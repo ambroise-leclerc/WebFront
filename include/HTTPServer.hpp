@@ -420,7 +420,7 @@ private:
 
 class Server {
 public:
-    websocket::WSManager<net::ip::tcp::socket> webSockets;
+    websocket::WSManager webSockets;
 public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;

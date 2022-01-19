@@ -7,7 +7,7 @@ add_library(catch_main STATIC catch_main.cpp)
 target_link_libraries(catch_main PUBLIC Catch2::Catch2)
 target_link_libraries(catch_main PRIVATE project_options)
 
-add_executable(tests "HTTPServerTests.cpp" "EncodingsTests.cpp")
+add_executable(tests "HTTPServerTests.cpp" "EncodingsTests.cpp" "WebSocketTests.cpp")
 target_link_libraries(tests PRIVATE project_warnings project_options catch_main)
 target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/3rdParty)
 
