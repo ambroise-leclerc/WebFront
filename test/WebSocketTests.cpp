@@ -4,7 +4,6 @@
 
 #include <array>
 
-
 using namespace webfront;
 using namespace std;
 
@@ -20,7 +19,7 @@ SCENARIO("WebSocket Headers decoding") {
 				REQUIRE(header->RSV3() == false);
 				REQUIRE(header->opcode() == websocket::Header::Opcode::text);
 				REQUIRE(header->MASK() == true);
-				REQUIRE(header->maskingKey() == 0x010111213);
+				REQUIRE(header->maskingKey() == std::array<std::byte, 4>{std::byte{ 0x10 }, std::byte{ 0x11 }, std::byte{ 0x12 }, std::byte{ 0x13 }});
 				REQUIRE(header->payloadLen() == 63);
 				REQUIRE(header->extendedLen() == 0);
 				REQUIRE(header->getPayloadSize() == 63);
@@ -52,15 +51,39 @@ SCENARIO("WebSocket Headers decoding") {
 
 SCENARIO("WebSocket decoder") {
 	GIVEN("Some frame data and a decoder") {
-		array<uint8_t, 22> frame{ 0x1, 0b10000000 | 8, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x11, 0x12, 0x13, 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S' };
+		array<uint8_t, 22> frame{ 0x1, 0b10000000 | 8, 0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x11, 0x12, 0x13,
+			uint8_t{'H' ^ 0x10}, uint8_t{'e' ^ 0x11}, uint8_t{'l' ^ 0x12}, uint8_t{'l' ^ 0x13}, uint8_t{'o' ^ 0x10}, uint8_t{' ' ^ 0x11}, uint8_t{'W' ^ 0x12}, uint8_t{'S' ^ 0x13} };
 		websocket::FrameDecoder decoder;
-		std::array<std::byte, 8192> buffer;
 		WHEN("All data is received in one unique chunk") {
 			REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size())));
-			decoder.getPayload(buffer);
-			auto bufferParser = buffer.cbegin();
-			for (auto c : { 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S' })
-				REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+			auto payload = decoder.getPayload();
+			auto bufferParser = std::cbegin(payload);
+			THEN("Payload is correctly decoded") {
+				for (auto c : { 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S' })
+					REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+			}
+		}
+
+		WHEN("Data is received in two chunks but the first has a complete header") {
+			REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), sizeof(websocket::Header) + 1)) == false);
+			REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data() + sizeof(websocket::Header) + 1), frame.size() - (sizeof(websocket::Header) + 1))));
+			auto payload = decoder.getPayload();
+			auto bufferParser = std::cbegin(payload);
+			THEN("Payload is correctly decoded") {
+				for (auto c : { 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S' })
+					REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+			}
+		}
+
+		WHEN("Data is received in two chunks but the first has an incomplete header") {
+			REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), sizeof(websocket::Header) - 3)) == false);
+			REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data() + sizeof(websocket::Header) - 3), frame.size() - (sizeof(websocket::Header) - 3))));
+			auto payload = decoder.getPayload();
+			auto bufferParser = std::cbegin(payload);
+			THEN("Payload is correctly decoded") {
+				for (auto c : { 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S' })
+					REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+			}
 		}
 	}
 }
