@@ -349,16 +349,16 @@ public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(std::experimental::net::ip::tcp::socket socket, Connections<Connection>& connections, RequestHandler& handler)
+    explicit Connection(net::ip::tcp::socket socket, Connections<Connection>& connections, RequestHandler& handler)
         : socket(std::move(socket)), connections(connections), requestHandler(handler) { 
-        std::cout << "New connection\n";
+        std::clog << "New connection\n";
     }
 
     void start() { read();}
     void stop() { socket.close(); }
 
 public:
-    std::function<void(net::ip::tcp::socket&)> onUpgrade;
+    std::function<void(net::ip::tcp::socket)> onUpgrade;
 
 private:
     net::ip::tcp::socket socket;
@@ -371,81 +371,74 @@ private:
     Protocol protocol = Protocol::HTTP;
 
     void read() {
-
         auto self(shared_from_this());
-        socket.async_read_some(std::experimental::net::buffer(buffer),
-            [this, self](std::error_code ec, std::size_t bytesTransferred) {
+        socket.async_read_some(net::buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
-                std::cout << "Received : " << bytesTransferred << " bytes \n" << utils::HexDump(std::span(reinterpret_cast<const uint8_t*>(buffer.data()), bytesTransferred)) << "\n";
-                
+              // std::cout << "Received : " << bytesTransferred << " bytes \n" << utils::HexDump(std::span(reinterpret_cast<const uint8_t*>(buffer.data()), bytesTransferred)) << "\n";
+
                 switch (protocol) {
                     case Protocol::HTTP:
-                    try {
-                        auto request = requestParser.parse(buffer.data(), buffer.data() + bytesTransferred);
-                        if (request) {
-                            response = requestHandler.handleRequest(request.value());
-                            write();
-                            if (response.statusCode == Response::switchingProtocols) {
-                                protocol = Protocol::WebSocket;
-                                onUpgrade(socket);
-                                read();
+                        try {
+                            auto request = requestParser.parse(buffer.data(), buffer.data() + bytesTransferred);
+                            if (request) {
+                                response = requestHandler.handleRequest(request.value());
+                                write();
+                                if (response.statusCode == Response::switchingProtocols) {
+                                    protocol = Protocol::WebSocket;
+                                    onUpgrade(std::move(socket));
+                                }
                             }
+                            else read();
                         }
-                        else read();
-                    }
-                    catch (const BadRequestException&) {
-                        response = Response::getStatusResponse(Response::badRequest);
-                        write();
-                    }
-                    break;
-
-                    case Protocol::WebSocket:
+                        catch (const BadRequestException&) {
+                            response = Response::getStatusResponse(Response::badRequest);
+                            write();
+                        }
                         break;
-                    default:
+
+                    default: std::clog << "Connection is no longer in HTTP protocol. Connection::read() is disabled.\n";
                 }
             }
-            else if (ec != std::experimental::net::error::operation_aborted) connections.stop(shared_from_this());
+            else if (ec != net::error::operation_aborted)
+                connections.stop(shared_from_this());
         });
     }
 
     void write() {
-        using namespace std::experimental::net;
         auto self(shared_from_this());
-        net::async_write(socket, response.toBuffers(),
-            [this, self](std::error_code ec, std::size_t bytesTransferred) {
-            std::cout << bytesTransferred << " byte sent\n";
-            switch (protocol) {
-                case Protocol::HTTP:
-                    if (!ec) socket.shutdown(ip::tcp::socket::shutdown_both);
-                    if (ec != error::operation_aborted) connections.stop(shared_from_this());
-                    break;
-                default:
-            }
-        });
+        switch (protocol) {
+            case Protocol::HTTP: {
+                net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
+                    if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
+                    if (ec != net::error::operation_aborted) connections.stop(shared_from_this());
+                });
+            } break;
+            default: std::clog << "Connection is no longer in HTTP protocol. Connection::write() is disabled.\n";
+        }
     }
 };
 
 class Server {
 public:
+    websocket::WSManager webSockets;
+public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
-    explicit Server(std::string address, std::string port)
+    explicit Server(std::string_view address, std::string_view port)
         : acceptor(ioContext), requestHandler(".") {
-        using namespace std::experimental::net;
 
-        ip::tcp::resolver resolver(ioContext);
-        ip::tcp::endpoint endpoint = *resolver.resolve(address, port).begin();
+        net::ip::tcp::resolver resolver(ioContext);
+        net::ip::tcp::endpoint endpoint = *resolver.resolve(address, port).begin();
         acceptor.open(endpoint.protocol());
-        acceptor.set_option(ip::tcp::acceptor::reuse_address(true));
+        acceptor.set_option(net::ip::tcp::acceptor::reuse_address(true));
         acceptor.bind(endpoint);
         acceptor.listen();
 
         accept();
     }
 
-    void run() {
-        ioContext.run();
-    }
+    void run() { ioContext.run(); }
+    void runOne() { ioContext.run_one(); }
 
 private:
     net::io_context ioContext;
@@ -454,9 +447,14 @@ private:
     RequestHandler requestHandler;
 
     void accept() {
-        acceptor.async_accept([this](std::error_code ec, std::experimental::net::ip::tcp::socket socket) {
+        acceptor.async_accept([this](std::error_code ec, net::ip::tcp::socket socket) {
             if (!acceptor.is_open()) return;
-            if (!ec) connections.start(std::make_shared<Connection>(std::move(socket), connections, requestHandler));
+            auto newConnection = std::make_shared<Connection>(std::move(socket), connections, requestHandler);
+            newConnection->onUpgrade = [this](net::ip::tcp::socket socket) {
+                webSockets.createWebSocket(std::move(socket));
+                std::cout << "web socket !\n";
+            };
+            if (!ec) connections.start(newConnection);
             accept();
         });
     }
