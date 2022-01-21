@@ -183,7 +183,6 @@ public:
                         response.headers.emplace_back("Sec-WebSocket-Accept",
                             base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
                         response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
-                        std::cout << "-> Switch protocols\n";
                         return response;
                     }
                 }
@@ -367,7 +366,7 @@ private:
     std::array<char, 8192> buffer;
     RequestParser requestParser;
     Response response;
-    enum class Protocol { HTTP, WebSocket };
+    enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
     Protocol protocol = Protocol::HTTP;
 
     void read() {
@@ -384,8 +383,8 @@ private:
                                 response = requestHandler.handleRequest(request.value());
                                 write();
                                 if (response.statusCode == Response::switchingProtocols) {
-                                    protocol = Protocol::WebSocket;
-                                    onUpgrade(std::move(socket));
+                                    std::cout << "switching protocols\n";
+                                    protocol = Protocol::HTTPUpgrading;
                                 }
                             }
                             else read();
@@ -406,15 +405,16 @@ private:
 
     void write() {
         auto self(shared_from_this());
-        switch (protocol) {
-            case Protocol::HTTP: {
-                net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
-                    if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
-                    if (ec != net::error::operation_aborted) connections.stop(shared_from_this());
-                });
-            } break;
-            default: std::clog << "Connection is no longer in HTTP protocol. Connection::write() is disabled.\n";
-        }
+        net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
+            if (protocol == Protocol::HTTPUpgrading) {
+                protocol = Protocol::WebSocket;
+                onUpgrade(std::move(socket));
+            }
+            else {
+                if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
+                if (ec != net::error::operation_aborted) connections.stop(shared_from_this());
+            }
+        });
     }
 };
 
@@ -450,13 +450,17 @@ private:
         acceptor.async_accept([this](std::error_code ec, net::ip::tcp::socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](net::ip::tcp::socket socket) {
+            newConnection->onUpgrade = [this](net::ip::tcp::socket socket) { 
                 webSockets.createWebSocket(std::move(socket));
-                std::cout << "web socket !\n";
             };
             if (!ec) connections.start(newConnection);
             accept();
         });
+    }
+
+    void upgradeConnection(net::ip::tcp::socket socket) {
+        webSockets.createWebSocket(std::move(socket));
+        std::cout << "web socket !\n";
     }
 };
 

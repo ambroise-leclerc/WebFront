@@ -12,8 +12,8 @@ int main() {
 
     
     webfront::UI ui("80");
-    ui.runAsync();
-
+    //ui.runAsync();
+    ui.run();
 
     while (true) {
         std::string input;
