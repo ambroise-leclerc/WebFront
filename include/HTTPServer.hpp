@@ -1,3 +1,7 @@
+/// @file HTTPServer.hpp
+/// @date 16/01/2022 22:27:42
+/// @author Ambroise Leclerc
+/// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
 #include "details/Encodings.hpp"
 #include "details/HexDump.hpp"
@@ -62,7 +66,7 @@ struct Request {
     }
 
 private:
-    // return true if text is contained in the value field of headerName (case insensitive)
+    /// @return true if text is contained in the value field of headerName (case insensitive)
     bool headerContains(std::string headerName, std::string text) const {
         auto header = getHeaderValue(std::move(headerName));
         if (header) {
@@ -208,7 +212,6 @@ public:
 
         return response;
     }
-
 
 private:
     std::string documentRoot;
@@ -373,8 +376,6 @@ private:
         auto self(shared_from_this());
         socket.async_read_some(net::buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
-              // std::cout << "Received : " << bytesTransferred << " bytes \n" << utils::HexDump(std::span(reinterpret_cast<const uint8_t*>(buffer.data()), bytesTransferred)) << "\n";
-
                 switch (protocol) {
                     case Protocol::HTTP:
                         try {
@@ -382,10 +383,8 @@ private:
                             if (request) {
                                 response = requestHandler.handleRequest(request.value());
                                 write();
-                                if (response.statusCode == Response::switchingProtocols) {
-                                    std::cout << "switching protocols\n";
+                                if (response.statusCode == Response::switchingProtocols) 
                                     protocol = Protocol::HTTPUpgrading;
-                                }
                             }
                             else read();
                         }
@@ -460,7 +459,6 @@ private:
 
     void upgradeConnection(net::ip::tcp::socket socket) {
         webSockets.createWebSocket(std::move(socket));
-        std::cout << "web socket !\n";
     }
 };
 

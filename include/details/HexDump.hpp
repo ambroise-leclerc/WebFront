@@ -1,3 +1,7 @@
+/// @file HexDump.hpp
+/// @date 16/01/2022 22:27:42
+/// @author Ambroise Leclerc
+/// @brief HexDump tool for debugging/development purposes
 #pragma once
 #include <algorithm>
 #include <concepts>

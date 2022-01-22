@@ -1,3 +1,7 @@
+/// @file Encodings.hpp
+/// @date 16/01/2022 22:27:42
+/// @author Ambroise Leclerc
+/// @brief Encoders/Decoders for HTTP/WS (URI, BASE64, SHA-1)
 #pragma once
 
 #include <array>
@@ -10,7 +14,6 @@
 #include <iostream>
 
 namespace webfront {
-
 namespace uri {
 
 inline std::string encode(std::string_view uri) {
@@ -53,8 +56,6 @@ inline std::string decode(std::string_view uri) {
 } // namespace uri
 
 namespace base64 {
-
-
 
 namespace {
 
