@@ -1,0 +1,35 @@
+language: cpp
+
+matrix:
+  include:
+    - os : linux
+      addons:
+        apt:
+          sources:
+            - llvm-toolchain-10
+          packages:
+            - clang-5.0
+      env:
+        - MATRIX_EVAL="CC=clang-10 && CXX=clang++-10"
+
+  include:
+    # works on Precise and Trusty
+    - os: linux
+      addons:
+        apt:
+          sources:
+            - ubuntu-toolchain-r-test
+          packages:
+            - g++-11
+      env:
+         - MATRIX_EVAL="CC=gcc-11 && CXX=g++-11"
+         
+before_install:
+    - eval "${MATRIX_EVAL}"
+    
+script:
+  - mkdir build
+  - cd build
+  - cmake .. && make
+  - ls -l
+  - test/tests
