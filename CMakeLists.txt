@@ -33,7 +33,7 @@ option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
 
 if(ENABLE_TESTING)
   enable_testing()
-  add_subdirectory(TEST)
+  add_subdirectory(test)
 endif()
 
 add_subdirectory(src)
