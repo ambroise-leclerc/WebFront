@@ -1,6 +1,6 @@
 #include <WebSocket.hpp>
 
-#include <catch2/catch.hpp>
+#include "3rdParty/catch.hpp"
 
 #include <array>
 
