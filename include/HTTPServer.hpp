@@ -109,7 +109,7 @@ struct Response {
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
         buffers.push_back(net::buffer(httpStatus));
 
-        static const char separator[] = {':', ' '};
+        static const char separator[] = { ':', ' ' };
         static const char crlf[] = { '\r', '\n' };
         for (auto& header : headers) {
             buffers.push_back(net::buffer(header.name));
@@ -153,7 +153,7 @@ struct MimeType {
 
     std::string toString() const {
         std::string names[]{ "text/plain", "text/html", "text/css", "application/javascript", "image/jpeg", "image/png", "image/gif" };
-        return names[type] ;
+        return names[type];
     }
 };
 
@@ -206,7 +206,7 @@ public:
             default:
                 return Response::getStatusResponse(Response::notImplemented);
         };
-   
+
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType::fromExtension(extension).toString());
@@ -225,8 +225,8 @@ struct BadRequestException : public std::runtime_error {
 class RequestParser {
 public:
     RequestParser() : state(State::methodStart) {}
-    
-    void reset() { 
+
+    void reset() {
         currentRequest.reset();
         state = State::methodStart;
     }
@@ -235,7 +235,7 @@ public:
     std::optional<Request> parse(InputIterator begin, InputIterator end) {
         while (begin != end)
             if (completeRequest(*begin++, currentRequest)) return currentRequest;
-        
+
         return {};
     }
 
@@ -263,11 +263,11 @@ private:
             state = next;
             if (cond) throw BadRequestException();
         };
-        
+
         static std::string buffer;
 
         switch (state) {
-            case State::methodStart: 
+            case State::methodStart:
                 check(!isChar(input) || isCtrl(input) || isSpecial(input), State::method);
                 buffer = input;
                 break;
@@ -288,7 +288,7 @@ private:
                                     else if (isDigit(input)) req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0';
                                     else throw BadRequestException();
                 break;
-            case State::versionMinorStart: 
+            case State::versionMinorStart:
                 check(!isDigit(input), State::versionMinor);
                 req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                 break;
@@ -327,11 +327,11 @@ public:
     Connection& operator=(const Connection&) = delete;
 
     explicit Connection(net::ip::tcp::socket sock, Connections<Connection>& connectionsHandler, RequestHandler& handler)
-        : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) { 
+        : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         std::clog << "New connection\n";
     }
 
-    void start() { read();}
+    void start() { read(); }
     void stop() { socket.close(); }
 
 public:
@@ -358,7 +358,7 @@ private:
                             if (request) {
                                 response = requestHandler.handleRequest(request.value());
                                 write();
-                                if (response.statusCode == Response::switchingProtocols) 
+                                if (response.statusCode == Response::switchingProtocols)
                                     protocol = Protocol::HTTPUpgrading;
                             }
                             else read();
@@ -424,7 +424,7 @@ private:
         acceptor.async_accept([this](std::error_code ec, net::ip::tcp::socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](net::ip::tcp::socket sock) { 
+            newConnection->onUpgrade = [this](net::ip::tcp::socket sock) {
                 webSockets.createWebSocket(std::move(sock));
             };
             if (!ec) connections.start(newConnection);

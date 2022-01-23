@@ -27,6 +27,7 @@ public:
         });
     }
 
+
     void run() { httpServer.run(); }
     void runOne() { httpServer.runOne(); }
     auto runAsync() { return std::async(std::launch::async, &UI::run, this); }
