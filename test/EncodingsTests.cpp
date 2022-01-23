@@ -1,6 +1,6 @@
 #include <details/Encodings.hpp>
 
-#include <catch2/catch.hpp>
+#include "3rdParty/catch.hpp"
 
 #include <string>
 
