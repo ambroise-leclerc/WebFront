@@ -24,7 +24,7 @@ concept Buffer = std::movable<T> || requires(T t) {
 /// Provides an hexadecimal dump of a container or a buffer
 template<Buffer BufferType>
 struct HexDump {
-    HexDump(const BufferType& buffer, size_t startAddress = 0) : buffer(buffer), startAddress(startAddress) {}
+    HexDump(const BufferType& buf, size_t startAddr = 0) : buffer(buf), startAddress(startAddr) {}
 
     const BufferType& buffer;
     size_t startAddress;
@@ -52,7 +52,7 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& hexDump) {
         os << "  ";
         for (auto index = address; index < address + 16; ++index) {
             if (index < size) {
-                char car = buffer[index];
+                auto car = buffer[index];
                 os << (car < 32 ? '.' : index < size ? car : '.');
             }
         }

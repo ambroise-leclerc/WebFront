@@ -10,13 +10,41 @@
 #include <experimental/net>
 #include <functional>
 #include <memory>
+#include <set>
 #include <span>
 #include <variant>
-#include <vector>
 
 #include <iostream>
 
 namespace webfront {
+
+template <typename ConnectionType>
+class Connections {
+public:
+	Connections(const Connections&) = delete;
+	Connections& operator=(const Connections&) = delete;
+	Connections() = default;
+
+	void start(std::shared_ptr<ConnectionType> connection) {
+		connections.insert(connection);
+		connection->start();
+	}
+
+	void stop(std::shared_ptr<ConnectionType> connection) {
+		connections.erase(connection);
+		connection->stop();
+	}
+
+	void stopAll() {
+		for (auto connection : connections)
+			connection->stop();
+		connections.clear();
+	}
+
+private:
+	std::set<std::shared_ptr<ConnectionType>> connections;
+};
+
 namespace websocket {
 namespace net = std::experimental::net;
 using Handle = uint32_t;
@@ -38,7 +66,7 @@ struct Header {
 	bool MASK() const { return (raw[1] & 0b10000000) != 0; }
 	uint8_t payloadLenField() const { return raw[1] & 0b1111111; }
 	uint64_t extendedLenField() const {
-		return payloadLenField() == 126 ? (uint16_t(raw[2] << 8) | uint16_t(raw[3]))
+		return payloadLenField() == 126 ? (uint64_t(raw[2] << 8) | uint64_t(raw[3]))
 			: (uint64_t(raw[2]) << 56) | (uint64_t(raw[3]) << 48) | (uint64_t(raw[4]) << 40) | (uint64_t(raw[5]) << 32) | (uint64_t(raw[6]) << 24) | (uint64_t(raw[7]) << 16) | (uint64_t(raw[8]) << 8) | raw[9];
 	}
 	
@@ -88,12 +116,12 @@ struct Header {
 	void setPayloadSize(size_t size) {
 		raw[1] &= 0b10000000;
 		if (size < 126)
-			raw[1] |= size;
+			raw[1] |= static_cast<uint8_t>(size);
 		else if (size < 65536) {
 			raw[1] |= 126; raw[2] = uint8_t(size >> 8); raw[3] = uint8_t(size & 0xFF);
 		}
 		else {
-			raw[1] |= 127; raw[2] = size >> 56; raw[3] = (size >> 48) & 0xFF; raw[4] = (size >> 40) & 0xFF; raw[5] = (size >> 32) & 0xFF;
+			raw[1] |= 127; raw[2] = uint8_t(size >> 56); raw[3] = (size >> 48) & 0xFF; raw[4] = (size >> 40) & 0xFF; raw[5] = (size >> 32) & 0xFF;
 			raw[6] = (size >> 24) & 0xFF; raw[7] = (size >> 16) & 0xFF; raw[8] = (size >> 8) & 0xFF; raw[9] = size & 0xFF;
 		}
 	}
@@ -113,7 +141,7 @@ struct Frame : public Header {
 		setPayloadSize(text.size());
 		dataSpan = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
 	}
-	size_t size() const { return static_cast<size_t>(payloadSize()); };
+	size_t size() const { return payloadSize(); };
 	const std::byte* data() const { return reinterpret_cast<const std::byte*>(this + headerSize()); }
 
 	std::vector<net::const_buffer> toBuffers() const {
@@ -204,13 +232,18 @@ private:
 	uint8_t maskIndex;
 };
 
+
 class WebSocket : public std::enable_shared_from_this<WebSocket> {
 	net::ip::tcp::socket socket;
+	Connections<WebSocket>& webSockets;
 
 public:
-	WebSocket(net::ip::tcp::socket socket) : socket(std::move(socket)) {}
+	explicit WebSocket(net::ip::tcp::socket netSocket, Connections<WebSocket>& connections) : socket(std::move(netSocket)), webSockets(connections) {}
+	WebSocket(const WebSocket&) = delete;
+	WebSocket& operator=(const WebSocket&) = delete;
 
 	void start() { read(); }
+	void stop() { socket.close(); }
 
 	void onMessage(std::function<void(std::string_view)> handler) { textHandler = std::move(handler); }
 	void onMessage(std::function<void(std::span<const std::byte>)> handler) { binaryHandler = std::move(handler); }
@@ -220,7 +253,10 @@ public:
 		auto self(shared_from_this());
 		std::error_code ec;
 		net::write(socket, frame.toBuffers(), ec);
-		if (ec) std::cout << "Error during write : ec.value() = " << ec.value() << "\n";
+		if (ec) {
+			std::clog << "Error during write : ec.value() = " << ec.value() << "\n";
+			webSockets.stop(shared_from_this());
+		}
 	}
 
 private:
@@ -241,13 +277,17 @@ private:
 					switch (decoder.frameType) {
 						case Header::Opcode::text: if (textHandler) textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size())); break;
 						case Header::Opcode::binary: if (binaryHandler) binaryHandler(data); break;
+						case Header::Opcode::connectionClose: webSockets.stop(self); break;
 						default: std::cout << "Unhandled frameType";
 					};
 					decoder.reset();
 				}
 				read();
 			}
-			else std::cout << "Error in websocket::read() : " << ec << "\n";
+			else {
+				std::clog << "Error in websocket::read() : " << ec << "\n";
+				webSockets.stop(self);
+			}
 		});
 	}
 };
@@ -258,19 +298,19 @@ struct WSManagerConfigurationError : std::runtime_error {
 };
 
 class WSManager {
-	std::vector<std::shared_ptr<WebSocket>> webSockets;
+	Connections<WebSocket> webSockets;
 	std::function<void(std::shared_ptr<WebSocket>)> openHandler;
 public:
 	void onOpen(std::function<void(std::shared_ptr<WebSocket>)> handler) { openHandler = std::move(handler); }
 
 public:
 	void createWebSocket(net::ip::tcp::socket socket) {
-		if (!openHandler) throw WSManagerConfigurationError();
-
-		auto ws = std::make_shared<WebSocket>(std::move(socket));
-		webSockets.push_back(ws);
+		if (!openHandler)
+			throw WSManagerConfigurationError();
+		
+		auto ws = std::make_shared<WebSocket>(std::move(socket), webSockets);
 		openHandler(ws);
-		ws->start();
+		webSockets.start(ws);
 	};
 };
 

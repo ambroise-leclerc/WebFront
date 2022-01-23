@@ -28,7 +28,7 @@ SCENARIO("WebSocket Headers decoding") {
 	}
 
 	GIVEN("Header data") {
-		array<uint8_t, 8> data{ 0b10000001, 0b10000000 | 126, 10, 20, 0x10, 0x11, 0x12, 0x13 };
+		array<uint8_t, 14> data{ 0b10000001, 0b10000000 | 126, 10, 20, 0x10, 0x11, 0x12, 0x13 };
 		WHEN("Casting to header") {
 			auto header = reinterpret_cast<const websocket::Header*>(data.data());
 			header->dump();

@@ -139,7 +139,7 @@ struct MimeType {
     enum Type { plain, html, css, js, jpg, png, gif };
     Type type;
 
-    MimeType(Type type) : type(type) {}
+    MimeType(Type mimeType) : type(mimeType) {}
 
     static MimeType fromExtension(std::string e) {
         if (e == "htm" || e == "html") return html;
@@ -162,7 +162,7 @@ public:
     RequestHandler(const RequestHandler&) = delete;
     RequestHandler& operator=(const RequestHandler&) = delete;
 
-    explicit RequestHandler(std::string documentRoot) : documentRoot(documentRoot) {}
+    explicit RequestHandler(std::string root) : documentRoot(root) {}
 
     Response handleRequest(Request request) {
         Response response;
@@ -190,6 +190,7 @@ public:
                         return response;
                     }
                 }
+                [[fallthrough]];
             case Request::Method::Head: {
                 auto fullPath = documentRoot + requestPath;
                 std::ifstream file(fullPath.c_str(), std::ios::in | std::ios::binary);
@@ -198,7 +199,7 @@ public:
                 if (request.method == Request::Method::Get) {
                     char buffer[512];
                     while (file.read(buffer, sizeof(buffer)).gcount() > 0)
-                        response.content.append(buffer, file.gcount());
+                        response.content.append(buffer, static_cast<size_t>(file.gcount()));
                 }
             } break;
 
@@ -319,40 +320,14 @@ private:
     }
 };
 
-template <typename ConnectionType>
-class Connections {
-public:
-    Connections(const Connections&) = delete;
-    Connections& operator=(const Connections&) = delete;
-    Connections() = default;
-
-    void start(std::shared_ptr<ConnectionType> connection) {
-        connections.insert(connection);
-        connection->start();
-    }
-
-    void stop(std::shared_ptr<ConnectionType> connection) {
-        connections.erase(connection);
-        connection->stop();
-    }
-
-    void stopAll() {
-        for (auto connection : connections)
-            connection->stop();
-        connections.clear();
-    }
-
-private:
-    std::set<std::shared_ptr<ConnectionType>> connections;
-};
 
 class Connection : public std::enable_shared_from_this<Connection> {
 public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(net::ip::tcp::socket socket, Connections<Connection>& connections, RequestHandler& handler)
-        : socket(std::move(socket)), connections(connections), requestHandler(handler) { 
+    explicit Connection(net::ip::tcp::socket sock, Connections<Connection>& connectionsHandler, RequestHandler& handler)
+        : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) { 
         std::clog << "New connection\n";
     }
 
@@ -449,8 +424,8 @@ private:
         acceptor.async_accept([this](std::error_code ec, net::ip::tcp::socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](net::ip::tcp::socket socket) { 
-                webSockets.createWebSocket(std::move(socket));
+            newConnection->onUpgrade = [this](net::ip::tcp::socket sock) { 
+                webSockets.createWebSocket(std::move(sock));
             };
             if (!ec) connections.start(newConnection);
             accept();
