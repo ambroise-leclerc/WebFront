@@ -1,3 +1,7 @@
+/// @file HTTPServer.hpp
+/// @date 16/01/2022 22:27:42
+/// @author Ambroise Leclerc
+/// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
 #include "details/Encodings.hpp"
 #include "details/HexDump.hpp"
@@ -62,7 +66,7 @@ struct Request {
     }
 
 private:
-    // return true if text is contained in the value field of headerName (case insensitive)
+    /// @return true if text is contained in the value field of headerName (case insensitive)
     bool headerContains(std::string headerName, std::string text) const {
         auto header = getHeaderValue(std::move(headerName));
         if (header) {
@@ -105,7 +109,7 @@ struct Response {
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
         buffers.push_back(net::buffer(httpStatus));
 
-        static const char separator[] = {':', ' '};
+        static const char separator[] = { ':', ' ' };
         static const char crlf[] = { '\r', '\n' };
         for (auto& header : headers) {
             buffers.push_back(net::buffer(header.name));
@@ -135,7 +139,7 @@ struct MimeType {
     enum Type { plain, html, css, js, jpg, png, gif };
     Type type;
 
-    MimeType(Type type) : type(type) {}
+    MimeType(Type mimeType) : type(mimeType) {}
 
     static MimeType fromExtension(std::string e) {
         if (e == "htm" || e == "html") return html;
@@ -149,7 +153,7 @@ struct MimeType {
 
     std::string toString() const {
         std::string names[]{ "text/plain", "text/html", "text/css", "application/javascript", "image/jpeg", "image/png", "image/gif" };
-        return names[type] ;
+        return names[type];
     }
 };
 
@@ -158,7 +162,7 @@ public:
     RequestHandler(const RequestHandler&) = delete;
     RequestHandler& operator=(const RequestHandler&) = delete;
 
-    explicit RequestHandler(std::string documentRoot) : documentRoot(documentRoot) {}
+    explicit RequestHandler(std::string root) : documentRoot(root) {}
 
     Response handleRequest(Request request) {
         Response response;
@@ -183,10 +187,10 @@ public:
                         response.headers.emplace_back("Sec-WebSocket-Accept",
                             base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
                         response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
-                        std::cout << "-> Switch protocols\n";
                         return response;
                     }
                 }
+                [[fallthrough]];
             case Request::Method::Head: {
                 auto fullPath = documentRoot + requestPath;
                 std::ifstream file(fullPath.c_str(), std::ios::in | std::ios::binary);
@@ -195,21 +199,20 @@ public:
                 if (request.method == Request::Method::Get) {
                     char buffer[512];
                     while (file.read(buffer, sizeof(buffer)).gcount() > 0)
-                        response.content.append(buffer, file.gcount());
+                        response.content.append(buffer, static_cast<size_t>(file.gcount()));
                 }
             } break;
 
             default:
                 return Response::getStatusResponse(Response::notImplemented);
         };
-   
+
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType::fromExtension(extension).toString());
 
         return response;
     }
-
 
 private:
     std::string documentRoot;
@@ -222,8 +225,8 @@ struct BadRequestException : public std::runtime_error {
 class RequestParser {
 public:
     RequestParser() : state(State::methodStart) {}
-    
-    void reset() { 
+
+    void reset() {
         currentRequest.reset();
         state = State::methodStart;
     }
@@ -232,7 +235,7 @@ public:
     std::optional<Request> parse(InputIterator begin, InputIterator end) {
         while (begin != end)
             if (completeRequest(*begin++, currentRequest)) return currentRequest;
-        
+
         return {};
     }
 
@@ -260,11 +263,11 @@ private:
             state = next;
             if (cond) throw BadRequestException();
         };
-        
+
         static std::string buffer;
 
         switch (state) {
-            case State::methodStart: 
+            case State::methodStart:
                 check(!isChar(input) || isCtrl(input) || isSpecial(input), State::method);
                 buffer = input;
                 break;
@@ -285,7 +288,7 @@ private:
                                     else if (isDigit(input)) req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0';
                                     else throw BadRequestException();
                 break;
-            case State::versionMinorStart: 
+            case State::versionMinorStart:
                 check(!isDigit(input), State::versionMinor);
                 req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                 break;
@@ -317,44 +320,18 @@ private:
     }
 };
 
-template <typename ConnectionType>
-class Connections {
-public:
-    Connections(const Connections&) = delete;
-    Connections& operator=(const Connections&) = delete;
-    Connections() = default;
-
-    void start(std::shared_ptr<ConnectionType> connection) {
-        connections.insert(connection);
-        connection->start();
-    }
-
-    void stop(std::shared_ptr<ConnectionType> connection) {
-        connections.erase(connection);
-        connection->stop();
-    }
-
-    void stopAll() {
-        for (auto connection : connections)
-            connection->stop();
-        connections.clear();
-    }
-
-private:
-    std::set<std::shared_ptr<ConnectionType>> connections;
-};
 
 class Connection : public std::enable_shared_from_this<Connection> {
 public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(net::ip::tcp::socket socket, Connections<Connection>& connections, RequestHandler& handler)
-        : socket(std::move(socket)), connections(connections), requestHandler(handler) { 
+    explicit Connection(net::ip::tcp::socket sock, Connections<Connection>& connectionsHandler, RequestHandler& handler)
+        : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         std::clog << "New connection\n";
     }
 
-    void start() { read();}
+    void start() { read(); }
     void stop() { socket.close(); }
 
 public:
@@ -367,15 +344,13 @@ private:
     std::array<char, 8192> buffer;
     RequestParser requestParser;
     Response response;
-    enum class Protocol { HTTP, WebSocket };
+    enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
     Protocol protocol = Protocol::HTTP;
 
     void read() {
         auto self(shared_from_this());
         socket.async_read_some(net::buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
-              // std::cout << "Received : " << bytesTransferred << " bytes \n" << utils::HexDump(std::span(reinterpret_cast<const uint8_t*>(buffer.data()), bytesTransferred)) << "\n";
-
                 switch (protocol) {
                     case Protocol::HTTP:
                         try {
@@ -383,10 +358,8 @@ private:
                             if (request) {
                                 response = requestHandler.handleRequest(request.value());
                                 write();
-                                if (response.statusCode == Response::switchingProtocols) {
-                                    protocol = Protocol::WebSocket;
-                                    onUpgrade(std::move(socket));
-                                }
+                                if (response.statusCode == Response::switchingProtocols)
+                                    protocol = Protocol::HTTPUpgrading;
                             }
                             else read();
                         }
@@ -406,15 +379,16 @@ private:
 
     void write() {
         auto self(shared_from_this());
-        switch (protocol) {
-            case Protocol::HTTP: {
-                net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
-                    if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
-                    if (ec != net::error::operation_aborted) connections.stop(shared_from_this());
-                });
-            } break;
-            default: std::clog << "Connection is no longer in HTTP protocol. Connection::write() is disabled.\n";
-        }
+        net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
+            if (protocol == Protocol::HTTPUpgrading) {
+                protocol = Protocol::WebSocket;
+                onUpgrade(std::move(socket));
+            }
+            else {
+                if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
+                if (ec != net::error::operation_aborted) connections.stop(shared_from_this());
+            }
+        });
     }
 };
 
@@ -450,13 +424,16 @@ private:
         acceptor.async_accept([this](std::error_code ec, net::ip::tcp::socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](net::ip::tcp::socket socket) {
-                webSockets.createWebSocket(std::move(socket));
-                std::cout << "web socket !\n";
+            newConnection->onUpgrade = [this](net::ip::tcp::socket sock) {
+                webSockets.createWebSocket(std::move(sock));
             };
             if (!ec) connections.start(newConnection);
             accept();
         });
+    }
+
+    void upgradeConnection(net::ip::tcp::socket socket) {
+        webSockets.createWebSocket(std::move(socket));
     }
 };
 

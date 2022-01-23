@@ -1,3 +1,7 @@
+/// @file Encodings.hpp
+/// @date 16/01/2022 22:27:42
+/// @author Ambroise Leclerc
+/// @brief Encoders/Decoders for HTTP/WS (URI, BASE64, SHA-1)
 #pragma once
 
 #include <array>
@@ -10,7 +14,6 @@
 #include <iostream>
 
 namespace webfront {
-
 namespace uri {
 
 inline std::string encode(std::string_view uri) {
@@ -35,9 +38,9 @@ inline std::string decode(std::string_view uri) {
         switch (uri[index]) {
             case '%': if (index + 3 <= uri.size()) {
                 auto hexToValue = [](char c) -> uint8_t {
-                    if (c >= '0' && c <= '9') return c - '0';
-                    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                    if (c >= '0' && c <= '9') return uint8_t(c - '0');
+                    if (c >= 'A' && c <= 'F') return uint8_t(c - 'A' + 10);
+                    if (c >= 'a' && c <= 'f') return uint8_t(c - 'a' + 10);
                     return 0;
                 };
                 decoded += char(hexToValue(uri[index + 1]) * 16 + hexToValue(uri[index + 2]));
@@ -53,8 +56,6 @@ inline std::string decode(std::string_view uri) {
 } // namespace uri
 
 namespace base64 {
-
-
 
 namespace {
 
@@ -78,7 +79,7 @@ inline std::string encode(const uint8_t* input, size_t size) {
             *coded++ = '=';
         }
         else {
-            *coded++ = code[((input[i] & 0x3) << 4) | ((int)(input[i + 1] & 0xF0) >> 4)];
+            *coded++ = code[((input[i] & 0x3) << 4) | ((input[i + 1] & 0xF0) >> 4)];
             *coded++ = code[((input[i + 1] & 0xF) << 2)];
         }
         *coded++ = '=';
@@ -110,7 +111,7 @@ concept Container = std::movable<T> || requires(T t) {
 };
 
 inline std::string encode(Container auto input) {
-    return encode(reinterpret_cast<const uint8_t*>(input.data()), input.size() * sizeof(decltype(input)::value_type));
+    return encode(reinterpret_cast<const uint8_t*>(input.data()), input.size() * sizeof(typename decltype(input)::value_type));
 }
 
 inline std::string encodeInNetworkOrder(Container auto input) {
@@ -129,7 +130,7 @@ namespace crypto {
 
 constexpr std::array<uint32_t, 5> sha1(std::string_view input) {
     std::array<uint32_t, 5> digest = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0 };
-    uint8_t block[64] { 0 };
+    uint32_t block[64] { 0 };
     size_t blockByteIndex{ 0 }, byteCount{ 0 };
     auto next = [&](uint8_t byte) {
         block[blockByteIndex++] = byte;
@@ -152,7 +153,7 @@ constexpr std::array<uint32_t, 5> sha1(std::string_view input) {
         }
     };
 
-    for (auto c : input) next(c);
+    for (auto c : input) next(static_cast<uint8_t>(c));
     auto b = byteCount * 8;
     next(0x80);
     if (blockByteIndex > 56) while (blockByteIndex != 0) next(0);
