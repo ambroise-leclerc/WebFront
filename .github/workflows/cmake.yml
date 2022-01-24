@@ -30,21 +30,10 @@ jobs:
           sudo apt install gcc-11 g++-11
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
 
-    - name: Install vcpkg on Unix
-      if: matrix.os != 'windows-latest'
-      run: git clone https://github.com/Microsoft/vcpkg.git; ./vcpkg/bootstrap-vcpkg.sh
-
-    - name: Install vcpkg on Windows
-      if: matrix.os == 'windows-latest'
-      run: git clone https://github.com/Microsoft/vcpkg.git; ./vcpkg/bootstrap-vcpkg.bat
-
-    - name: Install dependencies
-      run: ./vcpkg/vcpkg install Catch2
-
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake . -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} "-DCMAKE_TOOLCHAIN_FILE=${{github.workspace}}/vcpkg/scripts/buildsystems/vcpkg.cmake" 
+      run: cmake . -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCatch2Dir=test/3rdParty
 
     - name: Build
       # Build your program with the given configuration
