@@ -18,7 +18,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, ubuntu-latest]
 
     steps:
     - uses: actions/checkout@v2
@@ -30,8 +30,13 @@ jobs:
           sudo apt install gcc-11 g++-11
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
 
-    - name: Install vcpkg
+    - name: Install vcpkg on Unix
+      if: matrix.os != 'windows-latest'
       run: git clone https://github.com/Microsoft/vcpkg.git; ./vcpkg/bootstrap-vcpkg.sh
+
+    - name: Install vcpkg on Windows
+      if: matrix.os == 'windows-latest'
+      run: git clone https://github.com/Microsoft/vcpkg.git; ./vcpkg/bootstrap-vcpkg.bat
 
     - name: Install dependencies
       run: ./vcpkg/vcpkg install Catch2
