@@ -89,22 +89,21 @@ inline std::string encode(const uint8_t* input, size_t size) {
     return output;
 }
 
-
-// While there is still no implementation of std::bswap
-#if defined(_MSC_VER)   
-inline auto byteswap(uint64_t v) noexcept { return _byteswap_uint64(v); }
-inline auto byteswap(uint32_t v) noexcept { return _byteswap_ulong(v); }
-inline auto byteswap(uint16_t v) noexcept { return _byteswap_ushort(v); }
-#else
-constexpr auto byteswap(uint64_t v) noexcept { return __builtin_bswap64(v); }
-constexpr auto byteswap(uint32_t v) noexcept { return __builtin_bswap32(v); }
-constexpr auto byteswap(uint16_t v) noexcept { return __builtin_bswap16(v); }
+#if __cplusplus <= 202002L  // std::bswap will be in C++23
+    #if defined(_MSC_VER)   
+        inline auto byteswap(uint64_t v) noexcept { return _byteswap_uint64(v); }
+        inline auto byteswap(uint32_t v) noexcept { return _byteswap_ulong(v); }
+        inline auto byteswap(uint16_t v) noexcept { return _byteswap_ushort(v); }
+    #else
+        constexpr auto byteswap(uint64_t v) noexcept { return __builtin_bswap64(v); }
+        constexpr auto byteswap(uint32_t v) noexcept { return __builtin_bswap32(v); }
+        constexpr auto byteswap(uint16_t v) noexcept { return __builtin_bswap16(v); }
+    #endif
 #endif
-
 } // namespace
 
 template<typename T>
-concept Container = std::movable<T> || requires(T t) {
+concept Container = ::std::movable<T> || requires(T t) {
     t.data();
     t.size();
     T::value_type;
@@ -117,11 +116,11 @@ inline std::string encode(Container auto input) {
 inline std::string encodeInNetworkOrder(Container auto input) {
     using namespace std;
     
-    if constexpr (std::endian::native == std::endian::little)
+    if constexpr (endian::native == endian::little)
         for (auto& elem : input)
             elem = byteswap(elem);
 
-    return encode(std::move(input));
+    return encode(move(input));
 }
 
 } // namespace base64

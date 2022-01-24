@@ -56,7 +56,7 @@ namespace net = std::experimental::net;
 using Handle = uint32_t;
 
 struct Header {
-	std::array<uint8_t, 14> raw;
+	std::array<std::byte, 14> raw;
 	Header() : raw{} {}
 
 	enum class Opcode {
@@ -64,16 +64,16 @@ struct Header {
 		connectionClose, ping, pong, ctrl1, ctrl2, ctrl3, ctrl4, ctrl5
 	};
 
-	bool FIN() const { return (raw[0] & 0b10000000) != 0; }
-	bool RSV1() const { return (raw[0] & 0b01000000) != 0; }
-	bool RSV2() const { return (raw[0] & 0b00100000) != 0; }
-	bool RSV3() const { return (raw[0] & 0b00010000) != 0; }
-	Opcode opcode() const { return static_cast<Opcode>(raw[0] & 0b1111); }
-	bool MASK() const { return (raw[1] & 0b10000000) != 0; }
-	uint8_t payloadLenField() const { return raw[1] & 0b1111111; }
+	bool FIN() const { return test(0, 7); }
+	bool RSV1() const { return test(0, 6); }
+	bool RSV2() const { return test(0, 5); }
+	bool RSV3() const { return test(0, 4); }
+	Opcode opcode() const { return static_cast<Opcode>(std::to_integer<uint8_t>(raw[0] & std::byte(0b1111))); }
+	bool MASK() const { return test(1, 7); }
+	uint8_t payloadLenField() const { return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)); }
 	uint64_t extendedLenField() const {
-		return payloadLenField() == 126 ? (uint64_t(raw[2] << 8) | uint64_t(raw[3]))
-			: (uint64_t(raw[2]) << 56) | (uint64_t(raw[3]) << 48) | (uint64_t(raw[4]) << 40) | (uint64_t(raw[5]) << 32) | (uint64_t(raw[6]) << 24) | (uint64_t(raw[7]) << 16) | (uint64_t(raw[8]) << 8) | raw[9];
+		auto s = [this](size_t i, uint8_t shift = 0) constexpr { return std::to_integer<uint64_t>(raw[i]) << shift; };
+		return payloadLenField() == 126 ? s(2, 8) | s(3) : s(2, 56) | s(3,48) | s(4, 40) | s(5, 32) | s(6, 24) | s(7, 16) | s(8, 8) | s(9, 0);
 	}
 	
 	size_t headerSize() const {
@@ -85,7 +85,7 @@ struct Header {
 	std::array<std::byte, 4> maskingKey() const {
 		if (!MASK()) return {};
 		auto index = headerSize() - 4;
-		return { std::byte{raw[index]}, std::byte{raw[index + 1] }, std::byte{ raw[index + 2] }, std::byte{ raw[index + 3] } };
+		return { raw[index], raw[index + 1], raw[index + 2], raw[index + 3] };
 	}
 
 	uint64_t payloadSize() const { 
@@ -114,23 +114,21 @@ struct Header {
 	/// @return true if first 'size' bytes constitute a complete header
 	bool isComplete(size_t size) const {
 		if (size < 2) return false;
-		return (raw[1] & 0b1111111) < 126 ? size >= 6 : size >= 14;
+		return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)) < 126 ? size >= 6 : size >= 14;
 	}
 
-	void setFIN(bool set) { if (set) raw[0] |= 1 << 7; else raw[0] &= 0b1111111; }
-	void setOpcode(Opcode code) { raw[0] &= 0b11110000; raw[0] |= static_cast<uint8_t>(code); }
+	void setFIN(bool set) { if (set) raw[0] |= std::byte(1 << 7); else raw[0] &= std::byte(0b1111111); }
+	void setOpcode(Opcode code) { raw[0] &= std::byte(0b11110000); raw[0] |= static_cast<std::byte>(code); }
 	void setPayloadSize(size_t size) {
-		raw[1] &= 0b10000000;
-		if (size < 126)
-			raw[1] |= static_cast<uint8_t>(size);
-		else if (size < 65536) {
-			raw[1] |= 126; raw[2] = uint8_t(size >> 8); raw[3] = uint8_t(size & 0xFF);
-		}
-		else {
-			raw[1] |= 127; raw[2] = uint8_t(size >> 56); raw[3] = (size >> 48) & 0xFF; raw[4] = (size >> 40) & 0xFF; raw[5] = (size >> 32) & 0xFF;
-			raw[6] = (size >> 24) & 0xFF; raw[7] = (size >> 16) & 0xFF; raw[8] = (size >> 8) & 0xFF; raw[9] = size & 0xFF;
-		}
+		raw[1] &= std::byte(0b10000000);
+		auto f = [&size, this](size_t i, uint8_t shift = 0) constexpr { return raw[i] = static_cast<std::byte>(size >> shift); };
+		if (size < 126) raw[1] |= static_cast<std::byte>(size);
+		else if (size < 65536) { raw[1] |= std::byte(126); f(2, 8); f(3); }
+		else { raw[1] |= std::byte(127); f(2, 56); f(3, 48); f(4, 40); f(5, 32); f(6, 24); f(7, 16); f(8, 8); f(9); }
 	}
+
+protected:
+	bool test(size_t index, uint8_t bit) const { return std::to_integer<bool>(raw[index] & std::byte(1 << bit)); }
 };
 
 
@@ -184,7 +182,7 @@ public:
 		};
 		auto bufferizeHeaderData = [&](std::span<const std::byte> input) -> size_t {
 			for (size_t index = 0; index < input.size(); ++index) {
-				headerBuffer.raw[headerBufferParser++] = std::to_integer<uint8_t>(*(input.data() + index));
+				headerBuffer.raw[headerBufferParser++] = *(input.data() + index);
 				if (headerBuffer.isComplete(headerBufferParser))
 					return index + 1;
 			}
