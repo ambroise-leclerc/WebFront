@@ -1,2 +1,3 @@
 # WebFront
-[![Build Status](https://app.travis-ci.com/ambroise-leclerc/WebFront.svg?branch=master)](https://app.travis-ci.com/ambroise-leclerc/WebFront)
+![CI Status](https://github.com/ambroise-leclerc/WebFront/actions/workflows/cmake.yml/badge.svg)
+
