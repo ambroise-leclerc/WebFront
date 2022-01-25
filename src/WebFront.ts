@@ -4,6 +4,8 @@ wfSocket.onopen = function (event) {
     console.log("wfSocket opened");
     let text = "Voici un texte que le serveur attend de recevoir";
     wfSocket.send(text)
+
+    wfSocket.binaryType = 'arraybuffer';
 }
 
 wfSocket.onmessage = function (event) {

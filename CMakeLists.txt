@@ -1,7 +1,4 @@
-﻿# CMakeList.txt : CMake project for WebFront, include source and define
-# project specific logic here.
-#
-cmake_minimum_required (VERSION 3.16)
+﻿cmake_minimum_required (VERSION 3.16)
 
 project ("WebFront")
 
@@ -26,6 +23,7 @@ include(cmake/Doxygen.cmake)
 enable_doxygen()
 
 include(cmake/StaticAnalyzers.cmake)
+include(cmake/CPM.cmake)
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)

@@ -320,13 +320,13 @@ private:
     }
 };
 
-
-class Connection : public std::enable_shared_from_this<Connection> {
+template<typename Net>
+class Connection : public std::enable_shared_from_this<typename Connection<Net>> {
 public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(net::ip::tcp::socket sock, Connections<Connection>& connectionsHandler, RequestHandler& handler)
+    explicit Connection(Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         std::clog << "New connection\n";
     }
@@ -335,11 +335,11 @@ public:
     void stop() { socket.close(); }
 
 public:
-    std::function<void(net::ip::tcp::socket)> onUpgrade;
+    std::function<void(typename Net::Socket)> onUpgrade;
 
 private:
-    net::ip::tcp::socket socket;
-    Connections<Connection>& connections;
+    typename Net::Socket socket;
+    Connections<typename Connection<Net>>& connections;
     RequestHandler& requestHandler;
     std::array<char, 8192> buffer;
     RequestParser requestParser;
@@ -348,8 +348,8 @@ private:
     Protocol protocol = Protocol::HTTP;
 
     void read() {
-        auto self(shared_from_this());
-        socket.async_read_some(net::buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
+        auto self(this->shared_from_this());
+        socket.async_read_some(Net::Buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
                 switch (protocol) {
                     case Protocol::HTTP:
@@ -372,13 +372,13 @@ private:
                     default: std::clog << "Connection is no longer in HTTP protocol. Connection::read() is disabled.\n";
                 }
             }
-            else if (ec != net::error::operation_aborted)
-                connections.stop(shared_from_this());
+            else if (ec != Net::Error::OperationAborted)
+                connections.stop(self);
         });
     }
 
     void write() {
-        auto self(shared_from_this());
+        auto self(this->shared_from_this());
         net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
             if (protocol == Protocol::HTTPUpgrading) {
                 protocol = Protocol::WebSocket;
@@ -386,28 +386,27 @@ private:
             }
             else {
                 if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
-                if (ec != net::error::operation_aborted) connections.stop(shared_from_this());
+                if (ec != Net::Error::OperationAborted) connections.stop(self);
             }
         });
     }
 };
 
+
+template<typename Net>
 class Server {
 public:
     websocket::WSManager webSockets;
 public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
-    explicit Server(std::string_view address, std::string_view port)
-        : acceptor(ioContext), requestHandler(".") {
-
-        net::ip::tcp::resolver resolver(ioContext);
-        net::ip::tcp::endpoint endpoint = *resolver.resolve(address, port).begin();
+    explicit Server(std::string_view address, std::string_view port) : acceptor(ioContext), requestHandler(".") {
+        typename Net::Resolver resolver(ioContext);
+        typename Net::Endpoint endpoint = *resolver.resolve(address, port).begin();
         acceptor.open(endpoint.protocol());
-        acceptor.set_option(net::ip::tcp::acceptor::reuse_address(true));
+        acceptor.set_option(Net::Acceptor::reuse_address(true));
         acceptor.bind(endpoint);
         acceptor.listen();
-
         accept();
     }
 
@@ -415,16 +414,16 @@ public:
     void runOne() { ioContext.run_one(); }
 
 private:
-    net::io_context ioContext;
-    net::ip::tcp::acceptor acceptor;
-    Connections<Connection> connections;
+    typename Net::IoContext ioContext;
+    typename Net::Acceptor acceptor;
+    Connections<typename Connection<Net>> connections;
     RequestHandler requestHandler;
 
     void accept() {
-        acceptor.async_accept([this](std::error_code ec, net::ip::tcp::socket socket) {
+        acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](net::ip::tcp::socket sock) {
+            auto newConnection = std::make_shared<Connection<Net>>(std::move(socket), connections, requestHandler);
+            newConnection->onUpgrade = [this](Net::Socket sock) {
                 webSockets.createWebSocket(std::move(sock));
             };
             if (!ec) connections.start(newConnection);
@@ -432,7 +431,7 @@ private:
         });
     }
 
-    void upgradeConnection(net::ip::tcp::socket socket) {
+    void upgradeConnection(typename Net::Socket socket) {
         webSockets.createWebSocket(std::move(socket));
     }
 };
