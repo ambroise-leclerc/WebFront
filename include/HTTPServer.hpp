@@ -9,10 +9,10 @@
 
 #include <algorithm>
 #include <cstring>
-#include <experimental/net>
 #include <fstream>
 #include <functional>
 #include <locale>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -23,7 +23,6 @@
 
 namespace webfront {
 namespace http {
-namespace net = std::experimental::net;
 
 struct Header {
     std::string name;
@@ -31,7 +30,7 @@ struct Header {
 };
 
 struct Request {
-    enum class Method { Connect, Delete, Get, Head, Options, Patch, Post, Put, Trace };
+    enum class Method { Connect, Delete, Get, Head, Options, Patch, Post, Put, Trace, Undefined };
     Method method;
     std::string uri;
     int httpVersionMajor;
@@ -43,23 +42,19 @@ struct Request {
         uri.clear();
     }
 
-    void setMethod(std::string text) {
-        if (text == "CONNECT") method = Method::Connect;
-        else if (text == "DELETE") method = Method::Delete;
-        else if (text == "GET") method = Method::Get;
-        else if (text == "HEAD") method = Method::Head;
-        else if (text == "OPTIONS") method = Method::Options;
-        else if (text == "PATCH") method = Method::Patch;
-        else if (text == "POST") method = Method::Post;
-        else if (text == "PUT") method = Method::Put;
-        else if (text == "TRACE") method = Method::Trace;
+    constexpr Method getMethodFromString(std::string_view text) const {
+        return text == "GET" ? Method::Get : text == "HEAD" ? Method::Head : text == "CONNECT" ? Method::Connect : text == "DELETE" ? Method::Delete
+            : text == "OPTIONS" ? Method::Options : text == "PATCH" ? Method::Patch : text == "POST" ? Method::Post : text == "PUT" ? Method::Put
+            : text == "TRACE" ? Method::Trace : Method::Undefined;
     }
 
-    bool isUpgradeRequest(std::string protocol) const {
+    void setMethod(std::string_view text) { method = getMethodFromString(text); }
+       
+    bool isUpgradeRequest(std::string_view protocol) const {
         return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol);
     }
 
-    std::optional<std::string> getHeaderValue(std::string headerName) const {
+    std::optional<std::string> getHeaderValue(std::string_view headerName) const {
         for (auto& header : headers)
             if (caseInsensitiveEqual(header.name, headerName)) return header.value;
         return {};
@@ -67,8 +62,8 @@ struct Request {
 
 private:
     /// @return true if text is contained in the value field of headerName (case insensitive)
-    bool headerContains(std::string headerName, std::string text) const {
-        auto header = getHeaderValue(std::move(headerName));
+    bool headerContains(std::string_view headerName, std::string_view text) const {
+        auto header = getHeaderValue(headerName);
         if (header) {
             if (std::search(header.value().cbegin(), header.value().cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
                 return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
@@ -103,22 +98,23 @@ struct Response {
         return response;
     }
 
-    std::vector<net::const_buffer> toBuffers() const {
-        std::vector<net::const_buffer> buffers;
+    template<typename Net>
+    std::vector<typename Net::ConstBuffer> toBuffers() const {
+        std::vector<typename Net::ConstBuffer> buffers;
         static std::string httpStatus;
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
-        buffers.push_back(net::buffer(httpStatus));
+        buffers.push_back(Net::Buffer(httpStatus));
 
         static const char separator[] = { ':', ' ' };
         static const char crlf[] = { '\r', '\n' };
         for (auto& header : headers) {
-            buffers.push_back(net::buffer(header.name));
-            buffers.push_back(net::buffer(separator));
-            buffers.push_back(net::buffer(header.value));
-            buffers.push_back(net::buffer(crlf));
+            buffers.push_back(Net::Buffer(header.name));
+            buffers.push_back(Net::Buffer(separator));
+            buffers.push_back(Net::Buffer(header.value));
+            buffers.push_back(Net::Buffer(crlf));
         }
-        buffers.push_back(net::buffer(crlf));
-        buffers.push_back(net::buffer(content));
+        buffers.push_back(Net::Buffer(crlf));
+        if (!content.empty()) buffers.push_back(Net::Buffer(content));
 
         return buffers;
     }
@@ -157,6 +153,7 @@ struct MimeType {
     }
 };
 
+template<typename Net>
 class RequestHandler {
 public:
     RequestHandler(const RequestHandler&) = delete;
@@ -321,12 +318,12 @@ private:
 };
 
 template<typename Net>
-class Connection : public std::enable_shared_from_this<typename Connection<Net>> {
+class Connection : public std::enable_shared_from_this<Connection<Net>> {
 public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler& handler)
+    explicit Connection(Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net> & handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         std::clog << "New connection\n";
     }
@@ -339,8 +336,8 @@ public:
 
 private:
     typename Net::Socket socket;
-    Connections<typename Connection<Net>>& connections;
-    RequestHandler& requestHandler;
+    Connections<Connection<Net>>& connections;
+    RequestHandler<Net>& requestHandler;
     std::array<char, 8192> buffer;
     RequestParser requestParser;
     Response response;
@@ -379,13 +376,13 @@ private:
 
     void write() {
         auto self(this->shared_from_this());
-        net::async_write(socket, response.toBuffers(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
+        Net::AsyncWrite(socket, response.toBuffers<Net>(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
             if (protocol == Protocol::HTTPUpgrading) {
                 protocol = Protocol::WebSocket;
                 onUpgrade(std::move(socket));
             }
             else {
-                if (!ec) socket.shutdown(net::ip::tcp::socket::shutdown_both);
+                if (!ec) socket.shutdown(Net::Socket::shutdown_both);
                 if (ec != Net::Error::OperationAborted) connections.stop(self);
             }
         });
@@ -396,7 +393,7 @@ private:
 template<typename Net>
 class Server {
 public:
-    websocket::WSManager webSockets;
+    websocket::WSManager<Net> webSockets;
 public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
@@ -404,7 +401,7 @@ public:
         typename Net::Resolver resolver(ioContext);
         typename Net::Endpoint endpoint = *resolver.resolve(address, port).begin();
         acceptor.open(endpoint.protocol());
-        acceptor.set_option(Net::Acceptor::reuse_address(true));
+        acceptor.set_option(typename Net::Acceptor::reuse_address(true));
         acceptor.bind(endpoint);
         acceptor.listen();
         accept();
@@ -416,8 +413,8 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    Connections<typename Connection<Net>> connections;
-    RequestHandler requestHandler;
+    Connections<Connection<Net>> connections;
+    RequestHandler<Net> requestHandler;
 
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {

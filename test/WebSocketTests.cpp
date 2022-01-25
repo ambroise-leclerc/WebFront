@@ -1,4 +1,5 @@
 #include <WebSocket.hpp>
+#include <details/Networking.hpp>
 
 #include <catch2/catch.hpp>
 
@@ -66,7 +67,7 @@ SCENARIO("WebSocket frame encoding") {
 				REQUIRE(frame.payloadSize() == 8);
 				REQUIRE(frame.headerSize() == 2);
 
-				auto buffers = frame.toBuffers();
+				auto buffers = frame.toBuffers<webfront::NetworkingMock>();
 				using Buffer = decltype(buffers[0]);
 				auto compare = [](Buffer b, std::string s) {
 					auto data = reinterpret_cast<const char*>(b.data());
@@ -84,7 +85,8 @@ SCENARIO("WebSocket frame encoding") {
 SCENARIO("WebSocket decoder") {
 	GIVEN("Some frame data and a decoder") {
 		array<uint8_t, 22> frame{ 0x1, 0b10000000 | 8, 0x10, 0x11, 0x12, 0x13,
-			uint8_t{'H' ^ 0x10}, uint8_t{'e' ^ 0x11}, uint8_t{'l' ^ 0x12}, uint8_t{'l' ^ 0x13}, uint8_t{'o' ^ 0x10}, uint8_t{' ' ^ 0x11}, uint8_t{'W' ^ 0x12}, uint8_t{'S' ^ 0x13} };
+			uint8_t{'H' ^ 0x10}, uint8_t{'e' ^ 0x11}, uint8_t{'l' ^ 0x12}, uint8_t{'l' ^ 0x13},
+			uint8_t{'o' ^ 0x10}, uint8_t{' ' ^ 0x11}, uint8_t{'W' ^ 0x12}, uint8_t{'S' ^ 0x13} };
 		websocket::FrameDecoder decoder;
 		WHEN("All data is received in one unique chunk") {
 			REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size())));

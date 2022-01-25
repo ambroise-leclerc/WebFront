@@ -4,7 +4,6 @@
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
 #include <array>
-#include <experimental/net>
 #include <functional>
 #include <memory>
 #include <span>
@@ -52,7 +51,6 @@ private:
 };
 
 namespace websocket {
-namespace net = std::experimental::net;
 using Handle = uint32_t;
 
 struct Header {
@@ -148,10 +146,11 @@ struct Frame : public Header {
 	size_t size() const { return payloadSize(); };
 	const std::byte* data() const { return reinterpret_cast<const std::byte*>(this + headerSize()); }
 
-	std::vector<net::const_buffer> toBuffers() const {
-		std::vector<net::const_buffer> buffers;
-		buffers.push_back(net::const_buffer(raw.data(), headerSize()));
-		buffers.push_back(net::const_buffer(dataSpan.data(), dataSpan.size()));
+	template<typename Net>
+	std::vector<typename Net::ConstBuffer> toBuffers() const {
+		std::vector<typename Net::ConstBuffer> buffers;
+		buffers.push_back(typename Net::ConstBuffer(raw.data(), headerSize()));
+		buffers.push_back(typename Net::ConstBuffer(dataSpan.data(), dataSpan.size()));
 		return buffers;
 	}
 
@@ -236,13 +235,13 @@ private:
 	uint8_t maskIndex;
 };
 
-
-class WebSocket : public std::enable_shared_from_this<WebSocket> {
-	net::ip::tcp::socket socket;
+template<typename Net>
+class WebSocket : std::enable_shared_from_this<WebSocket<Net>> {
+	typename Net::Socket socket;
 	Connections<WebSocket>& webSockets;
 
 public:
-	explicit WebSocket(net::ip::tcp::socket netSocket, Connections<WebSocket>& connections) : socket(std::move(netSocket)), webSockets(connections) {}
+	explicit WebSocket(typename Net::Socket netSocket, Connections<WebSocket>& connections) : socket(std::move(netSocket)), webSockets(connections) {}
 	WebSocket(const WebSocket&) = delete;
 	WebSocket& operator=(const WebSocket&) = delete;
 
@@ -254,12 +253,12 @@ public:
 	void onClose(std::function<void(CloseEvent)> handler) { closeHandler = std::move(handler); }
 	void write(std::string_view text) {
 		Frame frame(text);
-		auto self(shared_from_this());
+		auto self(this->shared_from_this());
 		std::error_code ec;
-		net::write(socket, frame.toBuffers(), ec);
+		Net::Write(socket, frame.toBuffers<Net>(), ec);
 		if (ec) {
 			std::clog << "Error during write : ec.value() = " << ec.value() << "\n";
-			webSockets.stop(shared_from_this());
+			webSockets.stop(self);
 		}
 	}
 
@@ -272,8 +271,8 @@ private:
 
 private:
 	void read() {
-		auto self(shared_from_this());
-		socket.async_read_some(net::buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
+		auto self(this->shared_from_this());
+		socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
 			if (!ec) {
 				std::cout << "Received " << bytesTransferred << " bytes\n" << utils::HexDump(std::span(readBuffer.data(), bytesTransferred)) << "\n";
 				if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
@@ -301,18 +300,19 @@ struct WSManagerConfigurationError : std::runtime_error {
 	WSManagerConfigurationError() : std::runtime_error("WSManager handler configuration error") {}
 };
 
+template<typename Net>
 class WSManager {
-	Connections<WebSocket> webSockets;
-	std::function<void(std::shared_ptr<WebSocket>)> openHandler;
+	Connections<WebSocket<Net>> webSockets;
+	std::function<void(std::shared_ptr<WebSocket<Net>>)> openHandler;
 public:
-	void onOpen(std::function<void(std::shared_ptr<WebSocket>)> handler) { openHandler = std::move(handler); }
+	void onOpen(std::function<void(std::shared_ptr<WebSocket<Net>>)> handler) { openHandler = std::move(handler); }
 
 public:
-	void createWebSocket(net::ip::tcp::socket socket) {
+	void createWebSocket(typename Net::Socket socket) {
 		if (!openHandler)
 			throw WSManagerConfigurationError();
 		
-		auto ws = std::make_shared<WebSocket>(std::move(socket), webSockets);
+		auto ws = std::make_shared<WebSocket<Net>>(std::move(socket), webSockets);
 		openHandler(ws);
 		webSockets.start(ws);
 	};
