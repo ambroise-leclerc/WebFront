@@ -1,5 +1,4 @@
 # WebFront
-=======
 
 A C++20 library with obvious purposes
 
