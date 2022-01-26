@@ -3,9 +3,9 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
+#include "WebSocket.hpp"
 #include "details/Encodings.hpp"
 #include "details/HexDump.hpp"
-#include "WebSocket.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -14,10 +14,10 @@
 #include <locale>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <set>
 #include <string>
 #include <vector>
-#include <regex>
 
 #include <iostream>
 
@@ -43,16 +43,21 @@ struct Request {
     }
 
     constexpr Method getMethodFromString(std::string_view text) const {
-        return text == "GET" ? Method::Get : text == "HEAD" ? Method::Head : text == "CONNECT" ? Method::Connect : text == "DELETE" ? Method::Delete
-            : text == "OPTIONS" ? Method::Options : text == "PATCH" ? Method::Patch : text == "POST" ? Method::Post : text == "PUT" ? Method::Put
-            : text == "TRACE" ? Method::Trace : Method::Undefined;
+        return text == "GET"       ? Method::Get
+               : text == "HEAD"    ? Method::Head
+               : text == "CONNECT" ? Method::Connect
+               : text == "DELETE"  ? Method::Delete
+               : text == "OPTIONS" ? Method::Options
+               : text == "PATCH"   ? Method::Patch
+               : text == "POST"    ? Method::Post
+               : text == "PUT"     ? Method::Put
+               : text == "TRACE"   ? Method::Trace
+                                   : Method::Undefined;
     }
 
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
-       
-    bool isUpgradeRequest(std::string_view protocol) const {
-        return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol);
-    }
+
+    bool isUpgradeRequest(std::string_view protocol) const { return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol); }
 
     std::optional<std::string> getHeaderValue(std::string_view headerName) const {
         for (auto& header : headers)
@@ -65,24 +70,21 @@ private:
     bool headerContains(std::string_view headerName, std::string_view text) const {
         auto header = getHeaderValue(headerName);
         if (header) {
-            if (std::search(header.value().cbegin(), header.value().cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
-                return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
-            }) != header.value().cend()) return true;
+            if (std::search(header.value().cbegin(), header.value().cend(), text.cbegin(), text.cend(),
+                            [](char c1, char c2) { return (c1 == c2 || std::toupper(c1) == std::toupper(c2)); }) != header.value().cend())
+                return true;
         }
         return false;
     }
 
     static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
-        return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
-            return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
-        }));
+        return ((s1.size() == s2.size()) &&
+                std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) { return (c1 == c2 || std::toupper(c1) == std::toupper(c2)); }));
     }
 };
 
 struct Response {
-    enum StatusCode : uint16_t {
-        switchingProtocols = 101, ok = 200, badRequest = 400, notFound = 404, notImplemented = 501
-    };
+    enum StatusCode : uint16_t { switchingProtocols = 101, ok = 200, badRequest = 400, notFound = 404, notImplemented = 501 };
     StatusCode statusCode;
     std::vector<Header> headers;
     std::string content;
@@ -105,8 +107,8 @@ struct Response {
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
         buffers.push_back(Net::Buffer(httpStatus));
 
-        static const char separator[] = { ':', ' ' };
-        static const char crlf[] = { '\r', '\n' };
+        static const char separator[] = {':', ' '};
+        static const char crlf[] = {'\r', '\n'};
         for (auto& header : headers) {
             buffers.push_back(Net::Buffer(header.name));
             buffers.push_back(Net::Buffer(separator));
@@ -118,14 +120,15 @@ struct Response {
 
         return buffers;
     }
+
 private:
     static std::string toString(StatusCode code) {
         switch (code) {
-            case switchingProtocols: return "Switching Protocols";
-            case ok: return "OK";
-            case badRequest: return "Bad Request";
-            case notFound: return "Not Found";
-            case notImplemented: return "Not Implemented";
+        case switchingProtocols: return "Switching Protocols";
+        case ok: return "OK";
+        case badRequest: return "Bad Request";
+        case notFound: return "Not Found";
+        case notImplemented: return "Not Implemented";
         }
         return {};
     }
@@ -148,7 +151,7 @@ struct MimeType {
     }
 
     std::string toString() const {
-        std::string names[]{ "text/plain", "text/html", "text/css", "application/javascript", "image/jpeg", "image/png", "image/gif" };
+        std::string names[]{"text/plain", "text/html", "text/css", "application/javascript", "image/jpeg", "image/png", "image/gif"};
         return names[type];
     }
 };
@@ -166,42 +169,39 @@ public:
         auto requestPath = uri::decode(request.uri);
         if (requestPath.empty() || requestPath[0] != '/' || requestPath.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
-        if (requestPath[requestPath.size() - 1] == '/')
-            requestPath += "index.html";
+        if (requestPath[requestPath.size() - 1] == '/') requestPath += "index.html";
         auto lastSlash = requestPath.find_last_of("/");
         auto lastDot = requestPath.find_last_of(".");
         std::string extension;
         if (lastDot != std::string::npos && lastDot > lastSlash) extension = requestPath.substr(lastDot + 1);
 
         switch (request.method) {
-            case Request::Method::Get:
-                if (request.isUpgradeRequest("websocket")) {
-                    auto key = request.getHeaderValue("Sec-WebSocket-Key");
-                    if (key) {
-                        response.statusCode = Response::StatusCode::switchingProtocols;
-                        response.headers.emplace_back("Upgrade", "websocket");
-                        response.headers.emplace_back("Connection", "Upgrade");
-                        response.headers.emplace_back("Sec-WebSocket-Accept",
-                            base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
-                        response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
-                        return response;
-                    }
+        case Request::Method::Get:
+            if (request.isUpgradeRequest("websocket")) {
+                auto key = request.getHeaderValue("Sec-WebSocket-Key");
+                if (key) {
+                    response.statusCode = Response::StatusCode::switchingProtocols;
+                    response.headers.emplace_back("Upgrade", "websocket");
+                    response.headers.emplace_back("Connection", "Upgrade");
+                    response.headers.emplace_back("Sec-WebSocket-Accept",
+                                                  base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+                    response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
+                    return response;
                 }
-                [[fallthrough]];
-            case Request::Method::Head: {
-                auto fullPath = documentRoot + requestPath;
-                std::ifstream file(fullPath.c_str(), std::ios::in | std::ios::binary);
-                if (!file) return Response::getStatusResponse(Response::notFound);
+            }
+            [[fallthrough]];
+        case Request::Method::Head: {
+            auto fullPath = documentRoot + requestPath;
+            std::ifstream file(fullPath.c_str(), std::ios::in | std::ios::binary);
+            if (!file) return Response::getStatusResponse(Response::notFound);
 
-                if (request.method == Request::Method::Get) {
-                    char buffer[512];
-                    while (file.read(buffer, sizeof(buffer)).gcount() > 0)
-                        response.content.append(buffer, static_cast<size_t>(file.gcount()));
-                }
-            } break;
+            if (request.method == Request::Method::Get) {
+                char buffer[512];
+                while (file.read(buffer, sizeof(buffer)).gcount() > 0) response.content.append(buffer, static_cast<size_t>(file.gcount()));
+            }
+        } break;
 
-            default:
-                return Response::getStatusResponse(Response::notImplemented);
+        default: return Response::getStatusResponse(Response::notImplemented);
         };
 
         response.statusCode = Response::ok;
@@ -228,7 +228,7 @@ public:
         state = State::methodStart;
     }
 
-    template <typename InputIterator>
+    template<typename InputIterator>
     std::optional<Request> parse(InputIterator begin, InputIterator end) {
         while (begin != end)
             if (completeRequest(*begin++, currentRequest)) return currentRequest;
@@ -236,17 +236,33 @@ public:
         return {};
     }
 
-
 private:
     enum class State {
-        methodStart, method, uri, versionH, versionT1, versionT2, versionP, versionSlash, versionMajorStart, versionMajor,
-        versionMinorStart, versionMinor, expectingNewline1, headerLineStart, headerLws, headerName, spaceBeforeHeaderValue,
-        headerValue, expectingNewline2, expectingNewline3
+        methodStart,
+        method,
+        uri,
+        versionH,
+        versionT1,
+        versionT2,
+        versionP,
+        versionSlash,
+        versionMajorStart,
+        versionMajor,
+        versionMinorStart,
+        versionMinor,
+        expectingNewline1,
+        headerLineStart,
+        headerLws,
+        headerName,
+        spaceBeforeHeaderValue,
+        headerValue,
+        expectingNewline2,
+        expectingNewline3
     };
     State state;
     Request currentRequest;
 
-private:
+private: // clang-format off
     bool completeRequest(char input, Request& req) {
         auto isChar = [](char c) { return c >= 0; };
         auto isCtrl = [](char c) { return (c >= 0 && c <= 31) || (c == 127); };
@@ -315,7 +331,7 @@ private:
         }
         return false;
     }
-};
+}; // clang-format on
 
 template<typename Net>
 class Connection : public std::enable_shared_from_this<Connection<Net>> {
@@ -323,7 +339,7 @@ public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net> & handler)
+    explicit Connection(Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         std::clog << "New connection\n";
     }
@@ -349,24 +365,24 @@ private:
         socket.async_read_some(Net::Buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
                 switch (protocol) {
-                    case Protocol::HTTP:
-                        try {
-                            auto request = requestParser.parse(buffer.data(), buffer.data() + bytesTransferred);
-                            if (request) {
-                                response = requestHandler.handleRequest(request.value());
-                                write();
-                                if (response.statusCode == Response::switchingProtocols)
-                                    protocol = Protocol::HTTPUpgrading;
-                            }
-                            else read();
-                        }
-                        catch (const BadRequestException&) {
-                            response = Response::getStatusResponse(Response::badRequest);
+                case Protocol::HTTP:
+                    try {
+                        auto request = requestParser.parse(buffer.data(), buffer.data() + bytesTransferred);
+                        if (request) {
+                            response = requestHandler.handleRequest(request.value());
                             write();
+                            if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;
                         }
-                        break;
+                        else
+                            read();
+                    }
+                    catch (const BadRequestException&) {
+                        response = Response::getStatusResponse(Response::badRequest);
+                        write();
+                    }
+                    break;
 
-                    default: std::clog << "Connection is no longer in HTTP protocol. Connection::read() is disabled.\n";
+                default: std::clog << "Connection is no longer in HTTP protocol. Connection::read() is disabled.\n";
                 }
             }
             else if (ec != Net::Error::OperationAborted)
@@ -389,11 +405,12 @@ private:
     }
 };
 
-
 template<typename Net>
+requires Networking<Net>
 class Server {
 public:
     websocket::WSManager<Net> webSockets;
+
 public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
@@ -420,17 +437,13 @@ private:
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection<Net>>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](Net::Socket sock) {
-                webSockets.createWebSocket(std::move(sock));
-            };
+            newConnection->onUpgrade = [this](Net::Socket sock) { webSockets.createWebSocket(std::move(sock)); };
             if (!ec) connections.start(newConnection);
             accept();
         });
     }
 
-    void upgradeConnection(typename Net::Socket socket) {
-        webSockets.createWebSocket(std::move(socket));
-    }
+    void upgradeConnection(typename Net::Socket socket) { webSockets.createWebSocket(std::move(socket)); }
 };
 
 } // namespace http

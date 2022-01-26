@@ -36,7 +36,7 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& hexDump) {
     size_t address = 0;
     os << hex << setfill('0');
     auto buffer = std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(hexDump.buffer.data()),
-        hexDump.buffer.size() * sizeof(typename pointer_traits<typename Container::pointer>::element_type));
+                                           hexDump.buffer.size() * sizeof(typename pointer_traits<typename Container::pointer>::element_type));
     auto size = size_t(buffer.size());
     while (address < size) {
         os << setw(8) << address + hexDump.startAddress;
