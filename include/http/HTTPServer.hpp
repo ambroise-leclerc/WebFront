@@ -26,6 +26,7 @@ namespace webfront {
 namespace http {
 
 struct Header {
+    Header(std::string n, std::string v) : name(std::move(n)), value(std::move(v)) {}
     std::string name;
     std::string value;
 };
@@ -95,8 +96,8 @@ struct Response {
         response.statusCode = code;
         response.content = "<html><head><title>" + toString(code) + "</title></head>";
         response.content += "<body><h1>" + std::to_string(code) + " " + toString(code) + "</h1></body></html>";
-        response.headers.emplace_back(std::string("Content-Length"), std::to_string(response.content.size()));
-        response.headers.emplace_back(std::string("Content-Type"), "text/html");
+        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
+        response.headers.emplace_back("Content-Type", "text/html");
 
         return response;
     }
@@ -438,7 +439,7 @@ private:
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection<Net>>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](Net::Socket sock) { webSockets.createWebSocket(std::move(sock)); };
+            newConnection->onUpgrade = [this](typename Net::Socket sock) { webSockets.createWebSocket(std::move(sock)); };
             if (!ec) connections.start(newConnection);
             accept();
         });
