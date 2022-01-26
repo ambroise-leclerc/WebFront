@@ -26,6 +26,7 @@ namespace webfront {
 namespace http {
 
 struct Header {
+    Header() = default;
     Header(std::string n, std::string v) : name(std::move(n)), value(std::move(v)) {}
     std::string name;
     std::string value;
