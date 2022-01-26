@@ -1,3 +1,10 @@
+Include(FetchContent)
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG        v2.13.8
+)
+FetchContent_MakeAvailable(Catch2)
 
 CPMAddPackage("gh:catchorg/Catch2@2.13.8")
 
@@ -9,6 +16,7 @@ include(Catch)
 add_library(catch_main STATIC catch_main.cpp)
 target_link_libraries(catch_main PUBLIC Catch2::Catch2)
 target_link_libraries(catch_main PRIVATE project_options Threads::Threads)
+
 
 add_executable(tests "HTTPServerTests.cpp" "EncodingsTests.cpp" "WebSocketTests.cpp")
 target_link_libraries(tests PRIVATE project_warnings project_options catch_main)

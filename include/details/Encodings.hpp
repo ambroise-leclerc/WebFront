@@ -130,7 +130,6 @@ inline std::string encode(Container auto input) {
 
 inline std::string encodeInNetworkOrder(Container auto input) {
     using namespace std;
-
     if constexpr (endian::native == endian::little)
         for (auto& elem : input) elem = byteswap(elem);
 
