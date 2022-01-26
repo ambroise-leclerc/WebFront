@@ -2,20 +2,14 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
-#include <array>
-#include <functional>
-#include <memory>
-#include <span>
-#include <vector>
-
 #include "details/HexDump.hpp"
 
 #include <array>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <set>
 #include <span>
-#include <variant>
 
 #include <iostream>
 
