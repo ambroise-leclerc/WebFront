@@ -13,7 +13,7 @@ public:
     using super::MutableBuffer;
 
     template<typename... Args>
-    static auto AsyncWrite(Args&&... args) -> void {
+    static auto AsyncWrite(Args&&... /*args*/) -> void {
         return;
     }
 };

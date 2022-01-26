@@ -95,8 +95,8 @@ struct Response {
         response.statusCode = code;
         response.content = "<html><head><title>" + toString(code) + "</title></head>";
         response.content += "<body><h1>" + std::to_string(code) + " " + toString(code) + "</h1></body></html>";
-        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", "text/html");
+        response.headers.emplace_back(std::string("Content-Length"), std::to_string(response.content.size()));
+        response.headers.emplace_back(std::string("Content-Type"), "text/html");
 
         return response;
     }
@@ -340,7 +340,7 @@ public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    explicit Connection(Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
+    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         std::clog << "New connection\n";
     }
