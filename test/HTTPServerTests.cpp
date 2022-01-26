@@ -1,5 +1,5 @@
-#include <HTTPServer.hpp>
-#include <details/Networking.hpp>
+#include <http/HTTPServer.hpp>
+#include <networking/NetworkingMock.hpp>
 
 #include <catch2/catch.hpp>
 
@@ -9,7 +9,7 @@
 using namespace webfront;
 using namespace webfront::http;
 using namespace std;
-using Net = webfront::NetworkingMock;
+using Net = networking::NetworkingMock;
 
 SCENARIO("HTTP Request") {
     GIVEN("A request with % encoded characters") {

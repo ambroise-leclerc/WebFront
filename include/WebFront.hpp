@@ -3,10 +3,10 @@
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
-#include "HTTPServer.hpp"
-#include "WebSocket.hpp"
-#include "details/HexDump.hpp"
-#include "details/Networking.hpp"
+#include <http/HTTPServer.hpp>
+#include <http/WebSocket.hpp>
+#include <details/HexDump.hpp>
+#include <networking/TCPNetworkingTS.hpp>
 
 #include <future>
 #include <string_view>
@@ -14,11 +14,10 @@
 
 namespace webfront {
 
-template<typename NetworkingProvider>
+template<typename NetProvider>
 class BasicUI {
-    using NetProvider = TCPNetworkingTS;
     using WebSocketPtr = std::shared_ptr<websocket::WebSocket<NetProvider>>;
-    http::Server<NetworkingProvider> httpServer;
+    http::Server<NetProvider> httpServer;
 
 public:
     BasicUI(std::string_view port) : httpServer("0.0.0.0", port) {
@@ -42,5 +41,5 @@ private:
 private:
 };
 
-using UI = BasicUI<TCPNetworkingTS>;
+using UI = BasicUI<networking::TCPNetworkingTS>;
 } // namespace webfront

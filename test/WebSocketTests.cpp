@@ -1,5 +1,5 @@
-#include <WebSocket.hpp>
-#include <details/Networking.hpp>
+#include <http/WebSocket.hpp>
+#include <networking/NetworkingMock.hpp>
 
 #include <catch2/catch.hpp>
 
@@ -7,6 +7,7 @@
 
 using namespace webfront;
 using namespace std;
+using Net = networking::NetworkingMock;
 
 SCENARIO("WebSocket Headers decoding") {
     GIVEN("Some Header data") {
@@ -65,7 +66,7 @@ WHEN("Encoding it") {
         REQUIRE(frame.payloadSize() == 8);
         REQUIRE(frame.headerSize() == 2);
 
-        auto buffers = frame.toBuffers<webfront::NetworkingMock>();
+        auto buffers = frame.toBuffers<Net>();
         using Buffer = decltype(buffers[0]);
         auto compare = [](Buffer b, std::string s) {
             auto data = reinterpret_cast<const char*>(b.data());

@@ -1,4 +1,3 @@
-/// @file WebSocket.hpp
 /// @date 16/01/2022 22:27:42
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455

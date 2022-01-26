@@ -3,9 +3,10 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
-#include "WebSocket.hpp"
-#include "details/Encodings.hpp"
-#include "details/HexDump.hpp"
+#include <http/WebSocket.hpp>
+#include <details/Encodings.hpp>
+#include <details/HexDump.hpp>
+#include <networking/BasicNetworking.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -406,7 +407,7 @@ private:
 };
 
 template<typename Net>
-requires Networking<Net>
+requires networking::Features<Net>
 class Server {
 public:
     websocket::WSManager<Net> webSockets;
