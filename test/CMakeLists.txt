@@ -6,10 +6,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Catch2)
 
-find_package(Threads)
+CPMAddPackage("gh:catchorg/Catch2@2.13.8")
 
-list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/contrib)
+find_package(Threads)
 include(CTest)
+list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/contrib)
 include(Catch)
 
 add_library(catch_main STATIC catch_main.cpp)
