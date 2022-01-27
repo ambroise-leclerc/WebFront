@@ -1,4 +1,3 @@
-/// @file HTTPServer.hpp
 /// @date 16/01/2022 22:27:42
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
@@ -10,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <locale>
@@ -143,7 +143,8 @@ struct MimeType {
 
     MimeType(Type mimeType) : type(mimeType) {}
 
-    static MimeType fromExtension(std::string e) {
+    static MimeType fromExtension(std::string_view e) {
+        if (e.starts_with('.')) e = e.substr(1);
         if (e == "htm" || e == "html") return html;
         if (e == "css") return css;
         if (e == "js" || e == "mjs") return js;
@@ -165,19 +166,16 @@ public:
     RequestHandler(const RequestHandler&) = delete;
     RequestHandler& operator=(const RequestHandler&) = delete;
 
-    explicit RequestHandler(std::string root) : documentRoot(root) {}
+    explicit RequestHandler(std::filesystem::path root) : documentRoot(root) {}
 
     Response handleRequest(Request request) {
-        Response response;
-        auto requestPath = uri::decode(request.uri);
-        if (requestPath.empty() || requestPath[0] != '/' || requestPath.find("..") != std::string::npos)
+        auto requestUri = uri::decode(request.uri);
+        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
-        if (requestPath[requestPath.size() - 1] == '/') requestPath += "index.html";
-        auto lastSlash = requestPath.find_last_of("/");
-        auto lastDot = requestPath.find_last_of(".");
-        std::string extension;
-        if (lastDot != std::string::npos && lastDot > lastSlash) extension = requestPath.substr(lastDot + 1);
-
+        auto requestPath = documentRoot / std::filesystem::path(requestUri).relative_path();
+        if (!requestPath.has_filename()) requestPath /= "index.html";
+        
+        Response response;
         switch (request.method) {
         case Request::Method::Get:
             if (request.isUpgradeRequest("websocket")) {
@@ -194,13 +192,13 @@ public:
             }
             [[fallthrough]];
         case Request::Method::Head: {
-            auto fullPath = documentRoot + requestPath;
-            std::ifstream file(fullPath.c_str(), std::ios::in | std::ios::binary);
+            std::ifstream file(requestPath, std::ios::in | std::ios::binary);
             if (!file) return Response::getStatusResponse(Response::notFound);
 
             if (request.method == Request::Method::Get) {
                 char buffer[512];
-                while (file.read(buffer, sizeof(buffer)).gcount() > 0) response.content.append(buffer, static_cast<size_t>(file.gcount()));
+                while (file.read(buffer, sizeof(buffer)).gcount() > 0)
+                     response.content.append(buffer, static_cast<size_t>(file.gcount()));
             }
         } break;
 
@@ -209,13 +207,13 @@ public:
 
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", MimeType::fromExtension(extension).toString());
+        response.headers.emplace_back("Content-Type", MimeType::fromExtension(requestPath.extension().string()).toString());
 
         return response;
     }
 
 private:
-    std::string documentRoot;
+    const std::filesystem::path documentRoot;
 };
 
 struct BadRequestException : public std::runtime_error {
@@ -417,7 +415,7 @@ public:
 public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
-    explicit Server(std::string_view address, std::string_view port) : acceptor(ioContext), requestHandler(".") {
+    explicit Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".") : acceptor(ioContext), requestHandler(docRoot) {
         typename Net::Resolver resolver(ioContext);
         typename Net::Endpoint endpoint = *resolver.resolve(address, port).begin();
         acceptor.open(endpoint.protocol());
