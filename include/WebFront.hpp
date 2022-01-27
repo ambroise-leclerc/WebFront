@@ -3,14 +3,13 @@
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
+#include <details/HexDump.hpp>
 #include <http/HTTPServer.hpp>
 #include <http/WebSocket.hpp>
-#include <details/HexDump.hpp>
 #include <networking/TCPNetworkingTS.hpp>
 
-#include <future>
+#include <bit>
 #include <string_view>
-#include <system_error>
 
 namespace webfront {
 
@@ -19,15 +18,29 @@ class BasicUI {
     using WebSocketPtr = std::shared_ptr<websocket::WebSocket<NetProvider>>;
     http::Server<NetProvider> httpServer;
 
+    enum class Command { Handshake = 72 };
+    enum class JSEndian { little = 0, big = 1, mixed = little + big };
+
 public:
-    BasicUI(std::string_view port) : httpServer("0.0.0.0", port) {
-        httpServer.webSockets.onOpen([](WebSocketPtr webSocket) {
+    BasicUI(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot) {
+        httpServer.webSockets.onOpen([this](WebSocketPtr webSocket) {
+            std::cout << "onOpen\n";
             webSocket->onMessage([webSocket](std::string_view text) {
                 std::cout << "onMessage(text) : " << text << "\n";
                 webSocket->write("This is my response");
             });
 
-            webSocket->onMessage([webSocket](std::span<const std::byte> data) { std::cout << "onMessage(binary) : " << utils::HexDump(data) << "\n"; });
+            webSocket->onMessage([this, webSocket](std::span<const std::byte> data) {
+                switch (static_cast<Command>(data[0])) {
+                case Command::Handshake:
+                        sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little)
+                        || (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
+                        std::cout << "Platform and client share the same endianness\n";
+                        break;
+                }
+
+                std::cout << "onMessage(binary) : " << utils::HexDump(data) << "\n";
+            });
         });
     }
 
@@ -36,7 +49,7 @@ public:
     auto runAsync() { return std::async(std::launch::async, &BasicUI::run, this); }
 
 private:
-    
+    bool sameEndian = true;
 
 private:
 };

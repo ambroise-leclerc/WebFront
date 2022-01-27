@@ -2,20 +2,14 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
-#include <array>
-#include <functional>
-#include <memory>
-#include <span>
-#include <vector>
-
 #include "details/HexDump.hpp"
 
 #include <array>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <set>
 #include <span>
-#include <variant>
 
 #include <iostream>
 
@@ -198,7 +192,7 @@ public:
     std::span<const std::byte> payload() const { return std::span(payloadBuffer.cbegin(), payloadSize); }
 
     // Parses some incoming data and tries to decode it.
-    // @return true if the frame is complete, false it it needs more data
+    // @return true if the frame is complete, false if it needs more data
     bool parse(std::span<const std::byte> buffer) {
         auto decodePayload = [&](std::span<const std::byte> encoded) -> size_t {
             for (auto in : encoded) payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
@@ -265,7 +259,7 @@ private:
 };
 
 template<typename Net>
-class WebSocket : std::enable_shared_from_this<WebSocket<Net>> {
+class WebSocket : public std::enable_shared_from_this<WebSocket<Net>> {
     typename Net::Socket socket;
     Connections<WebSocket>& webSockets;
 

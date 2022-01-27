@@ -103,3 +103,11 @@ TabWidth:        4
 UseTab:          Never
 ...
 
+Language: JavaScript
+ColumnLimit: 200
+IndentWidth:     4
+TabWidth:    4
+UseTab:      Never
+
+...
+
