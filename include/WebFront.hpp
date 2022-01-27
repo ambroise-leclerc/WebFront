@@ -22,7 +22,7 @@ class BasicUI {
     enum class JSEndian { little = 0, big = 1, mixed = little + big };
 
 public:
-    BasicUI(std::string_view port, std::filesystem::path docRoot = '.') : httpServer("0.0.0.0", port, docRoot) {
+    BasicUI(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot) {
         httpServer.webSockets.onOpen([this](WebSocketPtr webSocket) {
             std::cout << "onOpen\n";
             webSocket->onMessage([webSocket](std::string_view text) {
