@@ -16,9 +16,11 @@
 namespace std {
 template <typename T, typename... Args> concept constructible_from = destructible<T> && is_constructible_v<T, Args...>;
 template <typename T,typename U>
-concept convertible_to = is_convertible_v(T, U) && requires(add_rvalue_reference_t<T> (&t)()) { static_cast<U>(t()); };
+concept convertible_to = is_convertible_v<T, U> && requires(add_rvalue_reference_t<T> (&t)()) { static_cast<U>(t()); };
 template <class T> concept swappable = requires(T& t, T& t2) { swap(t, t2); };
 template <class T> concept move_constructible = constructible_from<T, T> && convertible_to<T, T>;
+template < class T, class U > concept common_reference_with = same_as<common_reference_t<T, U>, common_reference_t<U, T>> &&
+    convertible_to<T, common_reference_t<T, U>> && convertible_to<U, common_reference_t<T, U>>;
 template <typename T, typename U> concept assignable_from = is_lvalue_reference_v<T>
     && common_reference_with<const remove_reference_t<T>&, const remove_reference_t<T>&>
     && requires(T t, U u) { { t = static_cast<T&&>(u) } -> same_as<T>; };
