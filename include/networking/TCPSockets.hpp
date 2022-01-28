@@ -11,12 +11,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <IPHlpApi.h>
-#include <IcmpAPI.h>
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "iphlpapi.lib")
 #else
 #include <arpa/inet.h>
 #include <cstdlib>
