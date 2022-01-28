@@ -101,7 +101,7 @@ protected:
     enum class Error { Timeout = EAGAIN, WouldBlock = EWOULDBLOCK };
 
     static bool closeSocket(SocketType socket) { return ::close(socket) != socketError; }
-    static auto getLastError() { return errno; }
+    static int getLastError() { return errno; }
 #endif
 };
 
