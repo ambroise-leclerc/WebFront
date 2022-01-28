@@ -4,12 +4,34 @@
 /// @brief HexDump tool for debugging/development purposes
 #pragma once
 #include <algorithm>
-#include <concepts>
 #include <iomanip>
 #include <ostream>
 #include <span>
 #include <sstream>
 #include <vector>
+
+#if __has_include(<concepts>)
+#  include <concepts>
+#else
+#  include <type_traits>
+namespace std {
+template <typename T, typename... Args> concept constructible_from = destructible<T> && is_constructible_v<T, Args...>;
+template <typename T,typename U>
+concept convertible_to = __is_convertible_to(_From, _To)
+    && requires(add_rvalue_reference_t<_From> (&_Fn)()) {
+        static_cast<_To>(_Fn());
+    };
+template <class T> concept swappable = requires(T& t, T& t2) { swap(t, t2); };
+template <class T> concept move_constructible = constructible_from<T, T> && convertible_to<T, T>;
+template <typename T, typename U> concept assignable_from = is_lvalue_reference_v<T>
+    && common_reference_with<const remove_reference_t<T>&, const remove_reference_t<T>&>
+    && requires(T t, U u) { { t = static_cast<T&&>(u) } -> same_as<T>; };
+
+template <class T> concept movable = is_object_v<T> && move_constructible<T> && assignable_from<T&, T> && swappable<T>;
+}
+
+#endif
+
 
 namespace webfront {
 namespace utils {
