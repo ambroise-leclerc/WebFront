@@ -4,15 +4,14 @@
 /// @brief HexDump tool for debugging/development purposes
 #pragma once
 #include <algorithm>
+#include <concepts>
 #include <iomanip>
 #include <ostream>
 #include <span>
 #include <sstream>
 #include <vector>
 
-#if __has_include(<concepts>)
-#  include <concepts>
-#else
+#ifdef __APPLE__
 #  include <type_traits>
 namespace std {
 template <typename T, typename... Args> concept constructible_from = destructible<T> && is_constructible_v<T, Args...>;
