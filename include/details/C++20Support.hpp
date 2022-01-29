@@ -6,6 +6,7 @@
 
 
 #ifdef __APPLE__
+#  include <concepts>
 #  include <type_traits>
 namespace std {
 template <typename T, typename... Args> concept constructible_from = destructible<T> && is_constructible_v<T, Args...>;
@@ -15,7 +16,6 @@ template <class T> concept swappable = requires(T& t, T& t2) { swap(t, t2); };
 template <class T> concept move_constructible = constructible_from<T, T> && convertible_to<T, T>;
 template <class T> concept movable = is_object_v<T> && move_constructible<T> && swappable<T>;
 }
-
 #endif
 
 #if __has_include(<format>)
@@ -53,7 +53,7 @@ namespace std {
 #else
 namespace std {
   struct source_location {
-    static consteval source_location current() noexcept { return {}; }
+    static source_location current() noexcept { return {}; }
     constexpr source_location() noexcept {}
  
     constexpr uint_least32_t line() const noexcept { return l; };
