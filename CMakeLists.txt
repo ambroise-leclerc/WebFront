@@ -5,7 +5,7 @@ project ("WebFront")
 include(cmake/StandardProjectSettings.cmake)
 include(cmake/PreventInSourceBuilds.cmake)
 add_library(project_options INTERFACE)
-target_compile_features(project_options INTERFACE cxx_std_20)
+target_compile_features(project_options INTERFACE cxx_std_23)
 add_library(project_warnings INTERFACE)
 
 include(cmake/Cache.cmake)

@@ -3,6 +3,7 @@
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
 #include "details/HexDump.hpp"
+#include "details/Logger.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,8 +11,6 @@
 #include <memory>
 #include <set>
 #include <span>
-
-#include <iostream>
 
 namespace webfront {
 
@@ -23,11 +22,13 @@ public:
     Connections() = default;
 
     void start(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
         connections.insert(connection);
         connection->start();
     }
 
     void stop(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
         connections.erase(connection);
         connection->stop();
     }
@@ -189,7 +190,7 @@ public:
 
 public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
-    std::span<const std::byte> payload() const { return std::span(payloadBuffer.cbegin(), payloadSize); }
+    std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
@@ -280,7 +281,7 @@ public:
         std::error_code ec;
         Net::Write(socket, frame.toBuffers<Net>(), ec);
         if (ec) {
-            std::clog << "Error during write : ec.value() = " << ec.value() << "\n";
+            log::error("Error during write : ec.value() = {}", ec.value());
             webSockets.stop(self);
         }
     }
@@ -297,7 +298,6 @@ private:
         auto self(this->shared_from_this());
         socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
-                std::cout << "Received " << bytesTransferred << " bytes\n" << utils::HexDump(std::span(readBuffer.data(), bytesTransferred)) << "\n";
                 if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
                     auto data = decoder.payload();
                     switch (decoder.frameType) {

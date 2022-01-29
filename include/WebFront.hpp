@@ -24,22 +24,21 @@ class BasicUI {
 public:
     BasicUI(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot) {
         httpServer.webSockets.onOpen([this](WebSocketPtr webSocket) {
-            std::cout << "onOpen\n";
+            log::debug("onOpen");
             webSocket->onMessage([webSocket](std::string_view text) {
-                std::cout << "onMessage(text) : " << text << "\n";
+                log::debug("onMessage(text) :{}", text);
                 webSocket->write("This is my response");
             });
-
             webSocket->onMessage([this, webSocket](std::span<const std::byte> data) {
                 switch (static_cast<Command>(data[0])) {
                 case Command::Handshake:
                         sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little)
                         || (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
-                        std::cout << "Platform and client share the same endianness\n";
+                        log::info("Platform and client share the same endianness");
                         break;
                 }
 
-                std::cout << "onMessage(binary) : " << utils::HexDump(data) << "\n";
+                log::debugHex("onMessage(binary) :", data);
             });
         });
     }
