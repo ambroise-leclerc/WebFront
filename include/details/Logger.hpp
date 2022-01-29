@@ -33,7 +33,7 @@ namespace {
         out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(loc.file_name()).filename().string(), loc.line(), text)); }
     void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
     bool is(LogType logType) { return logTypeEnabled[logType]; }
-    void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
+[[maybe_unused]] void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
 }
 
 template <typename... Ts> struct debug {
