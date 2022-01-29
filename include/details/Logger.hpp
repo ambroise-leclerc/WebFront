@@ -3,19 +3,15 @@
 /// @author Ambroise Leclerc
 /// @brief Logging facilities
 #pragma once
+#include <details/C++20Support.hpp>
 
 #include <chrono>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <list>
 #include <source_location>
 #include <string_view>
-#if __has_include(<format>)
-#include <format>
-#else
-#include <sstream>
-namespace std { template<typename... Ts> string format(string_view, Ts&&... ts) { stringstream ss; ((ss << std::forward<Ts>(ts) << ' '), ...); return ss.str(); } }
-#endif
 
 namespace webfront {
 namespace log {
@@ -25,19 +21,19 @@ constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 static auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 
 namespace {
-using namespace std;
-inline static struct Sinks {
-    void operator()(string_view t) const { for (auto& s : sinks) s(t); }
-    list<function<void(string_view)>> sinks;
-} out;
-inline static bool logTypeEnabled[5];
-constexpr char toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
-void log(LogType l, string_view text) { out(format("[{}] {:%F %T} | {}", toChar(l), chrono::system_clock::now(), text));}
-void log(LogType l, string_view text, const source_location& loc) {
-     out(format("[{}] {:%F %T} | {}:{} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(loc.file_name()).filename().string(), loc.line(), text)); }
-void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
-bool is(LogType logType) { return logTypeEnabled[logType]; }
-void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
+    using namespace std;
+    inline static struct Sinks {
+        void operator()(string_view t) const { for (auto& s : sinks) s(t); }
+        list<function<void(string_view)>> sinks;
+    } out;
+    inline static bool logTypeEnabled[5];
+    constexpr char toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
+    void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
+    void log(LogType l, string_view text, const source_location& loc) {
+        out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(loc.file_name()).filename().string(), loc.line(), text)); }
+    void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
+    bool is(LogType logType) { return logTypeEnabled[logType]; }
+    void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
 }
 
 template <typename... Ts> struct debug {
@@ -50,7 +46,7 @@ template <typename... Ts> struct warn { warn(string_view fmt, Ts&&... ts) { if (
 template <typename... Ts> warn(string_view, Ts&&...) -> warn<Ts...>;
 template <typename... Ts> struct info { info(string_view fmt, Ts&&... ts) { if (is(Info)) log(Info, format(fmt, ts...)); } };
 template <typename... Ts> info(string_view, Ts&&...) -> info<Ts...>;
-void debugHex(string_view text, auto container) { log(Debug, text); out(utils::hexDump(container)); }
+void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
 
 template <typename... Ts> void setSinks(Ts&&... ts) { (out.sinks.push_back(std::forward<Ts>(ts)), ...); }
 } // namespace log

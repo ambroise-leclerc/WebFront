@@ -3,6 +3,8 @@
 /// @author Ambroise Leclerc
 /// @brief HexDump tool for debugging/development purposes
 #pragma once
+#include <details/C++20Support.hpp>
+
 #include <algorithm>
 #include <concepts>
 #include <iomanip>
@@ -10,20 +12,6 @@
 #include <span>
 #include <sstream>
 #include <vector>
-
-#ifdef __APPLE__
-#  include <type_traits>
-namespace std {
-template <typename T, typename... Args> concept constructible_from = destructible<T> && is_constructible_v<T, Args...>;
-template <typename T,typename U>
-concept convertible_to = is_convertible_v<T, U> && requires(add_rvalue_reference_t<T> (&t)()) { static_cast<U>(t()); };
-template <class T> concept swappable = requires(T& t, T& t2) { swap(t, t2); };
-template <class T> concept move_constructible = constructible_from<T, T> && convertible_to<T, T>;
-template <class T> concept movable = is_object_v<T> && move_constructible<T> && swappable<T>;
-}
-
-#endif
-
 
 namespace webfront {
 namespace utils {

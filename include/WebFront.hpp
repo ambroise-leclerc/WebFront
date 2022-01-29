@@ -38,7 +38,7 @@ public:
                         break;
                 }
 
-                log::debugHex("onMessage(binary) :", data);
+                log::infoHex("onMessage(binary) :", data);
             });
         });
     }

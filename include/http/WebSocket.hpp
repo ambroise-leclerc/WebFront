@@ -100,19 +100,11 @@ struct Header {
     uint64_t getFrameSize() const { return payloadSize() + headerSize(); }
 
     void dump() const {
-        using namespace std;
-        cout << "FIN  : " << FIN() << "\n";
-        cout << "RSV1 : " << RSV1() << "\n";
-        cout << "RSV2 : " << RSV2() << "\n";
-        cout << "RSV3 : " << RSV3() << "\n";
-        cout << "opcode : " << static_cast<int>(opcode()) << "\n";
-        cout << "MASK : " << MASK() << "\n";
-        cout << "payloadLenField : " << +payloadLenField() << "\n";
-        cout << "extendedLenField : " << extendedLenField() << "\n";
+        log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(),static_cast<int>(opcode()));
+        log::debug("-> MASK:{} payloadLenField:{} extendedLenField:{}", MASK(), +payloadLenField(), extendedLenField());
         auto k = maskingKey();
-        cout << "maskingKey : 0x" << hex << to_integer<int>(k[0]) << to_integer<int>(k[1]) << to_integer<int>(k[2]) << to_integer<int>(k[3]) << dec << "\n";
-        cout << "getPayloadSize : " << payloadSize() << "\n";
-        cout << "headerSize : " << headerSize() << "\n";
+        log::debug("-> maskingKey:0x{:2x}{:2x}{:2x}{:2x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]),
+            std::to_integer<int>(k[1]), std::to_integer<int>(k[2]), std::to_integer<int>(k[3]), payloadSize(), headerSize());
     }
 
     /// @return true if first 'size' bytes constitute a complete header
@@ -217,6 +209,7 @@ public:
         switch (state) {
         case DecodingState::starting:
             if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
+                reinterpret_cast<const Header*>(buffer.data())->dump();
                 decodeHeader(buffer.data());
                 if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
@@ -315,7 +308,7 @@ private:
                 read();
             }
             else {
-                std::clog << "Error in websocket::read() : " << ec << "\n";
+                log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
                 webSockets.stop(self);
             }
         });
