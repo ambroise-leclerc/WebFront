@@ -3,6 +3,8 @@
 /// @author Ambroise Leclerc
 /// @brief HexDump tool for debugging/development purposes
 #pragma once
+#include <details/C++20Support.hpp>
+
 #include <algorithm>
 #include <concepts>
 #include <iomanip>
@@ -18,7 +20,6 @@ template<typename T>
 concept Buffer = std::movable<T> || requires(T t) {
     t.data();
     t.size();
-    T::value_type;
 };
 
 /// Provides an hexadecimal dump of a container or a buffer
@@ -31,15 +32,15 @@ struct HexDump {
 };
 
 template<typename Container>
-std::ostream& operator<<(std::ostream& os, const HexDump<Container>& hexDump) {
+std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
     using namespace std;
     size_t address = 0;
     os << hex << setfill('0');
-    auto buffer = std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(hexDump.buffer.data()),
-                                           hexDump.buffer.size() * sizeof(typename pointer_traits<typename Container::pointer>::element_type));
+    auto buffer = std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(h.buffer.data()),
+                                           h.buffer.size() * sizeof(typename pointer_traits<decltype(h.buffer.data())>::element_type));
     auto size = size_t(buffer.size());
     while (address < size) {
-        os << setw(8) << address + hexDump.startAddress;
+        os << setw(8) << address + h.startAddress;
 
         for (auto index = address; index < address + 16; ++index) {
             if (index % 8 == 0) os << ' ';
@@ -64,7 +65,7 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& hexDump) {
     return os;
 }
 
-/*
+
 
 /// Generates an hexadecimal dump string of a given buffer
 ///
@@ -96,6 +97,6 @@ static std::string hexDump(const Buffer auto& buffer1, const Buffer auto& buffer
 
     return ss.str();
 }
-*/
+
 } // namespace utils
 } // namespace webfront

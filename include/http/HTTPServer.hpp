@@ -20,8 +20,6 @@
 #include <string>
 #include <vector>
 
-#include <iostream>
-
 namespace webfront {
 namespace http {
 
@@ -342,7 +340,7 @@ public:
 
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
-        std::clog << "New connection\n";
+            log::debug("New connection");
     }
 
     void start() { read(); }
@@ -383,7 +381,7 @@ private:
                     }
                     break;
 
-                default: std::clog << "Connection is no longer in HTTP protocol. Connection::read() is disabled.\n";
+                default: log::warn("Connection is no longer in HTTP protocol. Connection::read() is disabled.");
                 }
             }
             else if (ec != Net::Error::OperationAborted)

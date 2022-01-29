@@ -1,11 +1,3 @@
-Include(FetchContent)
-FetchContent_Declare(
-  Catch2
-  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-  GIT_TAG        v2.13.8
-)
-FetchContent_MakeAvailable(Catch2)
-
 CPMAddPackage("gh:catchorg/Catch2@2.13.8")
 
 find_package(Threads)
@@ -18,7 +10,7 @@ target_link_libraries(catch_main PUBLIC Catch2::Catch2)
 target_link_libraries(catch_main PRIVATE project_options Threads::Threads)
 
 
-add_executable(tests "HTTPServerTests.cpp" "EncodingsTests.cpp" "WebSocketTests.cpp")
+add_executable(tests HTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp)
 target_link_libraries(tests PRIVATE project_warnings project_options catch_main)
 target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/include SYSTEM ${CMAKE_SOURCE_DIR}/3rdParty)
 

@@ -3,6 +3,7 @@
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
 #include "details/HexDump.hpp"
+#include "details/Logger.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,8 +11,6 @@
 #include <memory>
 #include <set>
 #include <span>
-
-#include <iostream>
 
 namespace webfront {
 
@@ -23,11 +22,13 @@ public:
     Connections() = default;
 
     void start(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
         connections.insert(connection);
         connection->start();
     }
 
     void stop(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
         connections.erase(connection);
         connection->stop();
     }
@@ -99,19 +100,11 @@ struct Header {
     uint64_t getFrameSize() const { return payloadSize() + headerSize(); }
 
     void dump() const {
-        using namespace std;
-        cout << "FIN  : " << FIN() << "\n";
-        cout << "RSV1 : " << RSV1() << "\n";
-        cout << "RSV2 : " << RSV2() << "\n";
-        cout << "RSV3 : " << RSV3() << "\n";
-        cout << "opcode : " << static_cast<int>(opcode()) << "\n";
-        cout << "MASK : " << MASK() << "\n";
-        cout << "payloadLenField : " << +payloadLenField() << "\n";
-        cout << "extendedLenField : " << extendedLenField() << "\n";
+        log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(),static_cast<int>(opcode()));
+        log::debug("-> MASK:{} payloadLenField:{} extendedLenField:{}", MASK(), +payloadLenField(), extendedLenField());
         auto k = maskingKey();
-        cout << "maskingKey : 0x" << hex << to_integer<int>(k[0]) << to_integer<int>(k[1]) << to_integer<int>(k[2]) << to_integer<int>(k[3]) << dec << "\n";
-        cout << "getPayloadSize : " << payloadSize() << "\n";
-        cout << "headerSize : " << headerSize() << "\n";
+        log::debug("-> maskingKey:0x{:02x}{:02x}{:02x}{:02x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]),
+            std::to_integer<int>(k[1]), std::to_integer<int>(k[2]), std::to_integer<int>(k[3]), payloadSize(), headerSize());
     }
 
     /// @return true if first 'size' bytes constitute a complete header
@@ -167,20 +160,31 @@ struct Frame : public Header {
         setFIN(true);
         setOpcode(Opcode::text);
         setPayloadSize(text.size());
-        dataSpan = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
+        dataSpan1 = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
+        dataSpan2 = {};
     }
+
+    Frame(std::span<const std::byte> dataHead, std::span<const std::byte> dataNext={}) {
+        setFIN(true);
+        setOpcode(Opcode::binary);
+        setPayloadSize(dataHead.size() + dataNext.size());
+        dataSpan1 = dataHead;
+        dataSpan2 = dataNext;
+    }
+
     size_t size() const { return payloadSize(); };
-    const std::byte* data() const { return reinterpret_cast<const std::byte*>(this + headerSize()); }
 
     template<typename Net>
     std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
         buffers.push_back(typename Net::ConstBuffer(raw.data(), headerSize()));
-        buffers.push_back(typename Net::ConstBuffer(dataSpan.data(), dataSpan.size()));
+        if (!dataSpan1.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan1.data(), dataSpan1.size()));
+        if (!dataSpan2.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan2.data(), dataSpan2.size()));
+        
         return buffers;
     }
 
-    std::span<const std::byte> dataSpan;
+    std::span<const std::byte> dataSpan1, dataSpan2;
 };
 
 class FrameDecoder {
@@ -189,7 +193,7 @@ public:
 
 public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
-    std::span<const std::byte> payload() const { return std::span(payloadBuffer.cbegin(), payloadSize); }
+    std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
@@ -216,6 +220,7 @@ public:
         switch (state) {
         case DecodingState::starting:
             if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
+                reinterpret_cast<const Header*>(buffer.data())->dump();
                 decodeHeader(buffer.data());
                 if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
@@ -274,16 +279,8 @@ public:
     void onMessage(std::function<void(std::string_view)> handler) { textHandler = std::move(handler); }
     void onMessage(std::function<void(std::span<const std::byte>)> handler) { binaryHandler = std::move(handler); }
     void onClose(std::function<void(CloseEvent)> handler) { closeHandler = std::move(handler); }
-    void write(std::string_view text) {
-        Frame frame(text);
-        auto self(this->shared_from_this());
-        std::error_code ec;
-        Net::Write(socket, frame.toBuffers<Net>(), ec);
-        if (ec) {
-            std::clog << "Error during write : ec.value() = " << ec.value() << "\n";
-            webSockets.stop(self);
-        }
-    }
+    void write(std::string_view text) { writeData(text); }
+    void write(std::span<const std::byte> data) { writeData(data); } 
 
 private:
     std::array<std::byte, 8192> readBuffer;
@@ -297,7 +294,6 @@ private:
         auto self(this->shared_from_this());
         socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
-                std::cout << "Received " << bytesTransferred << " bytes\n" << utils::HexDump(std::span(readBuffer.data(), bytesTransferred)) << "\n";
                 if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
                     auto data = decoder.payload();
                     switch (decoder.frameType) {
@@ -315,10 +311,21 @@ private:
                 read();
             }
             else {
-                std::clog << "Error in websocket::read() : " << ec << "\n";
+                log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
                 webSockets.stop(self);
             }
         });
+    }
+
+    void writeData(auto data) {
+        Frame frame(data);
+        auto self(this->shared_from_this());
+        std::error_code ec;
+        Net::Write(socket, frame.toBuffers<Net>(), ec);
+        if (ec) {
+            log::error("Error during write : ec.value() = {}", ec.value());
+            webSockets.stop(self);
+        }
     }
 };
 
