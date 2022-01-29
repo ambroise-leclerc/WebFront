@@ -103,7 +103,7 @@ struct Header {
         log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(),static_cast<int>(opcode()));
         log::debug("-> MASK:{} payloadLenField:{} extendedLenField:{}", MASK(), +payloadLenField(), extendedLenField());
         auto k = maskingKey();
-        log::debug("-> maskingKey:0x{:2x}{:2x}{:2x}{:2x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]),
+        log::debug("-> maskingKey:0x{:02x}{:02x}{:02x}{:02x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]),
             std::to_integer<int>(k[1]), std::to_integer<int>(k[2]), std::to_integer<int>(k[3]), payloadSize(), headerSize());
     }
 
@@ -160,20 +160,31 @@ struct Frame : public Header {
         setFIN(true);
         setOpcode(Opcode::text);
         setPayloadSize(text.size());
-        dataSpan = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
+        dataSpan1 = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
+        dataSpan2 = {};
     }
+
+    Frame(std::span<const std::byte> dataHead, std::span<const std::byte> dataNext={}) {
+        setFIN(true);
+        setOpcode(Opcode::binary);
+        setPayloadSize(dataHead.size() + dataNext.size());
+        dataSpan1 = dataHead;
+        dataSpan2 = dataNext;
+    }
+
     size_t size() const { return payloadSize(); };
-    const std::byte* data() const { return reinterpret_cast<const std::byte*>(this + headerSize()); }
 
     template<typename Net>
     std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
         buffers.push_back(typename Net::ConstBuffer(raw.data(), headerSize()));
-        buffers.push_back(typename Net::ConstBuffer(dataSpan.data(), dataSpan.size()));
+        if (!dataSpan1.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan1.data(), dataSpan1.size()));
+        if (!dataSpan2.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan2.data(), dataSpan2.size()));
+        
         return buffers;
     }
 
-    std::span<const std::byte> dataSpan;
+    std::span<const std::byte> dataSpan1, dataSpan2;
 };
 
 class FrameDecoder {
@@ -268,16 +279,8 @@ public:
     void onMessage(std::function<void(std::string_view)> handler) { textHandler = std::move(handler); }
     void onMessage(std::function<void(std::span<const std::byte>)> handler) { binaryHandler = std::move(handler); }
     void onClose(std::function<void(CloseEvent)> handler) { closeHandler = std::move(handler); }
-    void write(std::string_view text) {
-        Frame frame(text);
-        auto self(this->shared_from_this());
-        std::error_code ec;
-        Net::Write(socket, frame.toBuffers<Net>(), ec);
-        if (ec) {
-            log::error("Error during write : ec.value() = {}", ec.value());
-            webSockets.stop(self);
-        }
-    }
+    void write(std::string_view text) { writeData(text); }
+    void write(std::span<const std::byte> data) { writeData(data); } 
 
 private:
     std::array<std::byte, 8192> readBuffer;
@@ -312,6 +315,17 @@ private:
                 webSockets.stop(self);
             }
         });
+    }
+
+    void writeData(auto data) {
+        Frame frame(data);
+        auto self(this->shared_from_this());
+        std::error_code ec;
+        Net::Write(socket, frame.toBuffers<Net>(), ec);
+        if (ec) {
+            log::error("Error during write : ec.value() = {}", ec.value());
+            webSockets.stop(self);
+        }
     }
 };
 

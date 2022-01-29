@@ -77,8 +77,8 @@ struct source_location {
 
     constexpr uint_least32_t line() const noexcept { return l; };
     constexpr uint_least32_t column() const noexcept { return c; };
-    constexpr const char* file_name() const noexcept { return fileName; }
-    constexpr const char* function_name() const noexcept { return functionName; }
+    constexpr const char* file_name() const noexcept { return "file"; }
+    constexpr const char* function_name() const noexcept { return "function"; }
 
 private:
     uint_least32_t l = 0;

@@ -32,10 +32,12 @@ public:
             webSocket->onMessage([this, webSocket](std::span<const std::byte> data) {
                 switch (static_cast<Command>(data[0])) {
                 case Command::Handshake:
-                        sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little)
-                        || (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
-                        log::info("Platform and client share the same endianness");
-                        break;
+                    sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little) ||
+                                 (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
+                    log::info("Endianness - platform:{}, client:{}, identical:{}", std::endian::native == std::endian::little ? "little" : "big",
+                    static_cast<JSEndian>(data[1]) == JSEndian::little ? "little" : "big", sameEndian);
+                    //webSocket.write()
+                break;
                 }
 
                 log::infoHex("onMessage(binary) :", data);
@@ -51,6 +53,10 @@ private:
     bool sameEndian = true;
 
 private:
+
+    void send(Command) {
+        
+    }
 };
 
 using UI = BasicUI<networking::TCPNetworkingTS>;
