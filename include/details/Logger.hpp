@@ -21,19 +21,19 @@ constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 static auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 
 namespace {
-    using namespace std;
-    inline static struct Sinks {
-        void operator()(string_view t) const { for (auto& s : sinks) s(t); }
-        list<function<void(string_view)>> sinks;
-    } out;
-    inline static bool logTypeEnabled[5];
-    constexpr char toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
-    void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
-    void log(LogType l, string_view text, const source_location& loc) {
-        out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(loc.file_name()).filename().string(), loc.line(), text)); }
-    void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
-    bool is(LogType logType) { return logTypeEnabled[logType]; }
-[[maybe_unused]] void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
+using namespace std;
+inline static struct Sinks {
+    void operator()(string_view t) const { for (auto& s : sinks) s(t); }
+    list<function<void(string_view)>> sinks;
+} out;
+inline static bool logTypeEnabled[5];
+constexpr char toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
+inline static void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
+inline static void log(LogType l, string_view text, const source_location& loc) {
+    out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(loc.file_name()).filename().string(), loc.line(), text)); }
+inline static void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
+inline static bool is(LogType logType) { return logTypeEnabled[logType]; }
+inline static void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
 }
 
 template <typename... Ts> struct debug {
