@@ -47,3 +47,25 @@ namespace std {
     }
 
 #endif
+
+#if __has_include(<source_location>)
+#include <source_location>
+#else
+nnamespace std {
+  struct source_location {
+    static consteval source_location current() noexcept { return {}; }
+    constexpr source_location() noexcept {}
+ 
+    constexpr uint_least32_t line() const noexcept { return l; };
+    constexpr uint_least32_t column() const noexcept { return c; };
+    constexpr const char* file_name() const noexcept { return fileName; }
+    constexpr const char* function_name() const noexcept { return functionName; }
+ 
+  private:
+    uint_least32_t l = 0;
+    uint_least32_t c = 0;
+    const char* fileName = "file";
+    const char* functionName = "function";
+  };
+} // namespace std
+#endif
