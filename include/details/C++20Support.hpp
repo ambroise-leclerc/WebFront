@@ -51,7 +51,7 @@ namespace std {
 #if __has_include(<source_location>)
 #include <source_location>
 #else
-nnamespace std {
+namespace std {
   struct source_location {
     static consteval source_location current() noexcept { return {}; }
     constexpr source_location() noexcept {}

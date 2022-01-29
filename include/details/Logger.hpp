@@ -4,6 +4,7 @@
 /// @brief Logging facilities
 #pragma once
 #include <details/C++20Support.hpp>
+#include <details/HexDump.hpp>
 
 #include <chrono>
 #include <filesystem>
