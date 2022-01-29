@@ -83,8 +83,6 @@ struct source_location {
 private:
     uint_least32_t l = 0;
     uint_least32_t c = 0;
-    inline static const char* fileName = "file";
-    inline static const char* functionName = "function";
 };
 } // namespace std
 #endif
