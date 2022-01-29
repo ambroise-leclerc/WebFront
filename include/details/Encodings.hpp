@@ -3,6 +3,7 @@
 /// @author Ambroise Leclerc
 /// @brief Encoders/Decoders for HTTP/WS (URI, BASE64, SHA-1)
 #pragma once
+#include <details/C++20Support.hpp>
 
 #include <array>
 #include <bit>
