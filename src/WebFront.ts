@@ -3,80 +3,107 @@
 /// @brief WebFront client core
 
 namespace webfront {
-function computeEndianness() {
-    let uInt32 = new Uint32Array([ 0x110000ff ]);
-    let uInt8 = new Uint8Array(uInt32);
-    return uInt8[0] === 0xFF ? endian.little : uInt8[0] === 0x11 ? endian.big : endian.little + endian.big
-}
-
-enum endian {
-    little = 0,
-    big = 1,
-    native = computeEndianness()
-}
-
-abstract class NetLayer {
-    constructor() {
-        console.log("netlayer constructed");
-        this.recvBuffer = new ArrayBuffer(512);
-        this.recvMsg = new Uint8Array(this.recvBuffer);
-        this.sendBuffer = new ArrayBuffer(512);
-        this.sendMsg = new Uint8Array(this.sendBuffer);
-        this.socket = new WebSocket('ws://localhost', 'WebFront_0.1');
-        this.socket.onopen = (event) => {
-            console.log('webfront connection opened');
-            this.socket.binaryType = 'arraybuffer';
-            this.onOpen();
-        };
-
-        this.socket.onclose = (event) => {
-            if (event.wasClean)
-                console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
-            else
-                console.log('[close] Connection died');
-        };
-
-        this.socket.onerror = (error) => { console.log(`[error] ${error}`); };
-
-        this.socket.onmessage = this.read;
+    function computeEndianness() {
+        let uInt32 = new Uint32Array([0x110000ff]);
+        let uInt8 = new Uint8Array(uInt32);
+        return uInt8[0] === 0xFF ? endian.little : uInt8[0] === 0x11 ? endian.big : endian.little + endian.big
     }
 
-    abstract onOpen() : void;
+    enum endian {
+        little = 0,
+        big = 1,
+        native = computeEndianness()
+    }
 
-    write(command: Command) {
-        this.sendMsg[0] = command;
-        switch (command) {
-        case Command.Handshake:
-            this.sendMsg[1] = endian.native;
-            this.socket.send(this.sendMsg.slice(0, 2));
+    enum WebLinkState {
+        uninitialized, handshaking, linked
+    }
+
+    abstract class NetLayer {
+        constructor() {
+            console.log("netlayer constructed");
+            this.recvBuffer = new ArrayBuffer(512);
+            this.recvMsg = new Uint8Array(this.recvBuffer);
+            this.sendBuffer = new ArrayBuffer(512);
+            this.sendMsg = new Uint8Array(this.sendBuffer);
+            this.socket = new WebSocket('ws://localhost', 'WebFront_0.1');
+            this.socket.onopen = (event) => {
+                console.log('webfront connection opened');
+                this.socket.binaryType = 'arraybuffer';
+                this.onOpen();
+            };
+
+            this.socket.onclose = (event) => {
+                if (event.wasClean)
+                    console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                else
+                    console.log('[close] Connection died');
+            };
+
+            this.socket.onerror = (error) => { console.log(`[error] ${error}`); };
+
+            this.socket.onmessage =(event: MessageEvent) => {
+                let view = new DataView(event.data);
+                console.log("Received : " + view.getUint8(0) + " " + view.getUint8(1));
+                let command: Command = view.getUint8(0);
+                console.log('Receive command ' + command);
+                switch (command) {
+                    case Command.ack: console.log("<= Command.ack : state = " + this.state);
+                        if (this.state === WebLinkState.handshaking) {
+                            this.state = WebLinkState.linked;
+                            this.littleEndian = view.getUint8(1) == endian.little;
+                            console.log("WebLink negociated : server is ", this.littleEndian ? "little endian" : "big endian");
+                        }
+                        break;
+                    case Command.debugLog: {
+                        console.log("Dump " + view.getUint8(0) + " " + view.getUint8(1) + " " + view.getUint8(2) + " " + view.getUint8(3) + " " + view.getUint8(4) + " " + view.getUint8(5) + " ");
+                        let textLen = view.getUint16(4, this.littleEndian);
+                        console.log("Text len " + textLen);
+                        let textView = new Uint8Array(event.data, 6, textLen);
+                        let text = new TextDecoder("utf-8").decode(textView);
+                        console.log("WebFront : " + text);
+                        } break;
+                }
+            };
+            this.state = WebLinkState.uninitialized;
+            this.littleEndian = false;
         }
+
+        abstract onOpen(): void;
+
+        write(command: Command) {
+            this.sendMsg[0] = command;
+            switch (command) {
+                case Command.handshake:
+                    this.sendMsg[1] = endian.native;
+                    this.state = WebLinkState.handshaking;
+                    console.log("=> Command.handshake : state = " + this.state);
+                    this.socket.send(this.sendMsg.slice(0, 2));
+            }
+        }
+
+        private recvBuffer: ArrayBuffer;
+        private recvMsg: Uint8Array;
+        private sendBuffer: ArrayBuffer;
+        private sendMsg: Uint8Array;
+        private socket: WebSocket;
+        private state: WebLinkState;
+        private littleEndian: boolean;
+    };
+
+    export class WebFront extends NetLayer {
+        constructor() {
+            super();
+            console.log('WebFront constructed : endian ' + endian);
+        }
+
+        onOpen() { this.write(Command.handshake); }
     }
 
-    read(event: MessageEvent) {
-        let view = event.data;
-        let command: Command = view.getUint8(1);
-        console.log('Receive command ' + command);
+    enum Command {
+        handshake, ack, debugLog
     }
 
-    private recvBuffer: ArrayBuffer;
-    private recvMsg: Uint8Array;
-    private sendBuffer: ArrayBuffer;
-    private sendMsg: Uint8Array;
-    private socket: WebSocket;
-};
-
-export class WebFront extends NetLayer {
-    constructor() {
-        super();
-        console.log('WebFront constructed : endian ' + endian);
-    }
-
-    onOpen() { this.write(Command.Handshake); }
-}
-
-enum Command {
-    Handshake = 72
-}
 
 } // namespace webfront
 

@@ -108,6 +108,6 @@ ColumnLimit: 200
 IndentWidth:     4
 TabWidth:    4
 UseTab:      Never
-
+NamespaceIndentation: None
 ...
 

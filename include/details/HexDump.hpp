@@ -53,7 +53,7 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
         os << "  ";
         for (auto index = address; index < address + 16; ++index) {
             if (index < size) {
-                auto car = buffer[index];
+                char car = buffer[index];
                 os << (car < 32 ? '.' : index < size ? car : '.');
             }
         }

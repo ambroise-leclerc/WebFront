@@ -288,6 +288,7 @@ public:
     void onClose(std::function<void(CloseEvent)> handler) { closeHandler = std::move(handler); }
     void write(std::string_view text) { writeData(text); }
     void write(std::span<const std::byte> data) { writeData(data); } 
+    void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(data, data2); } 
 
 private:
     std::array<std::byte, 8192> readBuffer;
@@ -326,8 +327,11 @@ private:
         });
     }
 
-    void writeData(auto data) {
-        Frame frame(data);
+    void writeData(std::string_view text) { writeData(Frame(text)); }
+    void writeData(std::span<const std::byte> data) { writeData(Frame(data)); }
+    void writeData(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame(data, data2)); }
+    
+    void writeData(Frame frame) {
         std::error_code ec;
         Net::Write(socket, frame.toBuffers<Net>(), ec);
         if (ec) {

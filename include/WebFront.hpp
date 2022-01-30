@@ -23,10 +23,47 @@ struct WebLinkEvent {
     WebLinkId webLinkId;
 };
 
+enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
+
+enum class Command : uint8_t { handshake, ack, debugLog };
+namespace msg {
+
+struct Ack {
+    struct Header {
+        Command command = Command::ack;
+        JSEndian endian = std::endian::native == std::endian::little ? JSEndian::little : JSEndian::big;
+    } head;
+    static_assert(sizeof(Header) == 2, "Ack header needs to be 2 bytes long");
+
+    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+    std::span<const std::byte> payload() { return {}; }
+};
+
+struct DebugLog {
+    DebugLog(std::string_view text) : payloadSpan{std::span(reinterpret_cast<const std::byte*>(text.data()), text.size())} {
+        head.textLen = static_cast<uint16_t>(text.size());
+    }
+    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+    std::span<const std::byte> payload() { return payloadSpan; }
+
+    struct Header {
+        Command command = Command::debugLog;
+        uint8_t padding[3] = {};
+        uint16_t textLen;
+    } head;
+    static_assert(sizeof(Header) == 6, "DebugLog header needs to be 6 bytes long");
+
+protected:
+    std::span<const std::byte> payloadSpan;
+
+};
+// static_assert(sizeof(DebugLog) - sizeof(std::span<const std::byte>) == 4, "DebugLog header need to be 4 bytes long");
+
+} // namespace msg
+
 template<typename Net>
 class WebLink {
-    enum class Command { Handshake = 72 };
-    enum class JSEndian { little = 0, big = 1, mixed = little + big };
+
 
     websocket::WebSocket<Net> ws;
     WebLinkId id;
@@ -42,12 +79,13 @@ public:
         });
         ws.onMessage([this](std::span<const std::byte> data) {
             switch (static_cast<Command>(data[0])) {
-            case Command::Handshake:
+            case Command::handshake:
                 sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little) ||
                              (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
                 log::info("Endianness - platform:{}, client:{}, identical:{}", std::endian::native == std::endian::little ? "little" : "big",
                           static_cast<JSEndian>(data[1]) == JSEndian::little ? "little" : "big", sameEndian);
-                // webSocket.write()
+                sendCommand(msg::Ack{});
+                sendCommand(msg::DebugLog{"Debug text"});
                 break;
             }
 
@@ -60,21 +98,24 @@ public:
     WebLink(WebLink&&) = delete;
 
     ~WebLink() { log::debug("WebLink destructor"); }
+
+private:
+    void sendCommand(auto message) {
+        log::infoHex("header", message.header());
+        log::infoHex("payload:", message.payload());
+        ws.write(message.header(), message.payload());
+    }
 };
 
 template<typename Net>
 class BasicUI {
 public:
-    BasicUI(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idCounter(0) {
+    BasicUI(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
-            if (protocol == http::Protocol::WebSocket) {
-                bool inserted;
-                do {
+            if (protocol == http::Protocol::WebSocket)
+                for (bool inserted = false; !inserted; ++idsCounter)
                     std::tie(std::ignore, inserted) =
-                      webLinks.try_emplace(idCounter, std::move(socket), idCounter, [this](WebLinkEvent event) { onEvent(event); });
-                    ++idCounter;
-                } while (!inserted);
-            }
+                      webLinks.try_emplace(idsCounter, std::move(socket), idsCounter, [this](WebLinkEvent event) { onEvent(event); });
         });
     }
 
@@ -85,7 +126,7 @@ public:
 private:
     http::Server<Net> httpServer;
     std::map<WebLinkId, WebLink<Net>> webLinks;
-    WebLinkId idCounter;
+    WebLinkId idsCounter;
 
 private:
     void onEvent(WebLinkEvent event) {
