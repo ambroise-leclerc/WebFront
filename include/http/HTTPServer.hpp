@@ -2,9 +2,9 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
-#include <http/WebSocket.hpp>
 #include <details/Encodings.hpp>
 #include <details/HexDump.hpp>
+#include <http/WebSocket.hpp>
 #include <networking/BasicNetworking.hpp>
 
 #include <algorithm>
@@ -168,11 +168,10 @@ public:
 
     Response handleRequest(Request request) {
         auto requestUri = uri::decode(request.uri);
-        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
-            return Response::getStatusResponse(Response::badRequest);
+        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos) return Response::getStatusResponse(Response::badRequest);
         auto requestPath = documentRoot / std::filesystem::path(requestUri).relative_path();
         if (!requestPath.has_filename()) requestPath /= "index.html";
-        
+
         Response response;
         switch (request.method) {
         case Request::Method::Get:
@@ -195,8 +194,7 @@ public:
 
             if (request.method == Request::Method::Get) {
                 char buffer[512];
-                while (file.read(buffer, sizeof(buffer)).gcount() > 0)
-                     response.content.append(buffer, static_cast<size_t>(file.gcount()));
+                while (file.read(buffer, sizeof(buffer)).gcount() > 0) response.content.append(buffer, static_cast<size_t>(file.gcount()));
             }
         } break;
 
@@ -332,6 +330,8 @@ private: // clang-format off
     }
 }; // clang-format on
 
+enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
+
 template<typename Net>
 class Connection : public std::enable_shared_from_this<Connection<Net>> {
 public:
@@ -340,14 +340,14 @@ public:
 
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
-            log::debug("New connection");
+        log::debug("New connection");
     }
 
     void start() { read(); }
     void stop() { socket.close(); }
 
 public:
-    std::function<void(typename Net::Socket)> onUpgrade;
+    std::function<void(typename Net::Socket&&, Protocol)> onUpgrade;
 
 private:
     typename Net::Socket socket;
@@ -356,7 +356,6 @@ private:
     std::array<char, 8192> buffer;
     RequestParser requestParser;
     Response response;
-    enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
     Protocol protocol = Protocol::HTTP;
 
     void read() {
@@ -394,7 +393,7 @@ private:
         Net::AsyncWrite(socket, response.toBuffers<Net>(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
             if (protocol == Protocol::HTTPUpgrading) {
                 protocol = Protocol::WebSocket;
-                onUpgrade(std::move(socket));
+                if (onUpgrade) onUpgrade(std::move(socket), protocol);
             }
             else {
                 if (!ec) socket.shutdown(Net::Socket::shutdown_both);
@@ -407,9 +406,6 @@ private:
 template<typename Net>
 requires networking::Features<Net>
 class Server {
-public:
-    websocket::WSManager<Net> webSockets;
-
 public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
@@ -426,23 +422,24 @@ public:
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
 
+    void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)> handler) { upgradeHandler = std::move(handler); }
+
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
     Connections<Connection<Net>> connections;
     RequestHandler<Net> requestHandler;
-
+    std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
+    
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
             auto newConnection = std::make_shared<Connection<Net>>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = [this](typename Net::Socket sock) { webSockets.createWebSocket(std::move(sock)); };
+            newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
             accept();
         });
     }
-
-    void upgradeConnection(typename Net::Socket socket) { webSockets.createWebSocket(std::move(socket)); }
 };
 
 } // namespace http

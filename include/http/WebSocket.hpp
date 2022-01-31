@@ -100,11 +100,11 @@ struct Header {
     uint64_t getFrameSize() const { return payloadSize() + headerSize(); }
 
     void dump() const {
-        log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(),static_cast<int>(opcode()));
+        log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(), static_cast<int>(opcode()));
         log::debug("-> MASK:{} payloadLenField:{} extendedLenField:{}", MASK(), +payloadLenField(), extendedLenField());
         auto k = maskingKey();
-        log::debug("-> maskingKey:0x{:02x}{:02x}{:02x}{:02x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]),
-            std::to_integer<int>(k[1]), std::to_integer<int>(k[2]), std::to_integer<int>(k[3]), payloadSize(), headerSize());
+        log::debug("-> maskingKey:0x{:02x}{:02x}{:02x}{:02x} getPayloadSize:{} headerSize:{}", std::to_integer<int>(k[0]), std::to_integer<int>(k[1]),
+                   std::to_integer<int>(k[2]), std::to_integer<int>(k[3]), payloadSize(), headerSize());
     }
 
     /// @return true if first 'size' bytes constitute a complete header
@@ -164,7 +164,7 @@ struct Frame : public Header {
         dataSpan2 = {};
     }
 
-    Frame(std::span<const std::byte> dataHead, std::span<const std::byte> dataNext={}) {
+    Frame(std::span<const std::byte> dataHead, std::span<const std::byte> dataNext = {}) {
         setFIN(true);
         setOpcode(Opcode::binary);
         setPayloadSize(dataHead.size() + dataNext.size());
@@ -180,7 +180,7 @@ struct Frame : public Header {
         buffers.push_back(typename Net::ConstBuffer(raw.data(), headerSize()));
         if (!dataSpan1.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan1.data(), dataSpan1.size()));
         if (!dataSpan2.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan2.data(), dataSpan2.size()));
-        
+
         return buffers;
     }
 
@@ -264,14 +264,22 @@ private:
 };
 
 template<typename Net>
-class WebSocket : public std::enable_shared_from_this<WebSocket<Net>> {
+class WebSocket {
     typename Net::Socket socket;
-    Connections<WebSocket>& webSockets;
 
 public:
-    explicit WebSocket(typename Net::Socket netSocket, Connections<WebSocket>& connections) : socket(std::move(netSocket)), webSockets(connections) {}
-    WebSocket(const WebSocket&) = delete;
-    WebSocket& operator=(const WebSocket&) = delete;
+    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)) {
+        log::debug("WebSocket constructor");
+        start();
+    }
+    WebSocket(WebSocket&) = delete;
+    //    WebSocket(WebSocket&&) = default;
+    WebSocket(WebSocket&& w)
+        : socket(std::move(w.socket)), readBuffer(std::move(w.readBuffer)), decoder(std::move(w.decoder)), textHandler(std::move(w.textHandler)),
+          binaryHandler(std::move(w.binaryHandler)), closeHandler(std::move(w.closeHandler)) {
+        log::debug("WebSocket move constructor");
+    }
+    ~WebSocket() { log::debug("WebSocket destructor"); }
 
     void start() { read(); }
     void stop() { socket.close(); }
@@ -280,7 +288,8 @@ public:
     void onMessage(std::function<void(std::span<const std::byte>)> handler) { binaryHandler = std::move(handler); }
     void onClose(std::function<void(CloseEvent)> handler) { closeHandler = std::move(handler); }
     void write(std::string_view text) { writeData(text); }
-    void write(std::span<const std::byte> data) { writeData(data); } 
+    void write(std::span<const std::byte> data) { writeData(data); }
+    void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(data, data2); }
 
 private:
     std::array<std::byte, 8192> readBuffer;
@@ -291,8 +300,7 @@ private:
 
 private:
     void read() {
-        auto self(this->shared_from_this());
-        socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
+        socket.async_read_some(Net::Buffer(readBuffer), [this](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
                 if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
                     auto data = decoder.payload();
@@ -303,7 +311,10 @@ private:
                     case Header::Opcode::binary:
                         if (binaryHandler) binaryHandler(data);
                         break;
-                    case Header::Opcode::connectionClose: webSockets.stop(self); break;
+                    case Header::Opcode::connectionClose:
+                        if (closeHandler) closeHandler(CloseEvent{});
+                        stop();
+                        break;
                     default: std::cout << "Unhandled frameType";
                     };
                     decoder.reset();
@@ -312,43 +323,25 @@ private:
             }
             else {
                 log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
-                webSockets.stop(self);
+                if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+                stop();
             }
         });
     }
 
-    void writeData(auto data) {
-        Frame frame(data);
-        auto self(this->shared_from_this());
+    void writeData(std::string_view text) { writeData(Frame(text)); }
+    void writeData(std::span<const std::byte> data) { writeData(Frame(data)); }
+    void writeData(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame(data, data2)); }
+
+    void writeData(Frame frame) {
         std::error_code ec;
         Net::Write(socket, frame.toBuffers<Net>(), ec);
         if (ec) {
             log::error("Error during write : ec.value() = {}", ec.value());
-            webSockets.stop(self);
+            if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+            stop();
         }
     }
-};
-
-struct WSManagerConfigurationError : std::runtime_error {
-    WSManagerConfigurationError() : std::runtime_error("WSManager handler configuration error") {}
-};
-
-template<typename Net>
-class WSManager {
-    Connections<WebSocket<Net>> webSockets;
-    std::function<void(std::shared_ptr<WebSocket<Net>>)> openHandler;
-
-public:
-    void onOpen(std::function<void(std::shared_ptr<WebSocket<Net>>)> handler) { openHandler = std::move(handler); }
-
-public:
-    void createWebSocket(typename Net::Socket socket) {
-        if (!openHandler) throw WSManagerConfigurationError();
-
-        auto ws = std::make_shared<WebSocket<Net>>(std::move(socket), webSockets);
-        openHandler(ws);
-        webSockets.start(ws);
-    };
 };
 
 } // namespace websocket
