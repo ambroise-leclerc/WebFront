@@ -44,11 +44,11 @@ namespace webfront {
 
             this.socket.onmessage =(event: MessageEvent) => {
                 let view = new DataView(event.data);
-                console.log("Received : " + view.getUint8(0) + " " + view.getUint8(1));
                 let command: Command = view.getUint8(0);
-                console.log('Receive command ' + command);
+                //console.log('Receive command ' + command);
+                //console.log([...new Uint8Array(event.data)].map(x => x.toString(16).padStart(2, '0')).join(' '));
                 switch (command) {
-                    case Command.ack: console.log("<= Command.ack : state = " + this.state);
+                    case Command.ack:
                         if (this.state === WebLinkState.handshaking) {
                             this.state = WebLinkState.linked;
                             this.littleEndian = view.getUint8(1) == endian.little;
@@ -56,12 +56,10 @@ namespace webfront {
                         }
                         break;
                     case Command.debugLog: {
-                        console.log("Dump " + view.getUint8(0) + " " + view.getUint8(1) + " " + view.getUint8(2) + " " + view.getUint8(3) + " " + view.getUint8(4) + " " + view.getUint8(5) + " ");
                         let textLen = view.getUint16(4, this.littleEndian);
-                        console.log("Text len " + textLen);
                         let textView = new Uint8Array(event.data, 6, textLen);
                         let text = new TextDecoder("utf-8").decode(textView);
-                        console.log("WebFront : " + text);
+                        console.log("WebFrontLog : " + text);
                         } break;
                 }
             };
@@ -77,7 +75,6 @@ namespace webfront {
                 case Command.handshake:
                     this.sendMsg[1] = endian.native;
                     this.state = WebLinkState.handshaking;
-                    console.log("=> Command.handshake : state = " + this.state);
                     this.socket.send(this.sendMsg.slice(0, 2));
             }
         }

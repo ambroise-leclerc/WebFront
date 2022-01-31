@@ -55,16 +55,12 @@ struct DebugLog {
 
 protected:
     std::span<const std::byte> payloadSpan;
-
 };
-// static_assert(sizeof(DebugLog) - sizeof(std::span<const std::byte>) == 4, "DebugLog header need to be 4 bytes long");
 
 } // namespace msg
 
 template<typename Net>
 class WebLink {
-
-
     websocket::WebSocket<Net> ws;
     WebLinkId id;
     bool sameEndian;
@@ -80,15 +76,15 @@ public:
         ws.onMessage([this](std::span<const std::byte> data) {
             switch (static_cast<Command>(data[0])) {
             case Command::handshake:
+                sendCommand(msg::Ack{});
+                log::addSinks([this](std::string_view t) { sendCommand(msg::DebugLog(t)); });
                 sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little) ||
                              (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
                 log::info("Endianness - platform:{}, client:{}, identical:{}", std::endian::native == std::endian::little ? "little" : "big",
                           static_cast<JSEndian>(data[1]) == JSEndian::little ? "little" : "big", sameEndian);
-                sendCommand(msg::Ack{});
-                sendCommand(msg::DebugLog{"Debug text"});
                 break;
+            default: break;
             }
-
             log::infoHex("onMessage(binary) :", data);
         });
 
@@ -100,11 +96,7 @@ public:
     ~WebLink() { log::debug("WebLink destructor"); }
 
 private:
-    void sendCommand(auto message) {
-        log::infoHex("header", message.header());
-        log::infoHex("payload:", message.payload());
-        ws.write(message.header(), message.payload());
-    }
+    void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
 };
 
 template<typename Net>

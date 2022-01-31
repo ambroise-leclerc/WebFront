@@ -31,41 +31,33 @@ struct HexDump {
     size_t startAddress;
 };
 
-template<typename Container>
+template<Buffer Container>
 std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
     using namespace std;
     size_t address = 0;
+    const auto buffer =
+      span(reinterpret_cast<const uint8_t*>(h.buffer.data()), h.buffer.size() * sizeof(typename pointer_traits<decltype(h.buffer.data())>::element_type));
+    auto iosFlags{os.flags()};
     os << hex << setfill('0');
-    auto buffer = std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(h.buffer.data()),
-                                           h.buffer.size() * sizeof(typename pointer_traits<decltype(h.buffer.data())>::element_type));
-    auto size = size_t(buffer.size());
-    while (address < size) {
+    while (address < buffer.size()) {
         os << setw(8) << address + h.startAddress;
-
         for (auto index = address; index < address + 16; ++index) {
             if (index % 8 == 0) os << ' ';
-            if (index < size)
+            if (index < buffer.size())
                 os << ' ' << setw(2) << +buffer[index];
             else
                 os << "   ";
         }
-
-        os << "  ";
-        for (auto index = address; index < address + 16; ++index) {
-            if (index < size) {
-                char car = buffer[index];
-                os << (car < 32 ? '.' : index < size ? car : '.');
-            }
-        }
-
-        os << "\n";
+        os << ' ';
+        for (auto index = address; index < address + 16; ++index)
+            if (index < buffer.size()) os << (static_cast<char>(buffer[index]) < 32 ? '.' : index < buffer.size() ? static_cast<char>(buffer[index]) : '.');
+        os << '\n';
         address += 16;
     }
-    os << resetiosflags(ios_base::basefield | ios_base::adjustfield);
+    os.flags(iosFlags);
+
     return os;
 }
-
-
 
 /// Generates an hexadecimal dump string of a given buffer
 ///

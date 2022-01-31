@@ -4,6 +4,7 @@
 /// @brief Encoders/Decoders for HTTP/WS (URI, BASE64, SHA-1)
 #pragma once
 #include <details/C++20Support.hpp>
+#include <details/C++23Support.hpp>
 
 #include <array>
 #include <bit>
@@ -92,30 +93,6 @@ inline std::string encode(const uint8_t* input, size_t size) {
 
     return output;
 }
-
-#if __cplusplus <= 202002L // std::bswap will be in C++23
-#if defined(_MSC_VER)
-inline auto byteswap(uint64_t v) noexcept {
-    return _byteswap_uint64(v);
-}
-inline auto byteswap(uint32_t v) noexcept {
-    return _byteswap_ulong(v);
-}
-inline auto byteswap(uint16_t v) noexcept {
-    return _byteswap_ushort(v);
-}
-#else
-constexpr auto byteswap(uint64_t v) noexcept {
-    return __builtin_bswap64(v);
-}
-constexpr auto byteswap(uint32_t v) noexcept {
-    return __builtin_bswap32(v);
-}
-constexpr auto byteswap(uint16_t v) noexcept {
-    return __builtin_bswap16(v);
-}
-#endif
-#endif
 } // namespace
 
 template<typename T>

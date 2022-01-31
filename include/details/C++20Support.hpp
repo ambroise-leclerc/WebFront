@@ -1,7 +1,7 @@
 /// @file C++20Support.hpp
 /// @date 29/01/2022 13:58:42
 /// @author Ambroise Leclerc
-/// @brief C++20 missing functionnalities for selected target
+/// @brief C++20 missing functionnalities for selected targets
 #pragma once
 
 #ifdef __APPLE__

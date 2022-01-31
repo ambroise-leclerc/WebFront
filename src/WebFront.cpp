@@ -11,7 +11,7 @@ int main(int /*argc*/, char** argv) {
     namespace fs = filesystem;
     cout << "WebFront launched from " << std::filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
-    log::setSinks(log::clogSink);
+    log::addSinks(log::clogSink);
     log::info("Application started");
     UI ui("80", fs::weakly_canonical(fs::path(argv[0])).parent_path());
     //ui.runAsync();

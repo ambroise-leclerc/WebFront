@@ -48,6 +48,6 @@ template <typename... Ts> struct info { info(string_view fmt, Ts&&... ts) { if (
 template <typename... Ts> info(string_view, Ts&&...) -> info<Ts...>;
 void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
 
-template <typename... Ts> void setSinks(Ts&&... ts) { (out.sinks.push_back(std::forward<Ts>(ts)), ...); }
+template <typename... Ts> void addSinks(Ts&&... ts) { (out.sinks.push_back(std::forward<Ts>(ts)), ...); }
 } // namespace log
 } // namespace webfront
