@@ -1,4 +1,3 @@
-/// @file C++20Support.hpp
 /// @date 31/01/2022 10:17:42
 /// @author Ambroise Leclerc
 /// @brief C++23 missing functionnalities for selected targets

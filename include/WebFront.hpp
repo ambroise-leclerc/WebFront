@@ -1,108 +1,35 @@
-/// @file WebFront.hpp
 /// @date 18/01/2022 19:34:27
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
-#include <details/HexDump.hpp>
-#include <http/HTTPServer.hpp>
-#include <http/WebSocket.hpp>
-#include <networking/TCPNetworkingTS.hpp>
+#include "WebLink.hpp"
+#include "tooling/HexDump.hpp"
+#include "http/HTTPServer.hpp"
 
-#include <bit>
+#include "networking/TCPNetworkingTS.hpp"
+
 #include <map>
 #include <string_view>
 #include <tuple>
 
 namespace webfront {
 
-using WebLinkId = uint16_t;
+using NetProvider = networking::TCPNetworkingTS;
 
-struct WebLinkEvent {
-    enum class Code { closed };
-    Code code;
-    WebLinkId webLinkId;
-};
-
-enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
-
-enum class Command : uint8_t { handshake, ack, debugLog };
-namespace msg {
-
-struct Ack {
-    struct Header {
-        Command command = Command::ack;
-        JSEndian endian = std::endian::native == std::endian::little ? JSEndian::little : JSEndian::big;
-    } head;
-    static_assert(sizeof(Header) == 2, "Ack header needs to be 2 bytes long");
-
-    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
-    std::span<const std::byte> payload() { return {}; }
-};
-
-struct DebugLog {
-    DebugLog(std::string_view text) : payloadSpan{std::span(reinterpret_cast<const std::byte*>(text.data()), text.size())} {
-        head.textLen = static_cast<uint16_t>(text.size());
-    }
-    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
-    std::span<const std::byte> payload() { return payloadSpan; }
-
-    struct Header {
-        Command command = Command::debugLog;
-        uint8_t padding[3] = {};
-        uint16_t textLen;
-    } head;
-    static_assert(sizeof(Header) == 6, "DebugLog header needs to be 6 bytes long");
-
-protected:
-    std::span<const std::byte> payloadSpan;
-};
-
-} // namespace msg
-
-template<typename Net>
-class WebLink {
-    websocket::WebSocket<Net> ws;
-    WebLinkId id;
-    bool sameEndian;
-
-public:
-    WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)>) : ws(std::move(socket)), id(webLinkId) {
-        log::debug("New WebLink created with id:{}", id);
-
-        ws.onMessage([this](std::string_view text) {
-            log::debug("onMessage(text) :{}", text);
-            ws.write("This is my response");
-        });
-        ws.onMessage([this](std::span<const std::byte> data) {
-            switch (static_cast<Command>(data[0])) {
-            case Command::handshake:
-                sendCommand(msg::Ack{});
-                log::addSinks([this](std::string_view t) { sendCommand(msg::DebugLog(t)); });
-                sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little) ||
-                             (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
-                log::info("Endianness - platform:{}, client:{}, identical:{}", std::endian::native == std::endian::little ? "little" : "big",
-                          static_cast<JSEndian>(data[1]) == JSEndian::little ? "little" : "big", sameEndian);
-                break;
-            default: break;
-            }
-            log::infoHex("onMessage(binary) :", data);
-        });
-
-        ws.start();
-    }
-    WebLink(const WebLink&) = delete;
-    WebLink(WebLink&&) = delete;
-
-    ~WebLink() { log::debug("WebLink destructor"); }
-
-private:
-    void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
-};
-
-template<typename Net>
+template<typename WebFrontType>
 class BasicUI {
+    WebFrontType& webFront;
+    WebLinkId webLinkId;
 public:
-    BasicUI(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {
+    BasicUI(WebFrontType& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
+};
+
+template<typename Net>
+class BasicWF {
+public:
+    using UI = BasicUI<BasicWF<Net>>;
+
+    BasicWF(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
@@ -113,21 +40,25 @@ public:
 
     void run() { httpServer.run(); }
     void runOne() { httpServer.runOne(); }
-    auto runAsync() { return std::async(std::launch::async, &BasicUI::run, this); }
+
+    void onUIStarted(std::function<void(UI)>&& handler) { uiStartedHandler = std::move(handler); }
 
 private:
     http::Server<Net> httpServer;
     std::map<WebLinkId, WebLink<Net>> webLinks;
     WebLinkId idsCounter;
+    std::function<void(UI)> uiStartedHandler;
 
 private:
     void onEvent(WebLinkEvent event) {
         log::debug("onEvent");
         switch (event.code) {
+        case WebLinkEvent::Code::linked: uiStartedHandler(UI{*this, event.webLinkId}); break;
         case WebLinkEvent::Code::closed: webLinks.erase(event.webLinkId); break;
         }
     }
 };
 
-using UI = BasicUI<networking::TCPNetworkingTS>;
+using WebFront = BasicWF<NetProvider>;
+using UI = WebFront::UI;
 } // namespace webfront

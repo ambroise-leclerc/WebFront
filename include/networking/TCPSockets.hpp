@@ -57,7 +57,7 @@ protected:
     static auto getLastError() { return WSAGetLastError(); }
     static std::string getErrorText(bool prependErrorId = true) { return getErrorText(getLastError(), prependErrorId); }
     static std::string getErrorText(int error, bool prependErrorId = true) {
-        LPVOID lpMsgBuf;
+        LPVOID lpMsgBuf{};
         auto bufLen = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error, 0,
                                     reinterpret_cast<LPTSTR>(&lpMsgBuf), 0, nullptr);
         if (bufLen) {
@@ -67,7 +67,7 @@ protected:
             if (prependErrorId) { result.insert(0, std::to_string(error) + ":"); }
             return result;
         }
-        return std::string();
+        return {};
     }
 
     static constexpr auto toTimeout(const std::chrono::microseconds value) noexcept { return static_cast<long>(value.count() / 1000); }
