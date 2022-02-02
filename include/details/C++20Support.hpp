@@ -31,9 +31,11 @@ concept movable = is_object_v<T> && move_constructible<T> && swappable<T>;
 #if __has_include(<format>)
 #include <format>
 #else
+#include <array>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 
 namespace webfront {
 template<typename C, typename T>
@@ -55,11 +57,28 @@ std::ostream& operator<<(std::ostream& os, std::chrono::time_point<C, T> t) {
 }
 } // namespace webfront
 namespace std {
-template<typename... Ts>
-string format(string_view, Ts&&... ts) {
-    using webfront::operator<<;
+string format(std::string_view fmt, auto&&... ts) {
+    if (sizeof...(ts) == 0) return std::string(fmt);
+    std::array<std::string_view, 32> fragments;
+    if (sizeof...(ts) > fragments.size()) throw std::length_error("format parameters count limit exceeded");
+    size_t index = 0;
+    auto start = fmt.cbegin(), parser = start;
+    while (parser != fmt.cend()) {
+        if (*parser == '{') {
+            if (start == fmt.cbegin())
+                fragments[index++] = std::string_view(start, parser);
+            else if (start != parser && index < fragments.size())
+                fragments[index++] = std::string_view(start + 1, parser);
+        }
+        else if (*parser == '}')
+            start = parser;
+        ++parser;
+    }
+
+    auto frag = fragments.cbegin();
     stringstream ss;
-    ((ss << std::forward<Ts>(ts) << ' '), ...);
+    using webfront::operator<<;
+    ((ss << *frag++ << std::forward<decltype(ts)>(ts)), ...);
     return ss.str();
 }
 } // namespace std

@@ -15,6 +15,7 @@ namespace webfront {
 using WebLinkId = uint16_t;
 
 struct WebLinkEvent {
+    WebLinkEvent(Code eventCode, WebLinkId id) : code(eventCode), webLinkId(id) {}
     enum class Code { linked, closed };
     Code code;
     WebLinkId webLinkId;

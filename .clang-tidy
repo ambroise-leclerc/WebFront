@@ -1,6 +1,6 @@
 ---
 Checks:          'clang-diagnostic-*,clang-analyzer-*,cppcoreguidelines-*,modernize-*,-modernize-use-trailing-return-type'
 WarningsAsErrors: true
-HeaderFilterRegex: ''
+HeaderFilterRegex: '^((?!/_deps/|/3rdParty/).)*$'
 AnalyzeTemporaryDtors: false
 ...
