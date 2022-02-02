@@ -15,15 +15,17 @@ namespace webfront {
 using WebLinkId = uint16_t;
 
 struct WebLinkEvent {
-    WebLinkEvent(Code eventCode, WebLinkId id) : code(eventCode), webLinkId(id) {}
     enum class Code { linked, closed };
+ 
+    WebLinkEvent(Code eventCode, WebLinkId id) : code(eventCode), webLinkId(id) {}
     Code code;
     WebLinkId webLinkId;
 };
 
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
 
-enum class Command : uint8_t { handshake, ack, debugLog, textCommand };
+enum class Command : uint8_t { handshake, ack, textCommand };
+enum class TxtOpcode : uint8_t { debugLog, injectScript };
 namespace msg {
 
 struct Ack {
@@ -39,28 +41,9 @@ private:
 
 };
 
-struct DebugLog {
-    DebugLog(std::string_view text) : payloadSpan{std::span(reinterpret_cast<const std::byte*>(text.data()), text.size())} {
-        head.textLen = static_cast<uint16_t>(text.size());
-    }
-    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
-    std::span<const std::byte> payload() { return payloadSpan; }
-
-private:
-    struct Header {
-        Command command = Command::debugLog;
-        std::array<uint8_t, 3> padding = {};
-        uint16_t textLen;
-    } head;
-    static_assert(sizeof(Header) == 6, "DebugLog header has to be 6 bytes long");
-
-    std::span<const std::byte> payloadSpan;
-};
-
 /// Commands with a text payload
 struct TextCommand {
-    enum class Opcode : uint8_t { debugLog, injectScript };
-    TextCommand(std::string_view text, Opcode opcode)
+    TextCommand(TxtOpcode opcode, std::string_view text)
         : head{.opcode = opcode, .lengthHi = static_cast<uint8_t>(text.size() >> 8), .lengthLo = static_cast<uint8_t>(text.size())},
           payloadSpan{std::span(reinterpret_cast<const std::byte*>(text.data()), text.size())} {}
 
@@ -69,7 +52,7 @@ struct TextCommand {
 private:
     struct Header {
         Command command = Command::textCommand;
-        Opcode opcode;
+        TxtOpcode opcode;
         uint8_t lengthHi, lengthLo; // Payload length = (256 * lengthHi) + lengthLo
     } head;
     static_assert(sizeof(Header) == 4, "TextCommand header has to be 4 bytes long");
@@ -99,7 +82,7 @@ public:
             switch (static_cast<Command>(data[0])) {
             case Command::handshake:
                 sendCommand(msg::Ack{});
-                logSink = log::addSinks([this](std::string_view t) { sendCommand(msg::DebugLog(t)); });
+                logSink = log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(TxtOpcode::debugLog, t)); });
                 sameEndian = (std::endian::native == std::endian::little && static_cast<JSEndian>(data[1]) == JSEndian::little) ||
                              (std::endian::native == std::endian::big && static_cast<JSEndian>(data[1]) == JSEndian::big);
                 log::info("Endianness - platform:{}, client:{}, identical:{}", std::endian::native == std::endian::little ? "little" : "big",
@@ -122,7 +105,6 @@ public:
         if (logSink) log::removeSinks(logSink.value());
     }
 
-private:
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
 };
 

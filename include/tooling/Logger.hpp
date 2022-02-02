@@ -2,15 +2,15 @@
 /// @author Ambroise Leclerc
 /// @brief Logging facilities
 #pragma once
-#include "../details/C++20Support.hpp"
+#include "../details/C++20Support.hpp" // Provides <format> and <source_location>
 #include "HexDump.hpp"
 
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <functional>
 #include <iostream>
 #include <list>
-#include <source_location>
 #include <string_view>
 
 namespace webfront {

@@ -14,8 +14,16 @@ int main(int /*argc*/, char** argv) {
     log::addSinks(log::clogSink);
     log::info("Application started");
     WebFront webFront("80", fs::weakly_canonical(fs::path(argv[0])).parent_path());
-    webFront.onUIStarted([](UI /*ui*/) {
+    webFront.onUIStarted([](UI ui) {
         log::info("UIStarted");
+        ui.addScript("                                          "
+        "    var addText = function(text) {                     "
+        "        let newDiv = document.createElement('div');    "
+        "        let newContent = document.createTextNode(text);"
+        "        newDiv.appendChild(newContent);                "
+        "       document.body.appendChild(newDiv);              "
+        "    }                                                  "
+        );
     });
 
     webFront.run();

@@ -16,12 +16,24 @@ namespace webfront {
 
 using NetProvider = networking::TCPNetworkingTS;
 
+using ConnectionError = std::runtime_error;
+
 template<typename WebFrontType>
 class BasicUI {
     WebFrontType& webFront;
     WebLinkId webLinkId;
 public:
     BasicUI(WebFrontType& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
+    
+    
+    void addScript(std::string_view script) const {
+        try {
+            webFront.getLink(webLinkId).sendCommand(msg::TextCommand(TxtOpcode::injectScript, script));
+        }
+        catch (const std::out_of_range&) {
+            throw ConnectionError("Connection with client lost");
+        }
+    }
 };
 
 template<typename Net>
@@ -42,6 +54,7 @@ public:
     void runOne() { httpServer.runOne(); }
 
     void onUIStarted(std::function<void(UI)>&& handler) { uiStartedHandler = std::move(handler); }
+    WebLink<Net>& getLink(WebLinkId id) { return webLinks.at(id); }
 
 private:
     http::Server<Net> httpServer;
