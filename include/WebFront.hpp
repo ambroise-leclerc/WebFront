@@ -24,8 +24,7 @@ class BasicUI {
     WebLinkId webLinkId;
 public:
     BasicUI(WebFrontType& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
-    
-    
+      
     void addScript(std::string_view script) const {
         try {
             webFront.getLink(webLinkId).sendCommand(msg::TextCommand(TxtOpcode::injectScript, script));
