@@ -68,15 +68,15 @@ string format(std::string_view fmt, auto&&... ts) {
     while (parser != fmt.cend()) {
         if (*parser == '{') {
             if (start == fmt.cbegin())
-                fragments[index++] = std::string_view(start, parser);
+                fragments[index++] = std::string_view(start, static_cast<size_t>(parser - start));          /// string_view constructor with iterators is missing in Apple Clang 13
             else if (start != parser && index < fragments.size())
-                fragments[index++] = std::string_view(start + 1, parser);
+                fragments[index++] = std::string_view(start + 1, static_cast<size_t>(parser - (start + 1)));/// string_view constructor with iterators is missing in Apple Clang 13
         }
         else if (*parser == '}')
             start = parser;
         ++parser;
     }
-    if (start + 1 != fmt.cend()) fragments[index++] = std::string_view(start + 1, fmt.cend());
+    if (start + 1 != fmt.cend()) fragments[index++] = std::string_view(start + 1, static_cast<size_t>(fmt.cend() - (start + 1)));/// string_view constructor with iterators is missing in Apple Clang 13
 
     auto frag = fragments.cbegin();
     stringstream ss;
