@@ -2,8 +2,8 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
-#include "details/HexDump.hpp"
-#include "details/Logger.hpp"
+#include "../tooling/HexDump.hpp"
+#include "../tooling/Logger.hpp"
 
 #include <array>
 #include <cstddef>
@@ -119,31 +119,16 @@ struct Header {
         else
             raw[0] &= std::byte(0b1111111);
     }
+
     void setOpcode(Opcode code) {
         raw[0] &= std::byte(0b11110000);
         raw[0] |= static_cast<std::byte>(code);
     }
+
     void setPayloadSize(size_t size) {
-        raw[1] &= std::byte(0b10000000);
-        auto f = [&size, this ](size_t i, uint8_t shift = 0) constexpr { return raw[i] = static_cast<std::byte>(size >> shift); };
-        if (size < 126)
-            raw[1] |= static_cast<std::byte>(size);
-        else if (size < 65536) {
-            raw[1] |= std::byte(126);
-            f(2, 8);
-            f(3);
-        }
-        else {
-            raw[1] |= std::byte(127);
-            f(2, 56);
-            f(3, 48);
-            f(4, 40);
-            f(5, 32);
-            f(6, 24);
-            f(7, 16);
-            f(8, 8);
-            f(9);
-        }
+        raw[1] = (raw[1] & std::byte(0b10000000)) | std::byte(size < 126 ? size : size < 65536 ? 126 : 127);
+        size_t len = size < 126 ? 0 : size < 65536 ? 2 : 8;
+        for (size_t i = 0; i <= len; ++i) raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
     }
 
 protected:
@@ -284,9 +269,9 @@ public:
     void start() { read(); }
     void stop() { socket.close(); }
 
-    void onMessage(std::function<void(std::string_view)> handler) { textHandler = std::move(handler); }
-    void onMessage(std::function<void(std::span<const std::byte>)> handler) { binaryHandler = std::move(handler); }
-    void onClose(std::function<void(CloseEvent)> handler) { closeHandler = std::move(handler); }
+    void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
+    void onMessage(std::function<void(std::span<const std::byte>)>&& handler) { binaryHandler = std::move(handler); }
+    void onClose(std::function<void(CloseEvent)>&& handler) { closeHandler = std::move(handler); }
     void write(std::string_view text) { writeData(text); }
     void write(std::span<const std::byte> data) { writeData(data); }
     void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(data, data2); }

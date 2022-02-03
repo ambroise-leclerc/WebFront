@@ -1,10 +1,9 @@
-/// @file Encodings.hpp
 /// @date 16/01/2022 22:27:42
 /// @author Ambroise Leclerc
 /// @brief Encoders/Decoders for HTTP/WS (URI, BASE64, SHA-1)
 #pragma once
-#include <details/C++20Support.hpp>
-#include <details/C++23Support.hpp>
+#include "../details/C++20Support.hpp"
+#include "../details/C++23Support.hpp"
 
 #include <array>
 #include <bit>
@@ -117,9 +116,9 @@ inline std::string encodeInNetworkOrder(Container auto input) {
 } // namespace base64
 
 namespace crypto {
-
-constexpr std::array<uint32_t, 5> sha1(std::string_view input) {
-    std::array<uint32_t, 5> digest = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+static constexpr size_t sha1Length = 5;
+constexpr std::array<uint32_t, sha1Length> sha1(std::string_view input) {
+    std::array<uint32_t, sha1Length> digest = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
     uint32_t block[64]{0};
     size_t blockByteIndex{0}, byteCount{0};
     auto next = [&](uint8_t byte) {

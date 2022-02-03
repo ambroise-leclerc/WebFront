@@ -1,4 +1,3 @@
-/// @file C++20Support.hpp
 /// @date 29/01/2022 13:58:42
 /// @author Ambroise Leclerc
 /// @brief C++20 missing functionnalities for selected targets
@@ -32,9 +31,11 @@ concept movable = is_object_v<T> && move_constructible<T> && swappable<T>;
 #if __has_include(<format>)
 #include <format>
 #else
+#include <array>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
 
 namespace webfront {
 template<typename C, typename T>
@@ -51,16 +52,37 @@ std::ostream& operator<<(std::ostream& os, std::chrono::time_point<C, T> t) {
     tp -= s;
     auto us = duration_cast<microseconds>(tp);
     tp -= s;
-    os << std::setfill('0') << std::setw(2) << h.count() << ':' << m.count() << ':' << s.count() << '.' << std::setw(6) << us.count();
+    os << std::setfill('0') << std::setw(2) << h.count() << ':';
+    os << std::setfill('0') << std::setw(2) << m.count() << ':';
+    os << std::setfill('0') << std::setw(2) << s.count() << '.' << std::setw(6) << us.count();
     return os;
 }
 } // namespace webfront
 namespace std {
-template<typename... Ts>
-string format(string_view, Ts&&... ts) {
-    using webfront::operator<<;
+string format(std::string_view fmt, auto&&... ts) {
+    if (sizeof...(ts) == 0) return std::string(fmt);
+    std::array<std::string_view, 32> fragments{};
+    if (sizeof...(ts) > fragments.size()) throw std::length_error("format parameters count limit exceeded");
+    size_t index = 0;
+    auto start = fmt.cbegin(), parser = start;
+    while (parser != fmt.cend()) {
+        if (*parser == '{') {
+            if (start == fmt.cbegin())
+                fragments[index++] = std::string_view(start, static_cast<size_t>(parser - start));          /// string_view constructor with iterators is missing in Apple Clang 13
+            else if (start != parser && index < fragments.size())
+                fragments[index++] = std::string_view(start + 1, static_cast<size_t>(parser - (start + 1)));/// string_view constructor with iterators is missing in Apple Clang 13
+        }
+        else if (*parser == '}')
+            start = parser;
+        ++parser;
+    }
+    if (start + 1 != fmt.cend()) fragments[index++] = std::string_view(start + 1, static_cast<size_t>(fmt.cend() - (start + 1)));/// string_view constructor with iterators is missing in Apple Clang 13
+
+    auto frag = fragments.cbegin();
     stringstream ss;
-    ((ss << std::forward<Ts>(ts) << ' '), ...);
+    using webfront::operator<<;
+    ((ss << *frag++ << std::forward<decltype(ts)>(ts)), ...);
+    while (frag != fragments.cend()) ss << *frag++;
     return ss.str();
 }
 } // namespace std

@@ -1,11 +1,9 @@
-/// @file C++20Support.hpp
 /// @date 31/01/2022 10:17:42
 /// @author Ambroise Leclerc
 /// @brief C++23 missing functionnalities for selected targets
 #pragma once
 #include <bit>
 namespace std {
-
 
 /// template<typename T> constexpr T byteswap( T n ) noexcept;
 /// Reverses the bytes in the given integer value n. 

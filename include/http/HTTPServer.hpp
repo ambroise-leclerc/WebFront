@@ -2,10 +2,10 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
-#include <details/Encodings.hpp>
-#include <details/HexDump.hpp>
-#include <http/WebSocket.hpp>
-#include <networking/BasicNetworking.hpp>
+#include "Encodings.hpp"
+#include "../tooling/HexDump.hpp"
+#include "WebSocket.hpp"
+#include "../networking/BasicNetworking.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -422,7 +422,7 @@ public:
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
 
-    void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)> handler) { upgradeHandler = std::move(handler); }
+    void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)>&& handler) { upgradeHandler = std::move(handler); }
 
 private:
     typename Net::IoContext ioContext;
