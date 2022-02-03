@@ -50,8 +50,8 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
         os << ' ';
         for (auto index = address; index < address + 16; ++index)
             if (index < buffer.size()) os << (static_cast<char>(buffer[index]) < 32 ? '.' : index < buffer.size() ? static_cast<char>(buffer[index]) : '.');
-        os << '\n';
         address += 16;
+        if (address < buffer.size()) os << '\n';
     }
     os.flags(iosFlags);
 

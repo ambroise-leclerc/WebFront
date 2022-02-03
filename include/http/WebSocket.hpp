@@ -253,7 +253,7 @@ class WebSocket {
     typename Net::Socket socket;
 
 public:
-    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)) {
+    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
         log::debug("WebSocket constructor");
         start();
     }
@@ -261,13 +261,19 @@ public:
     //    WebSocket(WebSocket&&) = default;
     WebSocket(WebSocket&& w)
         : socket(std::move(w.socket)), readBuffer(std::move(w.readBuffer)), decoder(std::move(w.decoder)), textHandler(std::move(w.textHandler)),
-          binaryHandler(std::move(w.binaryHandler)), closeHandler(std::move(w.closeHandler)) {
+          binaryHandler(std::move(w.binaryHandler)), closeHandler(std::move(w.closeHandler)), started(std::move(w.started)) {
         log::debug("WebSocket move constructor");
     }
     ~WebSocket() { log::debug("WebSocket destructor"); }
 
-    void start() { read(); }
-    void stop() { socket.close(); }
+    void start() {
+        started = true;
+        read();
+    }
+    void stop() {
+        started = false;
+        socket.close();
+    }
 
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
     void onMessage(std::function<void(std::span<const std::byte>)>&& handler) { binaryHandler = std::move(handler); }
@@ -282,6 +288,7 @@ private:
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
+    bool started;
 
 private:
     void read() {
@@ -319,13 +326,15 @@ private:
     void writeData(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame(data, data2)); }
 
     void writeData(Frame frame) {
-        std::error_code ec;
-        Net::Write(socket, frame.toBuffers<Net>(), ec);
-        if (ec) {
-            log::error("Error during write : ec.value() = {}", ec.value());
-            if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-            stop();
-        }
+        Net::AsyncWrite(socket, frame.toBuffers<Net>(), [this](std::error_code ec, std::size_t /*bytesTransferred*/) {
+            if (ec) {
+                if (started) {
+                    log::error("Error during write : ec.value() = {}", ec.value());
+                    if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+                    if (ec != Net::Error::OperationAborted) stop();
+                }
+            }
+        });
     }
 };
 

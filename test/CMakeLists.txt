@@ -10,8 +10,8 @@ target_link_libraries(catch_main PUBLIC Catch2::Catch2)
 target_link_libraries(catch_main PRIVATE project_options Threads::Threads)
 
 
-add_executable(tests HTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp)
-#add_executable(tests JSFunctionTests.cpp)
+#add_executable(tests HTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp)
+add_executable(tests JSFunctionTests.cpp)
 target_link_libraries(tests PRIVATE project_warnings project_options catch_main)
 target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/include SYSTEM ${CMAKE_SOURCE_DIR}/3rdParty)
 
