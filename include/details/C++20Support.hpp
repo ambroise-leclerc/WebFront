@@ -52,14 +52,16 @@ std::ostream& operator<<(std::ostream& os, std::chrono::time_point<C, T> t) {
     tp -= s;
     auto us = duration_cast<microseconds>(tp);
     tp -= s;
-    os << std::setfill('0') << std::setw(2) << h.count() << ':' << m.count() << ':' << s.count() << '.' << std::setw(6) << us.count();
+    os << std::setfill('0') << std::setw(2) << h.count() << ':';
+    os << std::setfill('0') << std::setw(2) << m.count() << ':';
+    os << std::setfill('0') << std::setw(2) << s.count() << '.' << std::setw(6) << us.count();
     return os;
 }
 } // namespace webfront
 namespace std {
 string format(std::string_view fmt, auto&&... ts) {
     if (sizeof...(ts) == 0) return std::string(fmt);
-    std::array<std::string_view, 32> fragments;
+    std::array<std::string_view, 32> fragments{};
     if (sizeof...(ts) > fragments.size()) throw std::length_error("format parameters count limit exceeded");
     size_t index = 0;
     auto start = fmt.cbegin(), parser = start;
@@ -74,11 +76,13 @@ string format(std::string_view fmt, auto&&... ts) {
             start = parser;
         ++parser;
     }
+    if (start + 1 != fmt.cend()) fragments[index++] = std::string_view(start + 1, fmt.cend());
 
     auto frag = fragments.cbegin();
     stringstream ss;
     using webfront::operator<<;
     ((ss << *frag++ << std::forward<decltype(ts)>(ts)), ...);
+    while (frag != fragments.cend()) ss << *frag++;
     return ss.str();
 }
 } // namespace std
