@@ -5,7 +5,6 @@
 #include <bit>
 namespace std {
 
-
 /// template<typename T> constexpr T byteswap( T n ) noexcept;
 /// Reverses the bytes in the given integer value n. 
 #ifndef __cpp_lib_byteswap
