@@ -92,9 +92,9 @@ string format(std::string_view fmt, auto&&... ts) {
 #if __has_include(<source_location>)
 #include <source_location>
 #else
-#define source_location::current 
 namespace std {
 struct source_location {
+    static source_location current() noexcept { return {}; }
     constexpr source_location() noexcept {}
 
     constexpr uint_least32_t line() const noexcept { return l; };
