@@ -98,6 +98,8 @@ public:
     }
     WebLink(const WebLink&) = delete;
     WebLink(WebLink&&) = delete;
+    WebLink& operator=(const WebLink&) = delete;
+    WebLink& operator=(WebLink&&) = delete;
     
 
     ~WebLink() {

@@ -19,14 +19,14 @@ namespace uri {
 
 inline std::string encode(std::string_view uri) {
     std::string encoded;
-    static const char* digits = "0123456789ABCDEF";
+    static std::array<char, 16> digits{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
     for (auto c : uri) {
         if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
             encoded += c;
         else {
             encoded += "%";
-            encoded += digits[c >> 4];
-            encoded += digits[c % 16];
+            encoded += digits[static_cast<size_t>(c >> 4)];
+            encoded += digits[static_cast<size_t>(c % 16)];
         }
     }
     return encoded;
@@ -119,7 +119,7 @@ namespace crypto {
 static constexpr size_t sha1Length = 5;
 constexpr std::array<uint32_t, sha1Length> sha1(std::string_view input) {
     std::array<uint32_t, sha1Length> digest = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
-    uint32_t block[64]{0};
+    std::array<uint32_t, 64> block{0};
     size_t blockByteIndex{0}, byteCount{0};
     auto next = [&](uint8_t byte) {
         block[blockByteIndex++] = byte;

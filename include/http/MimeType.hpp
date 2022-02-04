@@ -5,8 +5,7 @@
 #include <array>
 #include <string_view>
 
-namespace webfront {
-namespace http {
+namespace webfront::http {
 
 struct MimeType {
     enum Type { plain, html, css, js, jpg, png, gif, json, pdf, ttf, ico, svg, webp, csv };
@@ -33,7 +32,7 @@ struct MimeType {
         return plain;
     }
 
-    constexpr std::string toString() const {
+    [[nodiscard]] constexpr std::string_view toString() const {
         auto names =
           std::array{"text/plain",      "text/html", "text/css",     "application/javascript", "image/jpeg", "image/png", "image/gif", "application/json",
                      "application/pdf", "font/ttf",  "image/x-icon", "image/svg+xml",          "image/webp", "text/css",  "text/csv"};
@@ -41,5 +40,4 @@ struct MimeType {
     }
 };
 
-} // namespace http
-} // namespace webfront
+} // namespace webfront::http

@@ -3,6 +3,7 @@
 /// @brief C++23 missing functionnalities for selected targets
 #pragma once
 #include <bit>
+#include <cstdint>
 namespace std {
 
 /// template<typename T> constexpr T byteswap( T n ) noexcept;

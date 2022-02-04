@@ -12,8 +12,7 @@
 #include <sstream>
 #include <vector>
 
-namespace webfront {
-namespace utils {
+namespace webfront::utils {
 
 template<typename T>
 concept Buffer = std::movable<T> || requires(T t) {
@@ -89,5 +88,4 @@ static std::string hexDump(const Buffer auto& buffer1, const Buffer auto& buffer
     return ss.str();
 }
 
-} // namespace utils
-} // namespace webfront
+} // namespace webfront::utils

@@ -35,7 +35,7 @@ public:
         }
     }
 
-    JsFunction jsFunction(std::string_view) const { return JsFunction{}; }
+    JsFunction jsFunction(std::string_view functionName) const { return JsFunction{functionName}; }
 
 };
 
@@ -77,4 +77,5 @@ private:
 
 using WebFront = BasicWF<NetProvider>;
 using UI = WebFront::UI;
+
 } // namespace webfront

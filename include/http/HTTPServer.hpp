@@ -19,14 +19,14 @@
 #include <regex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
-namespace webfront {
-namespace http {
+namespace webfront::http {
 
 struct Header {
     Header() = default;
-    Header(std::string n, std::string v) : name(std::move(n)), value(std::move(v)) {}
+    Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) {}
     std::string name;
     std::string value;
 };
@@ -308,6 +308,37 @@ private: // clang-format off
     }
 }; // clang-format on
 
+template<typename ConnectionType>
+class Connections {
+public:
+    Connections() = default;
+    Connections(const Connections&) = delete;
+    Connections(Connections&&) = default;
+    Connections& operator=(const Connections&) = delete;
+    Connections& operator=(Connections&&) = default;
+    ~Connections() = default;
+
+    void start(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
+        connections.insert(connection);
+        connection->start();
+    }
+
+    void stop(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
+        connections.erase(connection);
+        connection->stop();
+    }
+
+    void stopAll() {
+        for (auto connection : connections) connection->stop();
+        connections.clear();
+    }
+
+private:
+    std::set<std::shared_ptr<ConnectionType>> connections;
+};
+
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
 template<typename Net>
@@ -420,5 +451,4 @@ private:
     }
 };
 
-} // namespace http
-} // namespace webfront
+} // namespace webfront::http

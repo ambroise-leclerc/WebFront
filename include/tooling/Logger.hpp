@@ -13,9 +13,7 @@
 #include <list>
 #include <string_view>
 
-namespace webfront {
-namespace log {
-
+namespace webfront::log {
 using LogType = const uint8_t;
 constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 static const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
@@ -46,5 +44,4 @@ template<class... Ts> info(string_view, Ts&&...) -> info<Ts...>;
 void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
 auto addSinks(auto&&... ts) { (out.sinks.push_back(forward<decltype(ts)>(ts)), ...); return out.sinks.size() - 1; }
 void removeSinks(auto&&... sinkIds) { ((out.sinks[sinkIds] = nullptr), ...); }
-} // namespace log
-} // namespace webfront
+} //namespace webfront::log

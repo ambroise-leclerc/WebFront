@@ -38,36 +38,40 @@ std::string_view toString(Type t) {
 
 class JsFunction {
 public:
+    JsFunction(std::string_view functionName)
+        : name(functionName), bufferIndex(0), paramIndex(1), paramSpans{std::span(reinterpret_cast<const std::byte*>(name.data()), name.size())} {}
+
     void operator()(auto&&... ts) {
         bufferIndex = 0;
-        paramIndex = 0;
+        paramIndex = 1;
 
         ((encodeParam(std::forward<decltype(ts)>(ts))), ...);
 
-        std::cout << utils::hexDump(buffer) << "\n";
+        std::cout << utils::hexDump(std::span(buffer.data(), bufferIndex)) << "\n";
 
         for (size_t i = 0; i < paramIndex; ++i) std::cout << i << ": " << utils::hexDump(paramSpans[i]) << "\n";
     }
 
 private:
+    std::string name;
     static constexpr size_t maxParamsCount = 32;
     static constexpr size_t maxParamsDataSize = 5; // 1 byte for type, 1-4 bytes for value
     std::array<std::byte, maxParamsCount * maxParamsDataSize> buffer;
-    size_t bufferIndex, paramIndex;
+    size_t functionNameSize, bufferIndex, paramIndex;
     std::array<std::span<const std::byte>, maxParamsCount> paramSpans;
 
     template<typename T>
     constexpr auto typeName() {
 #if defined(_MSC_VER)
-        std::string_view name = __FUNCSIG__, prefix = "auto __cdecl JSFunction::typeName<", suffix = ">(void)";
+        std::string_view tName = __FUNCSIG__, prefix = "auto __cdecl JSFunction::typeName<", suffix = ">(void)";
 #elif __clang__
-        std::string_view name = __PRETTY_FUNCTION__, prefix = "auto JSFunction::typeName() [T = ", suffix = "]";
+        std::string_view tName = __PRETTY_FUNCTION__, prefix = "auto webfront::JSFunction::typeName() [T = ", suffix = "]";
 #elif defined(__GNUC__)
-        std::string_view name = __PRETTY_FUNCTION__, prefix = "constexpr auto JSFunction::typeName() [with T = ", suffix = "]";
+        std::string_view tName = __PRETTY_FUNCTION__, prefix = "constexpr auto webfront::JSFunction::typeName() [with T = ", suffix = "]";
 #endif
-        name.remove_prefix(prefix.size());
-        name.remove_suffix(suffix.size());
-        return name;
+        tName.remove_prefix(prefix.size());
+        tName.remove_suffix(suffix.size());
+        return tName;
     }
 
     template<typename T>
@@ -107,13 +111,14 @@ private:
             using ElementType = std::remove_all_extents_t<ParamType>;
             cout << "Array of " << typeName<ElementType>() << "\n";
             cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
-            if constexpr (is_same_v<ElementType, char>)
+            if constexpr (is_same_v<ElementType, char>) {
                 if constexpr (is_bounded_array_v<ParamType>)
                     encodeString(t, extent_v<ParamType> - 1);
                 else
                     encodeString(t, char_traits<char>::length(t));
+            }
             else
-                static_assert(false, "Arrays are not supported by JSFunction");
+                static_assert(is_same_v<ElementType, char>, "Arrays are not supported by JSFunction");
         }
         else if constexpr (is_same_v<ParamType, const char*>)
             encodeString(t, char_traits<char>::length(t));
@@ -122,7 +127,7 @@ private:
             encodeString(t.data(), t.size());
 
         else if constexpr (is_pointer_v<ParamType>)
-            static_assert(false, "Pointers cannot be used by JSFunction");
+            static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
     }
 };
 

@@ -12,42 +12,12 @@
 #include <set>
 #include <span>
 
-namespace webfront {
-
-template<typename ConnectionType>
-class Connections {
-public:
-    Connections(const Connections&) = delete;
-    Connections& operator=(const Connections&) = delete;
-    Connections() = default;
-
-    void start(std::shared_ptr<ConnectionType> connection) {
-        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.insert(connection);
-        connection->start();
-    }
-
-    void stop(std::shared_ptr<ConnectionType> connection) {
-        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.erase(connection);
-        connection->stop();
-    }
-
-    void stopAll() {
-        for (auto connection : connections) connection->stop();
-        connections.clear();
-    }
-
-private:
-    std::set<std::shared_ptr<ConnectionType>> connections;
-};
-
-namespace websocket {
+namespace webfront::websocket {
 using Handle = uint32_t;
 
 struct Header {
-    std::array<std::byte, 14> raw;
-    Header() : raw{} {}
+    static constexpr size_t maxHeaderSize = 14;
+    std::array<std::byte, maxHeaderSize> raw{};
 
     enum class Opcode {
         continuation,
@@ -65,7 +35,7 @@ struct Header {
         ctrl2,
         ctrl3,
         ctrl4,
-        ctrl5
+        ctrl5,
     };
 
     bool FIN() const { return test(0, 7); }
@@ -157,7 +127,7 @@ struct Frame : public Header {
         dataSpan2 = dataNext;
     }
 
-    size_t size() const { return payloadSize(); };
+    [[nodiscard]] size_t size() const { return payloadSize(); };
 
     template<typename Net>
     std::vector<typename Net::ConstBuffer> toBuffers() const {
@@ -338,5 +308,4 @@ private:
     }
 };
 
-} // namespace websocket
-} // namespace webfront
+} // namespace webfront::websocket
