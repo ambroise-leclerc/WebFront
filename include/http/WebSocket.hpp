@@ -6,7 +6,6 @@
 #include "../tooling/Logger.hpp"
 
 #include <array>
-#include <bit>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -116,7 +115,7 @@ struct Frame : public Header {
         setFIN(true);
         setOpcode(Opcode::text);
         setPayloadSize(text.size());
-        dataSpan1 = std::span(std::bit_cast<const std::byte*>(text.data()), text.size());
+        dataSpan1 = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
         dataSpan2 = {};
     }
 
@@ -159,10 +158,10 @@ public:
             return payloadBuffer.size();
         };
         auto decodeHeader = [&](auto input) {
-            payloadSize = std::bit_cast<const Header*>(input)->payloadSize();
-            headerSize = std::bit_cast<const Header*>(input)->headerSize();
-            mask = std::bit_cast<const Header*>(input)->maskingKey();
-            frameType = std::bit_cast<const Header*>(input)->opcode();
+            payloadSize = reinterpret_cast<const Header*>(input)->payloadSize();
+            headerSize = reinterpret_cast<const Header*>(input)->headerSize();
+            mask = reinterpret_cast<const Header*>(input)->maskingKey();
+            frameType = reinterpret_cast<const Header*>(input)->opcode();
             payloadBuffer.reserve(payloadSize);
         };
         auto bufferizeHeaderData = [&](std::span<const std::byte> input) -> size_t {
@@ -175,8 +174,8 @@ public:
 
         switch (state) {
         case DecodingState::starting:
-            if (std::bit_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
-                std::bit_cast<const Header*>(buffer.data())->dump();
+            if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
+                reinterpret_cast<const Header*>(buffer.data())->dump();
                 decodeHeader(buffer.data());
                 if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
@@ -269,7 +268,7 @@ private:
                     auto data = decoder.payload();
                     switch (decoder.frameType) {
                     case Header::Opcode::text:
-                        if (textHandler) textHandler(std::string_view(std::bit_cast<const char*>(data.data()), data.size()));
+                        if (textHandler) textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
                         break;
                     case Header::Opcode::binary:
                         if (binaryHandler) binaryHandler(data);
