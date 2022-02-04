@@ -49,7 +49,7 @@ public:
 
         std::cout << utils::hexDump(std::span(buffer.data(), bufferIndex)) << "\n";
 
-        for (size_t i = 0; i < paramIndex; ++i) std::cout << i << ": " << utils::hexDump(paramSpans[i]) << "\n";
+        for (size_t i = 0; i < paramIndex; ++i) std::cout << i << ": " << utils::hexDump(paramSpans.at(i)) << "\n";
     }
 
 private:
@@ -57,7 +57,7 @@ private:
     static constexpr size_t maxParamsCount = 32;
     static constexpr size_t maxParamsDataSize = 5; // 1 byte for type, 1-4 bytes for value
     std::array<std::byte, maxParamsCount * maxParamsDataSize> buffer;
-    size_t functionNameSize, bufferIndex, paramIndex;
+    size_t bufferIndex, paramIndex;
     std::array<std::span<const std::byte>, maxParamsCount> paramSpans;
 
     template<typename T>
