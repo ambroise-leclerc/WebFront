@@ -1264,14 +1264,14 @@ private:
         versionMajor,
         versionMinorStart,
         versionMinor,
-        expectingNewline1,
+        newline1,
         headerLineStart,
         headerLws,
         headerName,
         spaceBeforeHeaderValue,
         headerValue,
-        expectingNewline2,
-        expectingNewline3
+        newline2,
+        newline3
     };
     State state;
     Request currentRequest;
@@ -1319,16 +1319,16 @@ private: // clang-format off
                 check(!isDigit(input), State::versionMinor);
                 req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                 break;
-            case State::versionMinor: if (input == '\r') state = State::expectingNewline1;
+            case State::versionMinor: if (input == '\r') state = State::newline1;
                                     else if (isDigit(input)) req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                                     else throw BadRequestException();
                 break;
-            case State::expectingNewline1: check(input != '\n', State::headerLineStart); break;
-            case State::headerLineStart: if (input == '\r') { state = State::expectingNewline3; break; }
+            case State::newline1: check(input != '\n', State::headerLineStart); break;
+            case State::headerLineStart: if (input == '\r') { state = State::newline3; break; }
                                        else if (!req.headers.empty() && (input == ' ' || input == '\t')) { state = State::headerLws; break; }
                                        else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                        else { req.headers.push_back(Header()); req.headers.back().name.push_back(input); state = State::headerName; break; }
-            case State::headerLws:if (input == '\r') { state = State::expectingNewline2; break; }
+            case State::headerLws:if (input == '\r') { state = State::newline2; break; }
                                  else if (input == ' ' || input == '\t') break;
                                  else if (isCtrl(input)) throw BadRequestException();
                                  else { state = State::headerValue; req.headers.back().value.push_back(input); break; }
@@ -1336,11 +1336,11 @@ private: // clang-format off
                                   else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                   else { req.headers.back().name.push_back(input); break; }
             case State::spaceBeforeHeaderValue: check(input != ' ', State::headerValue); break;
-            case State::headerValue: if (input == '\r') { state = State::expectingNewline2; break; }
+            case State::headerValue: if (input == '\r') { state = State::newline2; break; }
                                    else if (isCtrl(input)) throw BadRequestException();
                                    else { req.headers.back().value.push_back(input); break; }
-            case State::expectingNewline2: check(input != '\n', State::headerLineStart); break;
-            case State::expectingNewline3: if (input == '\n') return true; else throw BadRequestException();
+            case State::newline2: check(input != '\n', State::headerLineStart); break;
+            case State::newline3: if (input == '\n') return true; else throw BadRequestException();
             default: throw BadRequestException();
         }
         return false;

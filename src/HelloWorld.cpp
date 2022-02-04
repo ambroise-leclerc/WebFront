@@ -24,6 +24,8 @@ int main(int /*argc*/, char** argv) {
         "       document.body.appendChild(newDiv);              "
         "    }                                                  "
         );
+        auto print = ui.jsFunction("addText");
+        print("Hello World !");
     });
 
     webFront.run();

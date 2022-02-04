@@ -2,6 +2,7 @@
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
+#include "JsFunction.hpp"
 #include "WebLink.hpp"
 #include "tooling/HexDump.hpp"
 #include "http/HTTPServer.hpp"
@@ -33,6 +34,9 @@ public:
             throw ConnectionError("Connection with client lost");
         }
     }
+
+    JsFunction jsFunction(std::string_view) const { return JsFunction{}; }
+
 };
 
 template<typename Net>
