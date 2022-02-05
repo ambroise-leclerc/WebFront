@@ -52,7 +52,12 @@ SCENARIO("WebSocket Headers decoding") {
     }
 }
 
-SCENARIO("WebSocket frame encoding"){GIVEN("Some text to send"){std::string text = "Hello WS";
+SCENARIO("WebSocket frame encoding"){
+
+  GIVEN("Some text to send"){
+
+    std::string text = "Hello WS";
+
 WHEN("Encoding it") {
     websocket::Frame frame(text);
     THEN("A text frame is produced") {

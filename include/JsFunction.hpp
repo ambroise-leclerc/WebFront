@@ -2,6 +2,8 @@
 /// @author Ambroise Leclerc
 /// @brief A functor which invokes a corresponding javascript function
 #pragma once
+#include "WebLink.hpp"
+#include "http/WebSocket.hpp"
 #include "tooling/HexDump.hpp"
 
 #include <algorithm>
@@ -36,10 +38,12 @@ std::string_view toString(Type t) {
     }
 }
 
+template<typename WebFront>
 class JsFunction {
 public:
-    JsFunction(std::string_view functionName)
-        : name(functionName), bufferIndex(0), paramIndex(1), paramSpans{std::span(reinterpret_cast<const std::byte*>(name.data()), name.size())} {}
+    JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId)
+        : name(functionName), webFront(wf), webLinkId(linkId), bufferIndex(0),
+          paramIndex(1), paramSpans{std::span(reinterpret_cast<const std::byte*>(name.data()), name.size())} {}
 
     void operator()(auto&&... ts) {
         bufferIndex = 0;
@@ -50,10 +54,14 @@ public:
         std::cout << utils::hexDump(std::span(buffer.data(), bufferIndex)) << "\n";
 
         for (size_t i = 0; i < paramIndex; ++i) std::cout << i << ": " << utils::hexDump(paramSpans.at(i)) << "\n";
+
+     //   webFront.getLink(webLinkId).sendCommand(paramSpans);
     }
 
 private:
     std::string name;
+    WebFront& webFront;
+    WebLinkId webLinkId;
     static constexpr size_t maxParamsCount = 32;
     static constexpr size_t maxParamsDataSize = 5; // 1 byte for type, 1-4 bytes for value
     std::array<std::byte, maxParamsCount * maxParamsDataSize> buffer;
