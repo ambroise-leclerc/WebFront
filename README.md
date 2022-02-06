@@ -12,7 +12,7 @@ A C++23 library with obvious purposes
 
 
 
-##Usage
+## Usage
 
 ```cpp
     WebFront webfront;
