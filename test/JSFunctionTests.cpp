@@ -1,24 +1,25 @@
 #include <catch2/catch.hpp>
 
 #include <JsFunction.hpp>
+#include <networking/NetworkingMock.hpp>
 
 using namespace webfront;
 using namespace std;
 
-namespace webfront::websocket {
-class FrameWithBuffers : Frame {};
-} // namespace webfront::websocket
-
+template<typename WebFront>
 struct WebLinkMock {
-    WebLinkMock(WebLinkId id) : webLinkId(id) {}
-    void sendCommand(websocket::FrameWithBuffers& ) {}
+    WebLinkMock(WebLinkId id, WebFront wf) : webLinkId(id), webFront(wf) {}
+    //void sendCommand(websocket::Frame& ) {}
 
     WebLinkId webLinkId;
+    WebFront& webFront;
+    void sendFrame(websocket::Frame<typename WebFront::Net>) {}
 };
 
 struct WebFrontMock {
+    using Net = networking::NetworkingMock;
     // webFront.getLink(webLinkId).sendCommand(paramSpans);
-    WebLinkMock getLink(WebLinkId id) { return WebLinkMock{id}; }
+    WebLinkMock<WebFrontMock> getLink(WebLinkId id) { return WebLinkMock<WebFrontMock>{id, *this}; }
 };
 
 SCENARIO("JsFunction") {

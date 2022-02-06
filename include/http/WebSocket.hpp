@@ -110,36 +110,41 @@ struct CloseEvent {
     std::string reason;
 };
 
+template<typename Net>
 struct Frame : public Header {
     Frame(std::string_view text) {
         setFIN(true);
         setOpcode(Opcode::text);
         setPayloadSize(text.size());
-        dataSpan1 = std::span(reinterpret_cast<const std::byte*>(text.data()), text.size());
-        dataSpan2 = {};
+        buffers.emplace_back(raw.data(), headerSize());
+        buffers.emplace_back(reinterpret_cast<const std::byte*>(text.data()), text.size());
     }
 
     Frame(std::span<const std::byte> dataHead, std::span<const std::byte> dataNext = {}) {
         setFIN(true);
         setOpcode(Opcode::binary);
         setPayloadSize(dataHead.size() + dataNext.size());
-        dataSpan1 = dataHead;
-        dataSpan2 = dataNext;
+        buffers.emplace_back(raw.data(), headerSize());
+        buffers.emplace_back(dataHead.data(), dataHead.size());
+        if (!dataNext.empty()) buffers.emplace_back(dataNext.data(), dataNext.size());
     }
+
+    Frame(const Frame&) = delete;
+    Frame& operator=(const Frame&) = delete;
+    Frame(Frame&&) = default; 
+    Frame& operator=(Frame&&) = default;
 
     [[nodiscard]] size_t size() const { return payloadSize(); };
 
-    template<typename Net>
-    std::vector<typename Net::ConstBuffer> toBuffers() const {
-        std::vector<typename Net::ConstBuffer> buffers;
-        buffers.push_back(typename Net::ConstBuffer(raw.data(), headerSize()));
-        if (!dataSpan1.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan1.data(), dataSpan1.size()));
-        if (!dataSpan2.empty()) buffers.push_back(typename Net::ConstBuffer(dataSpan2.data(), dataSpan2.size()));
+    std::vector<typename Net::ConstBuffer> toBuffers() const { return buffers; }
 
-        return buffers;
+    void addBuffer(std::span<const std::byte> buffer) {
+        setPayloadSize(payloadSize() + buffer.size());
+        buffers[0] = {raw.data(), headerSize()};
+        buffers.emplace_back(buffer.data(), buffer.size());
     }
 
-    std::span<const std::byte> dataSpan1, dataSpan2;
+    std::vector<typename Net::ConstBuffer> buffers;
 };
 
 class FrameDecoder {
@@ -221,25 +226,24 @@ private:
 template<typename Net>
 class WebSocket {
     typename Net::Socket socket;
+    static constexpr size_t receptionBufferSize = 8192;
 
 public:
     explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
         log::debug("WebSocket constructor");
         start();
     }
-    WebSocket(WebSocket&) = delete;
-    //    WebSocket(WebSocket&&) = default;
-    WebSocket(WebSocket&& w)
-        : socket(std::move(w.socket)), readBuffer(std::move(w.readBuffer)), decoder(std::move(w.decoder)), textHandler(std::move(w.textHandler)),
-          binaryHandler(std::move(w.binaryHandler)), closeHandler(std::move(w.closeHandler)), started(std::move(w.started)) {
-        log::debug("WebSocket move constructor");
-    }
+    WebSocket(const WebSocket&) = delete;
+    WebSocket(WebSocket&&) = default;
+    WebSocket& operator=(const WebSocket&) = delete;
+    WebSocket& operator=(WebSocket&&) = default;
     ~WebSocket() { log::debug("WebSocket destructor"); }
 
     void start() {
         started = true;
         read();
     }
+
     void stop() {
         started = false;
         socket.close();
@@ -248,12 +252,13 @@ public:
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
     void onMessage(std::function<void(std::span<const std::byte>)>&& handler) { binaryHandler = std::move(handler); }
     void onClose(std::function<void(CloseEvent)>&& handler) { closeHandler = std::move(handler); }
-    void write(std::string_view text) { writeData(text); }
-    void write(std::span<const std::byte> data) { writeData(data); }
-    void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(data, data2); }
+    void write(std::string_view text) { writeData(Frame<Net>(text)); }
+    void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
+    void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
+    void write(Frame<Net> frame) { writeData(std::move(frame)); }
 
 private:
-    std::array<std::byte, 8192> readBuffer;
+    std::array<std::byte, receptionBufferSize> readBuffer;
     FrameDecoder decoder;
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;
@@ -291,12 +296,8 @@ private:
         });
     }
 
-    void writeData(std::string_view text) { writeData(Frame(text)); }
-    void writeData(std::span<const std::byte> data) { writeData(Frame(data)); }
-    void writeData(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame(data, data2)); }
-
-    void writeData(Frame frame) {
-        Net::AsyncWrite(socket, frame.toBuffers<Net>(), [this](std::error_code ec, std::size_t /*bytesTransferred*/) {
+    void writeData(Frame<Net> frame) {
+        Net::AsyncWrite(socket, frame.toBuffers(), [this](std::error_code ec, std::size_t /*bytesTransferred*/) {
             if (ec) {
                 if (started) {
                     log::error("Error during write : ec.value() = {}", ec.value());

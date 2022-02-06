@@ -59,7 +59,7 @@ SCENARIO("WebSocket frame encoding"){
     std::string text = "Hello WS";
 
 WHEN("Encoding it") {
-    websocket::Frame frame(text);
+    websocket::Frame<Net> frame(text);
     THEN("A text frame is produced") {
         REQUIRE(frame.FIN() == true);
         REQUIRE(frame.RSV1() == false);
@@ -71,7 +71,7 @@ WHEN("Encoding it") {
         REQUIRE(frame.payloadSize() == 8);
         REQUIRE(frame.headerSize() == 2);
 
-        auto buffers = frame.toBuffers<Net>();
+        auto buffers = frame.toBuffers();
         using Buffer = decltype(buffers[0]);
         auto compare = [](Buffer b, std::string s) {
             auto data = reinterpret_cast<const char*>(b.data());

@@ -42,11 +42,7 @@ namespace webfront {
 
             this.socket.onerror = (error) => { console.log(`[error] ${error}`); };
 
-<<<<<<< HEAD
             this.socket.onmessage = (event: MessageEvent) => {
-=======
-            this.socket.onmessage =(event: MessageEvent) => {
->>>>>>> master
                 let view = new DataView(event.data);
                 let command: Command = view.getUint8(0);
                 //console.log('Receive command ' + command);
@@ -59,27 +55,22 @@ namespace webfront {
                             console.log("WebLink negociated : server is ", this.littleEndian ? "little endian" : "big endian");
                         }
                         break;
-<<<<<<< HEAD
                     case Command.textCommand: {
                         let opcode: TxtCmdOpcode = view.getUint8(1);
                         let textLen = view.getUint8(2) * 256 + view.getUint8(3);
                         this.textCommand(opcode, new Uint8Array(event.data, 4, textLen));
                     } break;
-=======
-                    case Command.debugLog: {
-                        let textLen = view.getUint16(4, this.littleEndian);
-                        let textView = new Uint8Array(event.data, 6, textLen);
-                        let text = new TextDecoder("utf-8").decode(textView);
-                        console.log("WebFrontLog : " + text);
-                        } break;
->>>>>>> master
+                    case Command.callJsFunction: {
+                        let paramsCount = view.getUint8(1);
+                        let paramsDataSize = view.getUint32(4);
+                        this.callJsFunction(paramsCount, new Uint8Array(event.data, 8, paramsDataSize));
+                    }
                 }
             };
             this.state = WebLinkState.uninitialized;
             this.littleEndian = false;
         }
 
-<<<<<<< HEAD
 
         textCommand(opcode: TxtCmdOpcode, textView: Uint8Array) {
             let text = new TextDecoder("utf-8").decode(textView);
@@ -94,8 +85,10 @@ namespace webfront {
             }
         }
 
-=======
->>>>>>> master
+        callJsFunction(paramsCount: number, data: Uint8Array) {
+            console.log("Received a function call with " + paramsCount + " parameters");
+        }
+
         abstract onOpen(): void;
 
         write(command: Command) {
@@ -127,19 +120,13 @@ namespace webfront {
     }
 
     enum Command {
-<<<<<<< HEAD
-        handshake, ack, textCommand
+        handshake, ack, textCommand, callJsFunction
     }
 
     enum TxtCmdOpcode {
         debugLog, injectScript
     }
 
-=======
-        handshake, ack, debugLog
-    }
-
->>>>>>> master
 
 } // namespace webfront
 

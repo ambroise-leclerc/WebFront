@@ -39,9 +39,10 @@ public:
     [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const { return JsFunction{functionName, webFront, webLinkId}; }
 };
 
-template<typename Net>
+template<typename NetProvider>
 class BasicWF {
 public:
+    using Net = NetProvider;
     using UI = BasicUI<BasicWF<Net>>;
 
     BasicWF(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {

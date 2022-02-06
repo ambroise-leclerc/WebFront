@@ -43,19 +43,31 @@ class JsFunction {
 public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId)
         : name(functionName), webFront(wf), webLinkId(linkId), bufferIndex(0),
-          paramIndex(1), paramSpans{std::span(reinterpret_cast<const std::byte*>(name.data()), name.size())} {}
+          paramsCount(0) {}
 
     void operator()(auto&&... ts) {
         bufferIndex = 0;
-        paramIndex = 1;
-
-        ((encodeParam(std::forward<decltype(ts)>(ts))), ...);
+        paramsCount = 0;
+        
+        websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
+        encodeParam(name, frame);
+        ((encodeParam(std::forward<decltype(ts)>(ts), frame)), ...);
+        command.setParametersCount(static_cast<uint8_t>(paramsCount));
+        uint32_t totalSize = 0;
+        for (const auto& buf : frame.buffers)
+            totalSize += static_cast<uint32_t>(buf.size());
+        command.setParametersDataSize(totalSize);
 
         std::cout << utils::hexDump(std::span(buffer.data(), bufferIndex)) << "\n";
 
-        for (size_t i = 0; i < paramIndex; ++i) std::cout << i << ": " << utils::hexDump(paramSpans.at(i)) << "\n";
-
-     //   webFront.getLink(webLinkId).sendCommand(paramSpans);
+        size_t bufCount = 0;
+        for (auto& buf : frame.buffers)
+            std::cout << bufCount++ << ": " << utils::hexDump(std::span(reinterpret_cast<const std::byte*>(buf.data()), buf.size())) << "\n";
+/*
+        for (size_t i = 0; i < frame.buffers.size(); ++i)
+            std::cout << i << ": " << utils::hexDump(std::span(reinterpret_cast<const std::byte*>(frame.buffers.at(i).data()), frame.buffers.at(i).size())) << "\n";
+*/
+        webFront.getLink(webLinkId).sendFrame(std::move(frame));
     }
 
 private:
@@ -65,8 +77,8 @@ private:
     static constexpr size_t maxParamsCount = 32;
     static constexpr size_t maxParamsDataSize = 5; // 1 byte for type, 1-4 bytes for value
     std::array<std::byte, maxParamsCount * maxParamsDataSize> buffer;
-    size_t bufferIndex, paramIndex;
-    std::array<std::span<const std::byte>, maxParamsCount> paramSpans;
+    msg::CallJsFunction command;
+    size_t bufferIndex, paramsCount;
 
     template<typename T>
     constexpr auto typeName() {
@@ -83,32 +95,34 @@ private:
     }
 
     template<typename T>
-    void encodeParam(T&& t) {
+    void encodeParam(T&& t, websocket::Frame<typename WebFront::Net>& frame) {
         using namespace std;
         using ParamType = std::remove_cvref_t<T>;
-        std::cout << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
-        [[maybe_unused]] auto encodeString = [this](const char* str, size_t size) constexpr {
+        paramsCount++;
+
+        std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
+        [[maybe_unused]] auto encodeString = [this, &frame](const char* str, size_t size) constexpr {
             if (size < 256) {
-                paramSpans[paramIndex++] = std::span(&buffer[bufferIndex], 2);
+                frame.addBuffer(std::span(&buffer[bufferIndex], 2));
                 buffer[bufferIndex++] = static_cast<std::byte>(Type::smallString);
                 buffer[bufferIndex++] = static_cast<std::byte>(size);
             }
             else {
-                paramSpans[paramIndex++] = std::span(&buffer[bufferIndex], 3);
+                frame.addBuffer(std::span(&buffer[bufferIndex], 3));
                 buffer[bufferIndex++] = static_cast<std::byte>(Type::string);
                 auto size16 = static_cast<uint16_t>(size);
                 std::copy_n(reinterpret_cast<const std::byte*>(&size16), sizeof(size16), &buffer[bufferIndex]);
                 bufferIndex += sizeof(size16);
             }
-            paramSpans[paramIndex++] = std::span(reinterpret_cast<const std::byte*>(str), size);
+            frame.addBuffer(std::span(reinterpret_cast<const std::byte*>(str), size));
         };
 
         if constexpr (std::is_same_v<ParamType, bool>) {
-            paramSpans[paramIndex++] = std::span(&buffer[bufferIndex], 1);
+            frame.addBuffer(std::span(&buffer[bufferIndex], 1));
             buffer[bufferIndex++] = static_cast<std::byte>(t ? Type::booleanTrue : Type::booleanFalse);
         }
         else if constexpr (std::is_arithmetic_v<ParamType>) {
-            paramSpans[paramIndex++] = std::span(&buffer[bufferIndex], 8);
+            frame.addBuffer(std::span(&buffer[bufferIndex], 8));
             buffer[bufferIndex++] = static_cast<std::byte>(Type::number);
             double number = t;
             std::copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[bufferIndex]);
