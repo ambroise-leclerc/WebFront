@@ -21,8 +21,6 @@ enum class Type : uint8_t {
     number,       // opcode + 8 bytes IEEE754 floating point number
     smallString,  // opcode + 1 byte size
     string,       // opcode + 2 bytes size
-    smallArray,   // opcode + 1 byte size
-    bigarray,     // opcode + 4 bytes size
 };
 
 std::string_view toString(Type t) {
@@ -32,8 +30,6 @@ std::string_view toString(Type t) {
     case Type::number: return "number";
     case Type::smallString: return "smallString";
     case Type::string: return "string";
-    case Type::smallArray: return "smallArray";
-    case Type::bigarray: return "bigArray";
     default: return "undefined";
     }
 }
@@ -42,31 +38,23 @@ template<typename WebFront>
 class JsFunction {
 public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId)
-        : name(functionName), webFront(wf), webLinkId(linkId), bufferIndex(0),
-          paramsCount(0) {}
+        : name(functionName), webFront(wf), webLinkId(linkId), bufferIndex(0), paramsCount(0) {}
 
     void operator()(auto&&... ts) {
         bufferIndex = 0;
         paramsCount = 0;
-        
+
         websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
         encodeParam(name, frame);
         ((encodeParam(std::forward<decltype(ts)>(ts), frame)), ...);
         command.setParametersCount(static_cast<uint8_t>(paramsCount));
-        uint32_t totalSize = 0;
-        for (const auto& buf : frame.buffers)
-            totalSize += static_cast<uint32_t>(buf.size());
-        command.setParametersDataSize(totalSize);
+        command.setParametersDataSize(static_cast<uint32_t>(frame.payloadSize() - command.header().size()));
 
         std::cout << utils::hexDump(std::span(buffer.data(), bufferIndex)) << "\n";
 
         size_t bufCount = 0;
         for (auto& buf : frame.buffers)
             std::cout << bufCount++ << ": " << utils::hexDump(std::span(reinterpret_cast<const std::byte*>(buf.data()), buf.size())) << "\n";
-/*
-        for (size_t i = 0; i < frame.buffers.size(); ++i)
-            std::cout << i << ": " << utils::hexDump(std::span(reinterpret_cast<const std::byte*>(frame.buffers.at(i).data()), frame.buffers.at(i).size())) << "\n";
-*/
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
     }
 
@@ -101,7 +89,7 @@ private:
         paramsCount++;
 
         std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
-        [[maybe_unused]] auto encodeString = [this, &frame](const char* str, size_t size) constexpr {
+        [[maybe_unused]] auto encodeString = [ this, &frame ](const char* str, size_t size) constexpr {
             if (size < 256) {
                 frame.addBuffer(std::span(&buffer[bufferIndex], 2));
                 buffer[bufferIndex++] = static_cast<std::byte>(Type::smallString);
@@ -122,9 +110,9 @@ private:
             buffer[bufferIndex++] = static_cast<std::byte>(t ? Type::booleanTrue : Type::booleanFalse);
         }
         else if constexpr (std::is_arithmetic_v<ParamType>) {
-            frame.addBuffer(std::span(&buffer[bufferIndex], 8));
-            buffer[bufferIndex++] = static_cast<std::byte>(Type::number);
             double number = t;
+            frame.addBuffer(std::span(&buffer[bufferIndex], 1 + sizeof(number)));
+            buffer[bufferIndex++] = static_cast<std::byte>(Type::number);
             std::copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[bufferIndex]);
             bufferIndex += sizeof(number);
         }
