@@ -8,7 +8,7 @@ using namespace std;
 
 template<typename WebFront>
 struct WebLinkMock {
-    WebLinkMock(WebLinkId id, WebFront wf) : webLinkId(id), webFront(wf) {}
+    WebLinkMock(WebLinkId id, WebFront& wf) : webLinkId(id), webFront(wf) {}
     //void sendCommand(websocket::Frame& ) {}
 
     WebLinkId webLinkId;
