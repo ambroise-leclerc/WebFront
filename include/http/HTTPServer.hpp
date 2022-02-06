@@ -2,10 +2,11 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
-#include "Encodings.hpp"
-#include "../tooling/HexDump.hpp"
-#include "WebSocket.hpp"
 #include "../networking/BasicNetworking.hpp"
+#include "../tooling/HexDump.hpp"
+#include "Encodings.hpp"
+#include "MimeType.hpp"
+#include "WebSocket.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -18,14 +19,14 @@
 #include <regex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
-namespace webfront {
-namespace http {
+namespace webfront::http {
 
 struct Header {
     Header() = default;
-    Header(std::string n, std::string v) : name(std::move(n)), value(std::move(v)) {}
+    Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) {}
     std::string name;
     std::string value;
 };
@@ -135,29 +136,6 @@ private:
     }
 };
 
-struct MimeType {
-    enum Type { plain, html, css, js, jpg, png, gif };
-    Type type;
-
-    MimeType(Type mimeType) : type(mimeType) {}
-
-    static MimeType fromExtension(std::string_view e) {
-        if (e.starts_with('.')) e = e.substr(1);
-        if (e == "htm" || e == "html") return html;
-        if (e == "css") return css;
-        if (e == "js" || e == "mjs") return js;
-        if (e == "jpg" || e == "jpeg") return jpg;
-        if (e == "png") return png;
-        if (e == "gif") return gif;
-        return plain;
-    }
-
-    std::string toString() const {
-        std::string names[]{"text/plain", "text/html", "text/css", "application/javascript", "image/jpeg", "image/png", "image/gif"};
-        return names[type];
-    }
-};
-
 template<typename Net>
 class RequestHandler {
 public:
@@ -203,7 +181,7 @@ public:
 
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", MimeType::fromExtension(requestPath.extension().string()).toString());
+        response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
 
         return response;
     }
@@ -247,14 +225,14 @@ private:
         versionMajor,
         versionMinorStart,
         versionMinor,
-        expectingNewline1,
+        newline1,
         headerLineStart,
         headerLws,
         headerName,
         spaceBeforeHeaderValue,
         headerValue,
-        expectingNewline2,
-        expectingNewline3
+        newline2,
+        newline3
     };
     State state;
     Request currentRequest;
@@ -302,16 +280,16 @@ private: // clang-format off
                 check(!isDigit(input), State::versionMinor);
                 req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                 break;
-            case State::versionMinor: if (input == '\r') state = State::expectingNewline1;
+            case State::versionMinor: if (input == '\r') state = State::newline1;
                                     else if (isDigit(input)) req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                                     else throw BadRequestException();
                 break;
-            case State::expectingNewline1: check(input != '\n', State::headerLineStart); break;
-            case State::headerLineStart: if (input == '\r') { state = State::expectingNewline3; break; }
+            case State::newline1: check(input != '\n', State::headerLineStart); break;
+            case State::headerLineStart: if (input == '\r') { state = State::newline3; break; }
                                        else if (!req.headers.empty() && (input == ' ' || input == '\t')) { state = State::headerLws; break; }
                                        else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                        else { req.headers.push_back(Header()); req.headers.back().name.push_back(input); state = State::headerName; break; }
-            case State::headerLws:if (input == '\r') { state = State::expectingNewline2; break; }
+            case State::headerLws:if (input == '\r') { state = State::newline2; break; }
                                  else if (input == ' ' || input == '\t') break;
                                  else if (isCtrl(input)) throw BadRequestException();
                                  else { state = State::headerValue; req.headers.back().value.push_back(input); break; }
@@ -319,16 +297,47 @@ private: // clang-format off
                                   else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                   else { req.headers.back().name.push_back(input); break; }
             case State::spaceBeforeHeaderValue: check(input != ' ', State::headerValue); break;
-            case State::headerValue: if (input == '\r') { state = State::expectingNewline2; break; }
+            case State::headerValue: if (input == '\r') { state = State::newline2; break; }
                                    else if (isCtrl(input)) throw BadRequestException();
                                    else { req.headers.back().value.push_back(input); break; }
-            case State::expectingNewline2: check(input != '\n', State::headerLineStart); break;
-            case State::expectingNewline3: if (input == '\n') return true; else throw BadRequestException();
+            case State::newline2: check(input != '\n', State::headerLineStart); break;
+            case State::newline3: if (input == '\n') return true; else throw BadRequestException();
             default: throw BadRequestException();
         }
         return false;
     }
 }; // clang-format on
+
+template<typename ConnectionType>
+class Connections {
+public:
+    Connections() = default;
+    Connections(const Connections&) = delete;
+    Connections(Connections&&) = default;
+    Connections& operator=(const Connections&) = delete;
+    Connections& operator=(Connections&&) = default;
+    ~Connections() = default;
+
+    void start(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
+        connections.insert(connection);
+        connection->start();
+    }
+
+    void stop(std::shared_ptr<ConnectionType> connection) {
+        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
+        connections.erase(connection);
+        connection->stop();
+    }
+
+    void stopAll() {
+        for (auto connection : connections) connection->stop();
+        connections.clear();
+    }
+
+private:
+    std::set<std::shared_ptr<ConnectionType>> connections;
+};
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
@@ -430,7 +439,7 @@ private:
     Connections<Connection<Net>> connections;
     RequestHandler<Net> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
-    
+
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
@@ -442,5 +451,4 @@ private:
     }
 };
 
-} // namespace http
-} // namespace webfront
+} // namespace webfront::http

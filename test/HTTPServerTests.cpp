@@ -74,16 +74,6 @@ SCENARIO("HTTP Response") {
     }
 }
 
-SCENARIO("MimeTypes") {
-    REQUIRE(MimeType::fromExtension("jpg").type == MimeType::jpg);
-    REQUIRE(MimeType::fromExtension("js").type == MimeType::js);
-    REQUIRE(MimeType::fromExtension("mjs").type == MimeType::js);
-    REQUIRE(MimeType::fromExtension("html").toString() == "text/html");
-    REQUIRE(MimeType::fromExtension("htm").toString() == "text/html");
-    REQUIRE(MimeType::fromExtension("bozo").toString() == "text/plain");
-    REQUIRE(MimeType::fromExtension("gif").toString() == "image/gif");
-}
-
 SCENARIO("RequestParser") {
     GIVEN("A valid HTTP request") {
         RequestParser parser;

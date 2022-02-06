@@ -24,7 +24,7 @@ struct WebLinkEvent {
 
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
 
-enum class Command : uint8_t { handshake, ack, textCommand };
+enum class Command : uint8_t { handshake, ack, textCommand, callJsFunction };
 enum class TxtOpcode : uint8_t { debugLog, injectScript };
 namespace msg {
 
@@ -58,6 +58,20 @@ private:
     static_assert(sizeof(Header) == 4, "TextCommand header has to be 4 bytes long");
 
     std::span<const std::byte> payloadSpan;
+};
+
+struct CallJsFunction {
+    void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
+    void setParametersDataSize(uint32_t size) { head.parametersDataSize = size; }
+    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+private:
+    struct Header {
+        Command command = Command::callJsFunction;
+        uint8_t parametersCount = 0;
+        std::array<uint8_t, 2> padding {};
+        uint32_t parametersDataSize = 0;
+    } head;
+    static_assert(sizeof(Header) == 8, "CallJsFunction header has to be 8 bytes long");
 };
 } // namespace msg
 
@@ -98,6 +112,8 @@ public:
     }
     WebLink(const WebLink&) = delete;
     WebLink(WebLink&&) = delete;
+    WebLink& operator=(const WebLink&) = delete;
+    WebLink& operator=(WebLink&&) = delete;
     
 
     ~WebLink() {
@@ -106,6 +122,7 @@ public:
     }
 
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
+    void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 };
 
 } // namespace webfront

@@ -12,8 +12,7 @@
 #include <sstream>
 #include <vector>
 
-namespace webfront {
-namespace utils {
+namespace webfront::utils {
 
 template<typename T>
 concept Buffer = std::movable<T> || requires(T t) {
@@ -50,8 +49,8 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
         os << ' ';
         for (auto index = address; index < address + 16; ++index)
             if (index < buffer.size()) os << (static_cast<char>(buffer[index]) < 32 ? '.' : index < buffer.size() ? static_cast<char>(buffer[index]) : '.');
-        os << '\n';
         address += 16;
+        if (address < buffer.size()) os << '\n';
     }
     os.flags(iosFlags);
 
@@ -89,5 +88,4 @@ static std::string hexDump(const Buffer auto& buffer1, const Buffer auto& buffer
     return ss.str();
 }
 
-} // namespace utils
-} // namespace webfront
+} // namespace webfront::utils

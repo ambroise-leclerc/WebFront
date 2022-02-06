@@ -42,15 +42,10 @@ namespace webfront {
 
             this.socket.onerror = (error) => { console.log(`[error] ${error}`); };
 
-<<<<<<< HEAD
             this.socket.onmessage = (event: MessageEvent) => {
-=======
-            this.socket.onmessage =(event: MessageEvent) => {
->>>>>>> master
                 let view = new DataView(event.data);
                 let command: Command = view.getUint8(0);
-                //console.log('Receive command ' + command);
-                //console.log([...new Uint8Array(event.data)].map(x => x.toString(16).padStart(2, '0')).join(' '));
+//                console.log([...new Uint8Array(event.data)].map(x => x.toString(16).padStart(2, '0')).join(' '));
                 switch (command) {
                     case Command.ack:
                         if (this.state === WebLinkState.handshaking) {
@@ -59,27 +54,22 @@ namespace webfront {
                             console.log("WebLink negociated : server is ", this.littleEndian ? "little endian" : "big endian");
                         }
                         break;
-<<<<<<< HEAD
                     case Command.textCommand: {
                         let opcode: TxtCmdOpcode = view.getUint8(1);
-                        let textLen = view.getUint8(2) * 256 + view.getUint8(3);
+                        let textLen = view.getUint16(2);
                         this.textCommand(opcode, new Uint8Array(event.data, 4, textLen));
                     } break;
-=======
-                    case Command.debugLog: {
-                        let textLen = view.getUint16(4, this.littleEndian);
-                        let textView = new Uint8Array(event.data, 6, textLen);
-                        let text = new TextDecoder("utf-8").decode(textView);
-                        console.log("WebFrontLog : " + text);
-                        } break;
->>>>>>> master
+                    case Command.callJsFunction: {
+                        let paramsCount = view.getUint8(1);
+                        let paramsDataSize = view.getUint32(4, this.littleEndian);
+                        this.callJsFunction(paramsCount, new DataView(event.data, 8, paramsDataSize));
+                    } break;
                 }
             };
             this.state = WebLinkState.uninitialized;
             this.littleEndian = false;
         }
 
-<<<<<<< HEAD
 
         textCommand(opcode: TxtCmdOpcode, textView: Uint8Array) {
             let text = new TextDecoder("utf-8").decode(textView);
@@ -89,13 +79,47 @@ namespace webfront {
                     let script = document.createElement("script");
                     script.text = text;
                     document.body.appendChild(script);
-                    addText("Exemple");
                 }
             }
         }
 
-=======
->>>>>>> master
+
+        callJsFunction(paramsCount: number, data: DataView) {
+            let functionName: any = "";
+            let parameters: any[] = [];
+            let dataParser = 0;
+            for (let paramIndex = 0; paramIndex < paramsCount; ++paramIndex) {
+                let type: ParamType = data.getUint8(dataParser);
+                switch (type) {
+                    case ParamType.booleanTrue:  // opcode if boolean is true
+                        parameters.push(true);
+                        dataParser += 1;
+                        break;
+                    case ParamType.booleanFalse: // opcode if boolean is false
+                        parameters.push(false);
+                        dataParser += 1;
+                        break;
+                    case ParamType.number:       // opcode + 8 bytes IEEE754 floating point number
+                        parameters.push(data.getFloat64(dataParser + 1, this.littleEndian));
+                        dataParser += 9;
+                        break;
+                    case ParamType.smallString: // opcode + 1 byte size
+                    case ParamType.string: {    // opcode + 2 bytes size
+                        let word = type == ParamType.string; 
+                        let textLen = word ? data.getUint16(dataParser + 1, this.littleEndian) : data.getUint8(dataParser + 1);
+                        let payload = dataParser + (word ? 3 : 2);
+                        let text = new TextDecoder("utf-8").decode(
+                            data.buffer.slice(data.byteOffset + payload, data.byteOffset + payload + textLen));
+                        if (functionName.length == 0) functionName = text;
+                        else parameters.push(text);
+                        dataParser = payload + textLen;
+                    } break;
+                }
+            }
+
+            executeFunctionByName(functionName, window, ...parameters);
+        }
+
         abstract onOpen(): void;
 
         write(command: Command) {
@@ -126,20 +150,33 @@ namespace webfront {
         onOpen() { this.write(Command.handshake); }
     }
 
-    enum Command {
-<<<<<<< HEAD
-        handshake, ack, textCommand
+    function executeFunctionByName(functionName: string, context: any, ...args: any[]) {
+        var namespaces = functionName.split(".");
+        let func = namespaces[namespaces.length - 1];
+        namespaces.pop();
+        for (var i = 0; i < namespaces.length; i++)
+            context = context[namespaces[i]];
+        return context[func](...args);
     }
 
-    enum TxtCmdOpcode {
+    const enum Command {
+        handshake, ack, textCommand, callJsFunction
+    }
+
+    const enum TxtCmdOpcode {
         debugLog, injectScript
     }
 
-=======
-        handshake, ack, debugLog
+    const enum ParamType {
+        undefined,
+        booleanTrue,  // opcode if boolean is true
+        booleanFalse, // opcode if boolean is false
+        number,       // opcode + 8 bytes IEEE754 floating point number
+        smallString,  // opcode + 1 byte size
+        string,       // opcode + 2 bytes size
     }
 
->>>>>>> master
+
 
 } // namespace webfront
 

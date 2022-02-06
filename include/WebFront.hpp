@@ -2,9 +2,10 @@
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
+#include "JsFunction.hpp"
 #include "WebLink.hpp"
-#include "tooling/HexDump.hpp"
 #include "http/HTTPServer.hpp"
+#include "tooling/HexDump.hpp"
 
 #include "networking/TCPNetworkingTS.hpp"
 
@@ -18,13 +19,14 @@ using NetProvider = networking::TCPNetworkingTS;
 
 using ConnectionError = std::runtime_error;
 
-template<typename WebFrontType>
+template<typename WebFront>
 class BasicUI {
-    WebFrontType& webFront;
+    WebFront& webFront;
     WebLinkId webLinkId;
+
 public:
-    BasicUI(WebFrontType& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
-      
+    BasicUI(WebFront& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
+
     void addScript(std::string_view script) const {
         try {
             webFront.getLink(webLinkId).sendCommand(msg::TextCommand(TxtOpcode::injectScript, script));
@@ -33,11 +35,14 @@ public:
             throw ConnectionError("Connection with client lost");
         }
     }
+
+    [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const { return JsFunction{functionName, webFront, webLinkId}; }
 };
 
-template<typename Net>
+template<typename NetProvider>
 class BasicWF {
 public:
+    using Net = NetProvider;
     using UI = BasicUI<BasicWF<Net>>;
 
     BasicWF(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {
@@ -73,4 +78,5 @@ private:
 
 using WebFront = BasicWF<NetProvider>;
 using UI = WebFront::UI;
+
 } // namespace webfront
