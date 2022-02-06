@@ -13,8 +13,8 @@
 #include <iostream>
 
 namespace webfront {
-
-enum class Type : uint8_t {
+ 
+enum class CodedType : uint8_t {
     undefined,
     booleanTrue,  // opcode if boolean is true
     booleanFalse, // opcode if boolean is false
@@ -23,13 +23,13 @@ enum class Type : uint8_t {
     string,       // opcode + 2 bytes size
 };
 
-std::string_view toString(Type t) {
+std::string_view toString(CodedType t) {
     switch (t) {
-    case Type::booleanTrue: return "boolean (true)";
-    case Type::booleanFalse: return "boolean (false)";
-    case Type::number: return "number";
-    case Type::smallString: return "smallString";
-    case Type::string: return "string";
+    case CodedType::booleanTrue: return "boolean (true)";
+    case CodedType::booleanFalse: return "boolean (false)";
+    case CodedType::number: return "number";
+    case CodedType::smallString: return "smallString";
+    case CodedType::string: return "string";
     default: return "undefined";
     }
 }
@@ -49,12 +49,6 @@ public:
         ((encodeParam(std::forward<decltype(ts)>(ts), frame)), ...);
         command.setParametersCount(static_cast<uint8_t>(paramsCount));
         command.setParametersDataSize(static_cast<uint32_t>(frame.payloadSize() - command.header().size()));
-
-        std::cout << utils::hexDump(std::span(buffer.data(), bufferIndex)) << "\n";
-
-        size_t bufCount = 0;
-        for (auto& buf : frame.buffers)
-            std::cout << bufCount++ << ": " << utils::hexDump(std::span(reinterpret_cast<const std::byte*>(buf.data()), buf.size())) << "\n";
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
     }
 
@@ -88,16 +82,16 @@ private:
         using ParamType = std::remove_cvref_t<T>;
         paramsCount++;
 
-        std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
+      //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
         [[maybe_unused]] auto encodeString = [ this, &frame ](const char* str, size_t size) constexpr {
             if (size < 256) {
                 frame.addBuffer(std::span(&buffer[bufferIndex], 2));
-                buffer[bufferIndex++] = static_cast<std::byte>(Type::smallString);
+                buffer[bufferIndex++] = static_cast<std::byte>(CodedType::smallString);
                 buffer[bufferIndex++] = static_cast<std::byte>(size);
             }
             else {
                 frame.addBuffer(std::span(&buffer[bufferIndex], 3));
-                buffer[bufferIndex++] = static_cast<std::byte>(Type::string);
+                buffer[bufferIndex++] = static_cast<std::byte>(CodedType::string);
                 auto size16 = static_cast<uint16_t>(size);
                 std::copy_n(reinterpret_cast<const std::byte*>(&size16), sizeof(size16), &buffer[bufferIndex]);
                 bufferIndex += sizeof(size16);
@@ -107,20 +101,20 @@ private:
 
         if constexpr (std::is_same_v<ParamType, bool>) {
             frame.addBuffer(std::span(&buffer[bufferIndex], 1));
-            buffer[bufferIndex++] = static_cast<std::byte>(t ? Type::booleanTrue : Type::booleanFalse);
+            buffer[bufferIndex++] = static_cast<std::byte>(t ? CodedType::booleanTrue : CodedType::booleanFalse);
         }
         else if constexpr (std::is_arithmetic_v<ParamType>) {
             double number = t;
             frame.addBuffer(std::span(&buffer[bufferIndex], 1 + sizeof(number)));
-            buffer[bufferIndex++] = static_cast<std::byte>(Type::number);
+            buffer[bufferIndex++] = static_cast<std::byte>(CodedType::number);
             std::copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[bufferIndex]);
             bufferIndex += sizeof(number);
         }
 
         else if constexpr (std::is_array_v<ParamType>) {
             using ElementType = std::remove_all_extents_t<ParamType>;
-            cout << "Array of " << typeName<ElementType>() << "\n";
-            cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
+         //   cout << "Array of " << typeName<ElementType>() << "\n";
+         //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
             if constexpr (is_same_v<ElementType, char>) {
                 if constexpr (is_bounded_array_v<ParamType>)
                     encodeString(t, extent_v<ParamType> - 1);

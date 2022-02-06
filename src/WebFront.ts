@@ -45,8 +45,7 @@ namespace webfront {
             this.socket.onmessage = (event: MessageEvent) => {
                 let view = new DataView(event.data);
                 let command: Command = view.getUint8(0);
-                console.log('Receive command ' + command);
-                console.log([...new Uint8Array(event.data)].map(x => x.toString(16).padStart(2, '0')).join(' '));
+//                console.log([...new Uint8Array(event.data)].map(x => x.toString(16).padStart(2, '0')).join(' '));
                 switch (command) {
                     case Command.ack:
                         if (this.state === WebLinkState.handshaking) {
@@ -58,7 +57,6 @@ namespace webfront {
                     case Command.textCommand: {
                         let opcode: TxtCmdOpcode = view.getUint8(1);
                         let textLen = view.getUint16(2);
-                        console.log("TextLen" + textLen);
                         this.textCommand(opcode, new Uint8Array(event.data, 4, textLen));
                     } break;
                     case Command.callJsFunction: {
@@ -87,14 +85,11 @@ namespace webfront {
 
 
         callJsFunction(paramsCount: number, data: DataView) {
-            console.log("Received a function call with " + paramsCount + " parameters");
-
             let functionName: any = "";
             let parameters: any[] = [];
             let dataParser = 0;
             for (let paramIndex = 0; paramIndex < paramsCount; ++paramIndex) {
                 let type: ParamType = data.getUint8(dataParser);
-                console.log("Param type :" + type);
                 switch (type) {
                     case ParamType.booleanTrue:  // opcode if boolean is true
                         parameters.push(true);

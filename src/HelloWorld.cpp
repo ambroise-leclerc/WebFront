@@ -12,18 +12,16 @@ int main(int /*argc*/, char** argv) {
     cout << "WebFront launched from " << fs::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
-    log::info("Application started");
     WebFront webFront("80", fs::weakly_canonical(fs::path(argv[0])).parent_path());
   
   
     webFront.onUIStarted([](UI ui) {
-        log::info("UIStarted");
         ui.addScript("                                                          "
         "    var addText = function(text, num) {                                "
         "        let newDiv = document.createElement('div');                    "
-        "        let newContent = document.createTextNode(text + ' of ' + num);  "
+        "        let newContent = document.createTextNode(text + ' of ' + num); "
         "        newDiv.appendChild(newContent);                                "
-        "       document.body.appendChild(newDiv);                              "
+        "        document.body.appendChild(newDiv);                             "
         "    }                                                                  "
         );
         auto print = ui.jsFunction("addText");
@@ -41,21 +39,6 @@ int main(int /*argc*/, char** argv) {
         newDiv.appendChild(newContent);
         document.body.insert(newDiv);
     });
-
-    // Hello World, the convoluted javascript way
-    webFront.onUIStarted([](UI ui)){
-        ui.addScript("
-            function addText(text) {
-                let newDiv = document.createElement('div');
-                let newContent = document.createTextNode(text);
-                newDiv.appendChild(newContent);
-                document.body.insert(newDiv); 
-            }
-        ");
-        auto print = ui.functionJS("addText");
-        print("Hello World !");
-    });
-
 */
     while (true) {
         string input;
