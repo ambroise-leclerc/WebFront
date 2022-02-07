@@ -24,7 +24,7 @@ int main(int /*argc*/, char** argv) {
         "        document.body.appendChild(newDiv);                             "
         "    }                                                                  "
         );
-        auto print = ui.jsFunction("addText");
+        auto print = ui.jsFunction("addText2");
         print("Hello World", 2022);
     });
 

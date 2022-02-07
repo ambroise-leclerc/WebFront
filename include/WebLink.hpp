@@ -23,9 +23,16 @@ struct WebLinkEvent {
 };
 
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
-
-enum class Command : uint8_t { handshake, ack, textCommand, callJsFunction };
 enum class TxtOpcode : uint8_t { debugLog, injectScript };
+
+enum class Command : uint8_t {
+        handshake,
+        ack,
+        textCommand,
+        callFunction,       // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
+        functionReturn,     // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
+};
+
 namespace msg {
 
 struct Ack {
@@ -66,13 +73,26 @@ struct CallJsFunction {
     std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
 private:
     struct Header {
-        Command command = Command::callJsFunction;
+        Command command = Command::callFunction;
         uint8_t parametersCount = 0;
         std::array<uint8_t, 2> padding {};
         uint32_t parametersDataSize = 0;
     } head;
-    static_assert(sizeof(Header) == 8, "CallJsFunction header has to be 8 bytes long");
+    static_assert(sizeof(Header) == 8, "CallFunction header has to be 8 bytes long");
 };
+
+struct FunctionReturn {
+    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+private:
+    struct Header {
+        Command command = Command::functionReturn;
+        uint8_t parametersCount = 0;
+        std::array<uint8_t, 2> padding {};
+        uint32_t parametersDataSize = 0;
+    } head;
+    static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");
+};
+
 } // namespace msg
 
 template<typename Net>
