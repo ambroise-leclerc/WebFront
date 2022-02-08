@@ -73,9 +73,9 @@ private:
 struct TextCommand {
     TextCommand(TxtOpcode opcode, std::string_view text)
         : head{.opcode = opcode, .lengthHi = static_cast<uint8_t>(text.size() >> 8), .lengthLo = static_cast<uint8_t>(text.size())},
-          payloadSpan{std::span(reinterpret_cast<const std::byte*>(text.data()), text.size())} {}
+          payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} {}
 
-    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+    std::span<const std::byte> header() { return {reinterpret_cast<const std::byte*>(&head), sizeof(Header)}; }
     std::span<const std::byte> payload() { return payloadSpan; }
 private:
     struct Header {
@@ -91,11 +91,11 @@ private:
 struct FunctionCall {
     void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
     void setParametersDataSize(uint32_t size) { head.parametersDataSize = size; }
-    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
-
     uint8_t getParametersCount() const { return head.parametersCount; }
-    size_t getParameteresDataSize() { return head.parametersDataSize; }
-    std::span<const std::byte> payload() const { return std::span(reinterpret_cast<const std::byte*>(&header[sizeof(Header)]), getParametersDataSize()); }
+    size_t getParametersDataSize() const { return head.parametersDataSize; }
+
+    std::span<const std::byte> header() const { return { reinterpret_cast<const std::byte*>(&head), sizeof(Header) }; }
+    std::span<const std::byte> payload() const { return { &header()[sizeof(Header)], getParametersDataSize() }; }
 private:
     struct Header {
         Command command = Command::callFunction;
@@ -107,7 +107,7 @@ private:
 };
 
 struct FunctionReturn {
-    std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+    std::span<const std::byte> header() { return { reinterpret_cast<const std::byte*>(&head), sizeof(Header)}; }
 private:
     struct Header {
         Command command = Command::functionReturn;
@@ -149,12 +149,15 @@ public:
                 eventsHandler(WebLinkEvent(WebLinkEvent::Code::linked, id));
                 break;
 
-            case Command::callFunction:
+            case Command::callFunction: {
                 log::info("Function called !");
-                auto command = reinterpret_cast<const FunctionCall*>(data.data());
-
+                auto command = reinterpret_cast<const msg::FunctionCall*>(data.data());
+                if ((command->header().size() + command->payload().size()) > data.size())
+                    throw std::runtime_error("Erroneous callFunction message received : data size mismatch");
                 
-                break; 
+                callCppFunction(command->getParametersCount(), command->payload());
+
+            } break; 
 
             default: break;
             }
@@ -184,6 +187,7 @@ private:
             size_t offset = 0;
             auto[functionName, bytesDecoded] = decodeParameter<std::string>(data.subspan(offset));
             offset += bytesDecoded;
+            log::debug("Function called : {}", functionName);
         }
     }
 
@@ -193,12 +197,16 @@ private:
         auto codedType = static_cast<CodedType>(data[0]);
         switch (codedType) {
             case CodedType::smallString:
-                if constexpr (std::is_same<T, std::string>) {
+                if constexpr (std::is_same_v<T, std::string>) {
                     if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
-                    size_t size = data[1];
+                    auto size = static_cast<size_t>(data[1]);
                     if (data.size() < 2 + size) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
-                    return std::string(reinterpret_cast<const char*>(&data[2]), size);
+                    return { std::string(reinterpret_cast<const char*>(&data[2]), size), 2 + size };
                 }
+
+                break;
+            default:
+                return {{}, 0};
         }
 
     }
