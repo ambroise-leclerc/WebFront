@@ -121,8 +121,13 @@ namespace webfront {
                     } break;
                 }
             }
-
-            executeFunctionByName(functionName, window, ...parameters);
+            try {
+                executeFunctionByName(functionName, window, ...parameters);
+            }
+            catch (error) {
+                throw new Error("Calling function " + functionName + " : " + error);
+                
+            }
         }
 
         abstract onOpen(): void;
@@ -141,7 +146,7 @@ namespace webfront {
         private recvMsg: Uint8Array;
         private sendBuffer: ArrayBuffer;
         private sendMsg: Uint8Array;
-        private socket: WebSocket;
+        protected socket: WebSocket;
         private state: WebLinkState;
         protected littleEndian: boolean;
     };
@@ -177,6 +182,8 @@ namespace webfront {
                 insertIndex += this.decodeParameter(args[i], new DataView(messageData, insertIndex));
                 console.log(...new Uint8Array(messageData));
             }
+
+            this.socket.send(messageData);
         }
     
         private computeParameterSize(param: any) : number {
@@ -261,4 +268,4 @@ namespace webfront {
 
 } // namespace webfront
 
-let webFront = new webfront.WebFront();
+var webFront = new webfront.WebFront();

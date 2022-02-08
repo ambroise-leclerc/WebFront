@@ -22,9 +22,12 @@ int main(int /*argc*/, char** argv) {
         "        let newContent = document.createTextNode(text + ' of ' + num); "
         "        newDiv.appendChild(newContent);                                "
         "        document.body.appendChild(newDiv);                             "
+        "                                                                       "
+        "        let print = webFront.cppFunction('print');                     "
+        "        print(text, num);                                              "
         "    }                                                                  "
         );
-        auto print = ui.jsFunction("addText2");
+        auto print = ui.jsFunction("addText");
         print("Hello World", 2022);
     });
 

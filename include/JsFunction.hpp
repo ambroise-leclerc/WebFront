@@ -14,25 +14,6 @@
 
 namespace webfront {
  
-enum class CodedType : uint8_t {
-    undefined,
-    booleanTrue,  // opcode if boolean is true
-    booleanFalse, // opcode if boolean is false
-    number,       // opcode + 8 bytes IEEE754 floating point number
-    smallString,  // opcode + 1 byte size
-    string,       // opcode + 2 bytes size
-};
-
-std::string_view toString(CodedType t) {
-    switch (t) {
-    case CodedType::booleanTrue: return "boolean (true)";
-    case CodedType::booleanFalse: return "boolean (false)";
-    case CodedType::number: return "number";
-    case CodedType::smallString: return "smallString";
-    case CodedType::string: return "string";
-    default: return "undefined";
-    }
-}
 
 template<typename WebFront>
 class JsFunction {
@@ -59,7 +40,7 @@ private:
     static constexpr size_t maxParamsCount = 32;
     static constexpr size_t maxParamsDataSize = 5; // 1 byte for type, 1-4 bytes for value
     std::array<std::byte, maxParamsCount * maxParamsDataSize> buffer;
-    msg::CallJsFunction command;
+    msg::FunctionCall command;
     size_t bufferIndex, paramsCount;
 
     template<typename T>

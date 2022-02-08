@@ -12,6 +12,27 @@
 
 namespace webfront {
 
+enum class CodedType : uint8_t {
+    undefined,
+    booleanTrue,  // opcode if boolean is true
+    booleanFalse, // opcode if boolean is false
+    number,       // opcode + 8 bytes IEEE754 floating point number
+    smallString,  // opcode + 1 byte size
+    string,       // opcode + 2 bytes size
+};
+
+std::string_view toString(CodedType t) {
+    switch (t) {
+    case CodedType::booleanTrue: return "boolean (true)";
+    case CodedType::booleanFalse: return "boolean (false)";
+    case CodedType::number: return "number";
+    case CodedType::smallString: return "smallString";
+    case CodedType::string: return "string";
+    default: return "undefined";
+    }
+}
+
+
 using WebLinkId = uint16_t;
 
 struct WebLinkEvent {
@@ -67,10 +88,14 @@ private:
     std::span<const std::byte> payloadSpan;
 };
 
-struct CallJsFunction {
+struct FunctionCall {
     void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
     void setParametersDataSize(uint32_t size) { head.parametersDataSize = size; }
     std::span<const std::byte> header() { return std::span(reinterpret_cast<const std::byte*>(&head), sizeof(Header)); }
+
+    uint8_t getParametersCount() const { return head.parametersCount; }
+    size_t getParameteresDataSize() { return head.parametersDataSize; }
+    std::span<const std::byte> payload() const { return std::span(reinterpret_cast<const std::byte*>(&header[sizeof(Header)]), getParametersDataSize()); }
 private:
     struct Header {
         Command command = Command::callFunction;
@@ -78,7 +103,7 @@ private:
         std::array<uint8_t, 2> padding {};
         uint32_t parametersDataSize = 0;
     } head;
-    static_assert(sizeof(Header) == 8, "CallFunction header has to be 8 bytes long");
+    static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
 };
 
 struct FunctionReturn {
@@ -123,6 +148,14 @@ public:
                           static_cast<JSEndian>(data[1]) == JSEndian::little ? "little" : "big", sameEndian);
                 eventsHandler(WebLinkEvent(WebLinkEvent::Code::linked, id));
                 break;
+
+            case Command::callFunction:
+                log::info("Function called !");
+                auto command = reinterpret_cast<const FunctionCall*>(data.data());
+
+                
+                break; 
+
             default: break;
             }
             log::infoHex("onMessage(binary) :", data);
@@ -143,6 +176,32 @@ public:
 
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
+
+private:
+
+    void callCppFunction(size_t parametersCount, std::span<const std::byte> data) {
+        if (parametersCount > 0) {
+            size_t offset = 0;
+            auto[functionName, bytesDecoded] = decodeParameter<std::string>(data.subspan(offset));
+            offset += bytesDecoded;
+        }
+    }
+
+    template<typename T>
+    std::tuple<T, size_t> decodeParameter(std::span<const std::byte> data) {
+        if (data.size() == 0) throw std::runtime_error("Not enough data for WebLink::decodeParameter");
+        auto codedType = static_cast<CodedType>(data[0]);
+        switch (codedType) {
+            case CodedType::smallString:
+                if constexpr (std::is_same<T, std::string>) {
+                    if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
+                    size_t size = data[1];
+                    if (data.size() < 2 + size) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
+                    return std::string(reinterpret_cast<const char*>(&data[2]), size);
+                }
+        }
+
+    }
 };
 
 } // namespace webfront
