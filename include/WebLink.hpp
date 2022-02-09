@@ -91,11 +91,11 @@ private:
 struct FunctionCall {
     void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
     void setParametersDataSize(uint32_t size) { head.parametersDataSize = size; }
-    uint8_t getParametersCount() const { return head.parametersCount; }
-    size_t getParametersDataSize() const { return head.parametersDataSize; }
+    [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
+    [[nodiscard]] size_t getParametersDataSize() const { return head.parametersDataSize; }
 
-    std::span<const std::byte> header() const { return { reinterpret_cast<const std::byte*>(&head), sizeof(Header) }; }
-    std::span<const std::byte> payload() const { return { &header()[sizeof(Header)], getParametersDataSize() }; }
+    [[nodiscard]] std::span<const std::byte> header() const { return { reinterpret_cast<const std::byte*>(&head), sizeof(Header) }; }
+    [[nodiscard]] std::span<const std::byte> payload() const { return { header().data() + sizeof(Header), getParametersDataSize() }; }
 private:
     struct Header {
         Command command = Command::callFunction;
@@ -206,7 +206,7 @@ private:
 
                 break;
             default:
-                return {{}, 0};
+                return {T{}, 0};
         }
 
     }
