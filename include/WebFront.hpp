@@ -2,6 +2,7 @@
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
+#include "CppFunction.hpp"
 #include "JsFunction.hpp"
 #include "WebLink.hpp"
 #include "http/HTTPServer.hpp"
@@ -23,7 +24,7 @@ template<typename WebFront>
 class BasicUI {
     WebFront& webFront;
     WebLinkId webLinkId;
-
+    std::map<std::string, CppFunction> cppFunctions;
 public:
     BasicUI(WebFront& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
 
@@ -37,6 +38,11 @@ public:
     }
 
     [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const { return JsFunction{functionName, webFront, webLinkId}; }
+
+
+    void cppFunction(std::string functionName, auto&& function) {
+        cppFunctions.try_emplace(functionName, CppFunction{std::forward<decltype(function)>(function)});
+    }
 };
 
 template<typename NetProvider>

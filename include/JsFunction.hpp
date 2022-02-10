@@ -29,7 +29,7 @@ public:
         encodeParam(name, frame);
         ((encodeParam(std::forward<decltype(ts)>(ts), frame)), ...);
         command.setParametersCount(static_cast<uint8_t>(paramsCount));
-        command.setParametersDataSize(static_cast<uint32_t>(frame.payloadSize() - command.header().size()));
+        command.setPayloadSize(static_cast<uint32_t>(frame.payloadSize() - command.header().size()));
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
     }
 
