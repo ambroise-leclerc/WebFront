@@ -30,7 +30,8 @@ int main(int /*argc*/, char** argv) {
         auto print = ui.jsFunction("addText");
         print("Hello World", 2022);
 
-        ui.cppFunction("print", [](std::string text) { std::cout << text << "\n"; });
+        //ui.cppFunction<int(std::string)>("print")
+        //ui.cppFunction("print", [](std::string text) { std::cout << text << "\n"; });
     });
 
     webFront.run();
