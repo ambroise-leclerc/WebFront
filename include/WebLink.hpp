@@ -35,11 +35,13 @@ std::string_view toString(CodedType t) {
 using WebLinkId = uint16_t;
 
 struct WebLinkEvent {
-    enum class Code { linked, closed };
+    enum class Code { linked, closed, cppFunctionCalled };
 
     WebLinkEvent(Code eventCode, WebLinkId id) : code(eventCode), webLinkId(id) {}
+    WebLinkEvent(Code eventCode, WebLinkId id, std::string message) : code(eventCode), webLinkId(id), text(message) {}
     Code code;
     WebLinkId webLinkId;
+    std::string text;
 };
 
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
@@ -156,6 +158,7 @@ class WebLink {
     bool sameEndian;
     std::optional<size_t> logSink;
     std::function<void(WebLinkEvent)> eventsHandler;
+    std::span<const std::byte> undecodedData;           /// Data received but not yet consumed
 
 public:
     WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler)
@@ -206,6 +209,13 @@ public:
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 
+    template<typename T>
+    T extractNext(T) {
+        auto [value, bytesDecoded] = decodeParameter<T>(undecodedData);
+        undecodedData = undecodedData.subspan(bytesDecoded);
+        return value;
+    }
+
 private:
     void callCppFunction(size_t parametersCount, std::span<const std::byte> data) {
         if (parametersCount > 0) {
@@ -213,6 +223,7 @@ private:
             auto [functionName, bytesDecoded] = decodeParameter<std::string>(data.subspan(offset));
             offset += bytesDecoded;
             log::debug("Function called : {}", functionName);
+            eventsHandler({WebLinkEvent::Code::cppFunctionCalled, id, functionName});
         }
     }
 

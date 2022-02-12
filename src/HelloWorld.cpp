@@ -4,7 +4,6 @@
 #include <filesystem>
 #include <iostream>
 
-
 int main(int /*argc*/, char** argv) {
     using namespace std;
     using namespace webfront;
@@ -13,45 +12,24 @@ int main(int /*argc*/, char** argv) {
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
     WebFront webFront("80", fs::weakly_canonical(fs::path(argv[0])).parent_path());
-  
-  
+
     webFront.onUIStarted([](UI ui) {
-        ui.addScript("                                                          "
-        "    var addText = function(text, num) {                                "
-        "        let newDiv = document.createElement('div');                    "
-        "        let newContent = document.createTextNode(text + ' of ' + num); "
-        "        newDiv.appendChild(newContent);                                "
-        "        document.body.appendChild(newDiv);                             "
-        "                                                                       "
-        "        let print = webFront.cppFunction('print');                     "
-        "        print(text, num);                                              "
-        "    }                                                                  "
-        );
+        ui.addScript("var addText = function(text, num) {                 "
+                     "  let print = webFront.cppFunction('print');        "
+                     "  print(text + ' of ' + num);                       "
+                     "}                                                   ");
         auto print = ui.jsFunction("addText");
         print("Hello World", 2022);
-
-        //ui.cppFunction<int(std::string)>("print")
-        //ui.cppFunction("print", [](std::string text) { std::cout << text << "\n"; });
     });
+
+    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << "Called" << text << "\n"; });
 
     webFront.run();
-    
-    /*
 
-    // Hello World, the hard way
-    webFront.onUIStarted([](UI document)){
-        auto newDiv = document.createElement("div");
-        auto newContent = document.createTextNode("Hello World !");
-        newDiv.appendChild(newContent);
-        document.body.insert(newDiv);
-    });
-*/
     while (true) {
         string input;
         cout << "> ";
         cin >> input;
         cout << input << "\n";
     }
-
-
 }
