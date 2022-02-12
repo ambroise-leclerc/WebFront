@@ -58,7 +58,7 @@ namespace msg {
 template<typename T>
 class MessageBase {
 public:
-    [[nodiscard]] std::span<const std::byte> header() const { return {reinterpret_cast<const std::byte*>(this), sizeof(T::Header)}; }
+    [[nodiscard]] std::span<const std::byte> header() const { return {reinterpret_cast<const std::byte*>(this), sizeof(typename T::Header)}; }
     [[nodiscard]] std::span<const std::byte> payload() const { return {header().data() + sizeof(T::Header), static_cast<const T*>(this)->getPayloadSize()}; }
     [[nodiscard]] size_t getPayloadSize() const { return 0; };
 
