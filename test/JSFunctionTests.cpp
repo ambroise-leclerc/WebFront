@@ -10,7 +10,7 @@ using namespace std;
 
 std::vector<uint8_t> encodedBuffer;
 
-bool checkType(size_t index, CodedType type) { return encodedBuffer[index] == static_cast<uint8_t>(type); }
+bool checkType(size_t index, msg::CodedType type) { return encodedBuffer[index] == static_cast<uint8_t>(type); }
 
 bool checkSize8(size_t index, uint8_t size) { return encodedBuffer[index] == size; }
 
@@ -77,29 +77,29 @@ SCENARIO("JsFunction") {
         WHEN("print is called with a boolean (true) parameter") {
             print(true);
             THEN("encoded data should be") {
-                REQUIRE(checkType(0, CodedType::smallString));
+                REQUIRE(checkType(0, msg::CodedType::smallString));
                 REQUIRE(checkSize8(1, 5));
                 REQUIRE(checkString(2, "print"));
-                REQUIRE(checkType(7, CodedType::booleanTrue));
+                REQUIRE(checkType(7, msg::CodedType::booleanTrue));
             }
         }
 
         WHEN("print is called with a bunck of different types of parameters") {
             print(false, "text data", 45, text, bigText);
             THEN("encoded data should be") {
-                REQUIRE(checkType(0, CodedType::smallString));
+                REQUIRE(checkType(0, msg::CodedType::smallString));
                 REQUIRE(checkSize8(1, 5));
                 REQUIRE(checkString(2, "print"));
-                REQUIRE(checkType(7, CodedType::booleanFalse));
-                REQUIRE(checkType(8, CodedType::smallString));
+                REQUIRE(checkType(7, msg::CodedType::booleanFalse));
+                REQUIRE(checkType(8, msg::CodedType::smallString));
                 REQUIRE(checkSize8(9, 9));
                 REQUIRE(checkString(10, "text data"));
-                REQUIRE(checkType(19, CodedType::number));
+                REQUIRE(checkType(19, msg::CodedType::number));
                 REQUIRE(checkNumber(20, 45));
-                REQUIRE(checkType(28, CodedType::smallString));
+                REQUIRE(checkType(28, msg::CodedType::smallString));
                 REQUIRE(checkSize8(29, 10));
                 REQUIRE(checkString(30, "maFunction"));
-                REQUIRE(checkType(40, CodedType::string));
+                REQUIRE(checkType(40, msg::CodedType::string));
                 REQUIRE(checkSize16(41, 1980));
             }
         }

@@ -33,7 +33,7 @@ enum class CodedType : uint8_t {
     string,       // opcode + 2 bytes size
 };
 
-std::string_view toString(CodedType t) {
+inline std::string_view toString(CodedType t) {
     switch (t) {
     case CodedType::booleanTrue: return "boolean (true)";
     case CodedType::booleanFalse: return "boolean (false)";
