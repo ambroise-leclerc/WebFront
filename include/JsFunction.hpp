@@ -2,9 +2,9 @@
 /// @author Ambroise Leclerc
 /// @brief A functor which invokes a corresponding javascript function
 #pragma once
-#include "WebLink.hpp"
 #include "http/WebSocket.hpp"
 #include "tooling/HexDump.hpp"
+#include "weblink/WebLink.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,6 @@
 #include <iostream>
 
 namespace webfront {
- 
 
 template<typename WebFront>
 class JsFunction {
@@ -63,16 +62,16 @@ private:
         using ParamType = std::remove_cvref_t<T>;
         paramsCount++;
 
-      //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
+        //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
         [[maybe_unused]] auto encodeString = [ this, &frame ](const char* str, size_t size) constexpr {
             if (size < 256) {
                 frame.addBuffer(std::span(&buffer[bufferIndex], 2));
-                buffer[bufferIndex++] = static_cast<std::byte>(CodedType::smallString);
+                buffer[bufferIndex++] = static_cast<std::byte>(msg::CodedType::smallString);
                 buffer[bufferIndex++] = static_cast<std::byte>(size);
             }
             else {
                 frame.addBuffer(std::span(&buffer[bufferIndex], 3));
-                buffer[bufferIndex++] = static_cast<std::byte>(CodedType::string);
+                buffer[bufferIndex++] = static_cast<std::byte>(msg::CodedType::string);
                 auto size16 = static_cast<uint16_t>(size);
                 std::copy_n(reinterpret_cast<const std::byte*>(&size16), sizeof(size16), &buffer[bufferIndex]);
                 bufferIndex += sizeof(size16);
@@ -82,20 +81,20 @@ private:
 
         if constexpr (std::is_same_v<ParamType, bool>) {
             frame.addBuffer(std::span(&buffer[bufferIndex], 1));
-            buffer[bufferIndex++] = static_cast<std::byte>(t ? CodedType::booleanTrue : CodedType::booleanFalse);
+            buffer[bufferIndex++] = static_cast<std::byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
         }
         else if constexpr (std::is_arithmetic_v<ParamType>) {
             double number = t;
             frame.addBuffer(std::span(&buffer[bufferIndex], 1 + sizeof(number)));
-            buffer[bufferIndex++] = static_cast<std::byte>(CodedType::number);
+            buffer[bufferIndex++] = static_cast<std::byte>(msg::CodedType::number);
             std::copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[bufferIndex]);
             bufferIndex += sizeof(number);
         }
 
         else if constexpr (std::is_array_v<ParamType>) {
             using ElementType = std::remove_all_extents_t<ParamType>;
-         //   cout << "Array of " << typeName<ElementType>() << "\n";
-         //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
+            //   cout << "Array of " << typeName<ElementType>() << "\n";
+            //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
             if constexpr (is_same_v<ElementType, char>) {
                 if constexpr (is_bounded_array_v<ParamType>)
                     encodeString(t, extent_v<ParamType> - 1);

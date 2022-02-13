@@ -26,7 +26,7 @@ namespace webfront {
             this.recvMsg = new Uint8Array(this.recvBuffer);
             this.sendBuffer = new ArrayBuffer(512);
             this.sendMsg = new Uint8Array(this.sendBuffer);
-            this.socket = new WebSocket('ws://localhost', 'WebFront_0.1');
+            this.socket = new WebSocket('ws://localhost:' + window.location.port , 'WebFront_0.1');
             this.socket.onopen = (event) => {
                 console.log('webfront connection opened');
                 this.socket.binaryType = 'arraybuffer';
@@ -177,9 +177,9 @@ namespace webfront {
             byteView.setUint32(4, payloadSize, this.littleEndian);
     
             let insertIndex = 8;
-            insertIndex += this.decodeParameter(functionName, new DataView(messageData, insertIndex));
+            insertIndex += this.encodeParameter(functionName, new DataView(messageData, insertIndex));
             for (let i = 0; i < args.length; ++i) {
-                insertIndex += this.decodeParameter(args[i], new DataView(messageData, insertIndex));
+                insertIndex += this.encodeParameter(args[i], new DataView(messageData, insertIndex));
                 console.log(...new Uint8Array(messageData));
             }
 
@@ -199,7 +199,7 @@ namespace webfront {
             }
         }
     
-        private decodeParameter(param: any, buffer: DataView) : number {
+        private encodeParameter(param: any, buffer: DataView) : number {
             switch(typeof(param)) {
                 case "string": {
                     let binary = new TextEncoder().encode(param);

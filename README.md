@@ -14,35 +14,15 @@ A C++23 library with obvious purposes
 #### Hello World
 ```cpp
     WebFront webfront;
+    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
+
     webFront.onUIStarted([](UI ui) {
-        ui.addScript("                                                          "
-        "    var addText = function(text, num) {                                "
-        "        let newDiv = document.createElement('div');                    "
-        "        let newContent = document.createTextNode(text + ' of ' + num); "
-        "        newDiv.appendChild(newContent);                                "
-        "        document.body.appendChild(newDiv);                             "
-        "    }                                                                  "
-        );
+        ui.addScript("var addText = function(text, num) {                 "
+                     "  let print = webFront.cppFunction('print');        "
+                     "  print(text + ' of ' + num);                       "
+                     "}                                                   ");
         auto print = ui.jsFunction("addText");
         print("Hello World", 2022);
     });
-```
 
-
-#### Hello World on std::cout
-```cpp
-    WebFront webfront;
-    webFront.onUIStarted([](UI ui) {
-        ui.addScript("                                                          "
-        "    var printToServer = function(text, number) {                       "
-        "        let cppPrint = webfront.cppFunction('print');                  "
-        "        cppPrint(text, number);                                        "
-        "    }                                                                  "
-        );
-        ui.cppFunction("print", [](std::string text, int number) {
-            std::cout << text << " : " << number << '\n';
-        });
-        auto print = ui.jsFunction("printToServer");
-        print("Hello World");
-    });
 ```

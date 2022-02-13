@@ -43,6 +43,7 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
             if (index % 8 == 0) os << ' ';
             if (index < buffer.size())
                 os << ' ' << setw(2) << +buffer[index];
+//                  os << ", 0x" << setw(2) << +buffer[index];
             else
                 os << "   ";
         }
