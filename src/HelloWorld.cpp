@@ -9,7 +9,7 @@ int main(int /*argc*/, char** argv) {
     using namespace webfront;
     namespace fs = filesystem;
     cout << "WebFront launched from " << fs::current_path().string() << "\n";
-    log::setLogLevel(log::Debug);
+    log::setLogLevel(log::Disabled);
     log::addSinks(log::clogSink);
     WebFront webFront("80", fs::weakly_canonical(fs::path(argv[0])).parent_path());
 
@@ -22,14 +22,7 @@ int main(int /*argc*/, char** argv) {
         print("Hello World", 2022);
     });
 
-    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << "Called" << text << "\n"; });
+    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
 
     webFront.run();
-
-    while (true) {
-        string input;
-        cout << "> ";
-        cin >> input;
-        cout << input << "\n";
-    }
 }

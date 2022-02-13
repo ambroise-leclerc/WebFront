@@ -61,13 +61,13 @@ template<typename T>
 class MessageBase {
 public:
     [[nodiscard]] std::span<const std::byte> header() const { return {reinterpret_cast<const std::byte*>(this), sizeof(typename T::Header)}; }
-    [[nodiscard]] std::span<const std::byte> payload() const { return {header().data() + sizeof(T::Header), static_cast<const T*>(this)->getPayloadSize()}; }
+    [[nodiscard]] std::span<const std::byte> payload() const { return {header().data() + sizeof(typename T::Header), static_cast<const T*>(this)->getPayloadSize()}; }
     [[nodiscard]] size_t getPayloadSize() const { return 0; };
 
     static const T* castFromRawData(std::span<const std::byte> data) {
-        if (data.size() < sizeof(T::Header)) throw std::runtime_error("Not enough data to form a message Header");
+        if (data.size() < sizeof(typename T::Header)) throw std::runtime_error("Not enough data to form a message Header");
         auto message = reinterpret_cast<const T*>(data.data());
-        if ((data.size() + message->getPayloadSize()) < sizeof(T::Header)) throw std::runtime_error("Not enough data to form a complete message");
+        if ((data.size() + message->getPayloadSize()) < sizeof(typename T::Header)) throw std::runtime_error("Not enough data to form a complete message");
         return message;
     }
 };
@@ -113,7 +113,7 @@ public:
           payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} {}
 
     [[nodiscard]] std::span<const std::byte> payload() const { return payloadSpan; }
-    [[nodiscard]] size_t getPayloadSize() const { return 256 * head.lengthHi + head.lengthLo; }
+    [[nodiscard]] size_t getPayloadSize() const { return static_cast<uint16_t>(256 * head.lengthHi + head.lengthLo); }
 
 };
 
@@ -210,18 +210,17 @@ public:
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 
     template<typename T>
-    T extractNext(T) {
-        auto [value, bytesDecoded] = decodeParameter<T>(undecodedData);
+    void extractNext(T& value) {
+        size_t bytesDecoded;
+        std::tie(value, bytesDecoded) = decodeParameter<T>(undecodedData);
         undecodedData = undecodedData.subspan(bytesDecoded);
-        return value;
     }
 
 private:
     void callCppFunction(size_t parametersCount, std::span<const std::byte> data) {
         if (parametersCount > 0) {
-            size_t offset = 0;
-            auto [functionName, bytesDecoded] = decodeParameter<std::string>(data.subspan(offset));
-            offset += bytesDecoded;
+            auto [functionName, bytesDecoded] = decodeParameter<std::string>(data);
+            undecodedData = data.subspan(bytesDecoded);
             log::debug("Function called : {}", functionName);
             eventsHandler({WebLinkEvent::Code::cppFunctionCalled, id, functionName});
         }

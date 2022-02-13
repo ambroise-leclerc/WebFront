@@ -15,10 +15,9 @@
 #include <tuple>
 #include <utility>
 
+
 namespace webfront {
-
 using NetProvider = networking::TCPNetworkingTS;
-
 using ConnectionError = std::runtime_error;
 
 template<typename WebFront>
@@ -52,6 +51,7 @@ public:
     [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const { return JsFunction{functionName, webFront, webLinkId}; }
 };
 
+
 template<typename NetProvider>
 class BasicWF {
 public:
@@ -83,33 +83,16 @@ public:
      */
     template<typename R, typename... Args>
     void cppFunction(std::string functionName, auto&& function) {
-        cppFunctions.try_emplace(functionName, [&function, this](WebLinkId id) -> R {
+        cppFunctions.try_emplace(functionName, [&function, this](WebLinkId id) -> void {
             std::tuple<Args...> parameters;
             auto& webLink = getLink(id);
-            auto deserializeAndCall = [ this, &webLink, &function ]<std::size_t... Is>(std::tuple<Args...> & tuple, std::index_sequence<Is...>) {
+            auto deserializeAndCall = [&webLink, &function ]<std::size_t... Is>(std::tuple<Args...> & tuple, std::index_sequence<Is...>) {
                 (webLink.extractNext(std::get<Is>(tuple)), ...);
                 function(std::get<Is>(tuple)...);
             };
 
             deserializeAndCall(parameters, std::index_sequence_for<Args...>());
-            if constexpr (!std::is_same_v<R, void>) return {};
         });
-    }
-
-    void deserialize(size_t index, auto&& param) {
-        std::cout << "Param " << index << " : ";
-        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(param)>, std::string>) {
-            std::cout << "string ";
-            param = std::string("s");
-        }
-
-        else if constexpr (std::is_same_v<std::remove_cvref_t<decltype(param)>, int>) {
-            std::cout << "int ";
-            param = 13;
-        }
-
-        else
-            static_assert(false, "This type conversion from Javascript type is not handled");
     }
 
 private:
@@ -117,15 +100,15 @@ private:
     std::map<WebLinkId, WebLink<Net>> webLinks;
     WebLinkId idsCounter;
     std::function<void(UI)> uiStartedHandler;
-    std::map<std::string, utils::TypeErasedFunction> cppFunctions;
+    std::map<std::string, std::function<void(WebLinkId)>> cppFunctions;
+
 
 private:
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
         case WebLinkEvent::Code::linked: uiStartedHandler(UI{*this, event.webLinkId}); break;
         case WebLinkEvent::Code::closed: webLinks.erase(event.webLinkId); break;
-        case WebLinkEvent::Code::cppFunctionCalled: 
-            cppFunctions.at(event.text)(event.webLinkId); break;
+        case WebLinkEvent::Code::cppFunctionCalled: cppFunctions.at(event.text)(event.webLinkId); break;
         }
     }
 };
