@@ -81,7 +81,7 @@ public:
      */
     template<typename R, typename... Args>
     void cppFunction(std::string functionName, auto&& function) {
-        cppFunctions.try_emplace(functionName, [&function, this](std::span<const std::byte> data) -> void {
+        cppFunctions.try_emplace(functionName, [&function](std::span<const std::byte> data) -> void {
             std::tuple<Args...> parameters;
             auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...> & tuple, std::index_sequence<Is...>) {
                 (msg::FunctionCall::decodeParameter(std::get<Is>(tuple), data), ...);

@@ -263,9 +263,7 @@ namespace webfront {
         smallString,  // opcode + 1 byte size
         string,       // opcode + 2 bytes size
     }
-
-
-
+    
 } // namespace webfront
 
 var webFront = new webfront.WebFront();

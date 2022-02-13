@@ -12,7 +12,6 @@
 
 namespace webfront::msg {
 
-
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
 enum class TxtOpcode : uint8_t { debugLog, injectScript };
 
@@ -128,13 +127,6 @@ public:
         auto data = payload();
         decodeParameter(functionName, data);
         return {functionName, data};
-    }
-
-    template<typename T>
-    [[nodiscard]] static std::tuple<T, std::span<const std::byte>> decodeParameter(std::span<const std::byte> data) {
-        T value;
-        decodeParameter(value, data);
-        return {value, data};
     }
 
     template<typename T>
