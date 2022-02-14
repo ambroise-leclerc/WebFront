@@ -76,7 +76,7 @@ SCENARIO("FunctionCall") {
         REQUIRE(text.size() == 357);
         REQUIRE(text.ends_with("suffisament long pour changer de format - "));
 
-        int value;
+        size_t value;
         functionCall->decodeParameter(value, undecodedData);
         REQUIRE(value == text.size());
         REQUIRE(undecodedData.size() == 0);
