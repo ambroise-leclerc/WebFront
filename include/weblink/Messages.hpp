@@ -139,9 +139,9 @@ public:
         switch (codedType) {
         case CodedType::smallString:
             if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2 + size)
+                if (data.size() < 2u + size)
                     throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = std::string(reinterpret_cast<const char*>(&data[2]), size);
                 data = data.subspan(2 + size);
@@ -149,10 +149,10 @@ public:
             break;
         case CodedType::string:
             if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 uint16_t size;
                 std::copy_n(&data[1], 2, reinterpret_cast<std::byte*>(&size));
-                if (data.size() < 3 + size)
+                if (data.size() < 3u + size)
                     throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = std::string(reinterpret_cast<const char*>(&data[3]), size);
                 data = data.subspan(3 + size);
@@ -161,7 +161,7 @@ public:
         case CodedType::number: 
         if constexpr (std::is_arithmetic_v<T>) {
             double value;
-            if (data.size() < 1 + sizeof(value)) throw std::runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
+            if (data.size() < 1u + sizeof(value)) throw std::runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
             std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
             param = static_cast<T>(value);
             data = data.subspan(1 + sizeof(value));
