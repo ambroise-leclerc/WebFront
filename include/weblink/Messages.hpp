@@ -23,7 +23,6 @@ enum class Command : uint8_t {
     functionReturn, // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
 };
 
-
 enum class CodedType : uint8_t {
     undefined,
     booleanTrue,  // opcode if boolean is true
@@ -44,11 +43,12 @@ inline std::string_view toString(CodedType t) {
     }
 }
 
-
 template<typename T>
 class MessageBase {
 public:
-    [[nodiscard]] std::span<const std::byte> header() const { return {reinterpret_cast<const std::byte*>(this), sizeof(typename T::Header)}; }
+    [[nodiscard]] std::span<const std::byte> header() const {
+        return {reinterpret_cast<const std::byte*>(this), sizeof(typename T::Header)};
+    }
     [[nodiscard]] std::span<const std::byte> payload() const {
         return {header().data() + sizeof(typename T::Header), static_cast<const T*>(this)->getPayloadSize()};
     }
@@ -57,7 +57,8 @@ public:
     static const T* castFromRawData(std::span<const std::byte> data) {
         if (data.size() < sizeof(typename T::Header)) throw std::runtime_error("Not enough data to form a message Header");
         auto message = reinterpret_cast<const T*>(data.data());
-        if ((data.size() + message->getPayloadSize()) < sizeof(typename T::Header)) throw std::runtime_error("Not enough data to form a complete message");
+        if ((data.size() + message->getPayloadSize()) < sizeof(typename T::Header))
+            throw std::runtime_error("Not enough data to form a complete message");
         return message;
     }
 };
@@ -99,7 +100,9 @@ class TextCommand : public MessageBase<TextCommand> {
 
 public:
     TextCommand(TxtOpcode opcode, std::string_view text)
-        : head{.opcode = opcode, .lengthHi = static_cast<uint8_t>(text.size() >> 8), .lengthLo = static_cast<uint8_t>(text.size())},
+        : head{.opcode = opcode,
+               .lengthHi = static_cast<uint8_t>(text.size() >> 8),
+               .lengthLo = static_cast<uint8_t>(text.size())},
           payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} {}
 
     [[nodiscard]] std::span<const std::byte> payload() const { return payloadSpan; }
@@ -136,13 +139,33 @@ public:
         switch (codedType) {
         case CodedType::smallString:
             if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2 + size) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 2u + size)
+                    throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = std::string(reinterpret_cast<const char*>(&data[2]), size);
                 data = data.subspan(2 + size);
             }
             break;
+        case CodedType::string:
+            if constexpr (std::is_same_v<T, std::string>) {
+                if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                uint16_t size;
+                std::copy_n(&data[1], 2, reinterpret_cast<std::byte*>(&size));
+                if (data.size() < 3u + size)
+                    throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                param = std::string(reinterpret_cast<const char*>(&data[3]), size);
+                data = data.subspan(3 + size);
+            }
+            break;
+        case CodedType::number: 
+        if constexpr (std::is_arithmetic_v<T>) {
+            double value;
+            if (data.size() < 1u + sizeof(value)) throw std::runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
+            std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
+            param = static_cast<T>(value);
+            data = data.subspan(1 + sizeof(value));
+        } break;
 
         default: param = {};
         }

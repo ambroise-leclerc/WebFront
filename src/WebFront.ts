@@ -211,7 +211,7 @@ namespace webfront {
                     }
                     else if (binary.length < 65536) {
                         buffer.setInt8(0, ParamType.string);
-                        buffer.setInt16(1, binary.length);
+                        buffer.setInt16(1, binary.length, this.littleEndian);
                         offset = 3;
                     }
                     else throw new Error("RangeError: cannot encode string of more than 64kB of data.");

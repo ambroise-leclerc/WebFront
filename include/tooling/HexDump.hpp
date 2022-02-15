@@ -42,8 +42,8 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
         for (auto index = address; index < address + 16; ++index) {
             if (index % 8 == 0) os << ' ';
             if (index < buffer.size())
-                os << ' ' << setw(2) << +buffer[index];
-//                  os << ", 0x" << setw(2) << +buffer[index];
+//                os << ' ' << setw(2) << +buffer[index];
+                  os << ", 0x" << setw(2) << +buffer[index];
             else
                 os << "   ";
         }

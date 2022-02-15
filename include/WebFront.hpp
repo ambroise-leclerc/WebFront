@@ -104,7 +104,14 @@ private:
         switch (event.code) {
         case WebLinkEvent::Code::linked: uiStartedHandler(UI{*this, event.webLinkId}); break;
         case WebLinkEvent::Code::closed: webLinks.erase(event.webLinkId); break;
-        case WebLinkEvent::Code::cppFunctionCalled: cppFunctions.at(event.text)(event.data); break;
+        case WebLinkEvent::Code::cppFunctionCalled: {
+            try {
+                cppFunctions.at(event.text)(event.data);
+            }
+            catch (const std::exception& e) {
+                log::info("event cppFunctionCalled failed with exception {}", e.what());
+            }
+        } break;
         }
     }
 };
