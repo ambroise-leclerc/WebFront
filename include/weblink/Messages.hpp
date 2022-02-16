@@ -2,6 +2,7 @@
 /// @author Ambroise Leclerc
 /// @brief Messages exchanged between webfront clients and server
 #pragma once
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -118,7 +119,24 @@ class FunctionCall : public MessageBase<FunctionCall> {
         uint32_t parametersDataSize = 0;
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
+
+    std::array<std::byte, 8192> buffer;
     friend class MessageBase<FunctionCall>;
+
+    template<typename T>
+    constexpr auto typeName() {
+#if defined(_MSC_VER)
+        std::string_view tName = __FUNCSIG__, prefix = "auto __cdecl JSFunction::typeName<", suffix = ">(void)";
+#elif __clang__
+        std::string_view tName = __PRETTY_FUNCTION__, prefix = "auto webfront::JSFunction::typeName() [T = ", suffix = "]";
+#elif defined(__GNUC__)
+        std::string_view tName = __PRETTY_FUNCTION__,
+                         prefix = "constexpr auto webfront::JSFunction::typeName() [with T = ", suffix = "]";
+#endif
+        tName.remove_prefix(prefix.size());
+        tName.remove_suffix(suffix.size());
+        return tName;
+    }
 
 public:
     void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
@@ -130,6 +148,68 @@ public:
         auto data = payload();
         decodeParameter(functionName, data);
         return {functionName, data};
+    }
+
+    template<typename T, typename WebSocketFrame>
+    void encodeParameter(T&& t, WebSocketFrame& frame) {
+        using namespace std;
+        using ParamType = remove_cvref_t<T>;
+        setParametersCount(getParametersCount() + 1);
+        auto bufferIndex = getPayloadSize();
+
+        //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t <<
+        //  "\n";
+        [[maybe_unused]] auto encodeString = [ this, &frame, &bufferIndex](const char* str, size_t size) constexpr {
+            if (size < 256) {
+                frame.addBuffer(span(&buffer[bufferIndex], 2));
+                buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::smallString);
+                buffer[bufferIndex++] = static_cast<byte>(size);
+            }
+            else {
+                frame.addBuffer(span(&buffer[bufferIndex], 3));
+                buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::string);
+                auto size16 = static_cast<uint16_t>(size);
+                copy_n(reinterpret_cast<const byte*>(&size16), sizeof(size16), &buffer[bufferIndex]);
+                bufferIndex += sizeof(size16);
+            }
+            frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
+        };
+
+        if constexpr (is_same_v<ParamType, bool>) {
+            frame.addBuffer(span(&buffer[bufferIndex], 1));
+            buffer[bufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+        }
+        else if constexpr (is_arithmetic_v<ParamType>) {
+            double number = t;
+            frame.addBuffer(span(&buffer[bufferIndex], 1 + sizeof(number)));
+            buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::number);
+            copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[bufferIndex]);
+            bufferIndex += sizeof(number);
+        }
+
+        else if constexpr (is_array_v<ParamType>) {
+            using ElementType = remove_all_extents_t<ParamType>;
+            //   cout << "Array of " << typeName<ElementType>() << "\n";
+            //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
+            if constexpr (is_same_v<ElementType, char>) {
+                if constexpr (is_bounded_array_v<ParamType>)
+                    encodeString(t, extent_v<ParamType> - 1);
+                else
+                    encodeString(t, char_traits<char>::length(t));
+            }
+            else
+                static_assert(is_same_v<ElementType, char>, "Arrays are not supported by JSFunction");
+        }
+        else if constexpr (is_same_v<ParamType, const char*>)
+            encodeString(t, char_traits<char>::length(t));
+
+        else if constexpr (is_same_v<ParamType, string> or is_same_v<ParamType, string_view>)
+            encodeString(t.data(), t.size());
+
+        else if constexpr (is_pointer_v<ParamType>)
+            static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
+
+        setPayloadSize(static_cast<uint32_t>(bufferIndex));
     }
 
     template<typename T>
@@ -158,14 +238,16 @@ public:
                 data = data.subspan(3 + size);
             }
             break;
-        case CodedType::number: 
-        if constexpr (std::is_arithmetic_v<T>) {
-            double value;
-            if (data.size() < 1u + sizeof(value)) throw std::runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
-            std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
-            param = static_cast<T>(value);
-            data = data.subspan(1 + sizeof(value));
-        } break;
+        case CodedType::number:
+            if constexpr (std::is_arithmetic_v<T>) {
+                double value;
+                if (data.size() < 1u + sizeof(value))
+                    throw std::runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
+                std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
+                param = static_cast<T>(value);
+                data = data.subspan(1 + sizeof(value));
+            }
+            break;
 
         default: param = {};
         }
@@ -173,7 +255,7 @@ public:
 };
 
 /// Encodes FunctionCall return values (or exceptions)
-class FunctionReturn : public MessageBase<FunctionReturn> {
+class FunctionReturn : public FunctionCall {
     struct Header {
         Command command = Command::functionReturn;
         uint8_t parametersCount = 0;

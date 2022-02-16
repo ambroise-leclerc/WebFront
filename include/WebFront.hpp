@@ -86,6 +86,7 @@ public:
             auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...> & tuple, std::index_sequence<Is...>) {
                 (msg::FunctionCall::decodeParameter(std::get<Is>(tuple), data), ...);
                 function(std::get<Is>(tuple)...);
+
             };
 
             deserializeAndCall(parameters, std::index_sequence_for<Args...>());
@@ -107,6 +108,7 @@ private:
         case WebLinkEvent::Code::cppFunctionCalled: {
             try {
                 cppFunctions.at(event.text)(event.data);
+
             }
             catch (const std::exception& e) {
                 log::info("event cppFunctionCalled failed with exception {}", e.what());

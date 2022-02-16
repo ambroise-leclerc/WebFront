@@ -83,13 +83,6 @@ public:
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 
-    template<typename T>
-    void extractNext(T& value) {
-        size_t bytesDecoded;
-        std::tie(value, bytesDecoded) = decodeParameter<T>(undecodedData);
-        undecodedData = undecodedData.subspan(bytesDecoded);
-    }
-
 private:
     void callCppFunction(size_t parametersCount, std::span<const std::byte> data) {
         if (parametersCount > 0) {
@@ -100,23 +93,6 @@ private:
         }
     }
 
-    template<typename T>
-    std::tuple<T, size_t> decodeParameter(std::span<const std::byte> data) {
-        if (data.size() == 0) throw std::runtime_error("Not enough data for WebLink::decodeParameter");
-        auto codedType = static_cast<msg::CodedType>(data[0]);
-        switch (codedType) {
-        case msg::CodedType::smallString:
-            if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
-                auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2 + size) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
-                return {std::string(reinterpret_cast<const char*>(&data[2]), size), 2 + size};
-            }
-
-            break;
-        default: return {T{}, 0};
-        }
-    }
 };
 
 } // namespace webfront
