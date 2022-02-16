@@ -120,7 +120,7 @@ class FunctionCall : public MessageBase<FunctionCall> {
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 8192> buffer;
+    std::array<std::byte, 1024> buffer;     // When composing a message, buffer does not represent the payload but some bufferized data to be sent
     friend class MessageBase<FunctionCall>;
 
     template<typename T>
@@ -151,19 +151,21 @@ public:
     }
 
     template<typename T, typename WebSocketFrame>
-    void encodeParameter(T&& t, WebSocketFrame& frame) {
+    size_t encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
-        auto bufferIndex = getPayloadSize();
+        static size_t bufferIndex = 0;
+        size_t parameterDataSize = 0;
 
         //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t <<
         //  "\n";
-        [[maybe_unused]] auto encodeString = [ this, &frame, &bufferIndex](const char* str, size_t size) constexpr {
+        [[maybe_unused]] auto encodeString = [&, this](const char* str, size_t size) constexpr {
             if (size < 256) {
                 frame.addBuffer(span(&buffer[bufferIndex], 2));
                 buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::smallString);
                 buffer[bufferIndex++] = static_cast<byte>(size);
+                parameterDataSize += 2;
             }
             else {
                 frame.addBuffer(span(&buffer[bufferIndex], 3));
@@ -171,13 +173,16 @@ public:
                 auto size16 = static_cast<uint16_t>(size);
                 copy_n(reinterpret_cast<const byte*>(&size16), sizeof(size16), &buffer[bufferIndex]);
                 bufferIndex += sizeof(size16);
+                parameterDataSize += 1 + sizeof(size16);
             }
             frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
+            parameterDataSize += size;
         };
 
         if constexpr (is_same_v<ParamType, bool>) {
             frame.addBuffer(span(&buffer[bufferIndex], 1));
             buffer[bufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+            parameterDataSize += 1;
         }
         else if constexpr (is_arithmetic_v<ParamType>) {
             double number = t;
@@ -185,6 +190,7 @@ public:
             buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::number);
             copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[bufferIndex]);
             bufferIndex += sizeof(number);
+            parameterDataSize += 1 + sizeof(number);
         }
 
         else if constexpr (is_array_v<ParamType>) {
@@ -209,7 +215,7 @@ public:
         else if constexpr (is_pointer_v<ParamType>)
             static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
 
-        setPayloadSize(static_cast<uint32_t>(bufferIndex));
+        return parameterDataSize;
     }
 
     template<typename T>

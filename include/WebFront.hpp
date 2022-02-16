@@ -108,7 +108,9 @@ private:
         case WebLinkEvent::Code::cppFunctionCalled: {
             try {
                 cppFunctions.at(event.text)(event.data);
-
+            }
+            catch (const std::out_of_range& e) {
+                
             }
             catch (const std::exception& e) {
                 log::info("event cppFunctionCalled failed with exception {}", e.what());

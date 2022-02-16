@@ -22,10 +22,11 @@ public:
 
     void operator()(auto&&... ts) {
         command.setParametersCount(0);
-        command.setPayloadSize(0);
         websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
-        command.encodeParameter(name, frame);
-        ((command.encodeParameter(std::forward<decltype(ts)>(ts), frame)), ...);
+        auto payloadSize = command.encodeParameter(name, frame);
+        (((payloadSize += command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
+        command.setPayloadSize(static_cast<uint32_t>(payloadSize));
+
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
     }
 
