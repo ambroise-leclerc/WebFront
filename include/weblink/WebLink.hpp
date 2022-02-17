@@ -45,6 +45,8 @@ public:
             ws.write("This is my response");
         });
         ws.onMessage([this](std::span<const std::byte> data) {
+            log::infoHex("onMessage(binary) :", data);
+
             switch (static_cast<msg::Command>(data[0])) {
             case msg::Command::handshake: {
                 auto command = msg::Handshake::castFromRawData(data);
@@ -62,13 +64,23 @@ public:
                 log::info("Function called !");
                 auto command = msg::FunctionCall::castFromRawData(data);
                 auto [functionName, paramData] = command->getFunctionName();
-                eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData));
-
+                try {
+                    eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData));
+                }
+                catch (const std::out_of_range&) {
+                    msg::FunctionReturn returnValue;
+                    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
+        
+                    //returnValue.encodeParameter()
+                    sendFrame(std::move(frame));
+                }
+                catch (const std::exception& e) {
+                    log::info("event cppFunctionCalled failed with exception {}", e.what());
+                }
             } break;
 
             default: break;
             }
-            log::infoHex("onMessage(binary) :", data);
         });
 
         ws.start();

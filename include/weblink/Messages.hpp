@@ -31,6 +31,18 @@ enum class CodedType : uint8_t {
     number,       // opcode + 8 bytes IEEE754 floating point number
     smallString,  // opcode + 1 byte size
     string,       // opcode + 2 bytes size
+    exception,    // opcode + 2 bytes size
+    smallArrayU8, // opcode + 1 byte size,
+    arrayU8,      // opcode + 4 bytes size,
+    array8,       // opcode + 4 bytes size,
+    arrayU16,     // opcode + 4 bytes size,
+    array16,      // opcode + 4 bytes size,
+    arrayU32,     // opcode + 4 bytes size,
+    array32,      // opcode + 4 bytes size,
+    arrayU64,     // opcode + 4 bytes size,
+    array64,      // opcode + 4 bytes size,
+    arrayFloat,   // opcode + 4 bytes size,
+    arrayDouble,  // opcode + 4 bytes size,
 };
 
 inline std::string_view toString(CodedType t) {
@@ -40,6 +52,18 @@ inline std::string_view toString(CodedType t) {
     case CodedType::number: return "number";
     case CodedType::smallString: return "smallString";
     case CodedType::string: return "string";
+    case CodedType::exception: return "exception";
+    case CodedType::smallArrayU8: return "smallArrayU8";
+    case CodedType::arrayU8: return "arrayU8";
+    case CodedType::array8: return "array8";
+    case CodedType::arrayU16: return "arrayU16";
+    case CodedType::array16: return "array16";
+    case CodedType::arrayU32: return "arrayU32";
+    case CodedType::array32: return "array32";
+    case CodedType::arrayU64: return "arrayU64";
+    case CodedType::array64: return "array64";
+    case CodedType::arrayFloat: return "arrayFloat";
+    case CodedType::arrayDouble: return "arrayDouble";
     default: return "undefined";
     }
 }
@@ -120,7 +144,8 @@ class FunctionCall : public MessageBase<FunctionCall> {
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024> buffer;     // When composing a message, buffer does not represent the payload but some bufferized data to be sent
+    std::array<std::byte, 1024>
+      buffer; // When composing a message, buffer does not represent the payload but some bufferized data to be sent
     friend class MessageBase<FunctionCall>;
 
     template<typename T>
@@ -160,7 +185,7 @@ public:
 
         //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t <<
         //  "\n";
-        [[maybe_unused]] auto encodeString = [&, this](const char* str, size_t size) constexpr {
+        [[maybe_unused]] auto encodeString = [&, this ](const char* str, size_t size) constexpr {
             if (size < 256) {
                 frame.addBuffer(span(&buffer[bufferIndex], 2));
                 buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::smallString);
