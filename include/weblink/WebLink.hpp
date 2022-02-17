@@ -49,9 +49,12 @@ public:
             case msg::Command::handshake: {
                 auto command = msg::Handshake::castFromRawData(data);
                 sendCommand(msg::Ack{});
-                logSink = log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
-                sameEndian = (std::endian::native == std::endian::little && static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little) ||
-                             (std::endian::native == std::endian::big && static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
+                logSink =
+                  log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
+                sameEndian = (std::endian::native == std::endian::little &&
+                              static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little) ||
+                             (std::endian::native == std::endian::big &&
+                              static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
                 eventsHandler({WebLinkEvent::Code::linked, id});
             } break;
 
@@ -82,17 +85,6 @@ public:
 
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
-
-private:
-    void callCppFunction(size_t parametersCount, std::span<const std::byte> data) {
-        if (parametersCount > 0) {
-            auto [functionName, bytesDecoded] = decodeParameter<std::string>(data);
-            undecodedData = data.subspan(bytesDecoded);
-            log::debug("Function called : {}", functionName);
-            eventsHandler({WebLinkEvent::Code::cppFunctionCalled, id, functionName});
-        }
-    }
-
 };
 
 } // namespace webfront
