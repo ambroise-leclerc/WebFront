@@ -11,6 +11,8 @@
 #include <string>
 #include <tuple>
 
+#include <iostream>
+
 namespace webfront::msg {
 
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
@@ -146,6 +148,7 @@ class FunctionCall : public MessageBase<FunctionCall> {
 
     std::array<std::byte, 1024>
       buffer; // When composing a message, buffer does not represent the payload but some bufferized data to be sent
+    size_t encodeBufferIndex = 0;
     friend class MessageBase<FunctionCall>;
 
     template<typename T>
@@ -180,42 +183,46 @@ public:
         using namespace std;
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
-        static size_t bufferIndex = 0;
         size_t parameterDataSize = 0;
 
-        //  std::cout << "Param " << paramsCount << ": " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t <<
-        //  "\n";
+        std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t <<
+          "\n";
         [[maybe_unused]] auto encodeString = [&, this ](const char* str, size_t size) constexpr {
             if (size < 256) {
-                frame.addBuffer(span(&buffer[bufferIndex], 2));
-                buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::smallString);
-                buffer[bufferIndex++] = static_cast<byte>(size);
+                frame.addBuffer(span(&buffer[encodeBufferIndex], 2));
+                buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::smallString);
+                buffer[encodeBufferIndex++] = static_cast<byte>(size);
                 parameterDataSize += 2;
             }
             else {
-                frame.addBuffer(span(&buffer[bufferIndex], 3));
-                buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::string);
+                frame.addBuffer(span(&buffer[encodeBufferIndex], 3));
+                buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::string);
                 auto size16 = static_cast<uint16_t>(size);
-                copy_n(reinterpret_cast<const byte*>(&size16), sizeof(size16), &buffer[bufferIndex]);
-                bufferIndex += sizeof(size16);
+                copy_n(reinterpret_cast<const byte*>(&size16), sizeof(size16), &buffer[encodeBufferIndex]);
+                encodeBufferIndex += sizeof(size16);
                 parameterDataSize += 1 + sizeof(size16);
             }
             frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
             parameterDataSize += size;
+
+            std::cout << "-> encoded to string of size " << size << " in a span.";
+            
         };
 
         if constexpr (is_same_v<ParamType, bool>) {
-            frame.addBuffer(span(&buffer[bufferIndex], 1));
-            buffer[bufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+            frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
+            buffer[encodeBufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
             parameterDataSize += 1;
+            std::cout << "-> encoded to bool of size " << 1 << " in a span.";
         }
         else if constexpr (is_arithmetic_v<ParamType>) {
             double number = t;
-            frame.addBuffer(span(&buffer[bufferIndex], 1 + sizeof(number)));
-            buffer[bufferIndex++] = static_cast<byte>(msg::CodedType::number);
-            copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[bufferIndex]);
-            bufferIndex += sizeof(number);
+            frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
+            buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
+            copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
+            encodeBufferIndex += sizeof(number);
             parameterDataSize += 1 + sizeof(number);
+            std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";
         }
 
         else if constexpr (is_array_v<ParamType>) {
@@ -239,6 +246,9 @@ public:
 
         else if constexpr (is_pointer_v<ParamType>)
             static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
+
+
+        std::cout << "bufferIndex = " << encodeBufferIndex << " ,parameterDataSize = " << parameterDataSize << "\n";
 
         return parameterDataSize;
     }
