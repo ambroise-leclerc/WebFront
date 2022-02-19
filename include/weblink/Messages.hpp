@@ -70,6 +70,13 @@ inline std::string_view toString(CodedType t) {
     }
 }
 
+template<typename _Tp, typename dummy = void>
+struct is_printable : std::false_type {};
+
+template<typename T>
+struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type {};
+        
+
 template<typename T>
 class MessageBase {
 public:
@@ -178,6 +185,16 @@ public:
         return {functionName, data};
     }
 
+    // types with a size
+    template<typename T, typename WebSocketFrame>
+    size_t encodeType(msg::CodedType type, T size, WebSocketFrame& frame) {
+        frame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
+        std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
+        encodeBufferIndex += sizeof(size);
+        return 1 + sizeof(size);
+    }
+
     template<typename T, typename WebSocketFrame>
     size_t encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
@@ -185,28 +202,19 @@ public:
         setParametersCount(getParametersCount() + 1);
         size_t parameterDataSize = 0;
 
-        std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t <<
-          "\n";
+        if constexpr (is_printable<T>::value) {
+            std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
+        }
+
         [[maybe_unused]] auto encodeString = [&, this ](const char* str, size_t size) constexpr {
-            if (size < 256) {
-                frame.addBuffer(span(&buffer[encodeBufferIndex], 2));
-                buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::smallString);
-                buffer[encodeBufferIndex++] = static_cast<byte>(size);
-                parameterDataSize += 2;
-            }
-            else {
-                frame.addBuffer(span(&buffer[encodeBufferIndex], 3));
-                buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::string);
-                auto size16 = static_cast<uint16_t>(size);
-                copy_n(reinterpret_cast<const byte*>(&size16), sizeof(size16), &buffer[encodeBufferIndex]);
-                encodeBufferIndex += sizeof(size16);
-                parameterDataSize += 1 + sizeof(size16);
-            }
+            if (size < 256)
+                parameterDataSize += encodeType(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
+            else
+                parameterDataSize += encodeType(msg::CodedType::string, static_cast<uint16_t>(size), frame);
             frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
             parameterDataSize += size;
 
             std::cout << "-> encoded to string of size " << size << " in a span.";
-            
         };
 
         if constexpr (is_same_v<ParamType, bool>) {
@@ -247,6 +255,13 @@ public:
         else if constexpr (is_pointer_v<ParamType>)
             static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
 
+        else if constexpr (is_base_of_v<std::exception, ParamType>) {
+            std::cout << "Exception : " << t.what() << '\n';
+            auto textSize = char_traits<char>::length(t.what());
+            parameterDataSize += encodeType(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
+            frame.addBuffer(span(reinterpret_cast<const std::byte*>(t.what()), textSize));
+            parameterDataSize += textSize;
+        }
 
         std::cout << "bufferIndex = " << encodeBufferIndex << " ,parameterDataSize = " << parameterDataSize << "\n";
 

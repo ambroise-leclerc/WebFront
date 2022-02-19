@@ -1,6 +1,10 @@
+#include <http/WebSocket.hpp>
+#include <networking/NetworkingMock.hpp>
 #include <weblink/Messages.hpp>
 
 #include <catch2/catch.hpp>
+
+#include <stdexcept>
 
 using namespace webfront;
 SCENARIO("Handshake message") {
@@ -84,4 +88,17 @@ SCENARIO("FunctionCall") {
         
           
     }
+}
+
+SCENARIO("FunctionReturn") {
+    using Net = networking::NetworkingMock;
+    msg::FunctionReturn message;
+    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+    networking::SocketMock socket;
+    websocket::WebSocket<Net> ws(socket);
+        
+    auto exception = std::runtime_error("Parameter error");
+    message.encodeParameter(exception, frame);
+    ws.write(std::move(frame));
+
 }

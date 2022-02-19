@@ -67,11 +67,11 @@ public:
                 try {
                     eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData));
                 }
-                catch (const std::out_of_range&) {
+                catch (const std::out_of_range& e) {
                     msg::FunctionReturn returnValue;
                     websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
         
-                    //returnValue.encodeParameter()
+                    returnValue.encodeParameter(e, frame);
                     sendFrame(std::move(frame));
                 }
                 catch (const std::exception& e) {

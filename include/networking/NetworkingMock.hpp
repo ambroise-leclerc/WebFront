@@ -4,19 +4,35 @@
 #pragma once
 #include "BasicNetworking.hpp"
 
-namespace webfront {
-namespace networking {
+#include  <system_error>
+
+namespace webfront::networking {
+
+class SocketMock {
+public:
+    void async_read_some(auto /*Buffer*/, auto /*completionFunction*/) {
+
+    }
+
+    void close() {
+        
+    }
+};
 
 class NetworkingMock : public BasicNetworking<> {
 public:
     using super::ConstBuffer;
     using super::MutableBuffer;
+    using Socket = SocketMock;
 
     template<typename... Args>
     static auto AsyncWrite(Args&&... /*args*/) -> void {
         return;
     }
+
+    struct Error {
+        static inline const auto OperationAborted = std::make_error_code(std::errc::operation_canceled);
+    };
 };
 
-} // namespace networking
-} // namespace webfront
+} // namespace webfront::networking
