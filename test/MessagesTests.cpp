@@ -1,11 +1,14 @@
 #include <http/WebSocket.hpp>
 #include <networking/NetworkingMock.hpp>
+#include <tooling/HexDump.hpp>
 #include <weblink/Messages.hpp>
 
 #include <catch2/catch.hpp>
 
+#include <span>
 #include <stdexcept>
 
+using namespace std;
 using namespace webfront;
 SCENARIO("Handshake message") {
     std::array<uint8_t, 2> raw{0x00, 0x00};
@@ -92,13 +95,40 @@ SCENARIO("FunctionCall") {
 
 SCENARIO("FunctionReturn") {
     using Net = networking::NetworkingMock;
-    msg::FunctionReturn message;
-    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
-    networking::SocketMock socket;
-    websocket::WebSocket<Net> ws(socket);
-        
-    auto exception = std::runtime_error("Parameter error");
-    message.encodeParameter(exception, frame);
-    ws.write(std::move(frame));
 
+    GIVEN("A FunctionReturn message") {
+        msg::FunctionReturn message;
+        websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+        networking::SocketMock socket;
+        websocket::WebSocket<Net> ws(socket);
+        
+        WHEN("An exception is encoded in a functionReturn message") {
+            std::string exceptionText = "Parameter error";
+            auto exception = std::runtime_error(exceptionText);
+            message.encodeParameter(exception, frame);
+            ws.write(std::move(frame));
+
+
+    cout << "Socket wrote :\n" << utils::hexDump(span(socket.debugBuffer.data(), socket.bufferIndex)) << '\n';
+
+            THEN("Encoded frame should be") {
+                auto encodedFrame = span(socket.debugBuffer.data(), socket.bufferIndex);
+                REQUIRE(encodedFrame.size() == 2 + message.header().size() + 3 + exceptionText.size());
+            }
+
+            THEN("A Frame decoded should retrieve the encoded parameters") {
+                websocket::FrameDecoder decoder;
+                REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
+
+                auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
+                REQUIRE(funcRet->getParametersCount() == 1);
+                REQUIRE(funcRet->getPayloadSize() == 3 + exceptionText.size());
+
+                std::string text;
+                auto undecodedData = funcRet->payload();
+                funcRet->decodeParameter(text, undecodedData);
+                REQUIRE(text == exceptionText);
+            }
+        }
+    }
 }

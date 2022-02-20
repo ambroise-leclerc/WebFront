@@ -196,11 +196,11 @@ public:
     }
 
     template<typename T, typename WebSocketFrame>
-    size_t encodeParameter(T&& t, WebSocketFrame& frame) {
+    void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
-        size_t parameterDataSize = 0;
+        auto parameterDataSize = getPayloadSize();
 
         if constexpr (is_printable<T>::value) {
             std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
@@ -265,7 +265,7 @@ public:
 
         std::cout << "bufferIndex = " << encodeBufferIndex << " ,parameterDataSize = " << parameterDataSize << "\n";
 
-        return parameterDataSize;
+        setPayloadSize(static_cast<uint32_t>(parameterDataSize));
     }
 
     template<typename T>
@@ -284,6 +284,7 @@ public:
             }
             break;
         case CodedType::string:
+        case CodedType::exception:
             if constexpr (std::is_same_v<T, std::string>) {
                 if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 uint16_t size;
