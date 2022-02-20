@@ -210,8 +210,8 @@ public:
             std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
         }
 
-        [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& frame) {
-            frame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
+        [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& wsFrame) {
+            wsFrame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
             buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
             std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
             encodeBufferIndex += sizeof(size);
