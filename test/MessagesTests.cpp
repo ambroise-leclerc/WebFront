@@ -77,7 +77,7 @@ SCENARIO("FunctionCall") {
         std::string text;
         functionCall->decodeParameter(text, undecodedData);
         REQUIRE(text == "Texte de test suffisament long pour changer de format");
-        
+
         functionCall->decodeParameter(text, undecodedData);
         REQUIRE(text.starts_with("bigText : Texte de test suffisament long pour changer de format"));
         REQUIRE(text.size() == 357);
@@ -87,9 +87,6 @@ SCENARIO("FunctionCall") {
         functionCall->decodeParameter(value, undecodedData);
         REQUIRE(value == text.size());
         REQUIRE(undecodedData.size() == 0);
-
-        
-          
     }
 }
 
@@ -98,18 +95,16 @@ SCENARIO("FunctionReturn") {
 
     GIVEN("A FunctionReturn message") {
         msg::FunctionReturn message;
-        websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+        websocket::Frame<Net> frame{
+          std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
         networking::SocketMock socket;
         websocket::WebSocket<Net> ws(socket);
-        
-        WHEN("An exception is encoded in a functionReturn message") {
+
+        WHEN("An exception is encoded") {
             std::string exceptionText = "Parameter error";
             auto exception = std::runtime_error(exceptionText);
             message.encodeParameter(exception, frame);
             ws.write(std::move(frame));
-
-
-    cout << "Socket wrote :\n" << utils::hexDump(span(socket.debugBuffer.data(), socket.bufferIndex)) << '\n';
 
             THEN("Encoded frame should be") {
                 auto encodedFrame = span(socket.debugBuffer.data(), socket.bufferIndex);
@@ -128,6 +123,35 @@ SCENARIO("FunctionReturn") {
                 auto undecodedData = funcRet->payload();
                 funcRet->decodeParameter(text, undecodedData);
                 REQUIRE(text == exceptionText);
+            }
+        }
+
+        WHEN("A tuple is encoded") {
+            std::tuple<int, std::string> value{42, "Hello World"};
+            message.encodeParameter(value, frame);
+            ws.write(std::move(frame));
+            cout << "Socket wrote :\n" << utils::hexDump(span(socket.debugBuffer.data(), socket.bufferIndex)) << '\n';
+
+            THEN("An erroneous tuple should trigger an exception") {
+                websocket::FrameDecoder decoder;
+                REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
+                auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
+                std::tuple<int, std::string, int> tupleValue;
+                auto undecodedData = funcRet->payload();
+                REQUIRE_THROWS_AS(funcRet->decodeParameter(tupleValue, undecodedData), std::runtime_error);
+            }
+            THEN("A Frame decoded should retrieve the encoded parameters") {
+                websocket::FrameDecoder decoder;
+                REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
+                auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
+                REQUIRE(funcRet->getParametersCount() == 3);
+                REQUIRE(funcRet->getPayloadSize() == 33);
+
+                std::tuple<int, std::string> tupleValue;
+                auto undecodedData = funcRet->payload();
+                funcRet->decodeParameter(tupleValue, undecodedData);
+                REQUIRE(std::get<0>(tupleValue) == 42);
+                REQUIRE(std::get<1>(tupleValue) == "Hello World");
             }
         }
     }

@@ -45,6 +45,7 @@ enum class CodedType : uint8_t {
     array64,      // opcode + 4 bytes size,
     arrayFloat,   // opcode + 4 bytes size,
     arrayDouble,  // opcode + 4 bytes size,
+    tuple,        // opcode + 1 byte for number of parameters which constitute the tuple
 };
 
 inline std::string_view toString(CodedType t) {
@@ -66,6 +67,7 @@ inline std::string_view toString(CodedType t) {
     case CodedType::array64: return "array64";
     case CodedType::arrayFloat: return "arrayFloat";
     case CodedType::arrayDouble: return "arrayDouble";
+    case CodedType::tuple: return "tuple";
     default: return "undefined";
     }
 }
@@ -75,7 +77,18 @@ struct is_printable : std::false_type {};
 
 template<typename T>
 struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type {};
-        
+
+template<typename T, typename U>
+inline constexpr bool is_printable_v = is_printable<T, U>::value;
+
+template<typename>
+struct is_tuple : std::false_type {};
+
+template<typename... T>
+struct is_tuple<std::tuple<T...>> : std::true_type {};
+
+template<typename T>
+inline constexpr bool is_tuple_v = is_tuple<T>::value;
 
 template<typename T>
 class MessageBase {
@@ -143,7 +156,7 @@ public:
     [[nodiscard]] size_t getPayloadSize() const { return static_cast<uint16_t>(256 * head.lengthHi + head.lengthLo); }
 };
 
-/// Encodes a list of parameters : parameters 0 is the function. Sent either by WebFront or by the JS Client
+/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
 class FunctionCall : public MessageBase<FunctionCall> {
     struct Header {
         Command command = Command::callFunction;
@@ -185,18 +198,9 @@ public:
         return {functionName, data};
     }
 
-    // types with a size
-    template<typename T, typename WebSocketFrame>
-    size_t encodeType(msg::CodedType type, T size, WebSocketFrame& frame) {
-        frame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
-        buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
-        std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
-        encodeBufferIndex += sizeof(size);
-        return 1 + sizeof(size);
-    }
 
     template<typename T, typename WebSocketFrame>
-    void encodeParameter(T&& t, WebSocketFrame& frame) {
+    size_t encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
@@ -206,18 +210,32 @@ public:
             std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
         }
 
+        [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& frame) {
+            frame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
+            buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
+            std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
+            encodeBufferIndex += sizeof(size);
+            parameterDataSize += 1 + sizeof(size);
+        
+        };
+
         [[maybe_unused]] auto encodeString = [&, this ](const char* str, size_t size) constexpr {
             if (size < 256)
-                parameterDataSize += encodeType(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
+                encodeType(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
             else
-                parameterDataSize += encodeType(msg::CodedType::string, static_cast<uint16_t>(size), frame);
+                encodeType(msg::CodedType::string, static_cast<uint16_t>(size), frame);
             frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
             parameterDataSize += size;
 
             std::cout << "-> encoded to string of size " << size << " in a span.";
         };
 
-        if constexpr (is_same_v<ParamType, bool>) {
+        if constexpr (is_tuple<ParamType>::value) {
+            uint8_t nbParams = static_cast<uint8_t>(tuple_size<ParamType>::value);
+            encodeType(msg::CodedType::tuple, nbParams, frame);
+            std::apply([&](auto&... tupleArgs) { ((parameterDataSize += encodeParameter(tupleArgs, frame)), ...); }, t);
+        }
+        else if constexpr (is_same_v<ParamType, bool>) {
             frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
             buffer[encodeBufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
             parameterDataSize += 1;
@@ -258,7 +276,7 @@ public:
         else if constexpr (is_base_of_v<std::exception, ParamType>) {
             std::cout << "Exception : " << t.what() << '\n';
             auto textSize = char_traits<char>::length(t.what());
-            parameterDataSize += encodeType(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
+            encodeType(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
             frame.addBuffer(span(reinterpret_cast<const std::byte*>(t.what()), textSize));
             parameterDataSize += textSize;
         }
@@ -266,44 +284,59 @@ public:
         std::cout << "bufferIndex = " << encodeBufferIndex << " ,parameterDataSize = " << parameterDataSize << "\n";
 
         setPayloadSize(static_cast<uint32_t>(parameterDataSize));
+        return parameterDataSize;
     }
 
     template<typename T>
     static void decodeParameter(T& param, std::span<const std::byte>& data) {
-        if (data.size() == 0) throw std::runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
+        using namespace std;
+        if (data.size() == 0) throw runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
         auto codedType = static_cast<CodedType>(data[0]);
         switch (codedType) {
         case CodedType::smallString:
-            if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+            if constexpr (is_same_v<T, string>) {
+                if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 auto size = static_cast<size_t>(data[1]);
                 if (data.size() < 2u + size)
-                    throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                param = std::string(reinterpret_cast<const char*>(&data[2]), size);
+                    throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                param = string(reinterpret_cast<const char*>(&data[2]), size);
                 data = data.subspan(2 + size);
             }
             break;
         case CodedType::string:
         case CodedType::exception:
-            if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1u) throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+            if constexpr (is_same_v<T, string>) {
+                if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 uint16_t size;
-                std::copy_n(&data[1], 2, reinterpret_cast<std::byte*>(&size));
+                copy_n(&data[1], 2, reinterpret_cast<byte*>(&size));
                 if (data.size() < 3u + size)
-                    throw std::runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                param = std::string(reinterpret_cast<const char*>(&data[3]), size);
+                    throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                param = string(reinterpret_cast<const char*>(&data[3]), size);
                 data = data.subspan(3 + size);
             }
             break;
         case CodedType::number:
-            if constexpr (std::is_arithmetic_v<T>) {
+            if constexpr (is_arithmetic_v<T>) {
                 double value;
                 if (data.size() < 1u + sizeof(value))
-                    throw std::runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
-                std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
+                    throw runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
+                copy_n(&data[1], sizeof(value), reinterpret_cast<byte*>(&value));
                 param = static_cast<T>(value);
                 data = data.subspan(1 + sizeof(value));
             }
+            break;
+        case CodedType::tuple:
+            if constexpr (is_tuple_v<T>) {
+                auto tupleSize = static_cast<size_t>(data[1]);
+                if (tuple_size_v<T> != tupleSize)
+                    throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) + " elements tuple but decoded tuple only has " + to_string(tupleSize) + " elements.");
+                cout << "tuple expected\n";
+                data = data.subspan(2);
+                std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
+
+            }
+            else
+                throw runtime_error("Wrong parameter type : std::tuple expected");
             break;
 
         default: param = {};
