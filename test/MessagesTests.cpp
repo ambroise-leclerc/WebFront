@@ -86,7 +86,7 @@ SCENARIO("FunctionCall") {
         size_t value;
         functionCall->decodeParameter(value, undecodedData);
         REQUIRE(value == text.size());
-        REQUIRE(undecodedData.size() == 0);
+        REQUIRE(undecodedData.empty());
     }
 }
 
@@ -123,6 +123,7 @@ SCENARIO("FunctionReturn") {
                 auto undecodedData = funcRet->payload();
                 funcRet->decodeParameter(text, undecodedData);
                 REQUIRE(text == exceptionText);
+                REQUIRE(undecodedData.empty());
             }
         }
 
@@ -145,13 +146,15 @@ SCENARIO("FunctionReturn") {
                 REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
                 auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
                 REQUIRE(funcRet->getParametersCount() == 3);
-                REQUIRE(funcRet->getPayloadSize() == 33);
+                REQUIRE(funcRet->getPayloadSize() == 24);
 
                 std::tuple<int, std::string> tupleValue;
                 auto undecodedData = funcRet->payload();
                 funcRet->decodeParameter(tupleValue, undecodedData);
                 REQUIRE(std::get<0>(tupleValue) == 42);
                 REQUIRE(std::get<1>(tupleValue) == "Hello World");
+                std::cout << undecodedData.size() << "\n";
+                REQUIRE(undecodedData.empty());
             }
         }
     }
