@@ -194,37 +194,52 @@ namespace webfront {
                     let size = new TextEncoder().encode(param).length;
                     return size + (size < 256 ? 2 : 3);
                 }
+                case "object":
+                if (Array.isArray(param)) {
+                    let size = 2;   // Tuple type needs 2 bytes
+                    param.forEach(element => size += this.computeParameterSize(element));
+                    return size;
+                }
                 default:
                     throw new Error("TypeError : '" + typeof(param) + "' is an unsupported type");
             }
         }
     
-        private encodeParameter(param: any, buffer: DataView) : number {
+        private encodeParameter(param: any, buffer: DataView, offset = 0) : number {
             switch(typeof(param)) {
                 case "string": {
                     let binary = new TextEncoder().encode(param);
-                    let offset = 0;
+                    let headSize = 0;
                     if (binary.length < 256) {
-                        buffer.setInt8(0, ParamType.smallString);
-                        buffer.setInt8(1, binary.length);
-                        offset = 2;
+                        buffer.setInt8(offset + 0, ParamType.smallString);
+                        buffer.setInt8(offset + 1, binary.length);
+                        headSize = 2;
                     }
                     else if (binary.length < 65536) {
-                        buffer.setInt8(0, ParamType.string);
-                        buffer.setInt16(1, binary.length, this.littleEndian);
-                        offset = 3;
+                        buffer.setInt8(offset + 0, ParamType.string);
+                        buffer.setInt16(offset + 1, binary.length, this.littleEndian);
+                        headSize = 3;
                     }
                     else throw new Error("RangeError: cannot encode string of more than 64kB of data.");
-                    binary.forEach(function(value:number, index:number) { buffer.setInt8(offset + index, value); });
-                    return offset + binary.length;
+                    binary.forEach(function(value:number, index:number) { buffer.setInt8(offset + headSize + index, value); });
+                    return headSize + binary.length;
                 }
                 case "boolean":
-                    buffer.setInt8(0, param ? ParamType.booleanTrue : ParamType.booleanFalse);
+                    buffer.setInt8(offset + 0, param ? ParamType.booleanTrue : ParamType.booleanFalse);
                     return 1;
                 case "number":
-                    buffer.setInt8(0, ParamType.number);
-                    buffer.setFloat64(1, param, this.littleEndian);
+                    buffer.setInt8(offset + 0, ParamType.number);
+                    buffer.setFloat64(offset + 1, param, this.littleEndian);
                     return 9;
+                case "object":
+                    if (Array.isArray(param)) {
+                        buffer.setInt8(offset + 0, ParamType.tuple);
+                        buffer.setInt8(offset + 1, param.length);
+                        let tuppleSize = 2;
+                        param.forEach(element => tuppleSize += this.encodeParameter(element, buffer, tuppleSize));
+                        return tuppleSize;
+                }
+                console.log(param);
                 default:
                     throw new Error("TypeError : '" + typeof(param) + "' is an unsupported type");
             }
@@ -262,6 +277,19 @@ namespace webfront {
         number,       // opcode + 8 bytes IEEE754 floating point number
         smallString,  // opcode + 1 byte size
         string,       // opcode + 2 bytes size
+        exception,    // opcode + 2 bytes size
+        smallArrayU8, // opcode + 1 byte size,
+        arrayU8,      // opcode + 4 bytes size,
+        array8,       // opcode + 4 bytes size,
+        arrayU16,     // opcode + 4 bytes size,
+        array16,      // opcode + 4 bytes size,
+        arrayU32,     // opcode + 4 bytes size,
+        array32,      // opcode + 4 bytes size,
+        arrayU64,     // opcode + 4 bytes size,
+        array64,      // opcode + 4 bytes size,
+        arrayFloat,   // opcode + 4 bytes size,
+        arrayDouble,  // opcode + 4 bytes size,
+        tuple,        // opcode + 1 byte for number of parameters which constitute the tuple
     }
     
 } // namespace webfront
