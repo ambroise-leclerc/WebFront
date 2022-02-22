@@ -88,11 +88,9 @@ namespace webfront {
             }
         }
 
-
-        callJsFunction(paramsCount: number, data: DataView) {
-            let functionName: any = "";
+        decodeParameters(paramsCount: number, data: DataView, offset = 0) : [any[], number] {
             let parameters: any[] = [];
-            let dataParser = 0;
+            let dataParser = offset;
             for (let paramIndex = 0; paramIndex < paramsCount; ++paramIndex) {
                 let type: ParamType = data.getUint8(dataParser);
                 switch (type) {
@@ -115,18 +113,28 @@ namespace webfront {
                         let payload = dataParser + (word ? 3 : 2);
                         let text = new TextDecoder("utf-8").decode(
                             data.buffer.slice(data.byteOffset + payload, data.byteOffset + payload + textLen));
-                        if (functionName.length == 0) functionName = text;
-                        else parameters.push(text);
+                        parameters.push(text);
                         dataParser = payload + textLen;
                     } break;
+                    case ParamType.tuple: {     // opcode + 1 byte for number of parameters which constitute the tuple
+                        let nbParams = data.getUint8(dataParser + 1);
+                        let decodeRet = this.decodeParameters(nbParams, data, dataParser + 2);
+                        parameters.push(decodeRet[0]);                        
+                        dataParser += 2 + decodeRet[1];
+                    }
                 }
             }
+            return [parameters, dataParser - offset];
+        }
+
+        callJsFunction(paramsCount: number, data: DataView) {
+            let [functionName, offset] = this.decodeParameters(1, data);
+            let [parameters] = this.decodeParameters(paramsCount - 1, data, offset);
             try {
-                executeFunctionByName(functionName, window, ...parameters);
+                executeFunctionByName(functionName[0], window, ...parameters);
             }
             catch (error) {
-                throw new Error("Calling function " + functionName + " : " + error);
-                
+                throw new Error("Calling function " + functionName[0] + " : " + error);
             }
         }
 
