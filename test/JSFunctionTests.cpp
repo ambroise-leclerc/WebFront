@@ -40,7 +40,7 @@ struct WebLinkMock {
         encodedBuffer.clear();
         size_t bufCount = 0;
         for (auto& buf : frame.toBuffers()) {
-         //   cout << bufCount << ": " << utils::hexDump(span(reinterpret_cast<const byte*>(buf.data()), buf.size())) << "\n";
+            cout << bufCount << ": " << utils::hexDump(span(reinterpret_cast<const byte*>(buf.data()), buf.size())) << "\n";
             if (++bufCount > 2)
                 for (auto byte : span(reinterpret_cast<const uint8_t*>(buf.data()), buf.size())) encodedBuffer.push_back(byte);
         }
@@ -84,7 +84,7 @@ SCENARIO("JsFunction") {
             }
         }
 
-        WHEN("print is called with a bunck of different types of parameters") {
+        WHEN("print is called with a bunch of different types of parameters") {
             print(false, "text data", 45, text, bigText);
             THEN("encoded data should be") {
                 REQUIRE(checkType(0, msg::CodedType::smallString));

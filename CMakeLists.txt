@@ -1,6 +1,7 @@
 ﻿cmake_minimum_required (VERSION 3.16)
 
 project ("WebFront")
+set(WEBFRONT_VERSION 0.1.0)
 
 include(cmake/StandardProjectSettings.cmake)
 include(cmake/PreventInSourceBuilds.cmake)
@@ -23,11 +24,14 @@ set_project_warnings(project_warnings)
 include(cmake/Sanitizers.cmake)
 enable_sanitizers(project_options)
 
+configure_file(Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
 include(cmake/Doxygen.cmake)
 enable_doxygen()
 
 include(cmake/StaticAnalyzers.cmake)
 include(cmake/CPM.cmake)
+
+
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)

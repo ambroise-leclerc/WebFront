@@ -138,10 +138,12 @@ struct Frame : public Header {
 
     std::vector<typename Net::ConstBuffer> toBuffers() const { return buffers; }
 
-    void addBuffer(std::span<const std::byte> buffer) {
+    /// @return size of added buffer
+    size_t addBuffer(std::span<const std::byte> buffer) {
+        std::cout << "frame::addBuffer " << utils::hexDump(buffer) << "\n";
         setPayloadSize(payloadSize() + buffer.size());
-        buffers[0] = {raw.data(), headerSize()};
         buffers.emplace_back(buffer.data(), buffer.size());
+        return buffer.size();
     }
 
     std::vector<typename Net::ConstBuffer> buffers;

@@ -45,13 +45,18 @@ public:
             ws.write("This is my response");
         });
         ws.onMessage([this](std::span<const std::byte> data) {
+            log::infoHex("onMessage(binary) :", data);
+
             switch (static_cast<msg::Command>(data[0])) {
             case msg::Command::handshake: {
                 auto command = msg::Handshake::castFromRawData(data);
                 sendCommand(msg::Ack{});
-                logSink = log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
-                sameEndian = (std::endian::native == std::endian::little && static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little) ||
-                             (std::endian::native == std::endian::big && static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
+                logSink =
+                  log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
+                sameEndian = (std::endian::native == std::endian::little &&
+                              static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little) ||
+                             (std::endian::native == std::endian::big &&
+                              static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
                 eventsHandler({WebLinkEvent::Code::linked, id});
             } break;
 
@@ -59,13 +64,23 @@ public:
                 log::info("Function called !");
                 auto command = msg::FunctionCall::castFromRawData(data);
                 auto [functionName, paramData] = command->getFunctionName();
-                eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData));
-
+                try {
+                    eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData));
+                }
+                catch (const std::out_of_range& e) {
+                    msg::FunctionReturn returnValue;
+                    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
+        
+                    returnValue.encodeParameter(e, frame);
+                    sendFrame(std::move(frame));
+                }
+                catch (const std::exception& e) {
+                    log::info("event cppFunctionCalled failed with exception {}", e.what());
+                }
             } break;
 
             default: break;
             }
-            log::infoHex("onMessage(binary) :", data);
         });
 
         ws.start();
@@ -82,41 +97,6 @@ public:
 
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
-
-    template<typename T>
-    void extractNext(T& value) {
-        size_t bytesDecoded;
-        std::tie(value, bytesDecoded) = decodeParameter<T>(undecodedData);
-        undecodedData = undecodedData.subspan(bytesDecoded);
-    }
-
-private:
-    void callCppFunction(size_t parametersCount, std::span<const std::byte> data) {
-        if (parametersCount > 0) {
-            auto [functionName, bytesDecoded] = decodeParameter<std::string>(data);
-            undecodedData = data.subspan(bytesDecoded);
-            log::debug("Function called : {}", functionName);
-            eventsHandler({WebLinkEvent::Code::cppFunctionCalled, id, functionName});
-        }
-    }
-
-    template<typename T>
-    std::tuple<T, size_t> decodeParameter(std::span<const std::byte> data) {
-        if (data.size() == 0) throw std::runtime_error("Not enough data for WebLink::decodeParameter");
-        auto codedType = static_cast<msg::CodedType>(data[0]);
-        switch (codedType) {
-        case msg::CodedType::smallString:
-            if constexpr (std::is_same_v<T, std::string>) {
-                if (data.size() < 1) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
-                auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2 + size) throw std::runtime_error("Erroneous data feeded to WebLink::decodeParameter");
-                return {std::string(reinterpret_cast<const char*>(&data[2]), size), 2 + size};
-            }
-
-            break;
-        default: return {T{}, 0};
-        }
-    }
 };
 
 } // namespace webfront

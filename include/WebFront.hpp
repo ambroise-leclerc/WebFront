@@ -47,7 +47,9 @@ public:
      * @param functionName
      * @return JsFunction<WebFront>
      */
-    [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const { return JsFunction{functionName, webFront, webLinkId}; }
+    [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const {
+        return JsFunction{functionName, webFront, webLinkId};
+    }
 };
 
 template<typename NetProvider>
@@ -60,8 +62,8 @@ public:
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
-                    std::tie(std::ignore, inserted) =
-                      webLinks.try_emplace(idsCounter, std::move(socket), idsCounter, [this](WebLinkEvent event) { onEvent(event); });
+                    std::tie(std::ignore, inserted) = webLinks.try_emplace(idsCounter, std::move(socket), idsCounter,
+                                                                           [this](WebLinkEvent event) { onEvent(event); });
         });
     }
 
@@ -104,14 +106,7 @@ private:
         switch (event.code) {
         case WebLinkEvent::Code::linked: uiStartedHandler(UI{*this, event.webLinkId}); break;
         case WebLinkEvent::Code::closed: webLinks.erase(event.webLinkId); break;
-        case WebLinkEvent::Code::cppFunctionCalled: {
-            try {
-                cppFunctions.at(event.text)(event.data);
-            }
-            catch (const std::exception& e) {
-                log::info("event cppFunctionCalled failed with exception {}", e.what());
-            }
-        } break;
+        case WebLinkEvent::Code::cppFunctionCalled: cppFunctions.at(event.text)(event.data); break;
         }
     }
 };

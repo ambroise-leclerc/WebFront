@@ -6,8 +6,7 @@
 
 #include <experimental/net>
 
-namespace webfront {
-namespace networking {
+namespace webfront::networking {
 
 class TCPNetworkingTS : public BasicNetworking<std::experimental::net::const_buffer, std::experimental::net::mutable_buffer> {
 public:
@@ -30,9 +29,8 @@ public:
     }
 
     struct Error {
-        static inline auto OperationAborted = std::experimental::net::error::operation_aborted;
+        static inline const auto OperationAborted = std::experimental::net::error::operation_aborted;
     };
 };
 
-} // namespace networking
-} // namespace webfront
+} // namespace webfront::networking
