@@ -14,7 +14,9 @@ A C++23 library with obvious purposes
 #### Hello World
 ```cpp
     WebFront webfront;
-    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
+    webFront.cppFunction<void, std::string>("print", [](std::string text) {
+        std::cout << text << '\n';
+    });
 
     webFront.onUIStarted([](UI ui) {
         ui.addScript("var addText = function(text, num) {                 "
