@@ -70,7 +70,7 @@ public:
                 catch (const std::out_of_range& e) {
                     msg::FunctionReturn returnValue;
                     websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
-        
+                    returnValue.head.functionId = command.head.functionId;
                     returnValue.encodeParameter(e, frame);
                     sendFrame(std::move(frame));
                 }
@@ -78,6 +78,13 @@ public:
                     log::info("event cppFunctionCalled failed with exception {}", e.what());
                 }
             } break;
+
+            case msg::Command::functionReturn: {
+                auto command = msg::FunctionCall::castFromRawData(data);
+                log::info("Return value received from functionId {}", command.head.functionId);
+                
+                promise.set_value(command.payload());
+            }
 
             default: break;
             }

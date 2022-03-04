@@ -19,6 +19,10 @@ namespace webfront {
         uninitialized, handshaking, linked
     }
 
+    class FunctionReturns {
+        private retValues = Promise<any>[];
+    };
+
     abstract class NetLayer {
         constructor() {
             console.log("netlayer constructed");
@@ -63,7 +67,7 @@ namespace webfront {
                         let paramsCount = view.getUint8(1);
                         let paramsDataSize = view.getUint32(4, this.littleEndian);
                         try {
-                        this.callJsFunction(paramsCount, new DataView(event.data, 8, paramsDataSize));
+                            this.callJsFunction(paramsCount, new DataView(event.data, 8, paramsDataSize));
                         }
                         catch (error) {
                             console.error("With callJS: " + error);
@@ -106,8 +110,8 @@ namespace webfront {
                         parameters.push(data.getFloat64(dataParser + 1, this.littleEndian));
                         dataParser += 9;
                         break;
-                    case ParamType.smallString: // opcode + 1 byte size
-                    case ParamType.string: {    // opcode + 2 bytes size
+                    case ParamType.smallString:  // opcode + 1 byte size
+                    case ParamType.string: {     // opcode + 2 bytes size
                         let word = type == ParamType.string; 
                         let textLen = word ? data.getUint16(dataParser + 1, this.littleEndian) : data.getUint8(dataParser + 1);
                         let payload = dataParser + (word ? 3 : 2);
@@ -166,10 +170,12 @@ namespace webfront {
         }
 
         cppFunction(name : string): (...args:any[]) => void {
-            return this.cppFunctionBinder.bind(this, name);
+            const result = this.cppFunctionBinder.bind(this, name);
+            
+            return result;
         }
     
-        protected cppFunctionBinder(functionName: string, ...args:any[]): void {
+        protected cppFunctionBinder(functionName: string, ...args:any[]): Promise<any> {
             const headerSize = 8;
             let payloadSize = 0;
             payloadSize += this.computeParameterSize(functionName);
@@ -192,6 +198,8 @@ namespace webfront {
             }
 
             this.socket.send(messageData);
+
+            return new Promise
         }
     
         private computeParameterSize(param: any) : number {

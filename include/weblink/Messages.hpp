@@ -22,8 +22,8 @@ enum class Command : uint8_t {
     handshake,
     ack,
     textCommand,
-    callFunction,   // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
-    functionReturn, // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
+    callFunction,   // 1:command  1:paramsCount 2:functionId  4:paramsDataSize
+    functionReturn, // 1:command  1:paramsCount 2:functionId  4:paramsDataSize
 };
 
 enum class CodedType : uint8_t {
@@ -160,8 +160,8 @@ public:
 class FunctionCall : public MessageBase<FunctionCall> {
     struct Header {
         Command command = Command::callFunction;
-        uint8_t parametersCount = 0;
-        std::array<uint8_t, 2> padding{};
+        uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
+        uint16_t functionId = 0;     // functionId is an arbitrary number used to identify functionCall and functionReturn
         uint32_t parametersDataSize = 0;
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
@@ -187,11 +187,19 @@ class FunctionCall : public MessageBase<FunctionCall> {
     }
 
 public:
+    uint16_t setNextFunctionId() {
+        static uint16_t functionIdsCounter = 0;
+        auto id = functionIdsCounter++;
+        head.functionId = id;
+        return id;
+    }
+
     void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
     void setPayloadSize(uint32_t size) { head.parametersDataSize = size; }
     [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
     [[nodiscard]] size_t getPayloadSize() const { return head.parametersDataSize; }
     void incrementPayloadSize(auto value) { setPayloadSize(static_cast<uint32_t>(getPayloadSize() + value)); }
+    
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
         auto data = payload();
@@ -199,13 +207,12 @@ public:
         return {functionName, data};
     }
 
-
     template<typename T, typename WebSocketFrame>
     void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
-        
+
         if constexpr (is_printable<T>::value) {
             std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
         }
@@ -294,8 +301,7 @@ public:
             if constexpr (is_same_v<T, string>) {
                 if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2u + size)
-                    throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 2u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = string(reinterpret_cast<const char*>(&data[2]), size);
                 data = data.subspan(2 + size);
             }
@@ -306,8 +312,7 @@ public:
                 if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 uint16_t size;
                 copy_n(&data[1], 2, reinterpret_cast<byte*>(&size));
-                if (data.size() < 3u + size)
-                    throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 3u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = string(reinterpret_cast<const char*>(&data[3]), size);
                 data = data.subspan(3 + size);
             }
@@ -326,11 +331,11 @@ public:
             if constexpr (is_tuple_v<T>) {
                 auto tupleSize = static_cast<size_t>(data[1]);
                 if (tuple_size_v<T> != tupleSize)
-                    throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) + " elements tuple but decoded tuple only has " + to_string(tupleSize) + " elements.");
+                    throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) +
+                                        " elements tuple but decoded tuple only has " + to_string(tupleSize) + " elements.");
                 cout << "tuple expected\n";
                 data = data.subspan(2);
                 std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
-
             }
             else
                 throw runtime_error("Wrong parameter type : std::tuple expected");
@@ -346,7 +351,7 @@ class FunctionReturn : public FunctionCall {
     struct Header {
         Command command = Command::functionReturn;
         uint8_t parametersCount = 0;
-        std::array<uint8_t, 2> padding{};
+        uint16_t functionId = 0;
         uint32_t parametersDataSize = 0;
     } head;
     static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");

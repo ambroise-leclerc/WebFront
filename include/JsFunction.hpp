@@ -20,14 +20,19 @@ public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId)
         : name(functionName), webFront(wf), webLinkId(linkId) {}
 
-    void operator()(auto&&... ts) {
-        command.setParametersCount(0);
+    template<typename ReturnType = void>
+    ReturnType operator()(auto&&... ts) {
+        auto functionId = command.setNextFunctionId();
         websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
         command.encodeParameter(name, frame);
         (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
         
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
+        if constexpr (!std::is_same_v<ReturnType, void>){
+            
+        }
     }
+
 
 private:
     std::string name;
