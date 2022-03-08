@@ -19,6 +19,7 @@ int main(int /*argc*/, char** argv) {
         ui.addScript("var addText = function(text, num) {                 \n"
                      "  let print = webFront.cppFunction('print');        \n"
                      "  print(text + ' of ' + num);                       \n"
+                     "  return num + 1;                                   \n"
                      "}                                                   \n"
                      "                                                    \n"
                      "var testFunc = function(text) {                     \n"

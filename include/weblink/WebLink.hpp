@@ -7,6 +7,7 @@
 #include "Messages.hpp"
 
 #include <cstddef>
+#include <future>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -82,7 +83,7 @@ public:
             case msg::Command::functionReturn: {
                 auto command = msg::FunctionCall::castFromRawData(data);
                 log::info("Return value received from functionId {}", command.head.functionId);
-                
+
                 promise.set_value(command.payload());
             }
 
@@ -104,6 +105,10 @@ public:
 
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
+
+    void setReturnValue(uint16_t functionId, JsReturnValue& returnValue) {
+        returnValue[functionId] = std::promise()
+    }
 };
 
 } // namespace webfront

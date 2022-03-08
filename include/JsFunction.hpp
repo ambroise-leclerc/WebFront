@@ -14,23 +14,37 @@
 
 namespace webfront {
 
+class JsReturnValue {
+    std::future<std::vector<uint8_t>> rawValue;
+
+public:
+    void setFuture(std::future<std::vector<uint8_t>> futureValue) {
+        rawValue = futureValue;
+    }
+
+    template<typename T>
+    get() const {
+        
+    }
+};
+
 template<typename WebFront>
 class JsFunction {
 public:
     JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId)
         : name(functionName), webFront(wf), webLinkId(linkId) {}
 
-    template<typename ReturnType = void>
-    ReturnType operator()(auto&&... ts) {
+    JsReturnValue operator()(auto&&... ts) {
         auto functionId = command.setNextFunctionId();
         websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
         command.encodeParameter(name, frame);
         (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
         
+        JsReturnValue retValue;
+        webFront.getLink(webLinkId).setReturnValue(functionId, retValue);
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
-        if constexpr (!std::is_same_v<ReturnType, void>){
-            
-        }
+
+        return retValue;      
     }
 
 
