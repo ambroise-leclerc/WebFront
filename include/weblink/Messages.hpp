@@ -199,7 +199,7 @@ public:
     [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
     [[nodiscard]] size_t getPayloadSize() const { return head.parametersDataSize; }
     void incrementPayloadSize(auto value) { setPayloadSize(static_cast<uint32_t>(getPayloadSize() + value)); }
-    
+
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
         auto data = payload();

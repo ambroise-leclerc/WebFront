@@ -14,20 +14,6 @@
 
 namespace webfront {
 
-class JsReturnValue {
-    std::future<std::vector<uint8_t>> rawValue;
-
-public:
-    void setFuture(std::future<std::vector<uint8_t>> futureValue) {
-        rawValue = futureValue;
-    }
-
-    template<typename T>
-    get() const {
-        
-    }
-};
-
 template<typename WebFront>
 class JsFunction {
 public:

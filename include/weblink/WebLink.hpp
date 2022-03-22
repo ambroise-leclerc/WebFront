@@ -4,6 +4,7 @@
 #pragma once
 #include "../http/WebSocket.hpp"
 #include "../tooling/Logger.hpp"
+#include "JsReturnValue.hpp"
 #include "Messages.hpp"
 
 #include <cstddef>
@@ -107,7 +108,7 @@ public:
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 
     void setReturnValue(uint16_t functionId, JsReturnValue& returnValue) {
-        returnValue[functionId] = std::promise()
+        returnValues[functionId] = std::promise<std::vector<uint8_t>>;
     }
 };
 

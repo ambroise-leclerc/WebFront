@@ -107,23 +107,25 @@ SCENARIO("JsFunction") {
 }
 
 SCENARIO("JSReturnValue") {
-    GIVEN("A JSReturnValue"){
+    GIVEN("A JSReturnValue with an associated promise"){
         JSReturnValue returnValue;
         std::promise<std::vector<std::byte>> promise; 
         value.setFuture(promise.get_future());
 
-        WHEN("given a future") {
+        WHEN("No promised value is set") {
 
-            THEN("") {
+            THEN("returnValue provides the promised value") {
                 REQUIRE(!returnValue.received());
             }
         }
-        AND_WHEN("") {
+        AND_WHEN("Promised return value is set") {
             std::vector<uint8_t, 36> raw{0x03, 0x02, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x04, 0x05, 0x70, 0x72,
                                     0x69, 0x6e, 0x74, 0x04, 0x13, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x57,
                                     0x6f, 0x72, 0x6c, 0x64, 0x20, 0x6f, 0x66, 0x20, 0x32, 0x30, 0x32, 0x32};
 
-            promise.set_value()
+            promise.set_value(raw);
+            THEN("returnValue provides the promised value") {
+            }
         }
 
 
