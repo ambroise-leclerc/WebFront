@@ -187,8 +187,9 @@ class FunctionCall : public MessageBase<FunctionCall> {
     }
 
 public:
-    uint16_t setNextFunctionId() {
-        static uint16_t functionIdsCounter = 0;
+    using FunctionId = uint16_t;
+    FunctionId setNextFunctionId() {
+        static FunctionId functionIdsCounter = 0;
         auto id = functionIdsCounter++;
         head.functionId = id;
         return id;

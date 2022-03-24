@@ -113,9 +113,8 @@ SCENARIO("JSReturnValue") {
         value.setFuture(promise.get_future());
 
         WHEN("No promised value is set") {
-
-            THEN("returnValue provides the promised value") {
-                REQUIRE(!returnValue.received());
+            THEN("returnValue wait ends with a timeout") {
+                REQUIRE(returnValue.wait_for(1ms) == JSReturnValue::WaitStatus::timeout);
             }
         }
         AND_WHEN("Promised return value is set") {
@@ -125,6 +124,7 @@ SCENARIO("JSReturnValue") {
 
             promise.set_value(raw);
             THEN("returnValue provides the promised value") {
+                
             }
         }
 

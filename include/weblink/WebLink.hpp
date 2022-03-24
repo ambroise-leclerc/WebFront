@@ -36,7 +36,7 @@ class WebLink {
     std::optional<size_t> logSink;
     std::function<void(WebLinkEvent)> eventsHandler;
     std::span<const std::byte> undecodedData; /// Data received but not yet consumed
-
+    std::map<Command::FunctionId, std::promise<std::vector<uint8_t>>> returnValues; 
 public:
     WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler)
         : ws(std::move(socket)), id(webLinkId), eventsHandler(eventHandler) {
@@ -84,8 +84,7 @@ public:
             case msg::Command::functionReturn: {
                 auto command = msg::FunctionCall::castFromRawData(data);
                 log::info("Return value received from functionId {}", command.head.functionId);
-
-                promise.set_value(command.payload());
+                returnValue[command.head.functionId].set_value(command.payload());
             }
 
             default: break;
