@@ -84,7 +84,7 @@ public:
             case msg::Command::functionReturn: {
                 auto command = msg::FunctionCall::castFromRawData(data);
                 log::info("Return value received from functionId {}", command.head.functionId);
-                returnValue[command.head.functionId].set_value(command.payload());
+                returnValues[command.head.functionId].set_value(command.payload());
             }
 
             default: break;
