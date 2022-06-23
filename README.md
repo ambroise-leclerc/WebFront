@@ -1,6 +1,8 @@
 # WebFront
 
-A C++23 library with obvious purposes
+A C++23 header-only library with the aim of providing rich cross-platform UI (Typescript based) to C++ applications with a non-invasive API.
+
+WebFront implements websocket protocol over an embedded Web server and provides C++_to_Typescript and Typescript_to_C++ cross functions calls with native types conversions.
 
 [![Build Windows](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildWindows.yml/badge.svg)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildWindows.yml)
 [![Build Ubuntu](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildLinux.yml/badge.svg)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildLinux.yml)
