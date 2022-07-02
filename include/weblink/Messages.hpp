@@ -191,7 +191,7 @@ public:
     void setPayloadSize(uint32_t size) { head.parametersDataSize = size; }
     [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
     [[nodiscard]] size_t getPayloadSize() const { return head.parametersDataSize; }
-    void incrementPayloadSize(auto value) { setPayloadSize(static_cast<uint32_t>(getPayloadSize() + value)); }
+    void incrementPayloadSize(auto value) { setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value)); }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
         auto data = payload();
