@@ -57,14 +57,15 @@ SCENARIO("Logger") {
             log::error("Error log:{} enabled [{}]", logCounter++, log::is(log::Error) ? 'x' : ' ');
             
             THEN("Only enabled level should have produced a log") {
-                for (auto& logLine : logs) REQUIRE(logLine.ends_with("enabled [x]"));
+                for (auto& logLine : logs) {
+                    std::clog << "    logline : " << logLine << "\n";
+                    REQUIRE(logLine.ends_with("enabled [x]"));
+                }
 
                 for (auto level : {'I', 'D', 'W', 'E', 'W', 'I', 'E'}) {
                     REQUIRE(logs.front().at(1) == level);
                     logs.pop_front();
-                }
-                    
-                
+                }   
             }
         }
 
