@@ -107,9 +107,15 @@ public:
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 
-    void setReturnValue(uint16_t functionId, JsReturnValue& returnValue) {
-        returnValues[functionId] = std::promise<std::vector<uint8_t>>;
+    // Return the ReturnValue associated to functon functionId
+    // @functionId function id
+    JsReturnValue getReturnValue(uint16_t functionId) {
+        JsReturnValue retValue;
+        retValue.setFuture(returnValues[functionId].get_future());
+ 
+        return retValue;
     }
+
 };
 
 } // namespace webfront
