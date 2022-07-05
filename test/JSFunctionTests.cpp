@@ -50,7 +50,7 @@ struct WebLinkMock {
 
 struct WebFrontMock {
     using Net = networking::NetworkingMock;
-    WebLinkMock<WebFrontMock> getLink(WebLinkId id) { return WebLinkMock<WebFrontMock>{id, *this}; }
+    WebLink<WebFrontMock::Net> getLink(WebLinkId id) { return WebLink<WebFrontMock::Net>{id, *this}; }
 };
 
 SCENARIO("JsFunction") {
