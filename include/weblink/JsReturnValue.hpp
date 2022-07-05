@@ -24,7 +24,7 @@ public:
     }
 
     template<typename Rep, typename Period>
-    WaitStatus wait_for(std::chrono::time_point<Rep,Period> timePoint) const {
+    WaitStatus wait_until(std::chrono::time_point<Rep,Period> timePoint) const {
         return rawValue.wait_until(timePoint) == std::future_status::ready ? WaitStatus::ready : WaitStatus::timeout;
     }
 

@@ -51,7 +51,6 @@ std::ostream& operator<<(std::ostream& os, std::chrono::time_point<C, T> t) {
     auto s = duration_cast<seconds>(tp);
     tp -= s;
     auto us = duration_cast<microseconds>(tp);
-    tp -= s;
     os << std::setfill('0') << std::setw(2) << h.count() << ':';
     os << std::setfill('0') << std::setw(2) << m.count() << ':';
     os << std::setfill('0') << std::setw(2) << s.count() << '.' << std::setw(6) << us.count();
@@ -85,6 +84,9 @@ string format(std::string_view fmt, auto&&... ts) {
     while (frag != fragments.cend()) ss << *frag++;
     return ss.str();
 }
+
+
+
 } // namespace std
 
 #endif
