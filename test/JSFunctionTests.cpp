@@ -1,8 +1,10 @@
 #include <catch2/catch.hpp>
 
 #include <JsFunction.hpp>
+#include <WebFront.hpp>
 #include <networking/NetworkingMock.hpp>
 #include <weblink/JsReturnValue.hpp>
+
 
 #include <algorithm>
 
@@ -47,14 +49,17 @@ struct WebLinkMock {
         }
     }
 };
-
+/*
 struct WebFrontMock {
     using Net = networking::NetworkingMock;
     WebLink<WebFrontMock::Net> getLink(WebLinkId id) { return WebLink<WebFrontMock::Net>{id, *this}; }
 };
+*/
+
+using WebFrontMock = webfront::BasicWF<networking::NetworkingMock>;
 
 SCENARIO("JsFunction") {
-    WebFrontMock webFront;
+    WebFrontMock webFront("80");
     WebLinkId id{1};
 
     GIVEN("A print JsFunction") {
@@ -110,7 +115,7 @@ SCENARIO("JsFunction") {
 SCENARIO("JSReturnValue") {
     GIVEN("A JSReturnValue with an associated promise"){
         JsReturnValue returnValue;
-        std::promise<std::vector<std::uint8_t>> promise; 
+        std::promise<std::vector<std::byte>> promise; 
         returnValue.setFuture(promise.get_future());
 
         WHEN("No promised value is set") {
@@ -119,9 +124,12 @@ SCENARIO("JSReturnValue") {
             }
         }
         AND_WHEN("Promised return value is set") {
-            std::vector<uint8_t> raw{0x03, 0x02, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x04, 0x05, 0x70, 0x72,
-                                    0x69, 0x6e, 0x74, 0x04, 0x13, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x57,
-                                    0x6f, 0x72, 0x6c, 0x64, 0x20, 0x6f, 0x66, 0x20, 0x32, 0x30, 0x32, 0x32};
+            vector<byte> raw{
+                byte{0x03}, byte{0x02}, byte{0x00}, byte{0x00}, byte{0x1c}, byte{0x00}, byte{0x00}, byte{0x00},
+                byte{0x04}, byte{0x05}, byte{0x70}, byte{0x72}, byte{0x69}, byte{0x6e}, byte{0x74}, byte{0x04},
+                byte{0x13}, byte{0x48}, byte{0x65}, byte{0x6c}, byte{0x6c}, byte{0x6f}, byte{0x20}, byte{0x57},
+                byte{0x6f}, byte{0x72}, byte{0x6c}, byte{0x64}, byte{0x20}, byte{0x6f}, byte{0x66}, byte{0x20},
+                byte{0x32}, byte{0x30}, byte{0x32}, byte{0x32}};
 
             promise.set_value(raw);
             THEN("returnValue provides the promised value") {

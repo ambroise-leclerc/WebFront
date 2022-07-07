@@ -9,10 +9,10 @@
 namespace webfront {
     
 class JsReturnValue {
-    std::future<std::vector<uint8_t>> rawValue;
+    std::future<std::vector<std::byte>> rawValue;
 
 public:
-    void setFuture(std::future<std::vector<uint8_t>>&& futureValue) {
+    void setFuture(std::future<std::vector<std::byte>>&& futureValue) {
         rawValue = std::move(futureValue);
     }
 
