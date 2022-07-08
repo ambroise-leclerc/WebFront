@@ -37,7 +37,8 @@ class WebLink {
     std::optional<size_t> logSink;
     std::function<void(WebLinkEvent)> eventsHandler;
     std::span<const std::byte> undecodedData; /// Data received but not yet consumed
-      std::map<Command::FunctionId, std::promise<std::vector<uint8_t>>> returnValues; 
+    std::map<msg::FunctionCall::FunctionId, std::promise<std::vector<std::byte>>> returnValues;
+
 public:
     WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler)
         : ws(std::move(socket)), id(webLinkId), eventsHandler(eventHandler) {
@@ -72,8 +73,9 @@ public:
                 }
                 catch (const std::out_of_range& e) {
                     msg::FunctionReturn returnValue;
-                    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
-                    returnValue.head.functionId = command.head.functionId;
+                    websocket::Frame<Net> frame{
+                      std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
+                    returnValue.setFunctionId(command->getFunctionId());
                     returnValue.encodeParameter(e, frame);
                     sendFrame(std::move(frame));
                 }
@@ -84,8 +86,9 @@ public:
 
             case msg::Command::functionReturn: {
                 auto command = msg::FunctionCall::castFromRawData(data);
-                log::info("Return value received from functionId {}", command.head.functionId);
-                returnValues[command.head.functionId].set_value(command.payload());
+                log::info("Return value received from functionId {}", command->getFunctionId());
+                returnValues[command->getFunctionId()].set_value(
+                  std::vector(command->payload().begin(), command->payload().end()));
             }
 
             default: break;
@@ -107,8 +110,13 @@ public:
     void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
 
-    void setReturnValue(uint16_t functionId, JsReturnValue& returnValue) {
-        returnValues[functionId] = std::promise<std::vector<uint8_t>>;
+    // Return the ReturnValue associated to functon functionId
+    // @functionId function id
+    JsReturnValue getReturnValue(uint16_t functionId) {
+        JsReturnValue retValue;
+        retValue.setFuture(returnValues[functionId].get_future());
+
+        return retValue;
     }
 };
 

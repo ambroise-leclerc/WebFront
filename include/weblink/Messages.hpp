@@ -158,6 +158,7 @@ public:
 
 /// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
 class FunctionCall : public MessageBase<FunctionCall> {
+protected:
     struct Header {
         Command command = Command::callFunction;
         uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
@@ -166,8 +167,8 @@ class FunctionCall : public MessageBase<FunctionCall> {
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024>
-      buffer; // When composing a message, buffer does not represent the payload but some bufferized data to be sent
+private:
+    std::array<std::byte, 1024> buffer; // When composing a message, buffer does not represent the payload but some bufferized data to be sent
     size_t encodeBufferIndex = 0;
     friend class MessageBase<FunctionCall>;
 
@@ -195,12 +196,15 @@ public:
         return id;
     }
 
+    FunctionId getFunctionId() const { return head.functionId; }
+
     void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
     void setPayloadSize(uint32_t size) { head.parametersDataSize = size; }
     [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
     [[nodiscard]] size_t getPayloadSize() const { return head.parametersDataSize; }
-    void incrementPayloadSize(auto value) { setPayloadSize(static_cast<uint32_t>(getPayloadSize() + value)); }
-
+    void incrementPayloadSize(auto value) {
+        setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value));
+    }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
         auto data = payload();
@@ -349,13 +353,10 @@ public:
 
 /// Encodes FunctionCall return values (or exceptions)
 class FunctionReturn : public FunctionCall {
-    struct Header {
-        Command command = Command::functionReturn;
-        uint8_t parametersCount = 0;
-        uint16_t functionId = 0;
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");
+public:
+    FunctionReturn() { head.command = Command::functionReturn; }
+
+    void setFunctionId(FunctionId functionId) { head.functionId = functionId; }
     friend class MessageBase<FunctionReturn>;
 };
 

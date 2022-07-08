@@ -26,13 +26,11 @@ public:
         command.encodeParameter(name, frame);
         (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
         
-        JsReturnValue retValue;
-        webFront.getLink(webLinkId).setReturnValue(functionId, retValue);
+        auto retValue = webFront.getLink(webLinkId).getReturnValue(functionId);
         webFront.getLink(webLinkId).sendFrame(std::move(frame));
 
         return retValue;      
     }
-
 
 private:
     std::string name;
