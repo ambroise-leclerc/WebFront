@@ -107,7 +107,7 @@ SCENARIO("JsFunction") {
                 REQUIRE(checkString(30, "maFunction"));
                 REQUIRE(checkType(40, msg::CodedType::string));
                 REQUIRE(checkSize16(41, 1980));
-            }
+           }
         }
     }
 }

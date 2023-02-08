@@ -99,7 +99,7 @@ struct Response {
         Response response;
         response.statusCode = code;
         response.content = "<html><head><title>" + toString(code) + "</title></head>";
-        response.content += "<body><h1> WebFront " + std::to_string(code) + " " + toString(code) + "</h1></body></html>";
+        response.content += "<body><h1>" + std::to_string(code) + " " + toString(code) + "</h1></body></html>";
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", "text/html");
 
@@ -167,9 +167,8 @@ public:
                     response.statusCode = Response::StatusCode::switchingProtocols;
                     response.headers.emplace_back("Upgrade", "websocket");
                     response.headers.emplace_back("Connection", "Upgrade");
-                    response.headers.emplace_back(
-                      "Sec-WebSocket-Accept",
-                      base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+                    auto sec = base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"));
+                    response.headers.emplace_back("Sec-WebSocket-Accept", sec);
                     response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
                     return response;
                 }
@@ -219,33 +218,18 @@ public:
         return {};
     }
 
-private:
+private: // clang-format off
     enum class State {
-        methodStart,
-        method,
-        uri,
-        versionH,
-        versionT1,
-        versionT2,
-        versionP,
-        versionSlash,
-        versionMajorStart,
-        versionMajor,
-        versionMinorStart,
-        versionMinor,
-        newline1,
-        headerLineStart,
-        headerLws,
-        headerName,
-        spaceBeforeHeaderValue,
-        headerValue,
-        newline2,
-        newline3
+        methodStart, method, uri,
+        versionH, versionT1, versionT2, versionP, versionSlash,
+        versionMajorStart, versionMajor, versionMinorStart, versionMinor,
+        newline1, headerLineStart, headerLws, headerName,
+        spaceBeforeHeaderValue, headerValue, newline2, newline3
     };
     State state = State::methodStart;
     Request currentRequest;
 
-private: // clang-format off
+private: 
     bool completeRequest(char input, Request& req) {
         auto isChar = [](char c) { return c >= 0; };
         auto isCtrl = [](char c) { return (c >= 0 && c <= 31) || (c == 127); };
