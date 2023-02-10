@@ -160,14 +160,13 @@ public:
 class FunctionCall : public MessageBase<FunctionCall> {
     struct Header {
         Command command = Command::callFunction;
-        uint8_t parametersCount = 0;
+        uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
         std::array<uint8_t, 2> padding{};
         uint32_t parametersDataSize = 0;
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024>
-      buffer; // When composing a message, buffer does not represent the payload but some bufferized data to be sent
+    std::array<std::byte, 1024> buffer; // When composing a msg, buffer doesn't represent the payload but some bufferized data
     size_t encodeBufferIndex = 0;
     friend class MessageBase<FunctionCall>;
 
@@ -191,7 +190,9 @@ public:
     void setPayloadSize(uint32_t size) { head.parametersDataSize = size; }
     [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
     [[nodiscard]] size_t getPayloadSize() const { return head.parametersDataSize; }
-    void incrementPayloadSize(auto value) { setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value)); }
+    void incrementPayloadSize(auto value) {
+        setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value));
+    }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
         auto data = payload();
@@ -199,13 +200,12 @@ public:
         return {functionName, data};
     }
 
-
     template<typename T, typename WebSocketFrame>
     void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
-        
+
         if constexpr (is_printable<T>::value) {
             std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
         }
@@ -294,8 +294,7 @@ public:
             if constexpr (is_same_v<T, string>) {
                 if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2u + size)
-                    throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 2u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = string(reinterpret_cast<const char*>(&data[2]), size);
                 data = data.subspan(2 + size);
             }
@@ -306,8 +305,7 @@ public:
                 if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 uint16_t size;
                 copy_n(&data[1], 2, reinterpret_cast<byte*>(&size));
-                if (data.size() < 3u + size)
-                    throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < 3u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = string(reinterpret_cast<const char*>(&data[3]), size);
                 data = data.subspan(3 + size);
             }
@@ -326,11 +324,11 @@ public:
             if constexpr (is_tuple_v<T>) {
                 auto tupleSize = static_cast<size_t>(data[1]);
                 if (tuple_size_v<T> != tupleSize)
-                    throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) + " elements tuple but decoded tuple only has " + to_string(tupleSize) + " elements.");
+                    throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) +
+                                        " elements tuple but decoded tuple only has " + to_string(tupleSize) + " elements.");
                 cout << "tuple expected\n";
                 data = data.subspan(2);
                 std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
-
             }
             else
                 throw runtime_error("Wrong parameter type : std::tuple expected");
