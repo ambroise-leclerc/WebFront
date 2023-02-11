@@ -95,7 +95,6 @@ public:
     using Socket = SocketMock;
     using super::ConstBuffer;
     using super::MutableBuffer;
-    using Socket = SocketMock;
 
     template<typename WriteHandler>
     static void AsyncWrite(Socket socket, auto buffers, WriteHandler writeHandler) {
