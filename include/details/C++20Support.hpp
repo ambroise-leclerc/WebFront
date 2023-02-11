@@ -2,8 +2,10 @@
 /// @author Ambroise Leclerc
 /// @brief C++20 missing functionalities for selected targets
 #pragma once
-/*
-#ifdef __APPLE__
+
+#include <version>
+#ifndef __cpp_concepts
+#pragma message("Concepts minimal implementation added")
 #include <concepts>
 #include <type_traits>
 namespace std {
@@ -27,10 +29,11 @@ template<class T>
 concept movable = std::is_object_v<T> && std::move_constructible<T> && std::swappable<T>;
 } // namespace std
 #endif
-*/
-#if __has_include(<format>)
+
+#ifdef __cpp_lib_format
 #include <format>
 #else
+#pragma message("std::format minimal implementation added")
 #include <array>
 #include <chrono>
 #include <iomanip>
@@ -91,9 +94,10 @@ string format(std::string_view fmt, auto&&... ts) {
 
 #endif
 
-#if __has_include(<source_location>)
+#ifdef __cpp_lib_source_location
 #include <source_location>
 #else
+#pragma message("std::source_location minimal implementation added")
 namespace std {
 struct source_location {
     static source_location current() noexcept { return {}; }
