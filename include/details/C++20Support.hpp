@@ -2,7 +2,7 @@
 /// @author Ambroise Leclerc
 /// @brief C++20 missing functionalities for selected targets
 #pragma once
-
+/*
 #ifdef __APPLE__
 #include <concepts>
 #include <type_traits>
@@ -21,13 +21,13 @@ concept swappable = requires(T& t, T& t2) {
 };
 
 template<class T>
-concept move_constructible = constructible_from<T, T> && convertible_to<T, T>;
+concept move_constructible = std::constructible_from<T, T> && std::convertible_to<T, T>;
 
 template<class T>
-concept movable = is_object_v<T> && move_constructible<T> && swappable<T>;
+concept movable = std::is_object_v<T> && std::move_constructible<T> && std::swappable<T>;
 } // namespace std
 #endif
-
+*/
 #if __has_include(<format>)
 #include <format>
 #else

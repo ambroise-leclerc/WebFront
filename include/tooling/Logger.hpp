@@ -19,7 +19,8 @@ constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 static const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 
 namespace {
-    using namespace std; using srcLoc = source_location;
+    using namespace std;
+    using srcLoc = source_location;
     inline static struct Sinks {
         void operator()(string_view t) const { for (auto& s : sinks) if (s) s(t); }
         vector<function<void(string_view)>> sinks;
