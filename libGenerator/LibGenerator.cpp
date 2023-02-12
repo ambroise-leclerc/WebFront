@@ -4,7 +4,12 @@
 using namespace std;
 using nlohmann::json;
 
-class SourcesDir;
+
+class SourcesDir {
+public:
+    SourcesDir(std::string_view path) { cout << "Will parse " << path << "\n"; }
+};
+
 
 int main(int argc, char** argv) {
     cxxopts::Options options("libgen", "Single Header generator");
@@ -36,10 +41,3 @@ int main(int argc, char** argv) {
 
     return EXIT_SUCCESS;
 }
-
-class SourcesDir {
-public:
-    SourcesDir(std::string_view path) {
-        cout << "Will parse " << path << "\n";
-    }
-};

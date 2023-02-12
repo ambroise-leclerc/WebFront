@@ -19,7 +19,8 @@ constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 static const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 
 namespace {
-    using namespace std; using srcLoc = source_location;
+    using namespace std;
+    using srcLoc = source_location;
     inline static struct Sinks {
         void operator()(string_view t) const { for (auto& s : sinks) if (s) s(t); }
         vector<function<void(string_view)>> sinks;
@@ -31,14 +32,14 @@ namespace {
         out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(s.file_name()).filename().string(), s.line(), text));
     }
     template<typename... Ts> static void log(LogType l, string_view fmt, Ts&&... ts) {
-#if __has_include(<format>)
+#ifdef __cpp_lib_format
         log(l, vformat(fmt, make_format_args(forward<Ts>(ts)...)));
 #else
         log(l, format(fmt, forward<Ts>(ts)...));
 #endif
     }
     template<typename... Ts> static void log(LogType l, string_view fmt, const srcLoc& s, Ts&&... ts) {
-#if __has_include(<format>)
+#if __cpp_lib_format
         log(l, vformat(fmt, make_format_args(forward<Ts>(ts)...)), s);
 #else
         log(l, format(fmt, forward<Ts>(ts)...), s);

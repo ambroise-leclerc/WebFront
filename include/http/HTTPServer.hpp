@@ -59,7 +59,9 @@ struct Request {
 
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
-    bool isUpgradeRequest(std::string_view protocol) const { return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol); }
+    bool isUpgradeRequest(std::string_view protocol) const {
+        return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol);
+    }
 
     std::optional<std::string> getHeaderValue(std::string_view headerName) const {
         for (auto& header : headers)
@@ -72,16 +74,18 @@ private:
     bool headerContains(std::string_view headerName, std::string_view text) const {
         auto header = getHeaderValue(headerName);
         if (header) {
-            if (std::search(header.value().cbegin(), header.value().cend(), text.cbegin(), text.cend(),
-                            [](char c1, char c2) { return (c1 == c2 || std::toupper(c1) == std::toupper(c2)); }) != header.value().cend())
+            if (std::search(header.value().cbegin(), header.value().cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
+                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
+                }) != header.value().cend())
                 return true;
         }
         return false;
     }
 
     static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
-        return ((s1.size() == s2.size()) &&
-                std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) { return (c1 == c2 || std::toupper(c1) == std::toupper(c2)); }));
+        return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
+                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
+                }));
     }
 };
 
@@ -139,28 +143,32 @@ private:
 template<typename Net>
 class RequestHandler {
 public:
-    RequestHandler(const RequestHandler&) = delete;
-    RequestHandler& operator=(const RequestHandler&) = delete;
-
     explicit RequestHandler(std::filesystem::path root) : documentRoot(root) {}
+    ~RequestHandler() = default;
+    RequestHandler(const RequestHandler&) = default;
+    RequestHandler(RequestHandler&&) = default;
+    RequestHandler& operator=(const RequestHandler&) = default;
+    RequestHandler& operator=(RequestHandler&&) = default;
 
     Response handleRequest(Request request) {
         auto requestUri = uri::decode(request.uri);
-        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos) return Response::getStatusResponse(Response::badRequest);
+        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
+            return Response::getStatusResponse(Response::badRequest);
         auto requestPath = documentRoot / std::filesystem::path(requestUri).relative_path();
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;
         switch (request.method) {
         case Request::Method::Get:
+            log::debug("HTTP Get {}", requestPath.string());
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
                 if (key) {
                     response.statusCode = Response::StatusCode::switchingProtocols;
                     response.headers.emplace_back("Upgrade", "websocket");
                     response.headers.emplace_back("Connection", "Upgrade");
-                    response.headers.emplace_back("Sec-WebSocket-Accept",
-                                                  base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+                    auto sec = base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"));
+                    response.headers.emplace_back("Sec-WebSocket-Accept", sec);
                     response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
                     return response;
                 }
@@ -172,7 +180,8 @@ public:
 
             if (request.method == Request::Method::Get) {
                 char buffer[512];
-                while (file.read(buffer, sizeof(buffer)).gcount() > 0) response.content.append(buffer, static_cast<size_t>(file.gcount()));
+                while (file.read(buffer, sizeof(buffer)).gcount() > 0)
+                    response.content.append(buffer, static_cast<size_t>(file.gcount()));
             }
         } break;
 
@@ -213,26 +222,9 @@ public:
 
 private:
     enum class State {
-        methodStart,
-        method,
-        uri,
-        versionH,
-        versionT1,
-        versionT2,
-        versionP,
-        versionSlash,
-        versionMajorStart,
-        versionMajor,
-        versionMinorStart,
-        versionMinor,
-        newline1,
-        headerLineStart,
-        headerLws,
-        headerName,
-        spaceBeforeHeaderValue,
-        headerValue,
-        newline2,
-        newline3
+        methodStart, method, uri, versionH, versionT1, versionT2, versionP, versionSlash,
+        versionMajorStart, versionMajor, versionMinorStart, versionMinor, newline1,
+        headerLineStart, headerLws, headerName, spaceBeforeHeaderValue, headerValue, newline2, newline3
     };
     State state;
     Request currentRequest;
@@ -247,7 +239,7 @@ private: // clang-format off
             default: return false;
         }};
         auto isDigit = [](char c) { return c >= '0' && c <= '9'; };
-        auto check = [this](bool cond, State next) {
+        auto setState = [this](bool cond, State next) {
             state = next;
             if (cond) throw BadRequestException();
         };
@@ -256,7 +248,7 @@ private: // clang-format off
 
         switch (state) {
             case State::methodStart:
-                check(!isChar(input) || isCtrl(input) || isSpecial(input), State::method);
+                setState(!isChar(input) || isCtrl(input) || isSpecial(input), State::method);
                 buffer = input;
                 break;
             case State::method: if (input == ' ') { state = State::uri; req.setMethod(buffer); }
@@ -266,25 +258,25 @@ private: // clang-format off
             case State::uri: if (input == ' ') { state = State::versionH; break; }
                            else if (isCtrl(input)) throw BadRequestException();
                            else { req.uri.push_back(input); break; }
-            case State::versionH: check(input != 'H', State::versionT1); break;
-            case State::versionT1: check(input != 'T', State::versionT2); break;
-            case State::versionT2: check(input != 'T', State::versionP); break;
-            case State::versionP: check(input != 'P', State::versionSlash); break;
-            case State::versionSlash: check(input != '/', State::versionMajorStart); req.httpVersionMajor = 0; req.httpVersionMinor = 0; break;
-            case State::versionMajorStart: check(!isDigit(input), State::versionMajor); req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0'; break;
+            case State::versionH: setState(input != 'H', State::versionT1); break;
+            case State::versionT1: setState(input != 'T', State::versionT2); break;
+            case State::versionT2: setState(input != 'T', State::versionP); break;
+            case State::versionP: setState(input != 'P', State::versionSlash); break;
+            case State::versionSlash: setState(input != '/', State::versionMajorStart); req.httpVersionMajor = 0; req.httpVersionMinor = 0; break;
+            case State::versionMajorStart: setState(!isDigit(input), State::versionMajor); req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0'; break;
             case State::versionMajor: if (input == '.') state = State::versionMinorStart;
                                     else if (isDigit(input)) req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0';
                                     else throw BadRequestException();
                 break;
             case State::versionMinorStart:
-                check(!isDigit(input), State::versionMinor);
+                setState(!isDigit(input), State::versionMinor);
                 req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                 break;
             case State::versionMinor: if (input == '\r') state = State::newline1;
                                     else if (isDigit(input)) req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
                                     else throw BadRequestException();
                 break;
-            case State::newline1: check(input != '\n', State::headerLineStart); break;
+            case State::newline1: setState(input != '\n', State::headerLineStart); break;
             case State::headerLineStart: if (input == '\r') { state = State::newline3; break; }
                                        else if (!req.headers.empty() && (input == ' ' || input == '\t')) { state = State::headerLws; break; }
                                        else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
@@ -296,11 +288,11 @@ private: // clang-format off
             case State::headerName: if (input == ':') { state = State::spaceBeforeHeaderValue; break; }
                                   else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
                                   else { req.headers.back().name.push_back(input); break; }
-            case State::spaceBeforeHeaderValue: check(input != ' ', State::headerValue); break;
+            case State::spaceBeforeHeaderValue: setState(input != ' ', State::headerValue); break;
             case State::headerValue: if (input == '\r') { state = State::newline2; break; }
                                    else if (isCtrl(input)) throw BadRequestException();
                                    else { req.headers.back().value.push_back(input); break; }
-            case State::newline2: check(input != '\n', State::headerLineStart); break;
+            case State::newline2: setState(input != '\n', State::headerLineStart); break;
             case State::newline3: if (input == '\n') return true; else throw BadRequestException();
             default: throw BadRequestException();
         }
@@ -344,13 +336,15 @@ enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 template<typename Net>
 class Connection : public std::enable_shared_from_this<Connection<Net>> {
 public:
-    Connection(const Connection&) = delete;
-    Connection& operator=(const Connection&) = delete;
-
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         log::debug("New connection");
     }
+    ~Connection() = default;
+    Connection(const Connection&) = delete;
+    Connection(Connection&&) = delete;
+    Connection& operator=(const Connection&) = delete;
+    Connection& operator=(Connection&&) = delete;
 
     void start() { read(); }
     void stop() { socket.close(); }
@@ -413,12 +407,11 @@ private:
 };
 
 template<typename Net>
-requires networking::Features<Net>
+    requires networking::Features<Net>
 class Server {
 public:
-    Server(const Server&) = delete;
-    Server& operator=(const Server&) = delete;
-    explicit Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".") : acceptor(ioContext), requestHandler(docRoot) {
+    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
+        : acceptor(ioContext), requestHandler(docRoot) {
         typename Net::Resolver resolver(ioContext);
         typename Net::Endpoint endpoint = *resolver.resolve(address, port).begin();
         acceptor.open(endpoint.protocol());
@@ -427,6 +420,12 @@ public:
         acceptor.listen();
         accept();
     }
+    ~Server() = default;
+    Server(const Server&) = delete;
+    Server(Server&&) = delete;
+    Server& operator=(const Server&) = delete;
+    Server& operator=(Server&&) = delete;
+    
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
