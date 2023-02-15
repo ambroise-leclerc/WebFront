@@ -16,16 +16,20 @@
 namespace webfront::log {
 using LogType = const uint8_t;
 constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
-static const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
+const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
+inline bool logTypeEnabled[Debug + 1];
+inline struct Sinks {
+    void operator()(std::string_view t) const {
+        for (auto& s : sinks)
+            if (s) s(t);
+    }
+    inline static std::vector<std::function<void(std::string_view)>> sinks;
+} out;
 
 namespace {
     using namespace std;
     using srcLoc = source_location;
-    inline static struct Sinks {
-        void operator()(string_view t) const { for (auto& s : sinks) if (s) s(t); }
-        vector<function<void(string_view)>> sinks;
-    } out;
-    inline static array<bool, 5> logTypeEnabled;
+    
     constexpr auto toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
     inline static void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
     inline static void log(LogType l, string_view text, const srcLoc& s) {
@@ -46,8 +50,8 @@ namespace {
 #endif
     }
 
-    inline static void set(LogType logType, bool enabled) { logTypeEnabled.at(logType) = enabled; }
-    inline static bool is(LogType logType) { return logTypeEnabled.at(logType); }
+    inline static void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
+    inline static bool is(LogType logType) { return logTypeEnabled[logType]; }
     inline static void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
 }
 

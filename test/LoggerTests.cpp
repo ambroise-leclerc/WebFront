@@ -12,6 +12,16 @@ SCENARIO("Logger") {
     std::list<std::string> logs;
     auto testSink = [&logs](std::string_view text) { logs.emplace_back(text); };
 
+    GIVEN("A logger already initialized in main test file") {
+        WHEN("A debug and a warn log are issued") {
+            auto sinkId = log::addSinks(testSink);
+            log::debug("debug log 5");
+            log::warn("warn log 6");
+            THEN("The precedent configuration has persisted and only warnings are enabled") { REQUIRE(logs.size() == 1); }
+            log::removeSinks(sinkId);
+        }
+    }
+
     GIVEN("A Logger with a debug level config") {
         log::setLogLevel(log::Debug);
         auto sinkId = log::addSinks(testSink);
