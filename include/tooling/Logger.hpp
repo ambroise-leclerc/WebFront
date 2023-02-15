@@ -19,17 +19,22 @@ constinit LogType Disabled = 0, Error = 1, Warn = 2, Info = 3, Debug = 4;
 const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 inline bool logTypeEnabled[Debug + 1];
 inline struct Sinks {
-    void operator()(std::string_view t) const { for (auto& s : sinks) if (s) s(t); }
+    void operator()(std::string_view t) const {
+        for (auto& s : sinks)
+            if (s) s(t);
+    }
     inline static std::vector<std::function<void(std::string_view)>> sinks;
 } out;
 
+
+// NOTE : functions below are defined inline static in order to avoir clang "uneeded function" and "unused function" errors
 namespace {
     using namespace std;
     using srcLoc = source_location;
     
     constexpr auto toChar(LogType l) { return l == Debug ? 'D' : l == Warn ? 'W' : l == Error ? 'E' : 'I'; }
-    void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
-    void log(LogType l, string_view text, const srcLoc& s) {
+    inline static void log(LogType l, string_view text) { out(format("[{}] {:%T} | {}", toChar(l), chrono::system_clock::now(), text));}
+    inline static void log(LogType l, string_view text, const srcLoc& s) {
         out(format("[{}] {:%T} | {:16}:{:4} | {}", toChar(l), chrono::system_clock::now(), filesystem::path(s.file_name()).filename().string(), s.line(), text));
     }
     template<typename... Ts> static void log(LogType l, string_view fmt, Ts&&... ts) {
@@ -47,9 +52,9 @@ namespace {
 #endif
     }
 
-    void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
-    bool is(LogType logType) { return logTypeEnabled[logType]; }
-    void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
+    inline static void set(LogType logType, bool enabled) { logTypeEnabled[logType] = enabled; }
+    inline static bool is(LogType logType) { return logTypeEnabled[logType]; }
+    inline static void setLogLevel(LogType l) { set(Error, l >= Error); set(Warn, l >= Warn); set(Info, l >= Info); set(Debug, l >= Debug);}
 }
 
 template<typename... Ts> struct debug { debug(string_view fmt, Ts&&... ts, const srcLoc& l = srcLoc::current()) {
