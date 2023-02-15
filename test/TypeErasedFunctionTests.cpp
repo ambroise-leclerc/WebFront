@@ -1,6 +1,6 @@
 #include <utils/TypeErasedFunction.hpp>
 
-#include <catch2/catch.hpp>
+#include <doctest/doctest.h>
 
 #include <map>
 #include <string>
