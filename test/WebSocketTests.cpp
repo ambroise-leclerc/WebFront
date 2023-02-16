@@ -1,7 +1,7 @@
 #include <http/WebSocket.hpp>
 #include <networking/NetworkingMock.hpp>
 
-#include <catch2/catch.hpp>
+#include <doctest/doctest.h>
 
 #include <array>
 

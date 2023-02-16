@@ -1,5 +1,4 @@
-#include <catch2/catch.hpp>
-
+#include <doctest/doctest.h>
 #include <JsFunction.hpp>
 #include <networking/NetworkingMock.hpp>
 

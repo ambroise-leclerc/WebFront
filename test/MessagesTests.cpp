@@ -3,7 +3,7 @@
 #include <tooling/HexDump.hpp>
 #include <weblink/Messages.hpp>
 
-#include <catch2/catch.hpp>
+#include <doctest/doctest.h>
 
 #include <span>
 #include <stdexcept>
