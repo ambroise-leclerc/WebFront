@@ -1,3 +1,5 @@
+option(ENABLE_TEST_COVERAGE "Enable test coverage" OFF)
+
 CPMAddPackage("gh:doctest/doctest@2.4.9")
 
 find_package(Threads)
@@ -13,3 +15,7 @@ target_include_directories(tests PRIVATE ${CMAKE_SOURCE_DIR}/include SYSTEM ${CM
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 doctest_discover_tests(tests)
 
+if(ENABLE_TEST_COVERAGE)
+  target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)
+  target_link_options(tests PUBLIC -fprofile-arcs -ftest-coverage)
+endif()
