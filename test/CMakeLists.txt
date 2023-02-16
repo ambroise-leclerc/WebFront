@@ -1,4 +1,4 @@
-option(ENABLE_TEST_COVERAGE "Enable test coverage" ON)
+option(ENABLE_TEST_COVERAGE "Enable test coverage" OFF)
 
 CPMAddPackage("gh:doctest/doctest@2.4.9")
 

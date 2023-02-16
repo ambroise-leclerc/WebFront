@@ -29,9 +29,6 @@ jobs:
 
     - name: Test
       working-directory: ${{github.workspace}}/build
-      run: ctest --verbose -C ${{env.BUILD_TYPE}} -T Test -T Coverage
-            
-    - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
+      run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
 

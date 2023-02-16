@@ -24,7 +24,7 @@ jobs:
 
     - name: Config & Build
       run:  |
-          cmake . -B ${{github.workspace}}/build
+          cmake . -B ${{github.workspace}}/build -DENABLE_TEST_COVERAGE=ON
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
 
     - name: Test
