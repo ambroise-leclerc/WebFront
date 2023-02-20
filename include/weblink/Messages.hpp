@@ -305,9 +305,9 @@ public:
                 if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 uint16_t size;
                 copy_n(&data[1], 2, reinterpret_cast<byte*>(&size));
-                if (data.size() < 3u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
+                if (data.size() < (size + 3u)) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
                 param = string(reinterpret_cast<const char*>(&data[3]), size);
-                data = data.subspan(3 + size);
+                data = data.subspan(size + 3u);
             }
             break;
         case CodedType::number:
