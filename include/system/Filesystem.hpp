@@ -78,7 +78,7 @@ public:
 
             static istream& read(char* s, size_t count) { return get(s, count); }
             static istream& get(char* s, size_t count) {
-                static istream stream{.readIndex = 0};
+                static istream stream{.readIndex{0}, .lastReadCount{0}, .eofBit{false}, .badBit{false}};
                 static std::array<char, 8> chunk;
 
                 stream.lastReadCount = 0;
