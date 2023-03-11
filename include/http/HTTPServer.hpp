@@ -176,6 +176,7 @@ public:
             [[fallthrough]];
         case Request::Method::Head: {
             std::ifstream file(requestPath, std::ios::in | std::ios::binary);
+            //auto file = FileSystem::open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
 
             if (request.method == Request::Method::Get) {

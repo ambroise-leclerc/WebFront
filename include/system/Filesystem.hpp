@@ -5,6 +5,7 @@
 
 #include <array>
 #include <bit>
+#include <cstring>
 #include <optional>
 #include <string_view>
 
