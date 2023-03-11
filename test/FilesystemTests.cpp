@@ -15,7 +15,8 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
         using FS = webfront::filesystem::IndexFS;
         WHEN("Requesting index.html") {
             auto indexFile = FS::open("index.html");
-            THEN("correct data is returned") { REQUIRE(indexFile.has_value());
+            THEN("correct data is returned") {
+                REQUIRE(indexFile.has_value());
 
             }
         }
