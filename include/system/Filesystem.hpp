@@ -7,6 +7,7 @@
 #include <bit>
 #include <cstring>
 #include <optional>
+#include <sstream>
 #include <string_view>
 
 namespace webfront {
@@ -23,13 +24,14 @@ class IndexFS {
 public:
     class File {
     public:
-        enum FileId { index, favicon };
+        enum FileId { index, favicon, webfront };
 
         File(FileId id) : fileId(id) {}
-        size_t read(auto& buffer) const { return read(buffer, buffer.size()); }
-        size_t read(auto& buffer, size_t size) const {
+        size_t read(auto& buffer) { return read(buffer, buffer.size()); }
+        size_t read(auto& buffer, size_t size) {
             switch (fileId) {
-            case index: return 0;
+            case index:
+                return indexHtml.read(reinterpret_cast<char*>(buffer.data()), size).gcount(); 
             case favicon:
                 return WebfrontIco::read(reinterpret_cast<char*>(buffer.data()), size).gcount();
             }
@@ -38,6 +40,13 @@ public:
 
     private:
         FileId fileId;
+
+        std::stringstream indexHtml { 
+            "<!DOCTYPE html>\n"
+            "<html>\n"
+            "<head>\n  <meta charset=\"utf-8\">\n  <title>Webfront</title>\n</head>\n"
+            "<script src=\"WebFront.js\"></script>"
+            "</html>\n"};
 
         struct WebfrontIco {
             static constexpr size_t data_size{766};
@@ -108,6 +117,8 @@ public:
             return File(File::index);
         else if (filename == "favicon.ico")
             return File(File::favicon);
+        else if (filename == "WebFront.js")
+            return File(File::webfront);
         return {};
     }
 };
