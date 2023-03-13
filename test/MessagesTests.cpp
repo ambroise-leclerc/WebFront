@@ -10,6 +10,7 @@
 
 using namespace std;
 using namespace webfront;
+
 SCENARIO("Handshake message") {
     std::array<uint8_t, 2> raw{0x00, 0x00};
     auto handshake = msg::Handshake::castFromRawData(std::span(reinterpret_cast<const std::byte*>(raw.data()), raw.size()));

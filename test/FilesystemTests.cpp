@@ -27,8 +27,6 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
 
                 smatch match;
                 REQUIRE(regex_search(html, match, regex("<script.*src=\"WebFront.js\".*>")));
-
-
             }
         }
         WHEN("Requesting favicon.ico") {
@@ -48,9 +46,13 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
                 REQUIRE(equal(tail.begin(), tail.end(), buffer.begin() + readSize - tail.size()));
             }
         }
-        WHEN("Requesting webfront.js") { auto webfrontJSFile = FS::open("WebFront.js");
+        WHEN("Requesting WebFront.js") { auto webfrontJSFile = FS::open("WebFront.js");
             THEN("correct data is returned") { REQUIRE(webfrontJSFile.has_value());
-
+                array<char, 128> buffer;
+                
+                webfrontJSFile->read(buffer);
+                cout << "WebfrontJS : " << std::string(buffer.data(), buffer.size()) << "\n";
+                
 
             }
         }

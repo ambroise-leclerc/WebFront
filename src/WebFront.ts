@@ -3,6 +3,8 @@
 /// @brief WebFront client core
 
 namespace webfront {
+    const version = { major:0, minor:1, patch:1}
+
     function computeEndianness() {
         let uInt32 = new Uint32Array([0x110000ff]);
         let uInt8 = new Uint8Array(uInt32);
