@@ -40,7 +40,7 @@ public:
     static istream& read(char* s, size_t count) { return get(s, count); }
     static istream& get(char* s, size_t count) {
         static istream stream{.readIndex =0, .lastReadCount =0, .eofBit = false, .badBit =false};
-        constexpr auto bytesPerInt = sizeof(decltype(Data::data)::size_type);
+        constexpr auto bytesPerInt = sizeof(typename decltype(Data::data)::size_type);
         static std::array<char, bytesPerInt> chunk;
         
         stream.lastReadCount = 0;
@@ -74,7 +74,7 @@ public:
         size_t read(auto& buffer, size_t size) {
             switch (fileId) {
             case index:
-                return indexHtml.read(reinterpret_cast<char*>(buffer.data()), size).gcount(); 
+                return static_cast<size_t>(indexHtml.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size)).gcount()); 
             case favicon:
                 return Streamer<WebfrontIco>::read(reinterpret_cast<char*>(buffer.data()), size).gcount();
             case webfront:
