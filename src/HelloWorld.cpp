@@ -21,7 +21,7 @@ auto openInDefaultBrowser(std::string_view port, std::string_view file) {
 int main(int /*argc*/, char** argv) {
     using namespace std;
     using namespace webfront;
-    namespace fs = filesystem;
+    namespace fs = std::filesystem;
 
     auto httpPort = "9002";
     auto httpRoot = fs::weakly_canonical(fs::path(argv[0])).parent_path();

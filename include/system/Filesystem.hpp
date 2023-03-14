@@ -6,21 +6,14 @@
 #include <array>
 #include <bit>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <sstream>
 #include <string_view>
 
-namespace webfront {
+namespace webfront::filesystem {
 
-namespace filesystem {
-
-template<typename T, typename Buffer>
-concept File = requires(T f, Buffer buffer, size_t size) { f.read(buffer, size); };
-
-template<typename T>
-concept Filesystem = requires(T fs, std::string_view filename) { T::open(filename); };
-
-
+namespace {
 template<typename Data>
 class Streamer {
 public:
@@ -62,6 +55,7 @@ public:
         return stream;
     }
 };
+} // namespace
 
 class IndexFS {
 public:
@@ -76,9 +70,9 @@ public:
             case index:
                 return static_cast<size_t>(indexHtml.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size)).gcount()); 
             case favicon:
-                return Streamer<WebfrontIco>::read(reinterpret_cast<char*>(buffer.data()), size).gcount();
+                return WebfrontIco::read(reinterpret_cast<char*>(buffer.data()), size).gcount();
             case webfront:
-                return Streamer<WebFrontJs0_1_1>::read(reinterpret_cast<char*>(buffer.data()), size).gcount();
+                return WebFrontJs0_1_1::read(reinterpret_cast<char*>(buffer.data()), size).gcount();
             }
             return 0;
         }
@@ -93,7 +87,7 @@ public:
             "<script src=\"WebFront.js\"></script>"
             "</html>\n"};
 
-        struct WebfrontIco {
+        struct WebfrontIco : Streamer<WebfrontIco> {
             static constexpr size_t data_size{766};
             static constexpr std::array<uint64_t, 96> data{
               0x0000010001002020, 0x100001000400e802, 0x0000160000002800, 0x0000200000004000, 0x0000010004000000,
@@ -118,7 +112,7 @@ public:
               0x0001e00000070000};
         };
 
-        struct WebFrontJs0_1_1 {
+        struct WebFrontJs0_1_1 : Streamer<WebFrontJs0_1_1> {
             static constexpr size_t data_size{ 4596 };
             static constexpr std::array<uint64_t, 575> data {
                 0x2275736520737472, 0x696374223b766172, 0x2077656266726f6e, 0x743b2866756e6374, 0x696f6e2877297b63, 0x6f6e737420453d7b, 0x6d616a6f723a302c, 0x6d696e6f723a312c,
@@ -198,7 +192,8 @@ public:
     };
 
 public:
-    static std::optional<File> open(std::string_view filename) {
+    static std::optional<File> open(std::filesystem::path file) {
+        auto filename = file.relative_path().string();
         if (filename == "index.html")
             return File(File::index);
         else if (filename == "favicon.ico")
@@ -211,6 +206,4 @@ public:
 
 class NativeFS {};
 
-} // namespace filesystem
-
-} // namespace webfront
+} // namespace webfront::filesystem

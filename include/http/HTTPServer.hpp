@@ -140,7 +140,7 @@ private:
     }
 };
 
-template<typename Net>
+template<typename Net, typename Filesystem>
 class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root) : documentRoot(root) {}
@@ -175,14 +175,14 @@ public:
             }
             [[fallthrough]];
         case Request::Method::Head: {
-            std::ifstream file(requestPath, std::ios::in | std::ios::binary);
-            //auto file = FileSystem::open(requestPath);
+            auto file = Filesystem::open(requestPath);
+            //std::ifstream file(requestPath, std::ios::in | std::ios::binary);
             if (!file) return Response::getStatusResponse(Response::notFound);
 
             if (request.method == Request::Method::Get) {
-                char buffer[512];
-                while (file.read(buffer, sizeof(buffer)).gcount() > 0)
-                    response.content.append(buffer, static_cast<size_t>(file.gcount()));
+                std::array<char, 512> buffer{0, 0};
+                while (size_t byteCounts = file->read(buffer) > 0)
+                    response.content.append(buffer.data(), byteCounts);
             }
         } break;
 
@@ -334,10 +334,10 @@ private:
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
-template<typename Net>
-class Connection : public std::enable_shared_from_this<Connection<Net>> {
+template<typename Net, typename Filesystem>
+class Connection : public std::enable_shared_from_this<Connection<Net, Filesystem>> {
 public:
-    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
+    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net, Filesystem>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         log::debug("New connection");
     }
@@ -355,8 +355,8 @@ public:
 
 private:
     typename Net::Socket socket;
-    Connections<Connection<Net>>& connections;
-    RequestHandler<Net>& requestHandler;
+    Connections<Connection<Net, Filesystem>>& connections;
+    RequestHandler<Net, Filesystem>& requestHandler;
     std::array<char, 8192> buffer;
     RequestParser requestParser;
     Response response;
@@ -407,7 +407,7 @@ private:
     }
 };
 
-template<typename Net>
+template<typename Net, typename Filesystem>
     requires networking::Features<Net>
 class Server {
 public:
@@ -436,14 +436,14 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    Connections<Connection<Net>> connections;
-    RequestHandler<Net> requestHandler;
+    Connections<Connection<Net, Filesystem>> connections;
+    RequestHandler<Net, Filesystem> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection<Net>>(std::move(socket), connections, requestHandler);
+            auto newConnection = std::make_shared<Connection<Net, Filesystem>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
             accept();

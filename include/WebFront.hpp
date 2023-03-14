@@ -6,6 +6,7 @@
 #include "http/HTTPServer.hpp"
 #include "tooling/HexDump.hpp"
 #include "utils/TypeErasedFunction.hpp"
+#include "system/Filesystem.hpp"
 #include "weblink/WebLink.hpp"
 
 #include "networking/TCPNetworkingTS.hpp"
@@ -52,11 +53,11 @@ public:
     }
 };
 
-template<typename NetProvider>
+template<typename NetProvider, typename Filesystem>
 class BasicWF {
 public:
     using Net = NetProvider;
-    using UI = BasicUI<BasicWF<Net>>;
+    using UI = BasicUI<BasicWF<Net, Filesystem>>;
 
     BasicWF(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
@@ -95,7 +96,7 @@ public:
     }
 
 private:
-    http::Server<Net> httpServer;
+    http::Server<Net, Filesystem> httpServer;
     std::map<WebLinkId, WebLink<Net>> webLinks;
     WebLinkId idsCounter;
     std::function<void(UI)> uiStartedHandler;
@@ -111,7 +112,7 @@ private:
     }
 };
 
-using WebFront = BasicWF<NetProvider>;
+using WebFront = BasicWF<NetProvider, filesystem::IndexFS>;
 using UI = WebFront::UI;
 
 } // namespace webfront

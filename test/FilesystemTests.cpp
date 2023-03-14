@@ -47,12 +47,17 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
             }
         }
         WHEN("Requesting WebFront.js") { auto webfrontJSFile = FS::open("WebFront.js");
-            THEN("correct data is returned") { REQUIRE(webfrontJSFile.has_value());
-                array<char, 128> buffer;
+            THEN("Wbefront.js V0.0.1 content should be returned") { REQUIRE(webfrontJSFile.has_value());
+                array<char, 256> buffer;
                 
                 webfrontJSFile->read(buffer);
-                cout << "WebfrontJS : " << std::string(buffer.data(), buffer.size()) << "\n";
-                
+                              
+                string js{buffer.data(), buffer.size()};
+                smatch match;
+                REQUIRE(regex_search(js, match, regex("var webfront")));
+                REQUIRE(regex_search(js, match, regex("major:0")));
+                REQUIRE(regex_search(js, match, regex("minor:1")));
+                REQUIRE(regex_search(js, match, regex("patch:1")));
 
             }
         }

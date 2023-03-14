@@ -118,6 +118,14 @@ SCENARIO("RequestParser") {
     }
 }
 
+struct MockFileSystem {
+    struct File {
+        size_t read(auto, size_t = 0) { return 0; }
+    };
+
+    static std::optional<File> open(auto) { return {}; }
+};
+
 SCENARIO("RequestHandler") {
     GIVEN("A valid HTTP request with an unimplemented method") {
         RequestParser parser;
@@ -130,7 +138,7 @@ SCENARIO("RequestHandler") {
         REQUIRE(request.value().uri == "/ressource.txt");
         REQUIRE(request.value().method == Request::Method::Delete);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net> handler{"."};
+            RequestHandler<Net, MockFileSystem> handler{"."};
             auto response = handler.handleRequest(request.value());
 
             THEN("It should respond with a 'Not Implemented' http response") {
@@ -159,7 +167,7 @@ SCENARIO("RequestHandler") {
         REQUIRE(request.value().uri == "/chat");
         REQUIRE(request.value().method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net> handler{"."};
+            RequestHandler<Net, MockFileSystem> handler{"."};
             auto response = handler.handleRequest(request.value());
 
             THEN("It should respond with a 'Switching Protocols' http response") {
