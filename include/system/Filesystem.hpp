@@ -13,7 +13,6 @@
 
 namespace webfront::filesystem {
 
-namespace {
 template<typename Data>
 class Streamer {
 public:
@@ -55,7 +54,8 @@ public:
         return stream;
     }
 };
-} // namespace
+
+
 
 class IndexFS {
 public:
