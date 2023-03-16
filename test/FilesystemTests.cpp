@@ -11,7 +11,6 @@
 using namespace std;
 using namespace webfront;
 
-
 SCENARIO("IndexFileStystem provides basic files for browser support") {
     GIVEN("An IndexFS") {
         using FS = webfront::filesystem::IndexFS;
@@ -22,7 +21,7 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
                 array<char, 1024> buffer;
                 indexFile->read(buffer);
 
-                string html{buffer.data(), buffer.size()};
+                string html{buffer.data(), indexFile->gcount()};
                 REQUIRE(html.starts_with("<!DOCTYPE html>"));
 
                 smatch match;
@@ -35,30 +34,38 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
                 REQUIRE(faviconFile.has_value());
 
                 array<uint8_t, 1024> buffer;
-                auto readSize = faviconFile->read(buffer);
+                auto readSize = faviconFile->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
                 REQUIRE(readSize == 766);
 
                 array<uint8_t, 16> head{0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x20, 0x20,
-                                             0x10, 0x00, 0x01, 0x00, 0x04, 0x00, 0xE8, 0x02};
+                                        0x10, 0x00, 0x01, 0x00, 0x04, 0x00, 0xE8, 0x02};
                 array<uint8_t, 16> tail{0X00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00,
-                                             0x80, 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x07};
+                                        0x80, 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x07};
                 REQUIRE(equal(head.begin(), head.end(), buffer.begin()));
                 REQUIRE(equal(tail.begin(), tail.end(), buffer.begin() + readSize - tail.size()));
+
+                readSize = faviconFile->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 0);
             }
         }
-        WHEN("Requesting WebFront.js") { auto webfrontJSFile = FS::open("WebFront.js");
-            THEN("Wbefront.js V0.0.1 content should be returned") { REQUIRE(webfrontJSFile.has_value());
-                array<char, 256> buffer;
-                
-                webfrontJSFile->read(buffer);
-                              
-                string js{buffer.data(), buffer.size()};
+        WHEN("Requesting WebFront.js") {
+            auto webfrontJSFile = FS::open("WebFront.js");
+            THEN("Wbefront.js V0.0.1 content should be returned") {
+                REQUIRE(webfrontJSFile.has_value());
+                array<uint8_t, 10> gzipHeader;
+                webfrontJSFile->read(reinterpret_cast<char*>(gzipHeader.data()), gzipHeader.size());
+
+                REQUIRE(gzipHeader[0] == 0x1f);
+                REQUIRE(gzipHeader[1] == 0x8b);
+                REQUIRE(gzipHeader[2] == 0x08);
+
+
+                /* string js{buffer.data(), buffer.size()};
                 smatch match;
                 REQUIRE(regex_search(js, match, regex("var webfront")));
                 REQUIRE(regex_search(js, match, regex("major:0")));
                 REQUIRE(regex_search(js, match, regex("minor:1")));
-                REQUIRE(regex_search(js, match, regex("patch:1")));
-
+                REQUIRE(regex_search(js, match, regex("patch:1"))); */
             }
         }
     }

@@ -119,8 +119,12 @@ SCENARIO("RequestParser") {
 }
 
 struct MockFileSystem {
+    MockFileSystem(auto) {};
     struct File {
-        size_t read(auto, size_t = 0) { return 0; }
+        bool isEncoded() const { return false; }
+        std::string_view getEncoding() const { return {}; }
+        size_t gcount() const { return 0; }
+        File& read(auto, size_t = 0) { return *this; }
     };
 
     static std::optional<File> open(auto) { return {}; }

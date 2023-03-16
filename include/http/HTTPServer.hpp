@@ -143,7 +143,7 @@ private:
 template<typename Net, typename Filesystem>
 class RequestHandler {
 public:
-    explicit RequestHandler(std::filesystem::path root) : documentRoot(root) {}
+    explicit RequestHandler(std::filesystem::path root) : fs(root) {}
     ~RequestHandler() = default;
     RequestHandler(const RequestHandler&) = default;
     RequestHandler(RequestHandler&&) = default;
@@ -154,12 +154,12 @@ public:
         auto requestUri = uri::decode(request.uri);
         if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
-        auto requestPath = documentRoot / std::filesystem::path(requestUri).relative_path();
+        auto requestPath = std::filesystem::path(requestUri).relative_path();
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;
         switch (request.method) {
-        case Request::Method::Get:
+        case Request::Method::Get: {
             log::debug("HTTP Get {}", requestPath.string());
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
@@ -173,18 +173,18 @@ public:
                     return response;
                 }
             }
-            [[fallthrough]];
-        case Request::Method::Head: {
+            
             auto file = Filesystem::open(requestPath);
-            //std::ifstream file(requestPath, std::ios::in | std::ios::binary);
             if (!file) return Response::getStatusResponse(Response::notFound);
-
-            if (request.method == Request::Method::Get) {
-                std::array<char, 512> buffer{0, 0};
-                while (size_t byteCounts = file->read(buffer) > 0)
-                    response.content.append(buffer.data(), byteCounts);
-            }
+            
+            std::array<char, 512> buffer{0, 0};
+            while (file->read(buffer).gcount() != 0) response.content.append(buffer.data(), file->gcount());
+            if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
+            
         } break;
+        case Request::Method::Head:
+            if (!Filesystem::open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
         };
@@ -192,12 +192,13 @@ public:
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
+        if (requestPath.string() == "WebFront.js") response.headers.emplace_back("Content-Encoding", "gzip");
 
         return response;
     }
 
 private:
-    const std::filesystem::path documentRoot;
+    Filesystem fs;
 };
 
 struct BadRequestException : public std::runtime_error {
