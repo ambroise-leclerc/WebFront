@@ -140,10 +140,10 @@ private:
     }
 };
 
-template<typename Net>
+template<typename Net, typename Filesystem>
 class RequestHandler {
 public:
-    explicit RequestHandler(std::filesystem::path root) : documentRoot(root) {}
+    explicit RequestHandler(std::filesystem::path root) : fs(root) {}
     ~RequestHandler() = default;
     RequestHandler(const RequestHandler&) = default;
     RequestHandler(RequestHandler&&) = default;
@@ -154,12 +154,12 @@ public:
         auto requestUri = uri::decode(request.uri);
         if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
-        auto requestPath = documentRoot / std::filesystem::path(requestUri).relative_path();
+        auto requestPath = std::filesystem::path(requestUri).relative_path();
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;
         switch (request.method) {
-        case Request::Method::Get:
+        case Request::Method::Get: {
             log::debug("HTTP Get {}", requestPath.string());
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
@@ -173,17 +173,18 @@ public:
                     return response;
                 }
             }
-            [[fallthrough]];
-        case Request::Method::Head: {
-            std::ifstream file(requestPath, std::ios::in | std::ios::binary);
+            
+            auto file = Filesystem::open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
-
-            if (request.method == Request::Method::Get) {
-                char buffer[512];
-                while (file.read(buffer, sizeof(buffer)).gcount() > 0)
-                    response.content.append(buffer, static_cast<size_t>(file.gcount()));
-            }
+            
+            std::array<char, 512> buffer{0, 0};
+            while (file->read(buffer).gcount() != 0) response.content.append(buffer.data(), file->gcount());
+            if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
+            
         } break;
+        case Request::Method::Head:
+            if (!Filesystem::open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
         };
@@ -191,12 +192,13 @@ public:
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
+        if (requestPath.string() == "WebFront.js") response.headers.emplace_back("Content-Encoding", "gzip");
 
         return response;
     }
 
 private:
-    const std::filesystem::path documentRoot;
+    Filesystem fs;
 };
 
 struct BadRequestException : public std::runtime_error {
@@ -333,10 +335,10 @@ private:
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
-template<typename Net>
-class Connection : public std::enable_shared_from_this<Connection<Net>> {
+template<typename Net, typename Filesystem>
+class Connection : public std::enable_shared_from_this<Connection<Net, Filesystem>> {
 public:
-    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net>& handler)
+    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net, Filesystem>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         log::debug("New connection");
     }
@@ -354,8 +356,8 @@ public:
 
 private:
     typename Net::Socket socket;
-    Connections<Connection<Net>>& connections;
-    RequestHandler<Net>& requestHandler;
+    Connections<Connection<Net, Filesystem>>& connections;
+    RequestHandler<Net, Filesystem>& requestHandler;
     std::array<char, 8192> buffer;
     RequestParser requestParser;
     Response response;
@@ -406,7 +408,7 @@ private:
     }
 };
 
-template<typename Net>
+template<typename Net, typename Filesystem>
     requires networking::Features<Net>
 class Server {
 public:
@@ -435,14 +437,14 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    Connections<Connection<Net>> connections;
-    RequestHandler<Net> requestHandler;
+    Connections<Connection<Net, Filesystem>> connections;
+    RequestHandler<Net, Filesystem> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection<Net>>(std::move(socket), connections, requestHandler);
+            auto newConnection = std::make_shared<Connection<Net, Filesystem>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
             accept();

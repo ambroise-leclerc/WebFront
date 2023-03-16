@@ -5,7 +5,7 @@ CPMAddPackage("gh:doctest/doctest@2.4.9")
 find_package(Threads)
 include(CTest)
 
-set(TESTS_LIST doctest_main.cpp)
+set(TESTS_LIST doctest_main.cpp "FilesystemTests.cpp")
 list(APPEND TESTS_LIST HTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp)
 add_executable(tests ${TESTS_LIST})
