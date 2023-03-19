@@ -15,9 +15,10 @@
 namespace webfront::utils {
 
 template<typename T>
-concept Buffer = std::movable<T> || requires(T t) {
+concept Buffer = requires(T t, size_t n) {
     t.data();
-    t.size();
+    { t.size() } -> std::integral;
+    t[n];
 };
 
 /// Provides an hexadecimal dump of a container or a buffer

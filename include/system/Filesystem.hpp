@@ -18,89 +18,101 @@
 namespace webfront::filesystem {
 
 
-class IndexFS {
+
+class File {
 public:
-    IndexFS(std::filesystem::path /*docRoot*/) {}
-    IndexFS() = delete;
-    IndexFS(const IndexFS&) = default;
-    IndexFS(IndexFS&&) = default;
-    IndexFS& operator=(const IndexFS&) = default;
-    IndexFS& operator=(IndexFS&&) = default;
-
-    class File {
-    public:
-        File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "") :
-            data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(std::move(contentEncoding)) {}
-        File() = delete;
-        
-        File& read(std::span<char> s) { return read(s.data(), s.size()); }
-        bool isEncoded() const { return encoding.empty(); }
-        std::string_view getEncoding() const { return encoding; }
-
-     
-        // fstream interface
-        size_t tellg() const { return readIndex; }
-        void seekg(size_t index) { readIndex = index; }
-        size_t gcount() const { return lastReadCount; }
-        bool bad() const { return badBit; }
-        void clear() { eofBit = false; badBit = false; }
-        bool eof() const { return eofBit; }
-        bool fail() const { return false; }
-        explicit operator bool() const { return !fail(); }
-        bool operator!() const { return eof() || bad(); }
-        File& get(char* s, size_t count) { return read(s, count); }
-        File& read(char* s, size_t count) {
-            constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
-            UIntByte chunk;
-            for (size_t index = 0; index < count; ++index) {
-                if (eof()) {
-                    badBit = true;
-                    lastReadCount = index;
-                    return *this;
-                }
-                
-                if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
-
-                s[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
-                readIndex++;
-                if (readIndex == size) eofBit = true;
-            }
-            lastReadCount = count;
-            return *this;
-        }
-        
-    private:
-        std::span<const uint64_t> data;
-        size_t readIndex, lastReadCount, size;
-        bool eofBit, badBit;
-        const std::string encoding;
+    File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "") :
+        data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(std::move(contentEncoding)) {}
+    File() = delete;
     
-        union UIntByte {
-            uint64_t uInt;
-            uint8_t byte[sizeof(uInt)];
-        };
+    File& read(std::span<char> s) { return read(s.data(), s.size()); }
+    bool isEncoded() const { return encoding.empty(); }
+    std::string_view getEncoding() const { return encoding; }
 
-        static UIntByte convert(uint64_t input) {
-            UIntByte result;
-            uint64_t bigEndian;
-            if constexpr (std::endian::native == std::endian::little) 
-                bigEndian = std::byteswap(input);
-            else
-                bigEndian = input;
-            std::memcpy(result.byte, &bigEndian, sizeof(bigEndian));
-            return result;
+    
+    // fstream interface
+    size_t tellg() const { return readIndex; }
+    void seekg(size_t index) { readIndex = index; }
+    size_t gcount() const { return lastReadCount; }
+    bool bad() const { return badBit; }
+    void clear() { eofBit = false; badBit = false; }
+    bool eof() const { return eofBit; }
+    bool fail() const { return false; }
+    explicit operator bool() const { return !fail(); }
+    bool operator!() const { return eof() || bad(); }
+    File& get(char* s, size_t count) { return read(s, count); }
+    File& read(char* s, size_t count) {
+        constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
+        UIntByte chunk;
+        for (size_t index = 0; index < count; ++index) {
+            if (eof()) {
+                badBit = true;
+                lastReadCount = index;
+                return *this;
+            }
+            
+            if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
+
+            s[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
+            readIndex++;
+            if (readIndex == size) eofBit = true;
         }
+        lastReadCount = count;
+        return *this;
+    }
+    
+private:
+    std::span<const uint64_t> data;
+    size_t readIndex, lastReadCount, size;
+    bool eofBit, badBit;
+    const std::string encoding;
+
+    union UIntByte {
+        uint64_t uInt;
+        uint8_t byte[sizeof(uInt)];
     };
 
-    struct IndexHtml {
-        static constexpr size_t dataSize {143};
-        static constexpr std::array<uint64_t, 18> data{
-          0x3c21444f43545950, 0x452068746d6c3e0a, 0x3c68746d6c3e0a20, 0x203c686561643e0a, 0x202020203c6d6574,
-          0x6120636861727365, 0x743d227574662d38, 0x223e0a202020203c, 0x7469746c653e5765, 0x6266726f6e743c2f,
-          0x7469746c653e0a20, 0x203c2f686561643e, 0x0a20203c73637269, 0x7074207372633d22, 0x57656246726f6e74,
-          0x2e6a73223e3c2f73, 0x63726970743e0a3c, 0x2f68746d6c3e0a00
-        };  
-    };
+    static UIntByte convert(uint64_t input) {
+        UIntByte result;
+        uint64_t bigEndian;
+        if constexpr (std::endian::native == std::endian::little) 
+            bigEndian = std::byteswap(input);
+        else
+            bigEndian = input;
+        std::memcpy(result.byte, &bigEndian, sizeof(bigEndian));
+        return result;
+    }
+};
+
+
+
+template<typename T>
+concept FilteringFileSystem = requires(T t) {
+    { T::open() } -> std::same_as<std::optional<File>>;
+};
+
+class NoFileFS {
+public:
+    NoFileFS(std::filesystem::path /*docRoot*/) {};
+    NoFileFS() = delete;
+    NoFileFS(const NoFileFS&) = default;
+    NoFileFS(NoFileFS&&) = default;
+    NoFileFS& operator=(const NoFileFS&) = default;
+    NoFileFS& operator=(NoFileFS&&) = default;
+
+    static std::optional<File> open(std::filesystem::path) { return {}; }
+};
+
+template<typename AlternativeFS = NoFileFS>
+class WebFrontFS : public AlternativeFS {
+public:
+    WebFrontFS(std::filesystem::path docRoot) : AlternativeFS(docRoot) {}
+    WebFrontFS() = delete;
+    WebFrontFS(const WebFrontFS&) = default;
+    WebFrontFS(WebFrontFS&&) = default;
+    WebFrontFS& operator=(const WebFrontFS&) = default;
+    WebFrontFS& operator=(WebFrontFS&&) = default;
+
 
     struct WebFrontIco {
         static constexpr size_t dataSize {766};
@@ -224,15 +236,42 @@ public:
 
     static std::optional<File> open(std::filesystem::path file) {
         auto filename = file.relative_path().string();
-        log::debug("IndexFS open {} -> filename:{}", file.string(), filename);
-        if (filename == "index.html") return File(IndexHtml::data, IndexHtml::dataSize);
-        else if (filename == "favicon.ico") return File(WebFrontIco::data, WebFrontIco::dataSize);
+        if (filename == "favicon.ico") return File(WebFrontIco::data, WebFrontIco::dataSize);
         else if (filename == "WebFront.js")
             return File{WebFrontJs0_1_1::data, WebFrontJs0_1_1::dataSize, std::string(WebFrontJs0_1_1::encoding)};
-        return {};
+        return AlternativeFS::open(file);
     }
-
 };
+
+
+template<typename AlternativeFS = NoFileFS>
+class IndexFS : public AlternativeFS {
+public:
+    IndexFS(std::filesystem::path docRoot) : AlternativeFS(docRoot) {}
+    IndexFS() = delete;
+    IndexFS(const IndexFS&) = default;
+    IndexFS(IndexFS&&) = default;
+    IndexFS& operator=(const IndexFS&) = default;
+    IndexFS& operator=(IndexFS&&) = default;
+
+
+    struct IndexHtml {
+        static constexpr size_t dataSize {143};
+        static constexpr std::array<uint64_t, 18> data{
+          0x3c21444f43545950, 0x452068746d6c3e0a, 0x3c68746d6c3e0a20, 0x203c686561643e0a, 0x202020203c6d6574,
+          0x6120636861727365, 0x743d227574662d38, 0x223e0a202020203c, 0x7469746c653e5765, 0x6266726f6e743c2f,
+          0x7469746c653e0a20, 0x203c2f686561643e, 0x0a20203c73637269, 0x7074207372633d22, 0x57656246726f6e74,
+          0x2e6a73223e3c2f73, 0x63726970743e0a3c, 0x2f68746d6c3e0a00
+        };  
+    };
+ 
+    static std::optional<File> open(std::filesystem::path file) {
+        auto filename = file.relative_path().string();
+        if (filename == "index.html") return File(IndexHtml::data, IndexHtml::dataSize);
+        return AlternativeFS::open(file);
+    }
+};
+
 
 class NativeFS {};
 

@@ -112,7 +112,7 @@ private:
     }
 };
 
-using WebFront = BasicWF<NetProvider, filesystem::IndexFS>;
+using WebFront = BasicWF<NetProvider, filesystem::WebFrontFS<>>;
 using UI = WebFront::UI;
 
 } // namespace webfront

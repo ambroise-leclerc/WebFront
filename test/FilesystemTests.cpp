@@ -11,61 +11,62 @@
 using namespace std;
 using namespace webfront;
 
+template<typename AlternativeFS = webfront::filesystem::NoFileFS>
+class MockFileSystem {
+    static inline size_t requestsCounter, hitsCounter;
+
+public:
+    static std::optional<webfront::filesystem::File> open(auto path) {
+        requestsCounter++;
+        if (path == "index.html") {
+            hitsCounter++;
+            return webfront::filesystem::File(std::span<uint64_t>{}, 0, {});
+        }
+        return AlternativeFS::open(path);
+    }
+
+    static void initCounts() {
+        requestsCounter = 0;
+        hitsCounter = 0;
+    }
+    [[nodiscard]] static size_t requestsCount() { return requestsCounter; }
+    [[nodiscard]] static size_t hitsCount() { return hitsCounter; }
+};
 
 SCENARIO("Multiple FileSystems can be combined") {
     GIVEN("A mock filesystem filtered by WebFrontFS") {
-        template<webfront::filesystem::FilteringFileSystem AlternativeFS = webfront::filesystem::NoFileFS>
-        class MockFileSystem {
-            static size_t requestsCounter, hitsCounter;
-        public:
-            class File {};
-        public:
-            std::optional<File> open(auto path) {
-                requestsCounter++;
-                if (path == "index.html") {
-                    hitsCounter++;
-                    return File;
-                }
-                return AlternativeFS::open(path);
-            }
-
-            static void initCounts() { requestsCounter = 0; hitsCounet = 0;}
-            [[nodiscard]] static auto requestsCount() const { return requestsCounter; }
-            [[nodiscard]] static auto hitsCount() const { return hitsCounter; } 
-        };
-
-        MockFileSystem::initCounts();
-        using FS = webfront::filesystem::WebFrontFS<MockFileSystem>;
+        MockFileSystem<>::initCounts();
+        using FS = webfront::filesystem::WebFrontFS<MockFileSystem<>>;
         WHEN("Requesting WebFront.js") {
-            auto webFrontJsFile = FS::open("WebFront.js");
+            auto webFrontJSFile = FS::open("WebFront.js");
             THEN("a file is returned and MockFileSystem is neither invovled") {
-                REQUIRE(webfrontJSFile.has_value());
-                REQUIRE(MockFileSystem::requestsCount() == 0);
-                REQUIRE(MockFileSystem::hitsCount() == 0);
+                REQUIRE(webFrontJSFile.has_value());
+                REQUIRE(MockFileSystem<>::requestsCount() == 0);
+                REQUIRE(MockFileSystem<>::hitsCount() == 0);
             }
         }
         WHEN("Requesting favicon.ico") {
             auto faviconFile = FS::open("favicon.ico");
             THEN("an icon file is returned and MockFileSystem is neither invovled") {
                 REQUIRE(faviconFile.has_value());
-                REQUIRE(MockFileSystem::requestsCount() == 0);
-                REQUIRE(MockFileSystem::hitsCount() == 0);
+                REQUIRE(MockFileSystem<>::requestsCount() == 0);
+                REQUIRE(MockFileSystem<>::hitsCount() == 0);
             }
         }
         WHEN("Requesting index.html") {
             auto indexFile = FS::open("index.html");
-            THEN("a is returned by MockFileSystem") {
+            THEN("a file is returned by MockFileSystem") {
                 REQUIRE(indexFile.has_value());
-                REQUIRE(MockFileSystem::requestsCount() == 1);
-                REQUIRE(MockFileSystem::hitsCount() == 1);
+                REQUIRE(MockFileSystem<>::requestsCount() == 1);
+                REQUIRE(MockFileSystem<>::hitsCount() == 1);
             }
         }
         WHEN("Requesting other filename") {
             auto otherFile = FS::open("other.html");
             THEN("No file is returned") {
                 REQUIRE(!otherFile);
-                REQUIRE(MockFileSystem::requestsCount() == 1);
-                REQUIRE(MockFileSystem::hitsCount() == 0);
+                REQUIRE(MockFileSystem<>::requestsCount() == 1);
+                REQUIRE(MockFileSystem<>::hitsCount() == 0);
             }
         }
     }
@@ -73,7 +74,7 @@ SCENARIO("Multiple FileSystems can be combined") {
 
 SCENARIO("IndexFileSystem provides basic files for browser support") {
     GIVEN("An IndexFS") {
-        using FS = webfront::filesystem::IndexFS;
+        using FS = webfront::filesystem::WebFrontFS<webfront::filesystem::IndexFS<>>;
         WHEN("Requesting index.html") {
             auto indexFile = FS::open("index.html");
             THEN("A correct HTML5 file with the WebFront.js script inclusion is returned") {
@@ -118,7 +119,6 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
                 REQUIRE(gzipHeader[0] == 0x1f);
                 REQUIRE(gzipHeader[1] == 0x8b);
                 REQUIRE(gzipHeader[2] == 0x08);
-
 
                 /* string js{buffer.data(), buffer.size()};
                 smatch match;
