@@ -51,7 +51,7 @@ public:
         File& get(char* s, size_t count) { return read(s, count); }
         File& read(char* s, size_t count) {
             constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
-            UIntByte chunk;
+            std::array<uint8_t, 8> chunk;
             for (size_t index = 0; index < count; ++index) {
                 if (eof()) {
                     badBit = true;
@@ -61,7 +61,7 @@ public:
                 
                 if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
 
-                s[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
+                s[index] = static_cast<char>(chunk[readIndex % bytesPerInt]);
                 readIndex++;
                 if (readIndex == size) eofBit = true;
             }
@@ -75,19 +75,11 @@ public:
         bool eofBit, badBit;
         const std::string encoding;
     
-        union UIntByte {
-            uint64_t uInt;
-            uint8_t byte[sizeof(uInt)];
-        };
-
-        static UIntByte convert(uint64_t input) {
-            UIntByte result;
-            uint64_t bigEndian;
+        static std::array<uint8_t, 8> convert(uint64_t input) {
+            std::array<uint8_t, 8> result;
             if constexpr (std::endian::native == std::endian::little) 
-                bigEndian = std::byteswap(input);
-            else
-                bigEndian = input;
-            std::memcpy(result.byte, &bigEndian, sizeof(bigEndian));
+                input = std::byteswap(input);
+            std::memcpy(result.data(), &input, result.size());
             return result;
         }
     };
