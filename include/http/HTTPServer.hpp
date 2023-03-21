@@ -69,18 +69,25 @@ struct Request {
         return {};
     }
 
-private:
+    std::list<std::string> getHeaderValues(std::string_view headerName) const {
+        std::list<std::string> values {};
+        for (auto& header : headers)
+            if (caseInsensitiveEqual(header.name, headerName)) values.push_back(header.value);
+        return values;
+    }
+
     /// @return true if text is contained in the value field of headerName (case insensitive)
     bool headerContains(std::string_view headerName, std::string_view text) const {
-        auto header = getHeaderValue(headerName);
-        if (header) {
-            if (std::search(header.value().cbegin(), header.value().cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
+        for (auto header : getHeaderValues(headerName)) {
+            if (std::search(header.cbegin(), header.cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
                     return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
-                }) != header.value().cend())
+                }) != header.cend())
                 return true;
         }
         return false;
     }
+private:
+
 
     static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
         return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
@@ -161,6 +168,8 @@ public:
         switch (request.method) {
         case Request::Method::Get: {
             log::debug("HTTP Get {}", requestPath.string());
+            for (auto encoding : request.getHeaderValues("Accept-Encoding"))
+                log::debug("Encoding : {}", encoding);
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
                 if (key) {

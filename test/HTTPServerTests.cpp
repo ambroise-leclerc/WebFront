@@ -79,7 +79,8 @@ SCENARIO("RequestParser") {
         RequestParser parser;
 
         string input{"GET /hello.htm HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
-                     "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip, deflate\r\nConnection: Keep-Alive\r\n\r\n"};
+                     "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip\r\n"
+                     "Accept-Encoding: deflate\r\nConnection: Keep-Alive\r\n\r\n"};
         WHEN("parsing it") {
             optional<Request> request;
             REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
@@ -87,6 +88,15 @@ SCENARIO("RequestParser") {
                 REQUIRE(request);
                 REQUIRE(request.value().uri == "/hello.htm");
                 REQUIRE(request.value().method == Request::Method::Get);
+
+                auto language = request->getHeaderValue("Accept-Language");
+                REQUIRE(language == "en-us");
+
+                auto encodings = request->getHeaderValues("Accept-Encoding");
+                REQUIRE(encodings.size() == 2);
+                
+                REQUIRE(request->headerContains("Accept-Encoding", "deflate"));
+                REQUIRE(request->headerContains("Accept-Encoding", "gzip"));
             }
         }
     }
