@@ -32,6 +32,7 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
             auto faviconFile = FS::open("favicon.ico");
             THEN("correct data is returned") {
                 REQUIRE(faviconFile.has_value());
+                REQUIRE(!faviconFile->isEncoded());
 
                 array<uint8_t, 1024> buffer;
                 auto readSize = faviconFile->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
@@ -52,13 +53,16 @@ SCENARIO("IndexFileStystem provides basic files for browser support") {
             auto webfrontJSFile = FS::open("WebFront.js");
             THEN("Wbefront.js V0.0.1 content should be returned") {
                 REQUIRE(webfrontJSFile.has_value());
+
+                REQUIRE(webfrontJSFile->isEncoded());
+                REQUIRE(webfrontJSFile->getEncoding() == "gzip");
+
                 array<uint8_t, 10> gzipHeader;
                 webfrontJSFile->read(reinterpret_cast<char*>(gzipHeader.data()), gzipHeader.size());
 
                 REQUIRE(gzipHeader[0] == 0x1f);
                 REQUIRE(gzipHeader[1] == 0x8b);
                 REQUIRE(gzipHeader[2] == 0x08);
-
 
                 /* string js{buffer.data(), buffer.size()};
                 smatch match;

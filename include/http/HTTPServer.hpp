@@ -24,21 +24,58 @@
 
 namespace webfront::http {
 
-struct Header {
-    Header() = default;
-    Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) {}
-    std::string name;
-    std::string value;
+class Headers {
+    struct Header {
+        Header() = default;
+        Header(std::string_view n, std::string_view v) : name(std::move(n)), value(std::move(v)) {}
+        std::string name;
+        std::string value;
+    };
+
+public:
+    /// @return the header value with headerName name (or at least the first one)
+    std::optional<std::string> getHeaderValue(std::string_view headerName) const {
+        for (auto& header : headers)
+            if (caseInsensitiveEqual(header.name, headerName)) return header.value;
+        return {};
+    }
+
+    /// @return the list of headers values with the same headerName name
+    std::list<std::string> getHeadersValues(std::string_view headerName) const {
+        std::list<std::string> values{};
+        for (auto& header : headers)
+            if (caseInsensitiveEqual(header.name, headerName)) values.push_back(header.value);
+        return values;
+    }
+
+    /// @return true if text is contained in the value field of headerName (case insensitive)
+    bool headerContains(std::string_view headerName, std::string_view text) const {
+        for (auto header : getHeadersValues(headerName)) {
+            if (std::search(header.cbegin(), header.cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
+                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
+                }) != header.cend())
+                return true;
+        }
+        return false;
+    }
+
+    std::vector<Header> headers;
+
+private:
+    static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
+        return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
+                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
+                }));
+    }
 };
 
-struct Request {
+struct Request : Headers {
     enum class Method { Connect, Delete, Get, Head, Options, Patch, Post, Put, Trace, Undefined };
     Method method;
     std::string uri;
     int httpVersionMajor;
     int httpVersionMinor;
-    std::vector<Header> headers;
-
+    
     void reset() {
         headers.clear();
         uri.clear();
@@ -62,44 +99,11 @@ struct Request {
     bool isUpgradeRequest(std::string_view protocol) const {
         return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol);
     }
-
-    std::optional<std::string> getHeaderValue(std::string_view headerName) const {
-        for (auto& header : headers)
-            if (caseInsensitiveEqual(header.name, headerName)) return header.value;
-        return {};
-    }
-
-    std::list<std::string> getHeaderValues(std::string_view headerName) const {
-        std::list<std::string> values {};
-        for (auto& header : headers)
-            if (caseInsensitiveEqual(header.name, headerName)) values.push_back(header.value);
-        return values;
-    }
-
-    /// @return true if text is contained in the value field of headerName (case insensitive)
-    bool headerContains(std::string_view headerName, std::string_view text) const {
-        for (auto header : getHeaderValues(headerName)) {
-            if (std::search(header.cbegin(), header.cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
-                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
-                }) != header.cend())
-                return true;
-        }
-        return false;
-    }
-private:
-
-
-    static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
-        return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
-                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
-                }));
-    }
 };
 
-struct Response {
-    enum StatusCode : uint16_t { switchingProtocols = 101, ok = 200, badRequest = 400, notFound = 404, notImplemented = 501 };
+struct Response : Headers {
+    enum StatusCode : uint16_t { switchingProtocols = 101, ok = 200, badRequest = 400, notFound = 404, notImplemented = 501, variantAlsoNegotiates = 506 };
     StatusCode statusCode;
-    std::vector<Header> headers;
     std::string content;
 
     static Response getStatusResponse(StatusCode code) {
@@ -142,6 +146,7 @@ private:
         case badRequest: return "Bad Request";
         case notFound: return "Not Found";
         case notImplemented: return "Not Implemented";
+        case variantAlsoNegotiates: return "Variant Also Negotiates";
         }
         return {};
     }
@@ -168,7 +173,7 @@ public:
         switch (request.method) {
         case Request::Method::Get: {
             log::debug("HTTP Get {}", requestPath.string());
-            for (auto encoding : request.getHeaderValues("Accept-Encoding"))
+            for (auto encoding : request.getHeadersValues("Accept-Encoding"))
                 log::debug("Encoding : {}", encoding);
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
@@ -185,6 +190,13 @@ public:
             
             auto file = Filesystem::open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
+            if (file->isEncoded()) {
+                log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
+                if (!request.headerContains("Accept-Encoding", file->getEncoding())) {
+                    log::error("File {} encoding is not supported by client : HTTP ERROR 506");
+                    return Response::getStatusResponse(Response::variantAlsoNegotiates);
+                }
+            }
             
             std::array<char, 512> buffer{0, 0};
             while (file->read(buffer).gcount() != 0) response.content.append(buffer.data(), file->gcount());
@@ -291,7 +303,7 @@ private: // clang-format off
             case State::headerLineStart: if (input == '\r') { state = State::newline3; break; }
                                        else if (!req.headers.empty() && (input == ' ' || input == '\t')) { state = State::headerLws; break; }
                                        else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
-                                       else { req.headers.push_back(Header()); req.headers.back().name.push_back(input); state = State::headerName; break; }
+                                       else { req.headers.push_back({}); req.headers.back().name.push_back(input); state = State::headerName; break; }
             case State::headerLws:if (input == '\r') { state = State::newline2; break; }
                                  else if (input == ' ' || input == '\t') break;
                                  else if (isCtrl(input)) throw BadRequestException();

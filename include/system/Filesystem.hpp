@@ -32,9 +32,10 @@ public:
         File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "") :
             data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(std::move(contentEncoding)) {}
         File() = delete;
+        //File(const File&) = delete;
         
         File& read(std::span<char> s) { return read(s.data(), s.size()); }
-        bool isEncoded() const { return encoding.empty(); }
+        bool isEncoded() const { return !encoding.empty(); }
         std::string_view getEncoding() const { return encoding; }
 
      
