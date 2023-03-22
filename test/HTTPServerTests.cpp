@@ -97,8 +97,8 @@ SCENARIO("RequestParser") {
                 auto encodings = request->getHeadersValues("Accept-Encoding");
                 REQUIRE(encodings.size() == 2);
 
-                REQUIRE(request->headerContains("Accept-Encoding", "deflate"));
-                REQUIRE(request->headerContains("Accept-Encoding", "gzip"));
+                REQUIRE(request->headersContain("Accept-Encoding", "deflate"));
+                REQUIRE(request->headersContain("Accept-Encoding", "gzip"));
             }
         }
     }
@@ -173,49 +173,6 @@ SCENARIO("RequestHandler") {
         }
     }
 
-    GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
-        RequestParser parser;
-
-        string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
-                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/compressed.txt");
-        REQUIRE(request.value().method == Request::Method::Get);
-        WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
-
-            THEN("It should respond with a 'Variant Also Negotiates' http response") {
-                auto buffers = response.toBuffers<Net>();
-                REQUIRE(compare(buffers[0], "HTTP/1.1 506 Variant Also Negotiates"));
-            }
-        }
-    }
-
-    GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
-        RequestParser parser;
-
-        string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
-                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/compressed.txt");
-        REQUIRE(request.value().method == Request::Method::Get);
-        WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
-            THEN("It should respond ok with a brotli encoded (empty) file") {
-                REQUIRE(response.statusCode == Response::ok);
-                REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
-                REQUIRE(response.getHeaderValue("Content-Type") == "text/plain");
-                REQUIRE(response.getHeaderValue("Content-Length") == "0");
-            }
-        }
-    }
-
     GIVEN("A valid HTTP upgrade request to websocket protocol") {
         RequestParser parser;
 
@@ -239,6 +196,51 @@ SCENARIO("RequestHandler") {
                 REQUIRE(compare(buffers[3], "websocket"));
                 REQUIRE(compare(buffers[9], "Sec-WebSocket-Accept"));
                 REQUIRE(compare(buffers[11], "HSmrc0sMlYUkAGmm5OPpG2HaGWk="));
+            }
+        }
+    }
+}
+
+SCENARIO("RequestHandler on a HTTP GET") {
+    GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
+        RequestParser parser;
+
+        string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        optional<Request> request;
+        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+        REQUIRE(request);
+        REQUIRE(request.value().uri == "/compressed.txt");
+        REQUIRE(request.value().method == Request::Method::Get);
+        WHEN("A RequestHandler process it") {
+            RequestHandler<Net, MockFileSystem> handler{"."};
+            auto response = handler.handleRequest(request.value());
+
+            THEN("It should respond with a 'Variant Also Negotiates' http response") {
+                auto buffers = response.toBuffers<Net>();
+                REQUIRE(compare(buffers[0], "HTTP/1.1 506 Variant Also Negotiates"));
+            }
+        }
+    }
+
+    GIVEN("A valid HTTP GET request on a compressed file with supported encoding") {
+        RequestParser parser;
+
+        string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
+        optional<Request> request;
+        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+        REQUIRE(request);
+        REQUIRE(request.value().uri == "/compressed.txt");
+        REQUIRE(request.value().method == Request::Method::Get);
+        WHEN("A RequestHandler process it") {
+            RequestHandler<Net, MockFileSystem> handler{"."};
+            auto response = handler.handleRequest(request.value());
+            THEN("It should respond ok with a brotli encoded (empty) file") {
+                REQUIRE(response.statusCode == Response::ok);
+                REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
+                REQUIRE(response.getHeaderValue("Content-Type") == "text/plain");
+                REQUIRE(response.getHeaderValue("Content-Length") == "0");
             }
         }
     }

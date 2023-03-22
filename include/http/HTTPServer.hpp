@@ -49,7 +49,7 @@ public:
     }
 
     /// @return true if text is contained in the value field of headerName (case insensitive)
-    bool headerContains(std::string_view headerName, std::string_view text) const {
+    bool headersContain(std::string_view headerName, std::string_view text) const {
         for (auto header : getHeadersValues(headerName)) {
             if (std::search(header.cbegin(), header.cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
                     return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
@@ -97,7 +97,7 @@ struct Request : Headers {
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
     bool isUpgradeRequest(std::string_view protocol) const {
-        return headerContains("Connection", "upgrade") && headerContains("Upgrade", protocol);
+        return headersContain("Connection", "upgrade") && headersContain("Upgrade", protocol);
     }
 };
 
@@ -192,7 +192,7 @@ public:
             if (!file) return Response::getStatusResponse(Response::notFound);
             if (file->isEncoded()) {
                 log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
-                if (!request.headerContains("Accept-Encoding", file->getEncoding())) {
+                if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
                     log::error("File {} encoding is not supported by client : HTTP ERROR 506");
                     return Response::getStatusResponse(Response::variantAlsoNegotiates);
                 }
