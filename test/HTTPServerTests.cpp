@@ -37,7 +37,8 @@ SCENARIO("HTTP Response") {
     GIVEN("notFound Response") {
         auto notFound = Response::getStatusResponse(Response::notFound);
         THEN("Fields should be") {
-            REQUIRE(notFound.content == "<html><head><title>Not Found</title></head><body><h1>404 Not Found</h1></body></html>");
+            REQUIRE(notFound.content ==
+                    "<html><head><title>Not Found</title></head><body><h1>404 Not Found</h1></body></html>");
             REQUIRE(notFound.headers[0].name == "Content-Length");
             REQUIRE(notFound.headers[1].name == "Content-Type");
             REQUIRE(notFound.headers[0].value == "85");
@@ -68,7 +69,8 @@ SCENARIO("HTTP Response") {
                 REQUIRE(compare(buffers[7], "text/html"));
                 REQUIRE(compare(buffers[8], "\r\n"));
                 REQUIRE(compare(buffers[9], "\r\n"));
-                REQUIRE(compare(buffers[10], "<html><head><title>Bad Request</title></head><body><h1>400 Bad Request</h1></body></html>"));
+                REQUIRE(compare(buffers[10],
+                                "<html><head><title>Bad Request</title></head><body><h1>400 Bad Request</h1></body></html>"));
             }
         }
     }
@@ -92,9 +94,9 @@ SCENARIO("RequestParser") {
                 auto language = request->getHeaderValue("Accept-Language");
                 REQUIRE(language == "en-us");
 
-                auto encodings = request->getHeaderValues("Accept-Encoding");
+                auto encodings = request->getHeadersValues("Accept-Encoding");
                 REQUIRE(encodings.size() == 2);
-                
+
                 REQUIRE(request->headerContains("Accept-Encoding", "deflate"));
                 REQUIRE(request->headerContains("Accept-Encoding", "gzip"));
             }
@@ -105,7 +107,8 @@ SCENARIO("RequestParser") {
         RequestParser parser;
 
         string input{"GET /hello.htm HTTP/1.1\r\nUser - Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
-                     "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip, deflate\r\nConnection: Keep-Alive\r\n\r\n"};
+                     "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip, deflate\r\nConnection: "
+                     "Keep-Alive\r\n\r\n"};
         WHEN("parsing it") {
             optional<Request> request;
             REQUIRE_THROWS(request = parser.parse(input.cbegin(), input.cend()));
@@ -116,7 +119,8 @@ SCENARIO("RequestParser") {
         RequestParser parser;
 
         string input{"GET / HTTP/1.1\r\nOrigin: localhost\r\nSec-WebSocket-Protocol: WebFront_0.1\r\nSec-WebSocket-Extensions: "
-                     "permessage-deflate\r\nSec-WebSocket-Key: Dh54KYbN4sDdk6ejeVPqXQ==\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n\r\n"};
+                     "permessage-deflate\r\nSec-WebSocket-Key: Dh54KYbN4sDdk6ejeVPqXQ==\r\nConnection: keep-alive, "
+                     "Upgrade\r\nUpgrade: websocket\r\n\r\n"};
         WHEN("parsing it") {
             optional<Request> request;
             REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
@@ -129,15 +133,22 @@ SCENARIO("RequestParser") {
 }
 
 struct MockFileSystem {
-    MockFileSystem(auto) {};
+    MockFileSystem(auto){};
     struct File {
-        bool isEncoded() const { return false; }
-        std::string_view getEncoding() const { return {}; }
+        bool isEncoded() const { return true; }
+        std::string_view getEncoding() const { return "br"; }
         size_t gcount() const { return 0; }
         File& read(auto, size_t = 0) { return *this; }
     };
 
-    static std::optional<File> open(auto) { return {}; }
+    static std::optional<File> open(auto) { return File{}; }
+};
+
+bool compare(auto& buffer, std::string text) {
+    auto data = reinterpret_cast<const char*>(buffer.data());
+    for (size_t index = 0; index < text.size(); ++index)
+        if (data[index] != text[index]) return false;
+    return true;
 };
 
 SCENARIO("RequestHandler") {
@@ -157,15 +168,50 @@ SCENARIO("RequestHandler") {
 
             THEN("It should respond with a 'Not Implemented' http response") {
                 auto buffers = response.toBuffers<Net>();
-                using Buffer = decltype(buffers[0]);
-                auto compare = [](Buffer& b, std::string s) {
-                    auto data = reinterpret_cast<const char*>(b.data());
-                    for (size_t index = 0; index < s.size(); ++index)
-                        if (data[index] != s[index]) return false;
-                    return true;
-                };
-
                 REQUIRE(compare(buffers[0], "HTTP/1.1 501 Not Implemented"));
+            }
+        }
+    }
+
+    GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
+        RequestParser parser;
+
+        string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        optional<Request> request;
+        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+        REQUIRE(request);
+        REQUIRE(request.value().uri == "/compressed.txt");
+        REQUIRE(request.value().method == Request::Method::Get);
+        WHEN("A RequestHandler process it") {
+            RequestHandler<Net, MockFileSystem> handler{"."};
+            auto response = handler.handleRequest(request.value());
+
+            THEN("It should respond with a 'Variant Also Negotiates' http response") {
+                auto buffers = response.toBuffers<Net>();
+                REQUIRE(compare(buffers[0], "HTTP/1.1 506 Variant Also Negotiates"));
+            }
+        }
+    }
+
+    GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
+        RequestParser parser;
+
+        string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
+        optional<Request> request;
+        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+        REQUIRE(request);
+        REQUIRE(request.value().uri == "/compressed.txt");
+        REQUIRE(request.value().method == Request::Method::Get);
+        WHEN("A RequestHandler process it") {
+            RequestHandler<Net, MockFileSystem> handler{"."};
+            auto response = handler.handleRequest(request.value());
+            THEN("It should respond ok with a brotli encoded (empty) file") {
+                REQUIRE(response.statusCode == Response::ok);
+                REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
+                REQUIRE(response.getHeaderValue("Content-Type") == "text/plain");
+                REQUIRE(response.getHeaderValue("Content-Length") == "0");
             }
         }
     }
@@ -173,8 +219,10 @@ SCENARIO("RequestHandler") {
     GIVEN("A valid HTTP upgrade request to websocket protocol") {
         RequestParser parser;
 
-        string input{"GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "
-                     "x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\nOrigin: http://example.com\r\n\r\n"};
+        string input{
+          "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "
+          "x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\nOrigin: "
+          "http://example.com\r\n\r\n"};
         optional<Request> request;
         REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
         REQUIRE(request);
@@ -186,14 +234,6 @@ SCENARIO("RequestHandler") {
 
             THEN("It should respond with a 'Switching Protocols' http response") {
                 auto buffers = response.toBuffers<Net>();
-                using Buffer = decltype(buffers[0]);
-                auto compare = [](Buffer& b, std::string s) {
-                    auto data = reinterpret_cast<const char*>(b.data());
-                    for (size_t index = 0; index < s.size(); ++index)
-                        if (data[index] != s[index]) return false;
-                    return true;
-                };
-
                 REQUIRE(compare(buffers[0], "HTTP/1.1 101 Switching Protocols"));
                 REQUIRE(compare(buffers[1], "Upgrade"));
                 REQUIRE(compare(buffers[3], "websocket"));
