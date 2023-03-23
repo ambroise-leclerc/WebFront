@@ -11,6 +11,12 @@ SCENARIO("URL encoding") {
     REQUIRE(uri::encode("mango & pineapple") == "mango%20%26%20pineapple");
 }
 
+SCENARIO("URI decoding") {
+    REQUIRE(uri::decode("http://path%25name%2F%25%23%21%25") == "http://path%name/%#!%");
+    REQUIRE(uri::decode("http://ABC12345zef") == "http://ABC12345zef");
+    REQUIRE(uri::decode("%20%RQabcABV") == " %RQabcABV");
+}
+
 SCENARIO("WebSocket Sec Key coding") {
     std::string key = "x3JJHMbDL1EzLkh9GBhXDw==";
     REQUIRE(base64::encodeInNetworkOrder(crypto::sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")) == "HSmrc0sMlYUkAGmm5OPpG2HaGWk=");
