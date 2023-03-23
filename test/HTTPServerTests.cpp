@@ -20,6 +20,17 @@ SCENARIO("HTTP Request") {
             THEN("% are expanded and decoded") { REQUIRE(uri::decode(request.uri) == "http://aaa.bbb.ccc/bozo le clown"); }
         }
     }
+
+    REQUIRE(Request::getMethodFromString("GET") == Request::Method::Get);
+    REQUIRE(Request::getMethodFromString("HEAD") == Request::Method::Head);
+    REQUIRE(Request::getMethodFromString("CONNECT") == Request::Method::Connect);
+    REQUIRE(Request::getMethodFromString("DELETE") == Request::Method::Delete);
+    REQUIRE(Request::getMethodFromString("OPTIONS") == Request::Method::Options);
+    REQUIRE(Request::getMethodFromString("PATCH") == Request::Method::Patch);
+    REQUIRE(Request::getMethodFromString("POST") == Request::Method::Post);
+    REQUIRE(Request::getMethodFromString("PUT") == Request::Method::Put);
+    REQUIRE(Request::getMethodFromString("TRACE") == Request::Method::Trace);
+    REQUIRE(Request::getMethodFromString("test") == Request::Method::Undefined);
 }
 
 SCENARIO("HTTP Response") {
@@ -93,6 +104,8 @@ SCENARIO("RequestParser") {
 
                 auto language = request->getHeaderValue("Accept-Language");
                 REQUIRE(language == "en-us");
+
+                REQUIRE(!request->getHeaderValue("Bozo le clown"));
 
                 auto encodings = request->getHeadersValues("Accept-Encoding");
                 REQUIRE(encodings.size() == 2);
@@ -198,6 +211,35 @@ SCENARIO("RequestHandler") {
                 REQUIRE(compare(buffers[11], "HSmrc0sMlYUkAGmm5OPpG2HaGWk="));
             }
         }
+    }
+
+    GIVEN("A HTTP HEAD request") {
+        RequestParser parser;
+
+        string input{"HEAD /file.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        optional<Request> request;
+        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+        REQUIRE(request);
+        REQUIRE(request.value().uri == "/file.txt");
+        REQUIRE(request.value().method == Request::Method::Head);
+        WHEN("A RequestHandler process it") {
+            RequestHandler<Net, MockFileSystem> handler{"."};
+            auto response = handler.handleRequest(request.value());
+
+            THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
+        }
+        
+    }
+
+    GIVEN("A HTTP HEAD request with an empty URL") {
+        RequestParser parser;
+
+        string input{"HEAD HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        optional<Request> request;
+        REQUIRE_THROWS_AS(request = parser.parse(input.cbegin(), input.cend()), BadRequestException);
+       
     }
 }
 

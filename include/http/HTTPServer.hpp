@@ -81,7 +81,7 @@ struct Request : Headers {
         uri.clear();
     }
 
-    constexpr Method getMethodFromString(std::string_view text) const {
+    static constexpr Method getMethodFromString(std::string_view text) {
         return text == "GET"       ? Method::Get
                : text == "HEAD"    ? Method::Head
                : text == "CONNECT" ? Method::Connect

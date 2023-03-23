@@ -38,16 +38,17 @@ inline std::string decode(std::string_view uri) {
     for (std::size_t index = 0; index < uri.size(); ++index) {
         switch (uri[index]) {
         case '%':
-            if (index + 3 <= uri.size()) {
+            if (index + 3 <= uri.size() && std::isxdigit(uri[index + 1]) && std::isxdigit(uri[index + 2])) {
                 auto hexToValue = [](char c) -> uint8_t {
                     if (c >= '0' && c <= '9') return uint8_t(c - '0');
                     if (c >= 'A' && c <= 'F') return uint8_t(c - 'A' + 10);
-                    if (c >= 'a' && c <= 'f') return uint8_t(c - 'a' + 10);
-                    return 0;
+                    return uint8_t(c - 'a' + 10);
                 };
                 decoded += char(hexToValue(uri[index + 1]) * 16 + hexToValue(uri[index + 2]));
                 index += 2;
             }
+            else
+                decoded += uri[index];
             break;
         case '+': decoded += ' '; break;
         default: decoded += uri[index];
