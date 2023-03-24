@@ -29,7 +29,7 @@ WebFront implements websocket protocol over an embedded Web server and provides 
                      "  print(text + ' of ' + num);                       "
                      "}                                                   ");
         auto print = ui.jsFunction("addText");
-        print("Hello World", 2022);
+        print("Hello World", 2023);
     });
 
 ```
