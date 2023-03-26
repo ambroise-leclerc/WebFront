@@ -41,4 +41,3 @@ if(ENABLE_TESTING)
 endif()
 
 add_subdirectory(src)
-add_subdirectory(libGenerator)
