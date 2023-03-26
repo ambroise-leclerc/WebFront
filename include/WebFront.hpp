@@ -11,7 +11,10 @@
 
 #include "networking/TCPNetworkingTS.hpp"
 
+#include <cstddef>
+#include <functional>
 #include <map>
+#include <span>
 #include <string_view>
 #include <tuple>
 #include <utility>
