@@ -158,7 +158,7 @@ bool compare(auto& buffer, std::string text) {
     return true;
 };
 
-SCENARIO("RequestHandler") {
+SCENARIO("Request parsing") {
     GIVEN("A valid HTTP request with an unimplemented method") {
         string input{"DELETE /ressource.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
@@ -228,7 +228,9 @@ SCENARIO("RequestHandler") {
         REQUIRE_THROWS_AS(request.parseSomeData(input.cbegin(), input.cend()), BadRequestException);
        
     }
+}
 
+SCENARIO("Asynchronous Request parsing") {
     GIVEN("A HTTP HEAD request received asynchronously") {
         string chunk1{"HEAD /file.txt HTTP/1.1\r\nUser-Agent:"};
         string chunk2{" Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "};
