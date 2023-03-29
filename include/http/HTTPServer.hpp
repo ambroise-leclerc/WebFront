@@ -14,6 +14,7 @@
 #include <fstream>
 #include <functional>
 #include <locale>
+#include <map>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -69,29 +70,29 @@ private:
     }
 };
 
+struct BadRequestException : public std::runtime_error {
+    BadRequestException() : std::runtime_error("Bad HTTP request") {}
+};
+
 struct Request : Headers {
     enum class Method { Connect, Delete, Get, Head, Options, Patch, Post, Put, Trace, Undefined };
     Method method;
     std::string uri;
     int httpVersionMajor;
     int httpVersionMinor;
-    
+
     void reset() {
         headers.clear();
         uri.clear();
     }
 
-    static constexpr Method getMethodFromString(std::string_view text) {
-        return text == "GET"       ? Method::Get
-               : text == "HEAD"    ? Method::Head
-               : text == "CONNECT" ? Method::Connect
-               : text == "DELETE"  ? Method::Delete
-               : text == "OPTIONS" ? Method::Options
-               : text == "PATCH"   ? Method::Patch
-               : text == "POST"    ? Method::Post
-               : text == "PUT"     ? Method::Put
-               : text == "TRACE"   ? Method::Trace
-                                   : Method::Undefined;
+    static Method getMethodFromString(std::string_view text) {
+        using enum Method;
+        std::map<std::string_view, Method> names{{"CONNECT", Connect}, {"DELETE", Delete},   {"GET", Get},
+                                                 {"HEAD", Head},       {"OPTIONS", Options}, {"PATCH", Patch},
+                                                 {"POST", Post},       {"PUT", Put},         {"TRACE", Trace}};
+        auto name = names.find(text);
+        return name != names.end() ? name->second : Undefined;
     }
 
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
@@ -99,10 +100,98 @@ struct Request : Headers {
     bool isUpgradeRequest(std::string_view protocol) const {
         return headersContain("Connection", "upgrade") && headersContain("Upgrade", protocol);
     }
-};
+
+    template<typename InputIterator>
+    bool parseSomeData(InputIterator begin, InputIterator end) {
+         while (begin != end)
+            if (completeRequest(*begin++)) return true;
+
+        return false;
+    }
+
+    bool completed() const { return state == State::completed; }
+
+private: // clang-format off
+    enum class State { methodStart, method, URI, versionH, versionT1, versionT2, versionP, versionSlash, versionMajorStart, versionMajor, versionMinorStart,
+                 versionMinor, newline1, headerLineStart, headerLws, headerName, spaceBeforeHeaderValue, headerValue, newline2, newline3, completed };
+    State state { State::methodStart };    
+    bool completeRequest(char input) {
+        auto isChar = [](char c) { return c >= 0; };
+        auto isCtrl = [](char c) { return (c >= 0 && c <= 31) || (c == 127); };
+        auto isSpecial = [](char c) {   switch (c) {
+            case '(': case ')': case '<': case '>': case '@': case ',': case ';': case ':': case '\\': case '"':
+            case '/': case '[': case ']': case '?': case '=': case '{': case '}': case ' ': case '\t': return true;
+            default: return false;
+        }};
+        auto isDigit = [](char c) { return c >= '0' && c <= '9'; };
+        auto setState = [this](bool cond, State next) {
+            state = next;
+            if (cond) throw BadRequestException();
+        };
+
+        static std::string buffer;
+        using enum State;
+        switch (state) {
+            case methodStart:
+                setState(!isChar(input) || isCtrl(input) || isSpecial(input), method);
+                buffer = input;
+                break;
+            case method: if (input == ' ') { state = URI; setMethod(buffer); }
+                              else if (!isChar(input) || isCtrl(input) || isSpecial(input)) { throw BadRequestException(); }
+                              else buffer.push_back(input);
+                break;
+            case URI: if (input == ' ') { state = versionH; break; }
+                           else if (isCtrl(input)) throw BadRequestException();
+                           else { uri.push_back(input); break; }
+            case versionH: setState(input != 'H', versionT1); break;
+            case versionT1: setState(input != 'T', versionT2); break;
+            case versionT2: setState(input != 'T', versionP); break;
+            case versionP: setState(input != 'P', versionSlash); break;
+            case versionSlash: setState(input != '/', versionMajorStart); httpVersionMajor = 0; httpVersionMinor = 0; break;
+            case versionMajorStart: setState(!isDigit(input), versionMajor); httpVersionMajor = httpVersionMajor * 10 + input - '0'; break;
+            case versionMajor: if (input == '.') state = versionMinorStart;
+                                    else if (isDigit(input)) httpVersionMajor = httpVersionMajor * 10 + input - '0';
+                                    else throw BadRequestException();
+                break;
+            case versionMinorStart: setState(!isDigit(input), versionMinor); httpVersionMinor = httpVersionMinor * 10 + input - '0'; break;
+            case versionMinor: if (input == '\r') state = newline1;
+                                    else if (isDigit(input)) httpVersionMinor = httpVersionMinor * 10 + input - '0';
+                                    else throw BadRequestException();
+                break;
+            case newline1: setState(input != '\n', headerLineStart); break;
+            case headerLineStart: if (input == '\r') { state = newline3; break; }
+                                       else if (!headers.empty() && (input == ' ' || input == '\t')) { state = headerLws; break; }
+                                       else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
+                                       else { headers.push_back({}); headers.back().name.push_back(input); state = headerName; break; }
+            case headerLws:if (input == '\r') { state = newline2; break; }
+                                 else if (input == ' ' || input == '\t') break;
+                                 else if (isCtrl(input)) throw BadRequestException();
+                                 else { state = headerValue; headers.back().value.push_back(input); break; }
+            case headerName: if (input == ':') { state = spaceBeforeHeaderValue; break; }
+                                  else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
+                                  else { headers.back().name.push_back(input); break; }
+            case spaceBeforeHeaderValue: setState(input != ' ', headerValue); break;
+            case headerValue: if (input == '\r') { state = newline2; break; }
+                                   else if (isCtrl(input)) throw BadRequestException();
+                                   else { headers.back().value.push_back(input); break; }
+            case newline2: setState(input != '\n', headerLineStart); break;
+            case newline3: if (input == '\n') { state = completed; return true; } else throw BadRequestException();
+            case completed: return true;
+            default: throw BadRequestException();
+        }
+        return false;
+    }
+}; // clang-format on
 
 struct Response : Headers {
-    enum StatusCode : uint16_t { switchingProtocols = 101, ok = 200, badRequest = 400, notFound = 404, notImplemented = 501, variantAlsoNegotiates = 506 };
+    enum StatusCode : uint16_t {
+        switchingProtocols = 101,
+        ok = 200,
+        badRequest = 400,
+        notFound = 404,
+        notImplemented = 501,
+        variantAlsoNegotiates = 506
+    };
     StatusCode statusCode;
     std::string content;
 
@@ -173,8 +262,7 @@ public:
         switch (request.method) {
         case Request::Method::Get: {
             log::debug("HTTP Get {}", requestPath.string());
-            for (auto encoding : request.getHeadersValues("Accept-Encoding"))
-                log::debug("Encoding : {}", encoding);
+            for (auto encoding : request.getHeadersValues("Accept-Encoding")) log::debug("Encoding : {}", encoding);
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
                 if (key) {
@@ -187,7 +275,7 @@ public:
                     return response;
                 }
             }
-            
+
             auto file = Filesystem::open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
             if (file->isEncoded()) {
@@ -197,11 +285,11 @@ public:
                     return Response::getStatusResponse(Response::variantAlsoNegotiates);
                 }
             }
-            
+
             std::array<char, 512> buffer{0, 0};
             while (file->read(buffer).gcount() != 0) response.content.append(buffer.data(), file->gcount());
             if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
-            
+
         } break;
         case Request::Method::Head:
             if (!Filesystem::open(requestPath)) return Response::getStatusResponse(Response::notFound);
@@ -221,107 +309,6 @@ public:
 private:
     Filesystem fs;
 };
-
-struct BadRequestException : public std::runtime_error {
-    BadRequestException() : std::runtime_error("Bad HTTP request") {}
-};
-
-class RequestParser {
-public:
-    RequestParser() : state(State::methodStart) {}
-
-    void reset() {
-        currentRequest.reset();
-        state = State::methodStart;
-    }
-
-    template<typename InputIterator>
-    std::optional<Request> parse(InputIterator begin, InputIterator end) {
-        while (begin != end)
-            if (completeRequest(*begin++, currentRequest)) return currentRequest;
-
-        return {};
-    }
-
-private:
-    enum class State {
-        methodStart, method, uri, versionH, versionT1, versionT2, versionP, versionSlash,
-        versionMajorStart, versionMajor, versionMinorStart, versionMinor, newline1,
-        headerLineStart, headerLws, headerName, spaceBeforeHeaderValue, headerValue, newline2, newline3
-    };
-    State state;
-    Request currentRequest;
-
-private: // clang-format off
-    bool completeRequest(char input, Request& req) {
-        auto isChar = [](char c) { return c >= 0; };
-        auto isCtrl = [](char c) { return (c >= 0 && c <= 31) || (c == 127); };
-        auto isSpecial = [](char c) {   switch (c) {
-            case '(': case ')': case '<': case '>': case '@': case ',': case ';': case ':': case '\\': case '"':
-            case '/': case '[': case ']': case '?': case '=': case '{': case '}': case ' ': case '\t': return true;
-            default: return false;
-        }};
-        auto isDigit = [](char c) { return c >= '0' && c <= '9'; };
-        auto setState = [this](bool cond, State next) {
-            state = next;
-            if (cond) throw BadRequestException();
-        };
-
-        static std::string buffer;
-
-        switch (state) {
-            case State::methodStart:
-                setState(!isChar(input) || isCtrl(input) || isSpecial(input), State::method);
-                buffer = input;
-                break;
-            case State::method: if (input == ' ') { state = State::uri; req.setMethod(buffer); }
-                              else if (!isChar(input) || isCtrl(input) || isSpecial(input)) { throw BadRequestException(); }
-                              else buffer.push_back(input);
-                break;
-            case State::uri: if (input == ' ') { state = State::versionH; break; }
-                           else if (isCtrl(input)) throw BadRequestException();
-                           else { req.uri.push_back(input); break; }
-            case State::versionH: setState(input != 'H', State::versionT1); break;
-            case State::versionT1: setState(input != 'T', State::versionT2); break;
-            case State::versionT2: setState(input != 'T', State::versionP); break;
-            case State::versionP: setState(input != 'P', State::versionSlash); break;
-            case State::versionSlash: setState(input != '/', State::versionMajorStart); req.httpVersionMajor = 0; req.httpVersionMinor = 0; break;
-            case State::versionMajorStart: setState(!isDigit(input), State::versionMajor); req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0'; break;
-            case State::versionMajor: if (input == '.') state = State::versionMinorStart;
-                                    else if (isDigit(input)) req.httpVersionMajor = req.httpVersionMajor * 10 + input - '0';
-                                    else throw BadRequestException();
-                break;
-            case State::versionMinorStart:
-                setState(!isDigit(input), State::versionMinor);
-                req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
-                break;
-            case State::versionMinor: if (input == '\r') state = State::newline1;
-                                    else if (isDigit(input)) req.httpVersionMinor = req.httpVersionMinor * 10 + input - '0';
-                                    else throw BadRequestException();
-                break;
-            case State::newline1: setState(input != '\n', State::headerLineStart); break;
-            case State::headerLineStart: if (input == '\r') { state = State::newline3; break; }
-                                       else if (!req.headers.empty() && (input == ' ' || input == '\t')) { state = State::headerLws; break; }
-                                       else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
-                                       else { req.headers.push_back({}); req.headers.back().name.push_back(input); state = State::headerName; break; }
-            case State::headerLws:if (input == '\r') { state = State::newline2; break; }
-                                 else if (input == ' ' || input == '\t') break;
-                                 else if (isCtrl(input)) throw BadRequestException();
-                                 else { state = State::headerValue; req.headers.back().value.push_back(input); break; }
-            case State::headerName: if (input == ':') { state = State::spaceBeforeHeaderValue; break; }
-                                  else if (!isChar(input) || isCtrl(input) || isSpecial(input)) throw BadRequestException();
-                                  else { req.headers.back().name.push_back(input); break; }
-            case State::spaceBeforeHeaderValue: setState(input != ' ', State::headerValue); break;
-            case State::headerValue: if (input == '\r') { state = State::newline2; break; }
-                                   else if (isCtrl(input)) throw BadRequestException();
-                                   else { req.headers.back().value.push_back(input); break; }
-            case State::newline2: setState(input != '\n', State::headerLineStart); break;
-            case State::newline3: if (input == '\n') return true; else throw BadRequestException();
-            default: throw BadRequestException();
-        }
-        return false;
-    }
-}; // clang-format on
 
 template<typename ConnectionType>
 class Connections {
@@ -359,7 +346,8 @@ enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 template<typename Net, typename Filesystem>
 class Connection : public std::enable_shared_from_this<Connection<Net, Filesystem>> {
 public:
-    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler, RequestHandler<Net, Filesystem>& handler)
+    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
+                        RequestHandler<Net, Filesystem>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         log::debug("New connection");
     }
@@ -380,7 +368,7 @@ private:
     Connections<Connection<Net, Filesystem>>& connections;
     RequestHandler<Net, Filesystem>& requestHandler;
     std::array<char, 8192> buffer;
-    RequestParser requestParser;
+    Request request;
     Response response;
     Protocol protocol = Protocol::HTTP;
 
@@ -391,9 +379,9 @@ private:
                 switch (protocol) {
                 case Protocol::HTTP:
                     try {
-                        auto request = requestParser.parse(buffer.data(), buffer.data() + bytesTransferred);
-                        if (request) {
-                            response = requestHandler.handleRequest(request.value());
+                        request.parseSomeData(buffer.data(), buffer.data() + bytesTransferred);
+                        if (request.completed()) {
+                            response = requestHandler.handleRequest(request);
                             write();
                             if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;
                         }
@@ -448,7 +436,6 @@ public:
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
     Server& operator=(Server&&) = delete;
-    
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }

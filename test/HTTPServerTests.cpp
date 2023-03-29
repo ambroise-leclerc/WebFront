@@ -89,57 +89,51 @@ SCENARIO("HTTP Response") {
 
 SCENARIO("RequestParser") {
     GIVEN("A valid HTTP request") {
-        RequestParser parser;
-
         string input{"GET /hello.htm HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip\r\n"
                      "Accept-Encoding: deflate\r\nConnection: Keep-Alive\r\n\r\n"};
         WHEN("parsing it") {
-            optional<Request> request;
-            REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+            Request request;
+            REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
             THEN("It should fill correctly the Request structure") {
-                REQUIRE(request);
-                REQUIRE(request.value().uri == "/hello.htm");
-                REQUIRE(request.value().method == Request::Method::Get);
+                REQUIRE(request.completed());
+                REQUIRE(request.uri == "/hello.htm");
+                REQUIRE(request.method == Request::Method::Get);
 
-                auto language = request->getHeaderValue("Accept-Language");
+                auto language = request.getHeaderValue("Accept-Language");
                 REQUIRE(language == "en-us");
 
-                REQUIRE(!request->getHeaderValue("Bozo le clown"));
+                REQUIRE(!request.getHeaderValue("Bozo le clown"));
 
-                auto encodings = request->getHeadersValues("Accept-Encoding");
+                auto encodings = request.getHeadersValues("Accept-Encoding");
                 REQUIRE(encodings.size() == 2);
 
-                REQUIRE(request->headersContain("Accept-Encoding", "deflate"));
-                REQUIRE(request->headersContain("Accept-Encoding", "gzip"));
+                REQUIRE(request.headersContain("Accept-Encoding", "deflate"));
+                REQUIRE(request.headersContain("Accept-Encoding", "gzip"));
             }
         }
     }
 
     GIVEN("An invalid HTTP request") {
-        RequestParser parser;
-
         string input{"GET /hello.htm HTTP/1.1\r\nUser - Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.tutorialspoint.com\r\nAccept-Language: en-us\r\nAccept-Encoding: gzip, deflate\r\nConnection: "
                      "Keep-Alive\r\n\r\n"};
         WHEN("parsing it") {
-            optional<Request> request;
-            REQUIRE_THROWS(request = parser.parse(input.cbegin(), input.cend()));
+            Request request;
+            REQUIRE_THROWS(request.parseSomeData(input.cbegin(), input.cend()));
         }
     }
 
     GIVEN("An upgrade request") {
-        RequestParser parser;
-
         string input{"GET / HTTP/1.1\r\nOrigin: localhost\r\nSec-WebSocket-Protocol: WebFront_0.1\r\nSec-WebSocket-Extensions: "
                      "permessage-deflate\r\nSec-WebSocket-Key: Dh54KYbN4sDdk6ejeVPqXQ==\r\nConnection: keep-alive, "
                      "Upgrade\r\nUpgrade: websocket\r\n\r\n"};
         WHEN("parsing it") {
-            optional<Request> request;
-            REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
+            Request request;
+            REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
             THEN("An upgrade request should be detected") {
-                REQUIRE(request);
-                REQUIRE(request.value().isUpgradeRequest("websocket"));
+                REQUIRE(request.completed());
+                REQUIRE(request.isUpgradeRequest("websocket"));
             }
         }
     }
@@ -166,18 +160,16 @@ bool compare(auto& buffer, std::string text) {
 
 SCENARIO("RequestHandler") {
     GIVEN("A valid HTTP request with an unimplemented method") {
-        RequestParser parser;
-
         string input{"DELETE /ressource.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/ressource.txt");
-        REQUIRE(request.value().method == Request::Method::Delete);
+        Request request;
+        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
+        REQUIRE(request.completed());
+        REQUIRE(request.uri == "/ressource.txt");
+        REQUIRE(request.method == Request::Method::Delete);
         WHEN("A RequestHandler process it") {
             RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
+            auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Not Implemented' http response") {
                 auto buffers = response.toBuffers<Net>();
@@ -187,20 +179,18 @@ SCENARIO("RequestHandler") {
     }
 
     GIVEN("A valid HTTP upgrade request to websocket protocol") {
-        RequestParser parser;
-
         string input{
           "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "
           "x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\nOrigin: "
           "http://example.com\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/chat");
-        REQUIRE(request.value().method == Request::Method::Get);
+        Request request;
+        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
+        REQUIRE(request.completed());
+        REQUIRE(request.uri == "/chat");
+        REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
             RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
+            auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Switching Protocols' http response") {
                 auto buffers = response.toBuffers<Net>();
@@ -214,18 +204,16 @@ SCENARIO("RequestHandler") {
     }
 
     GIVEN("A HTTP HEAD request") {
-        RequestParser parser;
-
         string input{"HEAD /file.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/file.txt");
-        REQUIRE(request.value().method == Request::Method::Head);
+        Request request;
+        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
+        REQUIRE(request.completed());
+        REQUIRE(request.uri == "/file.txt");
+        REQUIRE(request.method == Request::Method::Head);
         WHEN("A RequestHandler process it") {
             RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
+            auto response = handler.handleRequest(request);
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
         }
@@ -233,30 +221,49 @@ SCENARIO("RequestHandler") {
     }
 
     GIVEN("A HTTP HEAD request with an empty URL") {
-        RequestParser parser;
-
         string input{"HEAD HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_THROWS_AS(request = parser.parse(input.cbegin(), input.cend()), BadRequestException);
+                
+        Request request;
+        REQUIRE_THROWS_AS(request.parseSomeData(input.cbegin(), input.cend()), BadRequestException);
        
+    }
+
+    GIVEN("A HTTP HEAD request received asynchronously") {
+        string chunk1{"HEAD /file.txt HTTP/1.1\r\nUser-Agent:"};
+        string chunk2{" Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "};
+        string chunk3{"www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        Request request;
+        REQUIRE_NOTHROW(request.parseSomeData(chunk1.cbegin(), chunk1.cend()));
+        REQUIRE(!request.completed());
+        REQUIRE_NOTHROW(request.parseSomeData(chunk2.cbegin(), chunk2.cend()));
+        REQUIRE(!request.completed());
+        REQUIRE_NOTHROW(request.parseSomeData(chunk3.cbegin(), chunk3.cend()));
+        REQUIRE(request.completed());
+        REQUIRE(request.uri == "/file.txt");
+        REQUIRE(request.method == Request::Method::Head);
+        WHEN("A RequestHandler process it") {
+            RequestHandler<Net, MockFileSystem> handler{"."};
+            auto response = handler.handleRequest(request);
+
+            THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
+        }
+        
     }
 }
 
 SCENARIO("RequestHandler on a HTTP GET") {
     GIVEN("A valid HTTP GET request on a compressed file with no supported encoding") {
-        RequestParser parser;
-
         string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/compressed.txt");
-        REQUIRE(request.value().method == Request::Method::Get);
+        Request request;
+        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
+        REQUIRE(request.completed());
+        REQUIRE(request.uri == "/compressed.txt");
+        REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
             RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
+            auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Variant Also Negotiates' http response") {
                 auto buffers = response.toBuffers<Net>();
@@ -266,18 +273,16 @@ SCENARIO("RequestHandler on a HTTP GET") {
     }
 
     GIVEN("A valid HTTP GET request on a compressed file with supported encoding") {
-        RequestParser parser;
-
         string input{"GET /compressed.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-encoding: gzip, br, deflate\r\n\r\n"};
-        optional<Request> request;
-        REQUIRE_NOTHROW(request = parser.parse(input.cbegin(), input.cend()));
-        REQUIRE(request);
-        REQUIRE(request.value().uri == "/compressed.txt");
-        REQUIRE(request.value().method == Request::Method::Get);
+        Request request;
+        REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
+        REQUIRE(request.completed());
+        REQUIRE(request.uri == "/compressed.txt");
+        REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
             RequestHandler<Net, MockFileSystem> handler{"."};
-            auto response = handler.handleRequest(request.value());
+            auto response = handler.handleRequest(request);
             THEN("It should respond ok with a brotli encoded (empty) file") {
                 REQUIRE(response.statusCode == Response::ok);
                 REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
