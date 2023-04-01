@@ -88,9 +88,9 @@ struct Request : Headers {
 
     static Method getMethodFromString(std::string_view text) {
         using enum Method;
-        std::map<std::string_view, Method> names{{"CONNECT", Connect}, {"DELETE", Delete},   {"GET", Get},
-                                                 {"HEAD", Head},       {"OPTIONS", Options}, {"PATCH", Patch},
-                                                 {"POST", Post},       {"PUT", Put},         {"TRACE", Trace}};
+        using namespace std::literals;
+        std::map names{std::pair{"CONNECT"sv, Connect}, {"DELETE"sv, Delete}, {"GET"sv, Get}, {"HEAD"sv, Head},
+                        {"OPTIONS"sv, Options}, {"PATCH"sv, Patch}, {"POST"sv, Post}, {"PUT"sv, Put}, {"TRACE"sv, Trace}};
         auto name = names.find(text);
         return name != names.end() ? name->second : Undefined;
     }
@@ -103,7 +103,7 @@ struct Request : Headers {
 
     template<typename InputIterator>
     bool parseSomeData(InputIterator begin, InputIterator end) {
-         while (begin != end)
+        while (begin != end)
             if (completeRequest(*begin++)) return true;
 
         return false;
