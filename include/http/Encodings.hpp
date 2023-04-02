@@ -72,7 +72,7 @@ inline std::string encode(const uint8_t* input, size_t size) {
     auto coded = output.begin();
     size_t i = 0;
     for (; i < size - 2; i += 3) {
-        *coded++ = code[(input[i] >> 2) & 0x3F];
+        *coded++ = code[(input[i] >> 2) & 0x3Fu];
         *coded++ = code[((input[i] & 0x3) << 4) | ((input[i + 1] & 0xF0) >> 4)];
         *coded++ = code[((input[i + 1] & 0xF) << 2) | ((input[i + 2] & 0xC0) >> 6)];
         *coded++ = code[input[i + 2] & 0x3F];
