@@ -1,5 +1,5 @@
 find_package(Threads)
-CPMAddPackage(NAME net_ts GITHUB_REPOSITORY ambroise-leclerc/networking-ts-impl GIT_TAG eeab180)
+CPMAddPackage(NAME net_ts GITHUB_REPOSITORY ambroise-leclerc/networking-ts-impl GIT_TAG ab0bb12)
 
 add_executable(WebFront HelloWorld.cpp)
 target_link_libraries(WebFront PRIVATE project_options project_warnings Threads::Threads)
