@@ -14,7 +14,7 @@ struct MimeType {
     constexpr MimeType(Type mimeType) : type(mimeType) {}
     constexpr MimeType(std::string_view extension) : type(fromExtension(extension).type) {}
 
-    static constexpr MimeType fromExtension(std::string_view e) {
+    [[nodiscard]] static constexpr MimeType fromExtension(std::string_view e) {
         if (e.starts_with('.')) e.remove_prefix(1);
         if (e == "js" || e == "mjs") return js;
         if (e == "htm" || e == "html") return html;

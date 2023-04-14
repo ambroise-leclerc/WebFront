@@ -17,7 +17,7 @@
 namespace webfront {
 namespace uri {
 
-inline std::string encode(std::string_view uri) {
+[[nodiscard]] inline std::string encode(std::string_view uri) {
     std::string encoded;
     static std::array digits{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
     for (auto c : uri) {
@@ -32,7 +32,7 @@ inline std::string encode(std::string_view uri) {
     return encoded;
 }
 
-inline std::string decode(std::string_view uri) {
+[[nodiscard]] inline std::string decode(std::string_view uri) {
     std::string decoded;
     decoded.reserve(uri.size());
     for (std::size_t index = 0; index < uri.size(); ++index) {
@@ -63,7 +63,7 @@ namespace base64 {
 
 namespace {
 
-inline std::string encode(const uint8_t* input, size_t size) {
+[[nodiscard]]inline std::string encode(const uint8_t* input, size_t size) {
     static constexpr std::array code = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
                                     'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
                                     's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
@@ -102,11 +102,11 @@ concept Container = ::std::movable<T> || requires(T t) {
     T::value_type;
 };
 
-inline std::string encode(Container auto input) {
+[[nodiscard]] inline std::string encode(Container auto input) {
     return encode(reinterpret_cast<const uint8_t*>(input.data()), input.size() * sizeof(typename decltype(input)::value_type));
 }
 
-inline std::string encodeInNetworkOrder(Container auto input) {
+[[nodiscard]] inline std::string encodeInNetworkOrder(Container auto input) {
     using namespace std;
     if constexpr (endian::native == endian::little)
         for (auto& elem : input) elem = byteswap(elem);
@@ -118,7 +118,7 @@ inline std::string encodeInNetworkOrder(Container auto input) {
 
 namespace crypto {
 static constexpr size_t sha1Length = 5;
-constexpr std::array<uint32_t, sha1Length> sha1(std::string_view input) {
+[[nodiscard]] constexpr std::array<uint32_t, sha1Length> sha1(std::string_view input) {
     std::array<uint32_t, sha1Length> digest = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
     std::array<uint32_t, 64> block{0};
     size_t blockByteIndex{0}, byteCount{0};
@@ -174,7 +174,7 @@ constexpr std::array<uint32_t, sha1Length> sha1(std::string_view input) {
     return digest;
 }
 
-inline std::string sha1String(std::string_view input) {
+[[nodiscard]] inline std::string sha1String(std::string_view input) {
     static const char* digits = "0123456789abcdef";
     std::string output;
     for (auto d : sha1(input))

@@ -35,14 +35,14 @@ class Headers {
 
 public:
     /// @return the header value with headerName name (or at least the first one)
-    std::optional<std::string> getHeaderValue(std::string_view headerName) const {
+    [[nodiscard]] std::optional<std::string> getHeaderValue(std::string_view headerName) const {
         for (auto& header : headers)
             if (caseInsensitiveEqual(header.name, headerName)) return header.value;
         return {};
     }
 
     /// @return the list of headers values with the same headerName name
-    std::list<std::string> getHeadersValues(std::string_view headerName) const {
+    [[nodiscard]] std::list<std::string> getHeadersValues(std::string_view headerName) const {
         std::list<std::string> values{};
         for (auto& header : headers)
             if (caseInsensitiveEqual(header.name, headerName)) values.push_back(header.value);
@@ -50,7 +50,7 @@ public:
     }
 
     /// @return true if text is contained in the value field of headerName (case insensitive)
-    bool headersContain(std::string_view headerName, std::string_view text) const {
+    [[nodiscard]] bool headersContain(std::string_view headerName, std::string_view text) const {
         for (auto header : getHeadersValues(headerName)) {
             if (std::search(header.cbegin(), header.cend(), text.cbegin(), text.cend(), [](char c1, char c2) {
                     return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
@@ -63,7 +63,7 @@ public:
     std::vector<Header> headers;
 
 private:
-    static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
+    [[nodiscard]] static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
         return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
                     return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
                 }));
@@ -86,7 +86,7 @@ struct Request : Headers {
         uri.clear();
     }
 
-    static Method getMethodFromString(std::string_view text) {
+    [[nodiscard]] static Method getMethodFromString(std::string_view text) {
         using enum Method;
         using namespace std::literals;
         std::map names{std::pair{"CONNECT"sv, Connect}, {"DELETE"sv, Delete}, {"GET"sv, Get}, {"HEAD"sv, Head},
@@ -97,7 +97,7 @@ struct Request : Headers {
 
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
-    bool isUpgradeRequest(std::string_view protocol) const {
+    [[nodiscard]] bool isUpgradeRequest(std::string_view protocol) const {
         return headersContain("Connection", "upgrade") && headersContain("Upgrade", protocol);
     }
 
@@ -207,7 +207,7 @@ struct Response : Headers {
     }
 
     template<typename Net>
-    std::vector<typename Net::ConstBuffer> toBuffers() const {
+    [[nodiscard]] std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
         static std::string httpStatus;
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
@@ -228,7 +228,7 @@ struct Response : Headers {
     }
 
 private:
-    static std::string toString(StatusCode code) {
+    [[nodiscard]] static std::string toString(StatusCode code) {
         switch (code) {
         case switchingProtocols: return "Switching Protocols";
         case ok: return "OK";
