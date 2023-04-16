@@ -32,23 +32,22 @@ public:
         File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "") :
             data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(std::move(contentEncoding)) {}
         File() = delete;
-        //File(const File&) = delete;
         
         File& read(std::span<char> s) { return read(s.data(), s.size()); }
-        bool isEncoded() const { return !encoding.empty(); }
-        std::string_view getEncoding() const { return encoding; }
+        [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
+        [[nodiscard]] std::string_view getEncoding() const { return encoding; }
 
      
         // fstream interface
-        size_t tellg() const { return readIndex; }
+        [[nodiscard]] bool bad() const { return badBit; }
+        [[nodiscard]] bool eof() const { return eofBit; }
+        [[nodiscard]] bool fail() const { return false; }
+        [[nodiscard]] size_t gcount() const { return lastReadCount; }
+        [[nodiscard]] size_t tellg() const { return readIndex; }
+        [[nodiscard]] explicit operator bool() const { return !fail(); }
+        [[nodiscard]] bool operator!() const { return eof() || bad(); }
         void seekg(size_t index) { readIndex = index; }
-        size_t gcount() const { return lastReadCount; }
-        bool bad() const { return badBit; }
         void clear() { eofBit = false; badBit = false; }
-        bool eof() const { return eofBit; }
-        bool fail() const { return false; }
-        explicit operator bool() const { return !fail(); }
-        bool operator!() const { return eof() || bad(); }
         File& get(char* s, size_t count) { return read(s, count); }
         File& read(char* s, size_t count) {
             constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);

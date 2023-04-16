@@ -64,7 +64,7 @@ std::ostream& operator<<(std::ostream& os, const HexDump<Container>& h) {
 /// @param   startAddress optional offset for displayed adresses
 ///
 /// @return  a multi-lines string with the dumped data
-static std::string hexDump(const Buffer auto& buffer, size_t startAddress = 0) {
+[[nodiscard]] static std::string hexDump(const Buffer auto& buffer, size_t startAddress = 0) {
     std::stringstream ss;
     ss << HexDump<decltype(buffer)>(buffer, startAddress);
 
@@ -77,7 +77,7 @@ static std::string hexDump(const Buffer auto& buffer, size_t startAddress = 0) {
 /// @param   buffer2
 ///
 /// @return  a multi-lines string with the dumped data
-static std::string hexDump(const Buffer auto& buffer1, const Buffer auto& buffer2) {
+[[nodiscard]] static std::string hexDump(const Buffer auto& buffer1, const Buffer auto& buffer2) {
     std::vector<uint8_t> buffer;
     buffer.resize(buffer1.size() + buffer2.size());
     std::copy_n(buffer1.data(), buffer1.size(), buffer.data());

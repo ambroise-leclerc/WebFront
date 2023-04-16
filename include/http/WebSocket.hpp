@@ -38,36 +38,36 @@ struct Header {
         ctrl5,
     };
 
-    bool FIN() const { return test(0, 7); }
-    bool RSV1() const { return test(0, 6); }
-    bool RSV2() const { return test(0, 5); }
-    bool RSV3() const { return test(0, 4); }
-    Opcode opcode() const { return static_cast<Opcode>(std::to_integer<uint8_t>(raw[0] & std::byte(0b1111))); }
-    bool MASK() const { return test(1, 7); }
-    uint8_t payloadLenField() const { return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)); }
-    uint64_t extendedLenField() const {
+    [[nodiscard]] bool FIN() const { return test(0, 7); }
+    [[nodiscard]] bool RSV1() const { return test(0, 6); }
+    [[nodiscard]] bool RSV2() const { return test(0, 5); }
+    [[nodiscard]] bool RSV3() const { return test(0, 4); }
+    [[nodiscard]] Opcode opcode() const { return static_cast<Opcode>(std::to_integer<uint8_t>(raw[0] & std::byte(0b1111))); }
+    [[nodiscard]] bool MASK() const { return test(1, 7); }
+    [[nodiscard]] uint8_t payloadLenField() const { return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)); }
+    [[nodiscard]] uint64_t extendedLenField() const {
         auto s = [this](size_t i, uint8_t shift = 0) constexpr { return std::to_integer<uint64_t>(raw[i]) << shift; };
         return payloadLenField() == 126 ? s(2, 8) | s(3) : s(2, 56) | s(3, 48) | s(4, 40) | s(5, 32) | s(6, 24) | s(7, 16) | s(8, 8) | s(9, 0);
     }
 
-    size_t headerSize() const {
+    [[nodiscard]] size_t headerSize() const {
         if (payloadLenField() < 126) return MASK() ? 6 : 2;
         if (payloadLenField() == 126) return MASK() ? 8 : 4;
         return MASK() ? 14 : 10;
     }
 
-    std::array<std::byte, 4> maskingKey() const {
+    [[nodiscard]] std::array<std::byte, 4> maskingKey() const {
         if (!MASK()) return {};
         auto index = headerSize() - 4;
         return {raw[index], raw[index + 1], raw[index + 2], raw[index + 3]};
     }
 
-    uint64_t payloadSize() const {
+    [[nodiscard]] uint64_t payloadSize() const {
         auto len = payloadLenField();
         return len < 126 ? len : extendedLenField();
     }
 
-    uint64_t getFrameSize() const { return payloadSize() + headerSize(); }
+    [[nodiscard]] uint64_t getFrameSize() const { return payloadSize() + headerSize(); }
 
     void dump() const {
         log::debug("FIN:{} RSV1:{} RSV2:{} RSV3:{} opcode:{}", FIN(), RSV1(), RSV2(), RSV3(), static_cast<int>(opcode()));
@@ -78,7 +78,7 @@ struct Header {
     }
 
     /// @return true if first 'size' bytes constitute a complete header
-    bool isComplete(size_t size) const {
+    [[nodiscard]] bool isComplete(size_t size) const {
         if (size < 2) return false;
         return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)) < 126 ? size >= 6 : size >= 14;
     }
