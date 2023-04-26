@@ -17,6 +17,73 @@
 
 namespace webfront::filesystem {
 
+class File {
+public:
+    File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "")
+        : data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false),
+          encoding(std::move(contentEncoding)) {}
+    File() = delete;
+
+    File& read(std::span<char> s) { return read(s.data(), s.size()); }
+    [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
+    [[nodiscard]] std::string_view getEncoding() const { return encoding; }
+
+    // fstream interface
+    [[nodiscard]] bool bad() const { return badBit; }
+    [[nodiscard]] bool eof() const { return eofBit; }
+    [[nodiscard]] bool fail() const { return false; }
+    [[nodiscard]] size_t gcount() const { return lastReadCount; }
+    [[nodiscard]] size_t tellg() const { return readIndex; }
+    [[nodiscard]] explicit operator bool() const { return !fail(); }
+    [[nodiscard]] bool operator!() const { return eof() || bad(); }
+    void seekg(size_t index) { readIndex = index; }
+    void clear() {
+        eofBit = false;
+        badBit = false;
+    }
+    File& get(char* s, size_t count) { return read(s, count); }
+    File& read(char* s, size_t count) {
+        constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
+        UIntByte chunk;
+        for (size_t index = 0; index < count; ++index) {
+            if (eof()) {
+                badBit = true;
+                lastReadCount = index;
+                return *this;
+            }
+
+            if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
+
+            s[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
+            readIndex++;
+            if (readIndex == size) eofBit = true;
+        }
+        lastReadCount = count;
+        return *this;
+    }
+
+private:
+    std::span<const uint64_t> data;
+    size_t readIndex, lastReadCount, size;
+    bool eofBit, badBit;
+    const std::string encoding;
+
+    union UIntByte {
+        uint64_t uInt;
+        uint8_t byte[sizeof(uInt)];
+    };
+
+    static UIntByte convert(uint64_t input) {
+        UIntByte result;
+        uint64_t bigEndian;
+        if constexpr (std::endian::native == std::endian::little)
+            bigEndian = std::byteswap(input);
+        else
+            bigEndian = input;
+        std::memcpy(result.byte, &bigEndian, sizeof(bigEndian));
+        return result;
+    }
+};
 
 class IndexFS {
 public:
@@ -27,211 +94,141 @@ public:
     IndexFS& operator=(const IndexFS&) = default;
     IndexFS& operator=(IndexFS&&) = default;
 
-    class File {
-    public:
-        File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "") :
-            data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(std::move(contentEncoding)) {}
-        File() = delete;
-        
-        File& read(std::span<char> s) { return read(s.data(), s.size()); }
-        [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
-        [[nodiscard]] std::string_view getEncoding() const { return encoding; }
-
-     
-        // fstream interface
-        [[nodiscard]] bool bad() const { return badBit; }
-        [[nodiscard]] bool eof() const { return eofBit; }
-        [[nodiscard]] bool fail() const { return false; }
-        [[nodiscard]] size_t gcount() const { return lastReadCount; }
-        [[nodiscard]] size_t tellg() const { return readIndex; }
-        [[nodiscard]] explicit operator bool() const { return !fail(); }
-        [[nodiscard]] bool operator!() const { return eof() || bad(); }
-        void seekg(size_t index) { readIndex = index; }
-        void clear() { eofBit = false; badBit = false; }
-        File& get(char* s, size_t count) { return read(s, count); }
-        File& read(char* s, size_t count) {
-            constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
-            UIntByte chunk;
-            for (size_t index = 0; index < count; ++index) {
-                if (eof()) {
-                    badBit = true;
-                    lastReadCount = index;
-                    return *this;
-                }
-                
-                if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
-
-                s[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
-                readIndex++;
-                if (readIndex == size) eofBit = true;
-            }
-            lastReadCount = count;
-            return *this;
-        }
-        
-    private:
-        std::span<const uint64_t> data;
-        size_t readIndex, lastReadCount, size;
-        bool eofBit, badBit;
-        const std::string encoding;
-    
-        union UIntByte {
-            uint64_t uInt;
-            uint8_t byte[sizeof(uInt)];
-        };
-
-        static UIntByte convert(uint64_t input) {
-            UIntByte result;
-            uint64_t bigEndian;
-            if constexpr (std::endian::native == std::endian::little) 
-                bigEndian = std::byteswap(input);
-            else
-                bigEndian = input;
-            std::memcpy(result.byte, &bigEndian, sizeof(bigEndian));
-            return result;
-        }
-    };
-
     struct IndexHtml {
-        static constexpr size_t dataSize {143};
+        static constexpr std::string_view encoding{"gzip"};
+        static constexpr size_t dataSize{137};
         static constexpr std::array<uint64_t, 18> data{
-          0x3c21444f43545950, 0x452068746d6c3e0a, 0x3c68746d6c3e0a20, 0x203c686561643e0a, 0x202020203c6d6574,
-          0x6120636861727365, 0x743d227574662d38, 0x223e0a202020203c, 0x7469746c653e5765, 0x6266726f6e743c2f,
-          0x7469746c653e0a20, 0x203c2f686561643e, 0x0a20203c73637269, 0x7074207372633d22, 0x57656246726f6e74,
-          0x2e6a73223e3c2f73, 0x63726970743e0a3c, 0x2f68746d6c3e0a00
-        };  
+          0x1f8b080818a44764, 0x0203696e6465782e, 0x68746d6c00b35174, 0xf1770e890c7055c8, 0x28c9cdb1e3b28150,
+          0x0a0a3619a9892920, 0x0690999b5a92a890, 0x9c9158549c5a62ab, 0x545a92a66ba10495, 0x2ac92cc949b50b4f,
+          0x4d4a2bcacf2bb1d1, 0x87f041faf56106d8, 0x1427176516942814, 0x1725db2a0155ba81, 0x54ea65152bd9d9e8,
+          0x43a480d6ea43ec05, 0x00388fde3f8f0000, 0x0000000000000000};
     };
 
     struct WebFrontIco {
-        static constexpr size_t dataSize {766};
-        static constexpr std::array<uint64_t, 96> data{
-            0x0000010001002020, 0x100001000400e802, 0x0000160000002800, 0x0000200000004000, 0x0000010004000000,
-            0x0000000000000000, 0x0000000000001000, 0x0000000000003834, 0x3200e09b1200ead9, 0xb0006c676200ae9f,
-            0x7500e6b24200524e, 0x4800e1a429009d7b, 0x2f00bfbab900857e, 0x6f00fbf8ef00b887, 0x2000866d3800e8c2,
-            0x6d0063594600bb23, 0x0000000000000000, 0x0000000032bbb900, 0x0000000000000000, 0x00000000009b2000,
-            0x0000000000000000, 0x000000000002a000, 0x000000006d8cc8d6, 0x0000000000036000, 0x006000d111717111,
-            0x1d00000000000000, 0x00006c1777777777, 0x7110000000000000, 0x0006117777777777, 0x7777f00000000000,
-            0x00f1777777777777, 0x77771f0000000000, 0x0017777171717177, 0x7777710000000000, 0x0117111717171717,
-            0x1717171000000060, 0xf111711111111111, 0x1171111f00600000, 0xc111111111111111, 0x1111111100000600,
-            0x1111111217be7e1b, 0xe71111116000000d, 0x111111eb7ebb111b, 0x21111111d000060d, 0x111111227b2b5112,
-            0x211111118060000c, 0x111115b5eb72211b, 0xb2251111c0000668, 0x11111221b21eb11b, 0x2ee5111180600608,
-            0x11117be5b711be1b, 0xe1111111c060066d, 0x1111eb1221112b1b, 0xe7111111d660066f, 0x1111be7be1117b5b,
-            0xbbbbb111f0600666, 0x1111111111111111, 0x1111111166600666, 0xd717171717171711, 0x7171771d66600f66,
-            0x6777777177717777, 0x1777717666606666, 0x6377777777777777, 0x7777773666f006ff, 0xf685575777575777,
-            0x57775a6f6f6666f6, 0xff3a575555757555, 0x5555affff6f066ff, 0x3f3fa55555555557, 0x555af33636f6f6ff,
-            0xf333334555555555, 0xea333333636faff3, 0xf3333333a445444a, 0x3a33333ff664b36f, 0xf333a3aaaaaaaaaa,
-            0xaa3a3333f332b243, 0x363f333333333333, 0x33333fffaa2bbbb9, 0x9999999999999999, 0x999999999bbbc000,
-            0x0003800000010000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000,
-            0x0000000000000002, 0x1000001310000005, 0x0000002418000008, 0x9000004890000040, 0x500000905f800000,
-            0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000800000008000,
-            0x0001e00000070000};
+        static constexpr std::string_view encoding{"gzip"};
+        static constexpr size_t dataSize{522};
+        static constexpr std::array<uint64_t, 66> data{
+          0x1f8b080855a34764, 0x020366617669636f, 0x6e2e69636f008d52, 0x4f68d36014ffb56a, 0xdc4171afa211c25c,
+          0xea1f500a0a8d94b1, 0x4b863a191e448550, 0x9c07831ddf3cac84, 0x08358740e9657af1, 0xb0ab1451705e7670,
+          0xae225a03b57af2a8, 0x9789b7f5301ddbc1, 0x8e40103cc497a4ce, 0xced37e5f7e79eff7, 0xbeefbdef7df902a4,
+          0x78a8ea20bf77632d, 0x0d1c06708aa932c7, 0x9851fc7f0cf6ecc8, 0xb93c56ea19ac7f7b, 0x8999e9db78f1a482,
+          0xef8df3b87e65029d, 0xf9d378ec9ec5fb77, 0x4dcc562dfcfef513, 0x6f1fa8b85f1ec1da, 0xc7324a372ec13bde,
+          0x5f35ef35b76f5357, 0xb7ebf4d3d8941f7e, 0x5a8e9d5d2660e20b, 0xd9360d6d2d9a911d, 0x86fdb745899c04dd,
+          0x446ff6a4339c68d9, 0xb11951462c5332c9, 0x3d4415cc4db22986, 0x4dc3bc173ed03f70, 0x71b0c9c8adaaf283,
+          0x1d9edecf66a3ea91, 0x9265e733a4481f73, 0x73d73291ae99d847, 0x74e8f5c6ddacd238, 0x49d4867487d3b38d,
+          0xa34bca99d5685e1a, 0x207257df504be9f0, 0xfab62995b91ce7e6, 0xe2facba66411b5dc, 0x0eb9373d6f89baa6,
+          0x24fada21c1fa6bd2, 0x3b7f1267489807c4, 0x341f8c87c3c7bc27, 0x4c214ace160aa22b, 0x85c16cb1e8448f33,
+          0x69594204e168d130, 0x2a15c33016c3a02b, 0x425d7fcebe513426, 0xfd422108425fd3c6, 0xa3c0baa669256bd1,
+          0x67adcd8f5fbc3caa, 0x697a30f5caf2b567, 0x0b3138e0e71b170a, 0xbad6831e2ee4bce6, 0xa33ed4bd36df612d,
+          0xfac5768a345fca41, 0xe61ef64f1c0106e6, 0x8009e6d85560ee56, 0x6d27256a09532bc0, 0xde3f23cd980cfe02,
+          0x0000000000000000};
     };
 
     struct WebFrontJs0_1_1 {
-        static constexpr size_t dataSize{3531};
-        static constexpr std::string_view encoding {"gzip"};
-        static constexpr std::array<uint64_t, 442> data{
-          0x1f8b0808b7650f64, 0x000357656246726f, 0x6e742e6a7300d51b, 0x6b6fe336f27b81fe, 0x07d61f6a79ad556c,
-          0x279be6e2f5b5dd6d, 0x16e861af5b347bed, 0x072330648bb6b52b, 0x4b8244e7d136fffd, 0x66f8904889949d14,
-          0x3de0845dc4a66686, 0xc399e1bc489f9c9c, 0x90efa2905132f9e6, 0x64343e998c261332, 0x995c9e8d2fcf265f,
-          0x7e7182afc33ddb66, 0x05f97eb72cb2b8a4, 0xe43d5d25b458c9b7, 0xcb22a66bf21b5dbe, 0x2bb29491551253fc,
-          0x9315f4cb2f6ec382, 0x2c16f49ed1342ac9, 0x8c786c1b97e4ebaf, 0x09fe0daa3703f2e7, 0x9fc45befd3158bb3,
-          0x947803f2c7975f10, 0x78105fc05cb390c5, 0x2ba45183453e5956, 0xa0f834413f2c3fd1, 0x150b4aca7e2e3296,
-          0xb1879c7e58c35c35, 0x063ede1fc0638e00, 0x8bc52599df904712, 0xa7250bd315cdd6e4, 0xfba2081f90e5d6bc,
-          0x240a2a3c986c3925, 0x8f8316f136d61a44, 0xe9e1c272980687e2, 0x35f124a7b96233d8, 0x86e587bb14d8ce69,
-          0xc11e82559824ded2, 0x27f96040a2797e83, 0xf3c11f98725acf57, 0x50b62f52530a625a, 0x09a4802560872491,
-          0x27e40304b0245fcd, 0x66a4a7807b280b31, 0x96ee9364602e976d, 0x8bec8ea4f48e7c04, 0xecaba2c80aaff736,
-          0x09cb92282bb80d93, 0x3d253d3224d7ac88, 0xd38d07330fe13b18, 0x469a311282e980f4, 0x8bfd8a81a0e01fce,
-          0xd21b4c1d5a36d667, 0x087cb1403b1296a6, 0x939c9108c4562344, 0xb5d451aa64265746, 0xbe55f6b32a286c10,
-          0xe4f392788b85095f, 0x7ff3f9ba715a5dde, 0x8f030fbf8a9d50e6, 0x402a1226d5de0dda, 0x5bbe236afdb0cc27,
-          0xeb22db810184abcf, 0x95a6504b3880c061, 0xb1d9ef60e7954142, 0xd30ddbf2754c06b5, 0xb9c530e3c827096e,
-          0x212025c17c409cc2, 0xbbd724813fc361cb, 0x0a0013a87fe5c568, 0xad8838304014d857, 0x61310052409cf3af,
-          0x597299c42b2a0c58, 0x2c019888758de113, 0x16f3f84672069fb4, 0xb752538f86e5b20c, 0x55ba0a9964efc09c,
-          0x5c218f520b7774b9, 0x464f055f3597a346, 0x0dd7734b8b12dfce, 0xc08e76e1a7acb844, 0xe677718a9fc6a80c,
-          0xb6dac2a76a6355f4, 0x56d92edf337a9546, 0x7198a6b42c3d436a, 0x487cff63ca4e2740, 0x1bade63f317ee1cb,
-          0xf0e6a3fbf17804cf, 0x7a7da3cb49215d68, 0x38170245d01ab47d, 0x01879f8f6eb8358c, 0xeedfbd03aba69ca9,
-          0x2089194b28987403, 0x663cae6196f10600, 0x4c84a1f6726a2887, 0x7b6bfe4e8e6bf215, 0xe3a6b7e64373f9a7,
-          0x27c8f7d00a9017a2, 0x06a64e0c6080838f, 0x39387e73c3a6e02d, 0x6e05758b6e380109, 0xa2d634903cf3d824,
-          0x3f82213c56bb1b97, 0x0b61ef7d9c7e4667, 0x44db8bd6df1a4bd7, 0x5fcc8d2fbd7d1aa7, 0x318bc324fe9d469a,
-          0x34ccf1e951b4b621, 0x38dc6df819bcac26, 0x287df4383a097c94, 0xcc4ca46af8402d2a, 0x1d9e0bcc186889ed,
-          0x27cade870f14ddc5, 0xc98b17e4bb158f10, 0x2f4eac4980b1b114, 0xa6d7f242dcc3728f, 0x3ae30eb5e1613004,
-          0x64090d926ce3f552, 0xca123e7f15186035, 0x4d9fc4bd724157b7, 0x6ff6eb35e715771d, 0xdf7062c47b359e38,
-          0x91fe5d6edafbb441, 0xd28a5c82ad3d7946, 0x4472cf5893b42367, 0xabcf94495c50dc35, 0xffeef5efcacb9393,
-          0x240337bacd4a76d9, 0x87ad7f17a7517617, 0xe020aa23c8b382f9, 0xa4afb2bfc52818f7, 0x3be608b214129ad4,
-          0xc8e2e82dd5dcae4b, 0x657de5a07134a502, 0x1769d1a835213e0b, 0x7dd6659c86c5c347, 0x11b1fb210a66c9c5,
-          0xd1776266e90720ee, 0x35493f76ae6d9564, 0x253d72711834f9db, 0xe02e2cdf26149c63, 0x1ba82985de9c4f71,
-          0x43ded642e02311fc, 0x0112c9830ff0119d, 0xf5547c1453e0980f, 0x3916e4176596ce7a, 0x03f3b5181ed8e448,
-          0x93921ee6ab6fe12b, 0x8a2daae9961fc57c, 0xd1941f8e601a674a, 0x810fdf907a951c6c, 0x303d407f07ce3edc,
-          0x1cab219e01c4b025, 0xc4c6f82164e1aff0, 0x55ca0c6aa6d02630, 0xc48208b303270b88, 0x881f6c28e33bd21b,
-          0xd910a086ea90ec3c, 0x0882c696d6e6bf09, 0x7661eedd93d93fc9, 0x7dc03299508fcf07, 0x411e62865c306f02,
-          0xdb73d41f0c824f59, 0x9c7a7dd2b7aab9bc, 0x8b2195219ee4dc2a, 0x0fce5a08063e06a7, 0x0d9ae69001a69f2f,
-          0x4e2eede0f8a0a1cb, 0xdd28820164197a74, 0x08b478e49c573d06, 0x21938c884996b5b5, 0xf1456671a562baa9,
-          0xa4f1005834739e03, 0x440ddb943c81c96c, 0xb2550c8c45904195, 0xb4805c124b9c9e6f, 0xe3e15b95edc8797b,
-          0x8083098dfa6a5399, 0x7a1eddaf96b0b13f, 0x3b50b92627ba2619, 0x1456f273b7460fe8, 0x08774096a3cbb1c8,
-          0xf680281117f9784f, 0x9b8a199f7badd0d7, 0x7c8464b57578820f, 0xbf1915eb2de49333, 0x5fcd68dd19eaf92b,
-          0x623ed5c58c55c93b, 0xe57efeaa9cf3b008, 0x77e5db6c9fb2e709, 0x5b1040df760d8965, 0x83c6e9c43bb3d9eb,
-          0x21c2ac7838c43c3e, 0x8230cae35fa59288, 0xa7adc877f95d9f5c, 0xf80dce3b75874f87, 0xfef05985dcffa978,
-          0x739879b5e9a9e871, 0xfc1643c9cd97727d, 0xc99b1b82d2f3997a, 0x86bd3550ecb1d0e6, 0x3a8ddac286d57098,
-          0xeb10b282768d8e8f, 0xcacfb5625cf72b7a, 0xe4557b13dfa382ad, 0x193dbe9401f8237c, 0xfc81220ec87bcfd6,
-          0x2f2f208f89f88057, 0xd16870afe29a98cb, 0x9e65e20e1de10efd, 0x087ceea20f1c1408, 0x2ff79bf7d9c6bd45,
-          0x75b78ff3bb94ed52, 0x571d4b8d89e3149b, 0x4ed7ab22ce194eee, 0x3246944e29a06624, 0xca56bcfb237b5557,
-          0x09c56f5e4f0038e3, 0x87781d4821e31f07, 0x60457f99450f4198, 0x436e1cbdddc649e4, 0x0912b6099ae6a8d9,
-          0xcbb4d360844e7fc6, 0xfd4d192dcca6afe1, 0x1f8433c8d6eb92b6, 0x73384c3cc42b9e73, 0xdc66714446984baa,
-          0x41329a3699ac5ca2, 0x9a787e336d43e0b4, 0xc05ec94b3441ad01, 0x55377991d88f6944, 0xefc57cdaf7d7baf7,
-          0x9e92e1b07ee7cc47, 0x65d71119a81d7dcd, 0x4e576a87a847e475, 0x5cec582a81aa33ac, 0x293e167bcaed1012,
-          0x5519d641b2f225a6, 0x34503f3b4a047c6a, 0x6906f9bedc7a08dd, 0xe51635d90e6764dc, 0x01795c76d35acf3b,
-          0x745e9d0be2eeedf8, 0x1571f0ffd1924ecd, 0x25a5fbdd12a89a8b, 0x19920bb27c60b424, 0x3f5e5d5d7df3ea8c,
-          0xac930ccaf5744372, 0xa801181158c72f50, 0x59db3b24737ee6e9, 0xebc136683b3f385e, 0x1afff82bd23833a5,
-          0x51ee20fe8a1aa825, 0x923117092921c275, 0x107cd52058d1ea48, 0xd28c692652f2ee79, 0xd4c35bd159812151,
-          0x6cea9973f627e5cc, 0x9ce6b7868780d4f9, 0xb0caa0e270791544, 0x392e977c000b89a4, 0x7faa703dc9d2294c,
-          0x7130857f42cce7ec, 0x8a3e8e68f8cb1150, 0xc007e1e1878a2511, 0x29acafe0d331e93f, 0x3e2d57d611f4d563,
-          0x848ad6947f53bd31, 0xbe302d89edf344b8, 0xbc3f6c9b62cd4fd9, 0xb827c9d67af8bbdb, 0xc61039788f34667b,
-          0x80645bf88fc4dccc, 0xa102d3259fbbec88, 0x54876c8a8759aee7, 0x5f78a8e606db4c0c, 0x3c3591ca040cfa9d,
-          0xb6d6f2716aaef9e8, 0xe678ef3581696acc, 0x713357508f4597ee, 0xe4081f797a33afb9, 0x34d6f652261dc639,
-          0x59774e655659dd19, 0x95bdb51e3ab53096, 0x687e45f4277805e0, 0x8b10a4e9d7f9167c, 0x6fc9a89571d9e7d0,
-          0x0bdd9764dc48fd60, 0x9a66d9622f41e93d, 0x5d81212b39bc7940, 0x4e319f4d1e3c9120, 0xfae631ad37d7d7c4,
-          0x97237ae0373ed1b5, 0x23928056bbb37106, 0x71a8c8ac8fcfd5d1, 0x39a80d8340a52d2c, 0x2d1b1cf1d3f38ea2,
-          0xf3f8c4fbae8899d9, 0x1d75f503f543077e, 0x74a87a9e8efaabab, 0xaf581760aa45a23a, 0x82d41d7a0d06f8b9,
-          0x96ecd889533cc746, 0x7497c05a13b21357, 0xb49271624f674106, 0x20b09e499711586e, 0x6b2835a8b3b4faf6,
-          0x8079cc286ed7749c, 0x972dca7d4e4db3aa, 0x2ed8788a0058b700, 0xd318a94828a0eeb3, 0x3541401caee310bf,
-          0xaa70e0c0ad5f5f0f, 0xaa0fdcaa9365d2af, 0x0e959bb293425a34, 0xe86b225594755f97, 0xe7564797c27e692d,
-          0x4ddd28e0ada81af1, 0x0d6c7258e532968a, 0xf609c77638dc6e26, 0x042d83157d0b5ba5, 0x1d161b6bf9591596,
-          0x0bbccf319ee2dfd7, 0xadcb1f38dcb8cba1, 0x1e243c07a497e234, 0xb8c284b1e65c96da, 0x780b7e9116b25578,
-          0x6175e53cc59110a3, 0x0684fe7638537773, 0xf8717ce5ebf1a529, 0x1f97086251524b01, 0xd46b1f0e63cb59da,
-          0xd1737309c5ad2cc0, 0xe8f2ab4c0ef37c08, 0x08494296e24e9336, 0x4b9300b22c4fa0b0, 0x6b6939dd3558d464,
-          0x6da38499dbaf96d3, 0x296d86269a42c10b, 0x71f240caefec4d1f, 0x2630f675d1db92ba, 0x36cec427ad83b036,
-          0xd4e91150a23fad49, 0xcd56d8586417a790, 0x4531d595699ab1fe, 0x56190a4d8d7cc4b0, 0x4fdfa9005fa7d58a,
-          0x0b47d9b1f5e8f808, 0x06a5113f97b786c1, 0xcb0c498eb48e5374, 0x9b3b9002b5a2a8c3, 0x5e0f7957cbc66d27,
-          0xb54fbd23a2b7cab2, 0xb522e24e5a7ab269, 0xd4bb5461c4d6dc11, 0xa0a2c0aa216d8d0f, 0x0129eafe5e77e357,
-          0xac5795c857a92891, 0x07d20e24e7ca92ec, 0x742423a5f0361eff, 0xfb9a4c5e9d43ad3e, 0x81e07c7a4453b7e6,
-          0x3ae377257b8e740d, 0x7bb1e2925e5c0a9b, 0xe9906d73a18b315e, 0x3c9a62e9fa9157b2, 0xbc6192521a95aae1,
-          0x72a0d00b60af5d85, 0xabad7e214db4c8b1, 0x1fac0902a6821db5, 0x7007078586977d3b, 0xca4483e4f1556144,
-          0xd7e13e61ce9cb751, 0x1d54776c415b7d8c, 0x3ea6e16261d0c786, 0x26a458fb14d236bc, 0xad03791742b58e04,
-          0x1c59aa65ef355c4d, 0x7bdbf94474659c9d, 0xf903dbf0398dfb27, 0x6fdd637699b83774, 0x789f3914ac12a66b,
-          0x65c3cd74485fb098, 0x4b0552be0f3b3787, 0x6a7c5186d73795bc, 0x8658c076b645bbac, 0xd64513a2bcc15e17,
-          0x0d63c193e34d1f1f, 0xbc6c6415c6f9ab57, 0xa7cf1687abad7ab4, 0x24c6e76e511c9171, 0x38a573fa74e9b829,
-          0xb79cc32f61ba11de, 0xe1124c3ec5bbf5c2, 0x688994006c935d56, 0x60530ffcc3f9d9e7, 0x3738c2fb75cef342,
-          0xb9f4b637e597fa31, 0xa51087574e7568eb, 0x1f0a685ffc20a0cb, 0xa14a676ae01a4a78, 0x4a9caa42b663856e,
-          0x3be27b1d6263e731, 0x19f6b83b8f9d0e2c, 0xf27002f164be5d67, 0x464e2557a4d4818f, 0x6efdd2c31f6df507,
-          0xd39dbf2171e81086, 0xab35fe4cb728b28b, 0xc35e911f6b40004e, 0xe841df88cff1498b, 0x41b44a5d9ad580c4,
-          0xab03b38e76642ea3, 0xa33ccd71e995b333, 0x60fe5fa43ee256b0, 0x91f154bf31e2cd53, 0xcfd9c71c587faba5,
-          0xe6a8ba7faa1d58d5, 0x51eade73a0f5001b, 0x581533d6ee76a356, 0x0565f073abe6cf51, 0x6c0d27b3d934795a,
-          0xb3a96e344dba1a4d, 0x8f261bd8652bf370, 0x45f55b1fbc495fe6, 0xe06ebc9e199c1005, 0xa13047ab30e7f547,
-          0x954260b74b43d300, 0xf22c376e79dbaaf2, 0x163df153a9567f48, 0x1e5cca4f1a1b5089, 0xdfb495afe0700137,
-          0x75898d63a2ad52fd, 0x8e8cff8cacba018f, 0xbfafa8bec8df5660, 0x7154cd57194df58b, 0x276539b8835a16c5,
-          0xd7ff5ff6cedea709, 0x3a00000000000000};
-    };    
+        static constexpr std::string_view encoding{"gzip"};
+        static constexpr size_t dataSize{3501};
+        static constexpr std::array<uint64_t, 438> data{
+          0x1f8b080872a34764, 0x020357656246726f, 0x6e742e6a7300d51b, 0xdb8edb36f6bd40ff, 0x81f5432dc58ac6f6,
+          0x4ca6d371bc6d934e, 0x802eb24dd1c9b60f, 0x8661c8366d2b9125, 0x43a2e7b2adff7dcf, 0xe145222551d24cd1,
+          0x057690c016c573e1, 0xe1b9933e3b3b23df, 0xaf0346c9f89bb3e1, 0xe86c3c1c8fc9787c, 0x7d31babe187ff9c5,
+          0x19be0e8e6c97a4e4, 0x87fd324dc28c92f7, 0x7415d17425df2ed3, 0x906ec8ef74f92e4d, 0x6246565148f12349,
+          0xe9975fdc0529592c, 0xe803a3f13a2353e2, 0xb05d9891afbf26f8, 0xe9e76f5cf2e79fc4, 0xd91ce3150b939838,
+          0x2ef9e3cb2f08fc21, 0xbc9873cb0216ae10, 0x47316ded91653e15, 0xffca533f2c3fd115, 0xf333ca7e491396b0,
+          0xc703fdb0015a0504, 0xfe397f008f079cb0, 0x585c93d99c9c4818, 0x672c885734d9901f, 0xd2347844962b74c9,
+          0xdacfe180d872424e, 0x6e0579156a03a274, 0x706107208343e186, 0x3892d38362d3df05, 0xd987fb18d83ed094,
+          0x3dfaab208a9ca547, 0x0eae4bd6b3c31ce9, 0xc107909c14f452ca, 0x8e696c4a41909593, 0xd46439b14192c813,
+          0xf201025892afa653, 0xd253937b280b3116, 0x1fa3c83597cb7669, 0x724f627a4f3e02f4, 0x4d9a26a9d37b1b05,
+          0x59469416dc05d191, 0x921e19905b9686f1, 0xd601ca037806c588, 0x134602501d907e7a, 0x5c311014fc432a3d,
+          0x7762d965637d86c0, 0x170bd423a1693aca, 0x295983d80a807521, 0x75942a99ca9591ef, 0x94feac520a06827c,
+          0x5e1367b130e7174f, 0x1e5f3792d5e57d72, 0x1d7c1496901d00d5, 0x5aa854d51ab4b7dc, 0x228afd6189473669,
+          0xb2070508569ff39d, 0xc25dc2019c1ca4db, 0xe31e2c2ff3231a6f, 0xd98eaf63ec16ea16, 0x02c5a14722342140,
+          0x25a77900388177af, 0x49041f8341450b00, 0x12b07fe584a8ad08, 0xe81a53d4b4af82d4, 0x0554809cf3af6972,
+          0x16852b2a14582c01, 0x9808f51dc3bf209d, 0x8573c9197cd3deca, 0x9d3a199acb12dcd2, 0x55c0247b2d34f986,
+          0x9ce42edcd3e5063d, 0x153c6a2e478d1aae, 0xe78ea619be9d821e, 0xed834f497a8dccef, 0xc318bf8d7033d86a,
+          0x07df72c3caf1ad92, 0xfde1c8e84dbc0e83, 0x38a659e6185243e4, 0xc79f62763e06dca8, 0x35ff0ef1812fc399,
+          0x0d1f46a321fc6d36, 0x735d4e0ae84a83b9, 0x122002975bf5057c, 0xfe6c38e7da307c78, 0xf70eb49a72a6fc28,
+          0x642ca2a0d2a539a3, 0x513167196e618209, 0x30d05e4e8ccde1de, 0x9abf93e39a7cc5b8, 0xe9adf9d04c7ef404,
+          0xfa1e6a01f242d4c0, 0xc40a010cf0e9233e, 0x1d9fec7363f01677, 0x027bcdde7004728a, 0x5a932b79e6b1497e,
+          0x054538e5d68dcb85, 0xb0f73e8c3fa333a2, 0xd545eb6f8da5eb2f, 0x66c643ef188771c8, 0xc2200aff43d79a34,
+          0xccf149275cbb001c, 0xee2ef80c5e561394, 0x3eda0d4f045f2533, 0x63b9357ca010953e, 0x9f0bcc18a888ed67,
+          0xcade078f14ddc5d9, 0x8b17e4fb158f102f, 0xce6a9300c3b014a4, 0x53f142dcc3728f3a, 0xe50eb5e461300424,
+          0x11f5a364ebf462ca, 0x224e3f0f0cb09ab2, 0x4fe25e39a5abbb37, 0xc7cd86f38a56c70d, 0x4e8c38af46632bd0,
+          0xbfb26dd54e4b286b, 0x8133d0b527534420, 0x3bc502653d70b2fa, 0x4c9984858dbbe5cf, 0x4eff3ebb3e3b8b12,
+          0x70a3bb2463d77d30, 0xfdfb305e27f73e0e, 0xe276f88724651ee9, 0xabec6f31f447fd06, 0x1a7e124342131b59,
+          0x1cbda39adbb56d59, 0x5f39681c8da98045, 0x5c745d21887f0b9d, 0xea328c83f4f1a388, 0xd8fd0005b3e4e2e8,
+          0x5b2193f8032077ca, 0xa84f8d6b5b454946, 0x3b2e0e83267febdf, 0x07d9db888273ac4e, 0xaa28ee8c939893b7,
+          0x8510f8c81a3e0045, 0xf4e8c1fc359df654, 0x7c142470cc831c0b, 0xf28b2c89a73dd77c, 0x2d86dd3a39d228a3,
+          0xed7cf56bf85a8735, 0x5bd32c3f8af9a229, 0x3f1cc134ce94021f, 0x9e9362957c9a3b69, 0xc1bf07671f6cbbee,
+          0x10cf004230096118, 0x3f062cf80d1ea5cc, 0xa0660aea04865010, 0x61f6e0640110e1fd, 0x2d65dc229d611d00,
+          0xd4500d929df9be5f, 0x32698dfedcdf0707, 0xe7814cff411e7c96, 0xc8847a74e9fa8700, 0x33e494396330cf61,
+          0xdf75fd4f49183b7d, 0xd2afdde6ec3e8454, 0x863892f35a7970d6, 0x0250f011386dd869, 0x3ed3c7f4f3c5d975,
+          0xfd74a5e8d21a4530, 0x802c438f0ebe168f, 0xac744b662da38a81, 0x46c4a44917789159, 0xdca8986e6ed2c805,
+          0x16cd9ca705a9a19b, 0x922750996db20a81, 0xb1356450194d2197, 0xc412a7e7d5f1f09d, 0xca7624dd1ec06042,
+          0xa31edd060e4ef657, 0x4b30eccf93869d1c, 0xeb3bc9a0b092df9b, 0x77b4658fd0029203, 0xba9c1ad94eda6191,
+          0x8ff7b4bc31a34b67, 0xec76da5d6d1d8ee0, 0xc3235613f2c885a7, 0x28ba7f9798cf7531, 0x6355f24eb99fbf2a,
+          0xe7439006fbec6d72, 0x8cd9f3842d10a06f, 0xbb85c4b284e37cec, 0x5cd4e96b1b62963e, 0xb6315f6c17cae39f,
+          0x999288a3adc8b3f9, 0x5d8f5c7925cedd36, 0x9e4e2d361c70ffa7, 0xe24d3bf3cae8a9e8, 0x71fc1e42c9cd9772,
+          0x7bcd9b1b02d3f399, 0x7a86be9dbac4da3a, 0xd769d41675502587, 0xb909202ba8d6e8f8, 0xa7f273ad18d7fd8a,
+          0x1e79956de27bdce0, 0xda8c1e5fca00fc11, 0xbefe481106e47d64, 0x9b975790c7acf980, 0x93e32871afe29aa0,
+          0x559f65a2850ed142, 0x3f029ffbf5073e15, 0x102f8fdbf7c9d66e, 0xa2badb47fab6cdb6, 0x6d57114b0dc2618c,
+          0x4da7db551a1e1812, 0xb729234a2713b3a6, 0x649dac78f747f6aa, 0x6e228a4f4e4f4cb0, 0xc60ff1da9742c60f,
+          0xcbc41cff32593ffa, 0xc10172e3f5db5d18, 0xad1d81c2eda08e9a, 0xbe4c1a1546ece92f, 0x68df94d1d46cfa1a,
+          0xfe41388364b3c928, 0xab6d4b89573ce7b8, 0x4bc23519622ea906, 0xc97052663277898a, 0xf06c3ea9ce40b2c0,
+          0x5ec64b3481ad34ab, 0x68f222b29fe2357d, 0x10f4b4e7d7baf79e, 0x90c1a07867cd4765, 0xd71119281c7dc14e,
+          0x536a87a01df23a2e, 0x762c9560ab13ac29, 0x3ea647caf5101255, 0x19d641b2f225a634, 0x503f53bbb32aa4e9,
+          0x1f8ed9cec1d94d6e, 0x5193ed604a4693bf, 0x9add54d6f30e9d57, 0xe382b87bebbe223e, 0xfd7fb4a4737349f1,
+          0x71bf04ace66206e4, 0x8a2c1f19cdc84f37, 0x3737dfbcba209b28, 0x81723dde9203d400, 0x8c08a8ee0b54daf6,
+          0x0ed15c5e38fa7ab0, 0x0d5acd0fba4be3db, 0xbf228d0b531ad91e, 0xe2afa8812a221971, 0x91900c225c03c257,
+          0x258439ae8624cd20, 0x339692b7d3d1adf9, 0x3e4931240aa39e5a, 0xa93f2967e638bf33, 0x3c04a4ceed5b0615,
+          0x87cdab2048b75cf2, 0x1134642dfd530eeb, 0x4896ce81c4b86b01, 0xd021e67376451f47, 0x34fce5086cc007e1,
+          0xe1078a2511296a5f, 0xc1b72ee97fad2b6b, 0x08fa35da3ead92fc, 0x9bea8dd195a949ec, 0x788884cbfba3ce28,
+          0x36fc948d7b9264a3, 0x87bffb5d089183f7, 0x48437684996c07ff, 0x11999d39dcc078c9, 0x69670d91aa4da778,
+          0x98e5fbfc2b0fd55c, 0x61cb8981a308a94c, 0xc0c0dfa86b151fa7, 0x68cd86f3eede6b0c, 0x640ac8d1dc02787a,
+          0x4a72a49ddecc0a2e, 0x8db5bd944987714e, 0xd69c539955567346, 0x55df5a0facbb3092, 0x605e8ef4677805d3,
+          0x170148d32bf22d78, 0x1ed5e55346c6554f, 0x432f745f925129f5, 0x0332e5b2a5be04a5, 0x0f74058aace4f0e6,
+          0x1139c57c367a7444, 0x82e899c7b4ce4c5f, 0x135f8ee881cf3da2, 0xef8e48022aedced2, 0x19445b91591c9fab,
+          0xa373d8360c02f96e, 0x616959e2889f9e37, 0x149ddd13effb3464, 0x6677d4d60fd40f1d, 0xf8d1a1ea795aeaaf,
+          0xa6be625180a91689, 0xea08527be83518e0, 0xe75ab263274ef126, 0x4d507525b0d6846c, 0x8415ad6424ece82c,
+          0xc80004da33763bca, 0x5fdab8da06759656, 0xdc1e308f19c5ed9a, 0x86f3b245763c5053, 0xadf20b368e4200da,
+          0x2da6d5dd9850939a, 0xcfd6040271b88e43, 0xfcaa42cb815bbfb8, 0x1e541cb8e527cba4, 0x9f1f2a97652785b4,
+          0x28e13f19c7961cb3, 0xeeeb0e875a471783, 0xbd5496a66e14f056, 0x5401f8068c1c56b9, 0x0ce5467b84435b1c,
+          0x6e33130297c18a6e, 0xc2b5d20ed26d6df9, 0x9917960bbccf319a, 0xe0e7ebcae50f1c2e, 0xdde5286e5a6cb319,
+          0x00bd14a7c139248c, 0xcd9bbd1752dd815f, 0xa4a96c155ed5ba72, 0x9ee2c819c3d20cfd, 0xed60aaeee6f0e3f8,
+          0xdcd7e34b533e3611, 0x84a2a4960228d63e, 0x18843567699d6973, 0x0985952cc0e8f2ab, 0x4c0ef37c08085144,
+          0x96e24e9346c5ad11, 0x8f3c81c2ae65cde9, 0xaec1a226eb3a4c98, 0xb9fd56733aa55128, 0x832910bc10270fa4,
+          0xbcc6de743b8291a7, 0x8bbe2ea9abc28c3d, 0x326c9f75de6196e8, 0x4f6b52ab2b6c6a64, 0x17c6904531d59529,
+          0xabb1fe56290a8d8d, 0x7cc4d04fcfba019e, 0x8ecb7d961ed71e1d, 0x7760502af173792b, 0x29bccc90e448e538,
+          0x45d7b99614a81245, 0x2dfadae65d6b0cb7, 0x9ad43ef58e88de2a, 0x4b360a893d69e9c9, 0xa651ef5a859191ad,
+          0xcfdb13055631f35b, 0xeb4c51f7f79a1bbf, 0x62bdaa44be894589, 0xec4a3d909c2b4daa, 0xc72319c984b771f8,
+          0xe76b327e7509b5fa, 0x1882f37987a66ec1, 0x75c2ef4af62ce91a, 0xf662c525bd30133a, 0xd320dbf2421723bc,
+          0x7834c1d2f523af64, 0x79c324a6749da986, 0x4b4ba1e783addd04, 0xab9d7e214db4c8b1, 0x1fac09024881452d,
+          0xecc14181e165df86, 0x32d140d9bd2a5cd3, 0x4d708c9835e72d55, 0x07f91d5bd8ad3e46, 0x1f5371b130e86343,
+          0x1352ac630c691bde, 0xd681bc0b67f53a66, 0xa935b657723555b3, 0xf388e8ca583bf32d, 0x66f89cc6fd934db7,
+          0x8b95897b43ed7636, 0xb1a3c0207eab7478, 0x38b15b87a0a50229, 0xb7c346e3508d2fca, 0xf0faa692d7000bd8,
+          0xc6b66893d6da7042, 0x9437d86bc2612c78, 0xdc5df5d565a35a61, 0x5cbe7a75fe6c71d8, 0xdaaa9d2531bab48b,
+          0xa243c66195cef9d3, 0xa563c75c710ebf06, 0xf15678876b50f918, 0xefd60ba525520260, 0x26fb24c5a61ef887,
+          0xcb8bcf6f7084f7eb, 0xace78572e9556fca, 0x2ff5634a210eafac, 0xdba1ad7f20667be2, 0x07014d0e553a5303,
+          0xd6d884a7c4a93c64, 0x5b5668d7236eeb10, 0x1b1b8fc9b0c7dd78, 0xecd4b2c8f604e2c9, 0x7cdbce8cac9b9ca3,
+          0x52073ebaf64b0fdf, 0x59eb5bd39dbf2171, 0x681086ad35fe4cb7, 0x28b28b76afc88f35, 0x200047b4d5373e2d,
+          0x693190e6a94bb91a, 0x90704560d6c13ae6, 0x323ac8d31c975e39, 0x5b03e6ff45ea236e, 0x051b194ffe1b23de,
+          0x3c75ac7d4cb7f6b7, 0x5a8a46defd53edc0, 0xbc8e52f79e7dad07, 0x5882ca99a9ed6e97, 0x6a55d80c7e6e55fe,
+          0x394a5dc3c96c368d, 0x9fd66c2a1a4de3a6, 0x46d3c96403bb6cd9, 0x215851fdd6076fd2, 0x670770374ecf0c4e,
+          0x0882b33047cb2167, 0xc557954260b74b03, 0xd3261c928371cbbb, 0xae2aafe0133f95aa, 0xf487e4c1a5fca6b1,
+          0x0195f8bcbaf96a1e, 0x2e605e94d83826da, 0x2a6ef1fb9a939bff, 0x4489ffbe227f90bf, 0xadc0e228a7972b4d,
+          0xfe8b27a539684115, 0x8de2ebff2ff6cede, 0xa7093a0000000000};
+    };
 
     static std::optional<File> open(std::filesystem::path file) {
         auto filename = file.relative_path().string();
         log::debug("IndexFS open {} -> filename:{}", file.string(), filename);
-        if (filename == "index.html") return File(IndexHtml::data, IndexHtml::dataSize);
-        else if (filename == "favicon.ico") return File(WebFrontIco::data, WebFrontIco::dataSize);
+        if (filename == "index.html")
+            return File{IndexHtml::data, IndexHtml::dataSize, std::string(IndexHtml::encoding)};
+        else if (filename == "favicon.ico")
+            return File{WebFrontIco::data, WebFrontIco::dataSize, std::string(WebFrontIco::encoding)};
         else if (filename == "WebFront.js")
             return File{WebFrontJs0_1_1::data, WebFrontJs0_1_1::dataSize, std::string(WebFrontJs0_1_1::encoding)};
         return {};
     }
-
 };
 
 class NativeFS {};

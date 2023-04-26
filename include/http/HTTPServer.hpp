@@ -281,7 +281,7 @@ public:
             if (file->isEncoded()) {
                 log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
                 if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
-                    log::error("File {} encoding is not supported by client : HTTP ERROR 506");
+                    log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
                     return Response::getStatusResponse(Response::variantAlsoNegotiates);
                 }
             }
@@ -301,7 +301,6 @@ public:
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
-        if (requestPath.string() == "WebFront.js") response.headers.emplace_back("Content-Encoding", "gzip");
 
         return response;
     }
