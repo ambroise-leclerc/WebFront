@@ -301,7 +301,6 @@ public:
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
-        if (requestPath.string() == "WebFront.js") response.headers.emplace_back("Content-Encoding", "gzip");
 
         return response;
     }
