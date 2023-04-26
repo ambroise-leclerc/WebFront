@@ -9,19 +9,36 @@
 #include <array>
 #include <bit>
 #include <cstring>
-#include <filesystem>
+
 #include <optional>
 #include <span>
 #include <string_view>
 
 namespace webfront::filesystem {
 
+namespace {
+template<typename T>
+concept HasEncoding = requires(T t) { T::encoding; };
+
+template<typename T>
+concept IsData = requires(T t) {
+    T::data;
+    T::dataSize;
+};
+
+template<typename T>
+concept EncodedData = IsData<T> && HasEncoding<T>;
+
+template<typename T>
+concept RawData = IsData<T>;
+} // namespace
 class File {
 public:
-    File(std::span<const uint64_t> input, size_t fileSize, std::string contentEncoding = "")
-        : data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false),
-          encoding(std::move(contentEncoding)) {}
-    File() = delete;
+    File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
+    File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
+    File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
+        : data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(contentEncoding) {
+    }
 
     File& read(std::span<char> s) { return read(s.data(), s.size()); }
     [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }

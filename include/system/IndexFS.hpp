@@ -4,6 +4,7 @@
 #pragma once
 
 #include "FileSystem.hpp"
+#include <tooling/StringHash.hpp>
 
 #include <filesystem>
 
@@ -46,7 +47,7 @@ public:
           0x7640a3c384ef0122};
     };
 
-    struct WebFrontJs0_1_1 {
+    struct WebFrontJs {
         static constexpr std::string_view encoding{"gzip"};
         static constexpr size_t dataSize{3501};
         static constexpr std::array<uint64_t, 438> data{
@@ -141,13 +142,12 @@ public:
     };
 
     static std::optional<File> open(std::filesystem::path file) {
-        auto filename = file.relative_path().string();
-        if (filename == "index.html")
-            return File{IndexHtml::data, IndexHtml::dataSize, std::string(IndexHtml::encoding)};
-        else if (filename == "favicon.ico")
-            return File{WebFrontIco::data, WebFrontIco::dataSize, std::string(WebFrontIco::encoding)};
-        else if (filename == "WebFront.js")
-            return File{WebFrontJs0_1_1::data, WebFrontJs0_1_1::dataSize, std::string(WebFrontJs0_1_1::encoding)};
+        auto filename = stringHash(file.relative_path().string());
+        switch (filename) {
+        case "index.html"_hash: return File(IndexHtml{});
+        case "favicon.ico"_hash: return File{WebFrontIco{}};
+        case "WebFront.js"_hash: return File{WebFrontJs{}};
+        }
         return {};
     }
 };
