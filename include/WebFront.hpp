@@ -6,7 +6,7 @@
 #include "http/HTTPServer.hpp"
 #include "tooling/HexDump.hpp"
 #include "utils/TypeErasedFunction.hpp"
-#include "system/Filesystem.hpp"
+#include "system/IndexFS.hpp"
 #include "weblink/WebLink.hpp"
 
 #include "networking/TCPNetworkingTS.hpp"

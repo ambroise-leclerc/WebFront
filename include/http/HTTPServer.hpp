@@ -281,7 +281,7 @@ public:
             if (file->isEncoded()) {
                 log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
                 if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
-                    log::error("File {} encoding is not supported by client : HTTP ERROR 506");
+                    log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
                     return Response::getStatusResponse(Response::variantAlsoNegotiates);
                 }
             }
