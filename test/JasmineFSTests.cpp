@@ -11,33 +11,75 @@
 using namespace std;
 using namespace webfront;
 
-SCENARIO("IndexFileSystem provides basic files for browser support") {
+SCENARIO("JasmineFileSystem provides Jasmine testing library") {
     GIVEN("A JasmineFS") {
         using FS = webfront::filesystem::JasmineFS;
 
         WHEN("Requesting jasmine_favicon.png") {
             auto file = FS::open("jasmine/4.6.0/jasmine_favicon.png");
-            THEN("correct data is returned") { REQUIRE(file.has_value()); }
+            THEN("correct data is returned") {
+                REQUIRE(file.has_value());
+                REQUIRE(file->isEncoded());
+                REQUIRE(file->getEncoding() == "br");
+                array<uint8_t, 2000> buffer;
+                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 1162);
+            }
         }
         WHEN("Requesting jasmine") {
             auto file = FS::open("jasmine/4.6.0/jasmine.css");
-            THEN("correct data is returned") { REQUIRE(file.has_value()); }
+            THEN("correct data is returned") {
+                REQUIRE(file.has_value());
+                REQUIRE(file->isEncoded());
+                REQUIRE(file->getEncoding() == "br");
+                array<uint8_t, 7000> buffer;
+                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 6409);
+            }
         }
         WHEN("Requesting jasmine") {
             auto file = FS::open("jasmine/4.6.0/jasmine.js");
-            THEN("correct data is returned") { REQUIRE(file.has_value()); }
+            THEN("correct data is returned") {
+                REQUIRE(file.has_value());
+                REQUIRE(file->isEncoded());
+                REQUIRE(file->getEncoding() == "br");
+                array<uint8_t, 55000> buffer;
+                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 50056);
+            }
         }
         WHEN("Requesting jasmine") {
             auto file = FS::open("jasmine/4.6.0/jasmine-html.js");
-            THEN("correct data is returned") { REQUIRE(file.has_value()); }
+            THEN("correct data is returned") {
+                REQUIRE(file.has_value());
+                REQUIRE(file->isEncoded());
+                REQUIRE(file->getEncoding() == "br");
+                array<uint8_t, 6000> buffer;
+                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 5166);
+            }
         }
         WHEN("Requesting jasmine") {
             auto file = FS::open("jasmine/4.6.0/boot0.js");
-            THEN("correct data is returned") { REQUIRE(file.has_value()); }
+            THEN("correct data is returned") {
+                REQUIRE(file.has_value());
+                REQUIRE(file->isEncoded());
+                REQUIRE(file->getEncoding() == "br");
+                array<uint8_t, 1000> buffer;
+                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 990);
+            }
         }
         WHEN("Requesting jasmine") {
             auto file = FS::open("jasmine/4.6.0/boot1.js");
-            THEN("correct data is returned") { REQUIRE(file.has_value()); }
+            THEN("correct data is returned") {
+                REQUIRE(file.has_value());
+                REQUIRE(file->isEncoded());
+                REQUIRE(file->getEncoding() == "br");
+                array<uint8_t, 2000> buffer;
+                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                REQUIRE(readSize == 1475);
+            }
         }
     }
 }

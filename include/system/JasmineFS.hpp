@@ -4,7 +4,6 @@
 #pragma once
 
 #include "FileSystem.hpp"
-#include <tooling/StringHash.hpp>
 
 namespace webfront::filesystem {
 
@@ -18,15 +17,13 @@ public:
     JasmineFS& operator=(JasmineFS&&) = default;
 
     static std::optional<File> open(std::filesystem::path file) {
-        auto filename = stringHash(file.relative_path().string());
-        switch (filename) {
-        case "jasmine/4.6.0/jasmine_favicon.png"_hash: return File(JasmineFavicon{});
-        case "jasmine/4.6.0/jasmine.css"_hash: return File{JasmineCss{}};
-        case "jasmine/4.6.0/jasmine.js"_hash: return File{JasmineJs{}};
-        case "jasmine/4.6.0/jasmine-html.js"_hash: return File{JasmineHtml{}};
-        case "jasmine/4.6.0/boot0.js"_hash: return File{Boot0{}};
-        case "jasmine/4.6.0/boot1.js"_hash: return File{Boot1{}};
-        }
+        auto filename = file.relative_path().string();
+        if (filename == "jasmine/4.6.0/jasmine_favicon.png") return File(JasmineFavicon{});
+        if (filename == "jasmine/4.6.0/jasmine.css") return File{JasmineCss{}};
+        if (filename == "jasmine/4.6.0/jasmine.js") return File{JasmineJs{}};
+        if (filename == "jasmine/4.6.0/jasmine-html.js") return File{JasmineHtml{}};
+        if (filename == "jasmine/4.6.0/boot0.js") return File{Boot0{}};
+        if (filename == "jasmine/4.6.0/boot1.js") return File{Boot1{}};
         return {};
     }
 

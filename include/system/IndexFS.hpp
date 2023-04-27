@@ -4,7 +4,6 @@
 #pragma once
 
 #include "FileSystem.hpp"
-#include <tooling/StringHash.hpp>
 
 #include <filesystem>
 
@@ -142,12 +141,10 @@ public:
     };
 
     static std::optional<File> open(std::filesystem::path file) {
-        auto filename = stringHash(file.relative_path().string());
-        switch (filename) {
-        case "index.html"_hash: return File(IndexHtml{});
-        case "favicon.ico"_hash: return File{WebFrontIco{}};
-        case "WebFront.js"_hash: return File{WebFrontJs{}};
-        }
+        auto filename = file.relative_path().string();
+        if (filename == "index.html") return File(IndexHtml{});
+        if (filename == "favicon.ico") return File{WebFrontIco{}};
+        if (filename == "WebFront.js") return File{WebFrontJs{}};
         return {};
     }
 };
