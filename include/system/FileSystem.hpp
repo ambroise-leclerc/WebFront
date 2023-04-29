@@ -32,6 +32,7 @@ concept EncodedData = IsData<T> && HasEncoding<T>;
 template<typename T>
 concept RawData = IsData<T>;
 } // namespace
+
 class File {
 public:
     File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
@@ -101,6 +102,10 @@ private:
     }
 };
 
-class NativeFS {};
+template<typename T>
+concept Provider = requires(T t) {
+    { T::open };
+};
+
 
 } // namespace webfront::filesystem

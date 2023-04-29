@@ -4,6 +4,7 @@
 #pragma once
 #include "../networking/BasicNetworking.hpp"
 #include "../tooling/HexDump.hpp"
+#include "../system/FileSystem.hpp"
 #include "Encodings.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
@@ -241,7 +242,7 @@ private:
     }
 };
 
-template<typename Net, typename Filesystem>
+template<networking::Features Net, filesystem::Provider FS>
 class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root) : fs(root) {}
@@ -276,7 +277,7 @@ public:
                 }
             }
 
-            auto file = Filesystem::open(requestPath);
+            auto file = FS::open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
             if (file->isEncoded()) {
                 log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
@@ -292,7 +293,7 @@ public:
 
         } break;
         case Request::Method::Head:
-            if (!Filesystem::open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            if (!FS::open(requestPath)) return Response::getStatusResponse(Response::notFound);
             break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
@@ -306,7 +307,7 @@ public:
     }
 
 private:
-    Filesystem fs;
+    FS fs;
 };
 
 template<typename ConnectionType>
@@ -342,11 +343,11 @@ private:
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
-template<typename Net, typename Filesystem>
-class Connection : public std::enable_shared_from_this<Connection<Net, Filesystem>> {
+template<networking::Features Net, filesystem::Provider FS>
+class Connection : public std::enable_shared_from_this<Connection<Net, FS>> {
 public:
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
-                        RequestHandler<Net, Filesystem>& handler)
+                        RequestHandler<Net, FS>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         log::debug("New connection");
     }
@@ -364,8 +365,8 @@ public:
 
 private:
     typename Net::Socket socket;
-    Connections<Connection<Net, Filesystem>>& connections;
-    RequestHandler<Net, Filesystem>& requestHandler;
+    Connections<Connection<Net, FS>>& connections;
+    RequestHandler<Net, FS>& requestHandler;
     std::array<char, 8192> buffer;
     Request request;
     Response response;
@@ -416,8 +417,7 @@ private:
     }
 };
 
-template<typename Net, typename Filesystem>
-    requires networking::Features<Net>
+template<networking::Features Net, filesystem::Provider FS>
 class Server {
 public:
     Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
@@ -444,14 +444,14 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    Connections<Connection<Net, Filesystem>> connections;
-    RequestHandler<Net, Filesystem> requestHandler;
+    Connections<Connection<Net, FS>> connections;
+    RequestHandler<Net, FS> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection<Net, Filesystem>>(std::move(socket), connections, requestHandler);
+            auto newConnection = std::make_shared<Connection<Net, FS>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
             accept();
