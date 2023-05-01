@@ -29,7 +29,7 @@ struct MockFileSystem {
 
     static std::optional<webfront::filesystem::File> open(std::filesystem::path file) {
         auto filename = file.relative_path().string();
-        if (ranges::find(KnownFiles::names, filename) != KnownFiles::names.end()) {
+        if (find(KnownFiles::names.cbegin(), KnownFiles::names.cend(), filename) != KnownFiles::names.cend()) {
             openingsCounter++;
             return webfront::filesystem::File{Data{}};
         }
