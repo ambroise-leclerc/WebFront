@@ -38,7 +38,7 @@ public:
     File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
     File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
-        : data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(false), badBit(false), encoding(contentEncoding) {
+        : data(input), readIndex(0), lastReadCount(0), size(fileSize), eofBit(fileSize == 0), badBit(false), encoding(contentEncoding) {
     }
 
     File& read(std::span<char> s) { return read(s.data(), s.size()); }
@@ -73,7 +73,7 @@ public:
 
             s[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
             readIndex++;
-            if (readIndex == size) eofBit = true;
+            if (readIndex >= size) eofBit = true;
         }
         lastReadCount = count;
         return *this;
@@ -103,9 +103,19 @@ private:
 };
 
 template<typename T>
-concept Provider = requires(T t) {
-    { T::open };
+concept Provider = requires(std::filesystem::path file) {
+    { T::open(file) } -> std::same_as<std::optional<File>>;
 };
+
+/*
+template<Provider Filesystems...>
+class Multi {
+public:
+    std::option<std::File> open(std::filesystem::path file) {
+
+    }
+};
+*/
 
 
 } // namespace webfront::filesystem

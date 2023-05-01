@@ -141,14 +141,14 @@ SCENARIO("RequestParser") {
 
 struct MockFileSystem {
     MockFileSystem(auto){};
-    struct File {
-        bool isEncoded() const { return true; }
-        std::string_view getEncoding() const { return "br"; }
-        size_t gcount() const { return 0; }
-        File& read(auto, size_t = 0) { return *this; }
+
+    struct Data {
+        static constexpr std::array<uint64_t, 1> data{0};
+        static constexpr size_t dataSize{0};
+        static constexpr std::string_view encoding{"br"};
     };
 
-    static std::optional<File> open(auto) { return File{}; }
+    static std::optional<webfront::filesystem::File> open(auto) { return webfront::filesystem::File{Data{}}; }
 };
 
 bool compare(auto& buffer, std::string text) {
@@ -217,16 +217,14 @@ SCENARIO("Request parsing") {
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
         }
-        
     }
 
     GIVEN("A HTTP HEAD request with an empty URL") {
         string input{"HEAD HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-                
+
         Request request;
         REQUIRE_THROWS_AS(request.parseSomeData(input.cbegin(), input.cend()), BadRequestException);
-       
     }
 }
 
@@ -250,7 +248,6 @@ SCENARIO("Asynchronous Request parsing") {
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
         }
-        
     }
 }
 
