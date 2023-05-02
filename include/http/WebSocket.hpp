@@ -2,6 +2,7 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
+#include "Encodings.hpp"
 #include "../tooling/HexDump.hpp"
 #include "../tooling/Logger.hpp"
 
@@ -140,7 +141,7 @@ struct Frame : public Header {
 
     /// @return size of added buffer
     size_t addBuffer(std::span<const std::byte> buffer) {
-        std::cout << "frame::addBuffer " << utils::hexDump(buffer) << "\n";
+        log::debug("frame::addBuffer {}", utils::hexDump(buffer));
         setPayloadSize(payloadSize() + buffer.size());
         buffers.emplace_back(buffer.data(), buffer.size());
         return buffer.size();
@@ -284,7 +285,7 @@ private:
                         if (closeHandler) closeHandler(CloseEvent{});
                         stop();
                         break;
-                    default: std::cout << "Unhandled frameType";
+                    default: log::debug("Unhandled frameType");
                     };
                     decoder.reset();
                 }
@@ -310,5 +311,10 @@ private:
         });
     }
 };
+
+[[nodiscard]] inline std::string getHashedSecKey(std::string key) {
+    constexpr auto rfc6455Guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    return base64::encodeInNetworkOrder(crypto::sha1(key + rfc6455Guid));
+}                    
 
 } // namespace webfront::websocket
