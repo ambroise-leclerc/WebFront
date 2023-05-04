@@ -3,11 +3,13 @@
 project ("WebFront")
 set(WEBFRONT_VERSION 0.1.0)
 
+add_library(WebFront INTERFACE)
 include(cmake/StandardProjectSettings.cmake)
 include(cmake/PreventInSourceBuilds.cmake)
 add_library(project_options INTERFACE)
 target_compile_features(project_options INTERFACE cxx_std_23)
 add_library(project_warnings INTERFACE)
+
 
 include(cmake/Cache.cmake)
 
@@ -27,7 +29,11 @@ enable_doxygen()
 include(cmake/StaticAnalyzers.cmake)
 include(cmake/CPM.cmake)
 
+CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0")
 
+
+target_link_libraries(WebFront INTERFACE project_options project_warnings )
+target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)
