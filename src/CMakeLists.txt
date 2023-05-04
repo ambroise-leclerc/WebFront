@@ -1,5 +1,4 @@
 find_package(Threads)
-CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0")
 
 add_executable(WebFront HelloWorld.cpp)
 target_link_libraries(WebFront PRIVATE project_options project_warnings Threads::Threads)
