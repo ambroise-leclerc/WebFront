@@ -27,6 +27,7 @@ enable_doxygen()
 include(cmake/StaticAnalyzers.cmake)
 include(cmake/CPM.cmake)
 
+CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0")
 
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
