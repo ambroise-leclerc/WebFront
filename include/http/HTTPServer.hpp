@@ -270,8 +270,7 @@ public:
                     response.statusCode = Response::StatusCode::switchingProtocols;
                     response.headers.emplace_back("Upgrade", "websocket");
                     response.headers.emplace_back("Connection", "Upgrade");
-                    auto sec = base64::encodeInNetworkOrder(crypto::sha1(key.value() + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"));
-                    response.headers.emplace_back("Sec-WebSocket-Accept", sec);
+                    response.headers.emplace_back("Sec-WebSocket-Accept", websocket::getHashedSecKey(key.value()));
                     response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
                     return response;
                 }

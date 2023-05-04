@@ -107,15 +107,24 @@ concept Provider = requires(std::filesystem::path file) {
     { T::open(file) } -> std::same_as<std::optional<File>>;
 };
 
-/*
-template<Provider Filesystems...>
+
+template<Provider ... FSs>
 class Multi {
 public:
-    std::option<std::File> open(std::filesystem::path file) {
+    static std::optional<File> open(std::filesystem::path filename) {
+        return openFile<FSs...>(filename);
+    }
 
+private:
+    template<typename First, typename ... Rest>
+    static std::optional<File> openFile(std::filesystem::path filename) {
+        auto file = First::open(filename);
+        if constexpr (sizeof...(Rest) == 0) return file;
+        else {
+            if (file.has_value()) return file;
+            return openFile<Rest...>(filename);
+        }
     }
 };
-*/
-
 
 } // namespace webfront::filesystem
