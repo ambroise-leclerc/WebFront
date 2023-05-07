@@ -9,7 +9,7 @@
 
 namespace webfront::filesystem {
 
-namespace {
+namespace detail {
 class NativeRawFS {
 public:
     static std::optional<std::ifstream> open(std::filesystem::path path) {
@@ -20,7 +20,7 @@ public:
 };
 } // namespace
 
-class NativeDebugFS : public NativeRawFS {
+class NativeDebugFS : public detail::NativeRawFS {
 
 };
 } // namespace webfront::filesystem
