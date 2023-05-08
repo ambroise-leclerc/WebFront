@@ -14,7 +14,7 @@
 #include <span>
 #include <string_view>
 
-namespace webfront::filesystem {
+namespace webfront::fs {
 
 namespace {
 template<typename T>
@@ -126,4 +126,4 @@ private:
     }
 };
 
-} // namespace webfront::filesystem
+} // namespace webfront::fs

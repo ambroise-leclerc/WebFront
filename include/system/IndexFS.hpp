@@ -7,7 +7,7 @@
 
 #include <filesystem>
 
-namespace webfront::filesystem {
+namespace webfront::fs {
 
 class IndexFS {
 public:
@@ -149,4 +149,4 @@ public:
     }
 };
 
-} // namespace webfront::filesystem
+} // namespace webfront::fs
