@@ -7,7 +7,7 @@
 
 #include <fstream>
 
-namespace webfront::filesystem {
+namespace webfront::fs {
 
 namespace detail {
 class NativeRawFS {
@@ -21,6 +21,10 @@ public:
 } // namespace
 
 class NativeDebugFS : public detail::NativeRawFS {
+public:
+    NativeDebugFS(std::filesystem::path rootPath) {
+
+    }
 
 };
-} // namespace webfront::filesystem
+} // namespace webfront::fs

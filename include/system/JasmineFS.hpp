@@ -5,7 +5,7 @@
 
 #include "FileSystem.hpp"
 
-namespace webfront::filesystem {
+namespace webfront::fs {
 
 class JasmineFS {
 public:
@@ -1699,4 +1699,4 @@ public:
     };
 };
 
-} // namespace webfront::filesystem
+} // namespace webfront::fs

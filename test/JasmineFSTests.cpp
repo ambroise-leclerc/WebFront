@@ -13,7 +13,7 @@ using namespace webfront;
 
 SCENARIO("JasmineFileSystem provides Jasmine testing library") {
     GIVEN("A JasmineFS") {
-        using FS = webfront::filesystem::JasmineFS;
+        using FS = fs::JasmineFS;
 
         WHEN("Requesting jasmine_favicon.png") {
             auto file = FS::open("jasmine/4.6.0/jasmine_favicon.png");

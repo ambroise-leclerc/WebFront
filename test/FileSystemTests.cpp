@@ -27,11 +27,11 @@ struct MockFileSystem {
         static constexpr std::string_view encoding{"br"};
     };
 
-    static std::optional<webfront::filesystem::File> open(std::filesystem::path file) {
+    static std::optional<fs::File> open(std::filesystem::path file) {
         auto filename = file.relative_path().string();
         if (find(KnownFiles::names.cbegin(), KnownFiles::names.cend(), filename) != KnownFiles::names.cend()) {
             openingsCounter++;
-            return webfront::filesystem::File{Data{}};
+            return fs::File{Data{}};
         }
         return {};
     }
@@ -79,7 +79,7 @@ SCENARIO("filesystem::Multi can combine multiple FileSystems") {
     }
 
     GIVEN("A Multi filesystem combining IndexFS and JsLibFS") {
-        using MockIndexJsFS = webfront::filesystem::Multi<MockIndexFS, MockJsLibFS>;
+        using MockIndexJsFS = fs::Multi<MockIndexFS, MockJsLibFS>;
 
         WHEN("opening known filenames") {
             THEN("should return file objects") {
@@ -96,7 +96,7 @@ SCENARIO("filesystem::Multi can combine multiple FileSystems") {
     }
 
     GIVEN("A Multi filesystem combining IndexFS, JsLibFS and MixFS with names which can be served by multiple filesystems") {
-        using FS = webfront::filesystem::Multi<MockIndexFS, MockJsLibFS, MockMixFS>;
+        using FS = fs::Multi<MockIndexFS, MockJsLibFS, MockMixFS>;
         MockIndexFS::openingsCounter = 0;
         MockJsLibFS::openingsCounter = 0;
         MockMixFS::openingsCounter = 0;
