@@ -144,8 +144,7 @@ struct MockFileSystem {
     struct File {
         bool isEncoded() const { return true; }
         std::string_view getEncoding() const { return "br"; }
-        size_t gcount() const { return 0; }
-        File& read(auto, size_t = 0) { return *this; }
+        size_t read(auto, size_t = 0) { return 0; }
     };
 
     static std::optional<File> open(auto) { return File{}; }

@@ -12,10 +12,11 @@ namespace webfront::fs {
 namespace detail {
 class NativeRawFS {
 public:
-    static std::optional<std::ifstream> open(std::filesystem::path path) {
+    static std::optional<File> open(std::filesystem::path path) {
         std::ifstream file;
         file.open(path, std::ios::binary);
-        return file;
+        if (file.is_open()) return File{std::move(file)};
+        return {};
     }
 };
 } // namespace

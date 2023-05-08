@@ -21,7 +21,7 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
                 array<char, 1024> buffer;
                 auto readSize = indexFile->read(buffer);
 
-                string html{buffer.data(), indexFile->gcount()};
+                string html{buffer.data(), readSize};
                 if (!indexFile->isEncoded()) {
                     REQUIRE(html.starts_with("<!DOCTYPE html>"));
 
@@ -36,7 +36,7 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
             THEN("correct data is returned") {
                 REQUIRE(faviconFile.has_value());
                 array<uint8_t, 1024> buffer;
-                auto readSize = faviconFile->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = faviconFile->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 array<uint8_t, 16> head, tail;
                 if (faviconFile->isEncoded()) {
                     REQUIRE(faviconFile->getEncoding() == "br");
@@ -51,7 +51,7 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
                 }
                 REQUIRE(equal(head.begin(), head.end(), buffer.begin()));
                 REQUIRE(equal(tail.begin(), tail.end(), buffer.begin() + readSize - tail.size()));
-                readSize = faviconFile->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                readSize = faviconFile->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 0);
             }
         }
@@ -66,7 +66,7 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
                                  // webviews does not support br encoding
 
                 array<uint8_t, 10> gzipHeader;
-                webfrontJSFile->read(reinterpret_cast<char*>(gzipHeader.data()), gzipHeader.size());
+                webfrontJSFile->read(span(reinterpret_cast<char*>(gzipHeader.data()), gzipHeader.size()));
 
                 REQUIRE(gzipHeader[0] == 0x1f);
                 REQUIRE(gzipHeader[1] == 0x8b);
