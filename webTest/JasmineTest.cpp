@@ -1,7 +1,10 @@
 #include <WebFront.hpp>
+#include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
+#include <system/NativeFS.hpp>
 
-
+#include <iostream>
+#include <filesystem>
 #include <string_view>
 
 /// Open the web UI in the system's default browser
@@ -18,17 +21,22 @@ auto openInDefaultBrowser(std::string_view port, std::string_view file) {
     return ::system(command.append(url).c_str());
 }
 
+using namespace std;
+using namespace webfront;
+
+void findFile(string_view filename) {
+    log::info("Looking for {} in {}", filename, filesystem::current_path)    ;
+}
 
 int main() {
-    using namespace webfront;
-
-    std::string_view httpPort{"9002"};
-    using Jas = filesystem::Multi<filesystem::IndexFS, filesystem::JasmineFS>;
-    BasicWF<NetProvider, Jas> webFront(httpPort);
-    openInDefaultBrowser(httpPort, "index.html");
-
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
+
+    std::string_view httpPort{"9002"};
+    using Jas = filesystem::Multi<webfront::filesystem::NativeDebugFS, webfront::filesystem::IndexFS, webfront::filesystem::JasmineFS>;
+    BasicWF<NetProvider, Jas> webFront(httpPort);
+    openInDefaultBrowser(httpPort, "webtest.html");
+
     log::debug("WebFront started on port {}", httpPort);
     webFront.run();
 
