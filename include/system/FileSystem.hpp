@@ -10,6 +10,7 @@
 #include <bit>
 #include <cstring>
 #include <fstream>
+#include <ios>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -95,12 +96,12 @@ private:
     }
 
     size_t readFStream(std::span<char> buffer) {
-        fstream.read(buffer.data(), buffer.size());
+        fstream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         if (fstream.eof()) {
             eofBit = true;
             fstream.close();
         }
-        return fstream.gcount();
+        return static_cast<size_t>(fstream.gcount());
     }
 };
 
