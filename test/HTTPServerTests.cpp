@@ -141,14 +141,13 @@ SCENARIO("RequestParser") {
 
 struct MockFileSystem {
     MockFileSystem(auto){};
-
-    struct Data {
-        static constexpr std::array<uint64_t, 1> data{0};
-        static constexpr size_t dataSize{0};
-        static constexpr std::string_view encoding{"br"};
+    struct File {
+        bool isEncoded() const { return true; }
+        std::string_view getEncoding() const { return "br"; }
+        size_t read(auto, size_t = 0) { return 0; }
     };
 
-    static std::optional<fs::File> open(auto) { return fs::File{Data{}}; }
+    static std::optional<File> open(auto) { return File{}; }
 };
 
 bool compare(auto& buffer, std::string text) {

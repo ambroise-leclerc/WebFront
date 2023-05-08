@@ -25,10 +25,12 @@ SCENARIO("NativeDebugFS give access to local files") {
             auto file = DebugFS::open("test.tmp");
             THEN("A file with the correct content is returned") {
                 REQUIRE(file);
-                // REQUIRE(file.value().get() == 'T');
-                stringstream buffer;
-                buffer << file.value().rdbuf();
-                REQUIRE(buffer.str() == "TestFile for NativeFSTests\n");
+                REQUIRE(!file->isEncoded());
+                std::array<char, 512> buffer;
+                auto bytesRead = file->read(buffer);
+                REQUIRE(bytesRead == 27);
+                REQUIRE(std::string(buffer.data(), 27) == "TestFile for NativeFSTests\n");
+                REQUIRE(file->eof());
             }
         }
     }

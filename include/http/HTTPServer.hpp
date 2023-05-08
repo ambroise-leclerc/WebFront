@@ -287,7 +287,7 @@ public:
             }
 
             std::array<char, 512> buffer{0, 0};
-            while (file->read(buffer).gcount() != 0) response.content.append(buffer.data(), file->gcount());
+            while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
             if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
 
         } break;

@@ -25,8 +25,8 @@ using namespace std;
 using namespace webfront;
 
 void findFile(string_view filename) {
-    log::info("Looking for {} in {}", filename, filesystem::current_path());
-    
+    log::info("Looking for {} in {}", filename, filesystem::current_path().string());
+
 }
 
 int main() {
@@ -36,6 +36,7 @@ int main() {
     std::string_view httpPort{"9002"};
     using Jas = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
     BasicWF<NetProvider, Jas> webFront(httpPort);
+    auto testRunnerFile = findFile("webtest.html");
     openInDefaultBrowser(httpPort, "webtest.html");
 
     log::debug("WebFront started on port {}", httpPort);
