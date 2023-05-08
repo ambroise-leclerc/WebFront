@@ -22,7 +22,7 @@ SCENARIO("JasmineFileSystem provides Jasmine testing library") {
                 REQUIRE(file->isEncoded());
                 REQUIRE(file->getEncoding() == "br");
                 array<uint8_t, 2000> buffer;
-                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 1162);
             }
         }
@@ -33,7 +33,7 @@ SCENARIO("JasmineFileSystem provides Jasmine testing library") {
                 REQUIRE(file->isEncoded());
                 REQUIRE(file->getEncoding() == "br");
                 array<uint8_t, 7000> buffer;
-                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 6409);
             }
         }
@@ -44,7 +44,7 @@ SCENARIO("JasmineFileSystem provides Jasmine testing library") {
                 REQUIRE(file->isEncoded());
                 REQUIRE(file->getEncoding() == "br");
                 array<uint8_t, 55000> buffer;
-                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 50056);
             }
         }
@@ -55,7 +55,7 @@ SCENARIO("JasmineFileSystem provides Jasmine testing library") {
                 REQUIRE(file->isEncoded());
                 REQUIRE(file->getEncoding() == "br");
                 array<uint8_t, 6000> buffer;
-                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 5166);
             }
         }
@@ -66,7 +66,7 @@ SCENARIO("JasmineFileSystem provides Jasmine testing library") {
                 REQUIRE(file->isEncoded());
                 REQUIRE(file->getEncoding() == "br");
                 array<uint8_t, 1000> buffer;
-                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 990);
             }
         }
@@ -77,7 +77,7 @@ SCENARIO("JasmineFileSystem provides Jasmine testing library") {
                 REQUIRE(file->isEncoded());
                 REQUIRE(file->getEncoding() == "br");
                 array<uint8_t, 2000> buffer;
-                auto readSize = file->read(reinterpret_cast<char*>(buffer.data()), buffer.size()).gcount();
+                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 REQUIRE(readSize == 1475);
             }
         }
