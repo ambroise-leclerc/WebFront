@@ -242,7 +242,7 @@ private:
     }
 };
 
-template<networking::Features Net, filesystem::Provider FS>
+template<networking::Features Net, fs::Provider FS>
 class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root) : fs(root) {}
@@ -342,7 +342,7 @@ private:
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
-template<networking::Features Net, filesystem::Provider FS>
+template<networking::Features Net, fs::Provider FS>
 class Connection : public std::enable_shared_from_this<Connection<Net, FS>> {
 public:
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
@@ -416,7 +416,7 @@ private:
     }
 };
 
-template<networking::Features Net, filesystem::Provider FS>
+template<networking::Features Net, fs::Provider FS>
 class Server {
 public:
     Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")

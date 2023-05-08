@@ -25,7 +25,8 @@ using namespace std;
 using namespace webfront;
 
 void findFile(string_view filename) {
-    log::info("Looking for {} in {}", filename, filesystem::current_path)    ;
+    log::info("Looking for {} in {}", filename, filesystem::current_path());
+    
 }
 
 int main() {
@@ -33,7 +34,7 @@ int main() {
     log::addSinks(log::clogSink);
 
     std::string_view httpPort{"9002"};
-    using Jas = filesystem::Multi<webfront::filesystem::NativeDebugFS, webfront::filesystem::IndexFS, webfront::filesystem::JasmineFS>;
+    using Jas = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
     BasicWF<NetProvider, Jas> webFront(httpPort);
     openInDefaultBrowser(httpPort, "webtest.html");
 

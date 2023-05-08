@@ -148,7 +148,7 @@ struct MockFileSystem {
         static constexpr std::string_view encoding{"br"};
     };
 
-    static std::optional<webfront::filesystem::File> open(auto) { return webfront::filesystem::File{Data{}}; }
+    static std::optional<fs::File> open(auto) { return fs::File{Data{}}; }
 };
 
 bool compare(auto& buffer, std::string text) {
