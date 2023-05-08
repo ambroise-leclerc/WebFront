@@ -22,7 +22,7 @@ public:
 
 class NativeDebugFS : public detail::NativeRawFS {
 public:
-    NativeDebugFS(std::filesystem::path rootPath) {
+    NativeDebugFS(std::filesystem::path /*rootPath*/) {
 
     }
 
