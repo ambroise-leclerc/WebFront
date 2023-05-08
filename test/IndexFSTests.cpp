@@ -13,7 +13,7 @@ using namespace webfront;
 
 SCENARIO("IndexFileSystem provides basic files for browser support") {
     GIVEN("An IndexFS") {
-        using FS = webfront::filesystem::IndexFS;
+        using FS = fs::IndexFS;
         WHEN("Requesting index.html") {
             auto indexFile = FS::open("index.html");
             THEN("A correct HTML5 file with the WebFront.js script inclusion is returned") {

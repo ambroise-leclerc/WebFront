@@ -10,8 +10,9 @@
 #include <string>
 
 using namespace std;
+using namespace webfront;
 
-using DebugFS = webfront::filesystem::NativeDebugFS;
+using DebugFS = fs::NativeDebugFS;
 
 SCENARIO("NativeDebugFS give access to local files") {
     GIVEN("A local file") {
