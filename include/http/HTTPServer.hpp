@@ -275,7 +275,7 @@ public:
                 }
             }
 
-            auto file = Filesystem::open(requestPath);
+            auto file = fs.open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
             if (file->isEncoded()) {
                 log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
