@@ -44,7 +44,7 @@ add_compile_definitions(_WIN32_WINNT=0x0501)
 if(ENABLE_TESTING)
   enable_testing()
   add_subdirectory(test)
-  add_subdirectory(webTest)
+  add_subdirectory(webtest)
 endif()
 
 add_subdirectory(src)

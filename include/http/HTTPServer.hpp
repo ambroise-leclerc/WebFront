@@ -290,7 +290,7 @@ public:
 
         } break;
         case Request::Method::Head:
-            if (!FS::open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            if (!fs.open(requestPath)) return Response::getStatusResponse(Response::notFound);
             break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
