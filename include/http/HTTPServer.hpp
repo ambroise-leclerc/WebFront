@@ -10,12 +10,12 @@
 #include "WebSocket.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <locale>
-#include <map>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -88,14 +88,13 @@ struct Request : Headers {
     }
 
     [[nodiscard]] static Method getMethodFromString(std::string_view text) {
-        using enum Method;
-        using namespace std::literals;
-        std::map names{std::pair{"CONNECT"sv, Connect}, {"DELETE"sv, Delete}, {"GET"sv, Get}, {"HEAD"sv, Head},
-                        {"OPTIONS"sv, Options}, {"PATCH"sv, Patch}, {"POST"sv, Post}, {"PUT"sv, Put}, {"TRACE"sv, Trace}};
-        auto name = names.find(text);
-        return name != names.end() ? name->second : Undefined;
+        for (size_t index = 0; index < methodNames.size(); ++index)
+            if (methodNames[index] == text) return static_cast<Method>(index);
+        return Method::Undefined;
     }
 
+    [[nodiscard]] std::string_view getMethodName() const { return methodNames[static_cast<size_t>(method)]; }
+        
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
     [[nodiscard]] bool isUpgradeRequest(std::string_view protocol) const {
@@ -182,6 +181,7 @@ private: // clang-format off
         }
         return false;
     }
+    inline static std::array methodNames{"CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE"};
 }; // clang-format on
 
 struct Response : Headers {
@@ -262,7 +262,6 @@ public:
         Response response;
         switch (request.method) {
         case Request::Method::Get: {
-            log::debug("HTTP Get {}", requestPath.string());
             for (auto encoding : request.getHeadersValues("Accept-Encoding")) log::debug("Encoding : {}", encoding);
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
@@ -276,10 +275,9 @@ public:
                 }
             }
 
-            auto file = FS::open(requestPath);
+            auto file = fs.open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
             if (file->isEncoded()) {
-                log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
                 if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
                     log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
                     return Response::getStatusResponse(Response::variantAlsoNegotiates);
@@ -380,6 +378,7 @@ private:
                     try {
                         request.parseSomeData(buffer.data(), buffer.data() + bytesTransferred);
                         if (request.completed()) {
+                            log::info("Received request {}", static_cast<size_t>(request.method));
                             response = requestHandler.handleRequest(request);
                             write();
                             if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;

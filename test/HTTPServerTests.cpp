@@ -147,7 +147,7 @@ struct MockFileSystem {
         size_t read(auto, size_t = 0) { return 0; }
     };
 
-    static std::optional<File> open(auto) { return File{}; }
+    std::optional<File> open(auto) { return File{}; }
 };
 
 bool compare(auto& buffer, std::string text) {

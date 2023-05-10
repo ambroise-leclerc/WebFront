@@ -105,15 +105,15 @@ private:
 };
 
 template<typename T>
-concept Provider = requires(std::filesystem::path filename) {
-    { T::open(filename) };
+concept Provider = requires(T t, std::filesystem::path filename) {
+    { t.open(filename) } -> std::same_as<std::optional<File>>;
     requires std::constructible_from<T, std::filesystem::path>;
 };
 
 template<Provider ... FSs>
-class Multi {
+class Multi : FSs... {
 public:
-    Multi(std::filesystem::path /*docRoot*/) {}
+    Multi(std::filesystem::path docRoot) : FSs(docRoot)... {}
     static std::optional<File> open(std::filesystem::path filename) {
         return openFile<FSs...>(filename);
     }

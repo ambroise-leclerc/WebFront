@@ -20,14 +20,14 @@ struct MixNames {
 
 template<typename KnownFiles>
 struct MockFileSystem {
-    MockFileSystem(auto){};
+    MockFileSystem(filesystem::path docRoot) { root = docRoot; };
     struct Data {
         static constexpr std::array<uint64_t, 1> data{0};
         static constexpr size_t dataSize{0};
         static constexpr std::string_view encoding{"br"};
     };
 
-    static std::optional<fs::File> open(std::filesystem::path file) {
+    static std::optional<fs::File> open(filesystem::path file) {
         auto filename = file.relative_path().string();
         if (find(KnownFiles::names.cbegin(), KnownFiles::names.cend(), filename) != KnownFiles::names.cend()) {
             openingsCounter++;
@@ -37,6 +37,7 @@ struct MockFileSystem {
     }
 
     inline static auto openingsCounter = 0;
+    inline static filesystem::path root;
 };
 
 using MockIndexFS = MockFileSystem<IndexNames>;
@@ -45,85 +46,93 @@ using MockMixFS = MockFileSystem<MixNames>;
 
 SCENARIO("filesystem::Multi can combine multiple FileSystems") {
     GIVEN("IndexFS") {
+        MockIndexFS indexFS(".");
         WHEN("opening known filenames") {
             THEN("should return corresponding File objects") {
-                REQUIRE(MockIndexFS::open("index.html").has_value());
-                REQUIRE(MockIndexFS::open("WebFront.js").has_value());
-                REQUIRE(MockIndexFS::open("favicon.ico").has_value());
+                REQUIRE(indexFS.open("index.html").has_value());
+                REQUIRE(indexFS.open("WebFront.js").has_value());
+                REQUIRE(indexFS.open("favicon.ico").has_value());
             }
         }
         WHEN("opening unknown filenames") {
             THEN("should return nothing") {
-                REQUIRE(!MockIndexFS::open("lib.js").has_value());
-                REQUIRE(!MockIndexFS::open("bootstrap.js").has_value());
-                REQUIRE(!MockIndexFS::open("dummy.file").has_value());
+                REQUIRE(!indexFS.open("lib.js").has_value());
+                REQUIRE(!indexFS.open("bootstrap.js").has_value());
+                REQUIRE(!indexFS.open("dummy.file").has_value());
             }
         }
     }
 
     GIVEN("JsLibFS") {
+        MockJsLibFS jsFS(".");
         WHEN("opening known filenames") {
             THEN("should return file objects") {
-                REQUIRE(MockJsLibFS::open("lib.js").has_value());
-                REQUIRE(MockJsLibFS::open("bootstrap.js").has_value());
+                REQUIRE(jsFS.open("lib.js").has_value());
+                REQUIRE(jsFS.open("bootstrap.js").has_value());
             }
         }
         WHEN("opening unknown filenames") {
             THEN("should return nothing") {
-                REQUIRE(!MockJsLibFS::open("index.html").has_value());
-                REQUIRE(!MockJsLibFS::open("WebFront.js").has_value());
-                REQUIRE(!MockJsLibFS::open("favicon.ico").has_value());
-                REQUIRE(!MockJsLibFS::open("dummy.file").has_value());
+                REQUIRE(!jsFS.open("index.html").has_value());
+                REQUIRE(!jsFS.open("WebFront.js").has_value());
+                REQUIRE(!jsFS.open("favicon.ico").has_value());
+                REQUIRE(!jsFS.open("dummy.file").has_value());
             }
         }
     }
 
     GIVEN("A Multi filesystem combining IndexFS and JsLibFS") {
         using MockIndexJsFS = fs::Multi<MockIndexFS, MockJsLibFS>;
+        MockIndexJsFS indexJsFS(".");
 
         WHEN("opening known filenames") {
             THEN("should return file objects") {
-                REQUIRE(MockIndexJsFS::open("lib.js").has_value());
-                REQUIRE(MockIndexJsFS::open("bootstrap.js").has_value());
-                REQUIRE(MockIndexJsFS::open("index.html").has_value());
-                REQUIRE(MockIndexJsFS::open("WebFront.js").has_value());
-                REQUIRE(MockIndexJsFS::open("favicon.ico").has_value());
+                REQUIRE(indexJsFS.open("lib.js").has_value());
+                REQUIRE(indexJsFS.open("bootstrap.js").has_value());
+                REQUIRE(indexJsFS.open("index.html").has_value());
+                REQUIRE(indexJsFS.open("WebFront.js").has_value());
+                REQUIRE(indexJsFS.open("favicon.ico").has_value());
             }
         }
         WHEN("opening unknown filenames") {
-            THEN("should return nothing") { REQUIRE(!MockIndexJsFS::open("dummy.file").has_value()); }
+            THEN("should return nothing") { REQUIRE(!indexJsFS.open("dummy.file").has_value()); }
         }
     }
 
     GIVEN("A Multi filesystem combining IndexFS, JsLibFS and MixFS with names which can be served by multiple filesystems") {
         using FS = fs::Multi<MockIndexFS, MockJsLibFS, MockMixFS>;
+        FS fs("testPath");
         MockIndexFS::openingsCounter = 0;
         MockJsLibFS::openingsCounter = 0;
         MockMixFS::openingsCounter = 0;
 
+        REQUIRE(MockIndexFS::root == "testPath");
+        REQUIRE(MockJsLibFS::root == "testPath");
+        REQUIRE(MockMixFS::root == "testPath");
+
         WHEN("opening ambiguous filenames") {
             THEN("First FS in the parameter list should serve the file") {
-                REQUIRE(FS::open("lib.js").has_value());
+                REQUIRE(fs.open("lib.js").has_value());
                 REQUIRE(MockIndexFS::openingsCounter == 0);
                 REQUIRE(MockJsLibFS::openingsCounter == 1);
                 REQUIRE(MockMixFS::openingsCounter == 0);
-                REQUIRE(FS::open("lib2.js").has_value());
+                REQUIRE(fs.open("lib2.js").has_value());
                 REQUIRE(MockIndexFS::openingsCounter == 0);
                 REQUIRE(MockJsLibFS::openingsCounter == 1);
                 REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(FS::open("bootstrap.js").has_value());
+                REQUIRE(fs.open("bootstrap.js").has_value());
                 REQUIRE(MockIndexFS::openingsCounter == 0);
                 REQUIRE(MockJsLibFS::openingsCounter == 2);
                 REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(FS::open("index.html").has_value());
+                REQUIRE(fs.open("index.html").has_value());
                 REQUIRE(MockIndexFS::openingsCounter == 1);
                 REQUIRE(MockJsLibFS::openingsCounter == 2);
                 REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(FS::open("WebFront.js").has_value());
+                REQUIRE(fs.open("WebFront.js").has_value());
                 REQUIRE(MockIndexFS::openingsCounter == 2);
                 REQUIRE(MockJsLibFS::openingsCounter == 2);
                 REQUIRE(MockMixFS::openingsCounter == 1);
-                REQUIRE(FS::open("favicon.ico").has_value());
+                REQUIRE(fs.open("favicon.ico").has_value());
                 REQUIRE(MockIndexFS::openingsCounter == 3);
                 REQUIRE(MockJsLibFS::openingsCounter == 2);
                 REQUIRE(MockMixFS::openingsCounter == 1);
