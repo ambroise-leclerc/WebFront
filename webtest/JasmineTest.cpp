@@ -1,11 +1,10 @@
-#include <WebFront.hpp>
+﻿#include <WebFront.hpp>
+#include <stdexcept>
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
 
-#include <iostream>
-#include <filesystem>
-#include <string_view>
+import std.core;
 
 /// Open the web UI in the system's default browser
 auto openInDefaultBrowser(std::string_view port, std::string_view file) {
@@ -24,11 +23,31 @@ auto openInDefaultBrowser(std::string_view port, std::string_view file) {
 using namespace std;
 using namespace webfront;
 
-filesystem::path findFile(string_view filename) {
-    log::info("Looking for {} in {}", filename, filesystem::current_path().string());
-    if (filesystem::exists(filesystem::current_path()/filename))
-        return filesystem::current_path()/filename;
+// Find the DocRoot path containing the given file (look for the filename in current directory,
+// in temp directory then in sources directory
+//
+// @param filename
+// @return DocRoot path
+filesystem::path findDocRoot(string filename) {
+    using namespace filesystem;
 
+    log::info("Looking for {} in {}", filename, current_path().string());
+    if (exists(current_path() / filename)) return current_path();
+
+    log::info("  not found : Looking now in temp directory {} ", temp_directory_path().string());
+    if (exists(temp_directory_path() / filename)) return temp_directory_path();
+
+    path webfront, cp{current_path()};
+    for (auto element = cp.begin(); element != cp.end(); ++element) {
+        webfront = webfront / *element;
+        if (*element == "WebFront") {
+            webfront = webfront / "webtest";
+            log::info("  not found : Looking now in source directory {}", webfront.string());
+            if (exists(webfront / filename)) return webfront;
+        }
+    }
+
+    throw runtime_error("Cannot find " + filename + " file");
 }
 
 int main() {
@@ -37,12 +56,18 @@ int main() {
 
     std::string_view httpPort{"9002"};
     using Jas = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
-    BasicWF<NetProvider, Jas> webFront(httpPort);
-    auto testRunnerFile = findFile("webtest.html");
-    openInDefaultBrowser(httpPort, testRunnerFile);
 
-    log::debug("WebFront started on port {}", httpPort);
-    webFront.run();
+    try {
+        auto specRunnerFile = "SpecRunner.html";
+        auto docRoot = findDocRoot(specRunnerFile);
+        BasicWF<NetProvider, Jas> webFront(httpPort, docRoot);
+        openInDefaultBrowser(httpPort, (docRoot / specRunnerFile).string());
 
+        log::debug("WebFront started on port {} with docRoot at {}", httpPort, docRoot.string());
+        webFront.run();
+    }
+    catch (std::runtime_error& e) {
+        log::error("runtime_error : {}", e.what());
+    }
     return 0;
 }

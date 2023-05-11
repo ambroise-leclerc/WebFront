@@ -262,7 +262,6 @@ public:
         Response response;
         switch (request.method) {
         case Request::Method::Get: {
-            for (auto encoding : request.getHeadersValues("Accept-Encoding")) log::debug("Encoding : {}", encoding);
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
                 if (key) {
@@ -378,8 +377,9 @@ private:
                     try {
                         request.parseSomeData(buffer.data(), buffer.data() + bytesTransferred);
                         if (request.completed()) {
-                            log::info("Received request {}", static_cast<size_t>(request.method));
+                            log::info("Received request {} on {}", request.getMethodName(), request.uri);
                             response = requestHandler.handleRequest(request);
+                            log::info("  responding http {}", static_cast<int>(response.statusCode));
                             write();
                             if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;
                         }

@@ -140,14 +140,18 @@ SCENARIO("RequestParser") {
 }
 
 struct MockFileSystem {
-    MockFileSystem(auto){};
-    struct File {
-        bool isEncoded() const { return true; }
-        std::string_view getEncoding() const { return "br"; }
-        size_t read(auto, size_t = 0) { return 0; }
+    MockFileSystem(filesystem::path docRoot) { root = docRoot; };
+    struct Data {
+        static constexpr std::array<uint64_t, 1> data{0};
+        static constexpr size_t dataSize{0};
+        static constexpr std::string_view encoding{"br"};
     };
 
-    std::optional<File> open(auto) { return File{}; }
+    static std::optional<fs::File> open(filesystem::path) {
+            return fs::File{Data{}};
+    }
+
+    inline static filesystem::path root;
 };
 
 bool compare(auto& buffer, std::string text) {
