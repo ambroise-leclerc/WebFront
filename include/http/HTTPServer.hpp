@@ -254,9 +254,11 @@ public:
 
     Response handleRequest(Request request) {
         auto requestUri = uri::decode(request.uri);
+        log::debug("Request uri - raw:'{}' decoded:'{}'", request.uri, requestUri);
         if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
         auto requestPath = std::filesystem::path(requestUri).relative_path();
+        log::debug("  -> requestPath : {}", requestPath.string());
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;

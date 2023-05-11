@@ -114,14 +114,14 @@ template<Provider ... FSs>
 class Multi : FSs... {
 public:
     Multi(std::filesystem::path docRoot) : FSs(docRoot)... {}
-    static std::optional<File> open(std::filesystem::path filename) {
+    std::optional<File> open(std::filesystem::path filename) {
         return openFile<FSs...>(filename);
     }
 
 private:
     template<typename First, typename ... Rest>
-    static std::optional<File> openFile(std::filesystem::path filename) {
-        auto file = First::open(filename);
+    std::optional<File> openFile(std::filesystem::path filename) {
+        auto file = this->First::open(filename);
         if constexpr (sizeof...(Rest) == 0) return file;
         else {
             if (file.has_value()) return file;

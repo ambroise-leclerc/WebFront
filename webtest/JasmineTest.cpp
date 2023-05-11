@@ -4,7 +4,10 @@
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
 
-import std.core;
+#include <filesystem>
+#include <iostream>
+#include <string_view>
+
 
 /// Open the web UI in the system's default browser
 auto openInDefaultBrowser(std::string_view port, std::string_view file) {
@@ -60,8 +63,14 @@ int main() {
     try {
         auto specRunnerFile = "SpecRunner.html";
         auto docRoot = findDocRoot(specRunnerFile);
-        BasicWF<NetProvider, Jas> webFront(httpPort, docRoot);
-        openInDefaultBrowser(httpPort, (docRoot / specRunnerFile).string());
+
+        using WF = BasicWF<NetProvider, Jas>;
+        WF webFront(httpPort, docRoot);
+        webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
+        webFront.onUIStarted([](WF::UI ) {
+            log::info("UI Started");
+        });
+        openInDefaultBrowser(httpPort, specRunnerFile);
 
         log::debug("WebFront started on port {} with docRoot at {}", httpPort, docRoot.string());
         webFront.run();
