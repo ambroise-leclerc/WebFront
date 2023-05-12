@@ -40,7 +40,7 @@ public:
     File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
     File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
-        : fileType{FileType::staticData}, data(input), size(fileSize), encoding(contentEncoding) {}
+        : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize==0), encoding(contentEncoding) {}
     File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} {}
 
     [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
@@ -71,7 +71,7 @@ private:
     size_t readData(std::span<char> buffer) {
         constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
         UIntByte chunk;
-        for (size_t index = 0; index < buffer.size(); ++index) {
+        for (size_t index = 0; (index < buffer.size()); ++index) {
             if (eof()) return index;
 
             if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
@@ -114,14 +114,14 @@ template<Provider ... FSs>
 class Multi : FSs... {
 public:
     Multi(std::filesystem::path docRoot) : FSs(docRoot)... {}
-    static std::optional<File> open(std::filesystem::path filename) {
+    std::optional<File> open(std::filesystem::path filename) {
         return openFile<FSs...>(filename);
     }
 
 private:
     template<typename First, typename ... Rest>
-    static std::optional<File> openFile(std::filesystem::path filename) {
-        auto file = First::open(filename);
+    std::optional<File> openFile(std::filesystem::path filename) {
+        auto file = this->First::open(filename);
         if constexpr (sizeof...(Rest) == 0) return file;
         else {
             if (file.has_value()) return file;

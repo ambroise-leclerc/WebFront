@@ -2,6 +2,7 @@
 #include <networking/NetworkingMock.hpp>
 
 #include <doctest/doctest.h>
+#include "Mocks.hpp"
 
 #include <string>
 #include <string_view>
@@ -139,15 +140,8 @@ SCENARIO("RequestParser") {
     }
 }
 
-struct MockFileSystem {
-    MockFileSystem(auto){};
-    struct File {
-        bool isEncoded() const { return true; }
-        std::string_view getEncoding() const { return "br"; }
-        size_t read(auto, size_t = 0) { return 0; }
-    };
-
-    static std::optional<File> open(auto) { return File{}; }
+struct ResourceAndFile {
+    static inline list names{"ressource.txt", "file.txt", "compressed.txt"};
 };
 
 bool compare(auto& buffer, std::string text) {
@@ -167,7 +161,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/ressource.txt");
         REQUIRE(request.method == Request::Method::Delete);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Not Implemented' http response") {
@@ -188,7 +182,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/chat");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Switching Protocols' http response") {
@@ -211,21 +205,19 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/file.txt");
         REQUIRE(request.method == Request::Method::Head);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
         }
-        
     }
 
     GIVEN("A HTTP HEAD request with an empty URL") {
         string input{"HEAD HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
-                
+
         Request request;
         REQUIRE_THROWS_AS(request.parseSomeData(input.cbegin(), input.cend()), BadRequestException);
-       
     }
 }
 
@@ -244,12 +236,11 @@ SCENARIO("Asynchronous Request parsing") {
         REQUIRE(request.uri == "/file.txt");
         REQUIRE(request.method == Request::Method::Head);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
         }
-        
     }
 }
 
@@ -263,7 +254,7 @@ SCENARIO("RequestHandler on a HTTP GET") {
         REQUIRE(request.uri == "/compressed.txt");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Variant Also Negotiates' http response") {
@@ -282,7 +273,7 @@ SCENARIO("RequestHandler on a HTTP GET") {
         REQUIRE(request.uri == "/compressed.txt");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
             THEN("It should respond ok with a brotli encoded (empty) file") {
                 REQUIRE(response.statusCode == Response::ok);

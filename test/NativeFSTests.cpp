@@ -22,7 +22,8 @@ SCENARIO("NativeDebugFS give access to local files") {
             testFile << "TestFile for NativeFSTests\n";
         }
         WHEN("NativeDebugFS open it") {
-            auto file = DebugFS::open("test.tmp");
+            DebugFS debugFS(".");
+            auto file = debugFS.open("test.tmp");
             THEN("A file with the correct content is returned") {
                 REQUIRE(file);
                 REQUIRE(!file->isEncoded());

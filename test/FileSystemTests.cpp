@@ -1,6 +1,7 @@
 #include <system/FileSystem.hpp>
 
 #include <doctest/doctest.h>
+#include "Mocks.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -16,28 +17,6 @@ struct JsLibNames {
 };
 struct MixNames {
     static inline list names{"index.html", "WebFront.js", "lib.js", "lib2.js"};
-};
-
-template<typename KnownFiles>
-struct MockFileSystem {
-    MockFileSystem(filesystem::path docRoot) { root = docRoot; };
-    struct Data {
-        static constexpr std::array<uint64_t, 1> data{0};
-        static constexpr size_t dataSize{0};
-        static constexpr std::string_view encoding{"br"};
-    };
-
-    static std::optional<fs::File> open(filesystem::path file) {
-        auto filename = file.relative_path().string();
-        if (find(KnownFiles::names.cbegin(), KnownFiles::names.cend(), filename) != KnownFiles::names.cend()) {
-            openingsCounter++;
-            return fs::File{Data{}};
-        }
-        return {};
-    }
-
-    inline static auto openingsCounter = 0;
-    inline static filesystem::path root;
 };
 
 using MockIndexFS = MockFileSystem<IndexNames>;

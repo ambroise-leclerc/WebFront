@@ -4,17 +4,18 @@
 #pragma once
 #include "../networking/BasicNetworking.hpp"
 #include "../tooling/HexDump.hpp"
+#include "../system/FileSystem.hpp"
 #include "Encodings.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <locale>
-#include <map>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -87,14 +88,13 @@ struct Request : Headers {
     }
 
     [[nodiscard]] static Method getMethodFromString(std::string_view text) {
-        using enum Method;
-        using namespace std::literals;
-        std::map names{std::pair{"CONNECT"sv, Connect}, {"DELETE"sv, Delete}, {"GET"sv, Get}, {"HEAD"sv, Head},
-                        {"OPTIONS"sv, Options}, {"PATCH"sv, Patch}, {"POST"sv, Post}, {"PUT"sv, Put}, {"TRACE"sv, Trace}};
-        auto name = names.find(text);
-        return name != names.end() ? name->second : Undefined;
+        for (size_t index = 0; index < methodNames.size(); ++index)
+            if (methodNames[index] == text) return static_cast<Method>(index);
+        return Method::Undefined;
     }
 
+    [[nodiscard]] std::string_view getMethodName() const { return methodNames[static_cast<size_t>(method)]; }
+        
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
     [[nodiscard]] bool isUpgradeRequest(std::string_view protocol) const {
@@ -181,6 +181,7 @@ private: // clang-format off
         }
         return false;
     }
+    inline static std::array methodNames{"CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE"};
 }; // clang-format on
 
 struct Response : Headers {
@@ -241,7 +242,7 @@ private:
     }
 };
 
-template<typename Net, typename Filesystem>
+template<networking::Features Net, fs::Provider FS>
 class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root) : fs(root) {}
@@ -253,16 +254,16 @@ public:
 
     Response handleRequest(Request request) {
         auto requestUri = uri::decode(request.uri);
+        log::debug("Request uri - raw:'{}' decoded:'{}'", request.uri, requestUri);
         if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
         auto requestPath = std::filesystem::path(requestUri).relative_path();
+        log::debug("  -> requestPath : {}", requestPath.string());
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;
         switch (request.method) {
         case Request::Method::Get: {
-            log::debug("HTTP Get {}", requestPath.string());
-            for (auto encoding : request.getHeadersValues("Accept-Encoding")) log::debug("Encoding : {}", encoding);
             if (request.isUpgradeRequest("websocket")) {
                 auto key = request.getHeaderValue("Sec-WebSocket-Key");
                 if (key) {
@@ -278,7 +279,6 @@ public:
             auto file = fs.open(requestPath);
             if (!file) return Response::getStatusResponse(Response::notFound);
             if (file->isEncoded()) {
-                log::debug("HTTP Get {} : file is encoded : {}", requestPath.string(), file->getEncoding());
                 if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
                     log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
                     return Response::getStatusResponse(Response::variantAlsoNegotiates);
@@ -291,7 +291,7 @@ public:
 
         } break;
         case Request::Method::Head:
-            if (!Filesystem::open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            if (!fs.open(requestPath)) return Response::getStatusResponse(Response::notFound);
             break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
@@ -305,7 +305,7 @@ public:
     }
 
 private:
-    Filesystem fs;
+    FS fs;
 };
 
 template<typename ConnectionType>
@@ -341,11 +341,11 @@ private:
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
-template<typename Net, typename Filesystem>
-class Connection : public std::enable_shared_from_this<Connection<Net, Filesystem>> {
+template<networking::Features Net, fs::Provider FS>
+class Connection : public std::enable_shared_from_this<Connection<Net, FS>> {
 public:
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
-                        RequestHandler<Net, Filesystem>& handler)
+                        RequestHandler<Net, FS>& handler)
         : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
         log::debug("New connection");
     }
@@ -363,8 +363,8 @@ public:
 
 private:
     typename Net::Socket socket;
-    Connections<Connection<Net, Filesystem>>& connections;
-    RequestHandler<Net, Filesystem>& requestHandler;
+    Connections<Connection<Net, FS>>& connections;
+    RequestHandler<Net, FS>& requestHandler;
     std::array<char, 8192> buffer;
     Request request;
     Response response;
@@ -379,7 +379,9 @@ private:
                     try {
                         request.parseSomeData(buffer.data(), buffer.data() + bytesTransferred);
                         if (request.completed()) {
+                            log::info("Received request {} on {}", request.getMethodName(), request.uri);
                             response = requestHandler.handleRequest(request);
+                            log::info("  responding http {}", static_cast<int>(response.statusCode));
                             write();
                             if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;
                         }
@@ -415,8 +417,7 @@ private:
     }
 };
 
-template<typename Net, typename Filesystem>
-    requires networking::Features<Net>
+template<networking::Features Net, fs::Provider FS>
 class Server {
 public:
     Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
@@ -443,14 +444,14 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    Connections<Connection<Net, Filesystem>> connections;
-    RequestHandler<Net, Filesystem> requestHandler;
+    Connections<Connection<Net, FS>> connections;
+    RequestHandler<Net, FS> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection<Net, Filesystem>>(std::move(socket), connections, requestHandler);
+            auto newConnection = std::make_shared<Connection<Net, FS>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
             accept();
