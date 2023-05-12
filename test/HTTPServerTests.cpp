@@ -2,6 +2,7 @@
 #include <networking/NetworkingMock.hpp>
 
 #include <doctest/doctest.h>
+#include "Mocks.hpp"
 
 #include <string>
 #include <string_view>
@@ -139,19 +140,8 @@ SCENARIO("RequestParser") {
     }
 }
 
-struct MockFileSystem {
-    MockFileSystem(filesystem::path docRoot) { root = docRoot; };
-    struct Data {
-        static constexpr std::array<uint64_t, 1> data{0};
-        static constexpr size_t dataSize{0};
-        static constexpr std::string_view encoding{"br"};
-    };
-
-    static std::optional<fs::File> open(filesystem::path) {
-            return fs::File{Data{}};
-    }
-
-    inline static filesystem::path root;
+struct ResourceAndFile {
+    static inline list names{"ressource.txt", "file.txt", "compressed.txt"};
 };
 
 bool compare(auto& buffer, std::string text) {
@@ -171,7 +161,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/ressource.txt");
         REQUIRE(request.method == Request::Method::Delete);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Not Implemented' http response") {
@@ -192,7 +182,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/chat");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Switching Protocols' http response") {
@@ -215,7 +205,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/file.txt");
         REQUIRE(request.method == Request::Method::Head);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
@@ -246,7 +236,7 @@ SCENARIO("Asynchronous Request parsing") {
         REQUIRE(request.uri == "/file.txt");
         REQUIRE(request.method == Request::Method::Head);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should find the file") { REQUIRE(response.statusCode == Response::ok); }
@@ -264,7 +254,7 @@ SCENARIO("RequestHandler on a HTTP GET") {
         REQUIRE(request.uri == "/compressed.txt");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Variant Also Negotiates' http response") {
@@ -283,7 +273,7 @@ SCENARIO("RequestHandler on a HTTP GET") {
         REQUIRE(request.uri == "/compressed.txt");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem> handler{"."};
+            RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
             THEN("It should respond ok with a brotli encoded (empty) file") {
                 REQUIRE(response.statusCode == Response::ok);
