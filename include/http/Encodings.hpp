@@ -74,53 +74,43 @@ struct URI {
 
 private:    
     std::string_view next() const {
-        enum class Step {scheme, authority, path, query, fragment, userinfo, host, port};
-        static auto step = Step::scheme;
+        constexpr auto stepScheme{0}, stepAuthority{1}, stepPath{2}, stepQuery{3}, stepFragment{4}, stepUserInfo{5}, stepHost{6}, stepPort{7}; 
+        static auto step = stepPort;
         static size_t mark, mark2;
+        step = (step == stepPort) ? stepScheme : step + 1;
         switch (step) {
-            case Step::scheme: 
-                mark = string.find("://");
+            case stepScheme:    mark = string.find("://");
                 if (mark == std::string::npos) { mark = string.size() - 1; return {}; }
-                step = Step::authority;                
                 return {string.data(), mark};
-            case Step::authority:
-                mark2 = string.find("/", mark + 3);
+
+            case stepAuthority: mark2 = string.find("/", mark + 3);
                 if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {}; }
-                step = Step::path;
                 return {&string[mark + 3], mark2 - mark - 3};
-            case Step::path:
-                mark = string.find("?", mark2 + 1);
-                step = Step::query;
+            
+            case stepPath:      mark = string.find("?", mark2 + 1);
                 if (mark == std::string::npos) {
                     mark = string.find("#");
                     if (mark == std::string::npos) { mark = string.size() - 1; return {&string[mark2], string.size() - mark2}; }
                 }
-
                 return {&string[mark2], mark - mark2};
-            case Step::query:
-                mark2 = string.find("#", mark + 1);
-                step = Step::fragment;
+            
+            case stepQuery:     mark2 = string.find("#", mark + 1);
                 if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {&string[mark + 1], string.size() - mark - 1}; }
                 return {&string[mark + 1], mark2 - mark - 1};
-            case Step::fragment:
-                step = Step::userinfo;
-                return {&string[mark2 + 1], string.size() - mark2 - 1};
-            case Step::userinfo:
-                mark = authority.find("@");
-                step = Step::host; 
+            
+            case stepFragment:  return {&string[mark2 + 1], string.size() - mark2 - 1};
+            
+            case stepUserInfo:  mark = authority.find("@");
                 if (mark == std::string::npos) return {};
                 return authority.substr(0, mark);
-            case Step::host:
-                mark2 = authority.find(":", mark + 1);
+            
+            case stepHost:      mark2 = authority.find(":", mark + 1);
                 if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {}; }
-                step = Step::port;
                 return authority.substr(mark + 1, mark2 - mark - 1);
-            case Step::port:
-                step = Step::scheme;
-                return authority.substr(mark2 + 1, authority.size() - mark2 - 1);
+            
+            case stepPort:      return authority.substr(mark2 + 1, authority.size() - mark2 - 1);
         }
-        return {};
-                
+        return {};           
     }
 };
 
