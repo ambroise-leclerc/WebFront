@@ -5,6 +5,7 @@
 #include "../details/C++20Support.hpp"
 #include "../details/C++23Support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <concepts>
@@ -56,6 +57,66 @@ namespace uri {
     }
     return decoded;
 }
+
+// A representation of an URI with its different fields
+//
+//          userinfo       host      port
+//          ┌──┴───┐ ┌──────┴──────┐ ┌┴┐
+//  https://john.doe@www.example.com:123/forum/questions/?tag=networking&order=newest#top
+//  └─┬─┘   └─────────────┬────────────┘└───────┬───────┘ └────────────┬────────────┘ └┬┘
+//  scheme          authority                  path                  query           fragment
+struct URI {
+    URI(std::string uri) : string(uri), scheme(next()), authority(next()), path(next()), query(next()),
+        fragment(next()), userinfo(next()), host(next()), port(next()) {}
+        
+    const std::string string;
+    const std::string_view scheme, authority, path, query, fragment, userinfo, host, port;
+
+private:    
+    std::string_view next() const {
+        constexpr auto stepScheme{0}, stepAuthority{1}, stepPath{2}, stepQuery{3}, stepFragment{4}, stepUserInfo{5}, stepHost{6}, stepPort{7}; 
+        static auto step = stepPort;
+        static size_t mark, mark2;
+        step = (step == stepPort) ? stepScheme : step + 1;
+        switch (step) {
+            case stepScheme:    mark = string.find("://");
+                if (mark == std::string::npos) { mark = string.size() - 1; return {}; }
+                return {string.data(), mark};
+
+            case stepAuthority: mark2 = string.find("/", mark + 3);
+                if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {}; }
+                return {&string[mark + 3], mark2 - mark - 3};
+            
+            case stepPath:      mark = string.find("?", mark2 + 1);
+                if (mark == std::string::npos) {
+                    mark = string.find("#");
+                    if (mark == std::string::npos) { mark = string.size() - 1; return {&string[mark2], string.size() - mark2}; }
+                }
+                return {&string[mark2], mark - mark2};
+            
+            case stepQuery:     mark2 = string.find("#", mark + 1);
+                if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {&string[mark + 1], string.size() - mark - 1}; }
+                return {&string[mark + 1], mark2 - mark - 1};
+            
+            case stepFragment:  return {&string[mark2 + 1], string.size() - mark2 - 1};
+            
+            case stepUserInfo:  mark = authority.find("@");
+                if (mark == std::string::npos) return {};
+                return authority.substr(0, mark);
+            
+            case stepHost:      mark2 = authority.find(":", mark + 1);
+                if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {}; }
+                return authority.substr(mark + 1, mark2 - mark - 1);
+            
+            case stepPort:      return authority.substr(mark2 + 1, authority.size() - mark2 - 1);
+        }
+        return {};           
+    }
+};
+
+
+
+
 
 } // namespace uri
 
