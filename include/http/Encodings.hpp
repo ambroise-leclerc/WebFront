@@ -73,7 +73,7 @@ struct URI {
     const std::string_view scheme, authority, path, query, fragment, userinfo, host, port;
 
 private:    
-    constexpr std::string_view next() const {
+    std::string_view next() const {
         constexpr auto schem{0}, autho{1}, path_{2}, quer_{3}, fragm{4}, usrnf{5}, host_{6}, port_{7}; 
         static auto step = port_;
         static size_t mark, mark2;
