@@ -19,13 +19,13 @@ SCENARIO("URI parsing") {
     GIVEN("An URI with no userinfo nor fragment") {
         uri::URI u0("http://localhost:80/foo.html?&q=1:2:3");
         WHEN("decoded") {
-            REQUIRE(u0.scheme == "http"sv);
+            REQUIRE(u0.scheme == "http");
             REQUIRE(u0.userinfo.empty());
-            REQUIRE(u0.host == "localhost"sv);
-            REQUIRE(u0.port == "80"sv);
-            REQUIRE(u0.path == "/foo.html"sv);
-            REQUIRE(u0.authority == "localhost:80"sv);
-            REQUIRE(u0.query == "&q=1:2:3"sv);
+            REQUIRE(u0.host == "localhost");
+            REQUIRE(u0.port == "80");
+            REQUIRE(u0.path == "/foo.html");
+            REQUIRE(u0.authority == "localhost:80");
+            REQUIRE(u0.query == "&q=1:2:3");
             REQUIRE(u0.fragment.empty());
         }
     }
@@ -41,6 +41,52 @@ SCENARIO("URI parsing") {
             REQUIRE(u1.authority == "john.doe@www.example.com:123");
             REQUIRE(u1.query == "tag=networking&order=newest");
             REQUIRE(u1.fragment == "top");
+        }
+    }
+
+    GIVEN("A function which returns an URI from a string") {
+        auto parse = [](std::string text) { return uri::URI(text); };
+
+        WHEN("parsing URI without userinfo") {
+            auto u = parse("https://www.example.com:123/forum/questions/?tag=networking&order=newest#top");
+            THEN("fields should be") {
+                REQUIRE(u.scheme == "https");
+                REQUIRE(u.userinfo.empty());
+                REQUIRE(u.host == "www.example.com");
+                REQUIRE(u.port == "123");
+                REQUIRE(u.path == "/forum/questions/");
+                REQUIRE(u.authority == "www.example.com:123");
+                REQUIRE(u.query == "tag=networking&order=newest");
+                REQUIRE(u.fragment == "top");
+            }
+        }
+
+        WHEN("parsing URI without userinfo nor port") {
+            auto u = parse("https://www.example.com/forum/questions/?tag=networking&order=newest#top");
+            THEN("fields should be") {
+                REQUIRE(u.scheme == "https");
+                REQUIRE(u.userinfo.empty());
+                REQUIRE(u.host == "www.example.com");
+                REQUIRE(u.port.empty());
+                REQUIRE(u.path == "/forum/questions/");
+                REQUIRE(u.authority == "www.example.com");
+                REQUIRE(u.query == "tag=networking&order=newest");
+                REQUIRE(u.fragment == "top");
+            }
+        }
+
+        WHEN("parsing URI without userinfo nor port or query") {
+            auto u = parse("https://www.example.com/forum/questions/");
+            THEN("fields should be") {
+                REQUIRE(u.scheme == "https");
+                REQUIRE(u.userinfo.empty());
+                REQUIRE(u.host == "www.example.com");
+                REQUIRE(u.port.empty());
+                REQUIRE(u.path == "/forum/questions/");
+                REQUIRE(u.authority == "www.example.com");
+                REQUIRE(u.query.empty());
+                REQUIRE(u.fragment.empty());
+            }
         }
     }
 }
