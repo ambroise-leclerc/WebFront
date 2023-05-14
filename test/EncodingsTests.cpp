@@ -19,13 +19,13 @@ SCENARIO("URI parsing") {
     GIVEN("An URI with no userinfo nor fragment") {
         uri::URI u0("http://localhost:80/foo.html?&q=1:2:3");
         WHEN("decoded") {
-            REQUIRE(u0.scheme == "http"sv);
+            REQUIRE(u0.scheme == "http");
             REQUIRE(u0.userinfo.empty());
-            REQUIRE(u0.host == "localhost"sv);
-            REQUIRE(u0.port == "80"sv);
-            REQUIRE(u0.path == "/foo.html"sv);
-            REQUIRE(u0.authority == "localhost:80"sv);
-            REQUIRE(u0.query == "&q=1:2:3"sv);
+            REQUIRE(u0.host == "localhost");
+            REQUIRE(u0.port == "80");
+            REQUIRE(u0.path == "/foo.html");
+            REQUIRE(u0.authority == "localhost:80");
+            REQUIRE(u0.query == "&q=1:2:3");
             REQUIRE(u0.fragment.empty());
         }
     }

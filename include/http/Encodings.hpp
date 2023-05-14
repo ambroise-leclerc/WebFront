@@ -66,58 +66,40 @@ namespace uri {
 //  └─┬─┘   └─────────────┬────────────┘└───────┬───────┘ └────────────┬────────────┘ └┬┘
 //  scheme          authority                  path                  query           fragment
 struct URI {
-    URI(std::string uri) : string(uri), scheme(next()), authority(next()), path(next()), query(next()),
-        fragment(next()), userinfo(next()), host(next()), port(next()) {}
+    URI(std::string uri) : string(uri), scheme(next(string)), authority(next(string)), path(next(string)), query(next(string)),
+        fragment(next(string)), userinfo(next(authority)), host(next(authority)), port(next(authority)) {}
         
     const std::string string;
     const std::string_view scheme, authority, path, query, fragment, userinfo, host, port;
 
 private:    
-    std::string_view next() const {
-        constexpr auto schem{0}, autho{1}, path_{2}, quer_{3}, fragm{4}, usrnf{5}, host_{6}, port_{7}; 
-        static auto step = port_;
-        static size_t mark, mark2;
+    static std::string_view next(std::string_view uri) {
+        const size_t schem{0}, autho{1}, path_{2}, quer_{3}, fragm{4}, usrnf{5}, host_{6}, port_{7}, npos = std::string_view::npos; 
+        static size_t step{port_}, mark, mark2;
         step = (step == port_) ? schem : step + 1;
         switch (step) {
-            case schem: mark = string.find("://");
-                if (mark == std::string::npos) { mark = string.size() - 3; return {}; }
-                return {string.data(), mark};
-
-            case autho: mark2 = string.find("/", mark + 3);
-                if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {}; }
-                return {&string[mark + 3], mark2 - mark - 3};
-            
-            case path_: mark = string.find("?", mark2 + 1);
-                if (mark == std::string::npos) {
-                    mark = string.find("#");
-                    if (mark == std::string::npos) { mark = string.size() - 1; return {&string[mark2], string.size() - mark2}; }
+            case schem: mark = uri.find("://");
+                if (mark == npos) { mark = uri.size() - 3; return {}; } else return uri.substr(0, mark);
+            case autho: mark2 = uri.find("/", mark + 3);
+                if (mark2 == npos) { mark2 = uri.size() - 1; return {}; } else return uri.substr(mark + 3, mark2 - mark - 3);
+            case path_: mark = uri.find("?", mark2 + 1);
+                if (mark == npos) {
+                    mark = uri.find("#");
+                    if (mark == npos) { mark = uri.size() - 1; return uri.substr(mark2); }
                 }
-                return {&string[mark2], mark - mark2};
-            
-            case quer_:     mark2 = string.find("#", mark + 1);
-                if (mark2 == std::string::npos) { mark2 = string.size() - 1; return {&string[mark + 1], string.size() - mark - 1}; }
-                return {&string[mark + 1], mark2 - mark - 1};
-            
-            case fragm:  return {&string[mark2 + 1], string.size() - mark2 - 1};
-            
-            case usrnf:  mark = authority.find("@");
-                if (mark == std::string::npos) return {};
-                return authority.substr(0, mark);
-            
-            case host_:  mark2 = authority.find(":", mark + 1);
-                if (mark2 == std::string::npos) return authority.substr(mark + 1);
-                return authority.substr(mark + 1, mark2 - mark - 1);
-            
-            case port_:  if (mark2 != std::string::npos) return authority.substr(mark2 + 1, authority.size() - mark2 - 1);
+                return uri.substr(mark2, mark - mark2);
+            case quer_: mark2 = uri.find("#", mark + 1);
+                if (mark2 == npos) { mark2 = uri.size() - 1; return uri.substr(mark + 1); } else return uri.substr(mark + 1, mark2 - mark - 1);
+            case fragm: return uri.substr(mark2 + 1);
+            case usrnf: mark = uri.find("@");
+                if (mark == npos) return {}; else return uri.substr(0, mark);
+            case host_: mark2 = uri.find(":", mark + 1);
+                if (mark2 == npos) return uri.substr(mark + 1); else return uri.substr(mark + 1, mark2 - mark - 1);
+            case port_: if (mark2 != npos) return uri.substr(mark2 + 1);
         }
         return {};           
     }
 };
-
-
-
-
-
 } // namespace uri
 
 namespace base64 {
