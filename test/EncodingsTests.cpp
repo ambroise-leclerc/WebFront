@@ -43,6 +43,52 @@ SCENARIO("URI parsing") {
             REQUIRE(u1.fragment == "top");
         }
     }
+
+    GIVEN("A function which returns an URI from a string") {
+        auto parse = [](std::string text) { return uri::URI(text); };
+
+        WHEN("parsing URI without userinfo") {
+            auto u = parse("https://www.example.com:123/forum/questions/?tag=networking&order=newest#top");
+            THEN("fields should be") {
+                REQUIRE(u.scheme == "https");
+                REQUIRE(u.userinfo.empty());
+                REQUIRE(u.host == "www.example.com");
+                REQUIRE(u.port == "123");
+                REQUIRE(u.path == "/forum/questions/");
+                REQUIRE(u.authority == "www.example.com:123");
+                REQUIRE(u.query == "tag=networking&order=newest");
+                REQUIRE(u.fragment == "top");
+            }
+        }
+
+        WHEN("parsing URI without userinfo nor port") {
+            auto u = parse("https://www.example.com/forum/questions/?tag=networking&order=newest#top");
+            THEN("fields should be") {
+                REQUIRE(u.scheme == "https");
+                REQUIRE(u.userinfo.empty());
+                REQUIRE(u.host == "www.example.com");
+                REQUIRE(u.port.empty());
+                REQUIRE(u.path == "/forum/questions/");
+                REQUIRE(u.authority == "www.example.com");
+                REQUIRE(u.query == "tag=networking&order=newest");
+                REQUIRE(u.fragment == "top");
+            }
+        }
+
+        WHEN("parsing URI without userinfo nor port or query") {
+            auto u = parse("https://www.example.com/forum/questions/");
+            THEN("fields should be") {
+                REQUIRE(u.scheme == "https");
+                REQUIRE(u.userinfo.empty());
+                REQUIRE(u.host == "www.example.com");
+                REQUIRE(u.port.empty());
+                REQUIRE(u.path == "/forum/questions/");
+                REQUIRE(u.authority == "www.example.com");
+                REQUIRE(u.query.empty());
+                REQUIRE(u.fragment.empty());
+            }
+        }
+    }
 }
 
 SCENARIO("WebSocket Sec Key coding") {
