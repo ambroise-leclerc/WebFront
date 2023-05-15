@@ -104,7 +104,7 @@ private:
 
 namespace base64 {
 
-namespace {
+namespace detail {
 
 [[nodiscard]]inline std::string encode(const uint8_t* input, size_t size) {
     static constexpr std::array code = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
@@ -136,7 +136,7 @@ namespace {
 
     return output;
 }
-} // namespace
+} // namespace detail
 
 template<typename T>
 concept Container = ::std::movable<T> || requires(T t) {
@@ -146,7 +146,7 @@ concept Container = ::std::movable<T> || requires(T t) {
 };
 
 [[nodiscard]] inline std::string encode(Container auto input) {
-    return encode(reinterpret_cast<const uint8_t*>(input.data()), input.size() * sizeof(typename decltype(input)::value_type));
+    return detail::encode(reinterpret_cast<const uint8_t*>(input.data()), input.size() * sizeof(typename decltype(input)::value_type));
 }
 
 [[nodiscard]] inline std::string encodeInNetworkOrder(Container auto input) {

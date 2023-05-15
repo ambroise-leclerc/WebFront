@@ -17,7 +17,6 @@
 
 namespace webfront::fs {
 
-namespace {
 template<typename T>
 concept HasEncoding = requires(T t) { T::encoding; };
 
@@ -32,7 +31,6 @@ concept EncodedData = IsData<T> && HasEncoding<T>;
 
 template<typename T>
 concept RawData = IsData<T>;
-} // namespace
 
 class File {
     enum class FileType { nativeFStream, staticData };
