@@ -6,7 +6,6 @@
 #include "http/HTTPServer.hpp"
 #include "tooling/HexDump.hpp"
 #include "utils/TypeErasedFunction.hpp"
-#include "utils/Version.hpp"
 #include "system/IndexFS.hpp"
 #include "weblink/WebLink.hpp"
 
@@ -23,16 +22,6 @@
 namespace webfront {
 
 inline constexpr std::string_view version = "0.1.0";
-/*namespace version {
-
-using namespace utils;
-inline constexpr uint8_t major = 0;
-inline constexpr uint8_t minor = 1;
-inline constexpr uint8_t patch = 0;
-inline constexpr auto string = Version<Num<major>, Dot, Num<minor>, Dot, Num<patch>>::value;
-
-} // namespace version
-*/
 
 using NetProvider = networking::TCPNetworkingTS;
 using ConnectionError = std::runtime_error;
