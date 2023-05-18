@@ -66,9 +66,14 @@ int main() {
 
         using WF = BasicWF<NetProvider, Jas>;
         WF webFront(httpPort, docRoot);
-        webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
-        webFront.onUIStarted([](WF::UI ) {
+        webFront.cppFunction<std::string, std::string>("getVersion", [](std::string) { return webfront::version; });
+        webFront.onUIStarted([](WF::UI ui) {
             log::info("UI Started");
+            ui.addScript("var addText = function(text, num) {                 \n"
+                     "  print(text + ' of ' + num);                       \n"
+                     "}                                                   \n");
+            auto print = ui.jsFunction("addText");
+            print("Hello World", 2023);
         });
         openInDefaultBrowser(httpPort, specRunnerFile);
 
