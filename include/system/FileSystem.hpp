@@ -1,4 +1,4 @@
-/// @date 01/03/2022 22:39:42
+/// @date 01/03/2023 22:39:42
 /// @author Ambroise Leclerc
 /// @brief Provides access to local or virtual file system.
 #pragma once
@@ -10,6 +10,7 @@
 #include <bit>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <ios>
 #include <optional>
 #include <span>

@@ -1,4 +1,4 @@
-/// @date 26/04/2022 22:39:42
+/// @date 26/04/2023 22:39:42
 /// @author Ambroise Leclerc
 /// @brief Virtual file system providing access to WebFront.js, favicon.ico and a minimal index.html.
 #pragma once

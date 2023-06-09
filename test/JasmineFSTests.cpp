@@ -1,5 +1,4 @@
 #include <system/JasmineFS.hpp>
-#include <tooling/HexDump.hpp>
 
 #include <doctest/doctest.h>
 
@@ -11,7 +10,7 @@
 using namespace std;
 using namespace webfront;
 
-SCENARIO("JasmineFileSystem provides Jasmine testing library") {
+SCENARIO("JasmineFS provides Jasmine testing library") {
     GIVEN("A JasmineFS") {
         using FS = fs::JasmineFS;
 
