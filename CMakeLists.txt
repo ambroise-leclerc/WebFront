@@ -6,30 +6,32 @@ string(REGEX REPLACE ${VERSION_REGEX} "\\1" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 add_library(WebFront INTERFACE)
-include(cmake/StandardProjectSettings.cmake)
-include(cmake/PreventInSourceBuilds.cmake)
+
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
+include(StandardProjectSettings)
+include(PreventInSourceBuilds)
 add_library(project_options INTERFACE)
 target_compile_features(project_options INTERFACE cxx_std_23)
 add_library(project_warnings INTERFACE)
 
 
-include(cmake/Cache.cmake)
+include(Cache)
 
-include(cmake/Linker.cmake)
+include(Linker)
 configure_linker(project_options)
 
-include(cmake/CompilerWarnings.cmake)
+include(CompilerWarnings)
 set_project_warnings(project_warnings)
 
-include(cmake/Sanitizers.cmake)
+include(Sanitizers)
 enable_sanitizers(project_options)
 
 configure_file(Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
-include(cmake/Doxygen.cmake)
+include(Doxygen)
 enable_doxygen()
 
-include(cmake/StaticAnalyzers.cmake)
-include(cmake/CPM.cmake)
+include(StaticAnalyzers)
+include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0")
 
