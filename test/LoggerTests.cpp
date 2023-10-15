@@ -1,6 +1,6 @@
 #include <tooling/Logger.hpp>
 
-#include <doctest/doctest.h>
+#include <catch2/catch_test_macros.hpp>
 
 #include <list>
 #include <string>

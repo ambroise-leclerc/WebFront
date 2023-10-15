@@ -1,7 +1,7 @@
 #include <http/HTTPServer.hpp>
 #include <networking/NetworkingMock.hpp>
 
-#include <doctest/doctest.h>
+#include <catch2/catch_test_macros.hpp>
 #include "Mocks.hpp"
 
 #include <string>
