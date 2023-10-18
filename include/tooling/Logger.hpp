@@ -41,14 +41,14 @@ namespace {
 #ifdef __cpp_lib_format
         log(l, vformat(fmt, make_format_args(forward<Ts>(ts)...)));
 #else
-        log(l, format(fmt, forward<Ts>(ts)...));
+        log(l, format(fmt, std::forward<Ts>(ts)...));
 #endif
     }
     template<typename... Ts> static void log(LogType l, string_view fmt, const srcLoc& s, Ts&&... ts) {
 #if __cpp_lib_format
         log(l, vformat(fmt, make_format_args(forward<Ts>(ts)...)), s);
 #else
-        log(l, format(fmt, forward<Ts>(ts)...), s);
+        log(l, format(fmt, std::forward<Ts>(ts)...), s);
 #endif
     }
 
@@ -58,14 +58,14 @@ namespace {
 }
 
 template<typename... Ts> struct debug { debug(string_view fmt, Ts&&... ts, const srcLoc& l = srcLoc::current()) {
-    if (is(Debug)) log(Debug, fmt, l, forward<Ts>(ts)...);
+    if (is(Debug)) log(Debug, fmt, l, std::forward<Ts>(ts)...);
     }
 };
 template<typename... Ts> debug(string_view, Ts&&...) -> debug<Ts...>;
-template<typename... Ts> void error(string_view fmt, Ts&&... ts) { if (is(Error)) log(Error, fmt, forward<Ts>(ts)...); }
-template<typename... Ts> void warn(string_view fmt, Ts&&... ts) { if (is(Warn)) log(Warn, fmt, forward<Ts>(ts)...); }
-template<typename... Ts> void info(string_view fmt, Ts&&... ts) { if (is(Info)) log(Info, fmt, forward<Ts>(ts)...); }
+template<typename... Ts> void error(string_view fmt, Ts&&... ts) { if (is(Error)) log(Error, fmt, std::forward<Ts>(ts)...); }
+template<typename... Ts> void warn(string_view fmt, Ts&&... ts) { if (is(Warn)) log(Warn, fmt, std::forward<Ts>(ts)...); }
+template<typename... Ts> void info(string_view fmt, Ts&&... ts) { if (is(Info)) log(Info, fmt, std::forward<Ts>(ts)...); }
 void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
-auto addSinks(auto&&... ts) { (out.sinks.push_back(forward<decltype(ts)>(ts)), ...); return out.sinks.size() - 1; }
+auto addSinks(auto&&... ts) { (out.sinks.push_back(std::forward<decltype(ts)>(ts)), ...); return out.sinks.size() - 1; }
 void removeSinks(auto&&... sinkIds) { ((out.sinks[sinkIds] = nullptr), ...); }
 } //namespace webfront::log
