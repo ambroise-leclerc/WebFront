@@ -33,7 +33,7 @@ enable_doxygen()
 include(StaticAnalyzers)
 include(CPM)
 
-CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0")
+CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
 
 target_link_libraries(WebFront INTERFACE project_options project_warnings )

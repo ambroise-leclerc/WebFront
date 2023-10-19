@@ -150,11 +150,10 @@ concept Container = ::std::movable<T> || requires(T t) {
 }
 
 [[nodiscard]] inline std::string encodeInNetworkOrder(Container auto input) {
-    using namespace std;
-    if constexpr (endian::native == endian::little)
-        for (auto& elem : input) elem = byteswap(elem);
+    if constexpr (std::endian::native == std::endian::little)
+        for (auto& elem : input) elem = std::byteswap(elem);
 
-    return encode(move(input));
+    return encode(std::move(input));
 }
 
 } // namespace base64
