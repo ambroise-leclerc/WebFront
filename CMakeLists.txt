@@ -10,21 +10,21 @@ add_library(WebFront INTERFACE)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 include(StandardProjectSettings)
 include(PreventInSourceBuilds)
-add_library(project_options INTERFACE)
-target_compile_features(project_options INTERFACE cxx_std_23)
-add_library(project_warnings INTERFACE)
+add_library(WebFront_options INTERFACE)
+target_compile_features(WebFront_options INTERFACE cxx_std_23)
+add_library(WebFront_warnings INTERFACE)
 
 
 include(Cache)
 
 include(Linker)
-configure_linker(project_options)
+configure_linker(WebFront_options)
 
 include(CompilerWarnings)
-set_project_warnings(project_warnings)
+set_project_warnings(WebFront_warnings)
 
 include(Sanitizers)
-enable_sanitizers(project_options)
+enable_sanitizers(WebFront_options)
 
 configure_file(Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
 include(Doxygen)
@@ -36,7 +36,7 @@ include(CPM)
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
 
-target_link_libraries(WebFront INTERFACE project_options project_warnings )
+target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
