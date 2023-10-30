@@ -12,7 +12,7 @@ list(APPEND TESTS_LIST HTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp
 list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp ReactFSTests.cpp BabelFSTests.cpp)
 add_executable(tests ${TESTS_LIST})
-target_link_libraries(tests PRIVATE project_warnings project_options Catch2::Catch2WithMain WebFront)
+target_link_libraries(tests PRIVATE WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 catch_discover_tests(tests)
