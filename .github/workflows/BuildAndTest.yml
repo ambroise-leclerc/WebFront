@@ -1,0 +1,30 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ master develop ]
+
+env:
+  BUILD_TYPE: Release
+s
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        compiler: [msvc, gcc, clang]
+        exclude:
+        - os: windows-latest
+          compiler: [gcc, clang]
+        - os: ubuntu-latest
+          compiler: msvc
+        - os: macos-latest
+          compiler: [msvc, gcc]
+    runs-on: ${{ matrix.os}}
+      
+    steps:
+      - name: Display OS and Compiler
+        run: echo ${{ matrix.os }} ${ { matrix.compiler }}
+s
