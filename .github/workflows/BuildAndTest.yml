@@ -26,5 +26,4 @@ jobs:
       
     steps:
       - name: Display OS and Compiler
-        run: echo ${{ matrix.os }} ${ { matrix.compiler }}
-s
+        run: echo ${{ matrix.os }} ${{ matrix.compiler }}
