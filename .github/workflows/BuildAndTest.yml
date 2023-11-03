@@ -17,11 +17,15 @@ jobs:
         compiler: [msvc, gcc, clang]
         exclude:
         - os: windows-latest
-          compiler: [gcc, clang]
+          compiler: gcc
+        - os: windows-latest
+          compiler: clang
         - os: ubuntu-latest
           compiler: msvc
         - os: macos-latest
-          compiler: [msvc, gcc]
+          compiler: msvc
+        - os: macos-latest
+          compiler: gcc
     runs-on: ${{ matrix.os}}
       
     steps:
