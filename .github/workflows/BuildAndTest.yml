@@ -35,7 +35,11 @@ jobs:
         
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1
-        if: matrix.compiler == 'gcc'
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc'
+
+      - name: Setup mingw
+        uses: egor-tensin/setup-mingw@v2
+        if: matrix.os == 'windows-latest' && matrix.compiler == 'gcc'
         
       - name: Config & Build
         run:  |
