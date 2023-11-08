@@ -1,6 +1,8 @@
 name: Code coverage and static analysis
 
 on:
+  push:
+    branches: [ master develop ]
   pull_request:
     branches: [ master develop ]
 
@@ -13,7 +15,7 @@ jobs:
     env:
       BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
     steps:
-    - uses: actions/checkout@v3.3.0
+    - uses: actions/checkout@v4
 
     - name: Setup GCC
       uses: egor-tensin/setup-gcc@v1
