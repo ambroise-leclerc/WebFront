@@ -2,7 +2,7 @@ name: Code coverage and static analysis
 
 on:
   push:
-    branches: [ master develop ]
+    branches: [ ** ]
   pull_request:
     branches: [ master develop ]
 
