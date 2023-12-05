@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <cstdint>
 #include <iomanip>
 #include <ostream>
 #include <span>
