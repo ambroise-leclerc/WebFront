@@ -41,6 +41,8 @@ jobs:
 
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 12
         if: matrix.compiler == 'gcc'
         
       - name: Config & Build
