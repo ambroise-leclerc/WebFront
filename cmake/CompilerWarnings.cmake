@@ -28,6 +28,8 @@ function(set_project_warnings project_name)
       /w14905 # wide string literal cast to 'LPSTR'
       /w14906 # string literal cast to 'LPWSTR'
       /w14928 # illegal copy-initialization; more than one user-defined conversion has been implicitly applied
+      /w26815 # check dangling pointers or views from unnamed temporary object
+      /w26816 # pointer or view points on the stack
       /permissive- # standards conformance mode for MSVC compiler.
   )
 
@@ -39,7 +41,7 @@ function(set_project_warnings project_name)
                          # catch hard to track down memory errors
       -Wold-style-cast # warn for c-style casts
       -Wcast-align # warn for potential performance problem casts
-#      -Wunused # warn on anything being unused
+#     -Wunused # warn on anything being unused
       -Wunused-label     
       -Wunused-value     
       -Wunused-variable
@@ -64,6 +66,7 @@ function(set_project_warnings project_name)
       -Wduplicated-cond # warn if if / else chain has duplicated conditions
       -Wduplicated-branches # warn if if / else branches have duplicated code
       -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
+      -Wdangling-reference
   )
 
   if(MSVC)

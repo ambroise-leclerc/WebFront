@@ -26,6 +26,8 @@ jobs:
           compiler: msvc
         - os: macos-latest
           compiler: gcc
+        - os: ubuntu-latest
+          compiler: clang
     runs-on: ${{ matrix.os}}
       
     steps:
@@ -33,10 +35,14 @@ jobs:
         
       - name: Setup Clang
         uses: egor-tensin/setup-clang@v1.4
-        if: matrix.os == 'ubunutu-latest' && matrix.compiler == 'clang'
+        with:
+          version: 14
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
 
       - name: Setup GCC
-        uses: egor-tensin/setup-gcc@v1
+        uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 13
         if: matrix.compiler == 'gcc'
         
       - name: Config & Build
