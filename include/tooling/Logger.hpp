@@ -39,14 +39,14 @@ namespace {
     }
     template<typename... Ts> static void log(LogType l, string_view fmt, Ts&&... ts) {
 #ifdef __cpp_lib_format
-        log(l, vformat(fmt, make_format_args(forward<Ts>(ts)...)));
+        log(l, vformat(fmt, make_format_args(ts...)));
 #else
         log(l, format(fmt, std::forward<Ts>(ts)...));
 #endif
     }
     template<typename... Ts> static void log(LogType l, string_view fmt, const srcLoc& s, Ts&&... ts) {
 #if __cpp_lib_format
-        log(l, vformat(fmt, make_format_args(forward<Ts>(ts)...)), s);
+        log(l, vformat(fmt, make_format_args(ts...)), s);
 #else
         log(l, format(fmt, std::forward<Ts>(ts)...), s);
 #endif
