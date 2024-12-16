@@ -4,6 +4,7 @@
 #pragma once
 #include "../details/C++20Support.hpp"
 #include "../details/C++23Support.hpp"
+#include "../tooling/Logger.hpp"
 
 #include <algorithm>
 #include <array>
@@ -66,23 +67,24 @@ namespace uri {
 //  └─┬─┘   └─────────────┬────────────┘└───────┬───────┘ └────────────┬────────────┘ └┬┘
 //  scheme          authority                  path                  query           fragment
 struct URI {
-    URI(std::string uri) : string(uri), scheme(next(string)), authority(next(string)), path(next(string)), query(next(string)),
+    URI(std::string uri) : string(std::move(uri)), scheme(next(string)), authority(next(string)), path(next(string)), query(next(string)),
         fragment(next(string)), userinfo(next(authority)), host(next(authority)), port(next(authority)) {}
         
     const std::string string;
     const std::string_view scheme, authority, path, query, fragment, userinfo, host, port;
 
 private:    
-    static std::string_view next(std::string_view uri) {
-        const size_t schem{0}, autho{1}, path_{2}, quer_{3}, fragm{4}, usrnf{5}, host_{6}, port_{7}, npos = std::string_view::npos; 
-        static size_t step{port_}, mark, mark2;
+    std::string_view next(std::string_view uri) const {
+        constexpr size_t schem{0}, autho{1}, path_{2}, quer_{3}, fragm{4}, usrnf{5}, host_{6}, port_{7}, npos = std::string_view::npos; 
+        static size_t step{port_}, mark{0}, mark2{0};
         step = (step == port_) ? schem : step + 1;
+        log::debug("URI::next({}) step:{}, mark:{}, mark2:{}", uri, step, mark, mark2);
         switch (step) {
-            case schem: mark = uri.find("://");
-                if (mark == npos) { mark = uri.size() - 3; return {}; } else return uri.substr(0, mark);
-            case autho: mark2 = uri.find("/", mark + 3);
+            case schem: mark = uri.find("://"); return mark == npos ? std::string_view{} : uri.substr(0, mark);
+            case autho: if (scheme.empty()) return {};
+                mark2 = uri.find("/", mark + 3);
                 if (mark2 == npos) { mark2 = uri.size() - 1; return {}; } else return uri.substr(mark + 3, mark2 - mark - 3);
-            case path_: mark = uri.find("?", mark2 + 1);
+            case path_: mark = uri.find("?", scheme.empty() ? 0 : mark2 + 1);
                 if (mark == npos) {
                     mark = uri.find("#");
                     if (mark == npos) { mark = uri.size() - 1; return uri.substr(mark2); }

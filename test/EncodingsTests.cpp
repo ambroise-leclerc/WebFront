@@ -44,6 +44,20 @@ SCENARIO("URI parsing") {
         }
     }
 
+    GIVEN("A Relative URI") {
+        uri::URI u2("/forum/questions/?tag=networking&order=newest#top");
+        WHEN("decoded") {
+            REQUIRE(u2.scheme.empty());
+            REQUIRE(u2.userinfo.empty());
+            REQUIRE(u2.host.empty());
+            REQUIRE(u2.port.empty());
+            REQUIRE(u2.path == "/forum/questions/");
+            REQUIRE(u2.authority.empty());
+            REQUIRE(u2.query == "tag=networking&order=newest");
+            REQUIRE(u2.fragment == "top");
+        }
+    }
+
     GIVEN("A function which returns an URI from a string") {
         auto parse = [](std::string text) { return uri::URI(text); };
 
