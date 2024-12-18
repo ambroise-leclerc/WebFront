@@ -14,14 +14,17 @@ jobs:
       BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
     steps:
     - uses: actions/checkout@v4
-
+      with:
+        # Disabling shallow clone is recommended for improving relevancy of reporting
+        fetch-depth: 0
+        
     - name: Setup GCC
       uses: egor-tensin/setup-gcc@v1.3
       with:
         version: 13
 
     - name: Install sonar-scanner and build-wrapper
-      uses: SonarSource/sonarcloud-github-c-cpp@v1
+      uses: SonarSource/sonarcloud-github-c-cpp@v3.1.0
       
     - name: Config & Build
       run:  |
