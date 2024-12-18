@@ -1,4 +1,4 @@
-﻿cmake_minimum_required (VERSION 3.16)
+﻿cmake_minimum_required (VERSION 3.18)
 
 set(VERSION_REGEX "inline constexpr std::string_view version =[ \t]+\"(.+)\".")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_REGEX})
@@ -12,6 +12,13 @@ include(StandardProjectSettings)
 include(PreventInSourceBuilds)
 add_library(WebFront_options INTERFACE)
 target_compile_features(WebFront_options INTERFACE cxx_std_23)
+target_compile_definitions(WebFront_options INTERFACE __cpp_lib_format=202207L)
+set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API "2182bf5c-ef0d-489a-91da-49dbc3090d2a")
+set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP ON)
+if(MSVC)
+  target_compile_options(WebFront_options INTERFACE /BuildStlModules)
+endif()
+
 add_library(WebFront_warnings INTERFACE)
 
 
