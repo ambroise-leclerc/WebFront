@@ -13,7 +13,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-15]
+        os: [windows-latest, ubuntu-latest, macos-latest]
         compiler: [msvc, gcc, clang]
         exclude:
         - os: windows-latest
@@ -22,9 +22,9 @@ jobs:
           compiler: gcc
         - os: ubuntu-latest
           compiler: msvc
-        - os: macos-15
+        - os: macos-latest
           compiler: msvc
-        - os: macos-15
+        - os: macos-latest
           compiler: gcc
         - os: ubuntu-latest
           compiler: clang
