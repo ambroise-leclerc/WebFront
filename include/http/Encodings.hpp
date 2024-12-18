@@ -67,7 +67,7 @@ namespace uri {
 //  └─┬─┘   └─────────────┬────────────┘└───────┬───────┘ └────────────┬────────────┘ └┬┘
 //  scheme          authority                  path                  query           fragment
 struct URI {
-    URI(std::string uri) : string(std::move(uri)), scheme(next(string)), authority(next(string)), path(next(string)), query(next(string)),
+    URI(std::string_view uri) : string(decode(uri)), scheme(next(string)), authority(next(string)), path(next(string)), query(next(string)),
         fragment(next(string)), userinfo(next(authority)), host(next(authority)), port(next(authority)) {}
         
     const std::string string;
