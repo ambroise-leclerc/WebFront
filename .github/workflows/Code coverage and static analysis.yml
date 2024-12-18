@@ -1,9 +1,13 @@
 name: Code coverage and static analysis
 
 on:
+  push:
+    branches:
+      - master
+      - develop
+      - 'releases/**'
   pull_request:
-    branches: [ '**' ]
-
+      types: [opened, synchronize, reopened]
 env:
   BUILD_TYPE: Release
 
