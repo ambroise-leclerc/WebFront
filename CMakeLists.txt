@@ -12,15 +12,11 @@ include(StandardProjectSettings)
 include(PreventInSourceBuilds)
 add_library(WebFront_options INTERFACE)
 target_compile_features(WebFront_options INTERFACE cxx_std_23)
-target_compile_definitions(WebFront_options INTERFACE __cpp_lib_format=202207L)
-set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API "2182bf5c-ef0d-489a-91da-49dbc3090d2a")
-set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP ON)
-if(MSVC)
-  target_compile_options(WebFront_options INTERFACE /BuildStlModules)
+if(APPLE)
+  target_compile_definitions(WebFront_options INTERFACE __cpp_lib_format=202207L)
 endif()
 
 add_library(WebFront_warnings INTERFACE)
-
 
 include(Cache)
 
