@@ -259,6 +259,8 @@ public:
             return Response::getStatusResponse(Response::badRequest);
         auto requestPath = std::filesystem::path(requestUri).relative_path();
         log::debug("  -> requestPath : {}", requestPath.string());
+        //uri::URI verifUri{requestUri};
+        //log::debug("(URI)   -> Path : {}   Query : {}", verifUri.path, verifUri.query);
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;

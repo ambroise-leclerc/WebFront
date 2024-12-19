@@ -1,4 +1,4 @@
-﻿cmake_minimum_required (VERSION 3.16)
+﻿cmake_minimum_required (VERSION 3.18)
 
 set(VERSION_REGEX "inline constexpr std::string_view version =[ \t]+\"(.+)\".")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_REGEX})
@@ -12,8 +12,11 @@ include(StandardProjectSettings)
 include(PreventInSourceBuilds)
 add_library(WebFront_options INTERFACE)
 target_compile_features(WebFront_options INTERFACE cxx_std_23)
-add_library(WebFront_warnings INTERFACE)
+if(APPLE)
+  target_compile_definitions(WebFront_options INTERFACE __cpp_lib_format=202207L)
+endif()
 
+add_library(WebFront_warnings INTERFACE)
 
 include(Cache)
 
