@@ -53,10 +53,17 @@ public:
                 sendCommand(msg::Ack{});
                 logSink =
                   log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
-                sameEndian = (std::endian::native == std::endian::little &&
-                              static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little) ||
-                             (std::endian::native == std::endian::big &&
-                              static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
+                
+                // Use if constexpr to check endianness at compile time
+                if constexpr (std::endian::native == std::endian::little) {
+                    sameEndian = (static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little);
+                } else if constexpr (std::endian::native == std::endian::big) {
+                    sameEndian = (static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
+                } else {
+                    // Handle mixed-endian if necessary, or assume mismatch
+                    sameEndian = false; 
+                }
+
                 eventsHandler({WebLinkEvent::Code::linked, id});
             } break;
 

@@ -28,8 +28,8 @@ function(set_project_warnings project_name)
       /w14905 # wide string literal cast to 'LPSTR'
       /w14906 # string literal cast to 'LPWSTR'
       /w14928 # illegal copy-initialization; more than one user-defined conversion has been implicitly applied
-      /w26815 # check dangling pointers or views from unnamed temporary object
-      /w26816 # pointer or view points on the stack
+      /analyze # Enable Code Analysis
+      /analyze:external- # Disable Code Analysis for external headers
       /permissive- # standards conformance mode for MSVC compiler.
   )
 
