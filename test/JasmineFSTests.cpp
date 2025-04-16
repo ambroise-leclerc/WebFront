@@ -8,7 +8,9 @@
 #include <string_view>
 
 // Deliberately using large stack buffers in tests
+#ifdef _MSC_VER
 #pragma warning(disable: 6262)
+#endif
 
 using namespace std;
 using namespace webfront;

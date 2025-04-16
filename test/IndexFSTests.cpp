@@ -11,6 +11,11 @@
 using namespace std;
 using namespace webfront;
 
+// Deliberately using large stack buffers in tests
+#ifdef _MSC_VER
+#pragma warning(disable: 6262)
+#endif
+
 SCENARIO("IndexFileSystem provides basic files for browser support") {
     GIVEN("An IndexFS") {
         using FS = fs::IndexFS;
