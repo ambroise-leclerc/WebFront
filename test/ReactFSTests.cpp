@@ -7,6 +7,9 @@
 #include <regex>
 #include <string_view>
 
+// Deliberately using large stack buffers in tests
+#pragma warning(disable: 6262)
+
 using namespace std;
 using namespace webfront;
 

@@ -123,14 +123,14 @@ namespace detail {
         *coded++ = code[input[i + 2] & 0x3Fu];
     }
     if (i < size) {
-        *coded++ = code[(input[i] >> 2) & 0x3Fu];
+        *coded++ = code[static_cast<size_t>(input[i] >> 2) & 0x3Fu];
         if (i == (size - 1)) {
-            *coded++ = code[((input[i] & 0x3u) << 4)];
+            *coded++ = code[static_cast<size_t>(input[i] & 0x3u) << 4];
             *coded++ = '=';
         }
         else {
-            *coded++ = code[((input[i] & 0x3u) << 4) | ((input[i + 1] & 0xF0u) >> 4)];
-            *coded++ = code[((input[i + 1] & 0xFu) << 2)];
+            *coded++ = code[static_cast<size_t>((input[i] & 0x3u) << 4 | ((input[i + 1] & 0xF0u) >> 4)) & 0x3Fu];
+            *coded++ = code[static_cast<size_t>((input[i + 1] & 0xFu) << 2) & 0x3Fu];
         }
         *coded++ = '=';
     }

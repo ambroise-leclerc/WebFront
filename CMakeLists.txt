@@ -38,9 +38,9 @@ include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
-
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
-target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
+target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
+include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)

@@ -69,7 +69,7 @@ private:
 
     size_t readData(std::span<char> buffer) {
         constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
-        UIntByte chunk;
+        UIntByte chunk{};
         for (size_t index = 0; (index < buffer.size()); ++index) {
             if (eof()) return index;
 
