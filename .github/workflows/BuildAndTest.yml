@@ -1,4 +1,4 @@
-name: Build and Test
+name: ${{ github.event_name == 'pull_request' && format('PR {0}', matrix.os) || matrix.os }}
 
 on:
   push:
@@ -10,27 +10,44 @@ env:
   BUILD_TYPE: Release
 
 jobs:
-  build:
-    name: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        compiler: [msvc, gcc, clang]
-        exclude:
-        - os: windows-latest
-          compiler: clang
-        - os: windows-latest
-          compiler: gcc
-        - os: ubuntu-latest
-          compiler: msvc
-        - os: macos-latest
-          compiler: msvc
-        - os: macos-latest
-          compiler: gcc
-        - os: ubuntu-latest
-          compiler: clang
-    runs-on: ${{ matrix.os}}
-      
+  windows:
+    name: Windows MSVC
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        
+      - name: Config & Build
+        run:  |
+            cmake . -B ${{github.workspace}}/build
+            cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+  
+      - name: Test
+        working-directory: ${{github.workspace}}/build
+        run: ctest --verbose -C ${{env.BUILD_TYPE}}
+
+  ubuntu-gcc:
+    name: Ubuntu GCC
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GCC
+        uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 13
+        
+      - name: Config & Build
+        run:  |
+            cmake . -B ${{github.workspace}}/build
+            cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+  
+      - name: Test
+        working-directory: ${{github.workspace}}/build
+        run: ctest --verbose -C ${{env.BUILD_TYPE}}
+
+  ubuntu-clang:
+    name: Ubuntu Clang
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         
@@ -38,18 +55,22 @@ jobs:
         uses: egor-tensin/setup-clang@v1.4
         with:
           version: 15
-        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
 
-      - name: Check Xcode version
-        run: xcodebuild -version
-        if: matrix.os == 'macos-15'
+      - name: Config & Build
+        run:  |
+            cmake . -B ${{github.workspace}}/build
+            cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+  
+      - name: Test
+        working-directory: ${{github.workspace}}/build
+        run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
-      - name: Setup GCC
-        uses: egor-tensin/setup-gcc@v1.3
-        with:
-          version: 13
-        if: matrix.compiler == 'gcc'
-        
+  macos:
+    name: MacOS Clang
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Config & Build
         run:  |
             cmake . -B ${{github.workspace}}/build
