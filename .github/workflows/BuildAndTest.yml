@@ -11,7 +11,6 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
@@ -30,6 +29,7 @@ jobs:
         - os: ubuntu-latest
           compiler: clang
     runs-on: ${{ matrix.os}}
+    name: Build (${{ matrix.os }})
       
     steps:
       - uses: actions/checkout@v4
