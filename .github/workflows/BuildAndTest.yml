@@ -29,6 +29,7 @@ jobs:
         - os: ubuntu-latest
           compiler: clang
     runs-on: ${{ matrix.os}}
+    name: ${{ matrix.os }}-${{ matrix.compiler }}
       
     steps:
       - uses: actions/checkout@v4
@@ -39,10 +40,6 @@ jobs:
           version: 15
         if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
 
-      - name: Check Xcode version
-        run: xcodebuild -version
-        if: matrix.os == 'macos-15'
-
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1.3
         with:
@@ -50,11 +47,22 @@ jobs:
         if: matrix.compiler == 'gcc'
         
       - name: Config & Build
-        run:  |
-            cmake . -B ${{github.workspace}}/build
-            cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+        run: |
+          cmake . -B ${{github.workspace}}/build
+          cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
   
       - name: Test
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
-        
+
+      - name: Update Badge
+        if: github.ref == 'refs/heads/master'
+        uses: schneegans/dynamic-badges-action@v1.6.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 317c22bfe80b2b51663187fbebfba533
+          filename: ${{ matrix.os }}-${{ matrix.compiler }}.json
+          label: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
+          message: ${{ job.status }}
+          color: ${{ job.status == 'success' && 'success' || 'critical' }}
+

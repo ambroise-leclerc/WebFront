@@ -4,10 +4,10 @@ A C++23 header-only library with the aim of providing rich cross-platform UI (Ty
 
 WebFront implements the websocket protocol over an embedded Web server and provides CppToJs and JsToCpp cross functions calls with native types conversions.
 
-[![Build Windows](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildWindows.yml/badge.svg)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildWindows.yml)
-[![Build Ubuntu](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildLinux.yml/badge.svg)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildLinux.yml)
-[![Ubuntu/Clang](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildLinuxClang.yml/badge.svg)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildLinuxClang.yml)
-[![Build MacOS](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildMacOS.yml/badge.svg)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildMacOS.yml)
+[![Windows MSVC](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/windows-latest-msvc.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![Ubuntu GCC](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/ubuntu-latest-gcc.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![Ubuntu Clang](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/ubuntu-latest-clang.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![MacOS Clang](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/macos-latest-clang.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![codecov](https://codecov.io/github/ambroise-leclerc/WebFront/branch/master/graph/badge.svg?token=ODE6O36XIV)](https://codecov.io/github/ambroise-leclerc/WebFront)
 
 [![CodeScene Code Health](https://codescene.io/projects/29377/status-badges/code-health)](https://codescene.io/projects/29377)
