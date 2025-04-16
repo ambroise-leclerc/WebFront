@@ -62,10 +62,11 @@ jobs:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: 317c22bfe80b2b51663187fbebfba533
           filename: ${{ matrix.os }}-${{ matrix.compiler }}.json
-          namedLogo: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'ubuntu-latest' && 'ubuntu' || matrix.os == 'macos-latest' && 'apple' }}
-          logoColor: white
+          schemaVersion: 1
           label: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
           message: ${{ job.status }}
+          namedLogo: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'ubuntu-latest' && 'ubuntu' || matrix.os == 'macos-latest' && 'apple' }}
+          logoColor: white
           color: ${{ job.status == 'success' && '2EA043' || job.status == 'failure' && 'E6484F' || 'DBAB0A' }}
-          style: flat
+          isError: ${{ job.status == 'failure' }}
 
