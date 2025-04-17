@@ -55,6 +55,32 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
+      - name: Prepare Badge Data
+        if: always() && github.ref == 'refs/heads/master'
+        id: badge
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            echo "label=Windows MSVC" >> $GITHUB_OUTPUT
+            echo "logo=windows" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "gcc" ]]; then
+            echo "label=Ubuntu GCC" >> $GITHUB_OUTPUT
+            echo "logo=ubuntu" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "clang" ]]; then
+            echo "label=Ubuntu Clang" >> $GITHUB_OUTPUT
+            echo "logo=ubuntu" >> $GITHUB_OUTPUT
+          else
+            echo "label=MacOS Clang" >> $GITHUB_OUTPUT
+            echo "logo=apple" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "color=2EA043" >> $GITHUB_OUTPUT
+          elif [[ "${{ job.status }}" == "failure" ]]; then
+            echo "color=E6484F" >> $GITHUB_OUTPUT
+          else
+            echo "color=DBAB0A" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
         uses: schneegans/dynamic-badges-action@v1.6.0
@@ -62,11 +88,9 @@ jobs:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: 317c22bfe80b2b51663187fbebfba533
           filename: ${{ matrix.os }}-${{ matrix.compiler }}.json
-          schemaVersion: 1
-          label: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
+          label: ${{ steps.badge.outputs.label }}
           message: ${{ job.status }}
-          namedLogo: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'ubuntu-latest' && 'ubuntu' || matrix.os == 'macos-latest' && 'apple' }}
+          color: ${{ steps.badge.outputs.color }}
+          namedLogo: ${{ steps.badge.outputs.logo }}
           logoColor: white
-          color: ${{ job.status == 'success' && '2EA043' || job.status == 'failure' && 'E6484F' || 'DBAB0A' }}
-          isError: ${{ job.status == 'failure' }}
 
