@@ -55,49 +55,55 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
-      - name: Initialize Badge Data
+      - name: Update Badge Data
         if: always() && github.ref == 'refs/heads/master'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const badgeLabel = (() => {
-              switch (true) {
-                case '${{ matrix.os }}' === 'windows-latest': return 'Windows MSVC';
-                case '${{ matrix.os }}' === 'ubuntu-latest' && '${{ matrix.compiler }}' === 'gcc': return 'Ubuntu GCC';
-                case '${{ matrix.os }}' === 'ubuntu-latest' && '${{ matrix.compiler }}' === 'clang': return 'Ubuntu Clang';
-                default: return 'MacOS Clang';
-              }
-            })();
-            
-            const color = (() => {
-              switch ('${{ job.status }}') {
-                case 'success': return '2EA043';
-                case 'failure': return 'E6484F';
-                default: return 'DBAB0A';
-              }
-            })();
-            
-            const filename = '${{ matrix.os }}-${{ matrix.compiler }}.json';
-            const content = {
-              schemaVersion: 1,
-              label: badgeLabel,
-              message: '${{ job.status }}',
-              color: color
-            };
-            
-            try {
-              // Try to update existing gist file
-              await github.rest.gists.update({
-                gist_id: '317c22bfe80b2b51663187fbebfba533',
-                files: {
-                  [filename]: {
-                    content: JSON.stringify(content)
-                  }
-                }
-              });
-            } catch (error) {
-              console.log('Error updating gist:', error);
-            }
+        run: |
+          # Determine badge label and color
+          BADGE_LABEL=""
+          case "${{ matrix.os }}-${{ matrix.compiler }}" in
+            "windows-latest-msvc")
+              BADGE_LABEL="Windows MSVC"
+              ;;
+            "ubuntu-latest-gcc")
+              BADGE_LABEL="Ubuntu GCC"
+              ;;
+            "ubuntu-latest-clang")
+              BADGE_LABEL="Ubuntu Clang"
+              ;;
+            *)
+              BADGE_LABEL="MacOS Clang"
+              ;;
+          esac
+          
+          COLOR=""
+          case "${{ job.status }}" in
+            "success")
+              COLOR="2EA043"
+              ;;
+            "failure")
+              COLOR="E6484F"
+              ;;
+            *)
+              COLOR="DBAB0A"
+              ;;
+          esac
+          
+          # Create badge JSON content
+          JSON_CONTENT="{\"schemaVersion\":1,\"label\":\"$BADGE_LABEL\",\"message\":\"${{ job.status }}\",\"color\":\"$COLOR\"}"
+          
+          # Escape JSON for curl
+          ESCAPED_JSON=$(echo "$JSON_CONTENT" | jq -c '.')
+          
+          # Update Gist using curl
+          curl -L \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GIST_SECRET }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/gists/317c22bfe80b2b51663187fbebfba533 \
+            -d "{\"files\":{\"`echo ${{ matrix.os }}-${{ matrix.compiler }}.json`\":{\"content\":$ESCAPED_JSON}}}"
+        shell: bash
 
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
