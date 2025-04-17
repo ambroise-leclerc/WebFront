@@ -30,7 +30,6 @@ jobs:
     - name: Config & Build
       run:  |
           cmake . -B ${{github.workspace}}/build -DENABLE_TEST_COVERAGE=ON
-          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
 
     - name: Test
       working-directory: ${{github.workspace}}/build
