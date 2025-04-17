@@ -55,12 +55,10 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
-      - name: Create Badge JSON
+      - name: Initialize or Update Gist
         if: always() && github.ref == 'refs/heads/master'
-        id: create_json
         run: |
-          echo "{\"schemaVersion\":1,\"label\":\"Build\",\"message\":\"pending\",\"color\":\"yellow\"}" > current_badge.json
-          BADGE_NAME="${{ matrix.os }}-${{ matrix.compiler }}.json"
+          # Determine badge label and color based on status
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             BADGE_LABEL="Windows MSVC"
           elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "gcc" ]]; then
@@ -70,27 +68,38 @@ jobs:
           else
             BADGE_LABEL="MacOS Clang"
           fi
-          echo "::set-output name=badge_label::$BADGE_LABEL"
-          echo "::set-output name=badge_name::$BADGE_NAME"
+          
+          if [[ "${{ job.status }}" == "success" ]]; then
+            COLOR="2EA043"
+          elif [[ "${{ job.status }}" == "failure" ]]; then
+            COLOR="E6484F"
+          else
+            COLOR="DBAB0A"
+          fi
+          
+          # Create JSON content and escape it properly
+          FILENAME="${{ matrix.os }}-${{ matrix.compiler }}.json"
+          JSON_CONTENT=$(echo "{\"schemaVersion\":1,\"label\":\"$BADGE_LABEL\",\"message\":\"${{ job.status }}\",\"color\":\"$COLOR\"}" | jq -c .)
+          
+          # Update Gist using GitHub API with properly escaped JSON
+          curl -L \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GIST_SECRET }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/gists/317c22bfe80b2b51663187fbebfba533 \
+            -d "{\"files\":{\"$FILENAME\":{\"content\":$JSON_CONTENT}}}"
         shell: bash
 
-      - name: Initialize Gist
-        if: always() && github.ref == 'refs/heads/master'
-        uses: gist-sync/actions/sync@v1.0.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gist_id: 317c22bfe80b2b51663187fbebfba533
-          gist_file_name: ${{ steps.create_json.outputs.badge_name }}
-          file: current_badge.json
-          
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
         uses: schneegans/dynamic-badges-action@v1.6.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: 317c22bfe80b2b51663187fbebfba533
-          filename: ${{ steps.create_json.outputs.badge_name }}
-          label: ${{ steps.create_json.outputs.badge_label }}
+          filename: ${{ matrix.os }}-${{ matrix.compiler }}.json
+          label: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
           message: ${{ job.status }}
           color: ${{ job.status == 'success' && '2EA043' || job.status == 'failure' && 'E6484F' || 'DBAB0A' }}
 
