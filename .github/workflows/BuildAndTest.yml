@@ -55,42 +55,59 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
-      - name: Prepare Badge Data
+      - name: Set Badge Variables
         if: always() && github.ref == 'refs/heads/master'
         id: badge
         run: |
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            echo "label=Windows MSVC" >> $GITHUB_OUTPUT
-            echo "logo=windows" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "gcc" ]]; then
-            echo "label=Ubuntu GCC" >> $GITHUB_OUTPUT
-            echo "logo=ubuntu" >> $GITHUB_OUTPUT
-          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "clang" ]]; then
-            echo "label=Ubuntu Clang" >> $GITHUB_OUTPUT
-            echo "logo=ubuntu" >> $GITHUB_OUTPUT
-          else
-            echo "label=MacOS Clang" >> $GITHUB_OUTPUT
-            echo "logo=apple" >> $GITHUB_OUTPUT
-          fi
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "color=2EA043" >> $GITHUB_OUTPUT
-          elif [[ "${{ job.status }}" == "failure" ]]; then
-            echo "color=E6484F" >> $GITHUB_OUTPUT
-          else
-            echo "color=DBAB0A" >> $GITHUB_OUTPUT
-          fi
+          case "${{ matrix.os }}" in
+            "windows-latest")
+              echo "label=Windows MSVC" >> $GITHUB_OUTPUT
+              echo "logo=windows" >> $GITHUB_OUTPUT
+              ;;
+            "ubuntu-latest")
+              if [ "${{ matrix.compiler }}" = "gcc" ]; then
+                echo "label=Ubuntu GCC" >> $GITHUB_OUTPUT
+                echo "logo=ubuntu" >> $GITHUB_OUTPUT
+              else
+                echo "label=Ubuntu Clang" >> $GITHUB_OUTPUT
+                echo "logo=ubuntu" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            *)
+              echo "label=MacOS Clang" >> $GITHUB_OUTPUT
+              echo "logo=apple" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+          case "${{ job.status }}" in
+            "success")
+              echo "color=2EA043" >> $GITHUB_OUTPUT
+              ;;
+            "failure")
+              echo "color=E6484F" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "color=DBAB0A" >> $GITHUB_OUTPUT
+              ;;
+          esac
+          
+          # Create initial gist content if needed
+          echo "{}" > badge.json
         shell: bash
 
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
         uses: schneegans/dynamic-badges-action@v1.6.0
+        env:
+          FILENAME: ${{ matrix.os }}-${{ matrix.compiler }}.json
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: 317c22bfe80b2b51663187fbebfba533
-          filename: ${{ matrix.os }}-${{ matrix.compiler }}.json
+          filename: ${{ env.FILENAME }}
           label: ${{ steps.badge.outputs.label }}
           message: ${{ job.status }}
           color: ${{ steps.badge.outputs.color }}
           namedLogo: ${{ steps.badge.outputs.logo }}
           logoColor: white
+          cacheSeconds: 30
 
