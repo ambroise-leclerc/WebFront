@@ -8,6 +8,7 @@ on:
 
 env:
   BUILD_TYPE: Release
+  GIST_ID: 317c22bfe80b2b51663187fbebfba533
 
 jobs:
   build:
@@ -55,64 +56,69 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
-      - name: Update Badge Data
+      - name: Set Badge Info
         if: always() && github.ref == 'refs/heads/master'
+        id: badge
         run: |
-          # Determine badge label and color
-          BADGE_LABEL=""
+          # Set badge label
           case "${{ matrix.os }}-${{ matrix.compiler }}" in
-            "windows-latest-msvc")
-              BADGE_LABEL="Windows MSVC"
-              ;;
-            "ubuntu-latest-gcc")
-              BADGE_LABEL="Ubuntu GCC"
-              ;;
-            "ubuntu-latest-clang")
-              BADGE_LABEL="Ubuntu Clang"
-              ;;
-            *)
-              BADGE_LABEL="MacOS Clang"
-              ;;
+            "windows-latest-msvc") echo "label=Windows MSVC" >> $GITHUB_OUTPUT ;;
+            "ubuntu-latest-gcc") echo "label=Ubuntu GCC" >> $GITHUB_OUTPUT ;;
+            "ubuntu-latest-clang") echo "label=Ubuntu Clang" >> $GITHUB_OUTPUT ;;
+            *) echo "label=MacOS Clang" >> $GITHUB_OUTPUT ;;
           esac
           
-          COLOR=""
+          # Set badge color
           case "${{ job.status }}" in
-            "success")
-              COLOR="2EA043"
-              ;;
-            "failure")
-              COLOR="E6484F"
-              ;;
-            *)
-              COLOR="DBAB0A"
-              ;;
+            "success") echo "color=2EA043" >> $GITHUB_OUTPUT ;;
+            "failure") echo "color=E6484F" >> $GITHUB_OUTPUT ;;
+            *) echo "color=DBAB0A" >> $GITHUB_OUTPUT ;;
           esac
           
-          # Create badge JSON content
-          JSON_CONTENT="{\"schemaVersion\":1,\"label\":\"$BADGE_LABEL\",\"message\":\"${{ job.status }}\",\"color\":\"$COLOR\"}"
-          
-          # Escape JSON for curl
-          ESCAPED_JSON=$(echo "$JSON_CONTENT" | jq -c '.')
-          
-          # Update Gist using curl
-          curl -L \
-            -X PATCH \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GIST_SECRET }}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -H "Content-Type: application/json" \
-            https://api.github.com/gists/317c22bfe80b2b51663187fbebfba533 \
-            -d "{\"files\":{\"`echo ${{ matrix.os }}-${{ matrix.compiler }}.json`\":{\"content\":$ESCAPED_JSON}}}"
+          # Set filename
+          echo "filename=${{ matrix.os }}-${{ matrix.compiler }}.json" >> $GITHUB_OUTPUT
         shell: bash
+
+      - name: Update Gist
+        if: always() && github.ref == 'refs/heads/master'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GIST_SECRET }}
+          script: |
+            const filename = '${{ steps.badge.outputs.filename }}';
+            const content = {
+              schemaVersion: 1,
+              label: '${{ steps.badge.outputs.label }}',
+              message: '${{ job.status }}',
+              color: '${{ steps.badge.outputs.color }}'
+            };
+            
+            try {
+              await github.rest.gists.update({
+                gist_id: process.env.GIST_ID,
+                files: {
+                  [filename]: {
+                    content: JSON.stringify(content)
+                  }
+                }
+              });
+            } catch (error) {
+              core.error(`Failed to update gist: ${error.message}`);
+              if (error.response) {
+                core.error(`Status: ${error.response.status}`);
+                core.error(`Response: ${JSON.stringify(error.response.data)}`);
+              }
+              throw error;
+            }
 
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
         uses: schneegans/dynamic-badges-action@v1.6.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
-          gistID: 317c22bfe80b2b51663187fbebfba533
-          filename: ${{ matrix.os }}-${{ matrix.compiler }}.json
-          label: ${{ matrix.os == 'windows-latest' && 'Windows MSVC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc' && 'Ubuntu GCC' || matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang' && 'Ubuntu Clang' || matrix.os == 'macos-latest' && 'MacOS Clang' }}
+          gistID: ${{ env.GIST_ID }}
+          filename: ${{ steps.badge.outputs.filename }}
+          label: ${{ steps.badge.outputs.label }}
           message: ${{ job.status }}
-          color: ${{ job.status == 'success' && '2EA043' || job.status == 'failure' && 'E6484F' || 'DBAB0A' }}
+          color: ${{ steps.badge.outputs.color }}
 
