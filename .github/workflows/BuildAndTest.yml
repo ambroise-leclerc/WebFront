@@ -14,59 +14,86 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        compiler: [msvc, gcc, clang]
-        exclude:
-        - os: windows-latest
-          compiler: clang
-        - os: windows-latest
-          compiler: gcc
-        - os: ubuntu-latest
-          compiler: msvc
-        - os: macos-latest
-          compiler: msvc
-        - os: macos-latest
-          compiler: gcc
-        - os: ubuntu-latest
-          compiler: clang
-    runs-on: ${{ matrix.os}}
-    name: ${{ matrix.os }}-${{ matrix.compiler }}
+        config:
+          - {
+              name: "Windows MSVC",
+              os: windows-latest,
+              compiler: msvc,
+              coverage: false
+            }
+          - {
+              name: "Ubuntu GCC with Coverage",
+              os: ubuntu-latest,
+              compiler: gcc,
+              coverage: true
+            }
+          - {
+              name: "Ubuntu Clang",
+              os: ubuntu-latest,
+              compiler: clang,
+              coverage: false
+            }
+          - {
+              name: "macOS Clang",
+              os: macos-latest,
+              compiler: clang,
+              coverage: false
+            }
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.name }}
       
     steps:
       - uses: actions/checkout@v4
         
-      - name: Setup Clang
-        uses: egor-tensin/setup-clang@v1.4
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
         with:
-          version: 15
-        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
+          version: "17.0"
+        if: matrix.config.compiler == 'clang' && matrix.config.os != 'macos-latest'
 
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1.3
         with:
           version: 13
-        if: matrix.compiler == 'gcc'
+        if: matrix.config.compiler == 'gcc'
+
+      - name: Install Coverage Tools
+        if: matrix.config.coverage
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
         
       - name: Config & Build
         run: |
-          cmake . -B ${{github.workspace}}/build
+          cmake . -B ${{github.workspace}}/build ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
   
       - name: Test
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
+      - name: Collect Coverage
+        if: matrix.config.coverage
+        working-directory: ${{github.workspace}}/build
+        run: |
+          lcov --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Upload Coverage
+        if: matrix.config.coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ${{github.workspace}}/build/coverage.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Set Badge Info
         if: always() && github.ref == 'refs/heads/master'
         id: badge
         run: |
           # Set badge label
-          case "${{ matrix.os }}-${{ matrix.compiler }}" in
-            "windows-latest-msvc") echo "label=Windows MSVC" >> $GITHUB_OUTPUT ;;
-            "ubuntu-latest-gcc") echo "label=Ubuntu GCC" >> $GITHUB_OUTPUT ;;
-            "ubuntu-latest-clang") echo "label=Ubuntu Clang" >> $GITHUB_OUTPUT ;;
-            *) echo "label=MacOS Clang" >> $GITHUB_OUTPUT ;;
-          esac
+          echo "label=${{ matrix.config.name }}" >> $GITHUB_OUTPUT
           
           # Set badge color
           case "${{ job.status }}" in
@@ -76,7 +103,7 @@ jobs:
           esac
           
           # Set filename
-          echo "filename=${{ matrix.os }}-${{ matrix.compiler }}.json" >> $GITHUB_OUTPUT
+          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}.json" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Update Gist

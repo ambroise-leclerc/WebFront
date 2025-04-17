@@ -12,8 +12,6 @@ WebFront implements the websocket protocol over an embedded Web server and provi
 
 [![CodeScene Code Health](https://codescene.io/projects/29377/status-badges/code-health)](https://codescene.io/projects/29377)
 [![CodeScene System Mastery](https://codescene.io/projects/29377/status-badges/system-mastery)](https://codescene.io/projects/29377)
-[![SonarCloud](https://sonarcloud.io/api/project_badges/measure?project=ambroise-leclerc_WebFront&metric=alert_status)](https://sonarcloud.io/dashboard?id=ambroise-leclerc_WebFront)
-
 
 ## Getting started
 
