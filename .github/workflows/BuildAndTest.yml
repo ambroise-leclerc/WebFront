@@ -55,59 +55,42 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
-      - name: Set Badge Variables
+      - name: Create Badge JSON
         if: always() && github.ref == 'refs/heads/master'
-        id: badge
+        id: create_json
         run: |
-          case "${{ matrix.os }}" in
-            "windows-latest")
-              echo "label=Windows MSVC" >> $GITHUB_OUTPUT
-              echo "logo=windows" >> $GITHUB_OUTPUT
-              ;;
-            "ubuntu-latest")
-              if [ "${{ matrix.compiler }}" = "gcc" ]; then
-                echo "label=Ubuntu GCC" >> $GITHUB_OUTPUT
-                echo "logo=ubuntu" >> $GITHUB_OUTPUT
-              else
-                echo "label=Ubuntu Clang" >> $GITHUB_OUTPUT
-                echo "logo=ubuntu" >> $GITHUB_OUTPUT
-              fi
-              ;;
-            *)
-              echo "label=MacOS Clang" >> $GITHUB_OUTPUT
-              echo "logo=apple" >> $GITHUB_OUTPUT
-              ;;
-          esac
-          
-          case "${{ job.status }}" in
-            "success")
-              echo "color=2EA043" >> $GITHUB_OUTPUT
-              ;;
-            "failure")
-              echo "color=E6484F" >> $GITHUB_OUTPUT
-              ;;
-            *)
-              echo "color=DBAB0A" >> $GITHUB_OUTPUT
-              ;;
-          esac
-          
-          # Create initial gist content if needed
-          echo "{}" > badge.json
+          echo "{\"schemaVersion\":1,\"label\":\"Build\",\"message\":\"pending\",\"color\":\"yellow\"}" > current_badge.json
+          BADGE_NAME="${{ matrix.os }}-${{ matrix.compiler }}.json"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            BADGE_LABEL="Windows MSVC"
+          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "gcc" ]]; then
+            BADGE_LABEL="Ubuntu GCC"
+          elif [[ "${{ matrix.os }}" == "ubuntu-latest" && "${{ matrix.compiler }}" == "clang" ]]; then
+            BADGE_LABEL="Ubuntu Clang"
+          else
+            BADGE_LABEL="MacOS Clang"
+          fi
+          echo "::set-output name=badge_label::$BADGE_LABEL"
+          echo "::set-output name=badge_name::$BADGE_NAME"
         shell: bash
 
+      - name: Initialize Gist
+        if: always() && github.ref == 'refs/heads/master'
+        uses: gist-sync/actions/sync@v1.0.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gist_id: 317c22bfe80b2b51663187fbebfba533
+          gist_file_name: ${{ steps.create_json.outputs.badge_name }}
+          file: current_badge.json
+          
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
         uses: schneegans/dynamic-badges-action@v1.6.0
-        env:
-          FILENAME: ${{ matrix.os }}-${{ matrix.compiler }}.json
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: 317c22bfe80b2b51663187fbebfba533
-          filename: ${{ env.FILENAME }}
-          label: ${{ steps.badge.outputs.label }}
+          filename: ${{ steps.create_json.outputs.badge_name }}
+          label: ${{ steps.create_json.outputs.badge_label }}
           message: ${{ job.status }}
-          color: ${{ steps.badge.outputs.color }}
-          namedLogo: ${{ steps.badge.outputs.logo }}
-          logoColor: white
-          cacheSeconds: 30
+          color: ${{ job.status == 'success' && '2EA043' || job.status == 'failure' && 'E6484F' || 'DBAB0A' }}
 
