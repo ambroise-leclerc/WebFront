@@ -34,9 +34,9 @@ jobs:
               coverage: false
             }
           - {
-              name: "macOS Clang (Apple Silicon)",
+              name: "macOS (Apple Silicon)",
               os: macos-14,
-              compiler: clang,
+              compiler: appleClang,
               coverage: false
             }
     runs-on: ${{ matrix.config.os }}
@@ -49,7 +49,7 @@ jobs:
         uses: KyleMayes/install-llvm-action@v2
         with:
           version: "17.0"
-        if: matrix.config.compiler == 'clang' && matrix.config.os != 'macos-latest'
+        if: matrix.config.compiler == 'clang'
 
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1.3
