@@ -34,19 +34,12 @@ jobs:
               coverage: false
             }
           - {
-              name: "macOS Clang",
-              os: macos-latest,
+              name: "macOS Clang (Apple Silicon)",
+              os: macos-14,
               compiler: clang,
               coverage: false
             }
-          - {
-              name: "Ubuntu ARM64",
-              os: ubuntu-latest,
-              compiler: gcc,
-              coverage: false,
-              arch: arm64
-            }
-    runs-on: ${{ matrix.config.arch == 'arm64' && 'ubuntu-latest-arm64' || matrix.config.os }}
+    runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.name }}
       
     steps:
