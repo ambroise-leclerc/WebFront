@@ -3,7 +3,6 @@
 set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
-message(STATUS "Version: ${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 add_library(WebFront INTERFACE)
