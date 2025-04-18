@@ -1,8 +1,8 @@
 ﻿cmake_minimum_required (VERSION 3.18)
 
-set(VERSION_REGEX "inline constexpr std::string_view version =[ \t]+\"(.+)\".")
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_REGEX})
-string(REGEX REPLACE ${VERSION_REGEX} "\\1" VERSION_STRING "${VERSION_STRING}")
+set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
+string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 add_library(WebFront INTERFACE)
