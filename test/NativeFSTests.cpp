@@ -65,7 +65,7 @@ public:
         file.write(reinterpret_cast<const char*>(data.data()), static_cast<streamsize>(size));
         file.close();
         
-        binaryData[relativePath] = move(data);
+        binaryData[relativePath] = std::move(data);
         return filePath;
     }
     
