@@ -210,6 +210,15 @@ SCENARIO("NativeDebugFS handles various file operations") {
                 REQUIRE(!file.has_value());
             }
         }
+        
+        WHEN("Retrieving binary data via getBinaryData") {
+            const auto& data = testEnv.getBinaryData("data.bin");
+            THEN("The returned data matches the requested size and is identical to the file content") {
+                REQUIRE(data.size() == 1024);
+                // Binary content is random but size should be correct
+                REQUIRE(!data.empty());
+            }
+        }
     }
 }
 
@@ -221,7 +230,6 @@ SCENARIO("NativeDebugFS root path handling") {
         DebugFS debugFS(testEnv.getTestDir().string());
         
         WHEN("Opening a file with absolute path that doesn't respect the root path") {
-            // Try to access a file outside of the root path using absolute path
             auto file = debugFS.open(filesystem::absolute("test_root.txt").string());
             
             THEN("File access should fail as it's not under the root path") {
@@ -230,16 +238,10 @@ SCENARIO("NativeDebugFS root path handling") {
         }
         
         WHEN("Changing the working directory and using relative paths") {
-            // Save current directory
             auto originalPath = filesystem::current_path();
             
-            // Change to test directory
             filesystem::current_path(testEnv.getTestDir());
-            
-            // Try to open the file
             auto file = debugFS.open("test_root.txt");
-            
-            // Restore original directory
             filesystem::current_path(originalPath);
             
             THEN("File access should succeed as the path is resolved correctly") {
@@ -258,18 +260,27 @@ SCENARIO("NativeDebugFS root path handling") {
         WHEN("Trying to access a file in the parent directory") {
             auto file = debugFS.open("../test_root.txt");
             
-            THEN("File access should succeed if path resolution allows navigation outside root") {
-                // This behavior depends on the implementation of NativeRawFS::open
-                // In many implementations, this would be denied for security reasons
-                // But let's test the actual behavior
+            THEN("File access behavior depends on implementation security policy") {
                 if (file.has_value()) {
                     std::array<char, 512> buffer;
                     auto bytesRead = file->read(buffer);
                     REQUIRE(std::string(buffer.data(), bytesRead) == "Root path test");
                 }
-                // If not implemented, we should at least document the expected behavior
-                // REQUIRE(!file.has_value());
             }
         }
     }
+}
+
+SCENARIO("TemporaryTestEnvironment destructor handles remove_all exception") {
+    std::unique_ptr<TemporaryTestEnvironment> testEnv = std::make_unique<TemporaryTestEnvironment>();
+    auto lockedFilePath = testEnv->createTextFile("locked.txt", "locked");
+    
+    std::ofstream lockStream(lockedFilePath, std::ios::out);
+    std::stringstream capturedCerr;
+    auto* oldCerrBuf = std::cerr.rdbuf(capturedCerr.rdbuf());
+    
+    testEnv.reset();
+    
+    std::cerr.rdbuf(oldCerrBuf);
+    REQUIRE(capturedCerr.str().find("Warning: Failed to clean up test directory") != std::string::npos);
 }

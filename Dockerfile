@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     wget \
-    gnupg
+    gnupg \
+    ccache
 
 # Installation de GCC 13 (comme dans GitHub Actions)
 RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
