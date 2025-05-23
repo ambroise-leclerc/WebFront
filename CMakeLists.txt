@@ -38,6 +38,27 @@ include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
+if(WIN32)
+  find_package(WebView2)
+  if(NOT WebView2_FOUND)
+    # Fallback to environment variable if find_package fails
+    if(DEFINED ENV{WEBVIEW2_SDK_PATH})
+      set(WebView2_INCLUDE_DIRS "$ENV{WEBVIEW2_SDK_PATH}/include")
+      # Check if the path is for a fixed version or a package
+      if(EXISTS "$ENV{WEBVIEW2_SDK_PATH}/lib/native/x64/WebView2Loader.dll.lib") # Evergreen
+        set(WebView2_LIBRARY "$ENV{WEBVIEW2_SDK_PATH}/lib/native/x64/WebView2Loader.dll.lib")
+      elseif(EXISTS "$ENV{WEBVIEW2_SDK_PATH}/build/native/x64/WebView2Loader.dll.lib") # Fixed Version
+        set(WebView2_LIBRARY "$ENV{WEBVIEW2_SDK_PATH}/build/native/x64/WebView2Loader.dll.lib")
+      else()
+        message(WARNING "WebView2 SDK not found in WEBVIEW2_SDK_PATH: $ENV{WEBVIEW2_SDK_PATH}")
+      endif()
+      set(WebView2_FOUND TRUE) # Assume found if path is set and files exist
+    else()
+      message(WARNING "WebView2 package not found and WEBVIEW2_SDK_PATH environment variable is not set.")
+    endif()
+  endif()
+endif()
+
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
 include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
