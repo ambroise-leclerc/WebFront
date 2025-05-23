@@ -72,6 +72,11 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: ctest --verbose -C ${{env.BUILD_TYPE}}
 
+      - name: Rerun Failed Tests (if any)
+        if: failure()
+        working-directory: ${{github.workspace}}/build
+        run: ctest --rerun-failed --output-on-failure -C ${{env.BUILD_TYPE}}
+
       - name: Collect Coverage
         if: matrix.config.coverage
         working-directory: ${{github.workspace}}/build
