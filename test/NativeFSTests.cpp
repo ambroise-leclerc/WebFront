@@ -206,7 +206,7 @@ SCENARIO("NativeDebugFS attempts to open a non-existent file") {
         }
     }
 
-    WHEN("An attempt is made to open ../unauthorised.txt") {
+    WHEN("An attempt is made to open ../unauthorized.txt") {
         auto file = debugFS.open("../unauthorized.txt");
         THEN("An empty optional is returned for security reasons") {
             REQUIRE(!file.has_value());
