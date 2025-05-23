@@ -82,6 +82,19 @@ private:
     std::map<string, std::vector<uint8_t>> binaryData;
 };
 
+namespace {
+    void checkFileRead(DebugFS& debugFS, const std::string& filename, const std::string& expectedContent) {
+        auto file = debugFS.open(filename);
+        REQUIRE(file.has_value());
+        REQUIRE(!file->isEncoded());
+        std::array<char, 512> buffer;
+        auto bytesRead = file->read(buffer);
+        std::string content(buffer.data(), bytesRead);
+        REQUIRE(content == expectedContent);
+        REQUIRE(file->eof());
+    }
+}
+
 SCENARIO("NativeDebugFS provides access to local files") {
     GIVEN("A local file") {
         filesystem::path testFilename{"test.tmp"};
@@ -112,15 +125,8 @@ SCENARIO("NativeDebugFS opens an existing text file using a relative path") {
     DebugFS debugFS(testEnv.getTestDir().string());
 
     WHEN("The file sample.txt is opened") {
-        auto file = debugFS.open("sample.txt");
         THEN("The file is opened and the content is correct") {
-            REQUIRE(file.has_value());
-            REQUIRE(!file->isEncoded());
-            std::array<char, 512> buffer;
-            auto bytesRead = file->read(buffer);
-            std::string content(buffer.data(), bytesRead);
-            REQUIRE(content == "This is a sample text file\nwith multiple lines\nfor testing.");
-            REQUIRE(file->eof());
+            checkFileRead(debugFS, "sample.txt", "This is a sample text file\nwith multiple lines\nfor testing.");
         }
     }
 }
@@ -131,13 +137,8 @@ SCENARIO("NativeDebugFS opens a JSON configuration file") {
     DebugFS debugFS(testEnv.getTestDir().string());
 
     WHEN("The file config.json is opened") {
-        auto file = debugFS.open("config.json");
         THEN("The file is opened and the JSON content is correct") {
-            REQUIRE(file.has_value());
-            std::array<char, 512> buffer;
-            auto bytesRead = file->read(buffer);
-            std::string content(buffer.data(), bytesRead);
-            REQUIRE(content == "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
+            checkFileRead(debugFS, "config.json", "{ \"name\": \"NativeFS\", \"version\": 1.0, \"isTest\": true }");
         }
     }
 }
@@ -184,13 +185,8 @@ SCENARIO("NativeDebugFS opens a file in a subdirectory") {
     DebugFS debugFS(testEnv.getTestDir().string());
 
     WHEN("The file subdir/nested.txt is opened") {
-        auto file = debugFS.open("subdir/nested.txt");
         THEN("The file is opened successfully") {
-            REQUIRE(file.has_value());
-            std::array<char, 512> buffer;
-            auto bytesRead = file->read(buffer);
-            std::string content(buffer.data(), bytesRead);
-            REQUIRE(content == "This is a nested file in a subdirectory");
+            checkFileRead(debugFS, "subdir/nested.txt", "This is a nested file in a subdirectory");
         }
     }
 }
