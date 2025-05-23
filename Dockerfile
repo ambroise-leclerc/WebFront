@@ -12,14 +12,16 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     wget \
     gnupg \
-    ccache
+    ccache \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installation de GCC 13 (comme dans GitHub Actions)
 RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get update \
     && apt-get install -y gcc-13 g++-13 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installation de LLVM et Clang 17 (comme dans GitHub Actions)
 RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
