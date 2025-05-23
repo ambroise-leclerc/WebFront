@@ -66,8 +66,14 @@ function(set_project_warnings project_name)
       -Wduplicated-cond # warn if if / else chain has duplicated conditions
       -Wduplicated-branches # warn if if / else branches have duplicated code
       -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
-      -Wdangling-reference
   )
+  
+  # Vérifier si -Wdangling-reference est supporté (GCC 13+ ou certaines versions de GCC 12)
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag("-Wdangling-reference" COMPILER_SUPPORTS_DANGLING_REF)
+  if(COMPILER_SUPPORTS_DANGLING_REF)
+    list(APPEND GCC_WARNINGS -Wdangling-reference)
+  endif()
 
   if(MSVC)
     set(PROJECT_WARNINGS ${MSVC_WARNINGS})
