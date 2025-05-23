@@ -22,7 +22,11 @@ class TemporaryTestEnvironment {
 public:
     TemporaryTestEnvironment() {
         // Create a unique test directory
-        testDir = filesystem::temp_directory_path() / "nativefs_test";
+        random_device rd;
+        mt19937 gen(rd());
+        uniform_int_distribution<> distrib(1000, 9999);
+        string uniqueSuffix = to_string(distrib(gen));
+        testDir = filesystem::temp_directory_path() / ("nativefs_test_" + uniqueSuffix);
         filesystem::create_directories(testDir);
         
         // Create subdirectory
