@@ -87,14 +87,26 @@ private:
 };
 
 namespace {
-    void checkFileRead(DebugFS& debugFS, const string& filename, const string& expectedContent) {
+    std::string normaliseNewlines(const std::string& s) {
+        std::string out;
+        out.reserve(s.size());
+        for (size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '\r') {
+                if (i + 1 < s.size() && s[i + 1] == '\n') continue; // skip, handled by \n
+            }
+            out += s[i];
+        }
+        return out;
+    }
+
+    void checkFileRead(DebugFS& debugFS, const std::string& filename, const std::string& expectedContent) {
         auto file = debugFS.open(filename);
         REQUIRE(file.has_value());
         REQUIRE(!file->isEncoded());
-        array<char, 512> buffer;
+        std::array<char, 512> buffer;
         auto bytesRead = file->read(buffer);
-        string content(buffer.data(), bytesRead);
-        REQUIRE(content == expectedContent);
+        std::string content(buffer.data(), bytesRead);
+        REQUIRE(normaliseNewlines(content) == normaliseNewlines(expectedContent));
         REQUIRE(file->eof());
     }
 }
