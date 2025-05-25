@@ -71,10 +71,10 @@ int main() {
         webFront.onUIStarted([](WF::UI ui) {
             log::info("UI Started");
             ui.addScript("var addText = function(text, num) {                 \n"
-                     "  print(text + ' of ' + num);                       \n"
+                     "  displayText(text + ' of ' + num);                       \n"
                      "}                                                   \n");
-            auto print = ui.jsFunction("addText");
-            print("Hello World", 2023);
+                     auto displayText = ui.jsFunction("addText");
+                     displayText("Hello World", 2023);
         });
         openInDefaultBrowser(httpPort, specRunnerFile);
 
