@@ -37,15 +37,7 @@ include(StaticAnalyzers)
 include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
-CPMAddPackage("gh:ambroise-leclerc/CEF@118.7.1a")
-
-# Ensure CEF test target is available for building
-if(ENABLE_TESTING AND TARGET cef_sanity_test)
-    # Add CEF test as a dependency to ensure it gets built
-    set_target_properties(cef_sanity_test PROPERTIES
-        EXCLUDE_FROM_ALL FALSE
-    )
-endif()
+CPMAddPackage("gh:ambroise-leclerc/CEF@118.7.1b")
 
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
@@ -61,11 +53,6 @@ if(ENABLE_TESTING)
   enable_testing()
   add_subdirectory(test)
   add_subdirectory(webtest)
-  
-  # Ensure CEF test is built when running tests
-  if(TARGET cef_sanity_test)
-    add_dependencies(tests cef_sanity_test)
-  endif()
 endif()
 
 add_subdirectory(src)
