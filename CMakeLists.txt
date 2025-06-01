@@ -37,6 +37,7 @@ include(StaticAnalyzers)
 include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
+CPMAddPackage("gh:ambroise-leclerc/CEF@118.7.1a")
 
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
