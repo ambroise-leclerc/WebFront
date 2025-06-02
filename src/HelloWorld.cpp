@@ -24,6 +24,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <atomic>
 
 // Forward declaration for openInDefaultBrowser function
 auto openInDefaultBrowser(std::string_view port, std::string_view file) -> int;
@@ -50,19 +51,39 @@ public:
     // CefLifeSpanHandler methods
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
         browser_ = browser;
-    }    virtual bool DoClose(CefRefPtr<CefBrowser> browser) override {
+        browser_count_++;
+    }
+
+    virtual bool DoClose(CefRefPtr<CefBrowser> browser) override {
         (void)browser; // Suppress unused parameter warning
-        // Allow the close
+        // Allow the close - returning false allows the browser to close normally
         return false;
     }
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
         (void)browser; // Suppress unused parameter warning
-        browser_ = nullptr;
-        // Signal that the browser window is closed
-        browser_closed_ = true;
-        // Quit the CEF message loop to trigger shutdown
-        CefQuitMessageLoop();
+        
+        // Decrement browser count
+        browser_count_--;
+        
+        // Clear the browser reference if this was our browser
+        if (browser_ && browser_->IsSame(browser)) {
+            browser_ = nullptr;
+        }
+        
+        // If this is the last browser, initiate proper shutdown sequence
+        if (browser_count_ == 0) {
+            browser_closed_ = true;
+            
+            // Schedule shutdown on a separate thread to avoid blocking CEF's cleanup
+            std::thread([this]() {
+                // Give CEF time to finish its internal cleanup
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                
+                // Quit the message loop only after all browsers are closed
+                CefQuitMessageLoop();
+            }).detach();
+        }
     }
 
     // CefLoadHandler methods
@@ -82,10 +103,12 @@ public:
     }
 
     bool IsBrowserClosed() const { return browser_closed_; }
+    int GetBrowserCount() const { return browser_count_; }
 
 private:
     CefRefPtr<CefBrowser> browser_;
     bool browser_closed_ = false;
+    std::atomic<int> browser_count_{0};
     IMPLEMENT_REFCOUNTING(SimpleCEFClient);
 };
 
@@ -127,19 +150,16 @@ auto openInCEF(std::string_view port, std::string_view file) -> int {
     auto url = std::string("http://localhost:").append(port) + std::string("/").append(file);
 
 #ifdef _WIN32
-    // CEF requires a separate process for sub-processes
+    // CEF main args (subprocess handling already done in main())
     CefMainArgs main_args(GetModuleHandle(nullptr));
-    
-    // Check if this is a sub-process
-    int exit_code = CefExecuteProcess(main_args, nullptr, nullptr);
-    if (exit_code >= 0) {
-        return exit_code;  // Sub-process completed
-    }
 
-    // CEF settings
+    // CEF settings for main process only
     CefSettings settings;
     settings.no_sandbox = true;  // Disable sandbox for simplicity
     settings.multi_threaded_message_loop = false;  // Use single-threaded message loop
+    
+    // Disable CEF logging to reduce noise (but enable for debugging if needed)
+    settings.log_severity = LOGSEVERITY_ERROR;  // Changed from DISABLE to ERROR to catch shutdown issues
 
     // Create the application
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp(url));
@@ -149,11 +169,20 @@ auto openInCEF(std::string_view port, std::string_view file) -> int {
         return -1;  // Failed to initialize CEF
     }
 
-    // Run the message loop
+    // Run the message loop - this will block until CefQuitMessageLoop() is called
     CefRunMessageLoop();
 
-    // Proper shutdown sequence
+    // Enhanced shutdown sequence
+    std::cout << "CEF message loop exited, beginning shutdown sequence..." << std::endl;
+    
+    // Give CEF more time to clean up subprocesses properly
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    
+    // Call CefShutdown to clean up CEF
+    std::cout << "Calling CefShutdown()..." << std::endl;
     CefShutdown();
+    
+    std::cout << "CEF shutdown complete." << std::endl;
 
     return 0;
 #else
@@ -209,6 +238,17 @@ filesystem::path findDocRoot(string filename) {
 
 int main(int /*argc*/, char** /*argv*/) {
 
+#ifdef _WIN32
+    // CEF subprocess handling must be done FIRST, before any other initialization
+    CefMainArgs main_args(GetModuleHandle(nullptr));
+    
+    // Check if this is a CEF sub-process - if so, handle it and exit immediately
+    int exit_code = CefExecuteProcess(main_args, nullptr, nullptr);
+    if (exit_code >= 0) {
+        return exit_code;  // Sub-process completed, exit immediately without any WebFront setup
+    }
+#endif
+
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
@@ -241,24 +281,30 @@ int main(int /*argc*/, char** /*argv*/) {
     });    // Start the HTTP server in a background thread
     std::atomic<bool> server_should_stop{false};
     std::thread serverThread([&webFront, &server_should_stop]() {
-        // Note: webFront.run() will need to be modified to check server_should_stop
-        // For now, just run the server
         webFront.run();
     });
 
     // Give the server a moment to start up
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+    cout << "Starting CEF browser..." << endl;
+    
     // Now launch CEF browser
     int cef_result = openInCEF(httpPort, mainHtml);
+    
+    cout << "CEF browser closed with result: " << cef_result << endl;
 
     // When CEF closes, signal the server to stop
     server_should_stop = true;
+    
+    cout << "Waiting for server thread to finish..." << endl;
     
     // Wait for the server thread to finish
     if (serverThread.joinable()) {
         serverThread.join();
     }
+    
+    cout << "Application shutdown complete." << endl;
 
     return cef_result;
 }
