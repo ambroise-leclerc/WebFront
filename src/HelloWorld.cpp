@@ -4,7 +4,8 @@
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
 
-// CEF includes
+// CEF includes - only include if CEF is available
+#ifdef WEBFRONT_HAS_CEF
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable: 4100) // unreferenced parameter
@@ -19,6 +20,7 @@
 #include "include/cef_sandbox_win.h"
 #pragma warning(pop)
 #endif
+#endif // WEBFRONT_HAS_CEF
 
 #include <filesystem>
 #include <iostream>
@@ -29,6 +31,7 @@
 // Forward declaration for openInDefaultBrowser function
 auto openInDefaultBrowser(std::string_view port, std::string_view file) -> int;
 
+#ifdef WEBFRONT_HAS_CEF
 // Simple CEF client implementation for embedded browser
 class SimpleCEFClient : public CefClient,
                        public CefDisplayHandler,
@@ -181,15 +184,14 @@ auto openInCEF(std::string_view port, std::string_view file) -> int {
     std::cout << "Calling CefShutdown()..." << std::endl;
     CefShutdown();
     
-    std::cout << "CEF shutdown complete." << std::endl;
-
-    return 0;
+    std::cout << "CEF shutdown complete." << std::endl;    return 0;
 #else
     // For non-Windows platforms, fall back to default browser for now
     std::cout << "CEF implementation not yet available for this platform, opening in default browser..." << std::endl;
     return openInDefaultBrowser(port, file);
 #endif
 }
+#endif // WEBFRONT_HAS_CEF
 
 /// Open the web UI in the system's default browser
 auto openInDefaultBrowser(std::string_view port, std::string_view file) -> int {
@@ -237,6 +239,7 @@ filesystem::path findDocRoot(string filename) {
 
 int main(int /*argc*/, char** /*argv*/) {
 
+#ifdef WEBFRONT_HAS_CEF
 #ifdef _WIN32
     // CEF subprocess handling must be done FIRST, before any other initialization
     CefMainArgs main_args(GetModuleHandle(nullptr));
@@ -247,6 +250,7 @@ int main(int /*argc*/, char** /*argv*/) {
         return exit_code;  // Sub-process completed, exit immediately without any WebFront setup
     }
 #endif
+#endif // WEBFRONT_HAS_CEF
 
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
@@ -281,17 +285,24 @@ int main(int /*argc*/, char** /*argv*/) {
     std::atomic<bool> server_should_stop{false};
     std::thread serverThread([&webFront]() {
         webFront.run();
-    });
-
-    // Give the server a moment to start up
+    });    // Give the server a moment to start up
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+#ifdef WEBFRONT_HAS_CEF
     cout << "Starting CEF browser..." << endl;
     
     // Now launch CEF browser
     int cef_result = openInCEF(httpPort, mainHtml);
     
     cout << "CEF browser closed with result: " << cef_result << endl;
+#else
+    cout << "CEF not available, starting default browser..." << endl;
+    
+    // Launch default browser when CEF is not available
+    int cef_result = openInDefaultBrowser(httpPort, mainHtml);
+    
+    cout << "Default browser opened with result: " << cef_result << endl;
+#endif
 
     // When CEF closes, signal the server to stop
     server_should_stop = true;

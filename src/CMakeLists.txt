@@ -25,8 +25,11 @@ if(TARGET cef)
         # For Release builds, use the cef target as-is
         target_link_libraries(WebFrontApp PRIVATE cef)
     endif()
+    
+    # Define that CEF is available for conditional compilation
+    target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_HAS_CEF)
 else()
-    message(STATUS "CEF target does NOT exist")
+    message(STATUS "CEF target does NOT exist - CEF features will be disabled")
 endif()
 
 # Link the CEF wrapper library if it exists
@@ -51,40 +54,73 @@ if(TARGET cef)
         set(CEF_BUILD_DIR "${CEF_ROOT}/Release")
     endif()
     
-    # Copy CEF DLLs and runtime files
-    add_custom_command(TARGET WebFrontApp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/libcef.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/chrome_elf.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/d3dcompiler_47.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/libEGL.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/libGLESv2.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/vk_swiftshader.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/vulkan-1.dll"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/snapshot_blob.bin"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/v8_context_snapshot.bin"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_BUILD_DIR}/vk_swiftshader_icd.json"
-            "$<TARGET_FILE_DIR:WebFrontApp>"
-        COMMENT "Copying CEF runtime files to output directory"
-    )
+    # Platform-specific CEF runtime file copying
+    if(WIN32)
+        # Copy CEF DLLs and runtime files for Windows
+        add_custom_command(TARGET WebFrontApp POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/libcef.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/chrome_elf.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/d3dcompiler_47.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/libEGL.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/libGLESv2.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/vk_swiftshader.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/vulkan-1.dll"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/snapshot_blob.bin"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/v8_context_snapshot.bin"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/vk_swiftshader_icd.json"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMENT "Copying CEF runtime files to output directory"
+        )
+    elseif(APPLE)
+        # Copy CEF framework and runtime files for macOS
+        if(EXISTS "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework")
+            add_custom_command(TARGET WebFrontApp POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework"
+                    "$<TARGET_FILE_DIR:WebFrontApp>/Chromium Embedded Framework.framework"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CEF_BUILD_DIR}/snapshot_blob.bin"
+                    "$<TARGET_FILE_DIR:WebFrontApp>"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CEF_BUILD_DIR}/v8_context_snapshot.bin"
+                    "$<TARGET_FILE_DIR:WebFrontApp>"
+                COMMENT "Copying CEF framework and runtime files to output directory"
+            )
+        endif()
+    elseif(UNIX)
+        # Copy CEF shared libraries and runtime files for Linux
+        add_custom_command(TARGET WebFrontApp POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/libcef.so"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/snapshot_blob.bin"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CEF_BUILD_DIR}/v8_context_snapshot.bin"
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMENT "Copying CEF runtime files to output directory"
+        )
+    endif()
     
     # Copy CEF Resources
     add_custom_command(TARGET WebFrontApp POST_BUILD

@@ -37,7 +37,11 @@ include(StaticAnalyzers)
 include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
-CPMAddPackage("gh:ambroise-leclerc/CEF@118.7.1b")
+
+# Only add CEF for non-Apple platforms for now due to architecture issues
+if(NOT APPLE)
+    CPMAddPackage("gh:ambroise-leclerc/CEF@118.7.1b")
+endif()
 
 # Create our own CEF wrapper library target
 set(CEF_ROOT "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
