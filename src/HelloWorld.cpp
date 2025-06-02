@@ -70,13 +70,12 @@ public:
         if (browser_ && browser_->IsSame(browser)) {
             browser_ = nullptr;
         }
-        
-        // If this is the last browser, initiate proper shutdown sequence
+          // If this is the last browser, initiate proper shutdown sequence
         if (browser_count_ == 0) {
             browser_closed_ = true;
             
             // Schedule shutdown on a separate thread to avoid blocking CEF's cleanup
-            std::thread([this]() {
+            std::thread([]() {
                 // Give CEF time to finish its internal cleanup
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
                 
@@ -280,7 +279,7 @@ int main(int /*argc*/, char** /*argv*/) {
         ui.jsFunction("testFunc")("Texte de test suffisament long pour changer de format");
     });    // Start the HTTP server in a background thread
     std::atomic<bool> server_should_stop{false};
-    std::thread serverThread([&webFront, &server_should_stop]() {
+    std::thread serverThread([&webFront]() {
         webFront.run();
     });
 
