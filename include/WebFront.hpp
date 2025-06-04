@@ -3,6 +3,8 @@
 /// @brief WebFront UI main objet
 #pragma once
 #include "JsFunction.hpp"
+#include "frontend/CEF.hpp"
+#include "frontend/DefaultBrowser.hpp"
 #include "http/HTTPServer.hpp"
 #include "tooling/HexDump.hpp"
 #include "utils/TypeErasedFunction.hpp"

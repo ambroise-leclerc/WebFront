@@ -93,16 +93,13 @@ if(TARGET cef)
     elseif(APPLE)
         # Copy CEF framework and runtime files for macOS
         if(EXISTS "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework")
+            # Create the Frameworks directory in the parent of the target file directory
             add_custom_command(TARGET WebFrontApp POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:WebFrontApp>/../Frameworks"
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
                     "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework"
-                    "$<TARGET_FILE_DIR:WebFrontApp>/Chromium Embedded Framework.framework"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CEF_BUILD_DIR}/snapshot_blob.bin"
-                    "$<TARGET_FILE_DIR:WebFrontApp>"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CEF_BUILD_DIR}/v8_context_snapshot.bin"
-                    "$<TARGET_FILE_DIR:WebFrontApp>"
+                    "$<TARGET_FILE_DIR:WebFrontApp>/../Frameworks/Chromium Embedded Framework.framework"
                 COMMENT "Copying CEF framework and runtime files to output directory"
             )
         endif()
@@ -125,27 +122,22 @@ if(TARGET cef)
     # Copy CEF Resources
     add_custom_command(TARGET WebFrontApp POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_ROOT}/Resources/chrome_100_percent.pak"
+            "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework/Resources/chrome_100_percent.pak"
             "$<TARGET_FILE_DIR:WebFrontApp>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_ROOT}/Resources/chrome_200_percent.pak"
+            "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework/Resources/chrome_200_percent.pak"
             "$<TARGET_FILE_DIR:WebFrontApp>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_ROOT}/Resources/icudtl.dat"
+            "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework/Resources/icudtl.dat"
             "$<TARGET_FILE_DIR:WebFrontApp>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_ROOT}/Resources/resources.pak"
+            "${CEF_BUILD_DIR}/Chromium Embedded Framework.framework/Resources/resources.pak"
             "$<TARGET_FILE_DIR:WebFrontApp>"
         COMMENT "Copying CEF resource files to output directory"
     )
     
-    # Copy CEF locales directory
-    add_custom_command(TARGET WebFrontApp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CEF_ROOT}/Resources/locales"
-            "$<TARGET_FILE_DIR:WebFrontApp>/locales"
-        COMMENT "Copying CEF locales to output directory"
-    )
+    # Note: locales are now embedded within the framework as .pak files in .lproj directories
+    # No separate locales directory copying needed for this CEF version
 endif()
 
 add_custom_command(
