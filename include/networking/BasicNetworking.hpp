@@ -2,6 +2,14 @@
 /// @author Ambroise Leclerc
 /// @brief Some networking classes which provide common access to C++2x NetworkingTS, Mock networking or internal implementation
 #pragma once
+
+// Prevent Windows min/max macros from interfering with std::min/max
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include <array>
 #include <cstddef>
 #include <cstdint>

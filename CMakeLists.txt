@@ -37,12 +37,7 @@ include(StaticAnalyzers)
 include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
-#CPMAddPackage("gh:ambroise-leclerc/CEF@118.7.1c")
-CPMAddPackage(
-  NAME cef
-  GITHUB_REPOSITORY ambroise-leclerc/CEF
-  GIT_TAG 17-cef-v137
-)
+CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.4")
 
 
 # Create our own CEF wrapper library target
