@@ -10,6 +10,8 @@
 #ifdef _WIN32
 #include "cef_command_line.h"
 #include "cef_sandbox_win.h"
+// Additional Windows APIs for window management
+#include <windows.h>
 #pragma warning(pop)
 #endif
 
@@ -26,70 +28,56 @@ auto openInDefaultBrowser(std::string_view port, std::string_view file) -> int;
 
 namespace webfront {
 
-// Simple CEF client implementation for embedded browser
-class SimpleCEFClient : public CefClient,
-                       public CefDisplayHandler,
-                       public CefLifeSpanHandler,
-                       public CefLoadHandler {
+// Ultra-minimal CEF client for content-only display
+class ContentOnlyCEFClient : public CefClient, public CefLifeSpanHandler, public CefKeyboardHandler {
 public:
-    SimpleCEFClient() = default;
+    ContentOnlyCEFClient() = default;
 
-    // CefClient methods
-    virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    // CefClient methods - absolute minimum required
     virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-    virtual CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
-
-    // CefDisplayHandler methods
-    virtual void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
-        // Set window title
-        (void)browser; (void)title; // Suppress unused parameter warnings
-    }
-
-    // CefLifeSpanHandler methods
+    virtual CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }    // CefLifeSpanHandler methods
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        (void)browser; // Mark as used to suppress warning
         browser_ = browser;
         browser_count_++;
     }
 
     virtual bool DoClose(CefRefPtr<CefBrowser> browser) override {
-        (void)browser; // Suppress unused parameter warning
-        // Allow the close - returning false allows the browser to close normally
-        return false;
+        (void)browser; // Mark as used to suppress warning
+        return false; // Allow normal close
     }
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        (void)browser; // Suppress unused parameter warning
-        
-        // Decrement browser count
+        (void)browser; // Mark as used to suppress warning
         browser_count_--;
         
-        // Clear the browser reference if this was our browser
         if (browser_ && browser_->IsSame(browser)) {
             browser_ = nullptr;
         }
-          // If this is the last browser, initiate proper shutdown sequence
+        
+        // Quit when last browser closes
         if (browser_count_ == 0) {
-            browser_closed_ = true;
-            
-            // Schedule shutdown on a separate thread to avoid blocking CEF's cleanup
-            std::thread([]() {
-                // Give CEF time to finish its internal cleanup
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                
-                // Quit the message loop only after all browsers are closed
-                CefQuitMessageLoop();
-            }).detach();
+            CefQuitMessageLoop();
         }
     }
 
-    // CefLoadHandler methods
-    virtual void OnLoadError(CefRefPtr<CefBrowser> browser,
-                           CefRefPtr<CefFrame> frame,
-                           ErrorCode errorCode,
-                           const CefString& errorText,
-                           const CefString& failedUrl) override {
-        // Handle load errors
-        (void)browser; (void)frame; (void)errorCode; (void)errorText; (void)failedUrl; // Suppress unused parameter warnings
+    // CefKeyboardHandler methods - enable basic window management
+    virtual bool OnPreKeyEvent(CefRefPtr<CefBrowser> browser,
+                             const CefKeyEvent& event,
+                             CefEventHandle os_event,
+                             bool* is_keyboard_shortcut) override {
+        (void)browser; // Mark as used to suppress warning
+        (void)os_event; // Mark as used to suppress warning
+        (void)is_keyboard_shortcut; // Mark as used to suppress warning
+        
+        // Alt+F4 to close window
+        if (event.type == KEYEVENT_KEYDOWN && 
+            (event.modifiers & EVENTFLAG_ALT_DOWN) && 
+            event.windows_key_code == VK_F4) {
+            browser->GetHost()->CloseBrowser(false);
+            return true;
+        }
+        return false;
     }
 
     void CloseBrowser() {
@@ -98,185 +86,194 @@ public:
         }
     }
 
-    bool IsBrowserClosed() const { return browser_closed_; }
-    int GetBrowserCount() const { return browser_count_; }
-
 private:
     CefRefPtr<CefBrowser> browser_;
-    bool browser_closed_ = false;
     std::atomic<int> browser_count_{0};
-    IMPLEMENT_REFCOUNTING(SimpleCEFClient);
+    IMPLEMENT_REFCOUNTING(ContentOnlyCEFClient);
 };
 
-// Simple CEF app implementation
-class SimpleCEFApp : public CefApp, public CefBrowserProcessHandler {
+// Helper function to create a minimal parent window with optional close button
+#ifdef _WIN32
+HWND CreateMinimalWindow(int width, int height, bool show_close_button = true) {
+    // Register window class
+    static bool class_registered = false;
+    const wchar_t* class_name = L"WebFrontMinimal";
+    
+    if (!class_registered) {
+        WNDCLASSW wc = {};
+        wc.lpfnWndProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT {
+            switch (msg) {
+                case WM_CLOSE:
+                    PostQuitMessage(0);
+                    return 0;
+                case WM_DESTROY:
+                    PostQuitMessage(0);
+                    return 0;
+                case WM_KEYDOWN:
+                    // Alt+F4 to close
+                    if (wParam == VK_F4 && (GetKeyState(VK_MENU) & 0x8000)) {
+                        PostQuitMessage(0);
+                        return 0;
+                    }
+                    break;
+            }
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
+        };
+        wc.hInstance = GetModuleHandle(nullptr);
+        wc.lpszClassName = class_name;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        
+        if (!RegisterClassW(&wc)) {
+            return nullptr;
+        }
+        class_registered = true;
+    }
+      // Get screen dimensions to center the window
+    int screen_width = GetSystemMetrics(SM_CXSCREEN);
+    int screen_height = GetSystemMetrics(SM_CYSCREEN);
+    int x = (screen_width - width) / 2;
+    int y = (screen_height - height) / 2;
+    
+    // Create window with optional close button
+    DWORD window_style, extended_style;
+    
+    if (show_close_button) {
+        // Minimal window with close button but no other chrome
+        window_style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        extended_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+    } else {
+        // Completely frameless window
+        window_style = WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        extended_style = WS_EX_APPWINDOW;
+    }
+    
+    HWND hwnd = CreateWindowExW(
+        extended_style,                     // Extended style
+        class_name,                         // Class name
+        L"WebFront",                        // Window title
+        window_style,                       // Style
+        x, y, width, height,                // Position and size
+        nullptr,                            // Parent
+        nullptr,                            // Menu
+        GetModuleHandle(nullptr),          // Instance
+        nullptr                             // Additional data
+    );
+    
+    if (hwnd) {
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+    }
+    
+    return hwnd;
+}
+#endif
+
+// Content-only CEF app for minimal browser windows with optional window chrome
+class ContentOnlyCEFApp : public CefApp, public CefBrowserProcessHandler {
 public:
-    SimpleCEFApp(const std::string& url) : url_(url) {}
+    ContentOnlyCEFApp(const std::string& url, bool show_close_button = true) 
+        : url_(url), show_close_button_(show_close_button) {}
 
     // CefApp methods
     virtual CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
         return this;
-    }    // CefBrowserProcessHandler methods
-    virtual void OnContextInitialized() override {
-        // CEF_REQUIRE_UI_THREAD(); // Removed wrapper dependency
-        
-        // Create the browser client
-        CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient());
+    }
 
-        // Browser settings
-        CefBrowserSettings browser_settings;
+    // CefBrowserProcessHandler methods
+    virtual void OnContextInitialized() override {        // Create the content-only browser client
+        CefRefPtr<ContentOnlyCEFClient> client(new ContentOnlyCEFClient());
         
-        // Window info
+        // Ultra-minimal browser settings
+        CefBrowserSettings browser_settings;
+        // Only use settings that are available in this CEF version
+        // Most settings are disabled by default for minimal footprint
+        
+        // Window configuration for truly chromeless embedded browser
         CefWindowInfo window_info;
         
 #ifdef _WIN32
-        // Create a windowed browser with default size
-        window_info.SetAsPopup(nullptr, "WebFront CEF Browser");
-        // Note: Width and height are set via SetAsPopup or can be controlled via window styles
+        int window_width = 1200;
+        int window_height = 800;
+        
+        // Create our own minimal parent window with optional close button
+        HWND parent_window = CreateMinimalWindow(window_width, window_height, show_close_button_);
+        if (!parent_window) {
+            std::cerr << "Failed to create parent window" << std::endl;
+            return;
+        }
+        
+        // Embed CEF browser as child window (no browser chrome)
+        CefRect rect(0, 0, window_width, window_height);
+        window_info.SetAsChild(parent_window, rect);
+        
 #elif __APPLE__
-        // macOS window configuration - use windowless mode for better stability
-        window_info.SetAsWindowless(0); // No parent window, offscreen rendering
-        // Alternative child window approach (commented out due to potential stability issues):
-        // CefRect bounds(0, 0, 1024, 768);
-        // window_info.SetAsChild(0, bounds);
+        // macOS content-only window
+        CefRect rect(0, 0, 1200, 800);
+        window_info.SetAsChild(0, rect);
+        
 #elif __linux__
-        // Linux window configuration
-        window_info.SetAsChild(0, 0, 0, 1024, 768); // Parent window, x, y, width, height
-        // Alternative: Use SetAsWindowless for offscreen rendering
-        // window_info.SetAsWindowless(0);
+        // Linux content-only window
+        CefRect rect(0, 0, 1200, 800);
+        window_info.SetAsChild(0, rect);
 #endif
 
-        // Create the browser window
+        // Create browser with chromeless settings
         CefBrowserHost::CreateBrowser(window_info, client, url_, browser_settings, nullptr, nullptr);
     }
 
 private:
     std::string url_;
-    IMPLEMENT_REFCOUNTING(SimpleCEFApp);
+    bool show_close_button_;
+    IMPLEMENT_REFCOUNTING(ContentOnlyCEFApp);
 };
 
-/// Open the web UI in CEF (Chromium Embedded Framework) browser
-auto openInCEF(std::string_view port, std::string_view file) -> int {
+/// Open the web UI in a content-only CEF browser window with optional window chrome
+auto openInCEF(std::string_view port, std::string_view file, bool show_close_button = true) -> int {
     auto url = std::string("http://localhost:").append(port) + std::string("/").append(file);
 
+    std::cout << "Starting content-only CEF browser for: " << url << std::endl;
+
 #ifdef _WIN32
-    // CEF main args (subprocess handling already done in main())
-    CefMainArgs main_args(GetModuleHandle(nullptr));
-
-    // CEF settings for main process only
+    // CEF main args
+    CefMainArgs main_args(GetModuleHandle(nullptr));    // Ultra-minimal CEF settings for chromeless display
     CefSettings settings;
-    settings.no_sandbox = true;  // Disable sandbox for simplicity
-    settings.multi_threaded_message_loop = false;  // Use single-threaded message loop
+    settings.no_sandbox = true;
+    settings.multi_threaded_message_loop = false;
+    settings.log_severity = LOGSEVERITY_FATAL; // Absolutely minimal logging
     
-    // Disable CEF logging to reduce noise (but enable for debugging if needed)
-    settings.log_severity = LOGSEVERITY_ERROR;  // Changed from DISABLE to ERROR to catch shutdown issues
+    // Disable all unnecessary CEF features
+    settings.remote_debugging_port = -1; // No debugging
+    settings.background_color = 0xFFFFFFFF; // White background
+    
+    // Reduce resource usage
+    settings.uncaught_exception_stack_size = 0;
+      // Create content-only app with optional close button
+    CefRefPtr<ContentOnlyCEFApp> app(new ContentOnlyCEFApp(url, show_close_button));
 
-    // Create the application
-    CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp(url));
-
-    // Initialize CEF
+    // Initialize CEF with minimal configuration
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
-        return -1;  // Failed to initialize CEF
+        std::cout << "Failed to initialize CEF, falling back to default browser..." << std::endl;
+        return openInDefaultBrowser(port, file);
     }
 
-    // Run the message loop - this will block until CefQuitMessageLoop() is called
+    if (show_close_button) {
+        std::cout << "CEF browser window created with close button (no address bar, minimal UI)" << std::endl;
+    } else {
+        std::cout << "Chromeless CEF browser window created (no address bar, no window UI)" << std::endl;
+    }
+    std::cout << "Press Alt+F4 to close the window" << std::endl;
+
+    // Run message loop
     CefRunMessageLoop();
 
-    // Enhanced shutdown sequence
-    std::cout << "CEF message loop exited, beginning shutdown sequence..." << std::endl;
-    
-    // Give CEF more time to clean up subprocesses properly
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    
-    // Call CefShutdown to clean up CEF
-    std::cout << "Calling CefShutdown()..." << std::endl;
+    // Clean shutdown
     CefShutdown();
-    
-    std::cout << "CEF shutdown complete." << std::endl;
-    return 0;
-
-#elif __APPLE__
-    // macOS CEF implementation - step-by-step debugging
-    std::cout << "=== CEF macOS Debug - Step 1: Starting..." << std::endl;
-    
-    try {
-        std::cout << "=== CEF macOS Debug - Step 2: Creating main args..." << std::endl;
-        CefMainArgs main_args(0, nullptr);
-        
-        std::cout << "=== CEF macOS Debug - Step 3: Creating settings..." << std::endl;
-        CefSettings settings;
-        settings.no_sandbox = true;
-        settings.multi_threaded_message_loop = false;
-        settings.log_severity = LOGSEVERITY_DISABLE; // Disable logging for now
-        
-        std::cout << "=== CEF macOS Debug - Step 4: About to call CefInitialize..." << std::endl;
-        
-        // Test minimal CEF initialization without app
-        if (!CefInitialize(main_args, settings, nullptr, nullptr)) {
-            std::cout << "=== CEF macOS Debug - Step 5: CefInitialize failed, fallback..." << std::endl;
-            return openInDefaultBrowser(port, file);
-        }
-        
-        std::cout << "=== CEF macOS Debug - Step 6: CefInitialize succeeded!" << std::endl;
-        
-        // Immediate shutdown to test basic initialization
-        std::cout << "=== CEF macOS Debug - Step 7: Calling CefShutdown..." << std::endl;
-        CefShutdown();
-        
-        std::cout << "=== CEF macOS Debug - Step 8: CefShutdown complete, using fallback..." << std::endl;
-        return openInDefaultBrowser(port, file);
-        
-    } catch (const std::exception& e) {
-        std::cout << "=== CEF macOS Debug - Exception caught: " << e.what() << std::endl;
-        return openInDefaultBrowser(port, file);
-    } catch (...) {
-        std::cout << "=== CEF macOS Debug - Unknown exception caught" << std::endl;
-        return openInDefaultBrowser(port, file);
-    }
-    
-#elif __linux__
-    // Linux CEF implementation
-    std::cout << "Starting CEF browser on Linux..." << std::endl;
-    
-    // CEF main args - on Linux, we pass command line arguments
-    CefMainArgs main_args(0, nullptr);
-
-    // CEF settings for Linux
-    CefSettings settings;
-    settings.no_sandbox = true;  // Disable sandbox for simplicity
-    settings.multi_threaded_message_loop = false;  // Use single-threaded message loop
-    
-    // Set log severity
-    settings.log_severity = LOGSEVERITY_ERROR;
-    
-    // Create the application
-    CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp(url));
-
-    // Initialize CEF
-    if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
-        std::cout << "Failed to initialize CEF on Linux, falling back to default browser..." << std::endl;
-        return openInDefaultBrowser(port, file);
-    }
-
-    // Run the message loop - this will block until CefQuitMessageLoop() is called
-    CefRunMessageLoop();
-
-    // Enhanced shutdown sequence
-    std::cout << "CEF message loop exited, beginning shutdown sequence..." << std::endl;
-    
-    // Give CEF more time to clean up subprocesses properly
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    
-    // Call CefShutdown to clean up CEF
-    std::cout << "Calling CefShutdown()..." << std::endl;
-    CefShutdown();
-    
-    std::cout << "CEF shutdown complete." << std::endl;
     return 0;
 
 #else
-    // For other platforms, fall back to default browser
-    std::cout << "CEF implementation not yet available for this platform, opening in default browser..." << std::endl;
+    // For non-Windows platforms, use default browser for now
+    std::cout << "Content-only CEF implementation currently Windows-only, using default browser..." << std::endl;
     return openInDefaultBrowser(port, file);
 #endif
 }
