@@ -7,6 +7,11 @@ project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 add_library(WebFront INTERFACE)
 
+# Static linkage for CEF compatibility
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 include(StandardProjectSettings)
 include(PreventInSourceBuilds)
@@ -36,49 +41,21 @@ enable_doxygen()
 include(StaticAnalyzers)
 include(CPM)
 
-CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
-CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.4")
-
-
-# Create our own CEF wrapper library target
-set(CEF_ROOT "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
-if(EXISTS "${CEF_ROOT}/libcef_dll")
-  # Create a simple library target for CEF wrapper
-  file(GLOB_RECURSE CEF_WRAPPER_SOURCES 
-    "${CEF_ROOT}/libcef_dll/*.cc"
-    "${CEF_ROOT}/libcef_dll/*.cpp"
-  )
-    if(CEF_WRAPPER_SOURCES)
-    add_library(libcef_dll_wrapper STATIC ${CEF_WRAPPER_SOURCES})
-    target_include_directories(libcef_dll_wrapper PUBLIC "${CEF_ROOT}")
-    target_include_directories(libcef_dll_wrapper PUBLIC "${CEF_ROOT}/include")
-    
-    # Set basic properties
-    set_target_properties(libcef_dll_wrapper PROPERTIES PREFIX "")
-    target_compile_definitions(libcef_dll_wrapper PRIVATE WRAPPING_CEF_SHARED)
-    
-    # Force C++17 for CEF wrapper to ensure compatibility
-    target_compile_features(libcef_dll_wrapper PRIVATE cxx_std_17)
-    
-    # Add Windows-specific compiler flags for CEF
-    if(WIN32)
-      target_compile_options(libcef_dll_wrapper PRIVATE
-        /MP           # Multiprocess compilation
-        /wd4100       # Ignore "unreferenced formal parameter" warning
-        /wd4127       # Ignore "conditional expression is constant" warning
-        /wd4244       # Ignore "conversion possible loss of data" warning
-        /wd4996       # Ignore "function or variable may be unsafe" warning
-      )
-      target_compile_definitions(libcef_dll_wrapper PRIVATE
-        WIN32 _WIN32 _WINDOWS
-        UNICODE _UNICODE
-        NOMINMAX
-        WIN32_LEAN_AND_MEAN
-        _HAS_EXCEPTIONS=0
-      )
-    endif()
+# Define the APPEND_PLATFORM_SOURCES macro needed by CEF
+macro(APPEND_PLATFORM_SOURCES variable_name)
+  if(WIN32 AND DEFINED ${variable_name}_WINDOWS)
+    list(APPEND ${variable_name} ${${variable_name}_WINDOWS})
   endif()
-endif()
+  if(UNIX AND NOT APPLE AND DEFINED ${variable_name}_LINUX)
+    list(APPEND ${variable_name} ${${variable_name}_LINUX})
+  endif()
+  if(APPLE AND DEFINED ${variable_name}_MAC)
+    list(APPEND ${variable_name} ${${variable_name}_MAC})
+  endif()
+endmacro()
+
+CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
+CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17")
 
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)

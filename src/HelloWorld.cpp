@@ -1,5 +1,6 @@
 ﻿#include <WebFront.hpp>
 #include <frontend/DefaultBrowser.hpp>
+#include <frontend/CEF.hpp>
 #include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
 #include <system/NativeFS.hpp>
