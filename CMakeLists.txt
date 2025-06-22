@@ -65,12 +65,13 @@ endmacro()
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
-# Skip CEF tests on macOS to avoid missing macro issues
-if(APPLE)
-    set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests on macOS" FORCE)
-    set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
-    set(CEF_WRAPPER_BUILD_SKIP ON CACHE BOOL "Skip CEF wrapper build on macOS" FORCE)
-endif()
+# Configure CEF build options to avoid binary distribution issues
+set(CEF_USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox" FORCE)
+set(CEF_WRAPPER_BUILD_SKIP ON CACHE BOOL "Skip CEF wrapper build" FORCE)
+
+# Skip CEF tests to avoid missing macro issues  
+set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests" FORCE)
+set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
 
 CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17")
 
