@@ -37,6 +37,12 @@ if(TARGET libcef_dll_wrapper)
     target_link_libraries(WebFrontApp PRIVATE libcef_dll_wrapper)
 endif()
 
+# Link the main CEF framework directly if CEF target exists
+if(TARGET cef)
+    target_link_libraries(WebFrontApp PRIVATE cef)
+    message(STATUS "Linking CEF framework to WebFrontApp")
+endif()
+
 # Link other libraries
 target_link_libraries(WebFrontApp PRIVATE 
     WebFront 
