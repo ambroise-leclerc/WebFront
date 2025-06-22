@@ -69,11 +69,21 @@ CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 set(CEF_USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox" FORCE)
 set(CEF_WRAPPER_BUILD_SKIP ON CACHE BOOL "Skip CEF wrapper build" FORCE)
 
-# Skip CEF tests to avoid missing macro issues  
+# Completely disable CEF tests to avoid linking issues on macOS
 set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests" FORCE)
 set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
+set(BUILD_CEF_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
+set(CEF_BUILD_LIBCEF_DLL_WRAPPER OFF CACHE BOOL "Disable CEF wrapper" FORCE)
+
+# Prevent CEF from adding test targets
+set(OPTION_BUILD_TESTS OFF CACHE BOOL "Disable all test building" FORCE)
+set(BUILD_TESTING_SAVED ${BUILD_TESTING})
+set(BUILD_TESTING OFF CACHE BOOL "Disable testing during CEF build" FORCE)
 
 CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17")
+
+# Restore the original BUILD_TESTING setting after CEF is configured
+set(BUILD_TESTING ${BUILD_TESTING_SAVED} CACHE BOOL "Restore original testing setting" FORCE)
 
 # Handle macOS CEF framework structure
 if(APPLE AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")

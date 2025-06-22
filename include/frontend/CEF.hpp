@@ -58,22 +58,36 @@ private:
     IMPLEMENT_REFCOUNTING(SimpleCEFApp);
 };
 
-inline auto openInCEF(std::string_view port, std::string_view file) -> int {
-    // CEF command line arguments
+inline auto openInCEF(std::string_view port, std::string_view file) -> int {    // CEF command line arguments
     CefMainArgs main_args;    // CEF settings
     CefSettings settings;
     settings.no_sandbox = true;
     // Note: single_process mode is not available in this CEF version
 
+#ifdef __APPLE__
+    // macOS-specific CEF settings
+    settings.multi_threaded_message_loop = false;  // Use single-threaded message loop on macOS
+#endif
+
     // Initialize CEF
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         return -1;
-    }
-
-    // Create browser window info
+    }// Create browser window info
     CefWindowInfo window_info;
+#ifdef _WIN32
+    // Windows-specific window creation
     window_info.SetAsPopup(nullptr, "WebFront");
+#elif defined(__APPLE__)
+    // macOS-specific window creation - use default windowed mode
+    window_info.width = 1024;
+    window_info.height = 768;
+    // On macOS, we can let CEF handle the window creation automatically
+#else
+    // Linux/other platforms - use default windowed mode
+    window_info.width = 1024;
+    window_info.height = 768;
+#endif
 
     // Browser settings
     CefBrowserSettings browser_settings;
