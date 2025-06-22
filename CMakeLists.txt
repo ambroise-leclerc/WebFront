@@ -80,7 +80,24 @@ set(OPTION_BUILD_TESTS OFF CACHE BOOL "Disable all test building" FORCE)
 set(BUILD_TESTING_SAVED ${BUILD_TESTING})
 set(BUILD_TESTING OFF CACHE BOOL "Disable testing during CEF build" FORCE)
 
+# Additional aggressive test prevention for CEF
+set(CEF_ENABLE_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
+set(ENABLE_CEF_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
+set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
+
 CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17")
+
+# Override CEF testing to prevent any test building on macOS and problematic platforms
+if(APPLE OR CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    # Replace the CEF testing file to disable all tests
+    file(WRITE "${CMAKE_BINARY_DIR}/_deps/cef-src/cmake/CEFTesting.cmake"
+        "# CEF Testing disabled for macOS compatibility\n"
+        "# Original file replaced to prevent test building issues\n"
+        "message(STATUS \"CEF testing has been disabled for platform compatibility\")\n"
+        "# Do not enable testing or add test subdirectory\n"
+    )
+    message(STATUS "Disabled CEF testing for macOS compatibility")
+endif()
 
 # Restore the original BUILD_TESTING setting after CEF is configured
 set(BUILD_TESTING ${BUILD_TESTING_SAVED} CACHE BOOL "Restore original testing setting" FORCE)

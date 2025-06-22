@@ -73,20 +73,20 @@ inline auto openInCEF(std::string_view port, std::string_view file) -> int {    
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         return -1;
-    }// Create browser window info
+    }    // Create browser window info
     CefWindowInfo window_info;
 #ifdef _WIN32
     // Windows-specific window creation
     window_info.SetAsPopup(nullptr, "WebFront");
 #elif defined(__APPLE__)
-    // macOS-specific window creation - use default windowed mode
-    window_info.width = 1024;
-    window_info.height = 768;
-    // On macOS, we can let CEF handle the window creation automatically
+    // macOS-specific window creation - use default settings
+    // CefWindowInfo on macOS doesn't have width/height properties
+    // The window will be created with default size by CEF
+    // We can set window bounds if needed using SetBounds()
+    // window_info.SetBounds(0, 0, 1024, 768);  // This might work on some versions
 #else
-    // Linux/other platforms - use default windowed mode
-    window_info.width = 1024;
-    window_info.height = 768;
+    // Linux/other platforms - attempt default windowed mode
+    // Different CEF versions/platforms may have different properties available
 #endif
 
     // Browser settings
