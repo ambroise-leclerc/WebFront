@@ -64,6 +64,14 @@ macro(ADD_LOGICAL_TARGET target)
 endmacro()
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
+
+# Skip CEF tests on macOS to avoid missing macro issues
+if(APPLE)
+    set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests on macOS" FORCE)
+    set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
+    set(CEF_WRAPPER_BUILD_SKIP ON CACHE BOOL "Skip CEF wrapper build on macOS" FORCE)
+endif()
+
 CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17")
 
 # Handle macOS CEF framework structure
