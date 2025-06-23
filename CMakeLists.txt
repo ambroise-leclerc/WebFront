@@ -1,9 +1,18 @@
 ﻿cmake_minimum_required (VERSION 3.18)
 
+option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
+option(ENABLE_CEF "Enable Chromium Embedded Framework" ON)
+option(ENABLE_TESTING "Enable Test Builds" ON)
+option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
+
 set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
+
+if(ENABLE_TESTING)
+  enable_testing()
+endif()
 
 add_library(WebFront INTERFACE)
 
@@ -15,6 +24,9 @@ target_compile_features(WebFront_options INTERFACE cxx_std_23)
 if(APPLE)
   target_compile_definitions(WebFront_options INTERFACE __cpp_lib_format=202207L)
 endif()
+
+# Apply compiler-specific settings
+configure_compiler_settings(WebFront_options)
 
 add_library(WebFront_warnings INTERFACE)
 
@@ -37,19 +49,25 @@ include(StaticAnalyzers)
 include(CPM)
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
+if (ENABLE_CEF)
+  #CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17c")
+  CPMAddPackage(
+    NAME CEF
+    GITHUB_REPOSITORY ambroise-leclerc/CEF
+    VERSION 137.0.17c
+    OPTIONS
+        "BUILD_TESTING ON"  # Enable building tests
+  )
+endif()
 
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
 include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
-option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
-option(ENABLE_TESTING "Enable Test Builds" ON)
-option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
 
 add_compile_definitions(_WIN32_WINNT=0x0501)
 
 if(ENABLE_TESTING)
-  enable_testing()
   add_subdirectory(test)
   add_subdirectory(webtest)
 endif()
