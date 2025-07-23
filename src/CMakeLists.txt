@@ -2,9 +2,15 @@ find_package(Threads)
 
 add_executable(WebFrontApp HelloWorld.cpp)
 
-# Debug: Check what the cef target provides
-if(TARGET cef)
-    message(STATUS "CEF target exists")
+# Re-enable CEF with single process mode
+set(CEF_AVAILABLE OFF)
+if(TARGET cef AND NOT CEF_WRAPPER_BUILD_SKIP)
+    set(CEF_AVAILABLE ON)
+endif()
+
+# Debug: Check what the cef target provides and if CEF is available
+if(CEF_AVAILABLE)
+    message(STATUS "CEF target available")
     get_target_property(CEF_INCLUDE_DIRS cef INTERFACE_INCLUDE_DIRECTORIES)
     get_target_property(CEF_LINK_LIBS cef INTERFACE_LINK_LIBRARIES)
     message(STATUS "CEF include directories: ${CEF_INCLUDE_DIRS}")

@@ -5,9 +5,29 @@
 #include <system/IndexFS.hpp>
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
+#include <thread>
+#include <chrono>
+
+#ifdef WEBFRONT_HAS_CEF
+#include "include/cef_app.h"
+#include "include/wrapper/cef_library_loader.h"
+#endif
 
 using namespace std;
 using namespace webfront;
+
+// Simple server readiness check using time-based approach
+void waitForServerStartup() {
+    cout << "Waiting for HTTP server to start..." << endl;
+    
+    // Give the server adequate time to start up
+    for (int i = 1; i <= 3; ++i) {
+        cout << "Server startup... " << i << "/3" << endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    }
+    
+    cout << "✅ Server should be ready now" << endl;
+}
 
 // Find the DocRoot path containing the given file (look for the filename in current directory,
 // in temp directory then in sources directory
@@ -36,7 +56,36 @@ filesystem::path findDocRoot(string filename) {
     throw runtime_error("Cannot find " + filename + " file");
 }
 
-int main(int /*argc*/, char** /*argv*/) {
+int main(int argc, char** argv) {
+#ifdef WEBFRONT_HAS_CEF
+    // Set environment variables BEFORE any CEF operations
+    setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
+    setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
+    setenv("USE_MOCK_KEYCHAIN", "1", 1);
+    setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
+    setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
+    
+    // Load the CEF framework library at runtime - required on macOS
+    CefScopedLibraryLoader library_loader;
+    if (!library_loader.LoadInMain()) {
+        cout << "Failed to load CEF library" << endl;
+        return -1;
+    }
+    
+    // CEF subprocesses require CefExecuteProcess to be called first
+    CefMainArgs main_args(argc, argv);
+    
+    // Create a simple app for subprocess handling
+    CefRefPtr<CefApp> app;
+    
+    // Execute the subprocess if this is a helper process
+    int exit_code = CefExecuteProcess(main_args, app, nullptr);
+    if (exit_code >= 0) {
+        // If this is a subprocess, exit immediately
+        return exit_code;
+    }
+#endif
+
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
@@ -70,11 +119,13 @@ int main(int /*argc*/, char** /*argv*/) {
     std::atomic<bool> server_should_stop{false};
     std::thread serverThread([&webFront]() {
         webFront.run();
-    });    // Give the server a moment to start up
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    });    
+    
+    // Wait for the server to be fully ready
+    waitForServerStartup();
 
 #ifdef WEBFRONT_HAS_CEF
-    cout << "Starting CEF browser..." << endl;
+    cout << "Server ready - Starting CEF browser..." << endl;
     
     // Now launch CEF browser
     int cef_result = openInCEF(httpPort, mainHtml);

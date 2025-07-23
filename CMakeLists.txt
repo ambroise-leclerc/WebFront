@@ -67,13 +67,13 @@ CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
 # Configure CEF build options to avoid binary distribution issues
 set(CEF_USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox" FORCE)
-set(CEF_WRAPPER_BUILD_SKIP ON CACHE BOOL "Skip CEF wrapper build" FORCE)
+set(CEF_WRAPPER_BUILD_SKIP OFF CACHE BOOL "Enable CEF wrapper build" FORCE)
 
 # Completely disable CEF tests to avoid linking issues on macOS
 set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests" FORCE)
 set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
 set(BUILD_CEF_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
-set(CEF_BUILD_LIBCEF_DLL_WRAPPER OFF CACHE BOOL "Disable CEF wrapper" FORCE)
+set(CEF_BUILD_LIBCEF_DLL_WRAPPER ON CACHE BOOL "Enable CEF wrapper" FORCE)
 
 # Prevent CEF from adding test targets
 set(OPTION_BUILD_TESTS OFF CACHE BOOL "Disable all test building" FORCE)
@@ -85,7 +85,7 @@ set(CEF_ENABLE_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
 set(ENABLE_CEF_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
 
-CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17")
+CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17d")
 
 # Override CEF testing to prevent any test building on macOS and problematic platforms
 if(APPLE OR CMAKE_SYSTEM_NAME MATCHES "Darwin")
