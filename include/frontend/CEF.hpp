@@ -13,8 +13,55 @@
 #include "include/cef_browser_process_handler.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_window.h"
+#include "include/views/cef_window_delegate.h"
 
 // CEF already provides IMPLEMENT_REFCOUNTING macro
+
+class SimpleCEFWindowDelegate : public CefWindowDelegate {
+public:
+    SimpleCEFWindowDelegate() = default;
+
+    // CefWindowDelegate methods
+    void OnWindowCreated(CefRefPtr<CefWindow> window) override {
+        // Add the browser view to the window
+        window->AddChildView(browser_view_);
+        
+        // Set window properties for a clean application window
+        window->SetTitle("WebFront Application");
+        window->CenterWindow(CefSize(1200, 800));
+        window->Show();
+    }
+
+    void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
+        (void)window; // Suppress unused parameter warning
+        browser_view_ = nullptr;
+    }
+
+    bool CanClose(CefRefPtr<CefWindow> window) override {
+        (void)window; // Suppress unused parameter warning
+        // Allow the window to close, which will terminate the app
+        return true;
+    }
+
+    CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
+        (void)view; // Suppress unused parameter warning
+        return CefSize(1200, 800);
+    }
+
+    void SetBrowserView(CefRefPtr<CefBrowserView> browser_view) {
+        browser_view_ = browser_view;
+    }
+
+private:
+    CefRefPtr<CefBrowserView> browser_view_;
+    
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wextra-semi"
+    IMPLEMENT_REFCOUNTING(SimpleCEFWindowDelegate);
+#pragma clang diagnostic pop
+};
 
 class SimpleCEFClient : public CefClient,
                         public CefDisplayHandler,
@@ -85,6 +132,16 @@ public:
         command_line->AppendSwitch("--disable-gpu");
         command_line->AppendSwitch("--disable-gpu-compositing");
         command_line->AppendSwitch("--disable-gpu-sandbox");
+        
+        // Remove browser UI elements for clean application window
+        command_line->AppendSwitch("--disable-features=TabStrip,Toolbar,LocationBar,Bookmarks,MenuBar");
+        command_line->AppendSwitch("--hide-scrollbars");
+        command_line->AppendSwitch("--disable-default-apps");
+        command_line->AppendSwitch("--disable-extensions");
+        command_line->AppendSwitch("--disable-plugins-discovery");
+        
+        // Enable Views framework for chromeless windows
+        command_line->AppendSwitch("--use-views");
     }
 
 private:
@@ -135,6 +192,8 @@ inline auto openInCEF(std::string_view port, std::string_view file) -> int {
     std::filesystem::path log_path = exe_dir / "cef_debug.log";
     CefString(&settings.log_file).FromString(log_path.string());
     settings.log_severity = LOGSEVERITY_INFO;
+    
+    // Note: Limited settings available in this CEF version
 #endif
 
     // Initialize CEF with minimal custom app
@@ -148,15 +207,6 @@ inline auto openInCEF(std::string_view port, std::string_view file) -> int {
     }
     std::cout << "CEF initialized successfully" << std::endl;
 
-    // Create browser window info
-    CefWindowInfo window_info;
-#ifdef _WIN32
-    window_info.SetAsPopup(nullptr, "WebFront");
-#endif
-
-    // Default browser settings - let CEF handle JavaScript normally
-    CefBrowserSettings browser_settings;
-
     // Create the browser client
     CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient);
 
@@ -168,8 +218,19 @@ inline auto openInCEF(std::string_view port, std::string_view file) -> int {
     // Give the server a moment to be ready
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
-    // Create the browser
-    CefBrowserHost::CreateBrowser(window_info, client, url, browser_settings, nullptr, nullptr);
+    // Browser settings for the modern Views approach
+    CefBrowserSettings browser_settings;
+    
+    // Create a browser view using the modern Views API - this creates a chromeless browser
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+        client, url, browser_settings, nullptr, nullptr, nullptr);
+    
+    // Create a window delegate for controlling the window appearance
+    CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate);
+    window_delegate->SetBrowserView(browser_view);
+    
+    // Create a top-level window with no browser chrome
+    CefRefPtr<CefWindow> window = CefWindow::CreateTopLevelWindow(window_delegate);
     
     // Run the CEF message loop
     CefRunMessageLoop();
