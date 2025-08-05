@@ -20,9 +20,9 @@
 #include "frontend/CEF.hpp"
 #include "frontend/DefaultBrowser.hpp"
 #include "http/HTTPServer.hpp"
+#include "system/IndexFS.hpp"
 #include "tooling/HexDump.hpp"
 #include "utils/TypeErasedFunction.hpp"
-#include "system/IndexFS.hpp"
 #include "weblink/WebLink.hpp"
 
 #include "networking/TCPNetworkingTS.hpp"
@@ -81,7 +81,8 @@ public:
     using Net = NetProvider;
     using UI = BasicUI<BasicWF<Net, Filesystem>>;
 
-    BasicWF(std::string_view port, std::filesystem::path docRoot = ".") : httpServer("0.0.0.0", port, docRoot), idsCounter(0) {
+    BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
+        : httpServer("0.0.0.0", port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
@@ -108,7 +109,7 @@ public:
     void cppFunction(std::string functionName, auto&& function) {
         cppFunctions.try_emplace(functionName, [&function](std::span<const std::byte> data) -> void {
             std::tuple<Args...> parameters;
-            auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...> & tuple, std::index_sequence<Is...>) {
+            auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) {
                 (msg::FunctionCall::decodeParameter(std::get<Is>(tuple), data), ...);
                 function(std::get<Is>(tuple)...);
             };
@@ -117,8 +118,17 @@ public:
         });
     }
 
+    void openWindow(std::string_view htmlFilename) {
+        if constexpr (cef::webfrontEmbedCEF)
+            cef::open(httpPort, htmlFilename);
+        else
+            browser::open(httpPort, htmlFilename);
+    }
+
 private:
     http::Server<Net, Filesystem> httpServer;
+    std::string_view httpPort;
+    std::filesystem::path httpDocRoot;
     std::map<WebLinkId, WebLink<Net>> webLinks;
     WebLinkId idsCounter;
     std::function<void(UI)> uiStartedHandler;

@@ -2,9 +2,9 @@ find_package(Threads)
 
 add_executable(WebFrontApp HelloWorld.cpp)
 
-# Re-enable CEF with single process mode
+# CEF availability is determined by the WEBFRONT_EMBED_CEF option
 set(CEF_AVAILABLE OFF)
-if(TARGET cef AND NOT CEF_WRAPPER_BUILD_SKIP)
+if(WEBFRONT_EMBED_CEF AND TARGET cef AND NOT CEF_WRAPPER_BUILD_SKIP)
     set(CEF_AVAILABLE ON)
 endif()
 
@@ -33,7 +33,7 @@ if(CEF_AVAILABLE)
     endif()
     
     # Define that CEF is available for conditional compilation
-    target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_HAS_CEF)
+    target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_EMBED_CEF)
 else()
     message(STATUS "CEF target does NOT exist - CEF features will be disabled")
 endif()

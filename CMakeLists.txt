@@ -1,5 +1,10 @@
 ﻿cmake_minimum_required (VERSION 3.18)
 
+option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
+option(ENABLE_TESTING "Enable Test Builds" ON)
+option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
+option(WEBFRONT_EMBED_CEF "Enable embedded CEF window support" ON)
+
 set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
@@ -65,30 +70,37 @@ endmacro()
 
 CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
 
-# Configure CEF build options to avoid binary distribution issues
-set(CEF_USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox" FORCE)
-set(CEF_WRAPPER_BUILD_SKIP OFF CACHE BOOL "Enable CEF wrapper build" FORCE)
+# Only build CEF if embedded window support is enabled
+if(WEBFRONT_EMBED_CEF)
+    message(STATUS "WebFront: Embedded CEF window support enabled")
+    
+    # Configure CEF build options to avoid binary distribution issues
+    set(CEF_USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox" FORCE)
+    set(CEF_WRAPPER_BUILD_SKIP OFF CACHE BOOL "Enable CEF wrapper build" FORCE)
 
-# Completely disable CEF tests to avoid linking issues on macOS
-set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests" FORCE)
-set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
-set(BUILD_CEF_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
-set(CEF_BUILD_LIBCEF_DLL_WRAPPER ON CACHE BOOL "Enable CEF wrapper" FORCE)
+    # Completely disable CEF tests to avoid linking issues on macOS
+    set(CEF_SKIP_TESTS ON CACHE BOOL "Skip CEF tests" FORCE)
+    set(CEF_BUILD_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
+    set(BUILD_CEF_TESTS OFF CACHE BOOL "Disable CEF test building" FORCE)
+    set(CEF_BUILD_LIBCEF_DLL_WRAPPER ON CACHE BOOL "Enable CEF wrapper" FORCE)
 
-# Prevent CEF from adding test targets
-set(OPTION_BUILD_TESTS OFF CACHE BOOL "Disable all test building" FORCE)
-set(BUILD_TESTING_SAVED ${BUILD_TESTING})
-set(BUILD_TESTING OFF CACHE BOOL "Disable testing during CEF build" FORCE)
+    # Prevent CEF from adding test targets
+    set(OPTION_BUILD_TESTS OFF CACHE BOOL "Disable all test building" FORCE)
+    set(BUILD_TESTING_SAVED ${BUILD_TESTING})
+    set(BUILD_TESTING OFF CACHE BOOL "Disable testing during CEF build" FORCE)
 
-# Additional aggressive test prevention for CEF
-set(CEF_ENABLE_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
-set(ENABLE_CEF_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
-set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
+    # Additional aggressive test prevention for CEF
+    set(CEF_ENABLE_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
+    set(ENABLE_CEF_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
+    set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
 
-CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17d")
+    CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17d")
+else()
+    message(STATUS "WebFront: Embedded CEF window support disabled")
+endif()
 
 # Override CEF testing to prevent any test building on macOS and problematic platforms
-if(APPLE OR CMAKE_SYSTEM_NAME MATCHES "Darwin")
+if(WEBFRONT_EMBED_CEF AND (APPLE OR CMAKE_SYSTEM_NAME MATCHES "Darwin"))
     # Replace the CEF testing file to disable all tests
     file(WRITE "${CMAKE_BINARY_DIR}/_deps/cef-src/cmake/CEFTesting.cmake"
         "# CEF Testing disabled for macOS compatibility\n"
@@ -132,10 +144,6 @@ if(EXISTS "${CEF_ROOT}")
   target_include_directories(WebFront SYSTEM INTERFACE "${CEF_ROOT}/include")
 endif()
 include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
-
-option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
-option(ENABLE_TESTING "Enable Test Builds" ON)
-option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
 
 add_compile_definitions(_WIN32_WINNT=0x0501)
 

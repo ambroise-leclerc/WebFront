@@ -1,14 +1,13 @@
-﻿#include <WebFront.hpp>
-#include <frontend/DefaultBrowser.hpp>
-#include <frontend/CEF.hpp>
+﻿#include <thread>
+#include <chrono>
+
+#include <WebFront.hpp>
 #include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
-#include <thread>
-#include <chrono>
 
-#ifdef WEBFRONT_HAS_CEF
+#ifdef WEBFRONT_EMBED_CEF
 #include "include/cef_app.h"
 #include "include/wrapper/cef_library_loader.h"
 #endif
@@ -16,18 +15,6 @@
 using namespace std;
 using namespace webfront;
 
-// Simple server readiness check using time-based approach
-void waitForServerStartup() {
-    cout << "Waiting for HTTP server to start..." << endl;
-    
-    // Give the server adequate time to start up
-    for (int i = 1; i <= 3; ++i) {
-        cout << "Server startup... " << i << "/3" << endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    }
-    
-    cout << "✅ Server should be ready now" << endl;
-}
 
 // Find the DocRoot path containing the given file (look for the filename in current directory,
 // in temp directory then in sources directory
@@ -57,7 +44,7 @@ filesystem::path findDocRoot(string filename) {
 }
 
 int main(int argc, char** argv) {
-#ifdef WEBFRONT_HAS_CEF
+#ifdef WEBFRONT_EMBED_CEF
     // Set environment variables BEFORE any CEF operations
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
     setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
@@ -84,6 +71,10 @@ int main(int argc, char** argv) {
         // If this is a subprocess, exit immediately
         return exit_code;
     }
+#else
+    // Suppress unused parameter warnings when CEF is not available
+    (void)argc;
+    (void)argv;
 #endif
 
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
@@ -119,38 +110,23 @@ int main(int argc, char** argv) {
     std::atomic<bool> server_should_stop{false};
     std::thread serverThread([&webFront]() {
         webFront.run();
-    });    
-    
-    // Wait for the server to be fully ready
-    waitForServerStartup();
+    });
 
-#ifdef WEBFRONT_HAS_CEF
-    cout << "Server ready - Starting CEF browser..." << endl;
-    
-    // Now launch CEF browser
-    int cef_result = openInCEF(httpPort, mainHtml);
-    
-    cout << "CEF browser closed with result: " << cef_result << endl;
-#else
-    cout << "CEF not available, starting default browser..." << endl;
-    
-    // Launch default browser when CEF is not available
-    int cef_result = openInDefaultBrowser(httpPort, mainHtml);
-    
-    cout << "Default browser opened with result: " << cef_result << endl;
-#endif
+    webFront.openWindow(mainHtml);
+
+    log::info("Application window closed");
 
     // When CEF closes, signal the server to stop
     server_should_stop = true;
-    
-    cout << "Waiting for server thread to finish..." << endl;
+
+    log::info("Waiting for server thread to finish...");
     
     // Wait for the server thread to finish
     if (serverThread.joinable()) {
         serverThread.join();
     }
-    
-    cout << "Application shutdown complete." << endl;
 
-    return cef_result;
+    log::info("Application shutdown complete.");
+
+    return 0;
 }
