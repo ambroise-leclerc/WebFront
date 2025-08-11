@@ -12,11 +12,6 @@
 #include <string_view>
 #include <thread>
 
-#ifdef WEBFRONT_EMBED_CEF
-#include "include/cef_app.h"
-#include "include/wrapper/cef_library_loader.h"
-#endif
-
 using namespace std;
 using namespace webfront;
 
@@ -48,38 +43,12 @@ filesystem::path findDocRoot(string filename) {
 }
 
 int main(int argc, char** argv) {
-#ifdef WEBFRONT_EMBED_CEF
-    // Set environment variables BEFORE any CEF operations
-    setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
-    setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
-    setenv("USE_MOCK_KEYCHAIN", "1", 1);
-    setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
-    setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
-    
-    // Load the CEF framework library at runtime - required on macOS
-    CefScopedLibraryLoader library_loader;
-    if (!library_loader.LoadInMain()) {
-        cout << "Failed to load CEF library" << endl;
-        return -1;
+    // Initialize CEF and handle subprocesses
+    int cef_result = webfront::cef::initialize(argc, argv);
+    if (cef_result != 0) {
+        // Either error (-1) or subprocess (>0) - exit either way
+        return cef_result;
     }
-    
-    // CEF subprocesses require CefExecuteProcess to be called first
-    CefMainArgs main_args(argc, argv);
-    
-    // Create a simple app for subprocess handling
-    CefRefPtr<CefApp> app;
-    
-    // Execute the subprocess if this is a helper process
-    int exit_code = CefExecuteProcess(main_args, app, nullptr);
-    if (exit_code >= 0) {
-        // If this is a subprocess, exit immediately
-        return exit_code;
-    }
-#else
-    // Suppress unused parameter warnings when CEF is not available
-    (void)argc;
-    (void)argv;
-#endif
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
 
@@ -106,13 +75,13 @@ int main(int argc, char** argv) {
         std::thread serverThread([&webFront]() {
             webFront.run();
         });
-        
-        // Give the server time to start
-      //  std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
         log::info("Starting Jasmine test runner...");
         webFront.openWindow(specRunnerFile);
-        log::info("Test runner window closed ");
+        log::info("Test runner window closed");
+
+        // When window closes, stop the server cleanly
+        webFront.stop();
 
         // Wait for server thread to finish
         if (serverThread.joinable()) {

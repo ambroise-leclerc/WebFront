@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <string_view>
 #include <thread>
 
@@ -18,10 +19,50 @@
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
-
-
+#include "include/wrapper/cef_library_loader.h"
 
 namespace webfront::cef {
+
+// Initialize CEF and handle subprocesses
+// Returns: -1 on error, 0 to continue with main process, >0 if this is a subprocess (should exit)
+int initialize(int argc, char** argv) {
+#ifdef WEBFRONT_EMBED_CEF
+    // Set environment variables BEFORE any CEF operations
+    setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
+    setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
+    setenv("USE_MOCK_KEYCHAIN", "1", 1);
+    setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
+    setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
+    
+    // Load the CEF framework library at runtime - required on macOS
+    CefScopedLibraryLoader library_loader;
+    if (!library_loader.LoadInMain()) {
+        std::cout << "Failed to load CEF library" << std::endl;
+        return -1;
+    }
+    
+    // CEF subprocesses require CefExecuteProcess to be called first
+    CefMainArgs main_args(argc, argv);
+    
+    // Create a simple app for subprocess handling
+    CefRefPtr<CefApp> app;
+    
+    // Execute the subprocess if this is a helper process
+    int exit_code = CefExecuteProcess(main_args, app, nullptr);
+    if (exit_code >= 0) {
+        // If this is a subprocess, return the exit code (caller should exit)
+        return exit_code;
+    }
+    
+    // Continue with main process
+    return 0;
+#else
+    // Suppress unused parameter warnings when CEF is not available
+    (void)argc;
+    (void)argv;
+    return 0;
+#endif
+}
 
 class SimpleCEFWindowDelegate : public CefWindowDelegate {
 public:
@@ -30,7 +71,7 @@ public:
     // CefWindowDelegate methods
     void OnWindowCreated(CefRefPtr<CefWindow> window) override {
         // Add the browser view to the window
-        window->AddChildView(browser_view_);
+        window->AddChildView(browserView);
 
         // Set window properties for a clean application window
         window->SetTitle("WebFront Application");
@@ -38,26 +79,25 @@ public:
         window->Show();
     }
 
-    void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
-        (void) window; // Suppress unused parameter warning
-        browser_view_ = nullptr;
+    void OnWindowDestroyed(CefRefPtr<CefWindow> /*window*/) override {
+        browserView = nullptr;
+        // Quit the CEF message loop when the window is destroyed
+        CefQuitMessageLoop();
     }
 
-    bool CanClose(CefRefPtr<CefWindow> window) override {
-        (void) window; // Suppress unused parameter warning
+    bool CanClose(CefRefPtr<CefWindow> /*window*/) override {
         // Allow the window to close, which will terminate the app
         return true;
     }
 
-    CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
-        (void) view; // Suppress unused parameter warning
+    CefSize GetPreferredSize(CefRefPtr<CefView> /*view*/) override {
         return CefSize(1200, 800);
     }
 
-    void SetBrowserView(CefRefPtr<CefBrowserView> browser_view) { browser_view_ = browser_view; }
+    void SetBrowserView(CefRefPtr<CefBrowserView> view) { browserView = view; }
 
 private:
-    CefRefPtr<CefBrowserView> browser_view_;
+    CefRefPtr<CefBrowserView> browserView;
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"
@@ -68,30 +108,17 @@ private:
 class SimpleCEFClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler {
 public:
     SimpleCEFClient() = default;
-
-    // CefClient methods
     virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
-
     virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
 
-    // CefDisplayHandler methods
-    virtual void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
-        (void) browser;
-        (void) title;
-    }
+    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override {}
+    virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override {}
+    virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override { return false; }
 
-    // CefLifeSpanHandler methods
-    virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
-        (void) browser;
-        log::info("CEF Browser created successfully");
+    virtual void OnBeforeClose(CefRefPtr<CefBrowser> /*browser*/) override { 
+        // Ensure message loop exits when browser closes
+        CefQuitMessageLoop();
     }
-
-    virtual bool DoClose(CefRefPtr<CefBrowser> browser) override {
-        (void) browser;
-        return false;
-    }
-
-    virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override { (void) browser; }
 
 private:
 #pragma clang diagnostic push
@@ -108,9 +135,7 @@ public:
     virtual CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
 
     // CefBrowserProcessHandler methods
-    virtual void OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> command_line) override {
-        (void) process_type; // Suppress unused parameter warning
-
+    virtual void OnBeforeCommandLineProcessing(const CefString& /*process_type*/, CefRefPtr<CefCommandLine> command_line) override {
         // Minimal keychain-disabling switches only
         command_line->AppendSwitch("--use-mock-keychain");
         command_line->AppendSwitch("--disable-password-manager");

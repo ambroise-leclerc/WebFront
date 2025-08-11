@@ -93,6 +93,8 @@ public:
 
     void run() { httpServer.run(); }
     void runOne() { httpServer.runOne(); }
+    
+    void stop() { httpServer.stop(); }
 
     void onUIStarted(std::function<void(UI)>&& handler) { uiStartedHandler = std::move(handler); }
     WebLink<Net>& getLink(WebLinkId id) { return webLinks.at(id); }

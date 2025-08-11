@@ -440,6 +440,13 @@ public:
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
+    
+    void stop() {
+        log::info("Stopping HTTP server...");
+        acceptor.close();
+        connections.stopAll();
+        ioContext.stop();
+    }
 
     void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)>&& handler) { upgradeHandler = std::move(handler); }
 

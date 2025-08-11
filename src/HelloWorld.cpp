@@ -1,20 +1,17 @@
 ﻿#include <thread>
 #include <chrono>
+#include <filesystem>
+#include <iostream>
 
 #include <WebFront.hpp>
 #include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
-
-#ifdef WEBFRONT_EMBED_CEF
-#include "include/cef_app.h"
-#include "include/wrapper/cef_library_loader.h"
-#endif
+#include <frontend/CEF.hpp>
 
 using namespace std;
 using namespace webfront;
-
 
 // Find the DocRoot path containing the given file (look for the filename in current directory,
 // in temp directory then in sources directory
@@ -44,38 +41,12 @@ filesystem::path findDocRoot(string filename) {
 }
 
 int main(int argc, char** argv) {
-#ifdef WEBFRONT_EMBED_CEF
-    // Set environment variables BEFORE any CEF operations
-    setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
-    setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
-    setenv("USE_MOCK_KEYCHAIN", "1", 1);
-    setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
-    setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
-    
-    // Load the CEF framework library at runtime - required on macOS
-    CefScopedLibraryLoader library_loader;
-    if (!library_loader.LoadInMain()) {
-        cout << "Failed to load CEF library" << endl;
-        return -1;
+    // Initialize CEF and handle subprocesses
+    int cef_result = webfront::cef::initialize(argc, argv);
+    if (cef_result != 0) {
+        // Either error (-1) or subprocess (>0) - exit either way
+        return cef_result;
     }
-    
-    // CEF subprocesses require CefExecuteProcess to be called first
-    CefMainArgs main_args(argc, argv);
-    
-    // Create a simple app for subprocess handling
-    CefRefPtr<CefApp> app;
-    
-    // Execute the subprocess if this is a helper process
-    int exit_code = CefExecuteProcess(main_args, app, nullptr);
-    if (exit_code >= 0) {
-        // If this is a subprocess, exit immediately
-        return exit_code;
-    }
-#else
-    // Suppress unused parameter warnings when CEF is not available
-    (void)argc;
-    (void)argv;
-#endif
 
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
@@ -106,8 +77,9 @@ int main(int argc, char** argv) {
         auto print = ui.jsFunction("addText");
         print("Hello World", 2022);
         ui.jsFunction("testFunc")("Texte de test suffisament long pour changer de format");
-    });    // Start the HTTP server in a background thread
-    std::atomic<bool> server_should_stop{false};
+    });
+
+    // Start the HTTP server in a background thread
     std::thread serverThread([&webFront]() {
         webFront.run();
     });
@@ -116,8 +88,8 @@ int main(int argc, char** argv) {
 
     log::info("Application window closed");
 
-    // When CEF closes, signal the server to stop
-    server_should_stop = true;
+    // When CEF closes, stop the server cleanly
+    webFront.stop();
 
     log::info("Waiting for server thread to finish...");
     

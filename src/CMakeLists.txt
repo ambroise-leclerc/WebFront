@@ -137,7 +137,8 @@ if(TARGET cef)
                 "$<TARGET_FILE_DIR:WebFrontApp>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CEF_ROOT}/Resources/icudtl.dat"
-                "$<TARGET_FILE_DIR:WebFrontApp>"            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:WebFrontApp>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CEF_ROOT}/Resources/resources.pak"
                 "$<TARGET_FILE_DIR:WebFrontApp>"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
