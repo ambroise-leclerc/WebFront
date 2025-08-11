@@ -28,6 +28,7 @@
 #include "networking/TCPNetworkingTS.hpp"
 
 #include <cstddef>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <span>
@@ -79,13 +80,21 @@ public:
 namespace detail {
     inline int ensureCEFInitialized() {
         if constexpr (cef::webfrontEmbedCEF) {
-            static int init_result = cef::initialize();
-            if (init_result != 0) {
-                throw std::runtime_error("CEF initialization failed");
+            static bool initialized = false;
+            if (!initialized) {
+                try {
+                    cef::initialize();
+                    initialized = true;
+                } catch (const cef::CEFSubprocessExit& e) {
+                    // If this is a CEF subprocess, exit immediately
+                    std::exit(e.exit_code());
+                } catch (const cef::CEFInitializationError& e) {
+                    // CEF initialization failed - this is a fatal error
+                    throw std::runtime_error(e.what());
+                }
             }
-            return init_result;
         }
-        return 0;
+        return 0;  // Return value for comma operator
     }
 } // namespace detail
 

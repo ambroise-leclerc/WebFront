@@ -21,6 +21,25 @@
 
 namespace webfront::cef {
 
+// Exception types for CEF initialization
+class CEFInitializationError : public std::runtime_error {
+public:
+    explicit CEFInitializationError(const std::string& message) 
+        : std::runtime_error("CEF initialization failed: " + message) {}
+};
+
+class CEFSubprocessExit : public std::exception {
+    int exit_code_;
+public:
+    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) {}
+    
+    [[nodiscard]] const char* what() const noexcept override {
+        return "CEF subprocess should exit";
+    }
+    
+    [[nodiscard]] int exit_code() const noexcept { return exit_code_; }
+};
+
 // Compile-time constant indicating CEF availability
 #ifdef WEBFRONT_EMBED_CEF
 static constexpr bool webfrontEmbedCEF{true};
@@ -100,11 +119,14 @@ std::pair<int, std::vector<std::string>> getCommandLineArgs() {
 }
 
 // Initialize CEF and handle subprocesses
-// Returns: -1 on error, 0 to continue with main process, >0 if this is a subprocess (should exit)
-int initialize() {
+// Throws: CEFInitializationError on initialization failure
+// Throws: CEFSubprocessExit if this is a subprocess (caller should exit with the provided code)
+// Returns: void on successful main process initialization
+void initialize() {
     if constexpr (!webfrontEmbedCEF) {
-        return 0;
+        return;
     }
+    
     // Set environment variables BEFORE any CEF operations
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
     setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
@@ -115,8 +137,7 @@ int initialize() {
     // Load the CEF framework library at runtime - required on macOS
     CefScopedLibraryLoader library_loader;
     if (!library_loader.LoadInMain()) {
-        std::cout << "Failed to load CEF library" << std::endl;
-        return -1;
+        throw CEFInitializationError("Failed to load CEF framework library");
     }
     
     // Get command line arguments using platform-specific APIs
@@ -137,12 +158,11 @@ int initialize() {
     // Execute the subprocess if this is a helper process
     int exit_code = CefExecuteProcess(main_args, app, nullptr);
     if (exit_code >= 0) {
-        // If this is a subprocess, return the exit code (caller should exit)
-        return exit_code;
+        // If this is a subprocess, throw exception with exit code
+        throw CEFSubprocessExit(exit_code);
     }
     
-    // Continue with main process
-    return 0;
+    // Main process continues - initialization successful
 }
 
 class SimpleCEFWindowDelegate : public CefWindowDelegate {
@@ -341,8 +361,8 @@ void open(std::string_view port, std::string_view file) {
 namespace webfront::cef {
 
 // Stub implementations for when CEF is not available
-int initialize() {
-    return 0;
+void initialize() {
+    // No-op when CEF is not available
 }
 
 void open(std::string_view /*port*/, std::string_view /*file*/) {

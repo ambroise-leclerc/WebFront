@@ -44,10 +44,14 @@ filesystem::path findDocRoot(string filename) {
 
 int main(int /*argc*/, char** /*argv*/) {
     // Initialize CEF and handle subprocesses
-    int cef_result = webfront::cef::initialize();
-    if (cef_result != 0) {
-        // Either error (-1) or subprocess (>0) - exit either way
-        return cef_result;
+    try {
+        webfront::cef::initialize();
+    } catch (const webfront::cef::CEFSubprocessExit& e) {
+        // If this is a CEF subprocess, exit with the provided code
+        return e.exit_code();
+    } catch (const webfront::cef::CEFInitializationError& e) {
+        std::cerr << e.what() << std::endl;
+        return -1;
     }
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
