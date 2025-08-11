@@ -42,9 +42,9 @@ filesystem::path findDocRoot(string filename) {
     throw runtime_error("Cannot find " + filename + " file");
 }
 
-int main(int argc, char** argv) {
+int main(int /*argc*/, char** /*argv*/) {
     // Initialize CEF and handle subprocesses
-    int cef_result = webfront::cef::initialize(argc, argv);
+    int cef_result = webfront::cef::initialize();
     if (cef_result != 0) {
         // Either error (-1) or subprocess (>0) - exit either way
         return cef_result;

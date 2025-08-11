@@ -6,8 +6,18 @@
 #include <iostream>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include <tooling/Logger.hpp>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#elif __linux__
+#include <fstream>
+#elif __APPLE__
+#include <crt_externs.h>
+#endif
 
 #ifdef WEBFRONT_EMBED_CEF
 
@@ -23,9 +33,64 @@
 
 namespace webfront::cef {
 
+// Platform-specific function to get command line arguments
+std::pair<int, std::vector<std::string>> getCommandLineArgs() {
+#ifdef _WIN32
+    LPWSTR* argv_w;
+    int argc;
+    argv_w = CommandLineToArgvW(GetCommandLineW(), &argc);
+    
+    std::vector<std::string> argv;
+    for (int i = 0; i < argc; ++i) {
+        int size = WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, nullptr, 0, nullptr, nullptr);
+        std::string arg(size - 1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, arg.data(), size, nullptr, nullptr);
+        argv.push_back(std::move(arg));
+    }
+    
+    LocalFree(argv_w);
+    return {argc, std::move(argv)};
+    
+#elif __linux__
+    std::ifstream cmdline("/proc/self/cmdline");
+    std::vector<std::string> argv;
+    std::string arg;
+    
+    while (std::getline(cmdline, arg, '\0')) {
+        if (!arg.empty()) {
+            argv.push_back(arg);
+        }
+    }
+    
+    return {static_cast<int>(argv.size()), std::move(argv)};
+    
+#elif __APPLE__
+    char*** argv_ptr = _NSGetArgv();
+    int* argc_ptr = _NSGetArgc();
+    
+    if (!argv_ptr || !argc_ptr || !*argv_ptr) {
+        return {0, {}};
+    }
+    
+    int argc = *argc_ptr;
+    char** argv_c = *argv_ptr;
+    std::vector<std::string> argv;
+    
+    for (int i = 0; i < argc; ++i) {
+        argv.emplace_back(argv_c[i]);
+    }
+    
+    return {argc, std::move(argv)};
+    
+#else
+    // Fallback - return empty arguments
+    return {0, {}};
+#endif
+}
+
 // Initialize CEF and handle subprocesses
 // Returns: -1 on error, 0 to continue with main process, >0 if this is a subprocess (should exit)
-int initialize(int argc, char** argv) {
+int initialize() {
 #ifdef WEBFRONT_EMBED_CEF
     // Set environment variables BEFORE any CEF operations
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
@@ -41,8 +106,17 @@ int initialize(int argc, char** argv) {
         return -1;
     }
     
+    // Get command line arguments using platform-specific APIs
+    auto [argc, argv_vec] = getCommandLineArgs();
+    
+    // Convert std::vector<std::string> to char** for CEF
+    std::vector<char*> argv_ptrs;
+    for (auto& arg : argv_vec) {
+        argv_ptrs.push_back(arg.data());
+    }
+    
     // CEF subprocesses require CefExecuteProcess to be called first
-    CefMainArgs main_args(argc, argv);
+    CefMainArgs main_args(argc, argv_ptrs.data());
     
     // Create a simple app for subprocess handling
     CefRefPtr<CefApp> app;
@@ -57,9 +131,6 @@ int initialize(int argc, char** argv) {
     // Continue with main process
     return 0;
 #else
-    // Suppress unused parameter warnings when CEF is not available
-    (void)argc;
-    (void)argv;
     return 0;
 #endif
 }

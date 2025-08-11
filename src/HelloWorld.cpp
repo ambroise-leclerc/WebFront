@@ -40,14 +40,7 @@ filesystem::path findDocRoot(string filename) {
     throw runtime_error("Cannot find " + filename + " file");
 }
 
-int main(int argc, char** argv) {
-    // Initialize CEF and handle subprocesses
-    int cef_result = webfront::cef::initialize(argc, argv);
-    if (cef_result != 0) {
-        // Either error (-1) or subprocess (>0) - exit either way
-        return cef_result;
-    }
-
+int main(int /*argc*/, char** /*argv*/) {
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
@@ -59,6 +52,12 @@ int main(int argc, char** argv) {
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
+    int cef_result = webfront::cef::initialize();
+    if (cef_result != 0) {
+        // Either error (-1) or subprocess (>0) - exit either way
+        return cef_result;
+    }
+
     WebFrontDbg webFront(httpPort, docRoot);
 
     webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
@@ -75,7 +74,7 @@ int main(int argc, char** argv) {
                      "  cppTest(text, bigText, bigText.length);           \n"
                      "}                                                   \n");
         auto print = ui.jsFunction("addText");
-        print("Hello World", 2022);
+        print("Hello World", 2025);
         ui.jsFunction("testFunc")("Texte de test suffisament long pour changer de format");
     });
 
