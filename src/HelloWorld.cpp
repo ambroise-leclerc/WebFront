@@ -52,12 +52,6 @@ int main(int /*argc*/, char** /*argv*/) {
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
-    int cef_result = webfront::cef::initialize();
-    if (cef_result != 0) {
-        // Either error (-1) or subprocess (>0) - exit either way
-        return cef_result;
-    }
-
     WebFrontDbg webFront(httpPort, docRoot);
 
     webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });

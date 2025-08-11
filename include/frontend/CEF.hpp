@@ -19,6 +19,17 @@
 #include <crt_externs.h>
 #endif
 
+namespace webfront::cef {
+
+// Compile-time constant indicating CEF availability
+#ifdef WEBFRONT_EMBED_CEF
+static constexpr bool webfrontEmbedCEF{true};
+#else
+static constexpr bool webfrontEmbedCEF{false};
+#endif
+
+} // namespace webfront::cef
+
 #ifdef WEBFRONT_EMBED_CEF
 
 #include "cef_app.h"
@@ -91,7 +102,9 @@ std::pair<int, std::vector<std::string>> getCommandLineArgs() {
 // Initialize CEF and handle subprocesses
 // Returns: -1 on error, 0 to continue with main process, >0 if this is a subprocess (should exit)
 int initialize() {
-#ifdef WEBFRONT_EMBED_CEF
+    if constexpr (!webfrontEmbedCEF) {
+        return 0;
+    }
     // Set environment variables BEFORE any CEF operations
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
     setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
@@ -130,9 +143,6 @@ int initialize() {
     
     // Continue with main process
     return 0;
-#else
-    return 0;
-#endif
 }
 
 class SimpleCEFWindowDelegate : public CefWindowDelegate {
@@ -236,6 +246,10 @@ private:
 };
 
 void open(std::string_view port, std::string_view file) {
+    if constexpr (!webfrontEmbedCEF) {
+        throw std::runtime_error("cef::open() : CEF not available");
+    }
+    
     // Minimal keychain blocking environment variables
     setenv("USE_MOCK_KEYCHAIN", "1", 1);
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
@@ -320,14 +334,20 @@ void open(std::string_view port, std::string_view file) {
     // Shutdown CEF
     CefShutdown();
 }
-static constexpr bool webfrontEmbedCEF{true};
+
 } // namespace webfront::cef
 #else
+
 namespace webfront::cef {
+
+// Stub implementations for when CEF is not available
+int initialize() {
+    return 0;
+}
 
 void open(std::string_view /*port*/, std::string_view /*file*/) {
     throw std::runtime_error("cef::open() : CEF not available");
 }
-static constexpr bool webfrontEmbedCEF{false};
+
 } // namespace webfront::cef
 #endif // WEBFRONT_EMBED_CEF

@@ -75,6 +75,20 @@ public:
     }
 };
 
+// Global initialization helper to ensure CEF initializes before any networking
+namespace detail {
+    inline int ensureCEFInitialized() {
+        if constexpr (cef::webfrontEmbedCEF) {
+            static int init_result = cef::initialize();
+            if (init_result != 0) {
+                throw std::runtime_error("CEF initialization failed");
+            }
+            return init_result;
+        }
+        return 0;
+    }
+} // namespace detail
+
 template<typename NetProvider, typename Filesystem>
 class BasicWF {
 public:
@@ -82,7 +96,7 @@ public:
     using UI = BasicUI<BasicWF<Net, Filesystem>>;
 
     BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
-        : httpServer("0.0.0.0", port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
+        : httpServer((detail::ensureCEFInitialized(), "0.0.0.0"), port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
@@ -93,7 +107,7 @@ public:
 
     void run() { httpServer.run(); }
     void runOne() { httpServer.runOne(); }
-    
+
     void stop() { httpServer.stop(); }
 
     void onUIStarted(std::function<void(UI)>&& handler) { uiStartedHandler = std::move(handler); }
