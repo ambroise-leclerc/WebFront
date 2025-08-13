@@ -18,15 +18,23 @@ if(CEF_AVAILABLE)
     # Manually add the correct include directory since the CEF target seems to have incorrect include path
     # CEF headers expect to be included from the parent of the include directory
     # Mark as SYSTEM to suppress warnings from CEF headers
-    target_include_directories(WebFrontApp SYSTEM PRIVATE "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
+    target_include_directories(WebFrontApp SYSTEM PRIVATE 
+        "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src"
+        "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/include"
+    )
     
     # Override CEF library with Debug version for Debug builds
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         message(STATUS "Using Debug CEF libraries")
-        target_link_libraries(WebFrontApp PRIVATE 
-            "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/Debug/libcef.lib"
-            comctl32.lib rpcrt4.lib shlwapi.lib ws2_32.lib winmm.lib winspool.lib psapi.lib
-        )
+        if(WIN32)
+            target_link_libraries(WebFrontApp PRIVATE 
+                "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/Debug/libcef.lib"
+                comctl32.lib rpcrt4.lib shlwapi.lib ws2_32.lib winmm.lib winspool.lib psapi.lib
+            )
+        else()
+            # For non-Windows platforms, use the cef target which has correct platform-specific paths
+            target_link_libraries(WebFrontApp PRIVATE cef)
+        endif()
     else()
         # For Release builds, use the cef target as-is
         target_link_libraries(WebFrontApp PRIVATE cef)

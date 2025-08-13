@@ -6,7 +6,10 @@ target_link_libraries(webtest PRIVATE WebFront)
 # Add CEF support if available (same as WebFrontApp)
 if(WEBFRONT_EMBED_CEF AND TARGET cef)
     # Add CEF include directories
-    target_include_directories(webtest SYSTEM PRIVATE "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
+    target_include_directories(webtest SYSTEM PRIVATE 
+        "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src"
+        "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/include"
+    )
     
     # Link CEF libraries
     target_link_libraries(webtest PRIVATE cef)
