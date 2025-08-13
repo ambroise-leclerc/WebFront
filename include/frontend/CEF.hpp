@@ -59,7 +59,9 @@ static constexpr bool webfrontEmbedCEF{false};
 #include "views/cef_browser_view.h"
 #include "views/cef_window.h"
 #include "views/cef_window_delegate.h"
+#ifdef __APPLE__
 #include "wrapper/cef_library_loader.h"
+#endif
 
 namespace webfront::cef {
 
@@ -134,11 +136,13 @@ void initialize() {
     setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
     setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
     
+#ifdef __APPLE__
     // Load the CEF framework library at runtime - required on macOS
     CefScopedLibraryLoader library_loader;
     if (!library_loader.LoadInMain()) {
         throw CEFInitializationError("Failed to load CEF framework library");
     }
+#endif
     
     // Get command line arguments using platform-specific APIs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -200,10 +204,14 @@ public:
 private:
     CefRefPtr<CefBrowserView> browserView;
 
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"
+#endif
     IMPLEMENT_REFCOUNTING(SimpleCEFWindowDelegate);
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 };
 
 class SimpleCEFClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler {
@@ -222,10 +230,14 @@ public:
     }
 
 private:
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"
+#endif
     IMPLEMENT_REFCOUNTING(SimpleCEFClient);
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 };
 
 class SimpleCEFApp : public CefApp, public CefBrowserProcessHandler {
@@ -259,10 +271,14 @@ public:
     }
 
 private:
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"
+#endif
     IMPLEMENT_REFCOUNTING(SimpleCEFApp);
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 };
 
 void open(std::string_view port, std::string_view file) {
