@@ -115,12 +115,15 @@ endif()
 set(BUILD_TESTING ${BUILD_TESTING_SAVED} CACHE BOOL "Restore original testing setting" FORCE)
 
 # Add CEF headers to WebFront interface after CEF is configured
-if(WEBFRONT_EMBED_CEF AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
+if(WEBFRONT_EMBED_CEF AND TARGET cef)
+  # Use the same include directories that the CEF target provides
+  get_target_property(CEF_INCLUDE_DIRS cef INTERFACE_INCLUDE_DIRECTORIES)
+  target_include_directories(WebFront SYSTEM INTERFACE ${CEF_INCLUDE_DIRS})
+  # Also add the wrapper include directory
   target_include_directories(WebFront SYSTEM INTERFACE 
-    "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src"
     "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/include"
   )
-  message(STATUS "Added CEF include directories to WebFront interface")
+  message(STATUS "Added CEF include directories to WebFront interface: ${CEF_INCLUDE_DIRS}")
 endif()
 
 # Handle macOS CEF framework structure
