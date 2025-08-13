@@ -114,6 +114,15 @@ endif()
 # Restore the original BUILD_TESTING setting after CEF is configured
 set(BUILD_TESTING ${BUILD_TESTING_SAVED} CACHE BOOL "Restore original testing setting" FORCE)
 
+# Add CEF headers to WebFront interface after CEF is configured
+if(WEBFRONT_EMBED_CEF AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
+  target_include_directories(WebFront SYSTEM INTERFACE 
+    "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src"
+    "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/include"
+  )
+  message(STATUS "Added CEF include directories to WebFront interface")
+endif()
+
 # Handle macOS CEF framework structure
 if(APPLE AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
     # Check if the libcef_dll_wrapper directory exists, create it if not
@@ -138,13 +147,6 @@ endif()
 
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
-# Ajouter les headers CEF à WebFront comme headers système pour éviter les warnings
-if(WEBFRONT_EMBED_CEF AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
-  target_include_directories(WebFront SYSTEM INTERFACE 
-    "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src"
-    "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/include"
-  )
-endif()
 include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
 add_compile_definitions(_WIN32_WINNT=0x0501)
