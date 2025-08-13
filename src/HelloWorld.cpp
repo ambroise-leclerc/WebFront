@@ -1,14 +1,15 @@
-﻿#include <thread>
-#include <chrono>
+﻿#include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <thread>
 
 #include <WebFront.hpp>
+#include <details/C++23Support.hpp>
+#include <frontend/CEF.hpp>
 #include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
-#include <frontend/CEF.hpp>
 
 using namespace std;
 using namespace webfront;
@@ -44,7 +45,6 @@ int main(int /*argc*/, char** /*argv*/) {
     using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
-
     auto httpPort = "9002";
     auto mainHtml = "react.html";
     auto docRoot = findDocRoot(mainHtml);
@@ -55,7 +55,7 @@ int main(int /*argc*/, char** /*argv*/) {
     WebFrontDbg webFront(httpPort, docRoot);
 
     webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
-      webFront.onUIStarted([](WebFrontDbg::UI ui) {
+    webFront.onUIStarted([](WebFrontDbg::UI ui) {
         ui.addScript("var addText = function(text, num) {                 \n"
                      "  let print = webFront.cppFunction('print');        \n"
                      "  print(text + ' of ' + num);                       \n"
@@ -72,24 +72,7 @@ int main(int /*argc*/, char** /*argv*/) {
         ui.jsFunction("testFunc")("Texte de test suffisament long pour changer de format");
     });
 
-    // Start the HTTP server in a background thread
-    std::thread serverThread([&webFront]() {
-        webFront.run();
-    });
-
-    webFront.openWindow(mainHtml);
-
-    log::info("Application window closed");
-
-    // When CEF closes, stop the server cleanly
-    webFront.stop();
-
-    log::info("Waiting for server thread to finish...");
-    
-    // Wait for the server thread to finish
-    if (serverThread.joinable()) {
-        serverThread.join();
-    }
+    webFront.openAndRun(mainHtml);
 
     log::info("Application shutdown complete.");
 

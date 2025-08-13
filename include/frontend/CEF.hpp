@@ -332,7 +332,7 @@ void open(std::string_view port, std::string_view file) {
     log::info("Opening URL: {}", url);
 
     // Give the server a moment to be ready
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+   // std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     // Browser settings for the modern Views approach
     CefBrowserSettings browser_settings;

@@ -4,6 +4,8 @@
 #pragma once
 #include <bit>
 #include <cstdint>
+#include <future>
+#include <type_traits>
 namespace std {
 
 /// template<typename T> constexpr T byteswap( T n ) noexcept;
