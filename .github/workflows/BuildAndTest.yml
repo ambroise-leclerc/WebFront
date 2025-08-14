@@ -62,27 +62,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y lcov
-
-      - name: Install ccache
-        run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y ccache
-            ccache --version
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            brew install ccache
-            ccache --version
-          elif [[ "${{ runner.os }}" == "Windows" ]]; then
-            choco install ccache
-            ccache --version
-          fi
-        shell: bash
-
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ matrix.config.os }}-${{ matrix.config.compiler }}
-          max-size: 2G
         
       - name: Config & Build
         run: |

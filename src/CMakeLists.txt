@@ -23,10 +23,15 @@ if(CEF_AVAILABLE)
     # Override CEF library with Debug version for Debug builds
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         message(STATUS "Using Debug CEF libraries")
-        target_link_libraries(WebFrontApp PRIVATE 
-            "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/Debug/libcef.lib"
-            comctl32.lib rpcrt4.lib shlwapi.lib ws2_32.lib winmm.lib winspool.lib psapi.lib
-        )
+        if(WIN32)
+            target_link_libraries(WebFrontApp PRIVATE 
+                "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src/Debug/libcef.lib"
+                comctl32.lib rpcrt4.lib shlwapi.lib ws2_32.lib winmm.lib winspool.lib psapi.lib
+            )
+        else()
+            # For non-Windows Debug builds, use the cef target as-is
+            target_link_libraries(WebFrontApp PRIVATE cef)
+        endif()
     else()
         # For Release builds, use the cef target as-is
         target_link_libraries(WebFrontApp PRIVATE cef)
