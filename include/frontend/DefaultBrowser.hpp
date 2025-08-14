@@ -1,6 +1,8 @@
 #pragma once
+#include <stdexcept>
 #include <string>
 #include <string_view>
+
 
 namespace webfront::browser {
 /// Open the web UI in the system's default browser
@@ -14,7 +16,10 @@ void open(std::string_view port, std::string_view file) {
 #endif
 
     auto url = std::string("http://localhost:").append(port) + std::string("/").append(file);
-    ::system(command.append(url).c_str());
+    auto systemResult = ::system(command.append(url).c_str());
+    if (systemResult != 0) {
+        throw std::runtime_error("Failed to open browser with command: " + command + url);
+    }
 }
 
 } // namespace webfront
