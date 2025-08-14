@@ -257,6 +257,17 @@ public:
         command_line->AppendSwitch("--disable-extensions");
         command_line->AppendSwitch("--disable-plugins-discovery");
 
+        // Linux-specific fixes for CEF initialization issues
+#ifdef __linux__
+        command_line->AppendSwitch("--no-sandbox");
+        command_line->AppendSwitch("--disable-dev-shm-usage");
+        command_line->AppendSwitch("--disable-gpu-sandbox");
+        command_line->AppendSwitch("--disable-software-rasterizer");
+        command_line->AppendSwitch("--disable-background-timer-throttling");
+        command_line->AppendSwitch("--disable-renderer-backgrounding");
+        command_line->AppendSwitch("--disable-backgrounding-occluded-windows");
+#endif
+
         // Enable Views framework for chromeless windows
         command_line->AppendSwitch("--use-views");
     }
@@ -323,6 +334,46 @@ void open(std::string_view port, std::string_view file) {
     settings.log_severity = LOGSEVERITY_INFO;
 
     // Note: Limited settings available in this CEF version
+#elif defined(__linux__)
+    settings.multi_threaded_message_loop = false;
+
+    // Set resource paths for Linux - find where the executable is
+    std::filesystem::path current_exe = std::filesystem::canonical("/proc/self/exe");
+    std::filesystem::path exe_dir = current_exe.parent_path();
+    
+    // Resources should be in the same directory as the executable
+    std::filesystem::path resources_path = exe_dir;
+    std::filesystem::path locales_path = resources_path / "locales";
+    std::filesystem::path exe_path = current_exe;
+    std::filesystem::path cache_path = exe_dir / "cef_cache";
+    std::filesystem::create_directories(cache_path);
+
+    // Convert to absolute paths
+    resources_path = std::filesystem::absolute(resources_path);
+    locales_path = std::filesystem::absolute(locales_path);
+    exe_path = std::filesystem::absolute(exe_path);
+    cache_path = std::filesystem::absolute(cache_path);
+
+    std::cout << "CEF Linux paths:" << std::endl;
+    std::cout << "  Resources: " << resources_path.string() << std::endl;
+    std::cout << "  Locales: " << locales_path.string() << std::endl;
+    std::cout << "  Executable: " << exe_path.string() << std::endl;
+    std::cout << "  Cache: " << cache_path.string() << std::endl;
+    
+    // Check if ICU data file exists
+    std::filesystem::path icu_file = resources_path / "icudtl.dat";
+    std::cout << "  ICU data file: " << icu_file.string() << " (exists: " << std::filesystem::exists(icu_file) << ")" << std::endl;
+    
+    CefString(&settings.resources_dir_path).FromString(resources_path.string());
+    CefString(&settings.locales_dir_path).FromString(locales_path.string());
+    CefString(&settings.browser_subprocess_path).FromString(exe_path.string());
+    CefString(&settings.root_cache_path).FromString(cache_path.string());
+    CefString(&settings.cache_path).FromString(cache_path.string());
+
+    // Enable logging to debug Linux issues
+    std::filesystem::path log_path = exe_dir / "cef_debug.log";
+    CefString(&settings.log_file).FromString(log_path.string());
+    settings.log_severity = LOGSEVERITY_INFO;
 #endif
     std::cout << "Attempting CEF initialization..." << std::endl;
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
