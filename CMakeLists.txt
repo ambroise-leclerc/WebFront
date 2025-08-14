@@ -10,6 +10,14 @@ file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING R
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
+# Enable pthreads on POSIX (needed for libstdc++ internal threading in <chrono>, benchmarks, etc.)
+if (UNIX AND NOT APPLE)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  add_compile_options($<$<COMPILE_LANGUAGE:C>:-pthread>$<$<COMPILE_LANGUAGE:CXX>:-pthread>)
+  add_link_options(-pthread)
+endif()
+
 add_library(WebFront INTERFACE)
 
 # Static linkage for CEF compatibility
@@ -99,6 +107,12 @@ else()
     message(STATUS "WebFront: Embedded CEF window support disabled")
 endif()
 
+# Workaround: CEF ships only release libs (iterator debug level 0). Prevent MSVC debug iterator level mismatch.
+if (WEBFRONT_EMBED_CEF AND MSVC)
+    # Apply globally so test targets (e.g., JasmineTest) match libcef_dll_wrapper.
+    add_compile_definitions(_ITERATOR_DEBUG_LEVEL=0 _HAS_ITERATOR_DEBUGGING=0)
+endif()
+
 # Override CEF testing to prevent any test building on macOS and problematic platforms
 if(WEBFRONT_EMBED_CEF AND (APPLE OR CMAKE_SYSTEM_NAME MATCHES "Darwin"))
     # Replace the CEF testing file to disable all tests
@@ -145,7 +159,14 @@ if(EXISTS "${CEF_ROOT}")
 endif()
 include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
-add_compile_definitions(_WIN32_WINNT=0x0501)
+# Only define Windows version macros when building on Windows.
+# Defining _WIN32_WINNT on non-Windows (e.g. WSL/Linux) breaks libstdc++ headers.
+if (WIN32)
+  # Prefer Windows 10 (0x0A00). Allow user override by predefining WINVER/_WIN32_WINNT.
+  if (NOT DEFINED WINVER AND NOT DEFINED _WIN32_WINNT)
+    add_compile_definitions(WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+  endif()
+endif()
 
 if(ENABLE_TESTING)
   enable_testing()

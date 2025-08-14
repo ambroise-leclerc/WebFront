@@ -65,13 +65,12 @@ static constexpr bool webfrontEmbedCEF{false};
 
 namespace webfront::cef {
 
-// Platform-specific function to get command line arguments
-std::pair<int, std::vector<std::string>> getCommandLineArgs() {
-#ifdef _WIN32
+// Platform-specific function to get command line arguments (inline definition)
+inline std::pair<int, std::vector<std::string>> getCommandLineArgs() {
+#if defined(_WIN32)
     LPWSTR* argv_w;
     int argc;
     argv_w = CommandLineToArgvW(GetCommandLineW(), &argc);
-    
     std::vector<std::string> argv;
     for (int i = 0; i < argc; ++i) {
         int size = WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, nullptr, 0, nullptr, nullptr);
@@ -79,44 +78,44 @@ std::pair<int, std::vector<std::string>> getCommandLineArgs() {
         WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, arg.data(), size, nullptr, nullptr);
         argv.push_back(std::move(arg));
     }
-    
     LocalFree(argv_w);
     return {argc, std::move(argv)};
-    
-#elif __linux__
+#elif defined(__linux__)
     std::ifstream cmdline("/proc/self/cmdline");
     std::vector<std::string> argv;
     std::string arg;
-    
     while (std::getline(cmdline, arg, '\0')) {
-        if (!arg.empty()) {
-            argv.push_back(arg);
-        }
+        if (!arg.empty()) argv.push_back(arg);
     }
-    
     return {static_cast<int>(argv.size()), std::move(argv)};
-    
-#elif __APPLE__
+#elif defined(__APPLE__)
     char*** argv_ptr = _NSGetArgv();
     int* argc_ptr = _NSGetArgc();
-    
     if (!argv_ptr || !argc_ptr || !*argv_ptr) {
         return {0, {}};
     }
-    
     int argc = *argc_ptr;
     char** argv_c = *argv_ptr;
     std::vector<std::string> argv;
-    
     for (int i = 0; i < argc; ++i) {
         argv.emplace_back(argv_c[i]);
     }
-    
     return {argc, std::move(argv)};
-    
 #else
-    // Fallback - return empty arguments
     return {0, {}};
+#endif
+}
+
+// Helper to build CefMainArgs portably
+inline CefMainArgs makeMainArgs(
+#if !defined(_WIN32)
+    int argc, char** argv
+#endif
+) {
+#if defined(_WIN32)
+    return CefMainArgs(GetModuleHandle(nullptr));
+#else
+    return CefMainArgs(argc, argv);
 #endif
 }
 
@@ -128,14 +127,14 @@ void initialize() {
     if constexpr (!webfrontEmbedCEF) {
         return;
     }
-    
-    // Set environment variables BEFORE any CEF operations
+    // Set environment variables BEFORE any CEF operations (macOS/Linux only; they are keychain-related)
+#if defined(__APPLE__) || defined(__linux__)
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
-    setenv("OSX_DISABLE_KEYCHAIN", "1", 1);  
+    setenv("OSX_DISABLE_KEYCHAIN", "1", 1);
     setenv("USE_MOCK_KEYCHAIN", "1", 1);
     setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
     setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
-    
+#endif
 #ifdef __APPLE__
     // Load the CEF framework library at runtime - required on macOS
     CefScopedLibraryLoader library_loader;
@@ -143,29 +142,21 @@ void initialize() {
         throw CEFInitializationError("Failed to load CEF framework library");
     }
 #endif
-    
-    // Get command line arguments using platform-specific APIs
     auto [argc, argv_vec] = getCommandLineArgs();
-    
-    // Convert std::vector<std::string> to char** for CEF
     std::vector<char*> argv_ptrs;
     for (auto& arg : argv_vec) {
         argv_ptrs.push_back(arg.data());
     }
-    
-    // CEF subprocesses require CefExecuteProcess to be called first
-    CefMainArgs main_args(argc, argv_ptrs.data());
-    
-    // Create a simple app for subprocess handling
+    CefMainArgs main_args = makeMainArgs(
+#if !defined(_WIN32)
+        argc, argv_ptrs.data()
+#endif
+    );
     CefRefPtr<CefApp> app;
-    
-    // Execute the subprocess if this is a helper process
     int exit_code = CefExecuteProcess(main_args, app, nullptr);
     if (exit_code >= 0) {
-        // If this is a subprocess, throw exception with exit code
         throw CEFSubprocessExit(exit_code);
     }
-    
     // Main process continues - initialization successful
 }
 
@@ -285,20 +276,24 @@ void open(std::string_view port, std::string_view file) {
     if constexpr (!webfrontEmbedCEF) {
         throw std::runtime_error("cef::open() : CEF not available");
     }
-    
-    // Minimal keychain blocking environment variables
+#if defined(__APPLE__) || defined(__linux__)
     setenv("USE_MOCK_KEYCHAIN", "1", 1);
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
-
-    // CEF command line arguments
-    CefMainArgs main_args;
-
-    // Minimal CEF settings - let CEF use its defaults for JavaScript/web features
+#endif
+    // Build platform-appropriate CefMainArgs
+    auto [argc, argv_vec] = getCommandLineArgs();
+    std::vector<char*> argv_ptrs;
+    for (auto& arg : argv_vec) {
+        argv_ptrs.push_back(arg.data());
+    }
+    CefMainArgs main_args = makeMainArgs(
+#if !defined(_WIN32)
+        argc, argv_ptrs.data()
+#endif
+    );
     CefSettings settings;
     settings.no_sandbox = true;
-
 #ifdef __APPLE__
-    // macOS-specific CEF settings
     settings.multi_threaded_message_loop = false;
 
     // Set framework and resource paths for macOS
@@ -329,16 +324,11 @@ void open(std::string_view port, std::string_view file) {
 
     // Note: Limited settings available in this CEF version
 #endif
-
-    // Initialize CEF with minimal custom app
     std::cout << "Attempting CEF initialization..." << std::endl;
-
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
-
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         throw std::runtime_error("CEF initialization failed");
     }
-    
     // Create the browser client
     CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient);
 
