@@ -169,22 +169,39 @@ if(TARGET cef)
     elseif(UNIX)
         # Linux uses Resources directory like Windows
         add_custom_command(TARGET WebFrontApp POST_BUILD
+            # Copy to application directory (existing behavior)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CEF_ROOT}/Resources/chrome_100_percent.pak"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/chrome_100_percent.pak"
                 "$<TARGET_FILE_DIR:WebFrontApp>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CEF_ROOT}/Resources/chrome_200_percent.pak"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/chrome_200_percent.pak"
                 "$<TARGET_FILE_DIR:WebFrontApp>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CEF_ROOT}/Resources/icudtl.dat"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/icudtl.dat"
                 "$<TARGET_FILE_DIR:WebFrontApp>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CEF_ROOT}/Resources/resources.pak"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/resources.pak"
                 "$<TARGET_FILE_DIR:WebFrontApp>"
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CEF_ROOT}/Resources/locales"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/locales"
                 "$<TARGET_FILE_DIR:WebFrontApp>/locales"
-            COMMENT "Copying CEF resource files to output directory"
+            # Also copy to CEF binary directory where CEF expects them (fix ICU loading issue)
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/chrome_100_percent.pak"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Release/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/chrome_200_percent.pak"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Release/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/icudtl.dat"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Release/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/resources.pak"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Release/"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Resources/locales"
+                "${CMAKE_CURRENT_BINARY_DIR}/../_deps/cef_binaries-src/Release/locales"
+            COMMENT "Copying CEF resource files to output and binary directories"
         )
     endif()
     
