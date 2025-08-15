@@ -3,15 +3,6 @@
 /// @brief C++2x networking TS from std::experimental::net
 #pragma once
 
-// On Windows, ensure WinSock2.h is included before any headers that might include WinSock.h
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
-
 #include "BasicNetworking.hpp"
 
 #include <experimental/net>

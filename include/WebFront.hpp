@@ -3,19 +3,7 @@
 /// @brief WebFront UI main objet
 #pragma once
 
-// Prevent Windows min/max macros from interfering with std::min/max
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-// Ensure WinSock2.h is included before any headers that might include WinSock.h
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
-
+#include "system/WindowsCompat.hpp"
 #include "JsFunction.hpp"
 #include "frontend/CEF.hpp"
 #include "frontend/DefaultBrowser.hpp"
