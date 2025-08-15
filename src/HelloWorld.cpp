@@ -1,19 +1,20 @@
-﻿#include <chrono>
-#include <filesystem>
-#include <iostream>
-#include <thread>
-
-#include <WebFront.hpp>
-#include <details/C++23Support.hpp>
-#include <frontend/CEF.hpp>
-#include <system/BabelFS.hpp>
+﻿#include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
+#include <system/FileSystem.hpp>
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
+#include <WebFront.hpp>
+#include <tooling/Logger.hpp>
+
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <stdexcept>
 
 using namespace std;
 using namespace webfront;
 
+namespace {
 // Find the DocRoot path containing the given file (look for the filename in current directory,
 // in temp directory then in sources directory
 //
@@ -23,38 +24,45 @@ filesystem::path findDocRoot(string filename) {
     using namespace filesystem;
 
     log::info("Looking for {} in {}", filename, current_path().string());
-    if (exists(current_path() / filename)) return current_path();
+    if (exists(current_path() / filename))
+        return current_path();
 
     log::info("  not found : Looking now in temp directory {} ", temp_directory_path().string());
-    if (exists(temp_directory_path() / filename)) return temp_directory_path();
+    if (exists(temp_directory_path() / filename))
+        return temp_directory_path();
 
-    path webfront, cp{current_path()};
-    for (auto element = cp.begin(); element != cp.end(); ++element) {
-        webfront = webfront / *element;
-        if (*element == "WebFront") {
+    path webfront;
+    for (const auto& element : current_path()) {
+        webfront = webfront / element;
+        if (element == "WebFront") {
             webfront = webfront / "src";
             log::info("  not found : Looking now in source directory {}", webfront.string());
-            if (exists(webfront / filename)) return webfront;
+            if (exists(webfront / filename))
+                return webfront;
         }
     }
 
     throw runtime_error("Cannot find " + filename + " file");
 }
 
+}  // namespace
+
 int main(int /*argc*/, char** /*argv*/) {
-    using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
+    using HelloFS     = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
-    auto httpPort = "9002";
-    auto mainHtml = "react.html";
-    auto docRoot = findDocRoot(mainHtml);
+    const string httpPort = "9002";
+    const string mainHtml = "react.html";
+    auto docRoot  = findDocRoot(mainHtml);
 
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
     WebFrontDbg webFront(httpPort, docRoot);
 
-    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
+    webFront.cppFunction<void, std::string>("print", [](const std::string& text) {
+        std::cout << text << '\n';
+    });
     webFront.onUIStarted([](WebFrontDbg::UI ui) {
         ui.addScript("var addText = function(text, num) {                 \n"
                      "  let print = webFront.cppFunction('print');        \n"

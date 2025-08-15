@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../tooling/Logger.hpp"
+
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -8,15 +10,13 @@
 #include <thread>
 #include <vector>
 
-#include <tooling/Logger.hpp>
-
 #ifdef _WIN32
-#include <shellapi.h>
-#include <windows.h>
+    #include <shellapi.h>
+    #include <windows.h>
 #elif __linux__
-#include <fstream>
+    #include <fstream>
 #elif __APPLE__
-#include <crt_externs.h>
+    #include <crt_externs.h>
 #endif
 
 namespace webfront::cef {
@@ -33,9 +33,13 @@ class CEFSubprocessExit : public std::exception {
 public:
     explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) {}
 
-    [[nodiscard]] const char* what() const noexcept override { return "CEF subprocess should exit"; }
+    [[nodiscard]] const char* what() const noexcept override {
+        return "CEF subprocess should exit";
+    }
 
-    [[nodiscard]] int exit_code() const noexcept { return exit_code_; }
+    [[nodiscard]] int exit_code() const noexcept {
+        return exit_code_;
+    }
 };
 
 // Compile-time constant indicating CEF availability
@@ -45,65 +49,65 @@ static constexpr bool webfrontEmbedCEF{true};
 static constexpr bool webfrontEmbedCEF{false};
 #endif
 
-} // namespace webfront::cef
+}  // namespace webfront::cef
 
 #ifdef WEBFRONT_EMBED_CEF
 
-#include "cef_app.h"
-#include "cef_browser.h"
-#include "cef_browser_process_handler.h"
-#include "cef_client.h"
-#include "cef_command_line.h"
-#include "views/cef_browser_view.h"
-#include "views/cef_window.h"
-#include "views/cef_window_delegate.h"
-#ifdef __APPLE__
-#include "wrapper/cef_library_loader.h"
-#endif
+    #include "cef_app.h"
+    #include "cef_browser.h"
+    #include "cef_browser_process_handler.h"
+    #include "cef_client.h"
+    #include "cef_command_line.h"
+    #include "views/cef_browser_view.h"
+    #include "views/cef_window.h"
+    #include "views/cef_window_delegate.h"
+    #ifdef __APPLE__
+        #include "wrapper/cef_library_loader.h"
+    #endif
 
 namespace webfront::cef {
 
 // Constants
 namespace {
-constexpr const char* kWindowTitle = "WebFront Application";
-constexpr int kDefaultWindowWidth = 1200;
-constexpr int kDefaultWindowHeight = 800;
-constexpr const char* kCEFCacheDir = "cef_cache";
-constexpr const char* kCEFLogFile = "cef_debug.log";
-constexpr const char* kICUDataFile = "icudtl.dat";
-constexpr const char* kLocalesDir = "locales";
-constexpr const char* kFrameworkName = "Chromium Embedded Framework.framework";
-constexpr const char* kResourcesDir = "Resources";
-constexpr const char* kExecutableName = "WebFrontApp";
-} // namespace
+constexpr const char* kWindowTitle         = "WebFront Application";
+constexpr int         kDefaultWindowWidth  = 1200;
+constexpr int         kDefaultWindowHeight = 800;
+constexpr const char* kCEFCacheDir         = "cef_cache";
+constexpr const char* kCEFLogFile          = "cef_debug.log";
+constexpr const char* kICUDataFile         = "icudtl.dat";
+constexpr const char* kLocalesDir          = "locales";
+constexpr const char* kFrameworkName       = "Chromium Embedded Framework.framework";
+constexpr const char* kResourcesDir        = "Resources";
+constexpr const char* kExecutableName      = "WebFrontApp";
+}  // namespace
 
 // Helper function to set keychain-related environment variables
 inline void setKeychainEnvironment() {
-#if defined(__APPLE__) || defined(__linux__)
+    #if defined(__APPLE__) || defined(__linux__)
     setenv("DISABLE_KEYCHAIN_ACCESS", "1", 1);
     setenv("OSX_DISABLE_KEYCHAIN", "1", 1);
     setenv("USE_MOCK_KEYCHAIN", "1", 1);
     setenv("CHROME_KEYCHAIN_REAUTH_DISABLED", "1", 1);
     setenv("PASSWORD_MANAGER_ENABLED", "0", 1);
-#endif
+    #endif
 }
 
 // Helper function to configure platform-specific paths
-inline void configurePlatformPaths(CefSettings& settings) {
-#ifdef __APPLE__
+inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
+    #ifdef __APPLE__
     // Set framework and resource paths for macOS
-    std::filesystem::path exe_dir = std::filesystem::current_path();
+    std::filesystem::path exe_dir        = std::filesystem::current_path();
     std::filesystem::path framework_path = exe_dir / "Frameworks" / kFrameworkName;
     std::filesystem::path resources_path = framework_path / kResourcesDir;
-    std::filesystem::path exe_path = exe_dir / "src" / kExecutableName;
-    std::filesystem::path cache_path = exe_dir / kCEFCacheDir;
+    std::filesystem::path exe_path       = exe_dir / "src" / kExecutableName;
+    std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
     std::filesystem::create_directories(cache_path);
 
     // Convert to absolute paths
     framework_path = std::filesystem::absolute(framework_path);
     resources_path = std::filesystem::absolute(resources_path);
-    exe_path = std::filesystem::absolute(exe_path);
-    cache_path = std::filesystem::absolute(cache_path);
+    exe_path       = std::filesystem::absolute(exe_path);
+    cache_path     = std::filesystem::absolute(cache_path);
 
     CefString(&settings.framework_dir_path).FromString(framework_path.string());
     CefString(&settings.resources_dir_path).FromString(resources_path.string());
@@ -115,22 +119,22 @@ inline void configurePlatformPaths(CefSettings& settings) {
     // Enable logging
     std::filesystem::path log_path = exe_dir / kCEFLogFile;
     CefString(&settings.log_file).FromString(log_path.string());
-#elif defined(__linux__)
+    #elif defined(__linux__)
     // Set resource paths for Linux
     std::filesystem::path current_exe = std::filesystem::canonical("/proc/self/exe");
-    std::filesystem::path exe_dir = current_exe.parent_path();
+    std::filesystem::path exe_dir     = current_exe.parent_path();
 
     std::filesystem::path resources_path = exe_dir;
-    std::filesystem::path locales_path = resources_path / kLocalesDir;
-    std::filesystem::path exe_path = current_exe;
-    std::filesystem::path cache_path = exe_dir / kCEFCacheDir;
+    std::filesystem::path locales_path   = resources_path / kLocalesDir;
+    std::filesystem::path exe_path       = current_exe;
+    std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
     std::filesystem::create_directories(cache_path);
 
     // Convert to absolute paths
     resources_path = std::filesystem::absolute(resources_path);
-    locales_path = std::filesystem::absolute(locales_path);
-    exe_path = std::filesystem::absolute(exe_path);
-    cache_path = std::filesystem::absolute(cache_path);
+    locales_path   = std::filesystem::absolute(locales_path);
+    exe_path       = std::filesystem::absolute(exe_path);
+    cache_path     = std::filesystem::absolute(cache_path);
 
     log::info("CEF Linux paths:");
     log::info("  Resources: {}", resources_path.string());
@@ -151,57 +155,63 @@ inline void configurePlatformPaths(CefSettings& settings) {
     // Enable logging
     std::filesystem::path log_path = exe_dir / kCEFLogFile;
     CefString(&settings.log_file).FromString(log_path.string());
-#endif
+    #endif
 }
 
 // Platform-specific function to get command line arguments (inline definition)
 inline std::pair<int, std::vector<std::string>> getCommandLineArgs() {
-#if defined(_WIN32)
+    #if defined(_WIN32)
     LPWSTR* argv_w;
-    int argc;
+    int     argc;
     argv_w = CommandLineToArgvW(GetCommandLineW(), &argc);
     std::vector<std::string> argv;
     for (int i = 0; i < argc; ++i) {
-        int size = WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, nullptr, 0, nullptr, nullptr);
+        int         size = WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, nullptr, 0, nullptr, nullptr);
         std::string arg(size - 1, '\0');
         WideCharToMultiByte(CP_UTF8, 0, argv_w[i], -1, arg.data(), size, nullptr, nullptr);
         argv.push_back(std::move(arg));
     }
     LocalFree(argv_w);
     return {argc, std::move(argv)};
-#elif defined(__linux__)
-    std::ifstream cmdline("/proc/self/cmdline");
+    #elif defined(__linux__)
+    std::ifstream            cmdline("/proc/self/cmdline");
     std::vector<std::string> argv;
-    std::string arg;
+    std::string              arg;
     while (std::getline(cmdline, arg, '\0')) {
-        if (!arg.empty()) argv.push_back(arg);
+        if (!arg.empty())
+            argv.push_back(arg);
     }
     return {static_cast<int>(argv.size()), std::move(argv)};
-#elif defined(__APPLE__)
+    #elif defined(__APPLE__)
     char*** argv_ptr = _NSGetArgv();
-    int* argc_ptr = _NSGetArgc();
-    if (!argv_ptr || !argc_ptr || !*argv_ptr) { return {0, {}}; }
-    int argc = *argc_ptr;
-    char** argv_c = *argv_ptr;
+    int*    argc_ptr = _NSGetArgc();
+    if (!argv_ptr || !argc_ptr || !*argv_ptr) {
+        return {0, {}};
+    }
+    int                      argc   = *argc_ptr;
+    char**                   argv_c = *argv_ptr;
     std::vector<std::string> argv;
-    for (int i = 0; i < argc; ++i) { argv.emplace_back(argv_c[i]); }
+    for (int i = 0; i < argc; ++i) {
+        argv.emplace_back(argv_c[i]);
+    }
     return {argc, std::move(argv)};
-#else
+    #else
     return {0, {}};
-#endif
+    #endif
 }
 
 // Helper to build CefMainArgs portably
 inline CefMainArgs makeMainArgs(
-#if !defined(_WIN32)
-  int argc, char** argv
-#endif
+    #if !defined(_WIN32)
+    int    argc,
+    char** argv
+    #endif
 ) {
-#if defined(_WIN32)
+    #if defined(_WIN32)
     return CefMainArgs(GetModuleHandle(nullptr));
-#else
+    #else
     return CefMainArgs(argc, argv);
-#endif
+    #endif
 }
 
 // Initialize CEF and handle subprocesses
@@ -209,25 +219,34 @@ inline CefMainArgs makeMainArgs(
 // Throws: CEFSubprocessExit if this is a subprocess (caller should exit with the provided code)
 // Returns: void on successful main process initialization
 void initialize() {
-    if constexpr (!webfrontEmbedCEF) { return; }
+    if constexpr (!webfrontEmbedCEF) {
+        return;
+    }
     // Set environment variables BEFORE any CEF operations
     setKeychainEnvironment();
-#ifdef __APPLE__
+    #ifdef __APPLE__
     // Load the CEF framework library at runtime - required on macOS
     CefScopedLibraryLoader library_loader;
-    if (!library_loader.LoadInMain()) { throw CEFInitializationError("Failed to load CEF framework library"); }
-#endif
+    if (!library_loader.LoadInMain()) {
+        throw CEFInitializationError("Failed to load CEF framework library");
+    }
+    #endif
     auto [argc, argv_vec] = getCommandLineArgs();
     std::vector<char*> argv_ptrs;
-    for (auto& arg : argv_vec) { argv_ptrs.push_back(arg.data()); }
+    for (auto& arg : argv_vec) {
+        argv_ptrs.push_back(arg.data());
+    }
     CefMainArgs main_args = makeMainArgs(
-#if !defined(_WIN32)
-      argc, argv_ptrs.data()
-#endif
+    #if !defined(_WIN32)
+        argc,
+        argv_ptrs.data()
+    #endif
     );
     CefRefPtr<CefApp> app;
-    int exit_code = CefExecuteProcess(main_args, app, nullptr);
-    if (exit_code >= 0) { throw CEFSubprocessExit(exit_code); }
+    int               exit_code = CefExecuteProcess(main_args, app, nullptr);
+    if (exit_code >= 0) {
+        throw CEFSubprocessExit(exit_code);
+    }
     // Main process continues - initialization successful
 }
 
@@ -261,30 +280,38 @@ public:
         return CefSize(kDefaultWindowWidth, kDefaultWindowHeight);
     }
 
-    void SetBrowserView(CefRefPtr<CefBrowserView> view) { browserView = view; }
+    void SetBrowserView(CefRefPtr<CefBrowserView> view) {
+        browserView = view;
+    }
 
 private:
     CefRefPtr<CefBrowserView> browserView;
 
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wextra-semi"
-#endif
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
     IMPLEMENT_REFCOUNTING(SimpleCEFWindowDelegate);
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
 };
 
 class SimpleCEFClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler {
 public:
     SimpleCEFClient() = default;
-    virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
-    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
+        return this;
+    }
+    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
+        return this;
+    }
 
     virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override {}
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override {}
-    virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override { return false; }
+    virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
+        return false;
+    }
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> /*browser*/) override {
         // Ensure message loop exits when browser closes
@@ -292,14 +319,14 @@ public:
     }
 
 private:
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wextra-semi"
-#endif
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
     IMPLEMENT_REFCOUNTING(SimpleCEFClient);
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
 };
 
 class SimpleCEFApp : public CefApp, public CefBrowserProcessHandler {
@@ -307,11 +334,12 @@ public:
     SimpleCEFApp() = default;
 
     // CefApp methods
-    virtual CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+    virtual CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
+        return this;
+    }
 
     // CefBrowserProcessHandler methods
-    virtual void OnBeforeCommandLineProcessing(const CefString& /*process_type*/,
-                                               CefRefPtr<CefCommandLine> command_line) override {
+    virtual void OnBeforeCommandLineProcessing(const CefString& /*process_type*/, CefRefPtr<CefCommandLine> command_line) override {
         // Minimal keychain-disabling switches only
         command_line->AppendSwitch("--use-mock-keychain");
         command_line->AppendSwitch("--disable-password-manager");
@@ -330,7 +358,7 @@ public:
         command_line->AppendSwitch("--disable-plugins-discovery");
 
         // Linux-specific fixes for CEF initialization issues
-#ifdef __linux__
+    #ifdef __linux__
         command_line->AppendSwitch("--no-sandbox");
         command_line->AppendSwitch("--disable-dev-shm-usage");
         command_line->AppendSwitch("--disable-gpu-sandbox");
@@ -338,46 +366,53 @@ public:
         command_line->AppendSwitch("--disable-background-timer-throttling");
         command_line->AppendSwitch("--disable-renderer-backgrounding");
         command_line->AppendSwitch("--disable-backgrounding-occluded-windows");
-#endif
+    #endif
 
         // Enable Views framework for chromeless windows
         command_line->AppendSwitch("--use-views");
     }
 
 private:
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wextra-semi"
-#endif
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
     IMPLEMENT_REFCOUNTING(SimpleCEFApp);
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
 };
 
 void open(std::string_view port, std::string_view file) {
-    if constexpr (!webfrontEmbedCEF) { throw std::runtime_error("cef::open() : CEF not available"); }
+    if constexpr (!webfrontEmbedCEF) {
+        throw std::runtime_error("cef::open() : CEF not available");
+    }
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
     std::vector<char*> argv_ptrs;
-    for (auto& arg : argv_vec) { argv_ptrs.push_back(arg.data()); }
+    for (auto& arg : argv_vec) {
+        argv_ptrs.push_back(arg.data());
+    }
     CefMainArgs main_args = makeMainArgs(
-#if !defined(_WIN32)
-      argc, argv_ptrs.data()
-#endif
+    #if !defined(_WIN32)
+        argc,
+        argv_ptrs.data()
+    #endif
     );
     CefSettings settings;
     settings.no_sandbox = true;
     // Common settings for all platforms
     settings.multi_threaded_message_loop = false;
-    settings.log_severity = LOGSEVERITY_INFO;
+    settings.log_severity                = LOGSEVERITY_INFO;
 
     // Platform-specific path configuration
     configurePlatformPaths(settings);
     log::info("Attempting CEF initialization...");
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
-    if (!CefInitialize(main_args, settings, app.get(), nullptr)) { throw std::runtime_error("CEF initialization failed"); }
+    if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
+        throw std::runtime_error("CEF initialization failed");
+    }
     // Create the browser client
     CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient);
 
@@ -390,8 +425,7 @@ void open(std::string_view port, std::string_view file) {
     CefBrowserSettings browser_settings;
 
     // Create a browser view using the modern Views API - this creates a chromeless browser
-    CefRefPtr<CefBrowserView> browser_view =
-      CefBrowserView::CreateBrowserView(client, url, browser_settings, nullptr, nullptr, nullptr);
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(client, url, browser_settings, nullptr, nullptr, nullptr);
 
     // Create a window delegate for controlling the window appearance
     CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate);
@@ -407,7 +441,7 @@ void open(std::string_view port, std::string_view file) {
     CefShutdown();
 }
 
-} // namespace webfront::cef
+}  // namespace webfront::cef
 #else
 
 namespace webfront::cef {
@@ -417,7 +451,9 @@ void initialize() {
     // No-op when CEF is not available
 }
 
-void open(std::string_view /*port*/, std::string_view /*file*/) { throw std::runtime_error("cef::open() : CEF not available"); }
+void open(std::string_view /*port*/, std::string_view /*file*/) {
+    throw std::runtime_error("cef::open() : CEF not available");
+}
 
-} // namespace webfront::cef
-#endif // WEBFRONT_EMBED_CEF
+}  // namespace webfront::cef
+#endif  // WEBFRONT_EMBED_CEF
