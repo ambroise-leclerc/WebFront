@@ -15,6 +15,15 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+// Define required macros to prevent header conflicts
+#ifndef STRICT
+#define STRICT
+#endif
+
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
+
 // Ensure WinSock2.h is included before any headers that might include WinSock.h
 // This prevents conflicts between WinSock and WinSock2 definitions
 #include <winsock2.h>

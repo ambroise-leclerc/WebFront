@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../system/WindowsCompat.hpp"
 #include "../tooling/Logger.hpp"
 
 #include <chrono>
@@ -12,7 +13,6 @@
 
 #ifdef _WIN32
     #include <shellapi.h>
-    #include <windows.h>
 #elif __linux__
     #include <fstream>
 #elif __APPLE__
@@ -42,13 +42,6 @@ public:
     }
 };
 
-// Compile-time constant indicating CEF availability
-#ifdef WEBFRONT_EMBED_CEF
-static constexpr bool webfrontEmbedCEF{true};
-#else
-static constexpr bool webfrontEmbedCEF{false};
-#endif
-
 }  // namespace webfront::cef
 
 #ifdef WEBFRONT_EMBED_CEF
@@ -66,6 +59,8 @@ static constexpr bool webfrontEmbedCEF{false};
     #endif
 
 namespace webfront::cef {
+// Compile-time constant indicating CEF availability
+static constexpr bool webfrontEmbedCEF{true};
 
 // Constants
 namespace {
@@ -445,6 +440,8 @@ void open(std::string_view port, std::string_view file) {
 #else
 
 namespace webfront::cef {
+// Compile-time constant indicating CEF availability
+static constexpr bool webfrontEmbedCEF{false};
 
 // Stub implementations for when CEF is not available
 void initialize() {
