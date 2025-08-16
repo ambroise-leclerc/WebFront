@@ -1,0 +1,156 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ master develop ]
+
+env:
+  BUILD_TYPE: Release
+  GIST_ID: 317c22bfe80b2b51663187fbebfba533
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        config:
+          - {
+              name: "Windows MSVC",
+              os: windows-latest,
+              compiler: msvc,
+              coverage: false
+            }
+          - {
+              name: "Ubuntu GCC with Coverage",
+              os: ubuntu-latest,
+              compiler: gcc,
+              coverage: true
+            }
+          - {
+              name: "Ubuntu Clang",
+              os: ubuntu-latest,
+              compiler: clang,
+              coverage: false
+            }
+          - {
+              name: "macOS (Apple Silicon)",
+              os: macos-14,
+              compiler: appleClang,
+              coverage: false
+            }
+    runs-on: ${{ matrix.config.os }}
+    name: ${{ matrix.config.name }}
+      
+    steps:
+      - uses: actions/checkout@v4
+        
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "17.0"
+        if: matrix.config.compiler == 'clang'
+
+      - name: Setup GCC
+        uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 13
+        if: matrix.config.compiler == 'gcc'
+
+      - name: Install Coverage Tools
+        if: matrix.config.coverage
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+        
+      - name: Config & Build
+        run: |
+          cmake . -B ${{github.workspace}}/build ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }} ${{ github.event_name == 'pull_request' && '-DWEBFRONT_EMBED_CEF=ON' || '' }}
+          cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
+  
+      - name: Test
+        working-directory: ${{github.workspace}}/build
+        run: ctest --verbose -C ${{env.BUILD_TYPE}}
+
+      - name: Rerun Failed Tests (if any)
+        if: failure()
+        working-directory: ${{github.workspace}}/build
+        run: ctest --rerun-failed --output-on-failure -C ${{env.BUILD_TYPE}}
+
+      - name: Collect Coverage
+        if: matrix.config.coverage
+        working-directory: ${{github.workspace}}/build
+        run: |
+          lcov --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Upload Coverage
+        if: matrix.config.coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ${{github.workspace}}/build/coverage.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Set Badge Info
+        if: always() && github.ref == 'refs/heads/master'
+        id: badge
+        run: |
+          # Set badge label
+          echo "label=${{ matrix.config.name }}" >> $GITHUB_OUTPUT
+          
+          # Set badge color
+          case "${{ job.status }}" in
+            "success") echo "color=2EA043" >> $GITHUB_OUTPUT ;;
+            "failure") echo "color=E6484F" >> $GITHUB_OUTPUT ;;
+            *) echo "color=DBAB0A" >> $GITHUB_OUTPUT ;;
+          esac
+          
+          # Set filename
+          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}.json" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Update Gist
+        if: always() && github.ref == 'refs/heads/master'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GIST_SECRET }}
+          script: |
+            const filename = '${{ steps.badge.outputs.filename }}';
+            const content = {
+              schemaVersion: 1,
+              label: '${{ steps.badge.outputs.label }}',
+              message: '${{ job.status }}',
+              color: '${{ steps.badge.outputs.color }}'
+            };
+            
+            try {
+              await github.rest.gists.update({
+                gist_id: process.env.GIST_ID,
+                files: {
+                  [filename]: {
+                    content: JSON.stringify(content)
+                  }
+                }
+              });
+            } catch (error) {
+              core.error(`Failed to update gist: ${error.message}`);
+              if (error.response) {
+                core.error(`Status: ${error.response.status}`);
+                core.error(`Response: ${JSON.stringify(error.response.data)}`);
+              }
+              throw error;
+            }
+
+      - name: Update Badge
+        if: always() && github.ref == 'refs/heads/master'
+        uses: schneegans/dynamic-badges-action@v1.6.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ env.GIST_ID }}
+          filename: ${{ steps.badge.outputs.filename }}
+          label: ${{ steps.badge.outputs.label }}
+          message: ${{ job.status }}
+          color: ${{ steps.badge.outputs.color }}
+
