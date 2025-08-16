@@ -40,14 +40,14 @@ int main(int /*argc*/, char** /*argv*/) {
 
         using WF = BasicWF<NetProvider, Jas>;
         WF webFront(httpPort, docRoot);
-        webFront.cppFunction<std::string, std::string>("getVersion", [](std::string) { return webfront::version; });
-        webFront.onUIStarted([](WF::UI ui) {
-            log::info("UI Started");
-            ui.addScript("var addText = function(text, num) {                 \n"
-                     "  displayText(text + ' of ' + num);                       \n"
-                     "}                                                   \n");
-                     auto displayText = ui.jsFunction("addText");
-                     displayText("Hello World", 2023);
+        // Register C++ functions for testing
+        webFront.cppFunction<std::string, std::string>("getVersion", [](std::string) { 
+            return webfront::version; 
+        });
+        
+        webFront.onUIStarted([](WF::UI) {
+            log::info("Jasmine test runner UI started");
+            // Test environment ready - Jasmine will execute tests automatically
         });
 
         // Start the HTTP server in a background thread

@@ -50,16 +50,19 @@ inline std::filesystem::path findFileInPaths(
 
     // 3. Check WebFront project subdirectories
     path webfront;
-    for (const auto& element : current_path()) {
+    const auto currentPath{current_path()};
+    for (const auto& element : currentPath) {
         webfront = webfront / element;
-        if (element == "WebFront") {
+        static constexpr std::string_view webFrontRootPath = "WebFront";
+        if (element == webFrontRootPath) {
             // Try each configured search path
             for (const auto& searchPath : searchPaths) {
-                path candidate = webfront / searchPath;
-                log::info("  not found : Looking now in source directory {}", candidate.string());
-                if (exists(candidate / filename)) {
-                    return candidate;
-                }
+            path candidate = webfront / searchPath;
+            log::info("  not found : Looking now in source directory {}", candidate.string());
+            if (exists(candidate / filename)) {
+                log::info("Found {} in {}", filename, candidate.string());
+                return candidate;
+            }
             }
         }
     }
