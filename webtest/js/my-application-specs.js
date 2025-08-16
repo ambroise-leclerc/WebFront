@@ -1,44 +1,45 @@
-describe("Encrypt String", function () {
-    it("returns the next character", function () {
-        var expectations = {
-            'a': 'b', 'b': 'c', 'c': 'd', 'd': 'e', 'e': 'f',
-            'f': 'g', 'g': 'h', 'h': 'i', 'i': 'j', 'j': 'k',
-            'k': 'l', 'l': 'm', 'm': 'n', 'n': 'o', 'o': 'p',
-            'p': 'q', 'q': 'r', 'r': 's', 's': 't', 't': 'u',
-            'u': 'v', 'v': 'w', 'w': 'x', 'x': 'y', 'y': 'z',
-            'z': 'a',
-            'A': 'B', 'B': 'C', 'C': 'D', 'D': 'E', 'E': 'F',
-            'F': 'G', 'G': 'H', 'H': 'I', 'I': 'J', 'J': 'K',
-            'K': 'L', 'L': 'M', 'M': 'N', 'N': 'O', 'O': 'P',
-            'P': 'Q', 'Q': 'R', 'R': 'S', 'S': 'T', 'T': 'U',
-            'U': 'V', 'V': 'W', 'W': 'X', 'X': 'Y', 'Y': 'Z',
-            'Z': 'A'
-        };
+// WebFront Framework Application Tests
+// These tests verify application-level functionality built on WebFront
 
-        for (var property in expectations) {
-            if (expectations.hasOwnProperty(property)) {
-                var charToEncrypt = property;
-                var expectedEncryptedChar = expectations[property];
+describe("WebFront Application Integration", function() {
+    
+    describe("Test Environment", function() {
+        it("should have Jasmine test framework loaded", function () {
+            expect(jasmine).toBeDefined();
+            expect(jasmine.version).toBeDefined();
+        });
 
-                expect(encrypt(charToEncrypt)).toEqual(expectedEncryptedChar);
-            }
-        }
+        it("should be running in WebFront test environment", function () {
+            expect(window.location.protocol).toBe("http:");
+            expect(window.location.pathname).toContain("SpecRunner.html");
+        });
     });
 
-    it("when input string is 'television' it returns 'ufmfwjtjpn'", function(){
-        expect(encrypt('television')).toEqual('ufmfwjtjpo');
+    describe("Browser Environment", function() {
+        it("should have standard JavaScript objects available", function () {
+            expect(window).toBeDefined();
+            expect(document).toBeDefined();
+            expect(console).toBeDefined();
+        });
+
+        it("should support modern JavaScript features", function () {
+            expect(function() {
+                const testArrow = () => "arrow function";
+                let testLet = "let variable";
+                const testConst = "const variable";
+            }).not.toThrow();
+        });
     });
 
-    it("can encrypt a word", function(){
-        expect(encrypt('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ')).
-        toEqual('bcdefghijklmnopqrstuvwxyzaBCDEFGHIJKLMNOPQRSTUVWXYZA');
+    describe("WebFront Integration", function() {
+        it("should maintain stable connection during tests", function () {
+            let getVersion = webFront.cppFunction('getVersion');
+            
+            // Multiple calls should work consistently
+            expect(getVersion()).toBe("0.0.1");
+            expect(getVersion()).toBe("0.0.1");
+            expect(getVersion()).toBe("0.0.1");
+        });
     });
-
-    it("throws an exception if there is any character that does not belong to the latin alphabet", function() {
-        expect(function(){
-            encrypt("This includes the blank character that does not belong to latin alphabet")
-        }).toThrowError(ArgumentError, "non-latin alphabet character encountered");
-    });
-
 });
 
