@@ -5,6 +5,7 @@
 #include <system/ReactFS.hpp>
 #include <WebFront.hpp>
 #include <tooling/Logger.hpp>
+#include <tooling/PathUtils.hpp>
 
 #include <filesystem>
 #include <iostream>
@@ -14,38 +15,6 @@
 using namespace std;
 using namespace webfront;
 
-namespace {
-// Find the DocRoot path containing the given file (look for the filename in current directory,
-// in temp directory then in sources directory
-//
-// @param filename
-// @return DocRoot path
-filesystem::path findDocRoot(string filename) {
-    using namespace filesystem;
-
-    log::info("Looking for {} in {}", filename, current_path().string());
-    if (exists(current_path() / filename))
-        return current_path();
-
-    log::info("  not found : Looking now in temp directory {} ", temp_directory_path().string());
-    if (exists(temp_directory_path() / filename))
-        return temp_directory_path();
-
-    path webfront;
-    for (const auto& element : current_path()) {
-        webfront = webfront / element;
-        if (element == "WebFront") {
-            webfront = webfront / "src";
-            log::info("  not found : Looking now in source directory {}", webfront.string());
-            if (exists(webfront / filename))
-                return webfront;
-        }
-    }
-
-    throw runtime_error("Cannot find " + filename + " file");
-}
-
-}  // namespace
 
 int main(int /*argc*/, char** /*argv*/) {
     using HelloFS     = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
@@ -53,7 +22,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
     const string httpPort = "9002";
     const string mainHtml = "react.html";
-    auto docRoot  = findDocRoot(mainHtml);
+    auto docRoot  = tooling::findDocRoot(mainHtml);
 
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);

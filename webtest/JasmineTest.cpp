@@ -5,6 +5,7 @@
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
+#include <tooling/PathUtils.hpp>
 
 #include <filesystem>
 #include <iostream>
@@ -15,32 +16,6 @@
 using namespace std;
 using namespace webfront;
 
-// Find the DocRoot path containing the given file (look for the filename in current directory,
-// in temp directory then in sources directory
-//
-// @param filename
-// @return DocRoot path
-filesystem::path findDocRoot(string filename) {
-    using namespace filesystem;
-
-    log::info("Looking for {} in {}", filename, current_path().string());
-    if (exists(current_path() / filename)) return current_path();
-
-    log::info("  not found : Looking now in temp directory {} ", temp_directory_path().string());
-    if (exists(temp_directory_path() / filename)) return temp_directory_path();
-
-    path webfront, cp{current_path()};
-    for (auto element = cp.begin(); element != cp.end(); ++element) {
-        webfront = webfront / *element;
-        if (*element == "WebFront") {
-            webfront = webfront / "webtest";
-            log::info("  not found : Looking now in source directory {}", webfront.string());
-            if (exists(webfront / filename)) return webfront;
-        }
-    }
-
-    throw runtime_error("Cannot find " + filename + " file");
-}
 
 int main(int /*argc*/, char** /*argv*/) {
     // Initialize CEF and handle subprocesses
@@ -61,7 +36,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
     try {
         auto specRunnerFile = "SpecRunner.html";
-        auto docRoot = findDocRoot(specRunnerFile);
+        auto docRoot = tooling::findTestRoot(specRunnerFile);
 
         using WF = BasicWF<NetProvider, Jas>;
         WF webFront(httpPort, docRoot);
