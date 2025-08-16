@@ -37,22 +37,22 @@ WebFront implements the websocket protocol over an embedded Web server and provi
 
 ### Build Configuration
 ```bash
-# Configure build (Release by default with embedded CEF)
+# Configure build (Release by default)
 cmake . -B build
 
 # Configure with Debug and coverage  
 cmake . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
 
-# Configure without embedded CEF (uses system browser)
-cmake . -B build -DWEBFRONT_EMBED_CEF=OFF
+# Configure with embedded Windows (instead of ystem browser)
+cmake . -B build -DWEBFRONT_EMBED_CEF=ON
 
 # Build the project
 cmake --build build --config Release --parallel
 ```
 
 #### CMake Options
-- `WEBFRONT_EMBED_CEF=ON` (default): Enable embedded CEF window support for chromeless application windows
-- `WEBFRONT_EMBED_CEF=OFF`: Disable CEF, applications will use the system browser instead
+- `WEBFRONT_EMBED_CEF=OFF` (default): Disable CEF, applications will use the system browser instead
+- `WEBFRONT_EMBED_CEF=ON`: Enable embedded CEF window support for chromeless application windows
 - `ENABLE_TESTING=ON` (default): Build unit tests
 - `ENABLE_COVERAGE=ON`: Enable test coverage collection
 
@@ -79,24 +79,4 @@ Run the JavaScript test suite in an embedded CEF window for automated testing:
 ```bash
 cd build
 ./webtest/webtest
-```
-
-This launches the Jasmine test runner using the same unified `webfront::open()` API, providing:
-- ✅ **Automated Testing**: JavaScript unit tests with visual feedback
-- ✅ **Embedded Test Runner**: No external browser dependencies when CEF enabled
-- ✅ **CI/CD Ready**: Suitable for headless testing environments
-- ✅ **WebFront API Testing**: Tests the C++/JavaScript bridge functionality
-
-Both applications automatically use the system browser when built with `WEBFRONT_EMBED_CEF=OFF`.
-
-### Testing
-```bash
-# Run all C++ unit tests
-cd build && ctest --verbose -C Release
-
-# Run JavaScript tests with embedded window
-cd build && ./webtest/webtest
-
-# Rerun failed tests with detailed output
-cd build && ctest --rerun-failed --output-on-failure -C Release
 ```
