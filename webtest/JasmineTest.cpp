@@ -1,4 +1,6 @@
 ﻿#include <WebFront.hpp>
+#include <frontend/DefaultBrowser.hpp>
+#include <frontend/CEF.hpp>
 
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
@@ -8,21 +10,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
-
-
-/// Open the web UI in the system's default browser
-auto openInDefaultBrowser(std::string_view port, std::string_view file) {
-#ifdef _WIN32
-    auto command = std::string("start ");
-#elif __linux__
-    auto command = std::string("xdg-open ");
-#elif __APPLE__
-    auto command = std::string("open ");
-#endif
-
-    auto url = std::string("http://localhost:").append(port) + std::string("/").append(file);
-    return ::system(command.append(url).c_str());
-}
+#include <thread>
 
 using namespace std;
 using namespace webfront;
@@ -54,7 +42,17 @@ filesystem::path findDocRoot(string filename) {
     throw runtime_error("Cannot find " + filename + " file");
 }
 
-int main() {
+int main(int /*argc*/, char** /*argv*/) {
+    // Initialize CEF and handle subprocesses
+    try {
+        webfront::cef::initialize();
+    } catch (const webfront::cef::CEFSubprocessExit& e) {
+        // If this is a CEF subprocess, exit with the provided code
+        return e.exit_code();
+    } catch (const webfront::cef::CEFInitializationError& e) {
+        std::cerr << e.what() << std::endl;
+        return -1;
+    }
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
 
@@ -76,10 +74,23 @@ int main() {
                      auto displayText = ui.jsFunction("addText");
                      displayText("Hello World", 2023);
         });
-        openInDefaultBrowser(httpPort, specRunnerFile);
 
-        log::debug("WebFront started on port {} with docRoot at {}", httpPort, docRoot.string());
-        webFront.run();
+        // Start the HTTP server in a background thread
+        std::thread serverThread([&webFront]() {
+            webFront.run();
+        });
+
+        log::info("Starting Jasmine test runner...");
+        webFront.openWindow(specRunnerFile);
+        log::info("Test runner window closed");
+
+        // When window closes, stop the server cleanly
+        webFront.stop();
+
+        // Wait for server thread to finish
+        if (serverThread.joinable()) {
+            serverThread.join();
+        }
     }
     catch (std::runtime_error& e) {
         log::error("runtime_error : {}", e.what());
