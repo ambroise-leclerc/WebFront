@@ -1,0 +1,49 @@
+# Build directories
+build/
+.cache/
+.vs/
+.vscode/
+
+# Compiled binaries
+*.exe
+*.dll
+*.lib
+*.obj
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+
+# Visual Studio
+*.vcxproj.user
+*.vcxproj.filters
+*.aps
+*.pch
+*.vspscc
+*_i.c
+*_p.c
+*.ncb
+*.suo
+*.user
+*.tlb
+*.tlh
+*.bak
+*.cache
+*.ilk
+*.log
+[Bb]in
+[Dd]ebug*/
+*.sbr
+obj/
+[Rr]elease*/
+_ReSharper*/
+[Tt]est[Rr]esult*
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,30 +1,20 @@
-﻿
-#include <WebFront.hpp>
-#include <system/BabelFS.hpp>
+﻿#include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
+#include <system/FileSystem.hpp>
 #include <system/NativeFS.hpp>
 #include <system/ReactFS.hpp>
+#include <WebFront.hpp>
+#include <tooling/Logger.hpp>
 
 #include <filesystem>
 #include <iostream>
-
-/// Open the web UI in the system's default browser
-auto openInDefaultBrowser(std::string_view port, std::string_view file) {
-#ifdef _WIN32
-    auto command = std::string("start ");
-#elif __linux__
-    auto command = std::string("xdg-open ");
-#elif __APPLE__
-    auto command = std::string("open ");
-#endif
-
-    auto url = std::string("http://localhost:").append(port) + std::string("/").append(file);
-    return ::system(command.append(url).c_str());
-}
+#include <string>
+#include <stdexcept>
 
 using namespace std;
 using namespace webfront;
 
+namespace {
 // Find the DocRoot path containing the given file (look for the filename in current directory,
 // in temp directory then in sources directory
 //
@@ -34,41 +24,45 @@ filesystem::path findDocRoot(string filename) {
     using namespace filesystem;
 
     log::info("Looking for {} in {}", filename, current_path().string());
-    if (exists(current_path() / filename)) return current_path();
+    if (exists(current_path() / filename))
+        return current_path();
 
     log::info("  not found : Looking now in temp directory {} ", temp_directory_path().string());
-    if (exists(temp_directory_path() / filename)) return temp_directory_path();
+    if (exists(temp_directory_path() / filename))
+        return temp_directory_path();
 
-    path webfront, cp{current_path()};
-    for (auto element = cp.begin(); element != cp.end(); ++element) {
-        webfront = webfront / *element;
-        if (*element == "WebFront") {
+    path webfront;
+    for (const auto& element : current_path()) {
+        webfront = webfront / element;
+        if (element == "WebFront") {
             webfront = webfront / "src";
             log::info("  not found : Looking now in source directory {}", webfront.string());
-            if (exists(webfront / filename)) return webfront;
+            if (exists(webfront / filename))
+                return webfront;
         }
     }
 
     throw runtime_error("Cannot find " + filename + " file");
 }
 
-int main(int /*argc*/, char** /*argv*/) {
+}  // namespace
 
-    using HelloFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
+int main(int /*argc*/, char** /*argv*/) {
+    using HelloFS     = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
-
-    auto httpPort = "9002";
-    auto mainHtml = "react.html";
-    auto docRoot = findDocRoot(mainHtml);
+    const string httpPort = "9002";
+    const string mainHtml = "react.html";
+    auto docRoot  = findDocRoot(mainHtml);
 
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
     WebFrontDbg webFront(httpPort, docRoot);
 
-    webFront.cppFunction<void, std::string>("print", [](std::string text) { std::cout << text << '\n'; });
-    
+    webFront.cppFunction<void, std::string>("print", [](const std::string& text) {
+        std::cout << text << '\n';
+    });
     webFront.onUIStarted([](WebFrontDbg::UI ui) {
         ui.addScript("var addText = function(text, num) {                 \n"
                      "  let print = webFront.cppFunction('print');        \n"
@@ -82,10 +76,13 @@ int main(int /*argc*/, char** /*argv*/) {
                      "  cppTest(text, bigText, bigText.length);           \n"
                      "}                                                   \n");
         auto print = ui.jsFunction("addText");
-        print("Hello World", 2022);
+        print("Hello World", 2025);
         ui.jsFunction("testFunc")("Texte de test suffisament long pour changer de format");
     });
 
-    openInDefaultBrowser(httpPort, mainHtml);
-    webFront.run();
+    webFront.openAndRun(mainHtml);
+
+    log::info("Application shutdown complete.");
+
+    return 0;
 }
