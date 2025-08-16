@@ -1,6 +1,5 @@
 # Auto detect text files and perform LF normalization
 *          text=auto
-
 #
 # The above will handle all files NOT found below
 #
@@ -105,6 +104,8 @@
 *.app   binary
 
 
+
+
 ###############################################################################
 # Set the merge driver for project and solution files
 #
@@ -142,3 +143,4 @@
 .gitattributes export-ignore
 .gitignore     export-ignore
 .gitkeep       export-ignore
+
