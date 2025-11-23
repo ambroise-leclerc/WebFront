@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 
 #include <array>
 #include <cstddef>
@@ -124,16 +125,16 @@ private:
     };
 
 public:
-    template<typename T>
-    TypeErasedFunction(T t)
-        : function(new FunctionPointer<typename function_traits<T>::type>(t)), voidFunction(new FunctionPointer<typename function_traits<T>::void_type>(t)) {
+    template<typename T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction>, int> = 0>
+    TypeErasedFunction(T&& t)
+        : function(new FunctionPointer<typename function_traits<std::decay_t<T>>::type>(std::forward<T>(t))), voidFunction(new FunctionPointer<typename function_traits<std::decay_t<T>>::void_type>(std::forward<T>(t))) {
             std::cout << "TypeErasedFunction constructor()\n";
         }
 
-    template<typename T, typename... Args>
+    template<typename T, typename... Args, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction> && (sizeof...(Args) > 0), int> = 0>
     TypeErasedFunction(T&& t, Args&&... args)
-        : function(new FunctionPointer<typename function_traits<T>::type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))),
-          voidFunction(new FunctionPointer<typename function_traits<T>::void_type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))) {
+        : function(new FunctionPointer<typename function_traits<std::decay_t<T>>::type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))),
+          voidFunction(new FunctionPointer<typename function_traits<std::decay_t<T>>::void_type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))) {
         std::cout << "TypeErasedFunction constructor(";
         ((std::cout << TypeName(args)), ...);
         std::cout << ")\n";
