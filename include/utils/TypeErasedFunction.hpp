@@ -126,12 +126,12 @@ private:
 
 public:
     template<typename T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction>, int> = 0>
-    TypeErasedFunction(T t)
-        : function(new FunctionPointer<typename function_traits<T>::type>(t)), voidFunction(new FunctionPointer<typename function_traits<T>::void_type>(t)) {
+    TypeErasedFunction(T&& t)
+        : function(new FunctionPointer<typename function_traits<T>::type>(std::forward<T>(t))), voidFunction(new FunctionPointer<typename function_traits<T>::void_type>(std::forward<T>(t))) {
             std::cout << "TypeErasedFunction constructor()\n";
         }
 
-    template<typename T, typename... Args, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction>, int> = 0>
+    template<typename T, typename... Args, std::enable_if_t<!std::is_same_v<std::decay_t<T>, TypeErasedFunction> && sizeof...(Args) > 0, int> = 0>
     TypeErasedFunction(T&& t, Args&&... args)
         : function(new FunctionPointer<typename function_traits<T>::type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))),
           voidFunction(new FunctionPointer<typename function_traits<T>::void_type>(std::bind(std::forward<T>(t), std::forward<Args>(args)...))) {
