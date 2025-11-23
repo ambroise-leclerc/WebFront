@@ -3,6 +3,8 @@
 /// @brief Messages exchanged between webfront clients and server
 #pragma once
 
+#include "../http/BuffersPolicy.hpp"
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -157,7 +159,8 @@ public:
 };
 
 /// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
-class FunctionCall : public MessageBase<FunctionCall> {
+template<http::BuffersPolicyType BuffersPolicy = http::DefaultBuffersPolicy>
+class FunctionCall : public MessageBase<FunctionCall<BuffersPolicy>> {
     struct Header {
         Command command = Command::callFunction;
         uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
@@ -166,9 +169,9 @@ class FunctionCall : public MessageBase<FunctionCall> {
     } head;
     static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024> buffer; // When composing a msg, buffer doesn't represent the payload but some bufferized data
+    std::array<std::byte, BuffersPolicy::functionCallBufferSize> buffer; // When composing a msg, buffer doesn't represent the payload but some bufferized data
     size_t encodeBufferIndex = 0;
-    friend class MessageBase<FunctionCall>;
+    friend class MessageBase<FunctionCall<BuffersPolicy>>;
 
     template<typename T>
     constexpr auto typeName() {
@@ -211,6 +214,9 @@ public:
         }
 
         [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& wsFrame) {
+            if (encodeBufferIndex + 1 + sizeof(size) > buffer.size()) {
+                throw http::BufferOverflowException("Function call buffer overflow: insufficient space for encoding type");
+            }
             wsFrame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
             buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
             std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
@@ -235,6 +241,9 @@ public:
             std::apply([&](auto&... tupleArgs) { ((encodeParameter(tupleArgs, frame)), ...); }, t);
         }
         else if constexpr (is_same_v<ParamType, bool>) {
+            if (encodeBufferIndex + 1 > buffer.size()) {
+                throw http::BufferOverflowException("Function call buffer overflow: insufficient space for encoding boolean");
+            }
             frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
             buffer[encodeBufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
             incrementPayloadSize(1);
@@ -242,6 +251,9 @@ public:
         }
         else if constexpr (is_arithmetic_v<ParamType>) {
             double number = t;
+            if (encodeBufferIndex + 1 + sizeof(number) > buffer.size()) {
+                throw http::BufferOverflowException("Function call buffer overflow: insufficient space for encoding number");
+            }
             frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
             buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
             copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
@@ -340,7 +352,8 @@ public:
 };
 
 /// Encodes FunctionCall return values (or exceptions)
-class FunctionReturn : public FunctionCall {
+template<http::BuffersPolicyType BuffersPolicy = http::DefaultBuffersPolicy>
+class FunctionReturn : public FunctionCall<BuffersPolicy> {
     struct Header {
         Command command = Command::functionReturn;
         uint8_t parametersCount = 0;
@@ -348,7 +361,7 @@ class FunctionReturn : public FunctionCall {
         uint32_t parametersDataSize = 0;
     } head;
     static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");
-    friend class MessageBase<FunctionReturn>;
+    friend class MessageBase<FunctionReturn<BuffersPolicy>>;
 };
 
 } // namespace webfront::msg

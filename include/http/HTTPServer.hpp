@@ -5,6 +5,7 @@
 #include "../networking/BasicNetworking.hpp"
 #include "../tooling/HexDump.hpp"
 #include "../system/FileSystem.hpp"
+#include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
@@ -343,8 +344,8 @@ private:
 
 enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
 
-template<networking::Features Net, fs::Provider FS>
-class Connection : public std::enable_shared_from_this<Connection<Net, FS>> {
+template<networking::Features Net, fs::Provider FS, BuffersPolicyType BuffersPolicy = DefaultBuffersPolicy>
+class Connection : public std::enable_shared_from_this<Connection<Net, FS, BuffersPolicy>> {
 public:
     explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
                         RequestHandler<Net, FS>& handler)
@@ -365,9 +366,9 @@ public:
 
 private:
     typename Net::Socket socket;
-    Connections<Connection<Net, FS>>& connections;
+    Connections<Connection<Net, FS, BuffersPolicy>>& connections;
     RequestHandler<Net, FS>& requestHandler;
-    std::array<char, 8192> buffer;
+    std::array<char, BuffersPolicy::receptionBufferSize> buffer;
     Request request;
     Response response;
     Protocol protocol = Protocol::HTTP;
@@ -419,7 +420,7 @@ private:
     }
 };
 
-template<networking::Features Net, fs::Provider FS>
+template<networking::Features Net, fs::Provider FS, BuffersPolicyType BuffersPolicy = DefaultBuffersPolicy>
 class Server {
 public:
     Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
@@ -440,7 +441,7 @@ public:
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
-    
+
     void stop() {
         log::info("Stopping HTTP server...");
         acceptor.close();
@@ -453,14 +454,14 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    Connections<Connection<Net, FS>> connections;
+    Connections<Connection<Net, FS, BuffersPolicy>> connections;
     RequestHandler<Net, FS> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
     void accept() {
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
             if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection<Net, FS>>(std::move(socket), connections, requestHandler);
+            auto newConnection = std::make_shared<Connection<Net, FS, BuffersPolicy>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
             accept();
