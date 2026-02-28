@@ -116,8 +116,8 @@ private: // clang-format off
                  versionMinor, newline1, headerLineStart, headerLws, headerName, spaceBeforeHeaderValue, headerValue, newline2, newline3, completed };
     State state { State::methodStart };    
     bool completeRequest(char input) {
-        auto isChar = [](char c) { return c >= 0; };
-        auto isCtrl = [](char c) { return (c >= 0 && c <= 31) || (c == 127); };
+        auto isChar = [](char c) { return static_cast<unsigned char>(c) <= 127; };
+        auto isCtrl = [](char c) { return static_cast<unsigned char>(c) <= 31 || c == 127; };
         auto isSpecial = [](char c) {   switch (c) {
             case '(': case ')': case '<': case '>': case '@': case ',': case ';': case ':': case '\\': case '"':
             case '/': case '[': case ']': case '?': case '=': case '{': case '}': case ' ': case '\t': return true;
