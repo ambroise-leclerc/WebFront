@@ -30,6 +30,7 @@ function(set_project_warnings project_name)
       /w14928 # illegal copy-initialization; more than one user-defined conversion has been implicitly applied
       /analyze # Enable Code Analysis
       /analyze:external- # Disable Code Analysis for external headers
+      /analyze:stacksize 65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB)
       /permissive- # standards conformance mode for MSVC compiler.
   )
 

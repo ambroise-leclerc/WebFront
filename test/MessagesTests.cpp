@@ -32,7 +32,7 @@ SCENARIO("FunctionCall") {
                                     0x6f, 0x72, 0x6c, 0x64, 0x20, 0x6f, 0x66, 0x20, 0x32, 0x30, 0x32, 0x32};
 
         auto functionCall =
-          msg::FunctionCall::castFromRawData(std::span(reinterpret_cast<const std::byte*>(raw.data()), raw.size()));
+          msg::FunctionCall<>::castFromRawData(std::span(reinterpret_cast<const std::byte*>(raw.data()), raw.size()));
         REQUIRE(functionCall->getParametersCount() == 2);
         REQUIRE(functionCall->getPayloadSize() == 28);
         auto [name, undecodedData] = functionCall->getFunctionName();
@@ -70,7 +70,7 @@ SCENARIO("FunctionCall") {
           0x00, 0x50, 0x76, 0x40};
 
         auto functionCall =
-          msg::FunctionCall::castFromRawData(std::span(reinterpret_cast<const std::byte*>(raw.data()), raw.size()));
+          msg::FunctionCall<>::castFromRawData(std::span(reinterpret_cast<const std::byte*>(raw.data()), raw.size()));
         REQUIRE(functionCall->getParametersCount() == 4);
         REQUIRE(functionCall->getPayloadSize() == 433);
         auto [name, undecodedData] = functionCall->getFunctionName();
@@ -95,11 +95,15 @@ SCENARIO("FunctionReturn") {
     using Net = networking::NetworkingMock;
 
     GIVEN("A FunctionReturn message") {
-        msg::FunctionReturn message;
+        msg::FunctionReturn<> message;
         websocket::Frame<Net> frame{
           std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
         networking::SocketMock socket;
         websocket::WebSocket<Net> ws(socket);
+
+        THEN("Header command byte is functionReturn") {
+            REQUIRE(static_cast<msg::Command>(message.header()[0]) == msg::Command::functionReturn);
+        }
 
         WHEN("An exception is encoded") {
             std::string exceptionText = "Parameter error";
@@ -116,7 +120,7 @@ SCENARIO("FunctionReturn") {
                 websocket::FrameDecoder decoder;
                 REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
 
-                auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
+                auto funcRet = msg::FunctionReturn<>::castFromRawData(decoder.payload());
                 REQUIRE(funcRet->getParametersCount() == 1);
                 REQUIRE(funcRet->getPayloadSize() == 3 + exceptionText.size());
 
@@ -137,7 +141,7 @@ SCENARIO("FunctionReturn") {
             THEN("An erroneous tuple should trigger an exception") {
                 websocket::FrameDecoder decoder;
                 REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
-                auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
+                auto funcRet = msg::FunctionReturn<>::castFromRawData(decoder.payload());
                 std::tuple<int, std::string, int> tupleValue;
                 auto undecodedData = funcRet->payload();
                 REQUIRE_THROWS_AS(funcRet->decodeParameter(tupleValue, undecodedData), std::runtime_error);
@@ -145,7 +149,7 @@ SCENARIO("FunctionReturn") {
             THEN("A Frame decoded should retrieve the encoded parameters") {
                 websocket::FrameDecoder decoder;
                 REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
-                auto funcRet = msg::FunctionReturn::castFromRawData(decoder.payload());
+                auto funcRet = msg::FunctionReturn<>::castFromRawData(decoder.payload());
                 REQUIRE(funcRet->getParametersCount() == 3);
                 REQUIRE(funcRet->getPayloadSize() == 24);
 
@@ -156,6 +160,45 @@ SCENARIO("FunctionReturn") {
                 REQUIRE(std::get<1>(tupleValue) == "Hello World");
                 std::cout << undecodedData.size() << "\n";
                 REQUIRE(undecodedData.empty());
+            }
+        }
+    }
+}
+
+SCENARIO("BufferOverflow") {
+    using Net = networking::NetworkingMock;
+    using TinyPolicy = http::CustomBuffersPolicy<8192, 8192, 12>;
+
+    GIVEN("A FunctionCall with a tiny buffer") {
+        msg::FunctionCall<TinyPolicy> message;
+        websocket::Frame<Net> frame{
+          std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+
+        WHEN("Number overflows the buffer") {
+            message.encodeParameter("fn", frame);   // 2 bytes in buffer (type + uint8 size)
+            message.encodeParameter(1, frame);       // 9 bytes in buffer (type + double) → total 11
+
+            THEN("Next number overflows") {
+                REQUIRE_THROWS_AS(message.encodeParameter(2, frame), http::BufferOverflowException);
+            }
+        }
+
+        WHEN("Boolean overflows the buffer") {
+            message.encodeParameter("fn", frame);   // 2 bytes → total 2
+            message.encodeParameter(1, frame);       // 9 bytes → total 11
+            message.encodeParameter(true, frame);    // 1 byte  → total 12 (exactly full)
+
+            THEN("Next boolean overflows") {
+                REQUIRE_THROWS_AS(message.encodeParameter(false, frame), http::BufferOverflowException);
+            }
+        }
+
+        WHEN("String header overflows the buffer") {
+            message.encodeParameter("fn", frame);   // 2 bytes → total 2
+            message.encodeParameter(1, frame);       // 9 bytes → total 11
+
+            THEN("Next string header overflows") {
+                REQUIRE_THROWS_AS(message.encodeParameter("x", frame), http::BufferOverflowException);
             }
         }
     }

@@ -3,6 +3,8 @@
 /// @brief Messages exchanged between webfront clients and server
 #pragma once
 
+#include "../http/BuffersPolicy.hpp"
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -156,19 +158,27 @@ public:
     [[nodiscard]] size_t getPayloadSize() const { return static_cast<uint16_t>(256 * head.lengthHi + head.lengthLo); }
 };
 
-/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
-class FunctionCall : public MessageBase<FunctionCall> {
-    struct Header {
-        Command command = Command::callFunction;
-        uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
-        std::array<uint8_t, 2> padding{};
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
+/// Shared header layout for function call/return messages
+template<Command Cmd>
+struct FunctionCallHeader {
+    Command command = Cmd;
+    uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
+    std::array<uint8_t, 2> padding{};
+    uint32_t parametersDataSize = 0;
+};
+static_assert(sizeof(FunctionCallHeader<Command::callFunction>) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024> buffer; // When composing a msg, buffer doesn't represent the payload but some bufferized data
+/// Shared encode/decode logic for FunctionCall and FunctionReturn
+template<typename Derived, Command Cmd, http::BuffersPolicyType Policy>
+class FunctionCallBase : public MessageBase<Derived> {
+public:
+    using Header = FunctionCallHeader<Cmd>;
+
+protected:
+    Header head{};
+    std::array<std::byte, Policy::functionCallBufferSize> buffer{};
     size_t encodeBufferIndex = 0;
-    friend class MessageBase<FunctionCall>;
+    friend class MessageBase<Derived>;
 
     template<typename T>
     constexpr auto typeName() {
@@ -195,7 +205,7 @@ public:
     }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
-        auto data = payload();
+        auto data = this->payload();
         decodeParameter(functionName, data);
         return {functionName, data};
     }
@@ -211,6 +221,8 @@ public:
         }
 
         [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& wsFrame) {
+            if (encodeBufferIndex + 1 + sizeof(size) > buffer.size())
+                throw http::BufferOverflowException("FunctionCall encode buffer overflow");
             wsFrame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
             buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
             std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
@@ -235,6 +247,8 @@ public:
             std::apply([&](auto&... tupleArgs) { ((encodeParameter(tupleArgs, frame)), ...); }, t);
         }
         else if constexpr (is_same_v<ParamType, bool>) {
+            if (encodeBufferIndex + 1 > buffer.size())
+                throw http::BufferOverflowException("FunctionCall encode buffer overflow");
             frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
             buffer[encodeBufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
             incrementPayloadSize(1);
@@ -242,6 +256,8 @@ public:
         }
         else if constexpr (is_arithmetic_v<ParamType>) {
             double number = t;
+            if (encodeBufferIndex + 1 + sizeof(number) > buffer.size())
+                throw http::BufferOverflowException("FunctionCall encode buffer overflow");
             frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
             buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
             copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
@@ -252,8 +268,6 @@ public:
 
         else if constexpr (is_array_v<ParamType>) {
             using ElementType = remove_all_extents_t<ParamType>;
-            //   cout << "Array of " << typeName<ElementType>() << "\n";
-            //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
             if constexpr (is_same_v<ElementType, char>) {
                 if constexpr (is_bounded_array_v<ParamType>)
                     encodeString(t, extent_v<ParamType> - 1);
@@ -339,16 +353,18 @@ public:
     }
 };
 
+/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
+template<http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+class FunctionCall : public FunctionCallBase<FunctionCall<Policy>, Command::callFunction, Policy> {
+    friend class MessageBase<FunctionCall<Policy>>;
+    friend class FunctionCallBase<FunctionCall<Policy>, Command::callFunction, Policy>;
+};
+
 /// Encodes FunctionCall return values (or exceptions)
-class FunctionReturn : public FunctionCall {
-    struct Header {
-        Command command = Command::functionReturn;
-        uint8_t parametersCount = 0;
-        std::array<uint8_t, 2> padding{};
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");
-    friend class MessageBase<FunctionReturn>;
+template<http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+class FunctionReturn : public FunctionCallBase<FunctionReturn<Policy>, Command::functionReturn, Policy> {
+    friend class MessageBase<FunctionReturn<Policy>>;
+    friend class FunctionCallBase<FunctionReturn<Policy>, Command::functionReturn, Policy>;
 };
 
 } // namespace webfront::msg

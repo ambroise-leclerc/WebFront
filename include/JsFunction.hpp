@@ -33,7 +33,7 @@ private:
     std::string name;
     WebFront& webFront;
     WebLinkId webLinkId;
-    msg::FunctionCall command;
+    msg::FunctionCall<typename WebFront::BufferPolicy> command;
 };
 
 } // namespace webfront
