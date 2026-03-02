@@ -2,6 +2,7 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
+#include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "../tooling/HexDump.hpp"
 #include "../tooling/Logger.hpp"
@@ -226,10 +227,9 @@ private:
     uint8_t maskIndex;
 };
 
-template<typename Net>
+template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebSocket {
     typename Net::Socket socket;
-    static constexpr size_t receptionBufferSize = 8192;
 
 public:
     explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
@@ -261,7 +261,7 @@ public:
     void write(Frame<Net> frame) { writeData(std::move(frame)); }
 
 private:
-    std::array<std::byte, receptionBufferSize> readBuffer;
+    std::array<std::byte, Policy::receptionBufferSize> readBuffer;
     FrameDecoder decoder;
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;

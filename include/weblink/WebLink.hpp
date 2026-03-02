@@ -26,9 +26,9 @@ struct WebLinkEvent {
     std::span<const std::byte> data;
 };
 
-template<typename Net>
+template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
-    websocket::WebSocket<Net> ws;
+    websocket::WebSocket<Net, Policy> ws;
     WebLinkId id;
     bool sameEndian;
     std::optional<size_t> logSink;
@@ -69,13 +69,13 @@ public:
 
             case msg::Command::callFunction: {
                 log::info("Function called !");
-                auto command = msg::FunctionCall::castFromRawData(data);
+                auto command = msg::FunctionCall<Policy>::castFromRawData(data);
                 auto [functionName, paramData] = command->getFunctionName();
                 try {
                     eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData));
                 }
                 catch (const std::out_of_range& e) {
-                    msg::FunctionReturn returnValue;
+                    msg::FunctionReturn<Policy> returnValue;
                     websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
         
                     returnValue.encodeParameter(e, frame);

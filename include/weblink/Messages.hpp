@@ -3,6 +3,8 @@
 /// @brief Messages exchanged between webfront clients and server
 #pragma once
 
+#include "../http/BuffersPolicy.hpp"
+
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -156,33 +158,83 @@ public:
     [[nodiscard]] size_t getPayloadSize() const { return static_cast<uint16_t>(256 * head.lengthHi + head.lengthLo); }
 };
 
-/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
-class FunctionCall : public MessageBase<FunctionCall> {
-    struct Header {
-        Command command = Command::callFunction;
-        uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
-        std::array<uint8_t, 2> padding{};
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
+/// Shared header layout for function call/return messages
+template<Command Cmd>
+struct FunctionCallHeader {
+    Command command = Cmd;
+    uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
+    std::array<uint8_t, 2> padding{};
+    uint32_t parametersDataSize = 0;
+};
+static_assert(sizeof(FunctionCallHeader<Command::callFunction>) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024> buffer; // When composing a msg, buffer doesn't represent the payload but some bufferized data
+/// Shared encode/decode logic for FunctionCall and FunctionReturn
+template<typename Derived, Command Cmd, http::BuffersPolicyType Policy>
+class FunctionCallBase : public MessageBase<Derived> {
+public:
+    using Header = FunctionCallHeader<Cmd>;
+
+protected:
+    Header head{};
+    std::array<std::byte, Policy::functionCallBufferSize> buffer{};
     size_t encodeBufferIndex = 0;
-    friend class MessageBase<FunctionCall>;
+    friend class MessageBase<Derived>;
 
-    template<typename T>
-    constexpr auto typeName() {
-#if defined(_MSC_VER)
-        std::string_view tName = __FUNCSIG__, prefix = "auto __cdecl JSFunction::typeName<", suffix = ">(void)";
-#elif __clang__
-        std::string_view tName = __PRETTY_FUNCTION__, prefix = "auto webfront::JSFunction::typeName() [T = ", suffix = "]";
-#elif defined(__GNUC__)
-        std::string_view tName = __PRETTY_FUNCTION__,
-                         prefix = "constexpr auto webfront::JSFunction::typeName() [with T = ", suffix = "]";
-#endif
-        tName.remove_prefix(prefix.size());
-        tName.remove_suffix(suffix.size());
-        return tName;
+    template<typename SizeType, typename WebSocketFrame>
+    void encodeTypeHeader(msg::CodedType type, SizeType size, WebSocketFrame& frame) {
+        if (encodeBufferIndex + 1 + sizeof(size) > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        frame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
+        std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
+        encodeBufferIndex += sizeof(size);
+        incrementPayloadSize(1 + sizeof(size));
+    }
+
+    template<typename WebSocketFrame>
+    void encodeString(const char* str, size_t size, WebSocketFrame& frame) {
+        using namespace std;
+        if (size < 256)
+            encodeTypeHeader(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
+        else
+            encodeTypeHeader(msg::CodedType::string, static_cast<uint16_t>(size), frame);
+        frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
+        incrementPayloadSize(size);
+        std::cout << "-> encoded to string of size " << size << " in a span.\n";
+    }
+
+    template<typename WebSocketFrame>
+    void encodeBool(bool value, WebSocketFrame& frame) {
+        using namespace std;
+        if (encodeBufferIndex + 1 > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
+        buffer[encodeBufferIndex++] = static_cast<byte>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+        incrementPayloadSize(1);
+        std::cout << "-> encoded to bool of size 1 in a span.";
+    }
+
+    template<typename WebSocketFrame>
+    void encodeNumber(double number, WebSocketFrame& frame) {
+        using namespace std;
+        if (encodeBufferIndex + 1 + sizeof(number) > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
+        buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
+        copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
+        encodeBufferIndex += sizeof(number);
+        incrementPayloadSize(1 + sizeof(number));
+        std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";
+    }
+
+    template<typename WebSocketFrame>
+    void encodeException(const std::exception& e, WebSocketFrame& frame) {
+        using namespace std;
+        std::cout << "Exception : " << e.what() << '\n';
+        auto textSize = char_traits<char>::length(e.what());
+        encodeTypeHeader(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
+        frame.addBuffer(span(reinterpret_cast<const std::byte*>(e.what()), textSize));
+        incrementPayloadSize(textSize);
     }
 
 public:
@@ -195,7 +247,7 @@ public:
     }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
         std::string functionName;
-        auto data = payload();
+        auto data = this->payload();
         decodeParameter(functionName, data);
         return {functionName, data};
     }
@@ -206,79 +258,31 @@ public:
         using ParamType = remove_cvref_t<T>;
         setParametersCount(getParametersCount() + 1);
 
-        if constexpr (is_printable<T>::value) {
-            std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
-        }
-
-        [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& wsFrame) {
-            wsFrame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
-            buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
-            std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
-            encodeBufferIndex += sizeof(size);
-            incrementPayloadSize(1 + sizeof(size));
-        };
-
-        [[maybe_unused]] auto encodeString = [&](const char* str, size_t size) constexpr {
-            if (size < 256)
-                encodeType(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
-            else
-                encodeType(msg::CodedType::string, static_cast<uint16_t>(size), frame);
-            frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
-            incrementPayloadSize(size);
-
-            std::cout << "-> encoded to string of size " << size << " in a span.\n";
-        };
-
         if constexpr (is_tuple_v<ParamType>) {
             uint8_t nbParams = static_cast<uint8_t>(tuple_size<ParamType>::value);
-            encodeType(msg::CodedType::tuple, nbParams, frame);
+            encodeTypeHeader(msg::CodedType::tuple, nbParams, frame);
             std::apply([&](auto&... tupleArgs) { ((encodeParameter(tupleArgs, frame)), ...); }, t);
         }
-        else if constexpr (is_same_v<ParamType, bool>) {
-            frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
-            buffer[encodeBufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
-            incrementPayloadSize(1);
-            std::cout << "-> encoded to bool of size " << 1 << " in a span.";
-        }
-        else if constexpr (is_arithmetic_v<ParamType>) {
-            double number = t;
-            frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
-            buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
-            copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
-            encodeBufferIndex += sizeof(number);
-            incrementPayloadSize(1 + sizeof(number));
-            std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";
-        }
-
+        else if constexpr (is_same_v<ParamType, bool>)
+            encodeBool(t, frame);
+        else if constexpr (is_arithmetic_v<ParamType>)
+            encodeNumber(static_cast<double>(t), frame);
         else if constexpr (is_array_v<ParamType>) {
             using ElementType = remove_all_extents_t<ParamType>;
-            //   cout << "Array of " << typeName<ElementType>() << "\n";
-            //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
-            if constexpr (is_same_v<ElementType, char>) {
-                if constexpr (is_bounded_array_v<ParamType>)
-                    encodeString(t, extent_v<ParamType> - 1);
-                else
-                    encodeString(t, char_traits<char>::length(t));
-            }
+            static_assert(is_same_v<ElementType, char>, "Arrays are not supported by JSFunction");
+            if constexpr (is_bounded_array_v<ParamType>)
+                encodeString(t, extent_v<ParamType> - 1, frame);
             else
-                static_assert(is_same_v<ElementType, char>, "Arrays are not supported by JSFunction");
+                encodeString(t, char_traits<char>::length(t), frame);
         }
         else if constexpr (is_same_v<ParamType, const char*>)
-            encodeString(t, char_traits<char>::length(t));
-
+            encodeString(t, char_traits<char>::length(t), frame);
         else if constexpr (is_same_v<ParamType, string> or is_same_v<ParamType, string_view>)
-            encodeString(t.data(), t.size());
-
+            encodeString(t.data(), t.size(), frame);
         else if constexpr (is_pointer_v<ParamType>)
             static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
-
-        else if constexpr (is_base_of_v<std::exception, ParamType>) {
-            std::cout << "Exception : " << t.what() << '\n';
-            auto textSize = char_traits<char>::length(t.what());
-            encodeType(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
-            frame.addBuffer(span(reinterpret_cast<const std::byte*>(t.what()), textSize));
-            incrementPayloadSize(textSize);
-        }
+        else if constexpr (is_base_of_v<std::exception, ParamType>)
+            encodeException(t, frame);
 
         std::cout << "bufferIndex = " << encodeBufferIndex << " ,payloadSize = " << getPayloadSize() << "\n";
     }
@@ -339,16 +343,18 @@ public:
     }
 };
 
+/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
+template<http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+class FunctionCall : public FunctionCallBase<FunctionCall<Policy>, Command::callFunction, Policy> {
+    friend class MessageBase<FunctionCall<Policy>>;
+    friend class FunctionCallBase<FunctionCall<Policy>, Command::callFunction, Policy>;
+};
+
 /// Encodes FunctionCall return values (or exceptions)
-class FunctionReturn : public FunctionCall {
-    struct Header {
-        Command command = Command::functionReturn;
-        uint8_t parametersCount = 0;
-        std::array<uint8_t, 2> padding{};
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");
-    friend class MessageBase<FunctionReturn>;
+template<http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+class FunctionReturn : public FunctionCallBase<FunctionReturn<Policy>, Command::functionReturn, Policy> {
+    friend class MessageBase<FunctionReturn<Policy>>;
+    friend class FunctionCallBase<FunctionReturn<Policy>, Command::functionReturn, Policy>;
 };
 
 } // namespace webfront::msg

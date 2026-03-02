@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <http/BuffersPolicy.hpp>
 #include <JsFunction.hpp>
 #include <networking/NetworkingMock.hpp>
 
@@ -48,6 +49,7 @@ struct WebLinkMock {
 
 struct WebFrontMock {
     using Net = networking::NetworkingMock;
+    using BufferPolicy = http::DefaultBuffersPolicy;
     WebLinkMock<WebFrontMock> getLink(WebLinkId id) { return WebLinkMock<WebFrontMock>{id, *this}; }
 };
 

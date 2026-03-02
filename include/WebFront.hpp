@@ -87,11 +87,12 @@ inline int ensureCEFInitialized() {
 }
 }  // namespace detail
 
-template <typename NetProvider, typename Filesystem>
+template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class BasicWF {
 public:
-    using Net = NetProvider;
-    using UI  = BasicUI<BasicWF<Net, Filesystem>>;
+    using Net          = NetProvider;
+    using BufferPolicy = Policy;
+    using UI           = BasicUI<BasicWF<Net, Filesystem, Policy>>;
 
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
         : httpServer((detail::ensureCEFInitialized(), "0.0.0.0"), port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
@@ -142,7 +143,7 @@ public:
         cppFunctions.try_emplace(functionName, [&function](std::span<const std::byte> data) -> void {
             std::tuple<Args...> parameters;
             auto                deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) {
-                (msg::FunctionCall::decodeParameter(std::get<Is>(tuple), data), ...);
+                (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
                 function(std::get<Is>(tuple)...);
             };
 
@@ -179,10 +180,10 @@ public:
     }
 
 private:
-    http::Server<Net, Filesystem>                                          httpServer;
-    std::string_view                                                       httpPort;
-    std::filesystem::path                                                  httpDocRoot;
-    std::map<WebLinkId, WebLink<Net>>                                      webLinks;
+    http::Server<Net, Filesystem, Policy>                                    httpServer;
+    std::string_view                                                         httpPort;
+    std::filesystem::path                                                    httpDocRoot;
+    std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
     std::map<std::string, std::function<void(std::span<const std::byte>)>> cppFunctions;
