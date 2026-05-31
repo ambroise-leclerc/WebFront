@@ -33,6 +33,14 @@ WebFront implements the websocket protocol over an embedded Web server and provi
 
 ```
 
+#### Choosing a frontend
+`webfront::WebFront` still uses the default frontend selected at build time. To force a specific frontend in user code, use `WebFrontWithFrontend` or `BasicWFWithFrontend`:
+
+```cpp
+using BrowserFront = webfront::WebFrontWithFrontend<webfront::frontend::DefaultBrowserFrontend>;
+using EmbeddedFront = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
+```
+
 ## Building and Testing
 
 ### Build Configuration
@@ -66,12 +74,12 @@ cd build
 ./src/WebFrontApp
 ```
 
-When built with `WEBFRONT_EMBED_CEF=ON` (default), this opens a clean chromeless application window. When built with `WEBFRONT_EMBED_CEF=OFF`, it opens in your system browser. The application provides:
-- ✅ **Unified API**: `webfront::open()` automatically uses the best available window type
-- ✅ **Chromeless UI**: Clean application window without browser chrome elements (CEF only)
-- ✅ **React Support**: Full React 18 + JSX + Babel transpilation
-- ✅ **C++/JS Interop**: Bidirectional function calls between C++ and JavaScript
-- ✅ **TypeScript Ready**: Modern JavaScript features and type support
+When built with `WEBFRONT_EMBED_CEF=ON`, this opens a clean chromeless application window. When built with `WEBFRONT_EMBED_CEF=OFF`, it opens in your system browser. The application provides:
+- **Unified API**: `webfront::WebFront` picks the default frontend, and `webfront::WebFrontWithFrontend<>` can force one explicitly
+- **Chromeless UI**: Clean application window without browser chrome elements (CEF only)
+- **React Support**: Full React 18 + JSX + Babel transpilation
+- **C++/JS Interop**: Bidirectional function calls between C++ and JavaScript
+- **TypeScript Ready**: Modern JavaScript features and type support
 
 #### webtest - Jasmine Test Runner with Embedded Window  
 Run the JavaScript test suite in an embedded CEF window for automated testing:

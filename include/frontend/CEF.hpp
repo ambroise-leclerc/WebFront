@@ -213,7 +213,7 @@ inline CefMainArgs makeMainArgs(
 // Throws: CEFInitializationError on initialization failure
 // Throws: CEFSubprocessExit if this is a subprocess (caller should exit with the provided code)
 // Returns: void on successful main process initialization
-void initialize() {
+inline void initialize() {
     if constexpr (!webfrontEmbedCEF) {
         return;
     }
@@ -378,7 +378,7 @@ private:
     #endif
 };
 
-void open(std::string_view port, std::string_view file) {
+inline void open(std::string_view port, std::string_view file) {
     if constexpr (!webfrontEmbedCEF) {
         throw std::runtime_error("cef::open() : CEF not available");
     }
@@ -444,11 +444,11 @@ namespace webfront::cef {
 static constexpr bool webfrontEmbedCEF{false};
 
 // Stub implementations for when CEF is not available
-void initialize() {
+inline void initialize() {
     // No-op when CEF is not available
 }
 
-void open(std::string_view /*port*/, std::string_view /*file*/) {
+inline void open(std::string_view /*port*/, std::string_view /*file*/) {
     throw std::runtime_error("cef::open() : CEF not available");
 }
 

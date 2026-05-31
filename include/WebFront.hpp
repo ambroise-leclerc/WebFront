@@ -3,8 +3,7 @@
 /// @brief WebFront UI main objet
 #pragma once
 
-#include "frontend/CEF.hpp"
-#include "frontend/DefaultBrowser.hpp"
+#include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
 #include "JsFunction.hpp"
 #include "networking/TCPNetworkingTS.hpp"
@@ -17,13 +16,13 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <tuple>
-#include <stdexcept>
-#include <thread>
 #include <utility>
 
 namespace webfront {
@@ -65,37 +64,28 @@ public:
     }
 };
 
-// Global initialization helper to ensure CEF initializes before any networking
 namespace detail {
-inline int ensureCEFInitialized() {
-    if constexpr (cef::webfrontEmbedCEF) {
-        static bool initialized = false;
-        if (!initialized) {
-            try {
-                cef::initialize();
-                initialized = true;
-            } catch (const cef::CEFSubprocessExit& e) {
-                // If this is a CEF subprocess, exit immediately
-                std::exit(e.exit_code());
-            } catch (const cef::CEFInitializationError& e) {
-                // CEF initialization failed - this is a fatal error
-                throw std::runtime_error(e.what());
-            }
-        }
-    }
-    return 0;  // Return value for comma operator
+template <frontend::FrontendType Frontend>
+inline int ensureFrontendInitialized() {
+    static std::once_flag initialized;
+    std::call_once(initialized, [] {
+        Frontend::initialize();
+    });
+    return 0;
 }
 }  // namespace detail
 
-template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
+          frontend::FrontendType Frontend = frontend::DefaultFrontend>
 class BasicWF {
 public:
-    using Net          = NetProvider;
-    using BufferPolicy = Policy;
-    using UI           = BasicUI<BasicWF<Net, Filesystem, Policy>>;
+    using Net              = NetProvider;
+    using BufferPolicy     = Policy;
+    using FrontendProvider = Frontend;
+    using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
 
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
-        : httpServer((detail::ensureCEFInitialized(), "0.0.0.0"), port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
+        : httpServer((detail::ensureFrontendInitialized<Frontend>(), "0.0.0.0"), port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
@@ -153,13 +143,11 @@ public:
 
     enum class WindowAction { none, closeWindow };
     WindowAction openWindow(std::string_view htmlFilename) {
-        if constexpr (cef::webfrontEmbedCEF) {
-            cef::open(httpPort, htmlFilename);  // Blocking until window closed
+        Frontend::open(httpPort, htmlFilename);
+        if constexpr (Frontend::action == frontend::Action::closeServerAfterOpen)
             return WindowAction::closeWindow;
-        } else {
-            browser::open(httpPort, htmlFilename);  // Non-blocking external browser
+        else
             return WindowAction::none;
-        };
     }
 
     // Starts the HTTP server in a background thread, opens the window (blocking for embedded CEF),
@@ -205,7 +193,12 @@ private:
     }
 };
 
+template <typename NetProvider, typename Filesystem, frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+using BasicWFWithFrontend = BasicWF<NetProvider, Filesystem, Policy, Frontend>;
+
 using WebFront = BasicWF<NetProvider, fs::IndexFS>;
+template <frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+using WebFrontWithFrontend = BasicWF<NetProvider, fs::IndexFS, Policy, Frontend>;
 using UI       = WebFront::UI;
 
 }  // namespace webfront
