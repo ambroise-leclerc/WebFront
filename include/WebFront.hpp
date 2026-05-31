@@ -144,7 +144,10 @@ public:
     enum class WindowAction { none, closeWindow };
     WindowAction openWindow(std::string_view htmlFilename) {
         Frontend::open(httpPort, htmlFilename);
-        return Frontend::action == frontend::Action::closeServerAfterOpen ? WindowAction::closeWindow : WindowAction::none;
+        if constexpr (Frontend::action == frontend::Action::closeServerAfterOpen)
+            return WindowAction::closeWindow;
+        else
+            return WindowAction::none;
     }
 
     // Starts the HTTP server in a background thread, opens the window (blocking for embedded CEF),
