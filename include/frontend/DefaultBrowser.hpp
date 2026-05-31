@@ -8,7 +8,7 @@
 
 namespace webfront::browser {
 /// Check if running under WSL
-bool isWSL() {
+inline bool isWSL() {
     std::ifstream proc_version("/proc/version");
     if (proc_version.is_open()) {
         std::string version_info;
@@ -20,7 +20,7 @@ bool isWSL() {
 }
 
 /// Open the web UI in the system's default browser (blocking until user closes)
-void open(std::string_view port, std::string_view file) {
+inline void open(std::string_view port, std::string_view file) {
     std::string command;
     
 #ifdef _WIN32
