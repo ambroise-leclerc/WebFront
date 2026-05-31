@@ -28,7 +28,11 @@ public:
     // auto reuse_address(bool reuse) { return reuse ? "SO_REUSEADDR:1" : "SO_REUSEADDR:0"; }
     struct reuse_address {
         bool isSet;
-        bool value() { return isSet; }
+
+        explicit reuse_address(bool reuse)
+            : isSet(reuse) {}
+
+        bool value() const { return isSet; }
     };
     void set_option(reuse_address option) { log::debug("SocketBaseMock::set_option(reuse_address({}))", option.value()); }
     void bind(const EndpointMock&) { log::debug("SocketBaseMock::bind()"); }
