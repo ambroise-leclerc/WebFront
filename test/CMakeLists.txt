@@ -8,7 +8,7 @@ find_package(Threads)
 include(CTest)
 
 set(TESTS_LIST)
-list(APPEND TESTS_LIST HTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
+list(APPEND TESTS_LIST HTTPServerTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp ReactFSTests.cpp BabelFSTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp)
