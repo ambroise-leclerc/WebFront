@@ -65,7 +65,7 @@ jobs:
         
       - name: Config & Build
         run: |
-          cmake . -B ${{github.workspace}}/build ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }} ${{ github.event_name == 'pull_request' && '-DWEBFRONT_EMBED_CEF=ON' || '' }}
+          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
   
       - name: Test
@@ -82,7 +82,7 @@ jobs:
         working-directory: ${{github.workspace}}/build
         run: |
           lcov --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/src/*' --output-file coverage.info
           lcov --list coverage.info
 
       - name: Upload Coverage
@@ -154,3 +154,22 @@ jobs:
           message: ${{ job.status }}
           color: ${{ steps.badge.outputs.color }}
 
+  web-integration:
+    runs-on: ubuntu-latest
+    name: Ubuntu CEF Jasmine integration
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Configure CEF integration build
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
+
+      - name: Build browser test
+        run: cmake --build ${{github.workspace}}/build-cef --target webtest --parallel 1
+
+      - name: Run Jasmine bridge test
+        run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure

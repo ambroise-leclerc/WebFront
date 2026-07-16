@@ -2,6 +2,7 @@
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)
+option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
 option(WEBFRONT_EMBED_CEF "Enable embedded CEF window support" OFF)
 

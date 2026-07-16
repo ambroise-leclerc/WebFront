@@ -2,23 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>WebFront autotest Spec Runner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WebFront automated browser tests</title>
     <link rel="shortcut icon" type="image/png" href="jasmine/4.6.0/jasmine_favicon.png">
     <link rel="stylesheet" href="jasmine/4.6.0/jasmine.css">
     <script src="jasmine/4.6.0/jasmine.js"></script>
     <script src="jasmine/4.6.0/jasmine-html.js"></script>
     <script src="jasmine/4.6.0/boot0.js"></script>
     <script src="jasmine/4.6.0/boot1.js"></script>
-
     <script src="WebFront.js"></script>
-
-    <!-- Source files -->
-
-    <!-- WebFront framework test files -->
-    <script src="js/webfront-specs.js"></script>
-    <script src="js/my-application-specs.js"></script>
+    <script type="module" src="js/webfront-specs.mjs"></script>
 </head>
 <body>
-
+    <p id="bridge-status">Waiting for the C++/JavaScript bridge…</p>
 </body>
 </html>
