@@ -1,5 +1,3 @@
-option(ENABLE_TEST_COVERAGE "Enable test coverage" OFF)
-
 CPMAddPackage("gh:catchorg/Catch2@3.4.0")
 target_compile_features(Catch2 PRIVATE cxx_std_23)
 target_compile_features(Catch2WithMain PRIVATE cxx_std_23)
@@ -18,7 +16,7 @@ target_link_libraries(tests PRIVATE WebFront_warnings WebFront_options Catch2::C
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 catch_discover_tests(tests)
 
-if(ENABLE_TEST_COVERAGE)
+if(ENABLE_COVERAGE)
   target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)
   target_link_options(tests PUBLIC -fprofile-arcs -ftest-coverage)
 endif()

@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <stdexcept>
@@ -23,6 +24,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace webfront {
@@ -72,6 +74,25 @@ inline int ensureFrontendInitialized() {
         Frontend::initialize();
     });
     return 0;
+}
+
+template <http::BuffersPolicyType Policy, typename R, typename... Args, typename Function>
+auto makeCppFunctionHandler(Function&& function) {
+    using StoredFunction = std::decay_t<Function>;
+    auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
+
+    return [callable = std::move(callable)](std::span<const std::byte> data) -> void {
+        std::tuple<Args...> parameters;
+        auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) {
+            (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
+            if constexpr (std::is_void_v<R>)
+                std::invoke(*callable, std::get<Is>(tuple)...);
+            else
+                static_cast<void>(std::invoke(*callable, std::get<Is>(tuple)...));
+        };
+
+        deserializeAndCall(parameters, std::index_sequence_for<Args...>());
+    };
 }
 }  // namespace detail
 
@@ -130,15 +151,8 @@ public:
      */
     template <typename R, typename... Args>
     void cppFunction(std::string functionName, auto&& function) {
-        cppFunctions.try_emplace(functionName, [&function](std::span<const std::byte> data) -> void {
-            std::tuple<Args...> parameters;
-            auto                deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) {
-                (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
-                function(std::get<Is>(tuple)...);
-            };
-
-            deserializeAndCall(parameters, std::index_sequence_for<Args...>());
-        });
+        cppFunctions.try_emplace(functionName,
+                                 detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function)));
     }
 
     enum class WindowAction { none, closeWindow };

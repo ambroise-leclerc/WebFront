@@ -5,6 +5,8 @@
 
 #include "Mocks.hpp"
 
+#include <array>
+#include <cstring>
 #include <list>
 #include <string>
 #include <type_traits>
@@ -165,6 +167,35 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
                 REQUIRE(ClosingFrontend::openCalls == 1);
                 REQUIRE(ClosingFrontend::lastPort == "9000");
                 REQUIRE(ClosingFrontend::lastFile == "react.html");
+            }
+        }
+    }
+}
+
+SCENARIO("Registered C++ function handlers own and invoke their callable") {
+    GIVEN("handlers created from temporary callables") {
+        int  decodedValue = 0;
+        using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+        FrontendWF webFront("9100");
+        auto registeredFunction = [] {};
+        webFront.cppFunction<void>("temporary", registeredFunction);
+        registeredFunction();
+
+        auto voidHandler = detail::makeCppFunctionHandler<http::DefaultBuffersPolicy, void, int>(
+          [&decodedValue](int value) { decodedValue = value; });
+        auto returningHandler = detail::makeCppFunctionHandler<http::DefaultBuffersPolicy, int>([] { return 42; });
+
+        std::array<std::byte, 1 + sizeof(double)> encodedNumber{};
+        encodedNumber.front() = static_cast<std::byte>(msg::CodedType::number);
+        double value          = 42.0;
+        std::memcpy(encodedNumber.data() + 1, &value, sizeof(value));
+
+        WHEN("the handlers are invoked after registration") {
+            voidHandler(encodedNumber);
+            returningHandler(std::span<const std::byte>{});
+
+            THEN("the stored callables remain valid") {
+                REQUIRE(decodedValue == 42);
             }
         }
     }
