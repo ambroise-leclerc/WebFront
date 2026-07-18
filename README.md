@@ -1,90 +1,73 @@
 # WebFront
 
-A C++23 header-only library with the aim of providing rich cross-platform UI (Typescript based) to C++ applications with a non-invasive API.
+WebFront is an experimental C++23 header-only library for browser-based user interfaces. It serves local HTML/JavaScript through an embedded HTTP server and connects the page to C++ over WebSocket.
 
-WebFront implements the websocket protocol over an embedded Web server and provides CppToJs and JsToCpp cross functions calls with native types conversions.
+The current baseline demonstrates asynchronous, fire-and-forget calls in both directions:
 
-[![Windows MSVC](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/windows-latest-msvc.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![Ubuntu GCC](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/ubuntu-latest-gcc.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![Ubuntu Clang](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/ubuntu-latest-clang.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![MacOS Clang](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/ambroise-leclerc/317c22bfe80b2b51663187fbebfba533/raw/macos-latest-clang.json)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![codecov](https://codecov.io/github/ambroise-leclerc/WebFront/branch/master/graph/badge.svg?token=ODE6O36XIV)](https://codecov.io/github/ambroise-leclerc/WebFront)
+- JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++.
+- C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript.
 
-[![CodeScene Code Health](https://codescene.io/projects/29377/status-badges/code-health)](https://codescene.io/projects/29377)
-[![CodeScene System Mastery](https://codescene.io/projects/29377/status-badges/system-mastery)](https://codescene.io/projects/29377)
+Function return values and remote exception propagation are not implemented yet.
 
-## Getting started
+## Build and test
 
-#### Hello World
-```cpp
-    WebFront webfront;
-    webFront.cppFunction<void, std::string>("print", [](std::string text) {
-        std::cout << text << '\n';
-    });
+The normal build avoids the large optional CEF dependency and runs the portable Catch2 suite:
 
-    webFront.onUIStarted([](UI ui) {
-        ui.addScript("var addText = function(text, num) {                 "
-                     "  let print = webFront.cppFunction('print');        "
-                     "  print(text + ' of ' + num);                       "
-                     "}                                                   ");
-        auto print = ui.jsFunction("addText");
-        print("Hello World", 2023);
-    });
-
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-#### Choosing a frontend
-`webfront::WebFront` still uses the default frontend selected at build time. To force a specific frontend in user code, use `WebFrontWithFrontend` or `BasicWFWithFrontend`:
+Relevant options are:
+
+- `WEBFRONT_EMBED_CEF=OFF`: open examples in the system browser.
+- `WEBFRONT_EMBED_CEF=ON`: build the embedded Chromium frontend and browser integration test.
+- `ENABLE_TESTING=ON`: build Catch2 and Jasmine test targets.
+- `ENABLE_COVERAGE=ON`: instrument the C++ tests with GCC/Clang coverage flags.
+
+CPM downloads Networking TS during configuration. It also downloads Catch2 when `ENABLE_TESTING=ON` and CEF when
+`WEBFRONT_EMBED_CEF=ON`.
+
+## Minimal native-module demo
+
+Run the default example after a CEF-off build:
+
+```bash
+./build/src/WebFrontApp
+```
+
+The application serves `src/module-demo.html`, whose entry module imports the other `.mjs` files with relative URLs. After the WebSocket is ready, the module calls the registered C++ `moduleReady` callback; C++ then calls `webfrontModule.receiveFromCpp`, a function installed by the served module. The page button demonstrates the reverse JavaScript-to-C++ call.
+
+The older React/Babel example remains available explicitly:
+
+```bash
+./build/src/WebFrontApp react.html
+```
+
+When the system-browser frontend is used, press Enter in the application terminal after closing the page. A CEF-enabled build uses an embedded window and stops when that window closes.
+
+## Automated browser integration
+
+On Linux with Xvfb available:
+
+```bash
+cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
+cmake --build build-cef --target webtest --parallel
+ctest --test-dir build-cef -L web-integration --output-on-failure
+```
+
+The Jasmine specs are native ES modules. They prove relative module loading and both bridge directions, report the final result to C++, close the CEF window automatically, and fail CTest on an assertion, bridge, startup, or timeout error.
+
+## Selecting a frontend
+
+`webfront::WebFront` uses the frontend selected by the build. Applications can select one explicitly:
 
 ```cpp
 using BrowserFront = webfront::WebFrontWithFrontend<webfront::frontend::DefaultBrowserFrontend>;
 using EmbeddedFront = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
 ```
 
-## Building and Testing
-
-### Build Configuration
-```bash
-# Configure build (Release by default)
-cmake . -B build
-
-# Configure with Debug and coverage  
-cmake . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON
-
-# Configure with embedded Windows (instead of ystem browser)
-cmake . -B build -DWEBFRONT_EMBED_CEF=ON
-
-# Build the project
-cmake --build build --config Release --parallel
-```
-
-#### CMake Options
-- `WEBFRONT_EMBED_CEF=OFF` (default): Disable CEF, applications will use the system browser instead
-- `WEBFRONT_EMBED_CEF=ON`: Enable embedded CEF window support for chromeless application windows
-- `ENABLE_TESTING=ON` (default): Build unit tests
-- `ENABLE_COVERAGE=ON`: Enable test coverage collection
-
-### Running Examples
-
-#### WebFrontApp - React Example with Embedded Window
-The main example application demonstrates React integration with TypeScript/Babel transpilation in a chromeless CEF window:
-
-```bash
-cd build
-./src/WebFrontApp
-```
-
-When built with `WEBFRONT_EMBED_CEF=ON`, this opens a clean chromeless application window. When built with `WEBFRONT_EMBED_CEF=OFF`, it opens in your system browser. The application provides:
-- **Unified API**: `webfront::WebFront` picks the default frontend, and `webfront::WebFrontWithFrontend<>` can force one explicitly
-- **Chromeless UI**: Clean application window without browser chrome elements (CEF only)
-- **React Support**: Full React 18 + JSX + Babel transpilation
-- **C++/JS Interop**: Bidirectional function calls between C++ and JavaScript
-- **TypeScript Ready**: Modern JavaScript features and type support
-
-#### webtest - Jasmine Test Runner with Embedded Window  
-Run the JavaScript test suite in an embedded CEF window for automated testing:
-
-```bash
-cd build
-./webtest/webtest
-```
+See [AGENTS.md](AGENTS.md) for architecture, development commands, conventions, test requirements, and safety guidance. The current evidence-based status and backlog recommendations are in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ISSUE_AUDIT.md](docs/ISSUE_AUDIT.md).
