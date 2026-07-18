@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <stdexcept>
 
@@ -16,37 +17,40 @@ using namespace std;
 using namespace webfront;
 
 
-int main(int /*argc*/, char** /*argv*/) {
+// LCOV_EXCL_START - interactive example; behavior is covered by the browser integration target.
+int main(int argc, char** argv) {
     using HelloFS     = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
     using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
 
     const string httpPort = "9002";
-    const string mainHtml = "react.html";
+    const string mainHtml = argc > 1 ? argv[1] : "module-demo.html";
     auto docRoot  = tooling::findDocRoot(mainHtml);
 
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
     log::addSinks(log::clogSink);
     WebFrontDbg webFront(httpPort, docRoot);
+    optional<WebFrontDbg::UI> connectedUI;
 
     webFront.cppFunction<void, std::string>("print", [](const std::string& text) {
         std::cout << text << '\n';
     });
-    webFront.onUIStarted([](WebFrontDbg::UI ui) {
-        ui.addScript("var addText = function(text, num) {                 \n"
-                     "  let print = webFront.cppFunction('print');        \n"
-                     "  print(text + ' of ' + num);                       \n"
-                     "}                                                   \n"
-                     "                                                    \n"
-                     "var testFunc = function(text) {                     \n"
-                     "  let bigText = 'bigText : ' + text + text + ' - '; \n"
-                     "  bigText += bigText + bigText;                     \n"
-                     "  let cppTest = webFront.cppFunction('cppTest');    \n"
-                     "  cppTest(text, bigText, bigText.length);           \n"
-                     "}                                                   \n");
-        auto print = ui.jsFunction("addText");
-        print("Hello World", 2025);
-        ui.jsFunction("testFunc")("Texte de test suffisament long pour changer de format");
+    webFront.cppFunction<void>("moduleReady", [&connectedUI] {
+        if (connectedUI)
+            connectedUI->jsFunction("webfrontModule.receiveFromCpp")("Hello from C++ through WebFront");
+    });
+
+    const bool useReactExample = filesystem::path(mainHtml).filename() == "react.html";
+    webFront.onUIStarted([&connectedUI, useReactExample](WebFrontDbg::UI ui) {
+        connectedUI.emplace(ui);
+        if (!useReactExample)
+            return;
+
+        ui.addScript("var addText = function(text, num) {          \n"
+                     "  const print = webFront.cppFunction('print');\n"
+                     "  print(text + ' of ' + num);                \n"
+                     "}                                            \n");
+        ui.jsFunction("addText")("Hello World", 2025);
     });
 
     webFront.openAndRun(mainHtml);
@@ -55,3 +59,4 @@ int main(int /*argc*/, char** /*argv*/) {
 
     return 0;
 }
+// LCOV_EXCL_STOP
