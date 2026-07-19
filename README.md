@@ -7,6 +7,8 @@ The current baseline demonstrates asynchronous, fire-and-forget calls in both di
 - JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++.
 - C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript.
 
+Bridge parameters include scalars, strings, tuples, and numeric typed arrays. C++ `std::vector`, `std::array`, and `std::span` values map to the corresponding JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups.
+
 Function return values and remote exception propagation are not implemented yet.
 
 ## Build and test
@@ -59,7 +61,7 @@ cmake --build build-cef --target webtest --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure
 ```
 
-The Jasmine specs are native ES modules. They prove relative module loading and both bridge directions, report the final result to C++, close the CEF window automatically, and fail CTest on an assertion, bridge, startup, or timeout error.
+The Jasmine specs are native ES modules. They prove relative module loading, both bridge directions, and all supported numeric typed arrays; report the final result to C++; close the CEF window automatically; and fail CTest on an assertion, bridge, startup, or timeout error.
 
 ## Selecting a frontend
 

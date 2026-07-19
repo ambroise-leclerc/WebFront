@@ -21,7 +21,7 @@ public:
         : name(functionName), webFront(wf), webLinkId(linkId) {}
 
     void operator()(auto&&... ts) {
-        command.setParametersCount(0);
+        command.reset();
         websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
         command.encodeParameter(name, frame);
         (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);

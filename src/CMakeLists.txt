@@ -35,9 +35,24 @@ setup_cef_for_target(WebFrontApp)
 # Additional Build Rules
 # ==============================================================================
 
-# TypeScript compilation
-add_custom_command(
-    OUTPUT WebFront.js
-    COMMAND tsc
+# Browser bridge asset maintenance. Normal builds consume the checked-in header;
+# this explicit target regenerates it, while CTest verifies that it is current.
+set(WEBFRONT_JS_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/WebFront.js")
+set(WEBFRONT_JS_HEADER "${CMAKE_SOURCE_DIR}/include/system/WebFrontJsData.hpp")
+add_custom_target(webfront-js-assets
+    COMMAND ${CMAKE_COMMAND}
+        -DINPUT=${WEBFRONT_JS_SOURCE}
+        -DOUTPUT=${WEBFRONT_JS_HEADER}
+        -P ${CMAKE_SOURCE_DIR}/cmake/EmbedWebFrontJs.cmake
+    COMMENT "Regenerating embedded WebFront.js"
+    VERBATIM
 )
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+
+if(ENABLE_TESTING)
+    add_test(NAME WebFrontJsAssetsFresh
+        COMMAND ${CMAKE_COMMAND}
+            -DINPUT=${WEBFRONT_JS_SOURCE}
+            -DCHECK=${WEBFRONT_JS_HEADER}
+            -P ${CMAKE_SOURCE_DIR}/cmake/EmbedWebFrontJs.cmake
+    )
+endif()
