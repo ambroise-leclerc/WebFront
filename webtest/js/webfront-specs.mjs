@@ -14,6 +14,13 @@ const cppArraysCall = new Promise((resolve) => {
     resolveCppArraysCall = resolve;
 });
 
+let resolveCppResult;
+let rejectCppResult;
+const cppResultCall = new Promise((resolve, reject) => {
+    resolveCppResult = resolve;
+    rejectCppResult = reject;
+});
+
 globalThis.webfrontTests = {
     receiveFromCpp(token) {
         status.textContent = `C++ called served JavaScript with: ${token}`;
@@ -22,6 +29,18 @@ globalThis.webfrontTests = {
 
     receiveArraysFromCpp(...arrays) {
         resolveCppArraysCall(arrays);
+    },
+
+    returnToCpp(value) {
+        return `js-result:${value}`;
+    },
+
+    recordCppResult(value) {
+        resolveCppResult(value);
+    },
+
+    recordCppError(message) {
+        rejectCppResult(new Error(message));
     },
 
     close(passed) {
@@ -82,6 +101,22 @@ describe('WebFront browser integration', () => {
     it('keeps ordinary JavaScript arrays as heterogeneous tuples', () => {
         const recordTuple = webFront.cppFunction('recordTupleFromJs');
         expect(() => recordTuple([42, 'tuple'])).not.toThrow();
+    });
+
+    it('returns successful C++ calls as promises', async () => {
+        await expectAsync(webFront.cppFunction('returnFromCpp')('from-js'))
+            .toBeResolvedTo('cpp-result:from-js');
+    });
+
+    it('rejects missing functions and C++ exceptions', async () => {
+        await expectAsync(webFront.cppFunction('missingCppFunction')())
+            .toBeRejectedWithError(/was not found/);
+        await expectAsync(webFront.cppFunction('throwFromCpp')())
+            .toBeRejectedWithError('C++ callback failed');
+    });
+
+    it('allows C++ to await a JavaScript result', async () => {
+        await expectAsync(cppResultCall).toBeResolvedTo('js-result:from-cpp');
     });
 });
 

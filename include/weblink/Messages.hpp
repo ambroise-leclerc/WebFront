@@ -21,6 +21,8 @@
 
 namespace webfront::msg {
 
+using CallId = std::uint16_t;
+
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
 enum class TxtOpcode : uint8_t { debugLog, injectScript };
 
@@ -216,7 +218,7 @@ public:
         if (data.size() < sizeof(typename T::Header))
             throw std::runtime_error("Not enough data to form a message Header");
         auto message = reinterpret_cast<const T*>(data.data());
-        if ((data.size() + message->getPayloadSize()) < sizeof(typename T::Header))
+        if (message->getPayloadSize() > data.size() - sizeof(typename T::Header))
             throw std::runtime_error("Not enough data to form a complete message");
         return message;
     }
@@ -277,7 +279,7 @@ template <Command Cmd>
 struct FunctionCallHeader {
     Command                command         = Cmd;
     uint8_t                parametersCount = 0;  // parameter 0 is the function name so parametersCount is always at least 1
-    std::array<uint8_t, 2> padding{};
+    CallId                 callId{};
     uint32_t               parametersDataSize = 0;
 };
 static_assert(sizeof(FunctionCallHeader<Command::callFunction>) == 8, "FunctionCall header has to be 8 bytes long");
@@ -382,17 +384,24 @@ protected:
 public:
     void reset() {
         head.parametersCount    = 0;
+        head.callId             = 0;
         head.parametersDataSize = 0;
         encodeBufferIndex       = 0;
     }
     void setParametersCount(uint8_t parametersCount) {
         head.parametersCount = parametersCount;
     }
+    void setCallId(CallId callId) {
+        head.callId = callId;
+    }
     void setPayloadSize(uint32_t size) {
         head.parametersDataSize = size;
     }
     [[nodiscard]] uint8_t getParametersCount() const {
         return head.parametersCount;
+    }
+    [[nodiscard]] CallId getCallId() const {
+        return head.callId;
     }
     [[nodiscard]] size_t getPayloadSize() const {
         return head.parametersDataSize;
@@ -401,6 +410,8 @@ public:
         setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value));
     }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
+        if (getParametersCount() == 0)
+            throw std::runtime_error("Function call has no function name");
         std::string functionName;
         auto        data = this->payload();
         decodeParameter(functionName, data);

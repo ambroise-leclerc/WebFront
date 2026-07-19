@@ -30,14 +30,15 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - The bridge carries all JavaScript numeric typed-array variants in both directions. C++ `std::vector`, `std::array`, and `std::span` values use the matching typed-array encoding, while decoded parameters own their storage.
 - `src/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
+- Correlated result messages now support asynchronous C++ futures and JavaScript promises, including void completion, missing-function errors, callback exceptions, malformed-return rejection, and disconnect rejection. Untyped calls remain fire-and-forget.
 - `AGENTS.md` is the canonical development guide for supported coding agents.
 
 Local verification on 2026-07-19 completed successfully: the CEF-off build passed all 47 CTest cases, including deterministic asset and typed-array protocol coverage, and a CEF-enabled build passed `WebFrontBrowserIntegration` under Xvfb. The browser test exercised every supported numeric typed array from C++ to JavaScript and JavaScript to C++, ordinary tuple arrays, final Jasmine reporting, and automatic CEF shutdown.
 
 ## Known limitations and next decisions
 
-- JavaScript/C++ function results and remote exceptions are not propagated. The existing `FunctionReturn` message type is protocol groundwork, not a working public feature.
-- Bridge lookup and connection errors need a defined cross-language error contract.
+- Result values are currently limited to the bridge's existing scalar, string, tuple, and numeric typed-array parameter types; richer object/DOM values remain out of scope.
+- The public API does not yet expose cancellation for an outstanding future or Promise.
 - Ordinary JavaScript arrays encode as tuple-like parameters; only numeric typed arrays use the homogeneous array wire representation.
 - `NativeDebugFS` exposes development files and is not a production packaging format.
 - CEF is a large optional dependency. Only the focused Linux integration job should download it for the minimal baseline.
