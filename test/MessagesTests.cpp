@@ -194,6 +194,8 @@ SCENARIO("Numeric arrays are encoded and decoded as owning values") {
     GIVEN("Uint8 arrays on either side of the compact-length boundary") {
         vector<uint8_t> compact(255, 7);
         vector<uint8_t> regular(256, 9);
+        array<uint8_t, 255> fixedCompact{};
+        array<uint8_t, 256> fixedRegular{};
 
         auto encodedType = []<typename Array>(const Array& input) {
             msg::FunctionReturn<> message;
@@ -207,6 +209,8 @@ SCENARIO("Numeric arrays are encoded and decoded as owning values") {
 
         REQUIRE(encodedType(compact) == msg::CodedType::smallArrayU8);
         REQUIRE(encodedType(regular) == msg::CodedType::arrayU8);
+        REQUIRE(encodedType(fixedCompact) == msg::CodedType::smallArrayU8);
+        REQUIRE(encodedType(fixedRegular) == msg::CodedType::arrayU8);
     }
 
     GIVEN("A fixed-size destination") {

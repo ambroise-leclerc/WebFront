@@ -18,12 +18,13 @@ file(ARCHIVE_CREATE
 file(READ "${gzip_file}" gzip_hex HEX)
 file(REMOVE "${gzip_file}")
 
-# libarchive currently records the source timestamp in the gzip header even
-# when ARCHIVE_CREATE receives MTIME 0. Normalize bytes 4-7; they are metadata
-# and are not covered by the compressed stream checksum.
+# libarchive currently records platform metadata in the gzip header even when
+# ARCHIVE_CREATE receives MTIME 0. Normalize bytes 4-7 (timestamp) and byte 9
+# (originating OS); they are not covered by the compressed stream checksum.
 string(SUBSTRING "${gzip_hex}" 0 8 gzip_prefix)
-string(SUBSTRING "${gzip_hex}" 16 -1 gzip_suffix)
-set(gzip_hex "${gzip_prefix}00000000${gzip_suffix}")
+string(SUBSTRING "${gzip_hex}" 16 2 gzip_extra_flags)
+string(SUBSTRING "${gzip_hex}" 20 -1 gzip_payload)
+set(gzip_hex "${gzip_prefix}00000000${gzip_extra_flags}ff${gzip_payload}")
 
 string(LENGTH "${gzip_hex}" hex_length)
 math(EXPR data_size "${hex_length} / 2")

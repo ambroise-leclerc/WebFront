@@ -130,18 +130,21 @@ struct numeric_array_traits {
 template <typename T, typename Allocator>
 struct numeric_array_traits<std::vector<T, Allocator>> {
     static constexpr bool supported = is_numeric_array_element_v<T>;
+    static constexpr auto extent    = std::dynamic_extent;
     using element_type              = T;
 };
 
 template <typename T, std::size_t Size>
 struct numeric_array_traits<std::array<T, Size>> {
     static constexpr bool supported = is_numeric_array_element_v<T>;
+    static constexpr auto extent    = Size;
     using element_type              = T;
 };
 
 template <typename T, std::size_t Extent>
 struct numeric_array_traits<std::span<T, Extent>> {
     static constexpr bool supported = is_numeric_array_element_v<T>;
+    static constexpr auto extent    = Extent;
     using element_type              = T;
 };
 
@@ -358,7 +361,13 @@ protected:
             throw std::length_error("WebFront array byte size overflow");
 
         if constexpr (std::is_same_v<Element, std::uint8_t>) {
-            if (elementCount < 256)
+            constexpr auto extent = numeric_array_traits<std::remove_cvref_t<Array>>::extent;
+            if constexpr (extent == std::dynamic_extent) {
+                if (elementCount < 256)
+                    encodeTypeHeader(CodedType::smallArrayU8, static_cast<std::uint8_t>(elementCount), frame);
+                else
+                    encodeTypeHeader(CodedType::arrayU8, static_cast<std::uint32_t>(elementCount), frame);
+            } else if constexpr (extent < 256)
                 encodeTypeHeader(CodedType::smallArrayU8, static_cast<std::uint8_t>(elementCount), frame);
             else
                 encodeTypeHeader(CodedType::arrayU8, static_cast<std::uint32_t>(elementCount), frame);

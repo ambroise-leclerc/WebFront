@@ -11,7 +11,7 @@ struct WebFrontJsData {
     static constexpr std::string_view encoding{"gzip"};
     static constexpr std::size_t dataSize{3386};
     static constexpr std::array<std::uint64_t, 424> data{
-        0x1f8b080000000000, 0x0203cd1b596fdb46, 0xfaddbf6242180db5, 0x961949b6551f55b2, 0x8d13032ed2eda271,
+        0x1f8b080000000000, 0x02ffcd1b596fdb46, 0xfaddbf6242180db5, 0x961949b6551f55b2, 0x8d13032ed2eda271,
         0x761f04614d892399, 0x0d456a79f8a8abff, 0xbedf9c1c0e67482a, 0x07b0060c4bc399ef, 0xbe877ef5ea15fafb,
         0x3c0df112bd4d9387, 0x0ca787591860f46f, 0x3cbf4a933847f02c, 0x58616f6fcf5d16f1, 0x220f9318b9ab2899,
         0xfb510f3def21f871, 0x8a0ca32c4fc345ee, 0x5cecd1a545126739, 0xba4cd66b3f0ed004, 0xfd36ff032f726f99,
