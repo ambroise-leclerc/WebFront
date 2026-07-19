@@ -1,32 +1,38 @@
-# Open GitHub issue audit
+# GitHub issue and branch audit
 
-Audit snapshot: 2026-07-16. These are recommendations only; no GitHub issues were changed.
+Audit applied: 2026-07-19. The backlog was reduced to work that has concrete interfaces, acceptance criteria, and a place in the current WebFront roadmap.
 
-| Issue | Finding | Recommended action |
+## Active issues
+
+| Issue | Decision | Next action |
 |---|---|---|
-| #189 Update develop branch | `develop` is the active integration branch, is ahead of `master`, and its latest matrix passed. The issue has no acceptance criteria. | Close as completed or obsolete with branch/CI evidence. |
-| #137 MSEdgeWebview2 frontend | Still a distinct possible frontend; a remote feature branch exists, but the parent frontend epic is closed. | Retain only after rewriting scope, supported Windows versions, lifecycle API, and tests; keep outside the minimal milestone. |
-| #133 CreateReactApp evaluation | Create React App is no longer an appropriate basis for new React integrations. | Close as obsolete. Create a Vite-specific evaluation only if Node integration becomes a current goal. |
-| #132 JavaScript modules | MIME support existed, but no automated module graph and bridge proof existed. | Close when the module demo and browser test in this milestone merge. |
-| #125 ReactFS integration | ReactFS, BabelFS, and the named child tasks are implemented; the remaining placeholder task is undefined. | Close as completed; file focused follow-ups for actual missing behavior. |
-| #120 Integrated WebFront UI | Broad product idea with no current acceptance criteria. | Rewrite as a concrete roadmap epic or close as inactive. |
-| #121 Status/debug overlay | Empty placeholder under #120. | Close unless rewritten with user-visible behavior and frontend constraints. |
-| #122 Developer overlay | Empty placeholder and overlaps #121. | Consolidate into a rewritten overlay issue or close. |
-| #123 Browser-backed download | Potentially useful but unrelated to the baseline and lacks security/lifetime semantics. | Retain only after defining API, storage ownership, permissions, and tests; otherwise close. |
-| #124 Conway readme application | Empty aspirational issue. | Close or rewrite as a documentation/demo task with assets and acceptance criteria. |
-| #114 Jasmine automation | Remains valid: Jasmine assets existed, but results were not connected to CTest/CI. | Close when the automated CEF/Xvfb test merges. |
-| #115 GruntJS evaluation | Superseded by direct Jasmine plus CEF/Xvfb; Grunt adds no necessary capability. | Close as superseded by #114 implementation. |
-| #116 Selenium evaluation | Unneeded for the selected minimal in-process browser path. | Close as superseded; create a new cross-browser issue only if required later. |
-| #117 Headless Chrome evaluation | Superseded for the minimal milestone by CEF under Xvfb. | Close as superseded, noting that Playwright may be reconsidered for future cross-browser coverage. |
-| #118 Chromatic evaluation | Visual-regression SaaS is unrelated to bridge correctness and the issue is empty. | Close as out of scope. |
-| #119 Jasmine Headless WebKit | Superseded by the selected CEF path and has no acceptance criteria. | Close as superseded. |
-| #35 Function return | Return/error propagation is not implemented despite partial message types. | Retain as the canonical epic; define correlation IDs, async result API, errors, timeouts, and compatibility. |
-| #43 JSReturnValue | Overlaps the C++-to-JS half of #35. | Consolidate into #35 and close as duplicate after preserving its future-like API considerations. |
-| #39 Arrays in calls | Enum values exist, but general/typed array encoding is incomplete. | Retain and rewrite with supported element types, ownership, size limits, round-trip tests, and both directions. |
-| #38 FileSystem | Layered native and virtual filesystems are implemented; archived packaging remains only an idea. | Close as completed. Open a separate packaged/archive filesystem issue if still wanted. |
-| #36 JS strings to views | Technically possible but exposes reception-buffer lifetime hazards. | Retain only as an explicit zero-copy API design task with lifetime guarantees; otherwise close as unsafe/not planned. |
-| #28 UI per browser document | `BasicUI` is created per connected `WebLink` and supports script/function interaction; DOM ambitions are undefined. | Close the implemented issue and create a separate DOM API epic only if still desired. |
+| #39 Typed arrays in bridge messages | Active, first priority. The wire enum already reserves numeric array types, but their codecs are incomplete and the readable browser bridge source was removed in 2023. | Restore a reproducible `WebFront.js` source/embedding pipeline, implement owning numeric arrays in both directions, and cover them in Catch2 and Jasmine. |
+| #35 Asynchronous bridge results and errors | Active, second priority. Existing calls remain fire-and-forget even though a partial return-message type exists. | Add correlation identifiers, C++ futures, JavaScript promises, exception propagation, missing-function errors, and disconnect cleanup after #39. |
+| #137 Optional WebView2 frontend | Retained but deferred. Closed PR #175 was untested and targeted the example rather than the current frontend abstraction. | Implement a fresh opt-in `frontend::WebView2` only with native Windows compilation and lifecycle/bridge testing. |
 
-## Closed issue consistency note
+Issue #199 tracks this one-time repository cleanup and closes with its documentation PR.
 
-Issue #187 (“Add Jasmine C++/JS bridge testing to JasmineTest”) was closed even though its assertions required unsupported synchronous return values and the executable was not connected to CTest results. The new automation should be referenced in any closing comment for #114 so the historical distinction is clear.
+## Closed issues
+
+| Issues | Resolution |
+|---|---|
+| #189 | Completed by #190 and the subsequent merged foundation work on `develop`. |
+| #114–#119 | #114 was completed by #197; the Grunt, Selenium, Chrome, Chromatic, and WebKit evaluations are superseded by the CEF/Xvfb Jasmine integration. |
+| #120–#124 | The integrated overlays, browser-backed download, and showcase application lack requirements or fall outside the minimal bridge foundation. |
+| #125, #133 | The defined ReactFS work and optional React example exist; Create React App integration is not part of the core roadmap. |
+| #132 | Completed by the native ES-module demonstration in #196. |
+| #28 | A `BasicUI` already represents each connected `WebLink`; general DOM abstraction is outside the current scope. |
+| #38 | The core `File`, `IndexFS`, `NativeDebugFS`, and `Multi` filesystem layers are implemented. |
+| #36 | Reception-buffer-backed string views and pointers would expose unsafe lifetimes; incoming values remain owning types. |
+| #43 | Consolidated into the canonical return-value issue #35. |
+
+## Branch cleanup
+
+Only protected `develop` and `master` remain as long-lived remote branches. The following remote branches were removed after comparing their tips and PR/issue history:
+
+- `137-msedgewebview2-frontend` and `140-ensure-typeerasedfunction-forwarding-constructor-has-constraints-that-prevent-copying-moving-objects-of-the-same-type` pointed at stale, unrelated history.
+- `179-cef-frontend`, `180-cef-crashes-on-macos-during-window-creation-exc_bad_access`, and `182-cef-frontend-for-windows` were superseded by the merged CEF/frontend implementation.
+- `claude/resolve-issue-40-01BBmQwYHN1GkxBbzsPXXgmb` was superseded by merged PR #194.
+- `feat/windows-webview2` belonged to closed, unmerged, untested PR #175; its requirements were preserved in rewritten issue #137.
+
+Merged and abandoned local feature branches were also removed. New work starts from an up-to-date `develop`, follows the issue-number branch convention, and targets `develop` with one focused pull request per milestone.
