@@ -6,25 +6,10 @@ if(NOT DEFINED OUTPUT AND NOT DEFINED CHECK)
     message(FATAL_ERROR "Set OUTPUT to regenerate the header or CHECK to verify it")
 endif()
 
-set(gzip_file "${CMAKE_CURRENT_BINARY_DIR}/WebFront.js.gz")
-file(ARCHIVE_CREATE
-    OUTPUT "${gzip_file}"
-    PATHS "${INPUT}"
-    FORMAT raw
-    COMPRESSION GZip
-    COMPRESSION_LEVEL 9
-    MTIME 0
-)
-file(READ "${gzip_file}" gzip_hex HEX)
-file(REMOVE "${gzip_file}")
-
-# libarchive currently records platform metadata in the gzip header even when
-# ARCHIVE_CREATE receives MTIME 0. Normalize bytes 4-7 (timestamp) and byte 9
-# (originating OS); they are not covered by the compressed stream checksum.
-string(SUBSTRING "${gzip_hex}" 0 8 gzip_prefix)
-string(SUBSTRING "${gzip_hex}" 16 2 gzip_extra_flags)
-string(SUBSTRING "${gzip_hex}" 20 -1 gzip_payload)
-set(gzip_hex "${gzip_prefix}00000000${gzip_extra_flags}ff${gzip_payload}")
+# Embed the source bytes directly. Compression libraries can produce different
+# deflate streams on different platforms, while the raw representation is
+# deterministic and is small enough for this development asset.
+file(READ "${INPUT}" gzip_hex HEX)
 
 string(LENGTH "${gzip_hex}" hex_length)
 math(EXPR data_size "${hex_length} / 2")
@@ -59,7 +44,7 @@ while(word_index LESS word_count)
     math(EXPR word_index "${word_index} + 1")
 endwhile()
 
-set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct WebFrontJsData {\n    static constexpr std::string_view encoding{\"gzip\"};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
+set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct WebFrontJsData {\n    static constexpr std::string_view encoding{};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
 
 if(DEFINED CHECK)
     file(READ "${CHECK}" expected)
