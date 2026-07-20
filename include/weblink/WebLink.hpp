@@ -10,6 +10,7 @@
 #include <future>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -40,7 +41,7 @@ class WebLink {
         std::function<void(std::exception_ptr)> reject;
     };
 
-    websocket::WebSocket<Net, Policy> ws;
+    std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
     WebLinkId id;
     bool sameEndian;
     std::optional<size_t> logSink;
@@ -53,20 +54,20 @@ class WebLink {
 
 public:
     WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler)
-        : ws(std::move(socket)), id(webLinkId), eventsHandler(eventHandler) {
+        : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket))), id(webLinkId), eventsHandler(eventHandler) {
         log::debug("New WebLink created with id:{}", id);
 
-        ws.onMessage([this](std::string_view text) {
+        ws->onMessage([this](std::string_view text) {
             log::debug("onMessage(text) :{}", text);
-            ws.write("This is my response");
+            ws->write("This is my response");
         });
-        ws.onMessage([this](std::span<const std::byte> data) { onBinaryMessage(data); });
-        ws.onClose([this](websocket::CloseEvent event) {
+        ws->onMessage([this](std::span<const std::byte> data) { onBinaryMessage(data); });
+        ws->onClose([this](websocket::CloseEvent event) {
             auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
             rejectPending(std::make_exception_ptr(std::runtime_error(message)));
         });
 
-        ws.start();
+        ws->start();
     }
     WebLink(const WebLink&) = delete;
     WebLink(WebLink&&) = delete;
@@ -79,8 +80,8 @@ public:
         if (logSink) log::removeSinks(logSink.value());
     }
 
-    void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
-    void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
+    void sendCommand(auto message) { ws->write(message.header(), message.payload()); }
+    void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
 
     template<typename Result>
     std::pair<msg::CallId, std::future<Result>> expectResult() {

@@ -93,7 +93,7 @@ SCENARIO("FunctionReturn") {
         msg::FunctionReturn<>     message;
         websocket::Frame<Net>     frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
         networking::SocketMock    socket;
-        websocket::WebSocket<Net> ws(socket);
+        auto ws = websocket::WebSocket<Net>::create(socket);
 
         THEN("Header command byte is functionReturn") {
             REQUIRE(static_cast<msg::Command>(message.header()[0]) == msg::Command::functionReturn);
@@ -103,7 +103,7 @@ SCENARIO("FunctionReturn") {
             std::string exceptionText = "Parameter error";
             auto        exception     = std::runtime_error(exceptionText);
             message.encodeParameter(exception, frame);
-            ws.write(std::move(frame));
+            ws->write(std::move(frame));
 
             THEN("Encoded frame should be") {
                 auto encodedFrame = span(socket.debugBuffer.data(), socket.bufferIndex);
@@ -129,7 +129,7 @@ SCENARIO("FunctionReturn") {
         WHEN("A tuple is encoded") {
             std::tuple<int, std::string> value{42, "Hello World"};
             message.encodeParameter(value, frame);
-            ws.write(std::move(frame));
+            ws->write(std::move(frame));
             cout << "Socket wrote :\n" << utils::hexDump(span(socket.debugBuffer.data(), socket.bufferIndex)) << '\n';
 
             THEN("An erroneous tuple should trigger an exception") {
@@ -174,10 +174,10 @@ SCENARIO("Numeric arrays are encoded and decoded as owning values") {
         msg::FunctionReturn<>     message;
         websocket::Frame<Net>     frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
         networking::SocketMock    socket;
-        websocket::WebSocket<Net> ws(socket);
+        auto ws = websocket::WebSocket<Net>::create(socket);
 
         message.encodeParameter(input, frame);
-        ws.write(std::move(frame));
+        ws->write(std::move(frame));
 
         websocket::FrameDecoder decoder;
         REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));

@@ -251,18 +251,21 @@ private:
 };
 
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
-class WebSocket {
+class WebSocket : public std::enable_shared_from_this<WebSocket<Net, Policy>> {
     typename Net::Socket socket;
 
 public:
-    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
-        log::debug("WebSocket constructor");
-        start();
+    /// WebSocket instances must be heap-allocated and owned via shared_ptr so that
+    /// pending async read/write operations can keep the object alive with shared_from_this(),
+    /// even if the owner (e.g. WebLink) is destroyed while an operation is in flight.
+    /// Call start() once message handlers are attached.
+    [[nodiscard]] static std::shared_ptr<WebSocket> create(typename Net::Socket netSocket) {
+        return std::shared_ptr<WebSocket>(new WebSocket(std::move(netSocket)));
     }
     WebSocket(const WebSocket&) = delete;
-    WebSocket(WebSocket&&) = default;
+    WebSocket(WebSocket&&) = delete;
     WebSocket& operator=(const WebSocket&) = delete;
-    WebSocket& operator=(WebSocket&&) = default;
+    WebSocket& operator=(WebSocket&&) = delete;
     ~WebSocket() { log::debug("WebSocket destructor"); }
 
     void start() {
@@ -298,8 +301,13 @@ private:
     bool started;
 
 private:
+    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
+        log::debug("WebSocket constructor");
+    }
+
     void read() {
-        socket.async_read_some(Net::Buffer(readBuffer), [this](std::error_code ec, std::size_t bytesTransferred) {
+        auto self(this->shared_from_this());
+        socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
                 if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
                     auto data = decoder.payload();
@@ -346,7 +354,8 @@ private:
             std::lock_guard lock(writeState->mutex);
             pendingFrame = writeState->queue.front();
         }
-        Net::AsyncWrite(socket, pendingFrame->toBuffers(), [this, pendingFrame](std::error_code ec, std::size_t /*bytesTransferred*/) {
+        auto self(this->shared_from_this());
+        Net::AsyncWrite(socket, pendingFrame->toBuffers(), [this, self, pendingFrame](std::error_code ec, std::size_t /*bytesTransferred*/) {
             bool hasNext;
             {
                 std::lock_guard lock(writeState->mutex);
