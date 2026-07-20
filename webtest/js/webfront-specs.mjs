@@ -4,7 +4,10 @@ const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';
 const status = document.getElementById('bridge-status');
 
+const browserReadyTimeoutMs = 10000;
+
 async function notifyBrowserReady() {
+    const deadline = Date.now() + browserReadyTimeoutMs;
     for (;;) {
         try {
             await webFront.cppFunction('browserReady')();
@@ -12,6 +15,8 @@ async function notifyBrowserReady() {
         } catch (error) {
             if (!(error instanceof Error) || error.message !== 'WebFront bridge is not connected')
                 throw error;
+            if (Date.now() >= deadline)
+                throw new Error(`notifyBrowserReady() timed out after ${browserReadyTimeoutMs}ms waiting for the WebFront bridge to connect`);
             await new Promise(resolve => setTimeout(resolve, 10));
         }
     }

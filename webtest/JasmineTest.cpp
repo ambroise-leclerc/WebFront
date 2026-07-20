@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <future>
@@ -58,6 +59,7 @@ private:
     TestState            state;
     optional<TestWF::UI> connectedUI;
     future<string> cppResult;
+    static constexpr chrono::seconds cppResultWaitTimeout{10};
 
     const array<uint8_t, 2>  cppU8{0, 255};
     const array<int8_t, 2>   cppI8{-128, 127};
@@ -150,8 +152,13 @@ private:
     }
 
     bool cppResultMatches() {
+        if (!cppResult.valid()) return false;
         try {
-            return cppResult.valid() && cppResult.get() == "js-result:from-cpp";
+            if (cppResult.wait_for(cppResultWaitTimeout) != future_status::ready) {
+                log::error("C++ result call timed out after {} seconds", cppResultWaitTimeout.count());
+                return false;
+            }
+            return cppResult.get() == "js-result:from-cpp";
         } catch (const exception& error) {
             log::error("C++ result call failed: {}", error.what());
             return false;
