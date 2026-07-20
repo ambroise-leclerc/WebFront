@@ -15,10 +15,8 @@ const cppArraysCall = new Promise((resolve) => {
 });
 
 let resolveCppResult;
-let rejectCppResult;
-const cppResultCall = new Promise((resolve, reject) => {
+const cppResultCall = new Promise((resolve) => {
     resolveCppResult = resolve;
-    rejectCppResult = reject;
 });
 
 globalThis.webfrontTests = {
@@ -32,15 +30,9 @@ globalThis.webfrontTests = {
     },
 
     returnToCpp(value) {
-        return `js-result:${value}`;
-    },
-
-    recordCppResult(value) {
-        resolveCppResult(value);
-    },
-
-    recordCppError(message) {
-        rejectCppResult(new Error(message));
+        const result = `js-result:${value}`;
+        resolveCppResult(result);
+        return result;
     },
 
     close(passed) {

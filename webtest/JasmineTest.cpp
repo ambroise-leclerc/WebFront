@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -17,7 +18,6 @@
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <thread>
 #include <vector>
 
 using namespace std;
@@ -47,11 +47,6 @@ public:
         registerCallbacks();
     }
 
-    ~BrowserIntegrationTest() {
-        if (cppResultThread.joinable())
-            cppResultThread.join();
-    }
-
     int run() {
         log::info("Starting automated Jasmine browser integration test");
         webFront.openAndRun("SpecRunner.html");
@@ -62,7 +57,7 @@ private:
     TestWF               webFront;
     TestState            state;
     optional<TestWF::UI> connectedUI;
-    thread cppResultThread;
+    future<string> cppResult;
 
     const array<uint8_t, 2>  cppU8{0, 255};
     const array<int8_t, 2>   cppI8{-128, 127};
@@ -144,22 +139,10 @@ private:
 
     void browserReady() {
         state.browserReady = true;
-        cppResultThread = thread([this] {
-            try {
-                requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
-                requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
-                  cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
-                auto result = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp").get();
-                state.cppResultObserved = result == "js-result:from-cpp";
-                requireUI().template jsFunction<void>("webfrontTests.recordCppResult")(result).get();
-            } catch (const exception& error) {
-                log::error("C++ result call failed: {}", error.what());
-                try {
-                    requireUI().jsFunction("webfrontTests.recordCppError")(string(error.what()));
-                } catch (...) {
-                }
-            }
-        });
+        requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
+        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
+          cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
+        cppResult = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp");
     }
 
     void recordFromJs(const string& token) {
@@ -168,6 +151,11 @@ private:
 
     void reportJasmine(const string& overallStatus, const string& failures) {
         state.jasmineReported = true;
+        try {
+            state.cppResultObserved = cppResult.valid() && cppResult.get() == "js-result:from-cpp";
+        } catch (const exception& error) {
+            log::error("C++ result call failed: {}", error.what());
+        }
         state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved
                        && state.cppResultObserved;
         if (!failures.empty())
