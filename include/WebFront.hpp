@@ -102,6 +102,32 @@ auto makeCppFunctionHandler(Function&& function) {
         return deserializeAndCall(parameters, std::index_sequence_for<Args...>());
     };
 }
+
+template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
+auto makeCppFunctionResponder(Callable&& callable) {
+    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId) mutable {
+        msg::FunctionReturn<Policy> result;
+        result.setCallId(callId);
+        websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+        try {
+            if constexpr (std::is_void_v<R>)
+                callable(data);
+            else {
+                auto value = callable(data);
+                result.encodeParameter(value, frame);
+                frame.freeze();
+            }
+        } catch (const std::exception& error) {
+            result.encodeParameter(error, frame);
+            frame.freeze();
+        } catch (...) {
+            result.encodeParameter(std::runtime_error("Unknown C++ exception"), frame);
+            frame.freeze();
+        }
+        if (callId != 0)
+            link.sendFrame(std::move(frame));
+    };
+}
 }  // namespace detail
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
@@ -160,29 +186,7 @@ public:
     template <typename R, typename... Args>
     void cppFunction(std::string functionName, auto&& function) {
         auto callable = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
-        cppFunctions.try_emplace(functionName, [callable = std::move(callable)](std::span<const std::byte> data, WebLink<Net, Policy>& link,
-                                                                                msg::CallId callId) mutable {
-            msg::FunctionReturn<Policy> result;
-            result.setCallId(callId);
-            websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-            try {
-                if constexpr (std::is_void_v<R>)
-                    callable(data);
-                else {
-                    auto value = callable(data);
-                    result.encodeParameter(value, frame);
-                    frame.freeze();
-                }
-            } catch (const std::exception& error) {
-                result.encodeParameter(error, frame);
-                frame.freeze();
-            } catch (...) {
-                result.encodeParameter(std::runtime_error("Unknown C++ exception"), frame);
-                frame.freeze();
-            }
-            if (callId != 0)
-                link.sendFrame(std::move(frame));
-        });
+        cppFunctions.try_emplace(functionName, detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable)));
     }
 
     enum class WindowAction { none, closeWindow };

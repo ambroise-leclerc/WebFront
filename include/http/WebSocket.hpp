@@ -154,6 +154,7 @@ struct Frame : public Header {
     }
 
     void freeze() {
+        if (borrowedBuffers.empty()) return;
         ownedBuffers.clear();
         ownedBuffers.reserve(borrowedBuffers.size());
         for (const auto buffer : borrowedBuffers) ownedBuffers.emplace_back(buffer.begin(), buffer.end());

@@ -6,16 +6,33 @@
 #include "Mocks.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <list>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 using namespace webfront;
 
 namespace {
 
 using TestFilesystem = MockFileSystem<>;
+
+struct ResultLinkMock {
+    std::vector<std::byte> message;
+
+    void sendFrame(websocket::Frame<networking::NetworkingMock> frame) {
+        frame.freeze();
+        const auto buffers = frame.toBuffers();
+        for (auto buffer = std::next(buffers.begin()); buffer != buffers.end(); ++buffer) {
+            const auto* first = static_cast<const std::byte*>(buffer->data());
+            message.insert(message.end(), first, first + buffer->size());
+        }
+    }
+};
 
 class WebFrontIoContextMock {
 public:
@@ -197,6 +214,74 @@ SCENARIO("Registered C++ function handlers own and invoke their callable") {
             THEN("the stored callables remain valid") {
                 REQUIRE(decodedValue == 42);
             }
+        }
+    }
+}
+
+SCENARIO("C++ function responders encode values and failures") {
+    using Policy = http::DefaultBuffersPolicy;
+    using Net    = networking::NetworkingMock;
+
+    GIVEN("a successful result") {
+        ResultLinkMock link;
+        auto responder = detail::makeCppFunctionResponder<Net, Policy, std::string>(
+          [](std::span<const std::byte>) { return std::string{"answer"}; });
+        responder({}, link, 42);
+
+        auto result = msg::FunctionReturn<Policy>::castFromRawData(link.message);
+        auto payload = result->payload();
+        std::string value;
+        result->decodeParameter(value, payload);
+
+        THEN("the correlated value is returned") {
+            REQUIRE(result->getCallId() == 42);
+            REQUIRE(value == "answer");
+            REQUIRE(payload.empty());
+        }
+    }
+
+    GIVEN("a standard exception") {
+        ResultLinkMock link;
+        auto responder = detail::makeCppFunctionResponder<Net, Policy, void>(
+          [](std::span<const std::byte>) { throw std::runtime_error("callback failed"); });
+        responder({}, link, 7);
+
+        auto result = msg::FunctionReturn<Policy>::castFromRawData(link.message);
+        auto payload = result->payload();
+        std::string message;
+        result->decodeParameter(message, payload);
+
+        THEN("its useful message is encoded") {
+            REQUIRE(message == "callback failed");
+        }
+    }
+
+    GIVEN("a non-standard exception") {
+        ResultLinkMock link;
+        auto responder = detail::makeCppFunctionResponder<Net, Policy, void>(
+          [](std::span<const std::byte>) { throw 42; });
+        responder({}, link, 8);
+
+        auto result = msg::FunctionReturn<Policy>::castFromRawData(link.message);
+        auto payload = result->payload();
+        std::string message;
+        result->decodeParameter(message, payload);
+
+        THEN("a stable fallback message is encoded") {
+            REQUIRE(message == "Unknown C++ exception");
+        }
+    }
+
+    GIVEN("a fire-and-forget call") {
+        ResultLinkMock link;
+        bool called = false;
+        auto responder = detail::makeCppFunctionResponder<Net, Policy, void>(
+          [&called](std::span<const std::byte>) { called = true; });
+        responder({}, link, 0);
+
+        THEN("the callback runs without sending a result") {
+            REQUIRE(called);
+            REQUIRE(link.message.empty());
         }
     }
 }
