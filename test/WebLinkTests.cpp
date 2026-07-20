@@ -137,7 +137,8 @@ SCENARIO("WebLink settles correlated asynchronous results") {
 
         WHEN("the browser returns a matching value") {
             auto response = returnMessage(callId, [](auto& message, auto& frame) {
-                message.encodeParameter(string{"done"}, frame);
+                const string value{"done"};
+                message.encodeParameter(value, frame);
                 frame.freeze();
             });
             InjectableSocket::receive(response);
@@ -149,7 +150,8 @@ SCENARIO("WebLink settles correlated asynchronous results") {
 
         WHEN("the browser returns an exception") {
             auto response = returnMessage(callId, [](auto& message, auto& frame) {
-                message.encodeParameter(runtime_error{"JavaScript failed"}, frame);
+                const runtime_error error{"JavaScript failed"};
+                message.encodeParameter(error, frame);
                 frame.freeze();
             });
             InjectableSocket::receive(response);
