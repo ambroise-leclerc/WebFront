@@ -94,12 +94,19 @@
         constructor() {
             this.state = "uninitialized";
             this.littleEndian = false;
+            this.nextCallId = 1;
+            this.pendingCalls = new Map();
             this.socket = new WebSocket(`ws://${global.location.host}`, "WebFront_0.1");
             this.socket.binaryType = "arraybuffer";
             this.socket.onopen = () => this.handshake();
             this.socket.onmessage = event => this.onMessage(event.data);
             this.socket.onclose = event => {
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
+                const error = new Error(`WebFront connection closed: ${detail}`);
+                for (const pending of this.pendingCalls.values())
+                    pending.reject(error);
+                this.pendingCalls.clear();
+                this.state = "closed";
                 console.log(`[WebFront close] ${detail}`);
             };
             this.socket.onerror = error => console.error("[WebFront socket error]", error);
@@ -126,6 +133,9 @@
                 break;
             case Command.callFunction:
                 this.callJsFunction(view);
+                break;
+            case Command.functionReturn:
+                this.handleFunctionReturn(view);
                 break;
             default:
                 throw new Error(`Unsupported WebFront command ${view.getUint8(0)}`);
@@ -155,6 +165,9 @@
         callJsFunction(message) {
             requireBytes(message, 0, 8, "function call header");
             const count = message.getUint8(1);
+            const callId = message.getUint16(2, this.littleEndian);
+            if (count === 0)
+                throw new Error("Function call has no function name");
             const payloadSize = message.getUint32(4, this.littleEndian);
             requireBytes(message, 8, payloadSize, "function call payload");
             const payload = new DataView(message.buffer, message.byteOffset + 8, payloadSize);
@@ -162,7 +175,33 @@
             const [parameters, parameterBytes] = this.decodeParameters(count - 1, payload, nameBytes);
             if (nameBytes + parameterBytes !== payloadSize)
                 throw new Error("Function call contains trailing payload data");
-            this.executeFunction(names[0], parameters);
+            let execution;
+            try {
+                execution = this.executeFunction(names[0], parameters);
+            } catch (error) {
+                this.reportCallFailure(callId, error);
+                return;
+            }
+            // callId 0 means the caller is not waiting for anything, so there is nothing to send back.
+            if (callId !== 0)
+                Promise.resolve(execution).then(
+                    value => this.reportCallSuccess(callId, value),
+                    error => this.sendFunctionError(callId, error));
+        }
+
+        reportCallFailure(callId, error) {
+            if (callId === 0)
+                console.error("[WebFront JavaScript call]", error);
+            else
+                this.sendFunctionError(callId, error);
+        }
+
+        reportCallSuccess(callId, value) {
+            try {
+                this.sendFunctionReturn(callId, value);
+            } catch (error) {
+                this.sendFunctionError(callId, error);
+            }
         }
 
         executeFunction(name, args) {
@@ -176,7 +215,58 @@
             }
             if (context == null || typeof context[member] !== "function")
                 throw new Error(`JavaScript function '${name}' was not found`);
-            context[member](...args);
+            return context[member](...args);
+        }
+
+        handleFunctionReturn(message) {
+            requireBytes(message, 0, 8, "function return header");
+            const callId = message.getUint16(2, this.littleEndian);
+            const pending = this.pendingCalls.get(callId);
+            if (!pending)
+                throw new Error(`Function return has unknown call id ${callId}`);
+            this.pendingCalls.delete(callId);
+
+            // A decode failure has to settle the pending call rather than escape into the socket handler,
+            // otherwise the caller's promise would hang forever.
+            try {
+                this.settleReturn(pending, message);
+            } catch (error) {
+                pending.reject(error);
+            }
+        }
+
+        settleReturn(pending, message) {
+            const count = message.getUint8(1);
+            const payloadSize = message.getUint32(4, this.littleEndian);
+            requireBytes(message, 8, payloadSize, "function return payload");
+            const payload = new DataView(message.buffer, message.byteOffset + 8, payloadSize);
+
+            if (this.carriesException(count, payloadSize, payload)) {
+                pending.reject(new Error(this.singleValue(payload, payloadSize, "Exception")));
+                return;
+            }
+            if (count === 0) {
+                if (payloadSize !== 0)
+                    throw new Error("Void return contains payload data");
+                pending.resolve(undefined);
+                return;
+            }
+            if (count !== 1)
+                throw new Error("Function return must contain zero or one value");
+            pending.resolve(this.singleValue(payload, payloadSize, "Function"));
+        }
+
+        carriesException(count, payloadSize, payload) {
+            if (count !== 1 || payloadSize === 0) return false;
+            return payload.getUint8(0) === ParamType.exception;
+        }
+
+        /// Decodes exactly one value and rejects any bytes left over after it.
+        singleValue(payload, payloadSize, what) {
+            const [values, consumed] = this.decodeParameters(1, payload);
+            if (consumed !== payloadSize)
+                throw new Error(`${what} return contains trailing payload data`);
+            return values[0];
         }
 
         decodeParameters(count, view, offset = 0) {
@@ -252,19 +342,74 @@
         }
 
         callCppFunction(name, args) {
-            const values = [name, ...args];
-            if (values.length > 255)
-                throw new RangeError("A function call cannot contain more than 255 top-level values");
-            const payloadSize = values.reduce((size, value) => size + this.parameterSize(value), 0);
+            return new Promise((resolve, reject) => {
+                let callId = 0;
+                try {
+                    if (this.state !== "linked")
+                        throw new Error("WebFront bridge is not connected");
+                    const values = [name, ...args];
+                    if (values.length > 255)
+                        throw new RangeError("A function call cannot contain more than 255 top-level values");
+                    const payloadSize = values.reduce((size, value) => size + this.parameterSize(value), 0);
+                    const buffer = new ArrayBuffer(8 + payloadSize);
+                    const view = new DataView(buffer);
+                    callId = this.allocateCallId();
+                    view.setUint8(0, Command.callFunction);
+                    view.setUint8(1, values.length);
+                    view.setUint16(2, callId, this.littleEndian);
+                    view.setUint32(4, payloadSize, this.littleEndian);
+                    let cursor = 8;
+                    for (const value of values)
+                        cursor += this.encodeParameter(value, view, cursor);
+                    this.pendingCalls.set(callId, {resolve, reject});
+                    this.socket.send(buffer);
+                } catch (error) {
+                    if (callId !== 0)
+                        this.pendingCalls.delete(callId);
+                    reject(error);
+                }
+            });
+        }
+
+        allocateCallId() {
+            for (let attempts = 0; attempts < 0xffff; ++attempts) {
+                const candidate = this.nextCallId;
+                this.nextCallId = this.nextCallId === 0xffff ? 1 : this.nextCallId + 1;
+                if (!this.pendingCalls.has(candidate))
+                    return candidate;
+            }
+            throw new Error("Too many outstanding WebFront calls");
+        }
+
+        sendFunctionReturn(callId, value) {
+            const values = value === undefined ? [] : [value];
+            const payloadSize = values.reduce((size, item) => size + this.parameterSize(item), 0);
             const buffer = new ArrayBuffer(8 + payloadSize);
             const view = new DataView(buffer);
-            view.setUint8(0, Command.callFunction);
+            view.setUint8(0, Command.functionReturn);
             view.setUint8(1, values.length);
-            view.setUint16(2, 0, this.littleEndian);
+            view.setUint16(2, callId, this.littleEndian);
             view.setUint32(4, payloadSize, this.littleEndian);
             let cursor = 8;
-            for (const value of values)
-                cursor += this.encodeParameter(value, view, cursor);
+            for (const item of values)
+                cursor += this.encodeParameter(item, view, cursor);
+            this.socket.send(buffer);
+        }
+
+        sendFunctionError(callId, error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const bytes = new TextEncoder().encode(message);
+            if (bytes.length >= 65536)
+                return this.sendFunctionError(callId, "JavaScript exception message exceeds 65535 UTF-8 bytes");
+            const buffer = new ArrayBuffer(11 + bytes.length);
+            const view = new DataView(buffer);
+            view.setUint8(0, Command.functionReturn);
+            view.setUint8(1, 1);
+            view.setUint16(2, callId, this.littleEndian);
+            view.setUint32(4, 3 + bytes.length, this.littleEndian);
+            view.setUint8(8, ParamType.exception);
+            view.setUint16(9, bytes.length, this.littleEndian);
+            new Uint8Array(buffer, 11).set(bytes);
             this.socket.send(buffer);
         }
 

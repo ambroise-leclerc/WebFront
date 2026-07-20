@@ -31,14 +31,15 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - `src/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
 - That asset is embedded **verbatim rather than gzipped**. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. The tradeoff is size: `WebFront.js` is served as ~15.5 KB instead of the ~3.5 KB the previous gzipped blob cost, and `IndexFS::open("WebFront.js")` now reports no encoding, so `HTTPServer` sends it without a `Content-Encoding` header. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. Note that `favicon.ico` and `index.html` are still Brotli-encoded; only the JavaScript bridge is raw.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
+- Correlated result messages now support asynchronous C++ futures and JavaScript promises, including void completion, missing-function errors, callback exceptions, malformed-return rejection, and disconnect rejection. Untyped calls remain fire-and-forget.
 - `AGENTS.md` is the canonical development guide for supported coding agents.
 
 Local verification on 2026-07-19 completed successfully: the CEF-off build passed all 47 CTest cases, including deterministic asset and typed-array protocol coverage, and a CEF-enabled build passed `WebFrontBrowserIntegration` under Xvfb. The browser test exercised every supported numeric typed array from C++ to JavaScript and JavaScript to C++, ordinary tuple arrays, final Jasmine reporting, and automatic CEF shutdown.
 
 ## Known limitations and next decisions
 
-- JavaScript/C++ function results and remote exceptions are not propagated. The existing `FunctionReturn` message type is protocol groundwork, not a working public feature.
-- Bridge lookup and connection errors need a defined cross-language error contract.
+- Result values are currently limited to the bridge's existing scalar, string, tuple, and numeric typed-array parameter types; richer object/DOM values remain out of scope.
+- The public API does not yet expose cancellation for an outstanding future or Promise.
 - Ordinary JavaScript arrays encode as tuple-like parameters; only numeric typed arrays use the homogeneous array wire representation.
 - `NativeDebugFS` exposes development files and is not a production packaging format.
 - CEF is a large optional dependency. Only the focused Linux integration job should download it for the minimal baseline.

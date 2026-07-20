@@ -8,8 +8,10 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <exception>
+#include <future>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -32,6 +34,7 @@ struct TestState {
     atomic<bool> jsToCppObserved{false};
     atomic<bool> jsArraysObserved{false};
     atomic<bool> jsTupleObserved{false};
+    atomic<bool> cppResultObserved{false};
     atomic<bool> jasmineReported{false};
     atomic<bool> passed{false};
 };
@@ -55,6 +58,8 @@ private:
     TestWF               webFront;
     TestState            state;
     optional<TestWF::UI> connectedUI;
+    future<string> cppResult;
+    static constexpr chrono::seconds cppResultWaitTimeout{10};
 
     const array<uint8_t, 2>  cppU8{0, 255};
     const array<int8_t, 2>   cppI8{-128, 127};
@@ -80,6 +85,8 @@ private:
         webFront.cppFunction<void, string, string>("reportJasmine", [this](const string& overallStatus, const string& failures) {
             reportJasmine(overallStatus, failures);
         });
+        webFront.cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
+        webFront.cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
         webFront.cppFunction<void,
                              vector<uint8_t>,
                              vector<int8_t>,
@@ -135,16 +142,34 @@ private:
     void browserReady() {
         state.browserReady = true;
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
-        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
+        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
+          cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
+        cppResult = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp");
     }
 
     void recordFromJs(const string& token) {
         state.jsToCppObserved = token == jsToCppToken;
     }
 
+    bool cppResultMatches() {
+        if (!cppResult.valid()) return false;
+        try {
+            if (cppResult.wait_for(cppResultWaitTimeout) != future_status::ready) {
+                log::error("C++ result call timed out after {} seconds", cppResultWaitTimeout.count());
+                return false;
+            }
+            return cppResult.get() == "js-result:from-cpp";
+        } catch (const exception& error) {
+            log::error("C++ result call failed: {}", error.what());
+            return false;
+        }
+    }
+
     void reportJasmine(const string& overallStatus, const string& failures) {
         state.jasmineReported = true;
-        state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved;
+        state.cppResultObserved = cppResultMatches();
+        state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved
+                       && state.cppResultObserved;
         if (!failures.empty())
             log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());

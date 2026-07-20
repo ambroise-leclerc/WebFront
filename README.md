@@ -9,7 +9,7 @@ The current baseline demonstrates asynchronous, fire-and-forget calls in both di
 
 Bridge parameters include scalars, strings, tuples, and numeric typed arrays. C++ `std::vector`, `std::array`, and `std::span` values map to the corresponding JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups.
 
-Function return values and remote exception propagation are not implemented yet.
+Typed calls can optionally return asynchronous values: `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`, and JavaScript `cppFunction(name)(...)` returns a Promise. Missing functions, callback exceptions, malformed returns, and disconnected browsers reject the corresponding completion. Calls without a result type remain fire-and-forget.
 
 ## Build and test
 

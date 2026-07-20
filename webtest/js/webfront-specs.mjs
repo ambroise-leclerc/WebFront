@@ -4,6 +4,24 @@ const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';
 const status = document.getElementById('bridge-status');
 
+const browserReadyTimeoutMs = 10000;
+
+async function notifyBrowserReady() {
+    const deadline = Date.now() + browserReadyTimeoutMs;
+    for (;;) {
+        try {
+            await webFront.cppFunction('browserReady')();
+            return;
+        } catch (error) {
+            if (!(error instanceof Error) || error.message !== 'WebFront bridge is not connected')
+                throw error;
+            if (Date.now() >= deadline)
+                throw new Error(`notifyBrowserReady() timed out after ${browserReadyTimeoutMs}ms waiting for the WebFront bridge to connect`);
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+    }
+}
+
 let resolveCppCall;
 const cppCall = new Promise((resolve) => {
     resolveCppCall = resolve;
@@ -14,6 +32,11 @@ const cppArraysCall = new Promise((resolve) => {
     resolveCppArraysCall = resolve;
 });
 
+let resolveCppResult;
+const cppResultCall = new Promise((resolve) => {
+    resolveCppResult = resolve;
+});
+
 globalThis.webfrontTests = {
     receiveFromCpp(token) {
         status.textContent = `C++ called served JavaScript with: ${token}`;
@@ -22,6 +45,12 @@ globalThis.webfrontTests = {
 
     receiveArraysFromCpp(...arrays) {
         resolveCppArraysCall(arrays);
+    },
+
+    returnToCpp(value) {
+        const result = `js-result:${value}`;
+        resolveCppResult(result);
+        return result;
     },
 
     close(passed) {
@@ -83,6 +112,22 @@ describe('WebFront browser integration', () => {
         const recordTuple = webFront.cppFunction('recordTupleFromJs');
         expect(() => recordTuple([42, 'tuple'])).not.toThrow();
     });
+
+    it('returns successful C++ calls as promises', async () => {
+        await expectAsync(webFront.cppFunction('returnFromCpp')('from-js'))
+            .toBeResolvedTo('cpp-result:from-js');
+    });
+
+    it('rejects missing functions and C++ exceptions', async () => {
+        await expectAsync(webFront.cppFunction('missingCppFunction')())
+            .toBeRejectedWithError(/was not found/);
+        await expectAsync(webFront.cppFunction('throwFromCpp')())
+            .toBeRejectedWithError('C++ callback failed');
+    });
+
+    it('allows C++ to await a JavaScript result', async () => {
+        await expectAsync(cppResultCall).toBeResolvedTo('js-result:from-cpp');
+    });
 });
 
 jasmine.getEnv().addReporter({
@@ -96,4 +141,4 @@ jasmine.getEnv().addReporter({
     }
 });
 
-webFront.cppFunction('browserReady')();
+await notifyBrowserReady();

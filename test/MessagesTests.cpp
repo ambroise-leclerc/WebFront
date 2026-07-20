@@ -159,6 +159,14 @@ SCENARIO("FunctionReturn") {
     }
 }
 
+SCENARIO("Function call correlation identifiers") {
+    msg::FunctionCall<> message;
+    message.setCallId(42);
+    REQUIRE(message.getCallId() == 42);
+    message.reset();
+    REQUIRE(message.getCallId() == 0);
+}
+
 SCENARIO("Numeric arrays are encoded and decoded as owning values") {
     using Net = networking::NetworkingMock;
 

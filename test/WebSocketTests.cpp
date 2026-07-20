@@ -96,11 +96,12 @@ SCENARIO("WebSocket frames can own payloads for asynchronous writes") {
 
         WHEN("The frame is frozen before the source buffers change") {
             frame.freeze();
+            frame.freeze();
             header.fill(byte{0xff});
             payload.fill(byte{0xff});
             const auto buffers = frame.toBuffers();
 
-            THEN("The encoded payload remains valid") {
+            THEN("Repeated freezing keeps the encoded payload valid") {
                 const auto* encodedHeader = static_cast<const byte*>(buffers[1].data());
                 const auto* encodedPayload = static_cast<const byte*>(buffers[2].data());
                 REQUIRE(buffers[1].size() == 2);
