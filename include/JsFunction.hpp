@@ -41,7 +41,9 @@ public:
             command.setCallId(callId);
             if (callId != 0)
                 link.sendFrame(std::move(frame));
-            return result;
+            // Structured bindings are not implicitly movable on return, so a move-only future would be
+            // copied here. Newer libc++ accepts it; Apple Clang rejects it outright.
+            return std::move(result);
         }
     }
 
