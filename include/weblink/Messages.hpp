@@ -172,6 +172,15 @@ struct is_std_array<std::array<T, Size>> : std::true_type {};
 template <typename T>
 inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
 
+/// The numeric array opcodes form one contiguous run, so membership is a range test rather than a
+/// case per element type. The asserts below pin the two ends against an accidental reordering.
+static_assert(static_cast<uint8_t>(CodedType::arrayU8) == static_cast<uint8_t>(CodedType::smallArrayU8) + 1);
+static_assert(static_cast<uint8_t>(CodedType::arrayDouble) + 1 == static_cast<uint8_t>(CodedType::tuple));
+
+constexpr bool isNumericArrayCode(CodedType type) {
+    return type >= CodedType::smallArrayU8 && type <= CodedType::arrayDouble;
+}
+
 template <typename T>
 consteval CodedType numericArrayCode() {
     using Element = std::remove_cv_t<T>;
@@ -450,27 +459,14 @@ public:
     static void decodeParameter(T& param, std::span<const std::byte>& data) {
         if (data.empty())
             throw std::runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
-        switch (static_cast<CodedType>(data[0])) {
-            case CodedType::booleanTrue:
-            case CodedType::booleanFalse: decodeBoolean(param, data); break;
-            case CodedType::smallString: decodeSmallString(param, data); break;
-            case CodedType::string:
-            case CodedType::exception: decodeLongString(param, data); break;
-            case CodedType::number: decodeNumber(param, data); break;
-            case CodedType::smallArrayU8:
-            case CodedType::arrayU8:
-            case CodedType::array8:
-            case CodedType::arrayU16:
-            case CodedType::array16:
-            case CodedType::arrayU32:
-            case CodedType::array32:
-            case CodedType::arrayU64:
-            case CodedType::array64:
-            case CodedType::arrayFloat:
-            case CodedType::arrayDouble: decodeArray(param, data); break;
-            case CodedType::tuple: decodeTuple(param, data); break;
-            default: throw std::runtime_error("Unsupported coded parameter type");
-        }
+        const auto type = static_cast<CodedType>(data[0]);
+        if (type == CodedType::booleanTrue || type == CodedType::booleanFalse) return decodeBoolean(param, data);
+        if (type == CodedType::smallString) return decodeSmallString(param, data);
+        if (type == CodedType::string || type == CodedType::exception) return decodeLongString(param, data);
+        if (type == CodedType::number) return decodeNumber(param, data);
+        if (isNumericArrayCode(type)) return decodeArray(param, data);
+        if (type == CodedType::tuple) return decodeTuple(param, data);
+        throw std::runtime_error("Unsupported coded parameter type");
     }
 
 private:
