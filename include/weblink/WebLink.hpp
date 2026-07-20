@@ -57,10 +57,7 @@ public:
         : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket))), id(webLinkId), eventsHandler(eventHandler) {
         log::debug("New WebLink created with id:{}", id);
 
-        ws->onMessage([this](std::string_view text) {
-            log::debug("onMessage(text) :{}", text);
-            ws->write("This is my response");
-        });
+        ws->onMessage([](std::string_view text) { log::debug("onMessage(text) :{}", text); });
         ws->onMessage([this](std::span<const std::byte> data) { onBinaryMessage(data); });
         ws->onClose([this](websocket::CloseEvent event) {
             auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;

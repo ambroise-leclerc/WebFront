@@ -144,7 +144,7 @@ SCENARIO("FunctionReturn") {
                 websocket::FrameDecoder decoder;
                 REQUIRE(decoder.parse(span(socket.debugBuffer.data(), socket.bufferIndex)));
                 auto funcRet = msg::FunctionReturn<>::castFromRawData(decoder.payload());
-                REQUIRE(funcRet->getParametersCount() == 3);
+                REQUIRE(funcRet->getParametersCount() == 1);
                 REQUIRE(funcRet->getPayloadSize() == 24);
 
                 std::tuple<int, std::string> tupleValue;

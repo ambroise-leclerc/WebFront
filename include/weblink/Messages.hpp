@@ -30,8 +30,8 @@ enum class Command : uint8_t {
     handshake,
     ack,
     textCommand,
-    callFunction,    // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
-    functionReturn,  // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
+    callFunction,    // 1:Command  1:ParamsCount 2:CallId  4:ParamsDataSize
+    functionReturn,  // 1:Command  1:ParamsCount 2:CallId  4:ParamsDataSize
 };
 
 enum class CodedType : uint8_t {
@@ -436,11 +436,15 @@ public:
         if constexpr (is_tuple_v<ParamType>) {
             uint8_t nbParams = static_cast<uint8_t>(tuple_size<ParamType>::value);
             encodeTypeHeader(msg::CodedType::tuple, nbParams, frame);
+            // The tuple itself is one parameter; encoding its elements recursively must not
+            // inflate the top-level parametersCount, so restore it once they're all encoded.
+            const auto parametersCountBeforeElements = getParametersCount();
             std::apply(
                 [&](auto&... tupleArgs) {
                     ((encodeParameter(tupleArgs, frame)), ...);
                 },
                 t);
+            setParametersCount(parametersCountBeforeElements);
         } else if constexpr (is_same_v<ParamType, bool>)
             encodeBool(t, frame);
         else if constexpr (is_arithmetic_v<ParamType>)
