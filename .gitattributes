@@ -49,6 +49,12 @@
 *.cmd      text eol=crlf
 *.ps1      text eol=crlf
 
+# Embedded assets: WebFrontJsData.hpp holds the exact bytes of WebFront.js, and the
+# WebFrontJsAssetsFresh test re-reads the source to compare. Under the default `* text=auto`
+# a Windows checkout would supply CRLF and the check could never match, so pin both to LF.
+src/WebFront.js                   text eol=lf
+include/system/WebFrontJsData.hpp text eol=lf
+
 # Serialisation
 *.json     text
 *.toml     text
