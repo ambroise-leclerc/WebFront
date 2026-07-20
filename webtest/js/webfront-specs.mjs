@@ -4,6 +4,19 @@ const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';
 const status = document.getElementById('bridge-status');
 
+async function notifyBrowserReady() {
+    for (;;) {
+        try {
+            await webFront.cppFunction('browserReady')();
+            return;
+        } catch (error) {
+            if (!(error instanceof Error) || error.message !== 'WebFront bridge is not connected')
+                throw error;
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+    }
+}
+
 let resolveCppCall;
 const cppCall = new Promise((resolve) => {
     resolveCppCall = resolve;
@@ -123,4 +136,4 @@ jasmine.getEnv().addReporter({
     }
 });
 
-webFront.cppFunction('browserReady')();
+await notifyBrowserReady();
