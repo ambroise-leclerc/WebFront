@@ -7,6 +7,7 @@
 #include "Messages.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -28,7 +29,7 @@ struct WebLinkEvent {
 
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
-    websocket::WebSocket<Net, Policy> ws;
+    std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
     WebLinkId id;
     bool sameEndian;
     std::optional<size_t> logSink;
@@ -37,14 +38,14 @@ class WebLink {
 
 public:
     WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler)
-        : ws(std::move(socket)), id(webLinkId), eventsHandler(eventHandler) {
+        : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket))), id(webLinkId), eventsHandler(eventHandler) {
         log::debug("New WebLink created with id:{}", id);
 
-        ws.onMessage([this](std::string_view text) {
+        ws->onMessage([this](std::string_view text) {
             log::debug("onMessage(text) :{}", text);
-            ws.write("This is my response");
+            ws->write("This is my response");
         });
-        ws.onMessage([this](std::span<const std::byte> data) {
+        ws->onMessage([this](std::span<const std::byte> data) {
             log::infoHex("onMessage(binary) :", data);
 
             switch (static_cast<msg::Command>(data[0])) {
@@ -90,7 +91,7 @@ public:
             }
         });
 
-        ws.start();
+        ws->start();
     }
     WebLink(const WebLink&) = delete;
     WebLink(WebLink&&) = delete;
@@ -102,8 +103,8 @@ public:
         if (logSink) log::removeSinks(logSink.value());
     }
 
-    void sendCommand(auto message) { ws.write(message.header(), message.payload()); }
-    void sendFrame(websocket::Frame<Net> frame) { ws.write(std::move(frame)); }
+    void sendCommand(auto message) { ws->write(message.header(), message.payload()); }
+    void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
 };
 
 } // namespace webfront

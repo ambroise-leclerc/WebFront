@@ -225,7 +225,7 @@ public:
         if (data.size() < sizeof(typename T::Header))
             throw std::runtime_error("Not enough data to form a message Header");
         auto message = reinterpret_cast<const T*>(data.data());
-        if ((data.size() + message->getPayloadSize()) < sizeof(typename T::Header))
+        if (data.size() < sizeof(typename T::Header) + message->getPayloadSize())
             throw std::runtime_error("Not enough data to form a complete message");
         return message;
     }
