@@ -459,54 +459,15 @@ public:
 
     template <typename T>
     static void decodeParameter(T& param, std::span<const std::byte>& data) {
-        using namespace std;
-        cout << "decodeParameter with data size " << data.size() << " bytes\n";
-        if (data.size() == 0)
-            throw runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
-        auto codedType = static_cast<CodedType>(data[0]);
-        switch (codedType) {
+        if (data.empty())
+            throw std::runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
+        switch (static_cast<CodedType>(data[0])) {
             case CodedType::booleanTrue:
-            case CodedType::booleanFalse:
-                if constexpr (is_same_v<T, bool>) {
-                    param = codedType == CodedType::booleanTrue;
-                    data  = data.subspan(1);
-                } else
-                    throw runtime_error("Wrong parameter type: bool expected");
-                break;
-            case CodedType::smallString:
-                if constexpr (is_same_v<T, string>) {
-                    if (data.size() < 1u)
-                        throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                    auto size = static_cast<size_t>(data[1]);
-                    if (data.size() < 2u + size)
-                        throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                    param = string(reinterpret_cast<const char*>(&data[2]), size);
-                    data  = data.subspan(2 + size);
-                }
-                break;
+            case CodedType::booleanFalse: decodeBoolean(param, data); break;
+            case CodedType::smallString: decodeSmallString(param, data); break;
             case CodedType::string:
-            case CodedType::exception:
-                if constexpr (is_same_v<T, string>) {
-                    if (data.size() < 1u)
-                        throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                    uint16_t size;
-                    copy_n(&data[1], 2, reinterpret_cast<byte*>(&size));
-                    if (data.size() < 3u + size)
-                        throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                    param = string(reinterpret_cast<const char*>(&data[3]), size);
-                    data  = data.subspan(3 + size);
-                }
-                break;
-            case CodedType::number:
-                if constexpr (is_arithmetic_v<T>) {
-                    double value;
-                    if (data.size() < 1u + sizeof(value))
-                        throw runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
-                    copy_n(&data[1], sizeof(value), reinterpret_cast<byte*>(&value));
-                    param = static_cast<T>(value);
-                    data  = data.subspan(1 + sizeof(value));
-                }
-                break;
+            case CodedType::exception: decodeLongString(param, data); break;
+            case CodedType::number: decodeNumber(param, data); break;
             case CodedType::smallArrayU8:
             case CodedType::arrayU8:
             case CodedType::array8:
@@ -517,43 +478,103 @@ public:
             case CodedType::arrayU64:
             case CodedType::array64:
             case CodedType::arrayFloat:
-            case CodedType::arrayDouble:
-                if constexpr (is_numeric_array_v<T> && (is_vector_v<T> || is_std_array_v<T>))
-                    decodeNumericArray(param, data);
-                else
-                    throw runtime_error("Wrong parameter type: owning numeric array expected");
-                break;
-            case CodedType::tuple:
-                if constexpr (is_tuple_v<T>) {
-                    auto tupleSize = static_cast<size_t>(data[1]);
-                    if (tuple_size_v<T> != tupleSize)
-                        throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) + " elements tuple but decoded tuple only has "
-                                            + to_string(tupleSize) + " elements.");
-                    cout << "tuple expected\n";
-                    data = data.subspan(2);
-                    std::apply(
-                        [&](auto&... tupleArgs) {
-                            ((decodeParameter(tupleArgs, data)), ...);
-                        },
-                        param);
-                } else
-                    throw runtime_error("Wrong parameter type : std::tuple expected");
-                break;
-
-            default:
-                throw runtime_error("Unsupported coded parameter type");
+            case CodedType::arrayDouble: decodeArray(param, data); break;
+            case CodedType::tuple: decodeTuple(param, data); break;
+            default: throw std::runtime_error("Unsupported coded parameter type");
         }
     }
 
 private:
+    /// Each decodeXxx helper consumes the bytes it decoded from 'data', so a type mismatch has to throw
+    /// rather than return: leaving 'data' unconsumed would silently desynchronise every later parameter.
+    template <typename T>
+    static void decodeBoolean(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, bool>) {
+            param = static_cast<CodedType>(data[0]) == CodedType::booleanTrue;
+            data  = data.subspan(1);
+        } else
+            throw std::runtime_error("Wrong parameter type: bool expected");
+    }
+
+    template <typename T>
+    static void decodeSmallString(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (data.size() < 2u)
+                throw std::runtime_error("Truncated smallString header");
+            const auto size = static_cast<size_t>(data[1]);
+            if (data.size() < 2u + size)
+                throw std::runtime_error("Truncated smallString payload");
+            param = std::string(reinterpret_cast<const char*>(&data[2]), size);
+            data  = data.subspan(2 + size);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+    template <typename T>
+    static void decodeLongString(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (data.size() < 3u)
+                throw std::runtime_error("Truncated string header");
+            uint16_t size;
+            std::copy_n(&data[1], sizeof(size), reinterpret_cast<std::byte*>(&size));
+            if (data.size() < 3u + size)
+                throw std::runtime_error("Truncated string payload");
+            param = std::string(reinterpret_cast<const char*>(&data[3]), size);
+            data  = data.subspan(3 + size);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+    template <typename T>
+    static void decodeNumber(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_arithmetic_v<T>) {
+            double value;
+            if (data.size() < 1u + sizeof(value))
+                throw std::runtime_error("Truncated 'number' payload");
+            std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
+            param = static_cast<T>(value);
+            data  = data.subspan(1 + sizeof(value));
+        } else
+            throw std::runtime_error("Wrong parameter type: arithmetic type expected");
+    }
+
+    template <typename T>
+    static void decodeArray(T& param, std::span<const std::byte>& data) {
+        if constexpr (is_numeric_array_v<T> && (is_vector_v<T> || is_std_array_v<T>))
+            decodeNumericArray(param, data);
+        else
+            throw std::runtime_error("Wrong parameter type: owning numeric array expected");
+    }
+
+    template <typename T>
+    static void decodeTuple(T& param, std::span<const std::byte>& data) {
+        if constexpr (is_tuple_v<T>) {
+            if (data.size() < 2u)
+                throw std::runtime_error("Truncated tuple header");
+            const auto tupleSize = static_cast<size_t>(data[1]);
+            if (std::tuple_size_v<T> != tupleSize)
+                throw std::runtime_error("Parameter is a " + std::to_string(std::tuple_size_v<T>)
+                                         + " elements tuple but decoded tuple only has " + std::to_string(tupleSize) + " elements.");
+            data = data.subspan(2);
+            std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
+        } else
+            throw std::runtime_error("Wrong parameter type : std::tuple expected");
+    }
+
+    /// Wire layout of a typed array: a smallArrayU8 carries a 1-byte count, every other code a 4-byte one.
+    struct NumericArrayLayout {
+        std::size_t   headerSize;
+        std::uint32_t elementCount;
+    };
+
+    /// Validates the header against the element type Array holds and reports where its payload starts.
     template <typename Array>
-    static void decodeNumericArray(Array& param, std::span<const std::byte>& data) {
+    static NumericArrayLayout readNumericArrayHeader(std::span<const std::byte> data) {
         using Element         = std::remove_cv_t<numeric_array_element_t<Array>>;
         const auto type       = static_cast<CodedType>(data.front());
         const bool smallUint8 = type == CodedType::smallArrayU8;
-        if (smallUint8 && !std::is_same_v<Element, std::uint8_t>)
-            throw std::runtime_error("Typed array element type does not match its wire type");
-        if (!smallUint8 && type != numericArrayCode<Element>())
+        const bool matches    = smallUint8 ? std::is_same_v<Element, std::uint8_t> : type == numericArrayCode<Element>();
+        if (!matches)
             throw std::runtime_error("Typed array element type does not match its wire type");
 
         const std::size_t headerSize = smallUint8 ? 2 : 5;
@@ -565,6 +586,13 @@ private:
             elementCount = static_cast<std::uint8_t>(data[1]);
         else
             std::memcpy(&elementCount, data.data() + 1, sizeof(elementCount));
+        return {headerSize, elementCount};
+    }
+
+    template <typename Array>
+    static void decodeNumericArray(Array& param, std::span<const std::byte>& data) {
+        using Element = std::remove_cv_t<numeric_array_element_t<Array>>;
+        const auto [headerSize, elementCount] = readNumericArrayHeader<Array>(data);
 
         if (elementCount > std::numeric_limits<std::size_t>::max() / sizeof(Element))
             throw std::runtime_error("Typed array byte size overflow");

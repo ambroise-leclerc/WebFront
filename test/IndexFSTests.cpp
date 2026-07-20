@@ -60,6 +60,9 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
             THEN("Wbefront.js V0.0.1 content should be returned") {
                 REQUIRE(webfrontJSFile.has_value());
 
+                // WebFront.js is embedded verbatim rather than pre-compressed: deflate streams are not
+                // reproducible across platforms, so the raw bytes are what the build can verify. Nothing
+                // downstream advertises a Content-Encoding for it (see HTTPServer::handleRequest).
                 REQUIRE_FALSE(webfrontJSFile->isEncoded());
                 REQUIRE(webfrontJSFile->getEncoding().empty());
 

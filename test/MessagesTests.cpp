@@ -6,6 +6,8 @@
 
 #include <limits>
 #include <span>
+#include <string>
+#include <tuple>
 #include <stdexcept>
 #include <vector>
 
@@ -199,67 +201,149 @@ SCENARIO("Numeric arrays are encoded and decoded as owning values") {
     roundTrip(vector<float>{-1.5F, 0.0F, 42.25F});
     roundTrip(vector<double>{-1.5, 0.0, 42.25});
 
-    GIVEN("Uint8 arrays on either side of the compact-length boundary") {
-        vector<uint8_t> compact(255, 7);
-        vector<uint8_t> regular(256, 9);
-        array<uint8_t, 255> fixedCompact{};
-        array<uint8_t, 256> fixedRegular{};
+}
 
-        auto encodedType = []<typename Array>(const Array& input) {
-            msg::FunctionReturn<> message;
-            websocket::Frame<Net> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
-            message.encodeParameter(input, frame);
-            const auto buffers = frame.toBuffers();
-            REQUIRE(buffers.size() == 4);
-            const auto type = *reinterpret_cast<const byte*>(buffers[2].data());
-            return static_cast<msg::CodedType>(to_integer<uint8_t>(type));
-        };
+SCENARIO("Uint8 arrays switch encoding at the compact-length boundary") {
+    using Net = networking::NetworkingMock;
 
-        REQUIRE(encodedType(compact) == msg::CodedType::smallArrayU8);
-        REQUIRE(encodedType(regular) == msg::CodedType::arrayU8);
-        REQUIRE(encodedType(fixedCompact) == msg::CodedType::smallArrayU8);
-        REQUIRE(encodedType(fixedRegular) == msg::CodedType::arrayU8);
-    }
+    auto encodedType = []<typename Array>(const Array& input) {
+        msg::FunctionReturn<> message;
+        websocket::Frame<Net> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+        message.encodeParameter(input, frame);
+        const auto buffers = frame.toBuffers();
+        REQUIRE(buffers.size() == 4);
+        const auto type = *reinterpret_cast<const byte*>(buffers[2].data());
+        return static_cast<msg::CodedType>(to_integer<uint8_t>(type));
+    };
 
-    GIVEN("A fixed-size destination") {
-        array<uint16_t, 3> output{};
-        array<byte, 11>    encoded{byte{static_cast<uint8_t>(msg::CodedType::arrayU16)},
-                                byte{3},
-                                byte{0},
-                                byte{0},
-                                byte{0},
-                                byte{1},
-                                byte{0},
-                                byte{2},
-                                byte{0},
-                                byte{3},
-                                byte{0}};
-        span<const byte>   payload{encoded};
-        msg::FunctionCall<>::decodeParameter(output, payload);
-        REQUIRE(output == array<uint16_t, 3>{1, 2, 3});
-        REQUIRE(payload.empty());
-    }
+    vector<uint8_t>     compact(255, 7);
+    vector<uint8_t>     regular(256, 9);
+    array<uint8_t, 255> fixedCompact{};
+    array<uint8_t, 256> fixedRegular{};
 
-    GIVEN("Malformed array payloads") {
+    REQUIRE(encodedType(compact) == msg::CodedType::smallArrayU8);
+    REQUIRE(encodedType(regular) == msg::CodedType::arrayU8);
+    REQUIRE(encodedType(fixedCompact) == msg::CodedType::smallArrayU8);
+    REQUIRE(encodedType(fixedRegular) == msg::CodedType::arrayU8);
+}
+
+namespace {
+/// Three uint16 elements (1, 2, 3) in an arrayU16 payload, little-endian.
+constexpr array<byte, 11> threeUint16s{byte{static_cast<uint8_t>(msg::CodedType::arrayU16)},
+                                       byte{3},
+                                       byte{0},
+                                       byte{0},
+                                       byte{0},
+                                       byte{1},
+                                       byte{0},
+                                       byte{2},
+                                       byte{0},
+                                       byte{3},
+                                       byte{0}};
+}  // namespace
+
+SCENARIO("Numeric arrays decode into fixed-size destinations") {
+    array<uint16_t, 3> output{};
+    span<const byte>   payload{threeUint16s};
+    msg::FunctionCall<>::decodeParameter(output, payload);
+    REQUIRE(output == array<uint16_t, 3>{1, 2, 3});
+    REQUIRE(payload.empty());
+}
+
+SCENARIO("Malformed numeric array payloads are rejected") {
+    GIVEN("A payload shorter than its declared element count") {
         vector<uint8_t>  output;
         array<byte, 3>   truncated{byte{static_cast<uint8_t>(msg::CodedType::smallArrayU8)}, byte{2}, byte{1}};
-        span<const byte> truncatedPayload{truncated};
-        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(output, truncatedPayload), runtime_error);
+        span<const byte> payload{truncated};
+        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(output, payload), runtime_error);
+    }
 
+    GIVEN("A fixed-size destination whose length disagrees with the payload") {
         array<uint16_t, 2> fixed{};
-        array<byte, 11>    wrongSize{byte{static_cast<uint8_t>(msg::CodedType::arrayU16)},
-                                  byte{3},
-                                  byte{0},
-                                  byte{0},
-                                  byte{0},
-                                  byte{1},
-                                  byte{0},
-                                  byte{2},
-                                  byte{0},
-                                  byte{3},
-                                  byte{0}};
-        span<const byte>   wrongSizePayload{wrongSize};
-        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(fixed, wrongSizePayload), runtime_error);
+        span<const byte>   payload{threeUint16s};
+        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(fixed, payload), runtime_error);
+    }
+
+    GIVEN("A wire type that does not match the destination element type") {
+        vector<uint32_t> output;
+        span<const byte> payload{threeUint16s};
+        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(output, payload), runtime_error);
+    }
+
+    GIVEN("An array header truncated before its length field") {
+        vector<uint16_t> output;
+        array<byte, 2>   shortHeader{byte{static_cast<uint8_t>(msg::CodedType::arrayU16)}, byte{1}};
+        span<const byte> payload{shortHeader};
+        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(output, payload), runtime_error);
+    }
+}
+
+SCENARIO("decodeParameter rejects malformed and mistyped payloads") {
+    auto decodeInto = []<typename T>(T& target, span<const byte> bytes) {
+        span<const byte> payload{bytes};
+        msg::FunctionCall<>::decodeParameter(target, payload);
+    };
+    auto coded = [](msg::CodedType type) { return byte{static_cast<uint8_t>(type)}; };
+
+    GIVEN("An empty payload") {
+        string           target;
+        span<const byte> payload{};
+        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(target, payload), runtime_error);
+    }
+
+    GIVEN("An unknown coded type") {
+        string        target;
+        array<byte, 1> unknown{byte{0xfe}};
+        REQUIRE_THROWS_AS(decodeInto(target, unknown), runtime_error);
+    }
+
+    GIVEN("A value decoded into the wrong destination type") {
+        // Every mismatch must throw: silently leaving the bytes unconsumed would desynchronise
+        // the parameters that follow it in the same message.
+        array<byte, 1> boolean{coded(msg::CodedType::booleanTrue)};
+        array<byte, 2> smallString{coded(msg::CodedType::smallString), byte{0}};
+        array<byte, 9> number{coded(msg::CodedType::number)};
+        array<byte, 2> tuple{coded(msg::CodedType::tuple), byte{1}};
+        array<byte, 2> array8{coded(msg::CodedType::smallArrayU8), byte{0}};
+
+        string          asString;
+        bool            asBool{};
+        int             asInt{};
+        vector<uint8_t> asVector;
+
+        REQUIRE_THROWS_AS(decodeInto(asString, boolean), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(asBool, smallString), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(asString, number), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(asInt, tuple), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(asInt, array8), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(asVector, boolean), runtime_error);
+    }
+
+    GIVEN("String payloads truncated after their type byte") {
+        string         target;
+        array<byte, 1> smallHeader{coded(msg::CodedType::smallString)};
+        array<byte, 2> longHeader{coded(msg::CodedType::string), byte{4}};
+        array<byte, 3> smallBody{coded(msg::CodedType::smallString), byte{8}, byte{'a'}};
+        array<byte, 4> longBody{coded(msg::CodedType::string), byte{8}, byte{0}, byte{'a'}};
+
+        REQUIRE_THROWS_AS(decodeInto(target, smallHeader), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(target, longHeader), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(target, smallBody), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(target, longBody), runtime_error);
+    }
+
+    GIVEN("A number payload shorter than a double") {
+        double         target{};
+        array<byte, 4> shortNumber{coded(msg::CodedType::number), byte{0}, byte{0}, byte{0}};
+        REQUIRE_THROWS_AS(decodeInto(target, shortNumber), runtime_error);
+    }
+
+    GIVEN("A tuple whose declared arity differs from the destination") {
+        tuple<int, string> target;
+        array<byte, 2>     wrongArity{coded(msg::CodedType::tuple), byte{3}};
+        array<byte, 1>     truncatedHeader{coded(msg::CodedType::tuple)};
+        REQUIRE_THROWS_AS(decodeInto(target, wrongArity), runtime_error);
+        REQUIRE_THROWS_AS(decodeInto(target, truncatedHeader), runtime_error);
     }
 }
 
