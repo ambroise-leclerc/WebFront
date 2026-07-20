@@ -144,13 +144,16 @@ private:
 
     void browserReady() {
         state.browserReady = true;
-        requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
-        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
         cppResultThread = thread([this] {
             try {
+                requireUI().template jsFunction<void>("webfrontTests.receiveFromCpp")(cppToJsToken).get();
+                requireUI()
+                  .template jsFunction<void>("webfrontTests.receiveArraysFromCpp")(
+                    cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble)
+                  .get();
                 auto result = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp").get();
                 state.cppResultObserved = result == "js-result:from-cpp";
-                requireUI().jsFunction("webfrontTests.recordCppResult")(result);
+                requireUI().template jsFunction<void>("webfrontTests.recordCppResult")(result).get();
             } catch (const exception& error) {
                 log::error("C++ result call failed: {}", error.what());
                 try {

@@ -121,7 +121,8 @@ auto makeCppFunctionResponder(Callable&& callable) {
             result.encodeParameter(error, frame);
             frame.freeze();
         } catch (...) {
-            result.encodeParameter(std::runtime_error("Unknown C++ exception"), frame);
+            std::runtime_error error{"Unknown C++ exception"};
+            result.encodeParameter(error, frame);
             frame.freeze();
         }
         if (callId != 0)
