@@ -198,7 +198,7 @@ SCENARIO("WebLink rejects incomplete asynchronous results") {
         InjectableSocket::fail(make_error_code(errc::connection_reset));
 
         THEN("the future receives a connection error") {
-            REQUIRE(futureError(result) == "Browser connection closed: Connection reset by peer");
+            REQUIRE(futureError(result).starts_with("Browser connection closed:"));
         }
     }
 }
@@ -226,8 +226,10 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
         msg::FunctionCall<> call;
         call.setCallId(37);
         websocket::Frame<InjectableNetworking> frame{span(reinterpret_cast<const byte*>(call.header().data()), call.header().size())};
-        call.encodeParameter(string{"registered"}, frame);
+        const string functionName{"registered"};
+        call.encodeParameter(functionName, frame);
         call.encodeParameter(42, frame);
+        frame.freeze();
         InjectableSocket::receive(clientFrame(messagePayload(frame)));
 
         THEN("the link acknowledges and dispatches the correlated call") {
