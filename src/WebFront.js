@@ -55,6 +55,21 @@
         return new Uint8Array(word.buffer)[0] === 0xff;
     }
 
+    /// Wire type -> decoder, so decodeValue stays a lookup instead of a chain of comparisons.
+    /// Every typed array code shares one entry; the handler reads the width back off the code.
+    const valueDecoders = new Map([
+        [ParamType.booleanTrue, () => ({value: true, bytes: 1})],
+        [ParamType.booleanFalse, () => ({value: false, bytes: 1})],
+        [ParamType.number, (bridge, type, view, offset) => bridge.decodeNumber(view, offset)],
+        [ParamType.smallString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.string, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.exception, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.tuple, (bridge, type, view, offset) => bridge.decodeTuple(view, offset)],
+    ]);
+
+    for (const code of [ParamType.smallArrayU8, ...arrayCodes.keys()])
+        valueDecoders.set(code, (bridge, type, view, offset) => bridge.decodeTypedArray(type, view, offset));
+
     function isTypedArray(value) {
         return ArrayBuffer.isView(value) && !(value instanceof DataView);
     }
@@ -245,19 +260,10 @@
 
         /// Decodes the single value starting at 'offset', returning it alongside the byte count it consumed.
         decodeValue(type, view, offset) {
-            if (type === ParamType.booleanTrue)
-                return {value: true, bytes: 1};
-            if (type === ParamType.booleanFalse)
-                return {value: false, bytes: 1};
-            if (type === ParamType.number)
-                return this.decodeNumber(view, offset);
-            if (type === ParamType.smallString || type === ParamType.string || type === ParamType.exception)
-                return this.decodeString(type, view, offset);
-            if (arrayCodes.has(type) || type === ParamType.smallArrayU8)
-                return this.decodeTypedArray(type, view, offset);
-            if (type === ParamType.tuple)
-                return this.decodeTuple(view, offset);
-            throw new TypeError(`Unsupported parameter type ${type}`);
+            const decoder = valueDecoders.get(type);
+            if (!decoder)
+                throw new TypeError(`Unsupported parameter type ${type}`);
+            return decoder(this, type, view, offset);
         }
 
         decodeNumber(view, offset) {
@@ -406,19 +412,25 @@
         }
 
         objectParameterSize(value) {
-            if (Array.isArray(value)) {
-                if (value.length > 255)
-                    throw new RangeError("WebFront tuples cannot exceed 255 elements");
-                return 2 + value.reduce((size, element) => size + this.parameterSize(element), 0);
-            }
-            if (isTypedArray(value)) {
-                if (!arrayTypes.has(value.constructor))
-                    throw new TypeError(`Unsupported typed array ${value.constructor.name}`);
-                if (value.length > 0xffffffff)
-                    throw new RangeError("Typed arrays cannot exceed 4294967295 elements");
-                return typedArrayHeaderSize(value) + value.byteLength;
-            }
+            if (Array.isArray(value))
+                return this.tupleParameterSize(value);
+            if (isTypedArray(value))
+                return this.typedArrayParameterSize(value);
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        tupleParameterSize(value) {
+            if (value.length > 255)
+                throw new RangeError("WebFront tuples cannot exceed 255 elements");
+            return 2 + value.reduce((size, element) => size + this.parameterSize(element), 0);
+        }
+
+        typedArrayParameterSize(value) {
+            if (!arrayTypes.has(value.constructor))
+                throw new TypeError(`Unsupported typed array ${value.constructor.name}`);
+            if (value.length > 0xffffffff)
+                throw new RangeError("Typed arrays cannot exceed 4294967295 elements");
+            return typedArrayHeaderSize(value) + value.byteLength;
         }
 
         encodeParameter(value, view, offset) {

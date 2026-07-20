@@ -126,19 +126,20 @@ private:
         return equal(actual.begin(), actual.end(), expected.begin(), expected.end());
     }
 
-    void recordArraysFromJs(const vector<uint8_t>&  u8,
-                            const vector<int8_t>&   i8,
-                            const vector<uint16_t>& u16,
-                            const vector<int16_t>&  i16,
-                            const vector<uint32_t>& u32,
-                            const vector<int32_t>&  i32,
-                            const vector<uint64_t>& u64,
-                            const vector<int64_t>&  i64,
-                            const vector<float>&    floats,
-                            const vector<double>&   doubles) {
-        state.jsArraysObserved = matches(u8, cppU8) && matches(i8, cppI8) && matches(u16, cppU16) && matches(i16, cppI16)
-                                 && matches(u32, cppU32) && matches(i32, cppI32) && matches(u64, cppU64) && matches(i64, cppI64)
-                                 && matches(floats, cppFloat) && matches(doubles, cppDouble);
+    /// Compares two same-arity tuples of references element-wise.
+    template <typename Actual, typename Expected>
+    static bool matchesAll(const Actual& actual, const Expected& expected) {
+        static_assert(tuple_size_v<Actual> == tuple_size_v<Expected>, "Echoed arrays and fixtures must correspond");
+        return [&]<size_t... I>(index_sequence<I...>) {
+            return (matches(get<I>(actual), get<I>(expected)) && ...);
+        }(make_index_sequence<tuple_size_v<Actual>>{});
+    }
+
+    /// Arity follows the bridge signature under test: ten typed arrays as ten top-level parameters.
+    template <typename... Arrays>
+    void recordArraysFromJs(const Arrays&... arrays) {
+        state.jsArraysObserved =
+          matchesAll(tie(arrays...), tie(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble));
     }
 
     void browserReady() {
