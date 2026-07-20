@@ -149,13 +149,18 @@ private:
         state.jsToCppObserved = token == jsToCppToken;
     }
 
-    void reportJasmine(const string& overallStatus, const string& failures) {
-        state.jasmineReported = true;
+    bool cppResultMatches() {
         try {
-            state.cppResultObserved = cppResult.valid() && cppResult.get() == "js-result:from-cpp";
+            return cppResult.valid() && cppResult.get() == "js-result:from-cpp";
         } catch (const exception& error) {
             log::error("C++ result call failed: {}", error.what());
+            return false;
         }
+    }
+
+    void reportJasmine(const string& overallStatus, const string& failures) {
+        state.jasmineReported = true;
+        state.cppResultObserved = cppResultMatches();
         state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved
                        && state.cppResultObserved;
         if (!failures.empty())
