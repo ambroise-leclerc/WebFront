@@ -179,20 +179,29 @@
             try {
                 execution = this.executeFunction(names[0], parameters);
             } catch (error) {
-                if (callId === 0)
-                    console.error("[WebFront JavaScript call]", error);
-                else
-                    this.sendFunctionError(callId, error);
+                this.reportCallFailure(callId, error);
                 return;
             }
+            // callId 0 means the caller is not waiting for anything, so there is nothing to send back.
             if (callId !== 0)
-                Promise.resolve(execution).then(value => {
-                    try {
-                        this.sendFunctionReturn(callId, value);
-                    } catch (error) {
-                        this.sendFunctionError(callId, error);
-                    }
-                }, error => this.sendFunctionError(callId, error));
+                Promise.resolve(execution).then(
+                    value => this.reportCallSuccess(callId, value),
+                    error => this.sendFunctionError(callId, error));
+        }
+
+        reportCallFailure(callId, error) {
+            if (callId === 0)
+                console.error("[WebFront JavaScript call]", error);
+            else
+                this.sendFunctionError(callId, error);
+        }
+
+        reportCallSuccess(callId, value) {
+            try {
+                this.sendFunctionReturn(callId, value);
+            } catch (error) {
+                this.sendFunctionError(callId, error);
+            }
         }
 
         executeFunction(name, args) {

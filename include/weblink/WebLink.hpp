@@ -60,63 +60,7 @@ public:
             log::debug("onMessage(text) :{}", text);
             ws.write("This is my response");
         });
-        ws.onMessage([this](std::span<const std::byte> data) {
-            log::infoHex("onMessage(binary) :", data);
-
-            if (data.empty()) {
-                log::error("Received an empty WebFront message");
-                return;
-            }
-
-            switch (static_cast<msg::Command>(data[0])) {
-            case msg::Command::handshake: {
-                auto command = msg::Handshake::castFromRawData(data);
-                sendCommand(msg::Ack{});
-                logSink =
-                  log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
-                
-                // Use if constexpr to check endianness at compile time
-                if constexpr (std::endian::native == std::endian::little) {
-                    sameEndian = (static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::little);
-                } else if constexpr (std::endian::native == std::endian::big) {
-                    sameEndian = (static_cast<msg::JSEndian>(command->getEndian()) == msg::JSEndian::big);
-                } else {
-                    // Handle mixed-endian if necessary, or assume mismatch
-                    sameEndian = false; 
-                }
-
-                eventsHandler({WebLinkEvent::Code::linked, id});
-            } break;
-
-            case msg::Command::callFunction: {
-                log::info("Function called !");
-                auto command = msg::FunctionCall<Policy>::castFromRawData(data);
-                auto [functionName, paramData] = command->getFunctionName();
-                try {
-                    eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData, command->getCallId()));
-                }
-                catch (const std::out_of_range& e) {
-                    msg::FunctionReturn<Policy> returnValue;
-                    returnValue.setCallId(command->getCallId());
-                    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
-
-                    returnValue.encodeParameter(e, frame);
-                    if (command->getCallId() != 0) sendFrame(std::move(frame));
-                }
-                catch (const std::exception& e) {
-                    log::info("event cppFunctionCalled failed with exception {}", e.what());
-                    sendError(command->getCallId(), e.what());
-                }
-            } break;
-
-            case msg::Command::functionReturn: {
-                auto command = msg::FunctionReturn<Policy>::castFromRawData(data);
-                completePending(*command);
-            } break;
-
-            default: break;
-            }
-        });
+        ws.onMessage([this](std::span<const std::byte> data) { onBinaryMessage(data); });
         ws.onClose([this](websocket::CloseEvent event) {
             auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
             rejectPending(std::make_exception_ptr(std::runtime_error(message)));
@@ -156,6 +100,60 @@ public:
     }
 
 private:
+    void onBinaryMessage(std::span<const std::byte> data) {
+        log::infoHex("onMessage(binary) :", data);
+        if (data.empty()) {
+            log::error("Received an empty WebFront message");
+            return;
+        }
+
+        switch (static_cast<msg::Command>(data[0])) {
+        case msg::Command::handshake: handleHandshake(data); break;
+        case msg::Command::callFunction: handleCallFunction(data); break;
+        case msg::Command::functionReturn: completePending(*msg::FunctionReturn<Policy>::castFromRawData(data)); break;
+        default: break;
+        }
+    }
+
+    void handleHandshake(std::span<const std::byte> data) {
+        auto command = msg::Handshake::castFromRawData(data);
+        sendCommand(msg::Ack{});
+        logSink = log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
+
+        // On a mixed-endian target native matches neither, leaving sameEndian false as it should.
+        constexpr bool nativeIsLittle = std::endian::native == std::endian::little;
+        constexpr bool nativeIsBig    = std::endian::native == std::endian::big;
+        const auto     jsEndian       = static_cast<msg::JSEndian>(command->getEndian());
+        sameEndian = (nativeIsLittle && jsEndian == msg::JSEndian::little) || (nativeIsBig && jsEndian == msg::JSEndian::big);
+
+        eventsHandler({WebLinkEvent::Code::linked, id});
+    }
+
+    void handleCallFunction(std::span<const std::byte> data) {
+        log::info("Function called !");
+        auto command                   = msg::FunctionCall<Policy>::castFromRawData(data);
+        auto [functionName, paramData] = command->getFunctionName();
+        try {
+            eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData, command->getCallId()));
+        }
+        catch (const std::out_of_range& e) {
+            sendException(command->getCallId(), e);
+        }
+        catch (const std::exception& e) {
+            log::info("event cppFunctionCalled failed with exception {}", e.what());
+            sendError(command->getCallId(), e.what());
+        }
+    }
+
+    /// An unknown function name is reported back as an encoded exception rather than a plain error string.
+    void sendException(msg::CallId callId, const std::out_of_range& error) {
+        msg::FunctionReturn<Policy> returnValue;
+        returnValue.setCallId(callId);
+        websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(returnValue.header().data()), returnValue.header().size())};
+        returnValue.encodeParameter(error, frame);
+        if (callId != 0) sendFrame(std::move(frame));
+    }
+
     /// A return message either carries an encoded exception, which is rethrown into the promise, or the
     /// value itself. Anything that fails to decode also surfaces as a broken promise rather than a throw
     /// on the receive thread.
