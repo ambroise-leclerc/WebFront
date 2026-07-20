@@ -89,7 +89,8 @@ public:
         std::lock_guard lock(pendingMutex);
         if (closed) {
             promise->set_exception(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
-            return {0, std::move(future)};
+            // Explicitly typed: a bare 0 is an int and narrows into CallId, which MSVC rejects (C4242).
+            return {msg::CallId{0}, std::move(future)};
         }
 
         auto callId = nextAvailableCallId();
