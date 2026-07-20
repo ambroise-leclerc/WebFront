@@ -150,37 +150,55 @@ public:
 
         auto callId = nextAvailableCallId();
         pendingCalls.emplace(callId, PendingCall{
-          .complete = [promise](const msg::FunctionReturn<Policy>& result) {
-              try {
-                  auto payload = result.payload();
-                  if (result.getParametersCount() == 1 && !payload.empty()
-                      && static_cast<msg::CodedType>(payload.front()) == msg::CodedType::exception) {
-                      std::string message;
-                      result.decodeParameter(message, payload);
-                      if (!payload.empty()) throw std::runtime_error("Malformed exception return payload");
-                      throw std::runtime_error(message);
-                  }
-                  if constexpr (std::is_void_v<Result>) {
-                      if (result.getParametersCount() != 0 || !payload.empty())
-                          throw std::runtime_error("Malformed void return message");
-                      promise->set_value();
-                  } else {
-                      if (result.getParametersCount() != 1)
-                          throw std::runtime_error("Malformed function return message");
-                      Result value{};
-                      result.decodeParameter(value, payload);
-                      if (!payload.empty()) throw std::runtime_error("Function return contains trailing data");
-                      promise->set_value(std::move(value));
-                  }
-              }
-              catch (...) {
-                  promise->set_exception(std::current_exception());
-              }
-          },
-          .reject = [promise](std::exception_ptr error) { promise->set_exception(std::move(error)); }});
+          .complete = [promise](const msg::FunctionReturn<Policy>& result) { settleResult<Result>(*promise, result); },
+          .reject   = [promise](std::exception_ptr error) { promise->set_exception(std::move(error)); }});
         return {callId, std::move(future)};
     }
 
+private:
+    /// A return message either carries an encoded exception, which is rethrown into the promise, or the
+    /// value itself. Anything that fails to decode also surfaces as a broken promise rather than a throw
+    /// on the receive thread.
+    template<typename Result>
+    static void settleResult(std::promise<Result>& promise, const msg::FunctionReturn<Policy>& result) {
+        try {
+            auto payload = result.payload();
+            if (carriesException(result, payload)) rethrowEncodedException(result, payload);
+            decodeInto(promise, result, payload);
+        }
+        catch (...) {
+            promise.set_exception(std::current_exception());
+        }
+    }
+
+    static bool carriesException(const msg::FunctionReturn<Policy>& result, std::span<const std::byte> payload) {
+        if (result.getParametersCount() != 1 || payload.empty()) return false;
+        return static_cast<msg::CodedType>(payload.front()) == msg::CodedType::exception;
+    }
+
+    [[noreturn]] static void rethrowEncodedException(const msg::FunctionReturn<Policy>& result, std::span<const std::byte> payload) {
+        std::string message;
+        result.decodeParameter(message, payload);
+        if (!payload.empty()) throw std::runtime_error("Malformed exception return payload");
+        throw std::runtime_error(message);
+    }
+
+    template<typename Result>
+    static void decodeInto(std::promise<Result>& promise, const msg::FunctionReturn<Policy>& result, std::span<const std::byte>& payload) {
+        if constexpr (std::is_void_v<Result>) {
+            if (result.getParametersCount() != 0 || !payload.empty()) throw std::runtime_error("Malformed void return message");
+            promise.set_value();
+        }
+        else {
+            if (result.getParametersCount() != 1) throw std::runtime_error("Malformed function return message");
+            Result value{};
+            result.decodeParameter(value, payload);
+            if (!payload.empty()) throw std::runtime_error("Function return contains trailing data");
+            promise.set_value(std::move(value));
+        }
+    }
+
+public:
     void sendError(msg::CallId callId, std::string_view message) {
         if (callId == 0) return;
         msg::FunctionReturn<Policy> result;

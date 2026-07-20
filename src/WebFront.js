@@ -217,33 +217,47 @@
                 throw new Error(`Function return has unknown call id ${callId}`);
             this.pendingCalls.delete(callId);
 
+            // A decode failure has to settle the pending call rather than escape into the socket handler,
+            // otherwise the caller's promise would hang forever.
             try {
-                const count = message.getUint8(1);
-                const payloadSize = message.getUint32(4, this.littleEndian);
-                requireBytes(message, 8, payloadSize, "function return payload");
-                const payload = new DataView(message.buffer, message.byteOffset + 8, payloadSize);
-                if (count === 1 && payloadSize > 0 && payload.getUint8(0) === ParamType.exception) {
-                    const [values, consumed] = this.decodeParameters(1, payload);
-                    if (consumed !== payloadSize)
-                        throw new Error("Exception return contains trailing payload data");
-                    pending.reject(new Error(values[0]));
-                    return;
-                }
-                if (count === 0) {
-                    if (payloadSize !== 0)
-                        throw new Error("Void return contains payload data");
-                    pending.resolve(undefined);
-                    return;
-                }
-                if (count !== 1)
-                    throw new Error("Function return must contain zero or one value");
-                const [values, consumed] = this.decodeParameters(1, payload);
-                if (consumed !== payloadSize)
-                    throw new Error("Function return contains trailing payload data");
-                pending.resolve(values[0]);
+                this.settleReturn(pending, message);
             } catch (error) {
                 pending.reject(error);
             }
+        }
+
+        settleReturn(pending, message) {
+            const count = message.getUint8(1);
+            const payloadSize = message.getUint32(4, this.littleEndian);
+            requireBytes(message, 8, payloadSize, "function return payload");
+            const payload = new DataView(message.buffer, message.byteOffset + 8, payloadSize);
+
+            if (this.carriesException(count, payloadSize, payload)) {
+                pending.reject(new Error(this.singleValue(payload, payloadSize, "Exception")));
+                return;
+            }
+            if (count === 0) {
+                if (payloadSize !== 0)
+                    throw new Error("Void return contains payload data");
+                pending.resolve(undefined);
+                return;
+            }
+            if (count !== 1)
+                throw new Error("Function return must contain zero or one value");
+            pending.resolve(this.singleValue(payload, payloadSize, "Function"));
+        }
+
+        carriesException(count, payloadSize, payload) {
+            if (count !== 1 || payloadSize === 0) return false;
+            return payload.getUint8(0) === ParamType.exception;
+        }
+
+        /// Decodes exactly one value and rejects any bytes left over after it.
+        singleValue(payload, payloadSize, what) {
+            const [values, consumed] = this.decodeParameters(1, payload);
+            if (consumed !== payloadSize)
+                throw new Error(`${what} return contains trailing payload data`);
+            return values[0];
         }
 
         decodeParameters(count, view, offset = 0) {
