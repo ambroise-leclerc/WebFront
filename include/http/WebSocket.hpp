@@ -140,14 +140,16 @@ struct Frame : public Header {
 
     std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
+        auto appendPayload = [&buffers](const auto& source) {
+            for (const auto& buffer : source) buffers.emplace_back(buffer.data(), buffer.size());
+        };
+        // freeze() moves the payload from borrowedBuffers into ownedBuffers, so only one of the two holds it.
         buffers.reserve((ownedBuffers.empty() ? borrowedBuffers.size() : ownedBuffers.size()) + 1);
         buffers.emplace_back(raw.data(), headerSize());
-        if (ownedBuffers.empty()) {
-            for (const auto buffer : borrowedBuffers) buffers.emplace_back(buffer.data(), buffer.size());
-        }
-        else {
-            for (const auto& buffer : ownedBuffers) buffers.emplace_back(buffer.data(), buffer.size());
-        }
+        if (ownedBuffers.empty())
+            appendPayload(borrowedBuffers);
+        else
+            appendPayload(ownedBuffers);
         return buffers;
     }
 

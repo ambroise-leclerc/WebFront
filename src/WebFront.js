@@ -55,10 +55,24 @@
         return new Uint8Array(word.buffer)[0] === 0xff;
     }
 
+    function isTypedArray(value) {
+        return ArrayBuffer.isView(value) && !(value instanceof DataView);
+    }
+
+    /// Short Uint8Array payloads use the compact smallArrayU8 header. Sizing and encoding must agree on
+    /// this, so both go through here: a disagreement would mis-size the send buffer.
+    function typedArrayHeaderSize(value) {
+        return value instanceof Uint8Array && value.length < 256 ? 2 : 5;
+    }
+
+    function isNonNegativeInteger(candidate) {
+        return Number.isSafeInteger(candidate) && candidate >= 0;
+    }
+
     function requireBytes(view, offset, count, description) {
-        if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(count) || offset < 0 || count < 0 || offset + count > view.byteLength) {
+        const wellFormed = isNonNegativeInteger(offset) && isNonNegativeInteger(count);
+        if (!wellFormed || offset + count > view.byteLength)
             throw new RangeError(`Truncated ${description}`);
-        }
     }
 
     class WebFrontBridge {
@@ -155,66 +169,54 @@
             let cursor = offset;
             for (let index = 0; index < count; ++index) {
                 requireBytes(view, cursor, 1, "parameter type");
-                const type = view.getUint8(cursor);
-                switch (type) {
-                case ParamType.booleanTrue:
-                    values.push(true);
-                    cursor += 1;
-                    break;
-                case ParamType.booleanFalse:
-                    values.push(false);
-                    cursor += 1;
-                    break;
-                case ParamType.number:
-                    requireBytes(view, cursor, 9, "number");
-                    values.push(view.getFloat64(cursor + 1, this.littleEndian));
-                    cursor += 9;
-                    break;
-                case ParamType.smallString:
-                case ParamType.string:
-                case ParamType.exception: {
-                    const sizeBytes = type === ParamType.smallString ? 1 : 2;
-                    requireBytes(view, cursor + 1, sizeBytes, "string length");
-                    const length = sizeBytes === 1 ? view.getUint8(cursor + 1) : view.getUint16(cursor + 1, this.littleEndian);
-                    const payload = cursor + 1 + sizeBytes;
-                    requireBytes(view, payload, length, "string payload");
-                    const bytes = new Uint8Array(view.buffer, view.byteOffset + payload, length);
-                    values.push(new TextDecoder("utf-8").decode(bytes));
-                    cursor = payload + length;
-                    break;
-                }
-                case ParamType.smallArrayU8:
-                case ParamType.arrayU8:
-                case ParamType.array8:
-                case ParamType.arrayU16:
-                case ParamType.array16:
-                case ParamType.arrayU32:
-                case ParamType.array32:
-                case ParamType.arrayU64:
-                case ParamType.array64:
-                case ParamType.arrayFloat:
-                case ParamType.arrayDouble: {
-                    const decoded = this.decodeTypedArray(type, view, cursor);
-                    values.push(decoded.value);
-                    cursor += decoded.bytes;
-                    break;
-                }
-                case ParamType.tuple: {
-                    requireBytes(view, cursor, 2, "tuple header");
-                    const tupleCount = view.getUint8(cursor + 1);
-                    const [tuple, consumed] = this.decodeParameters(tupleCount, view, cursor + 2);
-                    values.push(tuple);
-                    cursor += 2 + consumed;
-                    break;
-                }
-                default:
-                    throw new TypeError(`Unsupported parameter type ${type}`);
-                }
+                const {value, bytes} = this.decodeValue(view.getUint8(cursor), view, cursor);
+                values.push(value);
+                cursor += bytes;
             }
             return [values, cursor - offset];
         }
 
-        decodeTypedArray(type, view, offset) {
+        /// Decodes the single value starting at 'offset', returning it alongside the byte count it consumed.
+        decodeValue(type, view, offset) {
+            if (type === ParamType.booleanTrue)
+                return {value: true, bytes: 1};
+            if (type === ParamType.booleanFalse)
+                return {value: false, bytes: 1};
+            if (type === ParamType.number)
+                return this.decodeNumber(view, offset);
+            if (type === ParamType.smallString || type === ParamType.string || type === ParamType.exception)
+                return this.decodeString(type, view, offset);
+            if (arrayCodes.has(type) || type === ParamType.smallArrayU8)
+                return this.decodeTypedArray(type, view, offset);
+            if (type === ParamType.tuple)
+                return this.decodeTuple(view, offset);
+            throw new TypeError(`Unsupported parameter type ${type}`);
+        }
+
+        decodeNumber(view, offset) {
+            requireBytes(view, offset, 9, "number");
+            return {value: view.getFloat64(offset + 1, this.littleEndian), bytes: 9};
+        }
+
+        decodeString(type, view, offset) {
+            const sizeBytes = type === ParamType.smallString ? 1 : 2;
+            requireBytes(view, offset + 1, sizeBytes, "string length");
+            const length = sizeBytes === 1 ? view.getUint8(offset + 1) : view.getUint16(offset + 1, this.littleEndian);
+            const payload = offset + 1 + sizeBytes;
+            requireBytes(view, payload, length, "string payload");
+            const bytes = new Uint8Array(view.buffer, view.byteOffset + payload, length);
+            return {value: new TextDecoder("utf-8").decode(bytes), bytes: 1 + sizeBytes + length};
+        }
+
+        decodeTuple(view, offset) {
+            requireBytes(view, offset, 2, "tuple header");
+            const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2);
+            return {value: tuple, bytes: 2 + consumed};
+        }
+
+        /// Resolves the element spec and length prefix for a typed array, whose header is 2 bytes in the
+        /// compact smallArrayU8 form and 5 bytes otherwise.
+        readTypedArrayHeader(type, view, offset) {
             const small = type === ParamType.smallArrayU8;
             const spec = small ? {...arrayCodes.get(ParamType.arrayU8), constructor: Uint8Array} : arrayCodes.get(type);
             if (!spec)
@@ -222,10 +224,16 @@
             const headerSize = small ? 2 : 5;
             requireBytes(view, offset, headerSize, "array header");
             const length = small ? view.getUint8(offset + 1) : view.getUint32(offset + 1, this.littleEndian);
+            return {spec, headerSize, length};
+        }
+
+        decodeTypedArray(type, view, offset) {
+            const {spec, headerSize, length} = this.readTypedArrayHeader(type, view, offset);
             const byteLength = length * spec.bytes;
             if (!Number.isSafeInteger(byteLength))
                 throw new RangeError("Typed array length is too large");
             requireBytes(view, offset + headerSize, byteLength, "array payload");
+
             const result = new spec.constructor(length);
             const payload = offset + headerSize;
             for (let index = 0; index < length; ++index)
@@ -260,27 +268,33 @@
                 return 1;
             case "number":
                 return 9;
-            case "string": {
-                const length = new TextEncoder().encode(value).length;
-                if (length >= 65536)
-                    throw new RangeError("WebFront strings cannot exceed 65535 UTF-8 bytes");
-                return length + (length < 256 ? 2 : 3);
-            }
+            case "string":
+                return this.stringParameterSize(value);
             case "object":
-                if (Array.isArray(value)) {
-                    if (value.length > 255)
-                        throw new RangeError("WebFront tuples cannot exceed 255 elements");
-                    return 2 + value.reduce((size, element) => size + this.parameterSize(element), 0);
-                }
-                if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
-                    const spec = arrayTypes.get(value.constructor);
-                    if (!spec)
-                        throw new TypeError(`Unsupported typed array ${value.constructor.name}`);
-                    if (value.length > 0xffffffff)
-                        throw new RangeError("Typed arrays cannot exceed 4294967295 elements");
-                    return (value instanceof Uint8Array && value.length < 256 ? 2 : 5) + value.byteLength;
-                }
-                break;
+                return this.objectParameterSize(value);
+            }
+            throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        stringParameterSize(value) {
+            const length = new TextEncoder().encode(value).length;
+            if (length >= 65536)
+                throw new RangeError("WebFront strings cannot exceed 65535 UTF-8 bytes");
+            return length + (length < 256 ? 2 : 3);
+        }
+
+        objectParameterSize(value) {
+            if (Array.isArray(value)) {
+                if (value.length > 255)
+                    throw new RangeError("WebFront tuples cannot exceed 255 elements");
+                return 2 + value.reduce((size, element) => size + this.parameterSize(element), 0);
+            }
+            if (isTypedArray(value)) {
+                if (!arrayTypes.has(value.constructor))
+                    throw new TypeError(`Unsupported typed array ${value.constructor.name}`);
+                if (value.length > 0xffffffff)
+                    throw new RangeError("Typed arrays cannot exceed 4294967295 elements");
+                return typedArrayHeaderSize(value) + value.byteLength;
             }
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
@@ -294,42 +308,51 @@
                 view.setUint8(offset, ParamType.number);
                 view.setFloat64(offset + 1, value, this.littleEndian);
                 return 9;
-            case "string": {
-                const bytes = new TextEncoder().encode(value);
-                const small = bytes.length < 256;
-                view.setUint8(offset, small ? ParamType.smallString : ParamType.string);
-                if (small)
-                    view.setUint8(offset + 1, bytes.length);
-                else
-                    view.setUint16(offset + 1, bytes.length, this.littleEndian);
-                const headerSize = small ? 2 : 3;
-                new Uint8Array(view.buffer, view.byteOffset + offset + headerSize, bytes.length).set(bytes);
-                return headerSize + bytes.length;
-            }
+            case "string":
+                return this.encodeString(value, view, offset);
             case "object":
-                if (Array.isArray(value)) {
-                    view.setUint8(offset, ParamType.tuple);
-                    view.setUint8(offset + 1, value.length);
-                    let written = 2;
-                    for (const element of value)
-                        written += this.encodeParameter(element, view, offset + written);
-                    return written;
-                }
-                if (ArrayBuffer.isView(value) && !(value instanceof DataView))
-                    return this.encodeTypedArray(value, view, offset);
-                break;
+                return this.encodeObject(value, view, offset);
             }
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        encodeString(value, view, offset) {
+            const bytes = new TextEncoder().encode(value);
+            const small = bytes.length < 256;
+            view.setUint8(offset, small ? ParamType.smallString : ParamType.string);
+            if (small)
+                view.setUint8(offset + 1, bytes.length);
+            else
+                view.setUint16(offset + 1, bytes.length, this.littleEndian);
+            const headerSize = small ? 2 : 3;
+            new Uint8Array(view.buffer, view.byteOffset + offset + headerSize, bytes.length).set(bytes);
+            return headerSize + bytes.length;
+        }
+
+        encodeObject(value, view, offset) {
+            if (Array.isArray(value))
+                return this.encodeTuple(value, view, offset);
+            if (isTypedArray(value))
+                return this.encodeTypedArray(value, view, offset);
+            throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        encodeTuple(value, view, offset) {
+            view.setUint8(offset, ParamType.tuple);
+            view.setUint8(offset + 1, value.length);
+            let written = 2;
+            for (const element of value)
+                written += this.encodeParameter(element, view, offset + written);
+            return written;
         }
 
         encodeTypedArray(value, view, offset) {
             const spec = arrayTypes.get(value.constructor);
             if (!spec)
                 throw new TypeError(`Unsupported typed array ${value.constructor.name}`);
-            const small = value instanceof Uint8Array && value.length < 256;
-            const headerSize = small ? 2 : 5;
-            view.setUint8(offset, small ? ParamType.smallArrayU8 : spec.code);
-            if (small)
+            const headerSize = typedArrayHeaderSize(value);
+            view.setUint8(offset, headerSize === 2 ? ParamType.smallArrayU8 : spec.code);
+            if (headerSize === 2)
                 view.setUint8(offset + 1, value.length);
             else
                 view.setUint32(offset + 1, value.length, this.littleEndian);

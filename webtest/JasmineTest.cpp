@@ -102,16 +102,33 @@ private:
                    const vector<int64_t>&  i64,
                    const vector<float>&    floats,
                    const vector<double>&   doubles) {
-                state.jsArraysObserved = u8 == vector<uint8_t>{0, 255} && i8 == vector<int8_t>{-128, 127} && u16 == vector<uint16_t>{0, 65535}
-                                         && i16 == vector<int16_t>{-32768, 32767} && u32 == vector<uint32_t>{0, 0xffffffffu}
-                                         && i32 == vector<int32_t>{numeric_limits<int32_t>::min(), numeric_limits<int32_t>::max()}
-                                         && u64 == vector<uint64_t>{0, numeric_limits<uint64_t>::max()}
-                                         && i64 == vector<int64_t>{numeric_limits<int64_t>::min(), numeric_limits<int64_t>::max()}
-                                         && floats == vector<float>{-1.5F, 42.25F} && doubles == vector<double>{-1.5, 42.25};
+                recordArraysFromJs(u8, i8, u16, i16, u32, i32, u64, i64, floats, doubles);
             });
         webFront.cppFunction<void, tuple<int, string>>("recordTupleFromJs", [this](const tuple<int, string>& value) {
             state.jsTupleObserved = value == tuple<int, string>{42, "tuple"};
         });
+    }
+
+    /// The JS side echoes back the very arrays browserReady() sent it, so the cpp* members double as the
+    /// expected values and there is a single place to edit when the fixtures change.
+    template <typename T, size_t N>
+    static bool matches(const vector<T>& actual, const array<T, N>& expected) {
+        return equal(actual.begin(), actual.end(), expected.begin(), expected.end());
+    }
+
+    void recordArraysFromJs(const vector<uint8_t>&  u8,
+                            const vector<int8_t>&   i8,
+                            const vector<uint16_t>& u16,
+                            const vector<int16_t>&  i16,
+                            const vector<uint32_t>& u32,
+                            const vector<int32_t>&  i32,
+                            const vector<uint64_t>& u64,
+                            const vector<int64_t>&  i64,
+                            const vector<float>&    floats,
+                            const vector<double>&   doubles) {
+        state.jsArraysObserved = matches(u8, cppU8) && matches(i8, cppI8) && matches(u16, cppU16) && matches(i16, cppI16)
+                                 && matches(u32, cppU32) && matches(i32, cppI32) && matches(u64, cppU64) && matches(i64, cppI64)
+                                 && matches(floats, cppFloat) && matches(doubles, cppDouble);
     }
 
     void browserReady() {
