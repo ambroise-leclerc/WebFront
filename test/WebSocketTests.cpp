@@ -87,6 +87,35 @@ WHEN("Encoding it") {
 }
 ;
 
+SCENARIO("WebSocket frames can own payloads for asynchronous writes") {
+    GIVEN("A frame assembled from temporary message buffers") {
+        array<byte, 2> header{byte{0x01}, byte{0x02}};
+        array<byte, 3> payload{byte{0x03}, byte{0x04}, byte{0x05}};
+        websocket::Frame<Net> frame(header);
+        frame.addBuffer(payload);
+
+        WHEN("The frame is frozen before the source buffers change") {
+            frame.freeze();
+            frame.freeze();
+            header.fill(byte{0xff});
+            payload.fill(byte{0xff});
+            const auto buffers = frame.toBuffers();
+
+            THEN("Repeated freezing keeps the encoded payload valid") {
+                const auto* encodedHeader = static_cast<const byte*>(buffers[1].data());
+                const auto* encodedPayload = static_cast<const byte*>(buffers[2].data());
+                REQUIRE(buffers[1].size() == 2);
+                REQUIRE(encodedHeader[0] == byte{0x01});
+                REQUIRE(encodedHeader[1] == byte{0x02});
+                REQUIRE(buffers[2].size() == 3);
+                REQUIRE(encodedPayload[0] == byte{0x03});
+                REQUIRE(encodedPayload[1] == byte{0x04});
+                REQUIRE(encodedPayload[2] == byte{0x05});
+            }
+        }
+    }
+}
+
 SCENARIO("WebSocket decoder") {
     GIVEN("Some frame data and a decoder") {
         array<uint8_t, 22> frame{0x1,

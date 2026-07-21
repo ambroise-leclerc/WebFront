@@ -9,8 +9,10 @@
 
 #include <array>
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <span>
 
@@ -118,37 +120,58 @@ struct Frame : public Header {
         setFIN(true);
         setOpcode(Opcode::text);
         setPayloadSize(text.size());
-        buffers.emplace_back(raw.data(), headerSize());
-        buffers.emplace_back(reinterpret_cast<const std::byte*>(text.data()), text.size());
+        borrowedBuffers.emplace_back(reinterpret_cast<const std::byte*>(text.data()), text.size());
     }
 
     Frame(std::span<const std::byte> dataHead, std::span<const std::byte> dataNext = {}) {
         setFIN(true);
         setOpcode(Opcode::binary);
         setPayloadSize(dataHead.size() + dataNext.size());
-        buffers.emplace_back(raw.data(), headerSize());
-        buffers.emplace_back(dataHead.data(), dataHead.size());
-        if (!dataNext.empty()) buffers.emplace_back(dataNext.data(), dataNext.size());
+        borrowedBuffers.emplace_back(dataHead);
+        if (!dataNext.empty()) borrowedBuffers.emplace_back(dataNext);
     }
 
     Frame(const Frame&) = delete;
     Frame& operator=(const Frame&) = delete;
-    Frame(Frame&&) = default; 
+    Frame(Frame&&) = default;
     Frame& operator=(Frame&&) = default;
 
     [[nodiscard]] size_t size() const { return payloadSize(); };
 
-    std::vector<typename Net::ConstBuffer> toBuffers() const { return buffers; }
+    std::vector<typename Net::ConstBuffer> toBuffers() const {
+        std::vector<typename Net::ConstBuffer> buffers;
+        auto appendPayload = [&buffers](const auto& source) {
+            for (const auto& buffer : source) buffers.emplace_back(buffer.data(), buffer.size());
+        };
+        // freeze() moves the payload from borrowedBuffers into ownedBuffers, so only one of the two holds it.
+        buffers.reserve((ownedBuffers.empty() ? borrowedBuffers.size() : ownedBuffers.size()) + 1);
+        buffers.emplace_back(raw.data(), headerSize());
+        if (ownedBuffers.empty())
+            appendPayload(borrowedBuffers);
+        else
+            appendPayload(ownedBuffers);
+        return buffers;
+    }
+
+    void freeze() {
+        if (borrowedBuffers.empty()) return;
+        ownedBuffers.clear();
+        ownedBuffers.reserve(borrowedBuffers.size());
+        for (const auto buffer : borrowedBuffers) ownedBuffers.emplace_back(buffer.begin(), buffer.end());
+        borrowedBuffers.clear();
+    }
 
     /// @return size of added buffer
     size_t addBuffer(std::span<const std::byte> buffer) {
         log::debug("frame::addBuffer {}", utils::hexDump(buffer));
         setPayloadSize(payloadSize() + buffer.size());
-        buffers.emplace_back(buffer.data(), buffer.size());
+        borrowedBuffers.emplace_back(buffer);
         return buffer.size();
     }
 
-    std::vector<typename Net::ConstBuffer> buffers;
+private:
+    std::vector<std::span<const std::byte>> borrowedBuffers;
+    std::vector<std::vector<std::byte>> ownedBuffers;
 };
 
 class FrameDecoder {
@@ -228,18 +251,21 @@ private:
 };
 
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
-class WebSocket {
+class WebSocket : public std::enable_shared_from_this<WebSocket<Net, Policy>> {
     typename Net::Socket socket;
 
 public:
-    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
-        log::debug("WebSocket constructor");
-        start();
+    /// WebSocket instances must be heap-allocated and owned via shared_ptr so that
+    /// pending async read/write operations can keep the object alive with shared_from_this(),
+    /// even if the owner (e.g. WebLink) is destroyed while an operation is in flight.
+    /// Call start() once message handlers are attached.
+    [[nodiscard]] static std::shared_ptr<WebSocket> create(typename Net::Socket netSocket) {
+        return std::shared_ptr<WebSocket>(new WebSocket(std::move(netSocket)));
     }
     WebSocket(const WebSocket&) = delete;
-    WebSocket(WebSocket&&) = default;
+    WebSocket(WebSocket&&) = delete;
     WebSocket& operator=(const WebSocket&) = delete;
-    WebSocket& operator=(WebSocket&&) = default;
+    WebSocket& operator=(WebSocket&&) = delete;
     ~WebSocket() { log::debug("WebSocket destructor"); }
 
     void start() {
@@ -261,16 +287,27 @@ public:
     void write(Frame<Net> frame) { writeData(std::move(frame)); }
 
 private:
+    struct WriteState {
+        std::mutex mutex;
+        std::deque<std::shared_ptr<Frame<Net>>> queue;
+    };
+
     std::array<std::byte, Policy::receptionBufferSize> readBuffer;
     FrameDecoder decoder;
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
+    std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
     bool started;
 
 private:
+    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
+        log::debug("WebSocket constructor");
+    }
+
     void read() {
-        socket.async_read_some(Net::Buffer(readBuffer), [this](std::error_code ec, std::size_t bytesTransferred) {
+        auto self(this->shared_from_this());
+        socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
                 if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
                     auto data = decoder.payload();
@@ -300,7 +337,32 @@ private:
     }
 
     void writeData(Frame<Net> frame) {
-        Net::AsyncWrite(socket, frame.toBuffers(), [this](std::error_code ec, std::size_t /*bytesTransferred*/) {
+        frame.freeze();
+        auto pendingFrame = std::make_shared<Frame<Net>>(std::move(frame));
+        bool startWrite;
+        {
+            std::lock_guard lock(writeState->mutex);
+            startWrite = writeState->queue.empty();
+            writeState->queue.push_back(std::move(pendingFrame));
+        }
+        if (startWrite) writeNext();
+    }
+
+    void writeNext() {
+        std::shared_ptr<Frame<Net>> pendingFrame;
+        {
+            std::lock_guard lock(writeState->mutex);
+            pendingFrame = writeState->queue.front();
+        }
+        auto self(this->shared_from_this());
+        Net::AsyncWrite(socket, pendingFrame->toBuffers(), [this, self, pendingFrame](std::error_code ec, std::size_t /*bytesTransferred*/) {
+            bool hasNext;
+            {
+                std::lock_guard lock(writeState->mutex);
+                writeState->queue.pop_front();
+                if (ec) writeState->queue.clear();
+                hasNext = !writeState->queue.empty();
+            }
             if (ec) {
                 if (started) {
                     log::error("Error during write : ec.value() = {}", ec.value());
@@ -308,6 +370,7 @@ private:
                     if (ec != Net::Error::OperationAborted) stop();
                 }
             }
+            else if (hasNext) writeNext();
         });
     }
 };

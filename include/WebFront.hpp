@@ -64,6 +64,11 @@ public:
     [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const {
         return JsFunction{functionName, webFront, webLinkId};
     }
+
+    template <typename R>
+    [[nodiscard]] JsFunction<WebFront, R> jsFunction(std::string_view functionName) const {
+        return JsFunction<WebFront, R>{functionName, webFront, webLinkId};
+    }
 };
 
 namespace detail {
@@ -81,17 +86,47 @@ auto makeCppFunctionHandler(Function&& function) {
     using StoredFunction = std::decay_t<Function>;
     auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
 
-    return [callable = std::move(callable)](std::span<const std::byte> data) -> void {
+    return [callable = std::move(callable)](std::span<const std::byte> data) -> R {
         std::tuple<Args...> parameters;
-        auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) {
+        auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
             (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
-            if constexpr (std::is_void_v<R>)
+            if (!data.empty())
+                throw std::runtime_error("Function call contains trailing parameter data");
+            if constexpr (std::is_void_v<R>) {
                 std::invoke(*callable, std::get<Is>(tuple)...);
-            else
-                static_cast<void>(std::invoke(*callable, std::get<Is>(tuple)...));
+                return;
+            } else
+                return std::invoke(*callable, std::get<Is>(tuple)...);
         };
 
-        deserializeAndCall(parameters, std::index_sequence_for<Args...>());
+        return deserializeAndCall(parameters, std::index_sequence_for<Args...>());
+    };
+}
+
+template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
+auto makeCppFunctionResponder(Callable&& callable) {
+    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId) mutable {
+        msg::FunctionReturn<Policy> result;
+        result.setCallId(callId);
+        websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+        try {
+            if constexpr (std::is_void_v<R>)
+                callable(data);
+            else {
+                auto value = callable(data);
+                result.encodeParameter(value, frame);
+                frame.freeze();
+            }
+        } catch (const std::exception& error) {
+            result.encodeParameter(error, frame);
+            frame.freeze();
+        } catch (...) {
+            std::runtime_error error{"Unknown C++ exception"};
+            result.encodeParameter(error, frame);
+            frame.freeze();
+        }
+        if (callId != 0)
+            link.sendFrame(std::move(frame));
     };
 }
 }  // namespace detail
@@ -151,8 +186,8 @@ public:
      */
     template <typename R, typename... Args>
     void cppFunction(std::string functionName, auto&& function) {
-        cppFunctions.try_emplace(functionName,
-                                 detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function)));
+        auto callable = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
+        cppFunctions.try_emplace(functionName, detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable)));
     }
 
     enum class WindowAction { none, closeWindow };
@@ -188,7 +223,7 @@ private:
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
-    std::map<std::string, std::function<void(std::span<const std::byte>)>> cppFunctions;
+    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId)>> cppFunctions;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
 private:
@@ -201,7 +236,10 @@ private:
                 webLinks.erase(event.webLinkId);
                 break;
             case WebLinkEvent::Code::cppFunctionCalled:
-                cppFunctions.at(event.text)(event.data);
+                if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
+                    function->second(event.data, getLink(event.webLinkId), event.callId);
+                else
+                    getLink(event.webLinkId).sendError(event.callId, "C++ function '" + event.text + "' was not found");
                 break;
         }
     }

@@ -60,17 +60,15 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
             THEN("Wbefront.js V0.0.1 content should be returned") {
                 REQUIRE(webfrontJSFile.has_value());
 
-                REQUIRE(webfrontJSFile->isEncoded());
-                REQUIRE(webfrontJSFile->getEncoding() ==
-                        "gzip"); // Only gzip encoding should be used for mandatory file such as WebFront.js since android
-                                 // webviews does not support br encoding
+                // WebFront.js is embedded verbatim rather than pre-compressed: deflate streams are not
+                // reproducible across platforms, so the raw bytes are what the build can verify. Nothing
+                // downstream advertises a Content-Encoding for it (see HTTPServer::handleRequest).
+                REQUIRE_FALSE(webfrontJSFile->isEncoded());
+                REQUIRE(webfrontJSFile->getEncoding().empty());
 
-                array<uint8_t, 10> gzipHeader;
-                webfrontJSFile->read(span(reinterpret_cast<char*>(gzipHeader.data()), gzipHeader.size()));
-
-                REQUIRE(gzipHeader[0] == 0x1f);
-                REQUIRE(gzipHeader[1] == 0x8b);
-                REQUIRE(gzipHeader[2] == 0x08);
+                array<char, 3> sourceHeader{};
+                webfrontJSFile->read(sourceHeader);
+                REQUIRE(sourceHeader == array<char, 3>{'/', '/', '/'});
             }
         }
     }
