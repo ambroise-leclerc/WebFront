@@ -13,6 +13,7 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         config:
           - {
@@ -90,7 +91,7 @@ jobs:
         if: matrix.config.coverage
         working-directory: ${{github.workspace}}/build
         run: |
-          lcov --capture --directory . --output-file coverage.info
+          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
           lcov --remove coverage.info '/usr/*' '*/src/*' --output-file coverage.info
           lcov --list coverage.info
 
