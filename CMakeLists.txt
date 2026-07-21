@@ -1,4 +1,4 @@
-﻿cmake_minimum_required (VERSION 3.18)
+﻿cmake_minimum_required (VERSION 3.31)
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)
@@ -140,7 +140,7 @@ if(APPLE AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
         # Create a minimal CMakeLists.txt for compatibility
         file(WRITE "${CEF_WRAPPER_DIR}/CMakeLists.txt"
             "# Minimal libcef_dll_wrapper CMakeLists.txt for macOS compatibility\n"
-            "cmake_minimum_required(VERSION 3.21)\n"
+            "cmake_minimum_required(VERSION 3.31)\n"
             "project(libcef_dll_wrapper)\n"
             "\n"
             "# Create an empty interface target for compatibility\n"

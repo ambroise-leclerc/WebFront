@@ -1,6 +1,6 @@
 ---
 # Modern clang-tidy configuration for WebFront C++20+ project
-# Compatible with clang-tidy 16+ (optimized for 18+)
+# Compatible with clang-tidy 16+ (optimized for 22+)
 
 # =============================================================================
 # Check Selection
