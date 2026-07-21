@@ -1,9 +1,8 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     build-essential \
-    cmake \
     curl \
     git \
     libssl-dev \
@@ -15,22 +14,30 @@ RUN apt-get update && apt-get install -y \
     ccache \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Installation de GCC 13 (comme dans GitHub Actions)
+# Installation de GCC 16 (comme dans GitHub Actions)
 RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get update \
-    && apt-get install -y gcc-13 g++-13 \
-    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 \
+    && apt-get install -y gcc-16 g++-16 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-16 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-16 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Installation de LLVM et Clang 17 (comme dans GitHub Actions)
-RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
-    && echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-17 main" >> /etc/apt/sources.list \
+# Installation de LLVM et Clang 22 (comme dans GitHub Actions)
+RUN wget https://apt.llvm.org/llvm.sh \
+    && chmod +x llvm.sh \
+    && ./llvm.sh 22 \
+    && rm llvm.sh \
+    && apt-get install -y clang-22 lldb-22 lld-22 libclang-22-dev \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 100 \
+    && update-alternatives --install /usr/bin/lldb lldb /usr/bin/lldb-22 100
+
+# Installation d'un CMake récent (le dépôt Ubuntu 24.04 est trop ancien pour le plancher 3.31)
+RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor - > /usr/share/keyrings/kitware-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ noble main" > /etc/apt/sources.list.d/kitware.list \
     && apt-get update \
-    && apt-get install -y clang-17 lldb-17 lld-17 libclang-17-dev \
-    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-17 100 \
-    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-17 100 \
-    && update-alternatives --install /usr/bin/lldb lldb /usr/bin/lldb-17 100
+    && apt-get install -y cmake \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installation d'autres outils requis
 RUN apt-get install -y \
@@ -40,7 +47,7 @@ RUN apt-get install -y \
     libfmt-dev \
     libspdlog-dev \
     gdb \
-    llvm-17 \
+    llvm-22 \
     make
 
 # Installation de vcpkg
