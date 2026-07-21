@@ -17,45 +17,54 @@ jobs:
         config:
           - {
               name: "Windows MSVC",
-              os: windows-latest,
+              os: windows-2025,
               compiler: msvc,
               coverage: false
             }
           - {
               name: "Ubuntu GCC with Coverage",
-              os: ubuntu-latest,
+              os: ubuntu-24.04,
               compiler: gcc,
               coverage: true
             }
           - {
               name: "Ubuntu Clang",
-              os: ubuntu-latest,
+              os: ubuntu-24.04,
               compiler: clang,
               coverage: false
             }
           - {
               name: "macOS (Apple Silicon)",
-              os: macos-14,
+              os: macos-26,
               compiler: appleClang,
               coverage: false
             }
     runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.name }}
-      
+
     steps:
-      - uses: actions/checkout@v4
-        
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v2
-        with:
-          version: "17.0"
+      - uses: actions/checkout@v5
+
+      - name: Install Clang 22
         if: matrix.config.compiler == 'clang'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          echo "CC=clang-22" >> $GITHUB_ENV
+          echo "CXX=clang++-22" >> $GITHUB_ENV
 
       - name: Setup GCC
-        uses: egor-tensin/setup-gcc@v1.3
+        uses: egor-tensin/setup-gcc@v1
         with:
-          version: 13
+          version: 16
         if: matrix.config.compiler == 'gcc'
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+        if: matrix.config.compiler == 'appleClang'
 
       - name: Install Coverage Tools
         if: matrix.config.coverage
@@ -87,7 +96,7 @@ jobs:
 
       - name: Upload Coverage
         if: matrix.config.coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ${{github.workspace}}/build/coverage.info
           fail_ci_if_error: true
@@ -145,7 +154,7 @@ jobs:
 
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
-        uses: schneegans/dynamic-badges-action@v1.6.0
+        uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ env.GIST_ID }}
@@ -155,10 +164,10 @@ jobs:
           color: ${{ steps.badge.outputs.color }}
 
   web-integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: Ubuntu CEF Jasmine integration
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install virtual display
         run: |

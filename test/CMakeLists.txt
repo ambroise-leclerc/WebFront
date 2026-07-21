@@ -1,4 +1,4 @@
-CPMAddPackage("gh:catchorg/Catch2@3.4.0")
+CPMAddPackage("gh:catchorg/Catch2@3.15.2")
 target_compile_features(Catch2 PRIVATE cxx_std_23)
 target_compile_features(Catch2WithMain PRIVATE cxx_std_23)
 

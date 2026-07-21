@@ -1,6 +1,6 @@
 ---
 # Modern C++20+ clang-format configuration for WebFront project
-# Compatible with clang-format 18+
+# Compatible with clang-format 22+
 Language: Cpp
 BasedOnStyle: WebKit
 
