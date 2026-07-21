@@ -1,19 +1,25 @@
-#include <WebFront.hpp>
-
 #include <system/FileSystem.hpp>
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
 #include <tooling/Logger.hpp>
 #include <tooling/PathUtils.hpp>
+#include <WebFront.hpp>
 
+#include <array>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <exception>
+#include <future>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <vector>
 
 using namespace std;
 using namespace webfront;
@@ -26,6 +32,9 @@ constexpr string_view jsToCppToken{"js-to-cpp-token"};
 struct TestState {
     atomic<bool> browserReady{false};
     atomic<bool> jsToCppObserved{false};
+    atomic<bool> jsArraysObserved{false};
+    atomic<bool> jsTupleObserved{false};
+    atomic<bool> cppResultObserved{false};
     atomic<bool> jasmineReported{false};
     atomic<bool> passed{false};
 };
@@ -35,8 +44,7 @@ using TestWF = BasicWF<NetProvider, TestFS>;
 
 class BrowserIntegrationTest {
 public:
-    explicit BrowserIntegrationTest(const filesystem::path& docRoot)
-        : webFront("9002", docRoot) {
+    explicit BrowserIntegrationTest(const filesystem::path& docRoot) : webFront("9002", docRoot) {
         registerCallbacks();
     }
 
@@ -47,9 +55,22 @@ public:
     }
 
 private:
-    TestWF webFront;
-    TestState state;
+    TestWF               webFront;
+    TestState            state;
     optional<TestWF::UI> connectedUI;
+    future<string> cppResult;
+    static constexpr chrono::seconds cppResultWaitTimeout{10};
+
+    const array<uint8_t, 2>  cppU8{0, 255};
+    const array<int8_t, 2>   cppI8{-128, 127};
+    const array<uint16_t, 2> cppU16{0, 65535};
+    const array<int16_t, 2>  cppI16{-32768, 32767};
+    const array<uint32_t, 2> cppU32{0, 0xffffffffu};
+    const array<int32_t, 2>  cppI32{numeric_limits<int32_t>::min(), numeric_limits<int32_t>::max()};
+    const array<uint64_t, 2> cppU64{0, numeric_limits<uint64_t>::max()};
+    const array<int64_t, 2>  cppI64{numeric_limits<int64_t>::min(), numeric_limits<int64_t>::max()};
+    const array<float, 2>    cppFloat{-1.5F, 42.25F};
+    const array<double, 2>   cppDouble{-1.5, 42.25};
 
     void registerCallbacks() {
         webFront.onUIStarted([this](TestWF::UI ui) {
@@ -61,23 +82,96 @@ private:
         webFront.cppFunction<void, string>("recordFromJs", [this](const string& token) {
             recordFromJs(token);
         });
-        webFront.cppFunction<void, string>("reportJasmine", [this](const string& overallStatus) {
-            reportJasmine(overallStatus);
+        webFront.cppFunction<void, string, string>("reportJasmine", [this](const string& overallStatus, const string& failures) {
+            reportJasmine(overallStatus, failures);
         });
+        webFront.cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
+        webFront.cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
+        webFront.cppFunction<void,
+                             vector<uint8_t>,
+                             vector<int8_t>,
+                             vector<uint16_t>,
+                             vector<int16_t>,
+                             vector<uint32_t>,
+                             vector<int32_t>,
+                             vector<uint64_t>,
+                             vector<int64_t>,
+                             vector<float>,
+                             vector<double>>(
+            "recordArraysFromJs",
+            [this](const vector<uint8_t>&  u8,
+                   const vector<int8_t>&   i8,
+                   const vector<uint16_t>& u16,
+                   const vector<int16_t>&  i16,
+                   const vector<uint32_t>& u32,
+                   const vector<int32_t>&  i32,
+                   const vector<uint64_t>& u64,
+                   const vector<int64_t>&  i64,
+                   const vector<float>&    floats,
+                   const vector<double>&   doubles) {
+                recordArraysFromJs(u8, i8, u16, i16, u32, i32, u64, i64, floats, doubles);
+            });
+        webFront.cppFunction<void, tuple<int, string>>("recordTupleFromJs", [this](const tuple<int, string>& value) {
+            state.jsTupleObserved = value == tuple<int, string>{42, "tuple"};
+        });
+    }
+
+    /// The JS side echoes back the very arrays browserReady() sent it, so the cpp* members double as the
+    /// expected values and there is a single place to edit when the fixtures change.
+    template <typename T, size_t N>
+    static bool matches(const vector<T>& actual, const array<T, N>& expected) {
+        return equal(actual.begin(), actual.end(), expected.begin(), expected.end());
+    }
+
+    /// Compares two same-arity tuples of references element-wise.
+    template <typename Actual, typename Expected>
+    static bool matchesAll(const Actual& actual, const Expected& expected) {
+        static_assert(tuple_size_v<Actual> == tuple_size_v<Expected>, "Echoed arrays and fixtures must correspond");
+        return [&]<size_t... I>(index_sequence<I...>) {
+            return (matches(get<I>(actual), get<I>(expected)) && ...);
+        }(make_index_sequence<tuple_size_v<Actual>>{});
+    }
+
+    /// Arity follows the bridge signature under test: ten typed arrays as ten top-level parameters.
+    template <typename... Arrays>
+    void recordArraysFromJs(const Arrays&... arrays) {
+        state.jsArraysObserved =
+          matchesAll(tie(arrays...), tie(cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble));
     }
 
     void browserReady() {
         state.browserReady = true;
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
+        requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
+          cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
+        cppResult = requireUI().template jsFunction<string>("webfrontTests.returnToCpp")("from-cpp");
     }
 
     void recordFromJs(const string& token) {
         state.jsToCppObserved = token == jsToCppToken;
     }
 
-    void reportJasmine(const string& overallStatus) {
+    bool cppResultMatches() {
+        if (!cppResult.valid()) return false;
+        try {
+            if (cppResult.wait_for(cppResultWaitTimeout) != future_status::ready) {
+                log::error("C++ result call timed out after {} seconds", cppResultWaitTimeout.count());
+                return false;
+            }
+            return cppResult.get() == "js-result:from-cpp";
+        } catch (const exception& error) {
+            log::error("C++ result call failed: {}", error.what());
+            return false;
+        }
+    }
+
+    void reportJasmine(const string& overallStatus, const string& failures) {
         state.jasmineReported = true;
-        state.passed = overallStatus == "passed" && state.browserReady && state.jsToCppObserved;
+        state.cppResultObserved = cppResultMatches();
+        state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved
+                       && state.cppResultObserved;
+        if (!failures.empty())
+            log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());
     }
 
@@ -103,7 +197,7 @@ private:
 };
 
 int runBrowserIntegration() {
-    const auto docRoot = tooling::findTestRoot("SpecRunner.html");
+    const auto             docRoot = tooling::findTestRoot("SpecRunner.html");
     BrowserIntegrationTest test(docRoot);
     return test.run();
 }
