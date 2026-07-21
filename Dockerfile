@@ -25,7 +25,7 @@ RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
 
 # Installation de LLVM et Clang 22 (comme dans GitHub Actions)
 RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" > /etc/apt/sources.list.d/llvm.list \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" > /etc/apt/sources.list.d/llvm.list \
     && apt-get update \
     && apt-get install -y clang-22 lld-22 lldb-22 libclang-22-dev \
     && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 100 \
