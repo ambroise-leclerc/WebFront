@@ -40,7 +40,7 @@ RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --de
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installation d'autres outils requis
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y \
     cppcheck \
     valgrind \
     ninja-build \
@@ -48,7 +48,8 @@ RUN apt-get install -y \
     libspdlog-dev \
     gdb \
     llvm-22 \
-    make
+    make \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installation de vcpkg
 RUN git clone https://github.com/Microsoft/vcpkg.git /opt/vcpkg \

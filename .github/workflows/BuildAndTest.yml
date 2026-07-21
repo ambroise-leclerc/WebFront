@@ -56,7 +56,7 @@ jobs:
           echo "CXX=clang++-22" >> $GITHUB_ENV
 
       - name: Setup GCC
-        uses: egor-tensin/setup-gcc@v1
+        uses: egor-tensin/setup-gcc@v1.3
         with:
           version: 16
         if: matrix.config.compiler == 'gcc'
