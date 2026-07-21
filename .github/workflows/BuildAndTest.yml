@@ -49,9 +49,10 @@ jobs:
       - name: Install Clang 22
         if: matrix.config.compiler == 'clang'
         run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 22
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-22 lld-22 lldb-22
           echo "CC=clang-22" >> $GITHUB_ENV
           echo "CXX=clang++-22" >> $GITHUB_ENV
 
