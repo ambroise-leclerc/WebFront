@@ -40,7 +40,9 @@ struct TestState {
 };
 
 using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
-using TestWF = BasicWF<NetProvider, TestFS>;
+// The browser integration test needs an embedded, auto-closing window under Xvfb, so it selects
+// CEFFrontend explicitly rather than relying on webfront::WebFront's default (system) frontend.
+using TestWF = BasicWFWithFrontend<NetProvider, TestFS, frontend::CEFFrontend>;
 
 class BrowserIntegrationTest {
 public:

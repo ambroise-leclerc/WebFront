@@ -17,6 +17,7 @@
     #include <fstream>
 #elif __APPLE__
     #include <crt_externs.h>
+    #include <mach-o/dyld.h>
 #endif
 
 namespace webfront::cef {
@@ -73,7 +74,6 @@ constexpr const char* kICUDataFile         = "icudtl.dat";
 constexpr const char* kLocalesDir          = "locales";
 constexpr const char* kFrameworkName       = "Chromium Embedded Framework.framework";
 constexpr const char* kResourcesDir        = "Resources";
-constexpr const char* kExecutableName      = "WebFrontApp";
 }  // namespace
 
 // Helper function to set keychain-related environment variables
@@ -87,14 +87,29 @@ inline void setKeychainEnvironment() {
     #endif
 }
 
+#ifdef __APPLE__
+// Resolves the actual running executable's path, independent of its target name or working
+// directory. CEF needs this for the browser subprocess and to locate its sibling Frameworks/
+// Resources directories, which CMake copies next to whichever target is running (WebFrontApp,
+// webtest, or any other CEF-enabled example), not into a fixed "src/" layout.
+inline std::filesystem::path currentExecutablePath() {
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0)
+        throw CEFInitializationError("Unable to resolve the current executable path");
+    return std::filesystem::canonical(buffer);
+}
+#endif
+
 // Helper function to configure platform-specific paths
 inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     #ifdef __APPLE__
     // Set framework and resource paths for macOS
-    std::filesystem::path exe_dir        = std::filesystem::current_path();
+    std::filesystem::path exe_path       = currentExecutablePath();
+    std::filesystem::path exe_dir        = exe_path.parent_path();
     std::filesystem::path framework_path = exe_dir / "Frameworks" / kFrameworkName;
     std::filesystem::path resources_path = framework_path / kResourcesDir;
-    std::filesystem::path exe_path       = exe_dir / "src" / kExecutableName;
     std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
     std::filesystem::create_directories(cache_path);
 
@@ -443,13 +458,19 @@ namespace webfront::cef {
 // Compile-time constant indicating CEF availability
 static constexpr bool webfrontEmbedCEF{false};
 
-// Stub implementations for when CEF is not available
+// Stub implementations for when CEF is not available. Selecting CEFFrontend without CEF support
+// must fail clearly and as early as possible (initialize() runs once at BasicWF construction,
+// before open() would otherwise be reached from openAndRun()).
 inline void initialize() {
-    // No-op when CEF is not available
+    throw std::runtime_error(
+      "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+      "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
 inline void open(std::string_view /*port*/, std::string_view /*file*/) {
-    throw std::runtime_error("cef::open() : CEF not available");
+    throw std::runtime_error(
+      "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+      "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
 }  // namespace webfront::cef
