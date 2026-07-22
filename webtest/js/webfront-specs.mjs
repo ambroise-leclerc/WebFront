@@ -132,6 +132,13 @@ describe('WebFront browser integration', () => {
     it('resolves webFront.ready once the bridge has linked', async () => {
         await expectAsync(webFront.ready).toBeResolved();
     });
+
+    it('rejects a bridge whose initial connection fails, without an unhandled rejection', async () => {
+        // Nothing listens on this port, so the connection fails immediately (error, then close)
+        // before any handshake ack, exercising the same path as an initial connection failure.
+        const failingBridge = new WebFrontBridge('ws://127.0.0.1:54321');
+        await expectAsync(failingBridge.ready).toBeRejected();
+    });
 });
 
 jasmine.getEnv().addReporter({
