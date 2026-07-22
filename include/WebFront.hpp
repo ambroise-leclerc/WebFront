@@ -7,6 +7,7 @@
 #include "http/HTTPServer.hpp"
 #include "JsFunction.hpp"
 #include "networking/TCPNetworkingTS.hpp"
+#include "system/DefaultFS.hpp"
 #include "system/IndexFS.hpp"
 #include "system/WindowsCompat.hpp"
 #include "weblink/Messages.hpp"
@@ -131,6 +132,21 @@ auto makeCppFunctionResponder(Callable&& callable) {
 }
 }  // namespace detail
 
+/**
+ * @brief Configuration for the newcomer-friendly default construction of BasicWF.
+ *
+ * An empty documentRoot means no local document root is configured: the default filesystem
+ * (webfront::fs::DefaultFS) then performs no local filesystem access at all and serves only its
+ * embedded assets. Setting documentRoot enables serving local files for development; see
+ * webfront::fs::DefaultFS for the precedence between the embedded bridge script, the configured
+ * root, and the embedded fallback page.
+ */
+struct WebFrontConfig {
+    std::string           address{"127.0.0.1"};
+    std::string           port{"9002"};
+    std::filesystem::path documentRoot{};
+};
+
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
           frontend::FrontendType Frontend = frontend::DefaultFrontend>
 class BasicWF {
@@ -140,8 +156,12 @@ public:
     using FrontendProvider = Frontend;
     using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
 
-    explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
-        : httpServer((detail::ensureFrontendInitialized<Frontend>(), "0.0.0.0"), port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
+    // Newcomer-friendly defaults: loopback address, port 9002, no local document root.
+    BasicWF() : BasicWF(WebFrontConfig{}) {}
+
+    explicit BasicWF(WebFrontConfig config)
+        : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot),
+          httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
@@ -150,6 +170,11 @@ public:
                     });
         });
     }
+
+    // Preserved for source compatibility; binds all interfaces like it always has, unlike the
+    // loopback-by-default WebFrontConfig constructor above.
+    explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
+        : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
 
     ~BasicWF() {
         // Ensure clean shutdown if user forgot to stop explicitly
@@ -216,9 +241,15 @@ public:
         }
     }
 
+    // Concise newcomer entry point: starts the server, opens the given page, and returns once the
+    // window/browser session ends (or immediately for the system-browser frontend, like openAndRun).
+    void show(std::string_view page = "index.html") {
+        openAndRun(page);
+    }
+
 private:
     http::Server<Net, Filesystem, Policy>                                    httpServer;
-    std::string_view                                                         httpPort;
+    std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -230,7 +261,8 @@ private:
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
             case WebLinkEvent::Code::linked:
-                uiStartedHandler(UI{*this, event.webLinkId});
+                if (uiStartedHandler)
+                    uiStartedHandler(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::closed:
                 webLinks.erase(event.webLinkId);
@@ -248,9 +280,9 @@ private:
 template <typename NetProvider, typename Filesystem, frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 using BasicWFWithFrontend = BasicWF<NetProvider, Filesystem, Policy, Frontend>;
 
-using WebFront = BasicWF<NetProvider, fs::IndexFS>;
+using WebFront = BasicWF<NetProvider, fs::DefaultFS>;
 template <frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
-using WebFrontWithFrontend = BasicWF<NetProvider, fs::IndexFS, Policy, Frontend>;
+using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Frontend>;
 using UI       = WebFront::UI;
 
 }  // namespace webfront
