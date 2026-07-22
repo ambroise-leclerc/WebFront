@@ -65,7 +65,7 @@ The Jasmine specs are native ES modules. They prove relative module loading, bot
 
 ## Selecting a frontend
 
-`webfront::WebFront` uses the frontend selected by the build. Applications can select one explicitly:
+`webfront::WebFront` always opens the system browser, regardless of whether the build has CEF support (`WEBFRONT_EMBED_CEF`) enabled. Applications opt into the embedded CEF frontend explicitly:
 
 ```cpp
 using BrowserFront = webfront::WebFrontWithFrontend<webfront::frontend::DefaultBrowserFrontend>;
