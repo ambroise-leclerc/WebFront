@@ -191,6 +191,15 @@ public:
     }
 
     enum class WindowAction { none, closeWindow };
+#ifdef _MSC_VER
+    // A Frontend::open() that unconditionally throws (e.g. CEFFrontend::open() when CEF support
+    // isn't compiled in) makes the returns below provably unreachable for that instantiation, both
+    // here and in openAndRun() below it (which calls openWindow()). MSVC detects this via inlining
+    // and, uniquely among our compilers, flags it as an error under /WX; it's expected, not a bug,
+    // so it's suppressed narrowly rather than relaxed project-wide.
+    #pragma warning(push)
+    #pragma warning(disable : 4702)
+#endif
     WindowAction openWindow(std::string_view htmlFilename) {
         Frontend::open(httpPort, htmlFilename);
         if constexpr (Frontend::action == frontend::Action::closeServerAfterOpen)
@@ -215,6 +224,9 @@ public:
                 serverThread.join();
         }
     }
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 private:
     http::Server<Net, Filesystem, Policy>                                    httpServer;
