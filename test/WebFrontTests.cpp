@@ -285,3 +285,43 @@ SCENARIO("C++ function responders encode values and failures") {
         }
     }
 }
+
+SCENARIO("WebFrontConfig has newcomer-friendly defaults") {
+    THEN("the defaults are loopback binding, port 9002, and no local document root") {
+        WebFrontConfig config;
+        REQUIRE(config.address == "127.0.0.1");
+        REQUIRE(config.port == "9002");
+        REQUIRE(config.documentRoot.empty());
+    }
+}
+
+SCENARIO("BasicWF supports default construction") {
+    GIVEN("a frontend and networking mock") {
+        WHEN("a BasicWF is default-constructed") {
+            using DefaultCtorWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+            THEN("construction succeeds without specifying port, root, page, frontend, or callbacks") {
+                REQUIRE_NOTHROW(DefaultCtorWF{});
+            }
+        }
+    }
+}
+
+SCENARIO("BasicWF does not require onUIStarted to be set") {
+    // Note: this exercises construction/registration/teardown without onUIStarted. The guarded
+    // dispatch itself - onEvent's `if (uiStartedHandler) uiStartedHandler(...)` for the `linked`
+    // event - would need a full HTTP-upgrade-then-WebSocket-handshake simulation through the mock
+    // networking stack to exercise end-to-end; that infrastructure doesn't exist yet in this test
+    // suite, so this guard is otherwise verified by inspection (a plain std::function truthiness
+    // check around the call).
+    GIVEN("a BasicWF that never registers onUIStarted") {
+        using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+        WHEN("it is constructed and used") {
+            THEN("nothing throws") {
+                REQUIRE_NOTHROW([] {
+                    FrontendWF webFront("9160");
+                    webFront.cppFunction<void>("noop", [] {});
+                }());
+            }
+        }
+    }
+}
