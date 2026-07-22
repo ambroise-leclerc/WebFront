@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebFront</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fg: #1b1f24;
+    --bg: #f6f8fa;
+    --accent: #2f6fed;
+    --error: #cf222e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e6edf3; --bg: #0d1117; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+  }
+  main {
+    max-width: 32rem;
+    width: 100%;
+    text-align: center;
+  }
+  h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+  p { line-height: 1.5; }
+  #status {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+  }
+  #status[data-state="connecting"] { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+  #status[data-state="connected"] { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+  #status[data-state="error"] { background: color-mix(in srgb, var(--error) 20%, transparent); color: var(--error); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hello, WebFront!</h1>
+  <p>This page is served by WebFront's embedded fallback. It has no local UI files of its own.</p>
+  <p id="status" role="status" aria-live="polite" data-state="connecting">Connecting&hellip;</p>
+</main>
+<script src="WebFront.js"></script>
+<script type="module" src="webfront-fallback.mjs"></script>
+</body>
+</html>

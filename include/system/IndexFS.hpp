@@ -3,6 +3,8 @@
 /// @brief Virtual file system providing access to WebFront.js, favicon.ico and a minimal index.html.
 #pragma once
 
+#include "FallbackIndexHtmlData.hpp"
+#include "FallbackModuleData.hpp"
 #include "FileSystem.hpp"
 #include "WebFrontJsData.hpp"
 
@@ -19,13 +21,8 @@ public:
     IndexFS& operator=(const IndexFS&) = default;
     IndexFS& operator=(IndexFS&&) = default;
 
-    struct IndexHtml {
-        static constexpr std::string_view encoding{"br"};
-        static constexpr size_t dataSize{69};
-        static constexpr std::array<uint64_t, 9> data{0xa1700400e0383dd6, 0xfcacc835c88b58d9, 0x52b82a1f239ddcf9,
-                                                      0xa0d65a2581e511b4, 0x2cd0c06df85c8a2c, 0xa29e6831070def20,
-                                                      0x0ff44a658bab1f4d, 0x14065fb5a7c383b8, 0x7904c81000000000};
-    };
+    using IndexHtml = generated::FallbackIndexHtmlData;
+    using FallbackModule = generated::FallbackModuleData;
 
     struct WebFrontIco {
         static constexpr std::string_view encoding{"br"};
@@ -54,6 +51,7 @@ public:
         if (filename == "index.html") return File(IndexHtml{});
         if (filename == "favicon.ico") return File{WebFrontIco{}};
         if (filename == "WebFront.js") return File{WebFrontJs{}};
+        if (filename == "webfront-fallback.mjs") return File{FallbackModule{}};
         return {};
     }
 };
