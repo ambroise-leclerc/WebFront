@@ -91,40 +91,56 @@
     }
 
     class WebFrontBridge {
-        constructor() {
+        constructor(url = `ws://${global.location.host}`) {
             this.state = "uninitialized";
             this.littleEndian = false;
             this.nextCallId = 1;
             this.pendingCalls = new Map();
+            this.readySettled = false;
             this.readyPromise = new Promise((resolve, reject) => {
                 this.resolveReady = resolve;
                 this.rejectReady = reject;
             });
-            this.socket = new WebSocket(`ws://${global.location.host}`, "WebFront_0.1");
+            // Without this, a page that never touches webFront.ready would see an "unhandled
+            // promise rejection" warning if the initial connection fails. Application code still
+            // gets its own independent settlement via .then()/.catch()/await on the same promise;
+            // attaching a handler here doesn't consume or affect those.
+            this.readyPromise.catch(() => {});
+            this.socket = new WebSocket(url, "WebFront_0.1");
             this.socket.binaryType = "arraybuffer";
             this.socket.onopen = () => this.handshake();
             this.socket.onmessage = event => this.onMessage(event.data);
             this.socket.onclose = event => {
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
                 const error = new Error(`WebFront connection closed: ${detail}`);
-                // Only the initial connection attempt settles `ready`; a Promise can only settle
-                // once, so this is a no-op if the handshake already completed. Later disconnects
-                // are reported through pendingCalls rejection and `state` above, not through ready.
-                if (this.state !== "linked")
-                    this.rejectReady(error);
+                this.settleReadyRejected(error);
                 for (const pending of this.pendingCalls.values())
                     pending.reject(error);
                 this.pendingCalls.clear();
                 this.state = "closed";
                 console.log(`[WebFront close] ${detail}`);
             };
-            this.socket.onerror = error => console.error("[WebFront socket error]", error);
+            this.socket.onerror = () => {
+                const error = new Error("WebFront connection failed");
+                this.settleReadyRejected(error);
+                console.error("[WebFront socket error]", error);
+            };
         }
 
         /// Resolves once the WebSocket handshake is acknowledged, rejects if the initial connection
         /// closes or fails before that. Does not reflect later disconnects; see pendingCalls/state.
         get ready() {
             return this.readyPromise;
+        }
+
+        /// Rejects the initial-readiness promise at most once, and only while still waiting on the
+        /// handshake. A failed connection typically fires both `error` and `close`, and a later
+        /// disconnect (after linking) must not re-settle an already-resolved `ready`; this guard
+        /// makes every one of those cases a harmless no-op after the first settlement.
+        settleReadyRejected(error) {
+            if (this.readySettled || this.state === "linked") return;
+            this.readySettled = true;
+            this.rejectReady(error);
         }
 
         handshake() {
@@ -141,6 +157,7 @@
                 if (this.state === "handshaking") {
                     this.littleEndian = view.getUint8(1) === 0;
                     this.state = "linked";
+                    this.readySettled = true;
                     this.resolveReady();
                 }
                 break;
@@ -535,5 +552,8 @@
         }
     }
 
+    // Exposed (beyond the default `webFront` singleton) so tests can construct additional bridges
+    // pointed at a different URL, e.g. to exercise the initial-connection-failure path.
+    global.WebFrontBridge = WebFrontBridge;
     global.webFront = new WebFrontBridge();
 })(globalThis);
