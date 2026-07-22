@@ -31,9 +31,12 @@ include(StandardProjectSettings)
 include(PreventInSourceBuilds)
 add_library(WebFront_options INTERFACE)
 target_compile_features(WebFront_options INTERFACE cxx_std_23)
-if(APPLE)
-  target_compile_definitions(WebFront_options INTERFACE __cpp_lib_format=202207L)
-endif()
+# Do not force-define __cpp_lib_format on the command line: unlike a header setting it after
+# actually providing <format>, a command-line -D applies from the start of every translation
+# unit, so other standard headers (e.g. <vector>) that gate their own <format> integration on
+# this macro see it "on" before <format> has been included and fail to compile. Let each
+# toolchain's own <version>/<format> define it accurately; include/details/C++20Support.hpp
+# already falls back to a minimal std::format polyfill when a toolchain leaves it undefined.
 
 add_library(WebFront_warnings INTERFACE)
 
