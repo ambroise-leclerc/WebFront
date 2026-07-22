@@ -125,16 +125,26 @@ struct ClosingFrontend {
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
-    THEN("the default frontend follows the CEF availability") {
-        if constexpr (cef::webfrontEmbedCEF)
-            REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::CEFFrontend>);
-        else
-            REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::DefaultBrowserFrontend>);
+    THEN("the default frontend is always the system browser, regardless of CEF availability") {
+        REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::DefaultBrowserFrontend>);
     }
 
     THEN("the convenience alias keeps the selected frontend type") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, OpeningFrontend>;
         REQUIRE(std::is_same_v<typename FrontendWF::FrontendProvider, OpeningFrontend>);
+    }
+}
+
+SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
+    GIVEN("a build without CEF support") {
+        WHEN("a CEF-fronted WebFront is constructed") {
+            THEN("construction throws a clear diagnostic instead of silently doing nothing") {
+                if constexpr (!cef::webfrontEmbedCEF) {
+                    using CEFWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::CEFFrontend>;
+                    REQUIRE_THROWS_AS(CEFWF("9200"), std::runtime_error);
+                }
+            }
+        }
     }
 }
 
