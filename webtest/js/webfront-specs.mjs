@@ -128,6 +128,10 @@ describe('WebFront browser integration', () => {
     it('allows C++ to await a JavaScript result', async () => {
         await expectAsync(cppResultCall).toBeResolvedTo('js-result:from-cpp');
     });
+
+    it('resolves webFront.ready once the bridge has linked', async () => {
+        await expectAsync(webFront.ready).toBeResolved();
+    });
 });
 
 jasmine.getEnv().addReporter({

@@ -96,6 +96,10 @@
             this.littleEndian = false;
             this.nextCallId = 1;
             this.pendingCalls = new Map();
+            this.readyPromise = new Promise((resolve, reject) => {
+                this.resolveReady = resolve;
+                this.rejectReady = reject;
+            });
             this.socket = new WebSocket(`ws://${global.location.host}`, "WebFront_0.1");
             this.socket.binaryType = "arraybuffer";
             this.socket.onopen = () => this.handshake();
@@ -103,6 +107,11 @@
             this.socket.onclose = event => {
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
                 const error = new Error(`WebFront connection closed: ${detail}`);
+                // Only the initial connection attempt settles `ready`; a Promise can only settle
+                // once, so this is a no-op if the handshake already completed. Later disconnects
+                // are reported through pendingCalls rejection and `state` above, not through ready.
+                if (this.state !== "linked")
+                    this.rejectReady(error);
                 for (const pending of this.pendingCalls.values())
                     pending.reject(error);
                 this.pendingCalls.clear();
@@ -110,6 +119,12 @@
                 console.log(`[WebFront close] ${detail}`);
             };
             this.socket.onerror = error => console.error("[WebFront socket error]", error);
+        }
+
+        /// Resolves once the WebSocket handshake is acknowledged, rejects if the initial connection
+        /// closes or fails before that. Does not reflect later disconnects; see pendingCalls/state.
+        get ready() {
+            return this.readyPromise;
         }
 
         handshake() {
@@ -126,6 +141,7 @@
                 if (this.state === "handshaking") {
                     this.littleEndian = view.getUint8(1) === 0;
                     this.state = "linked";
+                    this.resolveReady();
                 }
                 break;
             case Command.textCommand:
