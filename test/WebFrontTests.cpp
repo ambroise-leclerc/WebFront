@@ -122,6 +122,10 @@ struct ClosingFrontend {
     }
 };
 
+int freeFunctionForDeductionTest(double value) {
+    return static_cast<int>(value);
+}
+
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
@@ -213,6 +217,59 @@ SCENARIO("Registered C++ function handlers own and invoke their callable") {
 
             THEN("the stored callables remain valid") {
                 REQUIRE(decodedValue == 42);
+            }
+        }
+    }
+}
+
+SCENARIO("cppFunction deduces a callable's signature from itself") {
+    THEN("callable_traits resolves the return type and decayed, owning parameter types") {
+        auto voidLambda = [](int) {};
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::Return, void>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::DecayedArgs, std::tuple<int>>);
+
+        auto valueLambda = [](const std::string& text) { return text + "!"; };
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(valueLambda)>::Return, std::string>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(valueLambda)>::DecayedArgs, std::tuple<std::string>>);
+
+        auto mutableLambda = [count = 0](int add) mutable { return count += add; };
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(mutableLambda)>::Return, int>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(mutableLambda)>::DecayedArgs, std::tuple<int>>);
+
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(&freeFunctionForDeductionTest)>::Return, int>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(&freeFunctionForDeductionTest)>::DecayedArgs, std::tuple<double>>);
+
+        std::function<void(std::string)> stdFunction = [](std::string) {};
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(stdFunction)>::Return, void>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(stdFunction)>::DecayedArgs, std::tuple<std::string>>);
+    }
+}
+
+SCENARIO("Deduced cppFunction registration accepts common callable kinds") {
+    GIVEN("a WebFront instance") {
+        using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+        FrontendWF webFront("9150");
+
+        WHEN("callables are registered without explicit template arguments") {
+            int  observed = 0;
+            auto voidLambda = [&observed](int value) { observed = value; };
+            webFront.cppFunction("onVoid", voidLambda);
+
+            auto valueLambda = [](const std::string& text) { return text + "!"; };
+            webFront.cppFunction("onValue", valueLambda);
+
+            auto mutableLambda = [count = 0](int add) mutable { return count += add; };
+            webFront.cppFunction("onMutable", mutableLambda);
+
+            webFront.cppFunction("onFreeFunction", &freeFunctionForDeductionTest);
+
+            std::function<void(std::string)> stdFunction = [](std::string) {};
+            webFront.cppFunction("onStdFunction", stdFunction);
+
+            THEN("registration compiles and the original callables remain usable") {
+                voidLambda(7);
+                REQUIRE(observed == 7);
+                REQUIRE(valueLambda("hi") == "hi!");
             }
         }
     }
