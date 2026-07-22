@@ -104,6 +104,76 @@ auto makeCppFunctionHandler(Function&& function) {
     };
 }
 
+// --- Callable signature inference for cppFunction(name, callable), without explicit <R, Args...> ---
+
+// Primary template intentionally has no Return/DecayedArgs members: has_callable_traits below
+// treats their absence as "inference unsupported", so unmatched T (generic lambdas, functors with
+// an overloaded or templated operator(), non-callables) fail detection instead of a specialization.
+template <typename T>
+struct callable_traits_impl {};
+
+template <typename R, typename... Args>
+struct callable_traits_impl<R (*)(Args...)> {
+    using Return      = R;
+    using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+};
+template <typename R, typename... Args>
+struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> {};
+
+template <typename R, typename... Args>
+struct callable_traits_impl<std::function<R(Args...)>> {
+    using Return      = R;
+    using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+};
+
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...)> {
+    using Return      = R;
+    using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+};
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> {};
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...) noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...) const noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+
+// A generic lambda or a functor with an overloaded operator() has no single &T::operator() (taking
+// its address, or picking an overload, is ill-formed without explicit template arguments), so this
+// correctly evaluates to false for exactly the callables that need explicit cppFunction<R, Args...>.
+template <typename T, typename = void>
+struct has_call_operator : std::false_type {};
+template <typename T>
+struct has_call_operator<T, std::void_t<decltype(&T::operator())>> : std::true_type {};
+
+// Function pointers and std::function have no operator() member, so their traits apply directly;
+// lambdas/functors route through their (single, non-overloaded, non-template) operator() member.
+template <typename T, bool = has_call_operator<T>::value>
+struct callable_traits : callable_traits_impl<T> {};
+template <typename T>
+struct callable_traits<T, true> : callable_traits_impl<decltype(&T::operator())> {};
+
+template <typename T, typename = void>
+struct has_callable_traits_impl : std::false_type {};
+template <typename T>
+struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Return, typename callable_traits<T>::DecayedArgs>>
+    : std::true_type {};
+
+template <typename T>
+concept has_callable_traits = has_callable_traits_impl<T>::value;
+
+// Bridges a deduced <Return, tuple<DecayedArgs...>> pair back to the explicit-template cppFunction
+// overload, so the deduced and explicit registration paths share one dispatch/response implementation.
+template <typename R, typename Tuple>
+struct ApplyArgs;
+template <typename R, typename... Args>
+struct ApplyArgs<R, std::tuple<Args...>> {
+    template <typename Self, typename Function>
+    static void invoke(Self& self, std::string functionName, Function&& function) {
+        self.template cppFunction<R, Args...>(std::move(functionName), std::forward<Function>(function));
+    }
+};
+
 template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
     return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId) mutable {
@@ -213,6 +283,29 @@ public:
     void cppFunction(std::string functionName, auto&& function) {
         auto callable = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
         cppFunctions.try_emplace(functionName, detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable)));
+    }
+
+    /**
+     * @brief Registers a function which will be callable from Javascript, deducing its return type
+     * and parameter types from the callable itself.
+     *
+     * Supports ordinary and mutable lambdas, function pointers, and std::function. Generic lambdas,
+     * functors with an overloaded operator(), and other callables that don't have a single concrete
+     * operator() cannot be deduced this way; use the explicit cppFunction<ReturnType, ArgTypes...>
+     * overload for those.
+     *
+     * @param functionName
+     * @param function
+     */
+    template <typename Function>
+    void cppFunction(std::string functionName, Function&& function) {
+        using Callable = std::remove_cvref_t<Function>;
+        static_assert(detail::has_callable_traits<Callable>,
+                      "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
+                      "lambdas, overloaded operator(), and other advanced callables require explicit "
+                      "cppFunction<ReturnType, ArgTypes...>(name, callable).");
+        detail::ApplyArgs<typename detail::callable_traits<Callable>::Return, typename detail::callable_traits<Callable>::DecayedArgs>::invoke(
+          *this, std::move(functionName), std::forward<Function>(function));
     }
 
     enum class WindowAction { none, closeWindow };
