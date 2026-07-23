@@ -160,3 +160,78 @@ SCENARIO("WebSocket decoder") {
         }
     }
 }
+
+SCENARIO("WebSocket decoder preserves coalesced frames") {
+    GIVEN("Two masked text frames received in one chunk") {
+        const array<uint8_t, 16> frames{0x81,
+                                        0x82,
+                                        0x10,
+                                        0x11,
+                                        0x12,
+                                        0x13,
+                                        uint8_t{'o' ^ 0x10},
+                                        uint8_t{'n' ^ 0x11},
+                                        0x81,
+                                        0x82,
+                                        0x20,
+                                        0x21,
+                                        0x22,
+                                        0x23,
+                                        uint8_t{'o' ^ 0x20},
+                                        uint8_t{'k' ^ 0x21}};
+        const auto               bytes = std::span(reinterpret_cast<const std::byte*>(frames.data()), frames.size());
+        websocket::FrameDecoder  decoder;
+
+        WHEN("The first frame is decoded") {
+            REQUIRE(decoder.parse(bytes));
+            REQUIRE(decoder.consumed() == 8);
+            REQUIRE(decoder.payload().size() == 2);
+            REQUIRE(std::to_integer<char>(decoder.payload()[0]) == 'o');
+            REQUIRE(std::to_integer<char>(decoder.payload()[1]) == 'n');
+
+            THEN("The unconsumed bytes decode as the second frame") {
+                const auto firstFrameSize = decoder.consumed();
+                decoder.reset();
+                REQUIRE(decoder.parse(bytes.subspan(firstFrameSize)));
+                REQUIRE(decoder.consumed() == 8);
+                REQUIRE(decoder.payload().size() == 2);
+                REQUIRE(std::to_integer<char>(decoder.payload()[0]) == 'o');
+                REQUIRE(std::to_integer<char>(decoder.payload()[1]) == 'k');
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket decoder waits for an entire split payload") {
+    GIVEN("A masked text frame split across three reads") {
+        const array<uint8_t, 14> frame{0x81,
+                                       0x88,
+                                       0x10,
+                                       0x11,
+                                       0x12,
+                                       0x13,
+                                       uint8_t{'H' ^ 0x10},
+                                       uint8_t{'e' ^ 0x11},
+                                       uint8_t{'l' ^ 0x12},
+                                       uint8_t{'l' ^ 0x13},
+                                       uint8_t{'o' ^ 0x10},
+                                       uint8_t{' ' ^ 0x11},
+                                       uint8_t{'W' ^ 0x12},
+                                       uint8_t{'S' ^ 0x13}};
+        const auto               bytes = std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size());
+        websocket::FrameDecoder  decoder;
+
+        WHEN("The middle read still leaves payload bytes outstanding") {
+            REQUIRE_FALSE(decoder.parse(bytes.first(7)));
+            REQUIRE(decoder.consumed() == 7);
+            REQUIRE_FALSE(decoder.parse(bytes.subspan(7, 3)));
+            REQUIRE(decoder.consumed() == 3);
+
+            THEN("Only the final read completes the frame") {
+                REQUIRE(decoder.parse(bytes.subspan(10)));
+                REQUIRE(decoder.consumed() == 4);
+                REQUIRE(decoder.payload().size() == 8);
+            }
+        }
+    }
+}
