@@ -272,3 +272,37 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
         }
     }
 }
+
+SCENARIO("WebLink dispatches every WebSocket frame coalesced in one read") {
+    InjectableSocket::reset();
+    vector<WebLinkEvent::Code>    events;
+    string                        calledName;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 10, [&](WebLinkEvent event) {
+                                           events.push_back(event.code);
+                                           if (event.code == WebLinkEvent::Code::cppFunctionCalled)
+                                               calledName = event.text;
+                                       }};
+
+    GIVEN("A handshake and function call delivered together") {
+        msg::Handshake handshake;
+        const auto     handshakePayload = span(reinterpret_cast<const byte*>(handshake.header().data()), handshake.header().size());
+        auto           received         = clientFrame(handshakePayload);
+
+        msg::FunctionCall<>                    call;
+        websocket::Frame<InjectableNetworking> frame{span(reinterpret_cast<const byte*>(call.header().data()), call.header().size())};
+        const string                           functionName{"registered"};
+        call.encodeParameter(functionName, frame);
+        frame.freeze();
+        const auto callFrame = clientFrame(messagePayload(frame));
+        received.insert(received.end(), callFrame.begin(), callFrame.end());
+
+        WHEN("The socket completes one read") {
+            InjectableSocket::receive(received);
+
+            THEN("Both frames are dispatched in order") {
+                REQUIRE(events == vector{WebLinkEvent::Code::linked, WebLinkEvent::Code::cppFunctionCalled});
+                REQUIRE(calledName == "registered");
+            }
+        }
+    }
+}

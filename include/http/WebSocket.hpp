@@ -8,6 +8,7 @@
 #include "../tooling/Logger.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -181,12 +182,15 @@ public:
 public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
     std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
+    [[nodiscard]] size_t consumed() const { return consumedSize; }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
     bool parse(std::span<const std::byte> buffer) {
+        consumedSize = 0;
         auto decodePayload = [&](std::span<const std::byte> encoded) -> size_t {
             for (auto in : encoded) payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
+            consumedSize += encoded.size();
             return payloadBuffer.size();
         };
         auto decodeHeader = [&](auto input) {
@@ -209,16 +213,18 @@ public:
             if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
                 reinterpret_cast<const Header*>(buffer.data())->dump();
                 decodeHeader(buffer.data());
+                consumedSize = headerSize;
                 if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
             }
             else {
-                bufferizeHeaderData(buffer);
+                consumedSize = bufferizeHeaderData(buffer);
                 state = DecodingState::partialHeader;
             }
             break;
         case DecodingState::partialHeader: {
             auto consumedData = bufferizeHeaderData(buffer);
+            consumedSize = consumedData;
             if (headerBuffer.isComplete(headerBufferParser)) {
                 decodeHeader(headerBuffer.raw.data());
                 if (decodePayload(buffer.subspan(consumedData, std::min(buffer.size() - consumedData, payloadSize))) == payloadSize) return true;
@@ -226,8 +232,9 @@ public:
             }
         } break;
         case DecodingState::decodingPayload: {
-            decodePayload(buffer.first(std::min(payloadSize - payloadBuffer.size(), buffer.size())));
-            return (buffer.size() >= (payloadSize - payloadBuffer.size()));
+            const auto remaining = payloadSize - payloadBuffer.size();
+            decodePayload(buffer.first(std::min(remaining, buffer.size())));
+            return consumedSize == remaining;
         }
         }
         return false;
@@ -238,6 +245,7 @@ public:
         headerBufferParser = 0;
         payloadBuffer.clear();
         state = DecodingState::starting;
+        consumedSize = 0;
     }
 
 private:
@@ -246,6 +254,7 @@ private:
     Header headerBuffer;
     size_t headerBufferParser;
     size_t payloadSize, headerSize;
+    size_t consumedSize;
     std::array<std::byte, 4> mask;
     uint8_t maskIndex;
 };
@@ -274,8 +283,8 @@ public:
     }
 
     void stop() {
-        started = false;
-        socket.close();
+        if (started.exchange(false))
+            socket.close();
     }
 
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
@@ -298,7 +307,7 @@ private:
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
     std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
-    bool started;
+    std::atomic_bool started;
 
 private:
     explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
@@ -309,7 +318,13 @@ private:
         auto self(this->shared_from_this());
         socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (!ec) {
-                if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
+                auto received = std::span(readBuffer.data(), bytesTransferred);
+                while (!received.empty() && started) {
+                    const auto frameComplete = decoder.parse(received);
+                    received = received.subspan(decoder.consumed());
+                    if (!frameComplete)
+                        break;
+
                     auto data = decoder.payload();
                     switch (decoder.frameType) {
                     case Header::Opcode::text:
@@ -326,12 +341,14 @@ private:
                     };
                     decoder.reset();
                 }
-                read();
+                if (started)
+                    read();
             }
-            else {
-                log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
+            else if (started.exchange(false)) {
+                if (ec != Net::Error::OperationAborted)
+                    log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
                 if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                stop();
+                socket.close();
             }
         });
     }
@@ -364,10 +381,10 @@ private:
                 hasNext = !writeState->queue.empty();
             }
             if (ec) {
-                if (started) {
+                if (started.exchange(false)) {
                     log::error("Error during write : ec.value() = {}", ec.value());
                     if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                    if (ec != Net::Error::OperationAborted) stop();
+                    socket.close();
                 }
             }
             else if (hasNext) writeNext();
