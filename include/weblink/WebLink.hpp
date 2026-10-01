@@ -44,7 +44,7 @@ class WebLink {
     std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
     WebLinkId id;
     bool sameEndian;
-    std::optional<size_t> logSink;
+    std::optional<decltype(log::addSinks(log::clogSink))> logSink;
     std::function<void(WebLinkEvent)> eventsHandler;
     std::span<const std::byte> undecodedData; /// Data received but not yet consumed
     std::mutex pendingMutex;
