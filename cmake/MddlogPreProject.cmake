@@ -1,0 +1,17 @@
+# Enabled path only. Match mddlog's qualified import-std gates before compiler discovery.
+if(CMAKE_VERSION VERSION_LESS "4.0" OR CMAKE_VERSION VERSION_GREATER_EQUAL "4.4")
+    message(FATAL_ERROR "WEBFRONT_USE_MDDLOG requires qualified CMake 4.0-4.3.")
+endif()
+if(NOT CMAKE_GENERATOR MATCHES "^Ninja")
+    message(FATAL_ERROR "WEBFRONT_USE_MDDLOG requires Ninja or Ninja Multi-Config.")
+endif()
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.3")
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
+else()
+    set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "d0edc3af-4c50-42ea-a356-e2862fe7a444")
+endif()
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+# Ordinary WebFront consumers include headers; only the adapter needs module scanning.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)

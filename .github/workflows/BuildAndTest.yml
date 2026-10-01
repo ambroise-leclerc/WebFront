@@ -46,6 +46,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Initialize MSVC environment
+        if: matrix.config.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup standalone CMake minimum
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.31.10'
+
       - name: Install Clang 22
         if: matrix.config.compiler == 'clang'
         run: |
