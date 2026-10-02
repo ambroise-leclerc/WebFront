@@ -4,6 +4,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <string>
+#include <tuple>
 
 using namespace webfront;
 using namespace std;
@@ -158,5 +160,15 @@ SCENARIO("WebSocket decoder") {
                 for (auto c : {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S'}) REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
             }
         }
+    }
+}
+
+SCENARIO("WebSocket frames encode extended payload lengths big-endian") {
+    for (const auto [size, lengthField, headerSize] : {std::tuple<size_t, uint8_t, size_t>{125, 125, 2}, {126, 126, 4}, {65535, 126, 4}, {65536, 127, 10}}) {
+        const std::string     text(size, 'x');
+        websocket::Frame<Net> frame(text);
+        CHECK(frame.payloadLenField() == lengthField);
+        CHECK(frame.payloadSize() == size);
+        CHECK(frame.headerSize() == headerSize);
     }
 }
