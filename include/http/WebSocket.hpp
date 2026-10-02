@@ -85,7 +85,7 @@ struct Header {
     /// @return true if first 'size' bytes constitute a complete header
     [[nodiscard]] bool isComplete(size_t size) const {
         if (size < 2) return false;
-        return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)) < 126 ? size >= 6 : size >= 14;
+        return size >= headerSize();
     }
 
     void setFIN(bool set) {
@@ -317,40 +317,56 @@ private:
     void read() {
         auto self(this->shared_from_this());
         socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
-            if (!ec) {
-                auto received = std::span(readBuffer.data(), bytesTransferred);
-                while (!received.empty() && started) {
-                    const auto frameComplete = decoder.parse(received);
-                    received = received.subspan(decoder.consumed());
-                    if (!frameComplete)
-                        break;
-
-                    auto data = decoder.payload();
-                    switch (decoder.frameType) {
-                    case Header::Opcode::text:
-                        if (textHandler) textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
-                        break;
-                    case Header::Opcode::binary:
-                        if (binaryHandler) binaryHandler(data);
-                        break;
-                    case Header::Opcode::connectionClose:
-                        if (closeHandler) closeHandler(CloseEvent{});
-                        stop();
-                        break;
-                    default: log::debug("Unhandled frameType");
-                    };
-                    decoder.reset();
-                }
-                if (started)
-                    read();
+            if (ec) {
+                closeOnError(ec);
+                return;
             }
-            else if (started.exchange(false)) {
-                if (ec != Net::Error::OperationAborted)
-                    log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
-                if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                socket.close();
-            }
+            processFrames(std::span(readBuffer.data(), bytesTransferred));
+            if (started)
+                read();
         });
+    }
+
+    void processFrames(std::span<const std::byte> received) {
+        while (!received.empty() && started) {
+            const auto frameComplete = decoder.parse(received);
+            received                 = received.subspan(decoder.consumed());
+            if (!frameComplete)
+                break;
+            dispatchFrame();
+            decoder.reset();
+        }
+    }
+
+    void dispatchFrame() {
+        const auto data = decoder.payload();
+        switch (decoder.frameType) {
+            case Header::Opcode::text:
+                if (textHandler)
+                    textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
+                break;
+            case Header::Opcode::binary:
+                if (binaryHandler)
+                    binaryHandler(data);
+                break;
+            case Header::Opcode::connectionClose:
+                if (closeHandler)
+                    closeHandler(CloseEvent{});
+                stop();
+                break;
+            default:
+                log::debug("Unhandled frameType");
+        }
+    }
+
+    void closeOnError(std::error_code ec) {
+        if (!started.exchange(false))
+            return;
+        if (ec != Net::Error::OperationAborted)
+            log::error("WebSocket I/O error: {}:{}", ec.value(), ec.message());
+        if (closeHandler)
+            closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+        socket.close();
     }
 
     void writeData(Frame<Net> frame) {
@@ -381,11 +397,7 @@ private:
                 hasNext = !writeState->queue.empty();
             }
             if (ec) {
-                if (started.exchange(false)) {
-                    log::error("Error during write : ec.value() = {}", ec.value());
-                    if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                    socket.close();
-                }
+                closeOnError(ec);
             }
             else if (hasNext) writeNext();
         });

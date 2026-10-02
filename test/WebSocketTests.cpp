@@ -2,6 +2,7 @@
 #include <networking/NetworkingMock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <functional>
@@ -245,18 +246,62 @@ SCENARIO("WebSocket decoder preserves coalesced frames") {
         WHEN("The first frame is decoded") {
             REQUIRE(decoder.parse(bytes));
             REQUIRE(decoder.consumed() == 8);
-            REQUIRE(decoder.payload().size() == 2);
-            REQUIRE(std::to_integer<char>(decoder.payload()[0]) == 'o');
-            REQUIRE(std::to_integer<char>(decoder.payload()[1]) == 'n');
+            REQUIRE(vector<byte>(decoder.payload().begin(), decoder.payload().end()) == vector{byte{'o'}, byte{'n'}});
 
             THEN("The unconsumed bytes decode as the second frame") {
                 const auto firstFrameSize = decoder.consumed();
                 decoder.reset();
                 REQUIRE(decoder.parse(bytes.subspan(firstFrameSize)));
                 REQUIRE(decoder.consumed() == 8);
-                REQUIRE(decoder.payload().size() == 2);
-                REQUIRE(std::to_integer<char>(decoder.payload()[0]) == 'o');
-                REQUIRE(std::to_integer<char>(decoder.payload()[1]) == 'k');
+                REQUIRE(vector<byte>(decoder.payload().begin(), decoder.payload().end()) == vector{byte{'o'}, byte{'k'}});
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket header completeness follows its encoded length and mask") {
+    const auto        lengthField = GENERATE(125, 126, 127);
+    const auto        masked      = GENERATE(false, true);
+    websocket::Header header;
+    header.raw[1]             = byte(lengthField | (masked ? 0x80 : 0));
+    const size_t expectedSize = (lengthField == 125 ? 2u : lengthField == 126 ? 4u : 10u) + (masked ? 4u : 0u);
+
+    GIVEN("An encoded WebSocket header") {
+        THEN("It becomes complete at exactly the header boundary") {
+            REQUIRE_FALSE(header.isComplete(expectedSize - 1));
+            REQUIRE(header.isComplete(expectedSize));
+            REQUIRE(header.isComplete(expectedSize + 1));
+        }
+    }
+}
+
+SCENARIO("WebSocket decoder preserves split extended headers and the following frame") {
+    const auto split = GENERATE(1u, 2u, 7u, 8u, 9u, 13u);
+    // A masked 16-bit length frame followed by an empty masked text frame.
+    vector<byte>       frames{byte{0x81}, byte{0xfe}, byte{0}, byte{126}, byte{0x10}, byte{0x11}, byte{0x12}, byte{0x13}};
+    const vector<byte> expected(126, byte{'x'});
+    const array        mask{byte{0x10}, byte{0x11}, byte{0x12}, byte{0x13}};
+    for (size_t i = 0; i < expected.size(); ++i)
+        frames.push_back(expected[i] ^ mask[i % mask.size()]);
+    frames.insert(frames.end(), {byte{0x81}, byte{0x80}, byte{0}, byte{0}, byte{0}, byte{0}});
+    websocket::FrameDecoder decoder;
+    const auto              bytes = span<const byte>(frames);
+
+    GIVEN("The first frame starts in one read and finishes alongside another frame") {
+        REQUIRE_FALSE(decoder.parse(bytes.first(split)));
+        REQUIRE(decoder.consumed() == split);
+
+        WHEN("The rest of the stream arrives") {
+            REQUIRE(decoder.parse(bytes.subspan(split)));
+            REQUIRE(decoder.consumed() == 134 - split);
+            REQUIRE(vector<byte>(decoder.payload().begin(), decoder.payload().end()) == expected);
+            const auto nextFrameOffset = split + decoder.consumed();
+            decoder.reset();
+
+            THEN("The next frame has not been consumed as part of the payload") {
+                REQUIRE(decoder.parse(bytes.subspan(nextFrameOffset)));
+                REQUIRE(decoder.consumed() == 6);
+                REQUIRE(decoder.payload().empty());
             }
         }
     }
