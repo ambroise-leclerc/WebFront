@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <tooling/Logger.hpp>
 #include <networking/NetworkingMock.hpp>
 #include <WebFront.hpp>
@@ -129,16 +130,57 @@ int freeFunctionForDeductionTest(double value) {
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
-    THEN("the default frontend follows the CEF availability") {
-        if constexpr (cef::webfrontEmbedCEF)
-            REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::CEFFrontend>);
-        else
-            REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::DefaultBrowserFrontend>);
+    THEN("the default frontend is always the system browser, regardless of CEF availability") {
+        REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::DefaultBrowserFrontend>);
     }
 
     THEN("the convenience alias keeps the selected frontend type") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, OpeningFrontend>;
         REQUIRE(std::is_same_v<typename FrontendWF::FrontendProvider, OpeningFrontend>);
+    }
+}
+
+SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
+    GIVEN("a build without CEF support") {
+        WHEN("a CEF-fronted WebFront is constructed") {
+            THEN("construction throws a clear diagnostic instead of silently doing nothing") {
+                if constexpr (!cef::webfrontEmbedCEF) {
+                    using CEFWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::CEFFrontend>;
+                    REQUIRE_THROWS_AS(CEFWF("9200"), std::runtime_error);
+                }
+            }
+        }
+    }
+
+    GIVEN("a build without CEF support") {
+        WHEN("the CEF frontend is opened directly") {
+            THEN("the diagnostic explains how to enable CEF") {
+                if constexpr (!cef::webfrontEmbedCEF) {
+                    REQUIRE_THROWS_WITH(frontend::CEFFrontend::open("9200", "index.html"),
+                                        "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                                        "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
+                }
+            }
+        }
+    }
+}
+
+SCENARIO("CEF subprocess exits preserve their status and diagnostic") {
+    GIVEN("a CEF subprocess that completed successfully") {
+        const cef::CEFSubprocessExit exit{0};
+
+        THEN("the frontend can propagate a successful process status") {
+            REQUIRE(exit.exit_code() == 0);
+        }
+    }
+
+    GIVEN("a CEF subprocess that failed") {
+        const cef::CEFSubprocessExit exit{7};
+
+        THEN("the frontend can propagate the failure status and report the exit request") {
+            REQUIRE(exit.exit_code() == 7);
+            REQUIRE(std::string_view(exit.what()) == "CEF subprocess should exit");
+        }
     }
 }
 

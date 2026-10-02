@@ -40,7 +40,9 @@ struct TestState {
 };
 
 using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
-using TestWF = BasicWF<NetProvider, TestFS>;
+// The browser integration test needs an embedded, auto-closing window under Xvfb, so it selects
+// CEFFrontend explicitly rather than relying on webfront::WebFront's default (system) frontend.
+using TestWF = BasicWFWithFrontend<NetProvider, TestFS, frontend::CEFFrontend>;
 
 class BrowserIntegrationTest {
 public:
@@ -48,11 +50,22 @@ public:
         registerCallbacks();
     }
 
+#ifdef _MSC_VER
+    // openAndRun() never returns normally here: TestWF selects CEFFrontend explicitly, and its
+    // open() unconditionally throws in a CEF-off build (this is intentional - see #206). MSVC's
+    // inliner detects that and flags the return below as unreachable, uniquely among our compilers,
+    // turning it into an error under /WX; see the matching suppression in include/WebFront.hpp.
+    #pragma warning(push)
+    #pragma warning(disable : 4702)
+#endif
     int run() {
         log::info("Starting automated Jasmine browser integration test");
         webFront.openAndRun("SpecRunner.html");
         return result();
     }
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 private:
     TestWF               webFront;
