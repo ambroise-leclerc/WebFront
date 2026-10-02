@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <tooling/Logger.hpp>
 #include <networking/NetworkingMock.hpp>
 #include <WebFront.hpp>
@@ -122,6 +123,10 @@ struct ClosingFrontend {
     }
 };
 
+int freeFunctionForDeductionTest(double value) {
+    return static_cast<int>(value);
+}
+
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
@@ -142,6 +147,18 @@ SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
                 if constexpr (!cef::webfrontEmbedCEF) {
                     using CEFWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::CEFFrontend>;
                     REQUIRE_THROWS_AS(CEFWF("9200"), std::runtime_error);
+                }
+            }
+        }
+    }
+
+    GIVEN("a build without CEF support") {
+        WHEN("the CEF frontend is opened directly") {
+            THEN("the diagnostic explains how to enable CEF") {
+                if constexpr (!cef::webfrontEmbedCEF) {
+                    REQUIRE_THROWS_WITH(frontend::CEFFrontend::open("9200", "index.html"),
+                                        "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                                        "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
                 }
             }
         }
@@ -228,6 +245,59 @@ SCENARIO("Registered C++ function handlers own and invoke their callable") {
     }
 }
 
+SCENARIO("cppFunction deduces a callable's signature from itself") {
+    THEN("callable_traits resolves the return type and decayed, owning parameter types") {
+        auto voidLambda = [](int) {};
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::Return, void>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(voidLambda)>::DecayedArgs, std::tuple<int>>);
+
+        auto valueLambda = [](const std::string& text) { return text + "!"; };
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(valueLambda)>::Return, std::string>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(valueLambda)>::DecayedArgs, std::tuple<std::string>>);
+
+        auto mutableLambda = [count = 0](int add) mutable { return count += add; };
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(mutableLambda)>::Return, int>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(mutableLambda)>::DecayedArgs, std::tuple<int>>);
+
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(&freeFunctionForDeductionTest)>::Return, int>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(&freeFunctionForDeductionTest)>::DecayedArgs, std::tuple<double>>);
+
+        std::function<void(std::string)> stdFunction = [](std::string) {};
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(stdFunction)>::Return, void>);
+        REQUIRE(std::is_same_v<detail::callable_traits<decltype(stdFunction)>::DecayedArgs, std::tuple<std::string>>);
+    }
+}
+
+SCENARIO("Deduced cppFunction registration accepts common callable kinds") {
+    GIVEN("a WebFront instance") {
+        using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+        FrontendWF webFront("9150");
+
+        WHEN("callables are registered without explicit template arguments") {
+            int  observed = 0;
+            auto voidLambda = [&observed](int value) { observed = value; };
+            webFront.cppFunction("onVoid", voidLambda);
+
+            auto valueLambda = [](const std::string& text) { return text + "!"; };
+            webFront.cppFunction("onValue", valueLambda);
+
+            auto mutableLambda = [count = 0](int add) mutable { return count += add; };
+            webFront.cppFunction("onMutable", mutableLambda);
+
+            webFront.cppFunction("onFreeFunction", &freeFunctionForDeductionTest);
+
+            std::function<void(std::string)> stdFunction = [](std::string) {};
+            webFront.cppFunction("onStdFunction", stdFunction);
+
+            THEN("registration compiles and the original callables remain usable") {
+                voidLambda(7);
+                REQUIRE(observed == 7);
+                REQUIRE(valueLambda("hi") == "hi!");
+            }
+        }
+    }
+}
+
 SCENARIO("C++ function responders encode values and failures") {
     using Policy = http::DefaultBuffersPolicy;
     using Net    = networking::NetworkingMock;
@@ -292,6 +362,46 @@ SCENARIO("C++ function responders encode values and failures") {
         THEN("the callback runs without sending a result") {
             REQUIRE(called);
             REQUIRE(link.message.empty());
+        }
+    }
+}
+
+SCENARIO("WebFrontConfig has newcomer-friendly defaults") {
+    THEN("the defaults are loopback binding, port 9002, and no local document root") {
+        WebFrontConfig config;
+        REQUIRE(config.address == "127.0.0.1");
+        REQUIRE(config.port == "9002");
+        REQUIRE(config.documentRoot.empty());
+    }
+}
+
+SCENARIO("BasicWF supports default construction") {
+    GIVEN("a frontend and networking mock") {
+        WHEN("a BasicWF is default-constructed") {
+            using DefaultCtorWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+            THEN("construction succeeds without specifying port, root, page, frontend, or callbacks") {
+                REQUIRE_NOTHROW(DefaultCtorWF{});
+            }
+        }
+    }
+}
+
+SCENARIO("BasicWF does not require onUIStarted to be set") {
+    // Note: this exercises construction/registration/teardown without onUIStarted. The guarded
+    // dispatch itself - onEvent's `if (uiStartedHandler) uiStartedHandler(...)` for the `linked`
+    // event - would need a full HTTP-upgrade-then-WebSocket-handshake simulation through the mock
+    // networking stack to exercise end-to-end; that infrastructure doesn't exist yet in this test
+    // suite, so this guard is otherwise verified by inspection (a plain std::function truthiness
+    // check around the call).
+    GIVEN("a BasicWF that never registers onUIStarted") {
+        using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+        WHEN("it is constructed and used") {
+            THEN("nothing throws") {
+                REQUIRE_NOTHROW([] {
+                    FrontendWF webFront("9160");
+                    webFront.cppFunction<void>("noop", [] {});
+                }());
+            }
         }
     }
 }
