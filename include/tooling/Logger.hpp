@@ -26,10 +26,9 @@ inline bool logTypeEnabled[Debug + 1];
 inline struct Sinks {
     void operator()(std::string_view t) const {
         // A sink may remove itself or add sinks while running (a transport detached on a failed
-        // write): iterate over a copy so no running callback is destroyed or invalidated.
-        const auto snapshot = sinks;
-        for (auto& s : snapshot)
-            if (s) s(t);
+        // write): index the vector and call a copy, so no running callback is destroyed.
+        for (size_t i = 0; i < sinks.size(); ++i)
+            if (auto s = sinks[i]) s(t);
     }
     inline static std::vector<std::function<void(std::string_view)>> sinks;
 } out;
