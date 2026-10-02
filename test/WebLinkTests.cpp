@@ -253,3 +253,33 @@ SCENARIO("A write failing after its WebLink is destroyed does not reach the link
     link.reset();
     log::setLogLevel(log::Disabled);
 }
+
+SCENARIO("A browser that stops reading bounds the diagnostic frames queued for it") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 51, [](WebLinkEvent) {}};
+    browserHandshake();
+    // Only the first write reaches the network, and it does not complete.
+    InjectableSocket::deferWrites();
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+    const auto before = log::transportHealth();
+#endif
+    constexpr size_t messages = 10240;
+    for (size_t index = 0; index < messages; ++index) {
+        log::info("unread diagnostic");
+        if (index % 64 == 63) drainBrowserLogs();  // Keep the rings below saturation.
+    }
+    drainBrowserLogs();
+
+    CHECK(link.pendingWrites() == link.maxPendingLogFrames);
+    CHECK(link.droppedLogFrames() == messages - link.maxPendingLogFrames);
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+    CHECK(log::transportHealth().overflows - before.overflows == link.droppedLogFrames());
+#endif
+
+    // Once the network completes, the queue drains and the link keeps working.
+    InjectableSocket::deferWrites(false);
+    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    CHECK(link.pendingWrites() == 0);
+    log::setLogLevel(log::Disabled);
+}

@@ -126,6 +126,12 @@ Without the option, the same calls map to the historical synchronous sink, and
 
 - The handshake attaches one transport sending `debugLog` commands; its handle is stored
   and is never an RAII subscription.
+- The rings bound producers, but a browser that stops reading would otherwise let the consumer
+  move every record into the WebSocket's write queue. Diagnostic frames therefore go through
+  `WebSocket::tryWrite`, refused once `WebLink::maxPendingLogFrames` (64) frames of any kind
+  await the network. A refused frame is dropped without logging, counted by
+  `WebLink::droppedLogFrames()` and in `TransportHealth::overflows`. Application frames
+  (calls, returns, script injection) keep the unbounded queue and are never dropped.
 - A WebSocket write error invokes `onWriteError` **before** its diagnostic, even after
   `stop()`, because frames queued earlier still fail. WebLink then calls
   `reportTransportFailure`, retiring the transport before anything logs the failure.
@@ -157,7 +163,9 @@ transports after their context strings are destroyed, legacy rendering and trunc
 saturation while the consumer is blocked, synchronous throws, reentrant logging,
 asynchronous failure reports, removal during concurrent emission, and WebLink
 disconnection, synchronous and asynchronous write failures and destruction before
-the drain. The `sanitizers` job of `MddlogIntegration.yml` runs these scenarios under
+the drain. `WebLinkTests.cpp`, built in both configurations, reproduces a browser
+that stops reading: 10,240 diagnostics with one write never completing leave 64 frames
+queued and 10,176 counted refusals. The `sanitizers` job of `MddlogIntegration.yml` runs these scenarios under
 AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSanitizer on Linux/Clang 21,
 instrumenting the whole build, including mddlog and the std module, through
 `CMAKE_CXX_FLAGS` and `CMAKE_EXE_LINKER_FLAGS`. LLVM 21.1.8's sanitizer runtimes do not

@@ -162,6 +162,7 @@ struct TransportHealth {
     std::uint64_t ringRefusals     = 0;
     std::uint64_t ringUnavailable  = 0;
     std::uint64_t drainFailures    = 0;  ///< Drains abandoned by an exception, retried later
+    std::uint64_t overflows        = 0;  ///< Records a transport dropped because its own output was full
     std::size_t   activeTransports = 0;
 };
 
@@ -176,6 +177,8 @@ struct TransportHealth {
 void removeTransport(const TransportHandle& handle);
 /** @brief Detach after a transport error; call before logging that error. */
 void reportTransportFailure(const TransportHandle& handle);
+/** @brief Count a record a transport dropped because its bounded output was full; never logs. */
+void reportTransportOverflow() noexcept;
 /** @brief Observe transport health independently of every sink. */
 [[nodiscard]] TransportHealth transportHealth();
 /**

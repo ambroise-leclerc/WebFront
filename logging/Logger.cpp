@@ -107,6 +107,9 @@ constinit std::atomic<TransportLane*> createdLane{nullptr};
 /** @brief The lane while its consumer runs; cleared before the consumer stops at exit. */
 constinit std::atomic<TransportLane*> activeLane{nullptr};
 
+/** @brief Records dropped by transports whose own bounded output was full. */
+constinit std::atomic<std::uint64_t> transportOverflows{0};
+
 /** @brief The calling thread's ring; a producer ring returns to the pool when the thread exits. */
 struct RingClaim {
     RingClaim()                            = default;
@@ -228,6 +231,7 @@ public:
                 .ringRefusals     = snapshot.ringRefusals,
                 .ringUnavailable  = unavailable.load(std::memory_order_relaxed),
                 .drainFailures    = drainFailures.load(std::memory_order_relaxed),
+                .overflows        = transportOverflows.load(std::memory_order_relaxed),
                 .activeTransports = snapshot.activeTransports};
     }
 
@@ -535,6 +539,11 @@ void reportTransportFailure(const TransportHandle& handle) {
         else
             lane->consumer.removeTransport(handle.value->handle);
     }
+}
+
+/** @brief Count a transport-side drop without logging it. */
+void reportTransportOverflow() noexcept {
+    transportOverflows.fetch_add(1, std::memory_order_relaxed);
 }
 
 /** @brief Read the lane's counters without involving any sink. */
