@@ -103,7 +103,7 @@ struct Header {
     void setPayloadSize(size_t size) {
         raw[1] = (raw[1] & std::byte(0b10000000)) | std::byte(size < 126 ? size : size < 65536 ? 126 : 127);
         size_t len = size < 126 ? 0 : size < 65536 ? 2 : 8;
-        for (size_t i = 0; i <= len; ++i) raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
+        for (size_t i = 0; i < len; ++i) raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
     }
 
 protected:
