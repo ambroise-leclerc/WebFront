@@ -7,6 +7,7 @@
 #include "http/HTTPServer.hpp"
 #include "JsFunction.hpp"
 #include "networking/TCPNetworkingTS.hpp"
+#include "system/DefaultFS.hpp"
 #include "system/IndexFS.hpp"
 #include "system/WindowsCompat.hpp"
 #include "weblink/Messages.hpp"
@@ -103,6 +104,76 @@ auto makeCppFunctionHandler(Function&& function) {
     };
 }
 
+// --- Callable signature inference for cppFunction(name, callable), without explicit <R, Args...> ---
+
+// Primary template intentionally has no Return/DecayedArgs members: has_callable_traits below
+// treats their absence as "inference unsupported", so unmatched T (generic lambdas, functors with
+// an overloaded or templated operator(), non-callables) fail detection instead of a specialization.
+template <typename T>
+struct callable_traits_impl {};
+
+template <typename R, typename... Args>
+struct callable_traits_impl<R (*)(Args...)> {
+    using Return      = R;
+    using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+};
+template <typename R, typename... Args>
+struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> {};
+
+template <typename R, typename... Args>
+struct callable_traits_impl<std::function<R(Args...)>> {
+    using Return      = R;
+    using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+};
+
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...)> {
+    using Return      = R;
+    using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+};
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> {};
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...) noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+template <typename C, typename R, typename... Args>
+struct callable_traits_impl<R (C::*)(Args...) const noexcept> : callable_traits_impl<R (C::*)(Args...)> {};
+
+// A generic lambda or a functor with an overloaded operator() has no single &T::operator() (taking
+// its address, or picking an overload, is ill-formed without explicit template arguments), so this
+// correctly evaluates to false for exactly the callables that need explicit cppFunction<R, Args...>.
+template <typename T, typename = void>
+struct has_call_operator : std::false_type {};
+template <typename T>
+struct has_call_operator<T, std::void_t<decltype(&T::operator())>> : std::true_type {};
+
+// Function pointers and std::function have no operator() member, so their traits apply directly;
+// lambdas/functors route through their (single, non-overloaded, non-template) operator() member.
+template <typename T, bool = has_call_operator<T>::value>
+struct callable_traits : callable_traits_impl<T> {};
+template <typename T>
+struct callable_traits<T, true> : callable_traits_impl<decltype(&T::operator())> {};
+
+template <typename T, typename = void>
+struct has_callable_traits_impl : std::false_type {};
+template <typename T>
+struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Return, typename callable_traits<T>::DecayedArgs>>
+    : std::true_type {};
+
+template <typename T>
+concept has_callable_traits = has_callable_traits_impl<T>::value;
+
+// Bridges a deduced <Return, tuple<DecayedArgs...>> pair back to the explicit-template cppFunction
+// overload, so the deduced and explicit registration paths share one dispatch/response implementation.
+template <typename R, typename Tuple>
+struct ApplyArgs;
+template <typename R, typename... Args>
+struct ApplyArgs<R, std::tuple<Args...>> {
+    template <typename Self, typename Function>
+    static void invoke(Self& self, std::string functionName, Function&& function) {
+        self.template cppFunction<R, Args...>(std::move(functionName), std::forward<Function>(function));
+    }
+};
+
 template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
     return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId) mutable {
@@ -131,6 +202,21 @@ auto makeCppFunctionResponder(Callable&& callable) {
 }
 }  // namespace detail
 
+/**
+ * @brief Configuration for the newcomer-friendly default construction of BasicWF.
+ *
+ * An empty documentRoot means no local document root is configured: the default filesystem
+ * (webfront::fs::DefaultFS) then performs no local filesystem access at all and serves only its
+ * embedded assets. Setting documentRoot enables serving local files for development; see
+ * webfront::fs::DefaultFS for the precedence between the embedded bridge script, the configured
+ * root, and the embedded fallback page.
+ */
+struct WebFrontConfig {
+    std::string           address{"127.0.0.1"};
+    std::string           port{"9002"};
+    std::filesystem::path documentRoot{};
+};
+
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
           frontend::FrontendType Frontend = frontend::DefaultFrontend>
 class BasicWF {
@@ -140,8 +226,12 @@ public:
     using FrontendProvider = Frontend;
     using UI               = BasicUI<BasicWF<Net, Filesystem, Policy, Frontend>>;
 
-    explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
-        : httpServer((detail::ensureFrontendInitialized<Frontend>(), "0.0.0.0"), port, docRoot), httpPort(port), httpDocRoot(docRoot), idsCounter(0) {
+    // Newcomer-friendly defaults: loopback address, port 9002, no local document root.
+    BasicWF() : BasicWF(WebFrontConfig{}) {}
+
+    explicit BasicWF(WebFrontConfig config)
+        : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot),
+          httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
             if (protocol == http::Protocol::WebSocket)
                 for (bool inserted = false; !inserted; ++idsCounter)
@@ -150,6 +240,11 @@ public:
                     });
         });
     }
+
+    // Preserved for source compatibility; binds all interfaces like it always has, unlike the
+    // loopback-by-default WebFrontConfig constructor above.
+    explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
+        : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
 
     ~BasicWF() {
         // Ensure clean shutdown if user forgot to stop explicitly
@@ -190,6 +285,29 @@ public:
         cppFunctions.try_emplace(functionName, detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable)));
     }
 
+    /**
+     * @brief Registers a function which will be callable from Javascript, deducing its return type
+     * and parameter types from the callable itself.
+     *
+     * Supports ordinary and mutable lambdas, function pointers, and std::function. Generic lambdas,
+     * functors with an overloaded operator(), and other callables that don't have a single concrete
+     * operator() cannot be deduced this way; use the explicit cppFunction<ReturnType, ArgTypes...>
+     * overload for those.
+     *
+     * @param functionName
+     * @param function
+     */
+    template <typename Function>
+    void cppFunction(std::string functionName, Function&& function) {
+        using Callable = std::remove_cvref_t<Function>;
+        static_assert(detail::has_callable_traits<Callable>,
+                      "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
+                      "lambdas, overloaded operator(), and other advanced callables require explicit "
+                      "cppFunction<ReturnType, ArgTypes...>(name, callable).");
+        detail::ApplyArgs<typename detail::callable_traits<Callable>::Return, typename detail::callable_traits<Callable>::DecayedArgs>::invoke(
+          *this, std::move(functionName), std::forward<Function>(function));
+    }
+
     enum class WindowAction { none, closeWindow };
 #ifdef _MSC_VER
     // A Frontend::open() that unconditionally throws (e.g. CEFFrontend::open() when CEF support
@@ -228,9 +346,15 @@ public:
     #pragma warning(pop)
 #endif
 
+    // Concise newcomer entry point: starts the server, opens the given page, and returns once the
+    // window/browser session ends (or immediately for the system-browser frontend, like openAndRun).
+    void show(std::string_view page = "index.html") {
+        openAndRun(page);
+    }
+
 private:
     http::Server<Net, Filesystem, Policy>                                    httpServer;
-    std::string_view                                                         httpPort;
+    std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -242,7 +366,8 @@ private:
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
             case WebLinkEvent::Code::linked:
-                uiStartedHandler(UI{*this, event.webLinkId});
+                if (uiStartedHandler)
+                    uiStartedHandler(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::closed:
                 webLinks.erase(event.webLinkId);
@@ -260,9 +385,9 @@ private:
 template <typename NetProvider, typename Filesystem, frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 using BasicWFWithFrontend = BasicWF<NetProvider, Filesystem, Policy, Frontend>;
 
-using WebFront = BasicWF<NetProvider, fs::IndexFS>;
+using WebFront = BasicWF<NetProvider, fs::DefaultFS>;
 template <frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
-using WebFrontWithFrontend = BasicWF<NetProvider, fs::IndexFS, Policy, Frontend>;
+using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Frontend>;
 using UI       = WebFront::UI;
 
 }  // namespace webfront

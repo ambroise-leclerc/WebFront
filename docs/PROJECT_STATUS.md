@@ -1,6 +1,12 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-01.
+
+The default build remains header-only. `WEBFRONT_USE_MDDLOG=ON` adds a WebFront-owned
+compiled diagnostic adapter while keeping consuming translation units module-free.
+See [the optional integration contract](mddlog-integration.md) for dependencies,
+qualified tools and verification. This option does not accept mddlog ADR-003 or bind
+structured request contexts/rings automatically.
 
 ## Intended product
 
@@ -33,6 +39,9 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
 - Correlated result messages now support asynchronous C++ futures and JavaScript promises, including void completion, missing-function errors, callback exceptions, malformed-return rejection, and disconnect rejection. Untyped calls remain fire-and-forget.
 - `AGENTS.md` is the canonical development guide for supported coding agents.
+- The default frontend always uses the system browser, including CEF-enabled builds. Applications opt into embedded windows through
+  `WebFrontWithFrontend<frontend::CEFFrontend>`; selecting CEF without compiled support throws during construction. On macOS,
+  executable discovery and framework paths follow the running target and CMake's `../Frameworks` deployment layout.
 
 Local verification on 2026-07-19 completed successfully: the CEF-off build passed all 47 CTest cases, including deterministic asset and typed-array protocol coverage, and a CEF-enabled build passed `WebFrontBrowserIntegration` under Xvfb. The browser test exercised every supported numeric typed array from C++ to JavaScript and JavaScript to C++, ordinary tuple arrays, final Jasmine reporting, and automatic CEF shutdown.
 
