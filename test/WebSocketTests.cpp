@@ -326,15 +326,12 @@ SCENARIO("WebSocket decoder waits for an entire split payload") {
         const auto               bytes = std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size());
         websocket::FrameDecoder  decoder;
 
-        // The middle chunk (6 bytes) delivers more than half but not all of the 7 outstanding
-        // payload bytes. A naive "recompute remaining after appending" check (remaining=7-1=6
-        // before this call, buffer.size()=6, but comparing against remaining *after* appending -
-        // 8-(1+6)=1 - would wrongly see 6 >= 1 and report the frame complete one byte early. This
-        // split is chosen specifically to fail under that bug; smaller middle chunks (e.g. 3 of 7)
-        // don't exercise it, since old and new logic coincidentally agree there.
+        REQUIRE_FALSE(decoder.parse(bytes.first(7)));
+        REQUIRE(decoder.consumed() == 7);
+
+        // Six of the seven outstanding bytes arrive next. Comparing this chunk's size
+        // against the remaining length after appending would report completion one byte early.
         WHEN("The middle read still leaves payload bytes outstanding") {
-            REQUIRE_FALSE(decoder.parse(bytes.first(7)));
-            REQUIRE(decoder.consumed() == 7);
             REQUIRE_FALSE(decoder.parse(bytes.subspan(7, 6)));
             REQUIRE(decoder.consumed() == 6);
 
