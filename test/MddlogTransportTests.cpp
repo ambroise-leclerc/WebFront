@@ -455,7 +455,8 @@ SCENARIO("WebLink captures the link and call context of a C++ function call", "[
     msg::FunctionCall<> call;
     call.setCallId(37);
     websocket::Frame<InjectableNetworking> frame{span(reinterpret_cast<const byte*>(call.header().data()), call.header().size())};
-    call.encodeParameter(string{"registered"}, frame);
+    const string functionName{"registered"};  // The frame borrows it until freeze() copies it.
+    call.encodeParameter(functionName, frame);
     frame.freeze();
     InjectableSocket::receive(clientFrame(messagePayload(frame)));
     REQUIRE(log::flushTransports());
