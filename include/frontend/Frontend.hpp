@@ -50,6 +50,8 @@ struct CEFFrontend {
     }
 };
 
-using DefaultFrontend = std::conditional_t<cef::webfrontEmbedCEF, CEFFrontend, DefaultBrowserFrontend>;
+// WEBFRONT_EMBED_CEF only means "CEF is available"; it never changes which frontend
+// plain WebFront selects. Applications opt into CEF explicitly via WebFrontWithFrontend<CEFFrontend>.
+using DefaultFrontend = DefaultBrowserFrontend;
 
 }  // namespace webfront::frontend
