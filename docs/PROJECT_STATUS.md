@@ -6,8 +6,8 @@ The default build remains header-only. `WEBFRONT_USE_MDDLOG=ON` adds a WebFront-
 compiled diagnostic adapter while keeping consuming translation units module-free.
 See [the optional integration contract](mddlog-integration.md) for dependencies,
 qualified tools and verification. With the option on, browser logs travel through
-mddlog's bounded transport consumer and WebLink captures link/call context. This
-option does not accept mddlog ADR-003.
+mddlog's bounded transport consumer and WebLink captures link/call context. mddlog
+ADR-003, which this integration implements, was accepted on 2026-10-02.
 
 ## Intended product
 
