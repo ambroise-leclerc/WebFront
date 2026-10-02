@@ -206,13 +206,15 @@ int runBrowserIntegration() {
 
 int main() {
     log::setLogLevel(log::Debug);
-    log::addSinks(log::clogSink);
+    const auto consoleSink = log::addSinks(log::clogSink);
 
+    int result = 1;
     try {
-        return runBrowserIntegration();
+        result = runBrowserIntegration();
     } catch (const exception& error) {
         log::error("Browser integration test failed: {}", error.what());
         cerr << error.what() << '\n';
-        return 1;
     }
+    log::removeSinks(consoleSink);
+    return result;
 }

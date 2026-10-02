@@ -1,6 +1,7 @@
+#include "InjectableNetworking.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <http/WebSocket.hpp>
-#include <networking/NetworkingMock.hpp>
 #include <weblink/WebLink.hpp>
 
 #include <algorithm>
@@ -17,90 +18,9 @@
 
 using namespace std;
 using namespace webfront;
+using namespace webfront::testing;
 
 namespace {
-
-class InjectableSocket : public networking::SocketBaseMock {
-public:
-    enum shutdown_type { shutdown_receive, shutdown_send, shutdown_both };
-
-    void async_read_some(auto buffer, auto completion) {
-        readBuffer  = buffer;
-        readHandler = std::move(completion);
-    }
-
-    size_t write_some(auto input, error_code&) {
-        const auto* first = static_cast<const byte*>(input.data());
-        written.insert(written.end(), first, first + input.size());
-        return input.size();
-    }
-
-    void close() {}
-    void shutdown(shutdown_type) {}
-
-    static void receive(span<const byte> bytes) {
-        REQUIRE(readHandler);
-        REQUIRE(bytes.size() <= readBuffer.size());
-        copy(bytes.begin(), bytes.end(), static_cast<byte*>(readBuffer.data()));
-        auto handler = std::move(readHandler);
-        handler({}, bytes.size());
-    }
-
-    static void fail(error_code error) {
-        REQUIRE(readHandler);
-        auto handler = std::move(readHandler);
-        handler(error, 0);
-    }
-
-    static void reset() {
-        readHandler = {};
-        written.clear();
-    }
-
-    static bool hasWrittenData() {
-        return !written.empty();
-    }
-
-private:
-    inline static networking::buffers::MutableBuffer readBuffer;
-    inline static function<void(error_code, size_t)> readHandler;
-    inline static vector<byte>                       written;
-};
-
-class InjectableNetworking : public networking::NetworkingMock {
-public:
-    using Socket = InjectableSocket;
-
-    template <typename WriteHandler>
-    static void AsyncWrite(Socket socket, auto buffers, WriteHandler handler) {
-        error_code error;
-        size_t     transferred = 0;
-        for (const auto& buffer : buffers)
-            transferred += socket.write_some(buffer, error);
-        handler(error, transferred);
-    }
-};
-
-vector<byte> clientFrame(span<const byte> payload) {
-    REQUIRE(payload.size() < 126);
-    constexpr array<byte, 4> mask{byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}};
-    vector<byte>             frame{byte{0x82}, byte{static_cast<uint8_t>(0x80u | payload.size())}};
-    frame.insert(frame.end(), mask.begin(), mask.end());
-    for (size_t index = 0; index < payload.size(); ++index)
-        frame.push_back(payload[index] ^ mask[index % mask.size()]);
-    return frame;
-}
-
-template <typename Net>
-vector<byte> messagePayload(const websocket::Frame<Net>& frame) {
-    vector<byte> payload;
-    const auto   buffers = frame.toBuffers();
-    for (auto buffer = next(buffers.begin()); buffer != buffers.end(); ++buffer) {
-        const auto* first = static_cast<const byte*>(buffer->data());
-        payload.insert(payload.end(), first, first + buffer->size());
-    }
-    return payload;
-}
 
 template <typename Result>
 string futureError(future<Result>& result) {

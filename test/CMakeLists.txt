@@ -12,7 +12,7 @@ list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp 
 list(APPEND TESTS_LIST DefaultFSTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
-  list(APPEND TESTS_LIST MddlogLoggerTests.cpp)
+  list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()
 add_executable(tests ${TESTS_LIST})
 target_link_libraries(tests PRIVATE WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
