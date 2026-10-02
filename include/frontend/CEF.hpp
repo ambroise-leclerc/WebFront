@@ -2,6 +2,7 @@
 
 #include "../system/WindowsCompat.hpp"
 #include "../tooling/Logger.hpp"
+#include "CEFPaths.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -72,7 +73,6 @@ constexpr const char* kCEFCacheDir         = "cef_cache";
 constexpr const char* kCEFLogFile          = "cef_debug.log";
 constexpr const char* kICUDataFile         = "icudtl.dat";
 constexpr const char* kLocalesDir          = "locales";
-constexpr const char* kFrameworkName       = "Chromium Embedded Framework.framework";
 constexpr const char* kResourcesDir        = "Resources";
 }  // namespace
 
@@ -87,11 +87,10 @@ inline void setKeychainEnvironment() {
     #endif
 }
 
-#ifdef __APPLE__
+    #ifdef __APPLE__
 // Resolves the actual running executable's path, independent of its target name or working
-// directory. CEF needs this for the browser subprocess and to locate its sibling Frameworks/
-// Resources directories, which CMake copies next to whichever target is running (WebFrontApp,
-// webtest, or any other CEF-enabled example), not into a fixed "src/" layout.
+// directory. CEF needs this for the browser subprocess and to locate the Frameworks/ directory
+// deployed by CMake in the parent of the executable's directory, independent of the target name.
 inline std::filesystem::path currentExecutablePath() {
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
@@ -100,7 +99,7 @@ inline std::filesystem::path currentExecutablePath() {
         throw CEFInitializationError("Unable to resolve the current executable path");
     return std::filesystem::canonical(buffer);
 }
-#endif
+    #endif
 
 // Helper function to configure platform-specific paths
 inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
@@ -108,7 +107,7 @@ inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     // Set framework and resource paths for macOS
     std::filesystem::path exe_path       = currentExecutablePath();
     std::filesystem::path exe_dir        = exe_path.parent_path();
-    std::filesystem::path framework_path = exe_dir / "Frameworks" / kFrameworkName;
+    std::filesystem::path framework_path = detail::macOSFrameworkPath(exe_path);
     std::filesystem::path resources_path = framework_path / kResourcesDir;
     std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
     std::filesystem::create_directories(cache_path);
