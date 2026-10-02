@@ -73,6 +73,10 @@ describe('WebFront browser integration', () => {
         expect(() => recordFromJs(jsToken)).not.toThrow();
     });
 
+    it('delivers a browser frame with a 16-bit extended payload length to C++', () => {
+        expect(() => webFront.cppFunction('recordExtendedFrameFromJs')('x'.repeat(126))).not.toThrow();
+    });
+
     it('decodes every C++ numeric array type as the matching JavaScript typed array', async () => {
         const arrays = await cppArraysCall;
         const constructors = [

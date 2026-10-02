@@ -34,6 +34,7 @@ constexpr string_view jsToCppToken{"js-to-cpp-token"};
 struct TestState {
     atomic<bool> browserReady{false};
     atomic<bool> jsToCppObserved{false};
+    atomic<bool> jsExtendedFrameObserved{false};
     atomic<bool> jsArraysObserved{false};
     atomic<bool> jsTupleObserved{false};
     atomic<bool> cppResultObserved{false};
@@ -100,6 +101,9 @@ private:
         });
         webFront.cppFunction<void, string>("recordFromJs", [this](const string& token) {
             recordFromJs(token);
+        });
+        webFront.cppFunction<void, string>("recordExtendedFrameFromJs", [this](const string& value) {
+            state.jsExtendedFrameObserved = value == string(126, 'x');
         });
         webFront.cppFunction<void, string, string>("reportJasmine", [this](const string& overallStatus, const string& failures) {
             reportJasmine(overallStatus, failures);
@@ -187,11 +191,15 @@ private:
     void reportJasmine(const string& overallStatus, const string& failures) {
         state.jasmineReported = true;
         state.cppResultObserved = cppResultMatches();
-        state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved
+        state.passed = overallStatus == "passed" && state.browserReady && browserCallsObserved()
                        && state.cppResultObserved && rejectedWebSocket.rejectedRequests() >= 2;
         if (!failures.empty())
             log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());
+    }
+
+    bool browserCallsObserved() const {
+        return state.jsToCppObserved && state.jsExtendedFrameObserved && state.jsArraysObserved && state.jsTupleObserved;
     }
 
     TestWF::UI& requireUI() {

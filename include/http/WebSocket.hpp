@@ -8,6 +8,7 @@
 #include "../tooling/Logger.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -52,6 +53,7 @@ struct Header {
     [[nodiscard]] bool MASK() const { return test(1, 7); }
     [[nodiscard]] uint8_t payloadLenField() const { return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)); }
     [[nodiscard]] uint64_t extendedLenField() const {
+        if (payloadLenField() < 126) return 0;
         auto s = [this](size_t i, uint8_t shift = 0) constexpr { return std::to_integer<uint64_t>(raw[i]) << shift; };
         return payloadLenField() == 126 ? s(2, 8) | s(3) : s(2, 56) | s(3, 48) | s(4, 40) | s(5, 32) | s(6, 24) | s(7, 16) | s(8, 8) | s(9, 0);
     }
@@ -86,7 +88,7 @@ struct Header {
     /// @return true if first 'size' bytes constitute a complete header
     [[nodiscard]] bool isComplete(size_t size) const {
         if (size < 2) return false;
-        return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)) < 126 ? size >= 6 : size >= 14;
+        return size >= headerSize();
     }
 
     void setFIN(bool set) {
@@ -183,12 +185,15 @@ public:
 public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
     std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
+    [[nodiscard]] size_t consumed() const { return consumedSize; }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
     bool parse(std::span<const std::byte> buffer) {
+        consumedSize = 0;
         auto decodePayload = [&](std::span<const std::byte> encoded) -> size_t {
             for (auto in : encoded) payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
+            consumedSize += encoded.size();
             return payloadBuffer.size();
         };
         auto decodeHeader = [&](auto input) {
@@ -211,16 +216,18 @@ public:
             if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
                 reinterpret_cast<const Header*>(buffer.data())->dump();
                 decodeHeader(buffer.data());
+                consumedSize = headerSize;
                 if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
             }
             else {
-                bufferizeHeaderData(buffer);
+                consumedSize = bufferizeHeaderData(buffer);
                 state = DecodingState::partialHeader;
             }
             break;
         case DecodingState::partialHeader: {
             auto consumedData = bufferizeHeaderData(buffer);
+            consumedSize = consumedData;
             if (headerBuffer.isComplete(headerBufferParser)) {
                 decodeHeader(headerBuffer.raw.data());
                 if (decodePayload(buffer.subspan(consumedData, std::min(buffer.size() - consumedData, payloadSize))) == payloadSize) return true;
@@ -228,8 +235,9 @@ public:
             }
         } break;
         case DecodingState::decodingPayload: {
-            decodePayload(buffer.first(std::min(payloadSize - payloadBuffer.size(), buffer.size())));
-            return (buffer.size() >= (payloadSize - payloadBuffer.size()));
+            const auto remaining = payloadSize - payloadBuffer.size();
+            decodePayload(buffer.first(std::min(remaining, buffer.size())));
+            return consumedSize == remaining;
         }
         }
         return false;
@@ -240,6 +248,7 @@ public:
         headerBufferParser = 0;
         payloadBuffer.clear();
         state = DecodingState::starting;
+        consumedSize = 0;
     }
 
 private:
@@ -248,6 +257,7 @@ private:
     Header headerBuffer;
     size_t headerBufferParser;
     size_t payloadSize, headerSize;
+    size_t consumedSize;
     std::array<std::byte, 4> mask;
     uint8_t maskIndex;
 };
@@ -276,8 +286,8 @@ public:
     }
 
     void stop() {
-        started = false;
-        socket.close();
+        if (claimClose())
+            socket.close();
     }
 
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
@@ -314,42 +324,77 @@ private:
     std::function<void(CloseEvent)> closeHandler;
     std::function<void(std::error_code)> writeErrorHandler;
     std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
-    bool started;
+    std::mutex lifecycleMutex;
+    std::atomic_bool started;
 
 private:
     explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
         log::debug("WebSocket constructor");
     }
 
+    /** @brief Claims shutdown after any in-progress read initiation has finished. */
+    bool claimClose() {
+        std::lock_guard lock(lifecycleMutex);
+        return started.exchange(false);
+    }
+
     void read() {
         auto self(this->shared_from_this());
-        socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
-            if (!ec) {
-                if (decoder.parse(std::span(readBuffer.data(), bytesTransferred))) {
-                    auto data = decoder.payload();
-                    switch (decoder.frameType) {
-                    case Header::Opcode::text:
-                        if (textHandler) textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
-                        break;
-                    case Header::Opcode::binary:
-                        if (binaryHandler) binaryHandler(data);
-                        break;
-                    case Header::Opcode::connectionClose:
-                        if (closeHandler) closeHandler(CloseEvent{});
-                        stop();
-                        break;
-                    default: log::debug("Unhandled frameType");
-                    };
-                    decoder.reset();
-                }
+        const auto buffer = Net::Buffer(readBuffer);
+        // Networking TS completion handlers are not invoked inline by async_read_some().
+        std::lock_guard lock(lifecycleMutex);
+        if (!started) return;
+        socket.async_read_some(buffer, [this, self](std::error_code ec, std::size_t bytesTransferred) {
+            if (ec) {
+                closeOnError(ec);
+                return;
+            }
+            processFrames(std::span(readBuffer.data(), bytesTransferred));
+            if (started)
                 read();
-            }
-            else {
-                log::error("Error in websocket::read() : {}:{}", ec.value(), ec.message());
-                if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                stop();
-            }
         });
+    }
+
+    void processFrames(std::span<const std::byte> received) {
+        while (!received.empty() && started) {
+            const auto frameComplete = decoder.parse(received);
+            received                 = received.subspan(decoder.consumed());
+            if (!frameComplete)
+                break;
+            dispatchFrame();
+            decoder.reset();
+        }
+    }
+
+    void dispatchFrame() {
+        const auto data = decoder.payload();
+        switch (decoder.frameType) {
+            case Header::Opcode::text:
+                if (textHandler)
+                    textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
+                break;
+            case Header::Opcode::binary:
+                if (binaryHandler)
+                    binaryHandler(data);
+                break;
+            case Header::Opcode::connectionClose:
+                if (closeHandler)
+                    closeHandler(CloseEvent{});
+                stop();
+                break;
+            default:
+                log::debug("Unhandled frameType");
+        }
+    }
+
+    void closeOnError(std::error_code ec) {
+        if (!claimClose())
+            return;
+        if (ec != Net::Error::OperationAborted)
+            log::error("WebSocket I/O error: {}:{}", ec.value(), ec.message());
+        if (closeHandler)
+            closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+        socket.close();
     }
 
     void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
@@ -391,10 +436,7 @@ private:
     /// The producer is detached before the diagnostic; the flag only gates the close sequence.
     void onWriteFailed(std::error_code ec) {
         if (writeErrorHandler) writeErrorHandler(ec);
-        if (!started) return;
-        log::error("Error during write : ec.value() = {}", ec.value());
-        if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-        if (ec != Net::Error::OperationAborted) stop();
+        closeOnError(ec);
     }
 };
 
