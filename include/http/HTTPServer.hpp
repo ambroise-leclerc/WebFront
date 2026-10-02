@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <list>
 #include <locale>
 #include <memory>
 #include <optional>

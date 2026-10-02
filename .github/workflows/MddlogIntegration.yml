@@ -1,0 +1,69 @@
+name: Optional mddlog integration
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  clang:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        repository: ambroise-leclerc/mddlog
+        ref: 5b43265664d83c3b7135d328f611e685792a1b02
+        path: dependencies/mddlog
+    - name: Setup CMake (4.3.1, within the qualified 4.0-4.3 window)
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.3.1'
+
+    - name: Install LLVM/Clang 21 and libc++
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        LLVM_KEY_FPR="6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+        sudo install -d -m 0755 /etc/apt/keyrings
+        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /tmp/llvm-snapshot.asc
+        gpg --show-keys --with-colons --fingerprint /tmp/llvm-snapshot.asc \
+          | awk -F: '/^fpr:/ {print $10}' | grep -qx "$LLVM_KEY_FPR"
+        gpg --dearmor < /tmp/llvm-snapshot.asc > /tmp/llvm.gpg
+        sudo install -m 0644 /tmp/llvm.gpg /etc/apt/keyrings/llvm.gpg
+        codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+        echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] https://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-21 main" \
+          | sudo tee /etc/apt/sources.list.d/llvm-toolchain-21.list
+        sudo apt-get update
+        sudo apt-get install -y ninja-build build-essential ccache clang-21 clang-tidy-21 libc++-21-dev libc++abi-21-dev python3
+
+
+    - name: Configure source integration
+      run: >-
+        cmake -S . -B build-mddlog-source -G Ninja
+        -DCMAKE_BUILD_TYPE=Release -DENABLE_CACHE=OFF
+        -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake
+        -DWEBFRONT_USE_MDDLOG=ON
+        -DWEBFRONT_MDDLOG_SOURCE_DIR=${{ github.workspace }}/dependencies/mddlog
+    - name: Compile and link source integration
+      run: cmake --build build-mddlog-source --parallel 2
+    - name: Run source integration
+      run: ctest --test-dir build-mddlog-source --output-on-failure --no-tests=error
+    - name: Install mddlog
+      run: cmake --install build-mddlog-source/mddlog --prefix "${{ github.workspace }}/mddlog-install"
+    - name: Configure installed integration
+      run: >-
+        cmake -S . -B build-mddlog-install -G Ninja
+        -DCMAKE_BUILD_TYPE=Release -DENABLE_CACHE=OFF
+        -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake
+        -DWEBFRONT_USE_MDDLOG=ON
+        -DCMAKE_PREFIX_PATH=${{ github.workspace }}/mddlog-install
+    - name: Compile and link installed integration
+      run: cmake --build build-mddlog-install --parallel 2
+    - name: Run installed integration
+      run: ctest --test-dir build-mddlog-install --output-on-failure --no-tests=error
