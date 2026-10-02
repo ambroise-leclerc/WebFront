@@ -133,11 +133,27 @@ describe('WebFront browser integration', () => {
         await expectAsync(webFront.ready).toBeResolved();
     });
 
-    it('rejects a bridge whose initial connection fails, without an unhandled rejection', async () => {
-        // Nothing listens on this port, so the connection fails immediately (error, then close)
-        // before any handshake ack, exercising the same path as an initial connection failure.
-        const failingBridge = new WebFrontBridge('ws://127.0.0.1:54321');
-        await expectAsync(failingBridge.ready).toBeRejected();
+    it('rejects a bridge whose initial connection fails', async () => {
+        // C++ owns this HTTP endpoint on an OS-assigned port and refuses every upgrade.
+        const url = await webFront.cppFunction('rejectedWebSocketUrl')();
+        const failingBridge = new WebFrontBridge(url);
+        await expectAsync(failingBridge.ready).toBeRejectedWithError('WebFront connection failed');
+    });
+
+    it('does not report an unhandled rejection when ready is never consumed', async () => {
+        const url = await webFront.cppFunction('rejectedWebSocketUrl')();
+        const unhandled = [];
+        const onUnhandled = event => unhandled.push(event.reason);
+        globalThis.addEventListener('unhandledrejection', onUnhandled);
+        try {
+            const failingBridge = new WebFrontBridge(url);
+            await new Promise(resolve => failingBridge.socket.addEventListener('close', resolve, {once: true}));
+            // Let the browser dispatch any unhandledrejection queued by the socket failure.
+            await new Promise(resolve => setTimeout(resolve, 0));
+            expect(unhandled).toEqual([]);
+        } finally {
+            globalThis.removeEventListener('unhandledrejection', onUnhandled);
+        }
     });
 });
 
