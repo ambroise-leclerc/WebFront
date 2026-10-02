@@ -1,6 +1,7 @@
+#include "InjectableNetworking.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <http/WebSocket.hpp>
-#include <networking/NetworkingMock.hpp>
 #include <weblink/WebLink.hpp>
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <future>
 #include <span>
 #include <string>
@@ -17,89 +19,20 @@
 
 using namespace std;
 using namespace webfront;
+using namespace webfront::testing;
 
 namespace {
 
-class InjectableSocket : public networking::SocketBaseMock {
-public:
-    enum shutdown_type { shutdown_receive, shutdown_send, shutdown_both };
-
-    void async_read_some(auto buffer, auto completion) {
-        readBuffer  = buffer;
-        readHandler = std::move(completion);
-    }
-
-    size_t write_some(auto input, error_code&) {
-        const auto* first = static_cast<const byte*>(input.data());
-        written.insert(written.end(), first, first + input.size());
-        return input.size();
-    }
-
-    void close() {}
-    void shutdown(shutdown_type) {}
-
-    static void receive(span<const byte> bytes) {
-        REQUIRE(readHandler);
-        REQUIRE(bytes.size() <= readBuffer.size());
-        copy(bytes.begin(), bytes.end(), static_cast<byte*>(readBuffer.data()));
-        auto handler = std::move(readHandler);
-        handler({}, bytes.size());
-    }
-
-    static void fail(error_code error) {
-        REQUIRE(readHandler);
-        auto handler = std::move(readHandler);
-        handler(error, 0);
-    }
-
-    static void reset() {
-        readHandler = {};
-        written.clear();
-    }
-
-    static bool hasWrittenData() {
-        return !written.empty();
-    }
-
-private:
-    inline static networking::buffers::MutableBuffer readBuffer;
-    inline static function<void(error_code, size_t)> readHandler;
-    inline static vector<byte>                       written;
-};
-
-class InjectableNetworking : public networking::NetworkingMock {
-public:
-    using Socket = InjectableSocket;
-
-    template <typename WriteHandler>
-    static void AsyncWrite(Socket socket, auto buffers, WriteHandler handler) {
-        error_code error;
-        size_t     transferred = 0;
-        for (const auto& buffer : buffers)
-            transferred += socket.write_some(buffer, error);
-        handler(error, transferred);
-    }
-};
-
-vector<byte> clientFrame(span<const byte> payload) {
-    REQUIRE(payload.size() < 126);
-    constexpr array<byte, 4> mask{byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}};
-    vector<byte>             frame{byte{0x82}, byte{static_cast<uint8_t>(0x80u | payload.size())}};
-    frame.insert(frame.end(), mask.begin(), mask.end());
-    for (size_t index = 0; index < payload.size(); ++index)
-        frame.push_back(payload[index] ^ mask[index % mask.size()]);
-    return frame;
+/// With mddlog, browser logs are delivered by the transport consumer thread; wait for it.
+void drainBrowserLogs() {
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+    REQUIRE(log::flushTransports());
+#endif
 }
 
-template <typename Net>
-vector<byte> messagePayload(const websocket::Frame<Net>& frame) {
-    vector<byte> payload;
-    const auto   buffers = frame.toBuffers();
-    for (auto buffer = next(buffers.begin()); buffer != buffers.end(); ++buffer) {
-        const auto* first = static_cast<const byte*>(buffer->data());
-        payload.insert(payload.end(), first, first + buffer->size());
-    }
-    return payload;
+void browserHandshake() {
+    msg::Handshake message;
+    InjectableSocket::receive(clientFrame(span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())));
 }
 
 template <typename Result>
@@ -271,4 +204,82 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
             REQUIRE(futureError(result) == "Browser connection closed");
         }
     }
+}
+
+SCENARIO("WebLink forwards logs to the browser until a write fails") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 41, [](WebLinkEvent) {}};
+    browserHandshake();
+    log::info("forwarded to the browser");
+    drainBrowserLogs();
+    REQUIRE(InjectableSocket::wrote("forwarded to the browser"));
+
+    InjectableSocket::receive(clientFrame({}));  // An empty message is reported, not dispatched.
+    InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+    log::info("lost with the connection");
+    drainBrowserLogs();
+    InjectableSocket::failWrites({});
+    log::info("after the failure");
+    drainBrowserLogs();
+
+    // The failing write detached the transport before its diagnostic.
+    CHECK(!InjectableSocket::wrote("after the failure"));
+    log::setLogLevel(log::Disabled);
+}
+
+SCENARIO("A write failing after its WebLink is destroyed does not reach the link or its successor") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{31}, [](WebLinkEvent) {});
+    browserHandshake();
+    // The old link's write completes only after the link is gone, keeping its WebSocket alive.
+    InjectableSocket::deferWrites();
+    InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+    log::info("written by the old link");
+    drainBrowserLogs();
+    link.reset();
+    InjectableSocket::failWrites({});
+    InjectableSocket::deferWrites(false);
+
+    // A new link, possibly at the same address, attaches its own transport.
+    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) {});
+    browserHandshake();
+    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    log::info("delivered by the new link");
+    drainBrowserLogs();
+
+    CHECK(InjectableSocket::wrote("delivered by the new link"));
+    link.reset();
+    log::setLogLevel(log::Disabled);
+}
+
+SCENARIO("A browser that stops reading bounds the diagnostic frames queued for it") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 51, [](WebLinkEvent) {}};
+    browserHandshake();
+    // Only the first write reaches the network, and it does not complete.
+    InjectableSocket::deferWrites();
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+    const auto before = log::transportHealth();
+#endif
+    constexpr size_t messages = 10240;
+    for (size_t index = 0; index < messages; ++index) {
+        log::info("unread diagnostic");
+        if (index % 64 == 63) drainBrowserLogs();  // Keep the rings below saturation.
+    }
+    drainBrowserLogs();
+
+    CHECK(link.pendingWrites() == link.maxPendingLogFrames);
+    CHECK(link.droppedLogFrames() == messages - link.maxPendingLogFrames);
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+    CHECK(log::transportHealth().overflows - before.overflows == link.droppedLogFrames());
+#endif
+
+    // Once the network completes, the queue drains and the link keeps working.
+    InjectableSocket::deferWrites(false);
+    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    CHECK(link.pendingWrites() == 0);
+    log::setLogLevel(log::Disabled);
 }

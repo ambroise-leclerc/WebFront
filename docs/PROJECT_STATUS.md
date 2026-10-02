@@ -1,12 +1,13 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-01.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02.
 
 The default build remains header-only. `WEBFRONT_USE_MDDLOG=ON` adds a WebFront-owned
 compiled diagnostic adapter while keeping consuming translation units module-free.
 See [the optional integration contract](mddlog-integration.md) for dependencies,
-qualified tools and verification. This option does not accept mddlog ADR-003 or bind
-structured request contexts/rings automatically.
+qualified tools and verification. With the option on, browser logs travel through
+mddlog's bounded transport consumer and WebLink captures link/call context. This
+option does not accept mddlog ADR-003.
 
 ## Intended product
 

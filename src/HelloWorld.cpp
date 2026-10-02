@@ -28,7 +28,8 @@ int main(int argc, char** argv) {
 
     cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
     log::setLogLevel(log::Debug);
-    log::addSinks(log::clogSink);
+    // clogSink captures nothing; its handle is still removed explicitly, as registrations are not RAII.
+    const auto consoleSink = log::addSinks(log::clogSink);
     WebFrontDbg webFront(httpPort, docRoot);
     optional<WebFrontDbg::UI> connectedUI;
 
@@ -56,6 +57,7 @@ int main(int argc, char** argv) {
     webFront.openAndRun(mainHtml);
 
     log::info("Application shutdown complete.");
+    log::removeSinks(consoleSink);
 
     return 0;
 }

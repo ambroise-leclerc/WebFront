@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <list>
 #include <string_view>
 
@@ -24,8 +25,10 @@ const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 inline bool logTypeEnabled[Debug + 1];
 inline struct Sinks {
     void operator()(std::string_view t) const {
-        for (auto& s : sinks)
-            if (s) s(t);
+        // A sink may remove itself or add sinks while running (a transport detached on a failed
+        // write): index the vector and call a copy, so no running callback is destroyed.
+        for (size_t i = 0; i < sinks.size(); ++i)
+            if (auto s = sinks[i]) s(t);
     }
     inline static std::vector<std::function<void(std::string_view)>> sinks;
 } out;
@@ -72,5 +75,24 @@ template<typename... Ts> void info(string_view fmt, Ts&&... ts) { if (is(Info)) 
 void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text); out(utils::hexDump(container)); }}
 auto addSinks(auto&&... ts) { (out.sinks.push_back(std::forward<decltype(ts)>(ts)), ...); return out.sinks.size() - 1; }
 void removeSinks(auto&&... sinkIds) { ((out.sinks[sinkIds] = nullptr), ...); }
+
+// Without mddlog no context is captured; the scope keeps call sites identical in both builds.
+enum class CallDirection : uint8_t { None, CppToJs, JsToCpp };
+struct Context { string_view component; string_view webLinkId; CallDirection direction = CallDirection::None; string_view callId; };
+struct ContextScope {
+    explicit ContextScope(Context) noexcept {}
+    ContextScope(const ContextScope&) = delete;
+    ContextScope& operator=(const ContextScope&) = delete;
+};
+
+// Without mddlog a transport is a synchronous text sink: records carry only the rendered line.
+struct TransportRecord { string_view text; };
+struct TransportHandle { size_t index = numeric_limits<size_t>::max(); };
+inline TransportHandle addTransport(function<void(const TransportRecord&)> write) {
+    return {addSinks([write = std::move(write)](string_view t) { write(TransportRecord{t}); })};
+}
+inline void removeTransport(TransportHandle handle) { if (handle.index < out.sinks.size()) out.sinks[handle.index] = nullptr; }
+inline void reportTransportFailure(TransportHandle handle) { removeTransport(handle); }
+inline void reportTransportOverflow() noexcept {}
 } //namespace webfront::log
 #endif
