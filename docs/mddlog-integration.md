@@ -88,7 +88,7 @@ dump is refused or is short enough to remain complete. A host must copy borrowed
 bindings before destroying its producer ring, including exceptional exits. Legacy text
 delivery stays available. For the diagnostic/audit boundary, follow
 [mddlog's facade contract](https://github.com/ambroise-leclerc/mddlog/blob/develop/docs/migration/webfront-facade.md).
-ADR-003 remains **Proposed**; accepting it is a separate review decision.
+mddlog ADR-003 was accepted on 2026-10-02, after this adoption ([mddlog#83](https://github.com/ambroise-leclerc/mddlog/pull/83)).
 
 ## Browser transport lane (mddlog#72)
 
