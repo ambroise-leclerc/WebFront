@@ -48,7 +48,7 @@ The older React/Babel example remains available explicitly:
 ./build/src/WebFrontApp react.html
 ```
 
-When the system-browser frontend is used, press Enter in the application terminal after closing the page. A CEF-enabled build uses an embedded window and stops when that window closes.
+The default example opens the system browser even in a CEF-enabled build; press Enter in the application terminal after closing the page. Applications that explicitly select `CEFFrontend` use an embedded window and stop when that window closes.
 
 ## Automated browser integration
 
@@ -65,7 +65,7 @@ The Jasmine specs are native ES modules. They prove relative module loading, bot
 
 ## Selecting a frontend
 
-`webfront::WebFront` uses the frontend selected by the build. Applications can select one explicitly:
+`webfront::WebFront` always opens the system browser, regardless of whether the build has CEF support (`WEBFRONT_EMBED_CEF`) enabled. Applications opt into the embedded CEF frontend explicitly:
 
 ```cpp
 using BrowserFront = webfront::WebFrontWithFrontend<webfront::frontend::DefaultBrowserFrontend>;
@@ -73,3 +73,7 @@ using EmbeddedFront = webfront::WebFrontWithFrontend<webfront::frontend::CEFFron
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture, development commands, conventions, test requirements, and safety guidance. The current evidence-based status and backlog recommendations are in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ISSUE_AUDIT.md](docs/ISSUE_AUDIT.md).
+
+Optional mddlog diagnostics are available through `WEBFRONT_USE_MDDLOG=ON` (default:
+`OFF`). Consumers keep including `tooling/Logger.hpp`; WebFront links its compiled
+adapter. See [dependencies, toolchain matrix and verification](docs/mddlog-integration.md).

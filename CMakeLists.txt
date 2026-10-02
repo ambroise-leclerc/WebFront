@@ -4,6 +4,12 @@ option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" ON)
 option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
+option(WEBFRONT_USE_MDDLOG "Use the compiled mddlog diagnostic adapter" OFF)
+# The experimental gate must be selected before project() probes the compiler.
+if(WEBFRONT_USE_MDDLOG)
+    include(cmake/MddlogPreProject.cmake)
+endif()
+
 option(WEBFRONT_EMBED_CEF "Enable embedded CEF window support" OFF)
 
 set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
@@ -15,14 +21,19 @@ project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 if (UNIX AND NOT APPLE)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
-  add_compile_options($<$<COMPILE_LANGUAGE:C>:-pthread>$<$<COMPILE_LANGUAGE:CXX>:-pthread>)
-  add_link_options(-pthread)
+  if(NOT WEBFRONT_USE_MDDLOG)
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-pthread>$<$<COMPILE_LANGUAGE:CXX>:-pthread>)
+    add_link_options(-pthread)
+  endif()
 endif()
 
 add_library(WebFront INTERFACE)
+if(TARGET Threads::Threads)
+    target_link_libraries(WebFront INTERFACE Threads::Threads)
+endif()
 
 # Static linkage for CEF compatibility
-if(MSVC)
+if(MSVC AND NOT WEBFRONT_USE_MDDLOG)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
@@ -152,6 +163,11 @@ if(APPLE AND EXISTS "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src")
         )
         message(STATUS "Created minimal libcef_dll_wrapper for macOS")
     endif()
+endif()
+
+if(WEBFRONT_USE_MDDLOG)
+    include(cmake/MddlogIntegration.cmake)
+    webfront_add_mddlog()
 endif()
 
 target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)

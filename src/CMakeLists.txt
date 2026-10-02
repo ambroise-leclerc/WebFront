@@ -35,24 +35,47 @@ setup_cef_for_target(WebFrontApp)
 # Additional Build Rules
 # ==============================================================================
 
-# Browser bridge asset maintenance. Normal builds consume the checked-in header;
-# this explicit target regenerates it, while CTest verifies that it is current.
-set(WEBFRONT_JS_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/WebFront.js")
-set(WEBFRONT_JS_HEADER "${CMAKE_SOURCE_DIR}/include/system/WebFrontJsData.hpp")
-add_custom_target(webfront-js-assets
-    COMMAND ${CMAKE_COMMAND}
-        -DINPUT=${WEBFRONT_JS_SOURCE}
-        -DOUTPUT=${WEBFRONT_JS_HEADER}
-        -P ${CMAKE_SOURCE_DIR}/cmake/EmbedWebFrontJs.cmake
-    COMMENT "Regenerating embedded WebFront.js"
-    VERBATIM
-)
-
-if(ENABLE_TESTING)
-    add_test(NAME WebFrontJsAssetsFresh
+# Browser bridge and fallback-page asset maintenance. Normal builds consume the checked-in
+# generated headers; the webfront-embedded-assets target regenerates them from their readable
+# sources, while CTest verifies (per asset, for clear failure attribution) that each is current.
+function(add_embedded_text_asset source header struct test_name)
+    add_custom_command(TARGET webfront-embedded-assets POST_BUILD
         COMMAND ${CMAKE_COMMAND}
-            -DINPUT=${WEBFRONT_JS_SOURCE}
-            -DCHECK=${WEBFRONT_JS_HEADER}
-            -P ${CMAKE_SOURCE_DIR}/cmake/EmbedWebFrontJs.cmake
+            -DINPUT=${source}
+            -DOUTPUT=${header}
+            -DSTRUCT=${struct}
+            -P ${CMAKE_SOURCE_DIR}/cmake/EmbedTextAsset.cmake
+        COMMENT "Regenerating ${header}"
+        VERBATIM
     )
-endif()
+    if(ENABLE_TESTING)
+        add_test(NAME ${test_name}
+            COMMAND ${CMAKE_COMMAND}
+                -DINPUT=${source}
+                -DCHECK=${header}
+                -DSTRUCT=${struct}
+                -P ${CMAKE_SOURCE_DIR}/cmake/EmbedTextAsset.cmake
+        )
+    endif()
+endfunction()
+
+add_custom_target(webfront-embedded-assets COMMENT "Regenerating embedded browser bridge and fallback-page assets")
+
+add_embedded_text_asset(
+    "${CMAKE_CURRENT_SOURCE_DIR}/WebFront.js"
+    "${CMAKE_SOURCE_DIR}/include/system/WebFrontJsData.hpp"
+    WebFrontJsData
+    WebFrontJsAssetsFresh
+)
+add_embedded_text_asset(
+    "${CMAKE_CURRENT_SOURCE_DIR}/fallback/index.html"
+    "${CMAKE_SOURCE_DIR}/include/system/FallbackIndexHtmlData.hpp"
+    FallbackIndexHtmlData
+    FallbackIndexHtmlAssetFresh
+)
+add_embedded_text_asset(
+    "${CMAKE_CURRENT_SOURCE_DIR}/fallback/webfront-fallback.mjs"
+    "${CMAKE_SOURCE_DIR}/include/system/FallbackModuleData.hpp"
+    FallbackModuleData
+    FallbackModuleAssetFresh
+)
