@@ -330,7 +330,44 @@ TransportLane& transportLane() {
     return *instance;
 }
 
-/** @brief Validate emission context and synchronously submit its snapshot to the ring writer. */
+/** @brief Refuse an overlong identifier before any concatenation allocates; empty when valid. */
+std::optional<WriteOutcome> checkIdentifiers(const Context& context, std::string_view prefix) {
+    if (context.component.size() > mddlog::core::componentCapacity)
+        return WriteOutcome{.status = WriteStatus::IdentifierTooLong, .field = ContextField::Component};
+    if (context.callId.size() > mddlog::core::operationIdCapacity - prefix.size())
+        return WriteOutcome{.status = WriteStatus::IdentifierTooLong, .field = ContextField::OperationId};
+    if (context.webLinkId.size() > mddlog::core::correlationIdCapacity)
+        return WriteOutcome{.status = WriteStatus::IdentifierTooLong, .field = ContextField::CorrelationId};
+    return std::nullopt;
+}
+
+/** @brief Admit the record into this thread's transport ring while a transport is attached. */
+WriteStatus submitToLane(const mddlog::core::RecordInput& input) {
+    auto* lane = activeLane.load(std::memory_order_acquire);
+    if (lane == nullptr || !lane->hasTransports())
+        return WriteStatus::Written;
+    return lane->write(input);
+}
+
+/** @brief Offer the validated snapshot to the host writer; false only when it refuses. */
+bool submitToWriter(const ProducerState&                state,
+                    LogType                             level,
+                    const mddlog::core::RecordInput&    input,
+                    const mddlog::core::GovernedRecord& captured,
+                    bool                                truncated) {
+    if (!state.writer)
+        return true;
+    return state.writer({.level            = level,
+                         .time             = input.time.value(),
+                         .location         = input.location,
+                         .message          = input.message,
+                         .component        = captured.component(),
+                         .operationId      = captured.operationId(),
+                         .correlationId    = captured.correlationId(),
+                         .messageTruncated = truncated});
+}
+
+/** @brief Validate emission context and synchronously submit its snapshot to the lane and the ring writer. */
 WriteOutcome capture(LogType level, std::string_view text, const std::source_location& location) {
     auto&      state  = producer();
     const auto mapped = diagnosticLevel(level);
@@ -338,47 +375,24 @@ WriteOutcome capture(LogType level, std::string_view text, const std::source_loc
         return state.outcome = {};
     const auto&            context = state.context;
     const std::string_view prefix  = directionPrefix(context.direction);
-    // Bound the allocation below before concatenating caller-controlled identifiers.
-    if (context.component.size() > mddlog::core::componentCapacity)
-        return state.outcome = {.status = WriteStatus::IdentifierTooLong, .field = ContextField::Component};
-    if (context.callId.size() > mddlog::core::operationIdCapacity - prefix.size())
-        return state.outcome = {.status = WriteStatus::IdentifierTooLong, .field = ContextField::OperationId};
-    if (context.webLinkId.size() > mddlog::core::correlationIdCapacity)
-        return state.outcome = {.status = WriteStatus::IdentifierTooLong, .field = ContextField::CorrelationId};
-    const std::string            operation = std::string(prefix) + std::string(context.callId);
-    const auto                   time      = std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now());
-    mddlog::core::GovernedRecord captured;
-    const auto                   result    = captured.assign({.level         = *mapped,
-                                                              .time          = mddlog::core::RawTime::available(time),
-                                                              .location      = location,
-                                                              .message       = text,
-                                                              .component     = context.component,
-                                                              .operationId   = operation,
-                                                              .correlationId = context.webLinkId});
-    const bool                   truncated = result.truncated().message;
-    WriteOutcome                 outcome{.status = WriteStatus::Written, .messageTruncated = truncated};
-    // The transport lane is independent of the host writer; report the first refusal.
-    if (auto* lane = activeLane.load(std::memory_order_acquire); lane != nullptr && lane->hasTransports()) {
-        const auto status = lane->write({.level         = *mapped,
-                                         .time          = mddlog::core::RawTime::available(time),
-                                         .location      = location,
-                                         .message       = text,
-                                         .component     = context.component,
-                                         .operationId   = operation,
-                                         .correlationId = context.webLinkId});
-        if (status != WriteStatus::Written)
-            outcome = {.status = status};
-    }
-    if (state.writer
-        && !state.writer({.level            = level,
-                          .time             = time,
-                          .location         = location,
-                          .message          = text,
-                          .component        = captured.component(),
-                          .operationId      = captured.operationId(),
-                          .correlationId    = captured.correlationId(),
-                          .messageTruncated = truncated})
-        && outcome.status == WriteStatus::Written)
+    if (const auto refused = checkIdentifiers(context, prefix))
+        return state.outcome = *refused;
+    const std::string               operation = std::string(prefix) + std::string(context.callId);
+    const auto                      time      = std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now());
+    const mddlog::core::RecordInput input{.level         = *mapped,
+                                          .time          = mddlog::core::RawTime::available(time),
+                                          .location      = location,
+                                          .message       = text,
+                                          .component     = context.component,
+                                          .operationId   = operation,
+                                          .correlationId = context.webLinkId};
+    mddlog::core::GovernedRecord    captured;
+    const bool                      truncated = captured.assign(input).truncated().message;
+    WriteOutcome                    outcome{.status = WriteStatus::Written, .messageTruncated = truncated};
+    // The lane and the host writer are independent; report the first refusal.
+    if (const auto status = submitToLane(input); status != WriteStatus::Written)
+        outcome = {.status = status};
+    if (!submitToWriter(state, level, input, captured, truncated) && outcome.status == WriteStatus::Written)
         outcome = {.status = WriteStatus::RingFull};
     return state.outcome = outcome;
 }

@@ -368,16 +368,18 @@ private:
                 if (ec) writeState->queue.clear();
                 hasNext = !writeState->queue.empty();
             }
-            if (ec) {
-                if (writeErrorHandler) writeErrorHandler(ec);
-                if (started) {
-                    log::error("Error during write : ec.value() = {}", ec.value());
-                    if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                    if (ec != Net::Error::OperationAborted) stop();
-                }
-            }
+            if (ec) onWriteFailed(ec);
             else if (hasNext) writeNext();
         });
+    }
+
+    /// The producer is detached before the diagnostic; the flag only gates the close sequence.
+    void onWriteFailed(std::error_code ec) {
+        if (writeErrorHandler) writeErrorHandler(ec);
+        if (!started) return;
+        log::error("Error during write : ec.value() = {}", ec.value());
+        if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+        if (ec != Net::Error::OperationAborted) stop();
     }
 };
 
