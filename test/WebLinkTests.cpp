@@ -231,7 +231,7 @@ SCENARIO("WebLink forwards logs to the browser until a write fails") {
 SCENARIO("A write failing after its WebLink is destroyed does not reach the link or its successor") {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
-    auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, 31, [](WebLinkEvent) {});
+    auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{31}, [](WebLinkEvent) {});
     browserHandshake();
     // The old link's write completes only after the link is gone, keeping its WebSocket alive.
     InjectableSocket::deferWrites();
@@ -243,7 +243,7 @@ SCENARIO("A write failing after its WebLink is destroyed does not reach the link
     InjectableSocket::deferWrites(false);
 
     // A new link, possibly at the same address, attaches its own transport.
-    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, 32, [](WebLinkEvent) {});
+    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) {});
     browserHandshake();
     REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
     log::info("delivered by the new link");
