@@ -85,18 +85,92 @@ its truncation flag is true if either admitted record was truncated. A summary c
 therefore report RingFull and truncation together without marking the refused record.
 Removing that aggregate flag would lose truncation from an admitted message when its
 dump is refused or is short enough to remain complete. A host must copy borrowed record fields synchronously and remove writer
-bindings before destroying its producer ring, including exceptional exits. The option
-alone does not install structured rings, add call scopes to request handling or route
-browser transports through `TransportConsumer`. Legacy text delivery stays available.
-For structured deployment and the diagnostic/audit boundary, follow
+bindings before destroying its producer ring, including exceptional exits. Legacy text
+delivery stays available. For the diagnostic/audit boundary, follow
 [mddlog's facade contract](https://github.com/ambroise-leclerc/mddlog/blob/develop/docs/migration/webfront-facade.md).
 ADR-003 remains **Proposed**; accepting it is a separate review decision.
+
+## Browser transport lane (mddlog#72)
+
+With the option on, the browser log sink no longer runs on producer threads. `addTransport`
+registers it on mddlog's bounded `TransportConsumer`; the first registration starts one
+WebFront-owned consumer thread. Producers write only their own SPSC ring and never wait
+for a transport. `transportProducerRings` (32) rings of `transportRingCapacity` (128)
+records are registered before that thread starts. A thread claims a free ring on its first
+emission while a transport is attached, and returns it when the thread exits; the pool
+lock orders each hand-over, so a ring never has two producers. With every ring claimed,
+emission returns `RingUnavailable`; a full ring returns `RingFull`. Neither waits.
+
+The consumer thread logs into its own consumer ring. A record emitted there while a
+transport is dispatching (for example a write error reported synchronously by the socket)
+is acknowledged without delivery to any transport and counted in `reentrantRecords`;
+deferring it to the next drain would only postpone the feedback loop. A transport
+receives a `TransportRecord`: the context captured at emission (component, `operationId`,
+`correlationId`), level, time, location, governed message (160 bytes, truncation flagged)
+and its legacy rendering. Views end with the callback. `transportHealth()` reports
+delivered records, synchronous and reported failures, detachments, reentrant records,
+ring refusals, unavailable rings, abandoned drains and active transports without using
+any sink. `flushTransports()` waits for a complete drain started after the call; it
+returns false on the consumer thread.
+
+Producers skip the rings while no transport is attached. Records refused by the rings
+still reach synchronous text sinks, as `RingFull` from a host writer already did.
+The facade, its transports and `TransportRecord` carry diagnostics only; no audit event
+type is accepted, and mddlog checks at compile time that `TransportConsumer` accepts
+neither an audit ring nor an audit sink.
+
+Without the option, the same calls map to the historical synchronous sink, and
+`TransportRecord` carries only the rendered text. `ContextScope` is then a no-op.
+
+### WebLink lifecycle
+
+- The handshake attaches one transport sending `debugLog` commands; its handle is stored
+  and is never an RAII subscription.
+- The rings bound producers, but a browser that stops reading would otherwise let the consumer
+  move every record into the WebSocket's write queue. Diagnostic frames therefore go through
+  `WebSocket::tryWrite`, refused once `WebLink::maxPendingLogFrames` (64) frames of any kind
+  await the network. A refused frame is dropped without logging, counted by
+  `WebLink::droppedLogFrames()` and in `TransportHealth::overflows`. Application frames
+  (calls, returns, script injection) keep the unbounded queue and are never dropped.
+- A WebSocket write error invokes `onWriteError` **before** its diagnostic, even after
+  `stop()`, because frames queued earlier still fail. WebLink then calls
+  `reportTransportFailure`, retiring the transport before anything logs the failure.
+  When the failing write completes synchronously inside the transport, the removal is the
+  registry's deferred self-removal.
+- A normal close calls `removeTransport`. The reference emits no
+  `WebLinkEvent::Code::closed`; a link stays owned by `BasicWF` until destroyed, and its
+  destructor removes the transport, waiting for any in-flight write, before logging.
+- Detachment happens at most once per link and no transport attaches afterwards.
+- The WebSocket can outlive its link while asynchronous operations complete. Its message,
+  write-error and close handlers share a `HandlerGuard` with the link: the destructor first
+  stops new handler invocations and waits for those running on other threads, so a late
+  completion never reaches the destroyed link or a successor allocated at its address.
+- WebLink installs `ContextScope` at its entry points: `weblink` for received messages,
+  close and destruction; `cppFunction` with `js-cpp:<CallId>` for calls from JavaScript;
+  `jsFunction` with `cpp-js:<CallId>` for returns of C++-initiated calls.
+
+`main` in `HelloWorld.cpp` and `JasmineTest.cpp` now keeps the console handle and removes
+it before returning. `LoggerTests.cpp` already stored and removed its handle and remains
+unchanged.
 
 ## Verification
 
 `LoggerTests.cpp` is unchanged. Enabled builds additionally compile the module-free
 `MddlogLoggerTests.cpp` for masks, LLVM caller locations, independent registrations,
 every hex byte, nested context, structured refusal and independent legacy delivery.
+`MddlogTransportTests.cpp` covers the seven events of ADR-003 Decision 6 through two
+transports after their context strings are destroyed, legacy rendering and truncation,
+saturation while the consumer is blocked, synchronous throws, reentrant logging,
+asynchronous failure reports, removal during concurrent emission, and WebLink
+disconnection, synchronous and asynchronous write failures and destruction before
+the drain. `WebLinkTests.cpp`, built in both configurations, reproduces a browser
+that stops reading: 10,240 diagnostics with one write never completing leave 64 frames
+queued and 10,176 counted refusals. The `sanitizers` job of `MddlogIntegration.yml` runs these scenarios under
+AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSanitizer on Linux/Clang 21,
+instrumenting the whole build, including mddlog and the std module, through
+`CMAKE_CXX_FLAGS` and `CMAKE_EXE_LINKER_FLAGS`. LLVM 21.1.8's sanitizer runtimes do not
+start on macOS 27 (an empty program hangs under ASan and crashes under TSan), so local
+macOS runs cannot provide this evidence.
 The normal CI uses CMake 3.31.10 with the option off. `MddlogIntegration.yml` builds
 and tests both source and installed integration on Linux/Clang. The accompanying
 mddlog integration tests exercise these builds on its full supported CI matrix.

@@ -11,10 +11,12 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <span>
+#include <system_error>
 
 namespace webfront::websocket {
 using Handle = uint32_t;
@@ -102,7 +104,7 @@ struct Header {
     void setPayloadSize(size_t size) {
         raw[1] = (raw[1] & std::byte(0b10000000)) | std::byte(size < 126 ? size : size < 65536 ? 126 : 127);
         size_t len = size < 126 ? 0 : size < 65536 ? 2 : 8;
-        for (size_t i = 0; i <= len; ++i) raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
+        for (size_t i = 0; i < len; ++i) raw[2 + i] = std::byte(size >> (8 * (len - i - 1)));
     }
 
 protected:
@@ -281,10 +283,23 @@ public:
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
     void onMessage(std::function<void(std::span<const std::byte>)>&& handler) { binaryHandler = std::move(handler); }
     void onClose(std::function<void(CloseEvent)>&& handler) { closeHandler = std::move(handler); }
+    /// Called on every failed write, before its diagnostic and even after stop(): frames queued
+    /// before stopping still fail, and their producer must be detached rather than fed the error.
+    void onWriteError(std::function<void(std::error_code)>&& handler) { writeErrorHandler = std::move(handler); }
     void write(std::string_view text) { writeData(Frame<Net>(text)); }
     void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
     void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
     void write(Frame<Net> frame) { writeData(std::move(frame)); }
+    /// Queue a droppable frame (a diagnostic) only while fewer than maxPending frames await the
+    /// network, which may stop reading; false when refused. Other writes are never refused.
+    [[nodiscard]] bool tryWrite(std::span<const std::byte> data, std::span<const std::byte> data2, std::size_t maxPending) {
+        return enqueue(Frame<Net>(data, data2), maxPending);
+    }
+    /// Frames queued and not yet completed by the network, including the one being written.
+    [[nodiscard]] std::size_t pendingWrites() const {
+        std::lock_guard lock(writeState->mutex);
+        return writeState->queue.size();
+    }
 
 private:
     struct WriteState {
@@ -297,6 +312,7 @@ private:
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
+    std::function<void(std::error_code)> writeErrorHandler;
     std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
     bool started;
 
@@ -336,16 +352,20 @@ private:
         });
     }
 
-    void writeData(Frame<Net> frame) {
+    void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
+
+    bool enqueue(Frame<Net> frame, std::size_t maxPending) {
         frame.freeze();
         auto pendingFrame = std::make_shared<Frame<Net>>(std::move(frame));
         bool startWrite;
         {
             std::lock_guard lock(writeState->mutex);
+            if (writeState->queue.size() >= maxPending) return false;
             startWrite = writeState->queue.empty();
             writeState->queue.push_back(std::move(pendingFrame));
         }
         if (startWrite) writeNext();
+        return true;
     }
 
     void writeNext() {
@@ -363,15 +383,18 @@ private:
                 if (ec) writeState->queue.clear();
                 hasNext = !writeState->queue.empty();
             }
-            if (ec) {
-                if (started) {
-                    log::error("Error during write : ec.value() = {}", ec.value());
-                    if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-                    if (ec != Net::Error::OperationAborted) stop();
-                }
-            }
+            if (ec) onWriteFailed(ec);
             else if (hasNext) writeNext();
         });
+    }
+
+    /// The producer is detached before the diagnostic; the flag only gates the close sequence.
+    void onWriteFailed(std::error_code ec) {
+        if (writeErrorHandler) writeErrorHandler(ec);
+        if (!started) return;
+        log::error("Error during write : ec.value() = {}", ec.value());
+        if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+        if (ec != Net::Error::OperationAborted) stop();
     }
 };
 

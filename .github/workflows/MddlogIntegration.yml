@@ -67,3 +67,74 @@ jobs:
       run: cmake --build build-mddlog-install --parallel 2
     - name: Run installed integration
       run: ctest --test-dir build-mddlog-install --output-on-failure --no-tests=error
+
+  # The bounded browser transport lane (mddlog#72) under sanitizers. Every translation unit,
+  # including mddlog's modules and the std module, is instrumented through the global flags.
+  sanitizers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: address-undefined
+          flags: -fsanitize=address,undefined -fno-sanitize-recover=undefined
+        - name: thread
+          flags: -fsanitize=thread
+    name: sanitizers (${{ matrix.name }})
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+        repository: ambroise-leclerc/mddlog
+        ref: 5b43265664d83c3b7135d328f611e685792a1b02
+        path: dependencies/mddlog
+    - name: Setup CMake (4.3.1, within the qualified 4.0-4.3 window)
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '4.3.1'
+
+    - name: Install LLVM/Clang 21 and libc++
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        LLVM_KEY_FPR="6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
+        sudo install -d -m 0755 /etc/apt/keyrings
+        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /tmp/llvm-snapshot.asc
+        gpg --show-keys --with-colons --fingerprint /tmp/llvm-snapshot.asc \
+          | awk -F: '/^fpr:/ {print $10}' | grep -qx "$LLVM_KEY_FPR"
+        gpg --dearmor < /tmp/llvm-snapshot.asc > /tmp/llvm.gpg
+        sudo install -m 0644 /tmp/llvm.gpg /etc/apt/keyrings/llvm.gpg
+        codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+        echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] https://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-21 main" \
+          | sudo tee /etc/apt/sources.list.d/llvm-toolchain-21.list
+        sudo apt-get update
+        sudo apt-get install -y ninja-build build-essential clang-21 libc++-21-dev libc++abi-21-dev
+    - name: Restrict address-space randomization for ThreadSanitizer
+      if: matrix.name == 'thread'
+      run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+    - name: Configure instrumented source integration
+      run: >-
+        cmake -S . -B build-sanitized -G Ninja
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_CACHE=OFF
+        -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake
+        "-DCMAKE_CXX_FLAGS=-stdlib=libc++ ${{ matrix.flags }} -fno-omit-frame-pointer"
+        "-DCMAKE_EXE_LINKER_FLAGS=${{ matrix.flags }}"
+        -DWEBFRONT_USE_MDDLOG=ON
+        -DWEBFRONT_MDDLOG_SOURCE_DIR=${{ github.workspace }}/dependencies/mddlog
+    - name: Compile and link instrumented tests
+      run: cmake --build build-sanitized --parallel 2 --target tests
+    - name: Run the transport and WebLink scenarios repeatedly
+      run: |
+        for run in 1 2 3 4 5; do
+          ./build-sanitized/test/tests "[transport],[weblink]" --order rand
+        done
+    - name: Run every test once
+      run: ./build-sanitized/test/tests --order rand
