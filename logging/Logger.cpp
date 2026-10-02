@@ -350,11 +350,7 @@ WriteStatus submitToLane(const mddlog::core::RecordInput& input) {
 }
 
 /** @brief Offer the validated snapshot to the host writer; false only when it refuses. */
-bool submitToWriter(const ProducerState&                state,
-                    LogType                             level,
-                    const mddlog::core::RecordInput&    input,
-                    const mddlog::core::GovernedRecord& captured,
-                    bool                                truncated) {
+bool submitToWriter(const ProducerState& state, LogType level, const mddlog::core::RecordInput& input, const mddlog::core::GovernedRecord& captured) {
     if (!state.writer)
         return true;
     return state.writer({.level            = level,
@@ -364,7 +360,7 @@ bool submitToWriter(const ProducerState&                state,
                          .component        = captured.component(),
                          .operationId      = captured.operationId(),
                          .correlationId    = captured.correlationId(),
-                         .messageTruncated = truncated});
+                         .messageTruncated = captured.truncated().message});
 }
 
 /** @brief Validate emission context and synchronously submit its snapshot to the lane and the ring writer. */
@@ -392,7 +388,7 @@ WriteOutcome capture(LogType level, std::string_view text, const std::source_loc
     // The lane and the host writer are independent; report the first refusal.
     if (const auto status = submitToLane(input); status != WriteStatus::Written)
         outcome = {.status = status};
-    if (!submitToWriter(state, level, input, captured, truncated) && outcome.status == WriteStatus::Written)
+    if (!submitToWriter(state, level, input, captured) && outcome.status == WriteStatus::Written)
         outcome = {.status = WriteStatus::RingFull};
     return state.outcome = outcome;
 }
