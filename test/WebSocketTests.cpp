@@ -20,6 +20,7 @@ namespace {
 class InjectableSocket : public networking::SocketBaseMock {
 public:
     void async_read_some(auto buffer, auto completion) {
+        ++readCalls;
         readBuffer  = buffer;
         readHandler = std::move(completion);
     }
@@ -43,24 +44,35 @@ public:
         readHandler = {};
         written.clear();
         closeCalls = 0;
+        readCalls = 0;
     }
 
     static int closeCallCount() { return closeCalls; }
+    static int readCallCount() { return readCalls; }
 
 private:
     inline static networking::buffers::MutableBuffer readBuffer;
     inline static function<void(error_code, size_t)>  readHandler;
     inline static vector<byte>                        written;
     inline static int                                 closeCalls = 0;
+    inline static int                                 readCalls = 0;
 };
 
 class InjectableNetworking : public networking::NetworkingMock {
 public:
     using Socket = InjectableSocket;
+    inline static function<void()> beforeRead;
+    inline static error_code writeError;
+
+    template <typename T, size_t N>
+    static MutableBuffer Buffer(array<T, N>& data) {
+        if (beforeRead) beforeRead();
+        return NetworkingMock::Buffer(data);
+    }
 
     template <typename WriteHandler>
     static void AsyncWrite(Socket socket, auto buffers, WriteHandler handler) {
-        error_code error;
+        error_code error = writeError;
         size_t     transferred = 0;
         for (const auto& buffer : buffers)
             transferred += socket.write_some(buffer, error);
@@ -69,6 +81,39 @@ public:
 };
 
 } // namespace
+
+SCENARIO("WebSocket shutdown prevents a read from being rearmed after closure") {
+    InjectableSocket::reset();
+    InjectableNetworking::beforeRead = {};
+    InjectableNetworking::writeError = {};
+    const auto failWrite = GENERATE(false, true);
+    int closeHandlerCalls = 0;
+    auto ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
+    ws->start();
+
+    GIVEN("Shutdown occurs while preparing the next read, after the callback checked started") {
+        InjectableNetworking::beforeRead = [&] {
+            if (failWrite) {
+                InjectableNetworking::writeError = make_error_code(errc::broken_pipe);
+                ws->write("pending write");
+            }
+            else ws->stop();
+        };
+
+        WHEN("The pending read completes successfully") {
+            InjectableSocket::fail({});
+            InjectableNetworking::beforeRead = {};
+            InjectableNetworking::writeError = {};
+
+            THEN("Both explicit shutdown and write failure prevent another read") {
+                REQUIRE(InjectableSocket::readCallCount() == 1);
+                REQUIRE(InjectableSocket::closeCallCount() == 1);
+                REQUIRE(closeHandlerCalls == (failWrite ? 1 : 0));
+            }
+        }
+    }
+}
 
 SCENARIO("WebSocket Headers decoding") {
     GIVEN("Some Header data") {
