@@ -135,6 +135,10 @@ Without the option, the same calls map to the historical synchronous sink, and
   `WebLinkEvent::Code::closed`; a link stays owned by `BasicWF` until destroyed, and its
   destructor removes the transport, waiting for any in-flight write, before logging.
 - Detachment happens at most once per link and no transport attaches afterwards.
+- The WebSocket can outlive its link while asynchronous operations complete. Its message,
+  write-error and close handlers share a `HandlerGuard` with the link: the destructor first
+  stops new handler invocations and waits for those running on other threads, so a late
+  completion never reaches the destroyed link or a successor allocated at its address.
 - WebLink installs `ContextScope` at its entry points: `weblink` for received messages,
   close and destruction; `cppFunction` with `js-cpp:<CallId>` for calls from JavaScript;
   `jsFunction` with `cpp-js:<CallId>` for returns of C++-initiated calls.

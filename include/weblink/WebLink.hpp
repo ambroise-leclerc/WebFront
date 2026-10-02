@@ -6,8 +6,10 @@
 #include "../tooling/Logger.hpp"
 #include "Messages.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <future>
@@ -22,6 +24,7 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace webfront {
 
@@ -50,6 +53,58 @@ private:
     std::size_t size;
 };
 
+/// Shared by a WebLink's WebSocket handlers, which can run after the link is destroyed: the
+/// WebSocket outlives it while asynchronous operations complete. A handler starting after
+/// retire() returns without touching the link; retire() waits for handlers already running.
+class HandlerGuard {
+public:
+    template<typename Handler>
+    void run(Handler&& handler) {
+        {
+            std::lock_guard lock(mutex);
+            if (!alive) return;
+            ++inFlight;
+        }
+        struct Exit {
+            explicit Exit(HandlerGuard& value) : guard(value) {}
+            HandlerGuard& guard;
+            Exit(const Exit&) = delete;
+            Exit& operator=(const Exit&) = delete;
+            ~Exit() {
+                auto& running = runningOnThisThread();
+                running.erase(std::find(running.begin(), running.end(), &guard));
+                std::lock_guard lock(guard.mutex);
+                --guard.inFlight;
+                guard.idle.notify_all();
+            }
+        };
+        runningOnThisThread().push_back(this);
+        const Exit exit{*this};
+        std::forward<Handler>(handler)();
+    }
+
+    /// Stop new handlers and wait for those on other threads. A handler of this link running on
+    /// the calling thread (destruction from inside it) cannot be waited for and is not.
+    void retire() {
+        const auto& running = runningOnThisThread();
+        const auto  own     = static_cast<std::size_t>(std::count(running.begin(), running.end(), this));
+        std::unique_lock lock(mutex);
+        alive = false;
+        idle.wait(lock, [&] { return inFlight == own; });
+    }
+
+private:
+    static std::vector<const HandlerGuard*>& runningOnThisThread() {
+        static thread_local std::vector<const HandlerGuard*> running;
+        return running;
+    }
+
+    std::mutex mutex;
+    std::condition_variable idle;
+    bool alive = true;
+    std::size_t inFlight = 0;
+};
+
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
     struct PendingCall {
@@ -57,6 +112,7 @@ class WebLink {
         std::function<void(std::exception_ptr)> reject;
     };
 
+    std::shared_ptr<HandlerGuard> handlers{std::make_shared<HandlerGuard>()};
     std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
     WebLinkId id;
     DecimalId idText{id};
@@ -77,14 +133,17 @@ public:
         log::debug("New WebLink created with id:{}", id);
 
         ws->onMessage([](std::string_view text) { log::debug("onMessage(text) :{}", text); });
-        ws->onMessage([this](std::span<const std::byte> data) { onBinaryMessage(data); });
+        // Handlers capture the shared guard, never rely on `this` alone: completions may run after destruction.
+        ws->onMessage([this, guard = handlers](std::span<const std::byte> data) { guard->run([&] { onBinaryMessage(data); }); });
         // Retire the transport before the WebSocket logs the write error, so it is never fed its own failure.
-        ws->onWriteError([this](std::error_code) { detachTransport(true); });
-        ws->onClose([this](websocket::CloseEvent event) {
-            const log::ContextScope context(linkContext());
-            detachTransport(false);
-            auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
-            rejectPending(std::make_exception_ptr(std::runtime_error(message)));
+        ws->onWriteError([this, guard = handlers](std::error_code) { guard->run([&] { detachTransport(true); }); });
+        ws->onClose([this, guard = handlers](websocket::CloseEvent event) {
+            guard->run([&] {
+                const log::ContextScope context(linkContext());
+                detachTransport(false);
+                auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
+                rejectPending(std::make_exception_ptr(std::runtime_error(message)));
+            });
         });
 
         ws->start();
@@ -95,8 +154,10 @@ public:
     WebLink& operator=(WebLink&&) = delete;
 
     ~WebLink() {
-        // Remove the transport (waiting for its in-flight write) before this destructor logs or
-        // releases anything the transport captures. No closed event precedes destruction.
+        // First let no WebSocket handler reach this object again, then remove the transport (waiting
+        // for its in-flight write) before logging or releasing what it captures. No closed event
+        // precedes destruction.
+        handlers->retire();
         detachTransport(false);
         const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");

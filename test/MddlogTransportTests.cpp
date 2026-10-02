@@ -455,7 +455,7 @@ SCENARIO("WebLink captures the link and call context of a C++ function call", "[
     msg::FunctionCall<> call;
     call.setCallId(37);
     websocket::Frame<InjectableNetworking> frame{span(reinterpret_cast<const byte*>(call.header().data()), call.header().size())};
-    const string functionName{"registered"};  // The frame borrows it until freeze() copies it.
+    const string                           functionName{"registered"};  // The frame borrows it until freeze() copies it.
     call.encodeParameter(functionName, frame);
     frame.freeze();
     InjectableSocket::receive(clientFrame(messagePayload(frame)));
@@ -524,4 +524,34 @@ SCENARIO("A WebLink destroyed before the drain receives nothing more", "[mddlog]
     CHECK(!InjectableSocket::wrote("queued before destruction"));
     // The link's transport left; the blocker is still registered.
     CHECK(since(browser.before).activeTransports == browser.before.activeTransports);
+}
+
+SCENARIO("A write failing after its WebLink is destroyed does not reach the link or its successor", "[mddlog][transport][weblink]") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, 31, [](WebLinkEvent) {});
+    handshake();
+    // The old link's write completes only after the link is gone, keeping its WebSocket alive.
+    InjectableSocket::deferWrites();
+    InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+    log::info("written by the old link");
+    REQUIRE(log::flushTransports());
+    link.reset();
+    InjectableSocket::failWrites({});
+    InjectableSocket::deferWrites(false);
+
+    // A new link, possibly at the same address, attaches its own transport.
+    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, 32, [](WebLinkEvent) {});
+    handshake();
+    const auto before = log::transportHealth();
+    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    log::info("delivered by the new link");
+    REQUIRE(log::flushTransports());
+
+    const auto health = since(before);
+    CHECK(health.reportedFailures == 0);
+    CHECK(health.activeTransports == before.activeTransports);
+    CHECK(InjectableSocket::wrote("delivered by the new link"));
+    link.reset();
+    log::setLogLevel(log::Disabled);
 }

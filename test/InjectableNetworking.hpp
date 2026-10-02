@@ -83,9 +83,9 @@ public:
         writeError = error;
     }
 
-    static void deferWrites() {
+    static void deferWrites(bool defer = true) {
         std::lock_guard lock(mutex);
-        deferring = true;
+        deferring = defer;
     }
 
     /// Run queued completions on the calling thread, outside the write that queued them.
