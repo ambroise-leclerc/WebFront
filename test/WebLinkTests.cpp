@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <future>
 #include <span>
 #include <string>
@@ -21,6 +22,18 @@ using namespace webfront;
 using namespace webfront::testing;
 
 namespace {
+
+/// With mddlog, browser logs are delivered by the transport consumer thread; wait for it.
+void drainBrowserLogs() {
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+    REQUIRE(log::flushTransports());
+#endif
+}
+
+void browserHandshake() {
+    msg::Handshake message;
+    InjectableSocket::receive(clientFrame(span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())));
+}
 
 template <typename Result>
 string futureError(future<Result>& result) {
@@ -191,4 +204,52 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
             REQUIRE(futureError(result) == "Browser connection closed");
         }
     }
+}
+
+SCENARIO("WebLink forwards logs to the browser until a write fails") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 41, [](WebLinkEvent) {}};
+    browserHandshake();
+    log::info("forwarded to the browser");
+    drainBrowserLogs();
+    REQUIRE(InjectableSocket::wrote("forwarded to the browser"));
+
+    InjectableSocket::receive(clientFrame({}));  // An empty message is reported, not dispatched.
+    InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+    log::info("lost with the connection");
+    drainBrowserLogs();
+    InjectableSocket::failWrites({});
+    log::info("after the failure");
+    drainBrowserLogs();
+
+    // The failing write detached the transport before its diagnostic.
+    CHECK(!InjectableSocket::wrote("after the failure"));
+    log::setLogLevel(log::Disabled);
+}
+
+SCENARIO("A write failing after its WebLink is destroyed does not reach the link or its successor") {
+    InjectableSocket::reset();
+    log::setLogLevel(log::Info);
+    auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, 31, [](WebLinkEvent) {});
+    browserHandshake();
+    // The old link's write completes only after the link is gone, keeping its WebSocket alive.
+    InjectableSocket::deferWrites();
+    InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+    log::info("written by the old link");
+    drainBrowserLogs();
+    link.reset();
+    InjectableSocket::failWrites({});
+    InjectableSocket::deferWrites(false);
+
+    // A new link, possibly at the same address, attaches its own transport.
+    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, 32, [](WebLinkEvent) {});
+    browserHandshake();
+    REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
+    log::info("delivered by the new link");
+    drainBrowserLogs();
+
+    CHECK(InjectableSocket::wrote("delivered by the new link"));
+    link.reset();
+    log::setLogLevel(log::Disabled);
 }

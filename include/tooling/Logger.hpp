@@ -25,7 +25,10 @@ const auto clogSink = [](std::string_view t) { std::clog << t << "\n"; };
 inline bool logTypeEnabled[Debug + 1];
 inline struct Sinks {
     void operator()(std::string_view t) const {
-        for (auto& s : sinks)
+        // A sink may remove itself or add sinks while running (a transport detached on a failed
+        // write): iterate over a copy so no running callback is destroyed or invalidated.
+        const auto snapshot = sinks;
+        for (auto& s : snapshot)
             if (s) s(t);
     }
     inline static std::vector<std::function<void(std::string_view)>> sinks;
