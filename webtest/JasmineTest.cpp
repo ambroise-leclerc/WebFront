@@ -6,6 +6,8 @@
 #include <tooling/PathUtils.hpp>
 #include <WebFront.hpp>
 
+#include "RejectedWebSocketServer.hpp"
+
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -68,7 +70,10 @@ public:
 #endif
 
 private:
+    // WebFront dispatches CEF subprocesses during construction. Start the fixture's
+    // networking thread only after that bootstrap has completed in the browser process.
     TestWF               webFront;
+    RejectedWebSocketServer rejectedWebSocket;
     TestState            state;
     optional<TestWF::UI> connectedUI;
     future<string> cppResult;
@@ -86,6 +91,7 @@ private:
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
     void registerCallbacks() {
+        webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
         webFront.onUIStarted([this](TestWF::UI ui) {
             connectedUI.emplace(ui);
         });
@@ -182,7 +188,7 @@ private:
         state.jasmineReported = true;
         state.cppResultObserved = cppResultMatches();
         state.passed          = overallStatus == "passed" && state.browserReady && state.jsToCppObserved && state.jsArraysObserved && state.jsTupleObserved
-                       && state.cppResultObserved;
+                       && state.cppResultObserved && rejectedWebSocket.rejectedRequests() >= 2;
         if (!failures.empty())
             log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());
