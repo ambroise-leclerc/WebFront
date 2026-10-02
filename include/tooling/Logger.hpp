@@ -2,6 +2,10 @@
 /// @author Ambroise Leclerc
 /// @brief Logging facilities
 #pragma once
+
+#if defined(WEBFRONT_USE_MDDLOG) && WEBFRONT_USE_MDDLOG
+#include "MddlogLogger.hpp" // IWYU pragma: export
+#else
 #include "../details/C++20Support.hpp" // Provides <format> and <source_location>
 #include "HexDump.hpp"
 
@@ -69,3 +73,4 @@ void infoHex(string_view text, auto container) { if (is(Info)) { log(Info, text)
 auto addSinks(auto&&... ts) { (out.sinks.push_back(std::forward<decltype(ts)>(ts)), ...); return out.sinks.size() - 1; }
 void removeSinks(auto&&... sinkIds) { ((out.sinks[sinkIds] = nullptr), ...); }
 } //namespace webfront::log
+#endif
