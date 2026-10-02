@@ -283,7 +283,7 @@ public:
     }
 
     void stop() {
-        if (started.exchange(false))
+        if (claimClose())
             socket.close();
     }
 
@@ -307,6 +307,7 @@ private:
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
     std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
+    std::mutex lifecycleMutex;
     std::atomic_bool started;
 
 private:
@@ -314,9 +315,19 @@ private:
         log::debug("WebSocket constructor");
     }
 
+    /** @brief Claims shutdown after any in-progress read initiation has finished. */
+    bool claimClose() {
+        std::lock_guard lock(lifecycleMutex);
+        return started.exchange(false);
+    }
+
     void read() {
         auto self(this->shared_from_this());
-        socket.async_read_some(Net::Buffer(readBuffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
+        const auto buffer = Net::Buffer(readBuffer);
+        // Networking TS completion handlers are not invoked inline by async_read_some().
+        std::lock_guard lock(lifecycleMutex);
+        if (!started) return;
+        socket.async_read_some(buffer, [this, self](std::error_code ec, std::size_t bytesTransferred) {
             if (ec) {
                 closeOnError(ec);
                 return;
@@ -360,7 +371,7 @@ private:
     }
 
     void closeOnError(std::error_code ec) {
-        if (!started.exchange(false))
+        if (!claimClose())
             return;
         if (ec != Net::Error::OperationAborted)
             log::error("WebSocket I/O error: {}:{}", ec.value(), ec.message());
