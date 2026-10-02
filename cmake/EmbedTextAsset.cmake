@@ -1,9 +1,13 @@
 if(NOT DEFINED INPUT)
-    message(FATAL_ERROR "INPUT must name the readable WebFront.js source")
+    message(FATAL_ERROR "INPUT must name the readable text asset source")
 endif()
 
 if(NOT DEFINED OUTPUT AND NOT DEFINED CHECK)
     message(FATAL_ERROR "Set OUTPUT to regenerate the header or CHECK to verify it")
+endif()
+
+if(NOT DEFINED STRUCT)
+    message(FATAL_ERROR "STRUCT must name the generated struct, e.g. WebFrontJsData")
 endif()
 
 # Embed the source bytes directly. Compression libraries can produce different
@@ -44,12 +48,12 @@ while(word_index LESS word_count)
     math(EXPR word_index "${word_index} + 1")
 endwhile()
 
-set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct WebFrontJsData {\n    static constexpr std::string_view encoding{};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
+set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct ${STRUCT} {\n    static constexpr std::string_view encoding{};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
 
 if(DEFINED CHECK)
     file(READ "${CHECK}" expected)
     if(NOT contents STREQUAL expected)
-        message(FATAL_ERROR "${CHECK} is stale; run the webfront-js-assets target")
+        message(FATAL_ERROR "${CHECK} is stale; run the webfront-embedded-assets target")
     endif()
 else()
     file(WRITE "${OUTPUT}" "${contents}")
