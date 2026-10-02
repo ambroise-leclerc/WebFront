@@ -15,6 +15,7 @@
 #include <mutex>
 #include <set>
 #include <span>
+#include <system_error>
 
 namespace webfront::websocket {
 using Handle = uint32_t;
@@ -281,6 +282,9 @@ public:
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
     void onMessage(std::function<void(std::span<const std::byte>)>&& handler) { binaryHandler = std::move(handler); }
     void onClose(std::function<void(CloseEvent)>&& handler) { closeHandler = std::move(handler); }
+    /// Called on every failed write, before its diagnostic and even after stop(): frames queued
+    /// before stopping still fail, and their producer must be detached rather than fed the error.
+    void onWriteError(std::function<void(std::error_code)>&& handler) { writeErrorHandler = std::move(handler); }
     void write(std::string_view text) { writeData(Frame<Net>(text)); }
     void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
     void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
@@ -297,6 +301,7 @@ private:
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
+    std::function<void(std::error_code)> writeErrorHandler;
     std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
     bool started;
 
@@ -364,6 +369,7 @@ private:
                 hasNext = !writeState->queue.empty();
             }
             if (ec) {
+                if (writeErrorHandler) writeErrorHandler(ec);
                 if (started) {
                     log::error("Error during write : ec.value() = {}", ec.value());
                     if (closeHandler) closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});

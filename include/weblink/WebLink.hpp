@@ -6,7 +6,10 @@
 #include "../tooling/Logger.hpp"
 #include "Messages.hpp"
 
+#include <array>
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <future>
 #include <limits>
 #include <map>
@@ -16,7 +19,9 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <type_traits>
+#include <utility>
 
 namespace webfront {
 
@@ -34,6 +39,17 @@ struct WebLinkEvent {
     msg::CallId callId;
 };
 
+/// Decimal text of a link or call identifier for the diagnostic context, without allocating.
+class DecimalId {
+public:
+    explicit DecimalId(std::uint64_t value) : size(static_cast<std::size_t>(std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr - digits.data())) {}
+    [[nodiscard]] std::string_view view() const { return {digits.data(), size}; }
+
+private:
+    std::array<char, 20> digits{};
+    std::size_t size;
+};
+
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
     struct PendingCall {
@@ -43,8 +59,11 @@ class WebLink {
 
     std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
     WebLinkId id;
+    DecimalId idText{id};
     bool sameEndian;
-    std::optional<decltype(log::addSinks(log::clogSink))> logSink;
+    std::mutex transportMutex;
+    std::optional<log::TransportHandle> transport; /// Browser log transport, attached at handshake
+    bool transportRetired{};                       /// No transport may attach after disconnection
     std::function<void(WebLinkEvent)> eventsHandler;
     std::span<const std::byte> undecodedData; /// Data received but not yet consumed
     std::mutex pendingMutex;
@@ -59,7 +78,11 @@ public:
 
         ws->onMessage([](std::string_view text) { log::debug("onMessage(text) :{}", text); });
         ws->onMessage([this](std::span<const std::byte> data) { onBinaryMessage(data); });
+        // Retire the transport before the WebSocket logs the write error, so it is never fed its own failure.
+        ws->onWriteError([this](std::error_code) { detachTransport(true); });
         ws->onClose([this](websocket::CloseEvent event) {
+            const log::ContextScope context(linkContext());
+            detachTransport(false);
             auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
             rejectPending(std::make_exception_ptr(std::runtime_error(message)));
         });
@@ -72,9 +95,12 @@ public:
     WebLink& operator=(WebLink&&) = delete;
 
     ~WebLink() {
+        // Remove the transport (waiting for its in-flight write) before this destructor logs or
+        // releases anything the transport captures. No closed event precedes destruction.
+        detachTransport(false);
+        const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");
         rejectPending(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
-        if (logSink) log::removeSinks(logSink.value());
     }
 
     void sendCommand(auto message) { ws->write(message.header(), message.payload()); }
@@ -100,6 +126,7 @@ public:
 
 private:
     void onBinaryMessage(std::span<const std::byte> data) {
+        const log::ContextScope context(linkContext());
         log::infoHex("onMessage(binary) :", data);
         if (data.empty()) {
             log::error("Received an empty WebFront message");
@@ -117,7 +144,7 @@ private:
     void handleHandshake(std::span<const std::byte> data) {
         auto command = msg::Handshake::castFromRawData(data);
         sendCommand(msg::Ack{});
-        logSink = log::addSinks([this](std::string_view t) { sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, t)); });
+        attachTransport();
 
         // On a mixed-endian target native matches neither, leaving sameEndian false as it should.
         constexpr bool nativeIsLittle = std::endian::native == std::endian::little;
@@ -129,8 +156,10 @@ private:
     }
 
     void handleCallFunction(std::span<const std::byte> data) {
+        auto command = msg::FunctionCall<Policy>::castFromRawData(data);
+        const DecimalId callText(command->getCallId());
+        const log::ContextScope context({.component = "cppFunction", .webLinkId = idText.view(), .direction = log::CallDirection::JsToCpp, .callId = callText.view()});
         log::info("Function called !");
-        auto command                   = msg::FunctionCall<Policy>::castFromRawData(data);
         auto [functionName, paramData] = command->getFunctionName();
         try {
             eventsHandler(WebLinkEvent(WebLinkEvent::Code::cppFunctionCalled, id, functionName, paramData, command->getCallId()));
@@ -208,6 +237,37 @@ public:
     }
 
 private:
+    /// Context for link-level logs outside any call; operationId stays empty.
+    [[nodiscard]] log::Context linkContext() const {
+        return {.component = "weblink", .webLinkId = idText.view(), .direction = log::CallDirection::None, .callId = {}};
+    }
+
+    void attachTransport() {
+        auto handle = log::addTransport([this](const log::TransportRecord& record) {
+            sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, record.text));
+        });
+        std::optional<log::TransportHandle> replaced{handle};
+        {
+            std::lock_guard lock(transportMutex);
+            if (!transportRetired) replaced = std::exchange(transport, std::move(handle));
+        }
+        if (replaced) log::removeTransport(*replaced);
+    }
+
+    /// Detach at most once; no transport attaches afterwards. A failure is reported, retiring
+    /// the transport, before the caller logs anything about it.
+    void detachTransport(bool failed) {
+        std::optional<log::TransportHandle> attached;
+        {
+            std::lock_guard lock(transportMutex);
+            transportRetired = true;
+            attached.swap(transport);
+        }
+        if (!attached) return;
+        if (failed) log::reportTransportFailure(*attached);
+        else log::removeTransport(*attached);
+    }
+
     msg::CallId nextAvailableCallId() {
         for (std::size_t attempts = 0; attempts < std::numeric_limits<msg::CallId>::max(); ++attempts) {
             const auto candidate = nextCallId++;
@@ -218,6 +278,8 @@ private:
     }
 
     void completePending(const msg::FunctionReturn<Policy>& result) {
+        const DecimalId callText(result.getCallId());
+        const log::ContextScope context({.component = "jsFunction", .webLinkId = idText.view(), .direction = log::CallDirection::CppToJs, .callId = callText.view()});
         PendingCall pending;
         {
             std::lock_guard lock(pendingMutex);

@@ -63,8 +63,11 @@ private:
     Context previous;
 };
 
-/** @brief Admission or filtering result for a diagnostic emission. */
-enum class WriteStatus : std::uint8_t { Written, Filtered, IdentifierTooLong, RingFull };
+/**
+ * @brief Admission or filtering result for a diagnostic emission.
+ * @note RingUnavailable means every pooled transport ring is claimed by other live threads.
+ */
+enum class WriteStatus : std::uint8_t { Written, Filtered, IdentifierTooLong, RingFull, RingUnavailable };
 /** @brief Identifier responsible for an IdentifierTooLong refusal. */
 enum class ContextField : std::uint8_t { None, Component, OperationId, CorrelationId };
 /** @brief Admission status and truncation information for an emission or hex-pair summary. */
@@ -108,6 +111,78 @@ void setRecordWriter(std::function<bool(const DiagnosticRecord&)> writer);
 [[nodiscard]] WriteOutcome lastWriteOutcome() noexcept;
 /** @brief Emit already formatted diagnostic text, capturing context and an explicit location. */
 [[nodiscard]] WriteOutcome tryWrite(LogType level, std::string_view text, const std::source_location& location = std::source_location::current());
+
+/** @brief Records held by each pooled producer ring of the browser transport lane. */
+inline constexpr std::size_t transportRingCapacity = 128;
+/** @brief Producer rings shared, one thread at a time, by the browser transport lane. */
+inline constexpr std::size_t transportProducerRings = 32;
+
+/**
+ * @brief Diagnostic record delivered to a transport on the consumer thread.
+ * @note Views remain valid only during the callback; copy anything kept afterwards.
+ *       Context fields are the values captured at emission, never re-read from a connection.
+ */
+struct TransportRecord {
+    std::uint8_t                                    level         = Info;
+    bool                                            timeAvailable = false;
+    std::chrono::sys_time<std::chrono::nanoseconds> time;
+    std::source_location                            location;
+    std::string_view                                message;
+    bool                                            messageTruncated = false;
+    std::string_view                                component;
+    std::string_view                                operationId;
+    std::string_view                                correlationId;
+    /** @brief Legacy rendering, `[X] HH:MM:SS | text`, with file:line for Debug. */
+    std::string_view text;
+};
+
+/** @brief Opaque transport registration; contains no module types in the header. */
+class TransportHandle {
+public:
+    /** @brief Create an empty registration handle. */
+    TransportHandle() = default;
+
+private:
+    struct Registration;
+    /** @brief Wrap one transport registration. */
+    explicit TransportHandle(std::shared_ptr<Registration> registration) : value(std::move(registration)) {}
+    std::shared_ptr<Registration> value;
+    friend TransportHandle        addTransport(std::function<void(const TransportRecord&)> write);
+    friend void                   removeTransport(const TransportHandle& handle);
+    friend void                   reportTransportFailure(const TransportHandle& handle);
+};
+
+/** @brief Counters read without any sink; fields are read together but not atomically. */
+struct TransportHealth {
+    std::uint64_t delivered        = 0;
+    std::uint64_t writeFailures    = 0;
+    std::uint64_t reportedFailures = 0;
+    std::uint64_t detachments      = 0;
+    std::uint64_t reentrantRecords = 0;
+    std::uint64_t ringRefusals     = 0;
+    std::uint64_t ringUnavailable  = 0;
+    std::uint64_t drainFailures    = 0;  ///< Drains abandoned by an exception, retried later
+    std::size_t   activeTransports = 0;
+};
+
+/**
+ * @brief Register a transport on the bounded consumer lane, starting the lane on first use.
+ * @note Producers only write their own thread's ring; one consumer thread invokes transports.
+ *       A synchronous throw detaches the transport. Handles are not RAII subscriptions:
+ *       remove the transport before destroying anything its callback captures.
+ */
+[[nodiscard]] TransportHandle addTransport(std::function<void(const TransportRecord&)> write);
+/** @brief Detach on normal disconnection; waits for quiescence outside the callback itself. */
+void removeTransport(const TransportHandle& handle);
+/** @brief Detach after a transport error; call before logging that error. */
+void reportTransportFailure(const TransportHandle& handle);
+/** @brief Observe transport health independently of every sink. */
+[[nodiscard]] TransportHealth transportHealth();
+/**
+ * @brief Wait until a consumer drain started after this call has dispatched.
+ * @return False before any transport registration, or when called on the consumer thread.
+ */
+bool flushTransports();
 
 namespace detail {
 void            write(LogType level, std::string_view text);
