@@ -321,6 +321,20 @@ SCENARIO("WebSocket header completeness follows its encoded length and mask") {
     }
 }
 
+SCENARIO("Short WebSocket headers do not interpret payload bytes as an extended length") {
+    websocket::Header header;
+    header.raw.fill(byte{0xff});
+    header.raw[1] = byte{0x82};
+
+    GIVEN("A short masked header with nonzero bytes after its length field") {
+        THEN("Only the inline length is used") {
+            REQUIRE(header.extendedLenField() == 0);
+            REQUIRE(header.payloadSize() == 2);
+            REQUIRE(header.headerSize() == 6);
+        }
+    }
+}
+
 SCENARIO("WebSocket decoder preserves split extended headers and the following frame") {
     const auto split = GENERATE(1u, 2u, 7u, 8u, 9u, 13u);
     // A masked 16-bit length frame followed by an empty masked text frame.

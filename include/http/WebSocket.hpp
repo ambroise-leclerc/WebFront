@@ -53,6 +53,7 @@ struct Header {
     [[nodiscard]] bool MASK() const { return test(1, 7); }
     [[nodiscard]] uint8_t payloadLenField() const { return std::to_integer<uint8_t>(raw[1] & std::byte(0b1111111)); }
     [[nodiscard]] uint64_t extendedLenField() const {
+        if (payloadLenField() < 126) return 0;
         auto s = [this](size_t i, uint8_t shift = 0) constexpr { return std::to_integer<uint64_t>(raw[i]) << shift; };
         return payloadLenField() == 126 ? s(2, 8) | s(3) : s(2, 56) | s(3, 48) | s(4, 40) | s(5, 32) | s(6, 24) | s(7, 16) | s(8, 8) | s(9, 0);
     }
