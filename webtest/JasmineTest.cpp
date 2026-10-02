@@ -6,6 +6,8 @@
 #include <tooling/PathUtils.hpp>
 #include <WebFront.hpp>
 
+#include "RejectedWebSocketServer.hpp"
+
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -41,7 +43,9 @@ struct TestState {
 };
 
 using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
-using TestWF = BasicWF<NetProvider, TestFS>;
+// The browser integration test needs an embedded, auto-closing window under Xvfb, so it selects
+// CEFFrontend explicitly rather than relying on webfront::WebFront's default (system) frontend.
+using TestWF = BasicWFWithFrontend<NetProvider, TestFS, frontend::CEFFrontend>;
 
 class BrowserIntegrationTest {
 public:
@@ -49,14 +53,28 @@ public:
         registerCallbacks();
     }
 
+#ifdef _MSC_VER
+    // openAndRun() never returns normally here: TestWF selects CEFFrontend explicitly, and its
+    // open() unconditionally throws in a CEF-off build (this is intentional - see #206). MSVC's
+    // inliner detects that and flags the return below as unreachable, uniquely among our compilers,
+    // turning it into an error under /WX; see the matching suppression in include/WebFront.hpp.
+    #pragma warning(push)
+    #pragma warning(disable : 4702)
+#endif
     int run() {
         log::info("Starting automated Jasmine browser integration test");
         webFront.openAndRun("SpecRunner.html");
         return result();
     }
+#ifdef _MSC_VER
+    #pragma warning(pop)
+#endif
 
 private:
+    // WebFront dispatches CEF subprocesses during construction. Start the fixture's
+    // networking thread only after that bootstrap has completed in the browser process.
     TestWF               webFront;
+    RejectedWebSocketServer rejectedWebSocket;
     TestState            state;
     optional<TestWF::UI> connectedUI;
     future<string> cppResult;
@@ -74,6 +92,7 @@ private:
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
     void registerCallbacks() {
+        webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
         webFront.onUIStarted([this](TestWF::UI ui) {
             connectedUI.emplace(ui);
         });
@@ -172,7 +191,8 @@ private:
     void reportJasmine(const string& overallStatus, const string& failures) {
         state.jasmineReported = true;
         state.cppResultObserved = cppResultMatches();
-        state.passed          = overallStatus == "passed" && state.browserReady && browserCallsObserved() && state.cppResultObserved;
+        state.passed = overallStatus == "passed" && state.browserReady && browserCallsObserved()
+                       && state.cppResultObserved && rejectedWebSocket.rejectedRequests() >= 2;
         if (!failures.empty())
             log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());
@@ -213,13 +233,15 @@ int runBrowserIntegration() {
 
 int main() {
     log::setLogLevel(log::Debug);
-    log::addSinks(log::clogSink);
+    const auto consoleSink = log::addSinks(log::clogSink);
 
+    int result = 1;
     try {
-        return runBrowserIntegration();
+        result = runBrowserIntegration();
     } catch (const exception& error) {
         log::error("Browser integration test failed: {}", error.what());
         cerr << error.what() << '\n';
-        return 1;
     }
+    log::removeSinks(consoleSink);
+    return result;
 }
