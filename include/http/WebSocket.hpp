@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -289,6 +290,16 @@ public:
     void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
     void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
     void write(Frame<Net> frame) { writeData(std::move(frame)); }
+    /// Queue a droppable frame (a diagnostic) only while fewer than maxPending frames await the
+    /// network, which may stop reading; false when refused. Other writes are never refused.
+    [[nodiscard]] bool tryWrite(std::span<const std::byte> data, std::span<const std::byte> data2, std::size_t maxPending) {
+        return enqueue(Frame<Net>(data, data2), maxPending);
+    }
+    /// Frames queued and not yet completed by the network, including the one being written.
+    [[nodiscard]] std::size_t pendingWrites() const {
+        std::lock_guard lock(writeState->mutex);
+        return writeState->queue.size();
+    }
 
 private:
     struct WriteState {
@@ -341,16 +352,20 @@ private:
         });
     }
 
-    void writeData(Frame<Net> frame) {
+    void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
+
+    bool enqueue(Frame<Net> frame, std::size_t maxPending) {
         frame.freeze();
         auto pendingFrame = std::make_shared<Frame<Net>>(std::move(frame));
         bool startWrite;
         {
             std::lock_guard lock(writeState->mutex);
+            if (writeState->queue.size() >= maxPending) return false;
             startWrite = writeState->queue.empty();
             writeState->queue.push_back(std::move(pendingFrame));
         }
         if (startWrite) writeNext();
+        return true;
     }
 
     void writeNext() {

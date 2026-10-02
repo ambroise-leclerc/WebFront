@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <condition_variable>
 #include <cstddef>
@@ -120,6 +121,7 @@ class WebLink {
     std::mutex transportMutex;
     std::optional<log::TransportHandle> transport; /// Browser log transport, attached at handshake
     bool transportRetired{};                       /// No transport may attach after disconnection
+    std::atomic<std::uint64_t> droppedLogs{0};     /// Diagnostic frames refused by the bounded write queue
     std::function<void(WebLinkEvent)> eventsHandler;
     std::span<const std::byte> undecodedData; /// Data received but not yet consumed
     std::mutex pendingMutex;
@@ -163,6 +165,11 @@ public:
         log::debug("WebLink destructor");
         rejectPending(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
     }
+
+    /// Diagnostic frames are refused once this many frames of any kind await the network.
+    static constexpr std::size_t maxPendingLogFrames = 64;
+    [[nodiscard]] std::uint64_t droppedLogFrames() const { return droppedLogs.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t pendingWrites() const { return ws->pendingWrites(); }
 
     void sendCommand(auto message) { ws->write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
@@ -305,7 +312,13 @@ private:
 
     void attachTransport() {
         auto handle = log::addTransport([this](const log::TransportRecord& record) {
-            sendCommand(msg::TextCommand(msg::TxtOpcode::debugLog, record.text));
+            // A browser that stops reading must not grow the write queue without bound: diagnostics
+            // are dropped and counted, never logged (that would feed this transport again).
+            const msg::TextCommand command(msg::TxtOpcode::debugLog, record.text);
+            if (!ws->tryWrite(command.header(), command.payload(), maxPendingLogFrames)) {
+                droppedLogs.fetch_add(1, std::memory_order_relaxed);
+                log::reportTransportOverflow();
+            }
         });
         std::optional<log::TransportHandle> replaced{handle};
         {

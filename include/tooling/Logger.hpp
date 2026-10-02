@@ -94,5 +94,6 @@ inline TransportHandle addTransport(function<void(const TransportRecord&)> write
 }
 inline void removeTransport(TransportHandle handle) { if (handle.index < out.sinks.size()) out.sinks[handle.index] = nullptr; }
 inline void reportTransportFailure(TransportHandle handle) { removeTransport(handle); }
+inline void reportTransportOverflow() noexcept {}
 } //namespace webfront::log
 #endif
