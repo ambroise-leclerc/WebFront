@@ -165,6 +165,25 @@ SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
     }
 }
 
+SCENARIO("CEF subprocess exits preserve their status and diagnostic") {
+    GIVEN("a CEF subprocess that completed successfully") {
+        const cef::CEFSubprocessExit exit{0};
+
+        THEN("the frontend can propagate a successful process status") {
+            REQUIRE(exit.exit_code() == 0);
+        }
+    }
+
+    GIVEN("a CEF subprocess that failed") {
+        const cef::CEFSubprocessExit exit{7};
+
+        THEN("the frontend can propagate the failure status and report the exit request") {
+            REQUIRE(exit.exit_code() == 7);
+            REQUIRE(std::string_view(exit.what()) == "CEF subprocess should exit");
+        }
+    }
+}
+
 SCENARIO("BasicWF initializes a custom frontend once") {
     GIVEN("two BasicWF instances sharing the same frontend type") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
