@@ -57,8 +57,10 @@ public:
     }
 
 private:
-    RejectedWebSocketServer rejectedWebSocket;
+    // WebFront dispatches CEF subprocesses during construction. Start the fixture's
+    // networking thread only after that bootstrap has completed in the browser process.
     TestWF               webFront;
+    RejectedWebSocketServer rejectedWebSocket;
     TestState            state;
     optional<TestWF::UI> connectedUI;
     future<string> cppResult;
