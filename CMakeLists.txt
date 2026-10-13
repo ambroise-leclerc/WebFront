@@ -91,7 +91,7 @@ macro(ADD_LOGICAL_TARGET target)
   endif()
 endmacro()
 
-CPMAddPackage("gh:ambroise-leclerc/networking-ts-impl@1.12.0a")
+CPMAddPackage("gh:ambroise-leclerc/stdnet#8005774eabcba7e73188c02d2eeca2ff43c4ee3a")
 
 # Only build CEF if embedded window support is enabled
 if(WEBFRONT_EMBED_CEF)
@@ -170,14 +170,13 @@ if(WEBFRONT_USE_MDDLOG)
     webfront_add_mddlog()
 endif()
 
-target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings)
+target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings stdnet::stdnet)
 target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
 # Ajouter les headers CEF à WebFront comme headers système pour éviter les warnings
 if(EXISTS "${CEF_ROOT}")
   target_include_directories(WebFront SYSTEM INTERFACE "${CEF_ROOT}")
   target_include_directories(WebFront SYSTEM INTERFACE "${CEF_ROOT}/include")
 endif()
-include_directories(SYSTEM ${networking-ts-impl_SOURCE_DIR}/include)
 
 # Only define Windows version macros when building on Windows.
 # Defining _WIN32_WINNT on non-Windows (e.g. WSL/Linux) breaks libstdc++ headers.
