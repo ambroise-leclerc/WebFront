@@ -3,6 +3,7 @@
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
 #include "../networking/BasicNetworking.hpp"
+#include "../networking/Tasks.hpp"
 #include "../tooling/HexDump.hpp"
 #include "../system/FileSystem.hpp"
 #include "BuffersPolicy.hpp"
@@ -19,10 +20,8 @@
 #include <list>
 #include <locale>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <regex>
-#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -313,137 +312,17 @@ private:
     FS fs;
 };
 
-template<typename ConnectionType>
-class Connections {
-public:
-    Connections() = default;
-    Connections(const Connections&) = delete;
-    Connections& operator=(const Connections&) = delete;
-    ~Connections() = default;
-
-    void start(std::shared_ptr<ConnectionType> connection) {
-        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        {
-            std::lock_guard lock(mutex);
-            connections.insert(connection);
-        }
-        connection->start();
-    }
-
-    void stop(std::shared_ptr<ConnectionType> connection) {
-        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        {
-            std::lock_guard lock(mutex);
-            connections.erase(connection);
-        }
-        connection->stop();
-    }
-
-    // May be called from a thread other than the one running the io_context (Server::stop()).
-    void stopAll() {
-        std::set<std::shared_ptr<ConnectionType>> stopping;
-        {
-            std::lock_guard lock(mutex);
-            stopping.swap(connections);
-        }
-        for (const auto& connection : stopping) connection->stop();
-    }
-
-private:
-    std::mutex mutex;
-    std::set<std::shared_ptr<ConnectionType>> connections;
-};
-
-enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
-
-template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
-class Connection : public std::enable_shared_from_this<Connection<Net, FS, Policy>> {
-public:
-    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
-                        RequestHandler<Net, FS>& handler)
-        : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
-        log::debug("New connection");
-    }
-    ~Connection() = default;
-    Connection(const Connection&) = delete;
-    Connection(Connection&&) = delete;
-    Connection& operator=(const Connection&) = delete;
-    Connection& operator=(Connection&&) = delete;
-
-    void start() { read(); }
-    void stop() { socket.close(); }
-
-public:
-    std::function<void(typename Net::Socket&&, Protocol)> onUpgrade;
-
-private:
-    typename Net::Socket socket;
-    Connections<Connection<Net, FS, Policy>>& connections;
-    RequestHandler<Net, FS>& requestHandler;
-    std::array<char, Policy::receptionBufferSize> buffer;
-    Request request;
-    Response response;
-    Protocol protocol = Protocol::HTTP;
-
-    void read() {
-        auto self(this->shared_from_this());
-        socket.async_read_some(Net::Buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
-            if (!ec) {
-                switch (protocol) {
-                case Protocol::HTTP:
-                    try {
-                        request.parseSomeData(buffer.data(), buffer.data() + bytesTransferred);
-                        if (request.completed()) {
-                            log::info("Received request {} on {}", request.getMethodName(), request.uri);
-                            response = requestHandler.handleRequest(request);
-                            log::info("  responding http {}", static_cast<int>(response.statusCode));
-                            write();
-                            if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;
-                        }
-                        else
-                            read();
-                    }
-                    catch (const BadRequestException&) {
-                        response = Response::getStatusResponse(Response::badRequest);
-                        write();
-                    }
-                    break;
-
-                default: log::warn("Connection is no longer in HTTP protocol. Connection::read() is disabled.");
-                }
-            }
-            else if (ec != Net::Error::OperationAborted)
-                connections.stop(self);
-        });
-    }
-
-    void write() {
-        auto self(this->shared_from_this());
-        Net::AsyncWrite(socket, response.toBuffers<Net>(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
-            if (protocol == Protocol::HTTPUpgrading) {
-                protocol = Protocol::WebSocket;
-                if (onUpgrade) onUpgrade(std::move(socket), protocol);
-            }
-            else {
-                if (!ec) socket.shutdown(Net::Socket::shutdown_both);
-                if (ec != Net::Error::OperationAborted) connections.stop(self);
-            }
-        });
-    }
-};
-
 template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
 class Server {
 public:
     Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
         : acceptor(ioContext), requestHandler(docRoot) {
-        typename Net::Resolver resolver(ioContext);
-        typename Net::Endpoint endpoint = *resolver.resolve(address, port).begin();
+        const auto endpoint = Net::Resolve(address, port);
         acceptor.open(endpoint.protocol());
         acceptor.set_option(typename Net::Acceptor::reuse_address(true));
         acceptor.bind(endpoint);
         acceptor.listen();
-        accept();
+        spawn(acceptConnections());
     }
     ~Server() { drain(); }
     Server(const Server&) = delete;
@@ -451,78 +330,62 @@ public:
     Server& operator=(const Server&) = delete;
     Server& operator=(Server&&) = delete;
 
-    /// Closes the acceptor and the HTTP connections, then runs the cancellation completions still queued in
-    /// the context. stop() only cancels: without this the operations (and the connections their handlers
-    /// own) leak. Call it, from the thread owning the context, before destroying whatever the handlers use.
-    void drain() {
-        if constexpr (requires(typename Net::IoContext& ctx, typename Net::Acceptor& acc, std::error_code& ec) {
-                          acc.close(ec);
-                          ctx.restart();
-                          ctx.poll();
-                      }) {
-            std::error_code ec;
-            closeAcceptor(ec);
-            connections.stopAll();
-            // A posted stop() task that never ran stops the context when drained: poll again until idle.
-            do ioContext.restart();
-            while (ioContext.poll() != 0);
-        }
-    }
-
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
-    
-    /// Thread-safe. With a provider able to post (Net::Post) the closing happens on the thread running the
-    /// context, as I/O objects must not be closed concurrently with their pending operations; the context
-    /// then stops. If nothing runs the context, drain() (called by the destructor) does the work.
+
+    /// Thread-safe. Cancels the acceptor and the connections, and makes run() return.
     void stop() {
         log::info("Stopping HTTP server...");
-        if constexpr (requires(typename Net::IoContext& ctx) { Net::Post(ctx, [] {}); }) {
-            Net::Post(ioContext, [this] {
-                std::error_code ec;
-                closeAcceptor(ec);
-                connections.stopAll();
-                ioContext.stop();
-            });
-        }
-        else {
-            std::error_code ec;
-            closeAcceptor(ec);
-            connections.stopAll();
-            ioContext.stop();
-        }
+        stopSource.request_stop();
+        ioContext.stop();
     }
 
-    void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)>&& handler) { upgradeHandler = std::move(handler); }
+    /// Runs the cancelled tasks to completion, so that no connection outlives the objects its handlers use.
+    /// To be called from the thread owning the context, once nothing else runs it.
+    void drain() {
+        stop();
+        ioContext.restart();
+        ioContext.run();
+    }
+
+    /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
+    void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) { upgradeHandler = std::move(handler); }
 
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
-    // stop() runs on another thread than the context: it must not close the acceptor while a completion
-    // inspects or re-arms it. Recursive because a completion may run inline from async_accept().
-    std::recursive_mutex acceptorMutex;
-    Connections<Connection<Net, FS, Policy>> connections;
+    networking::ex::inplace_stop_source stopSource;
     RequestHandler<Net, FS> requestHandler;
-    std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
+    std::function<void(typename Net::Socket&&)> upgradeHandler;
 
-    void closeAcceptor(std::error_code& ec) {
-        std::lock_guard lock(acceptorMutex);
-        if constexpr (requires { acceptor.close(ec); }) acceptor.close(ec);
-        else acceptor.close();
+    void spawn(networking::Task task) { networking::Spawn(Net::Scheduler(acceptor), stopSource.get_token(), std::move(task)); }
+
+    networking::Task acceptConnections() {
+        for (;;) spawn(serve(co_await Net::Accept(acceptor)));
     }
 
-    void accept() {
-        std::lock_guard lock(acceptorMutex);
-        acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
-            {
-                std::lock_guard acceptorLock(acceptorMutex);
-                if (!acceptor.is_open()) return;
+    networking::Task serve(typename Net::Socket socket) {
+        Request request;
+        Response response;
+        try {
+            std::array<char, Policy::receptionBufferSize> buffer;
+            while (!request.completed()) {
+                const auto received = co_await Net::Receive(socket, Net::Buffer(buffer));
+                if (received == 0) co_return;  // the client closed the connection
+                request.parseSomeData(buffer.data(), buffer.data() + received);
             }
-            auto newConnection = std::make_shared<Connection<Net, FS, Policy>>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = upgradeHandler;
-            if (!ec) connections.start(newConnection);
-            accept();
-        });
+            log::info("Received request {} on {}", request.getMethodName(), request.uri);
+            response = requestHandler.handleRequest(request);
+            log::info("  responding http {}", static_cast<int>(response.statusCode));
+        }
+        catch (const BadRequestException&) {
+            response = Response::getStatusResponse(Response::badRequest);
+        }
+        co_await Net::Send(socket, response.toBuffers<Net>());
+        if (response.statusCode != Response::switchingProtocols || stopSource.stop_requested())
+            socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
+        else if (upgradeHandler)
+            upgradeHandler(std::move(socket));
     }
 };
 

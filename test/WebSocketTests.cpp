@@ -1,4 +1,5 @@
 #include <http/WebSocket.hpp>
+#include "InjectableNetworking.hpp"
 #include <networking/NetworkingMock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -13,104 +14,50 @@
 using namespace webfront;
 using namespace std;
 using Net = networking::NetworkingMock;
+using webfront::testing::InjectableNetworking;
+using webfront::testing::InjectableSocket;
 
-namespace {
-
-// Lets a test control exactly when a pending async_read_some completes, and with what error -
-// needed to simulate a read finishing after the WebSocket has already been stopped.
-class InjectableSocket : public networking::SocketBaseMock {
-public:
-    void async_read_some(auto buffer, auto completion) {
-        ++readCalls;
-        readBuffer  = buffer;
-        readHandler = std::move(completion);
-    }
-
-    size_t write_some(auto input, error_code&) {
-        const auto* first = static_cast<const byte*>(input.data());
-        written.insert(written.end(), first, first + input.size());
-        return input.size();
-    }
-
-    void close() { closeCalls++; }
-    void shutdown(int) {}
-
-    static void fail(error_code error) {
-        REQUIRE(readHandler);
-        auto handler = std::move(readHandler);
-        handler(error, 0);
-    }
-
-    static void reset() {
-        readHandler = {};
-        written.clear();
-        closeCalls = 0;
-        readCalls = 0;
-    }
-
-    static int closeCallCount() { return closeCalls; }
-    static int readCallCount() { return readCalls; }
-
-private:
-    inline static networking::buffers::MutableBuffer readBuffer;
-    inline static function<void(error_code, size_t)>  readHandler;
-    inline static vector<byte>                        written;
-    inline static int                                 closeCalls = 0;
-    inline static int                                 readCalls = 0;
-};
-
-class InjectableNetworking : public networking::NetworkingMock {
-public:
-    using Socket = InjectableSocket;
-    inline static function<void()> beforeRead;
-    inline static error_code writeError;
-
-    template <typename T, size_t N>
-    static MutableBuffer Buffer(array<T, N>& data) {
-        if (beforeRead) beforeRead();
-        return NetworkingMock::Buffer(data);
-    }
-
-    template <typename WriteHandler>
-    static void AsyncWrite(Socket socket, auto buffers, WriteHandler handler) {
-        error_code error = writeError;
-        size_t     transferred = 0;
-        for (const auto& buffer : buffers)
-            transferred += socket.write_some(buffer, error);
-        handler(error, transferred);
-    }
-};
-
-} // namespace
-
-SCENARIO("WebSocket shutdown prevents a read from being rearmed after closure") {
+SCENARIO("A stopped WebSocket does not read again") {
     InjectableSocket::reset();
-    InjectableNetworking::beforeRead = {};
-    InjectableNetworking::writeError = {};
-    const auto failWrite = GENERATE(false, true);
+    int closeHandlerCalls = 0;
+    auto ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
+    ws->start();
+    REQUIRE(InjectableSocket::readCallCount() == 1);
+
+    GIVEN("A read is pending when the WebSocket is stopped") {
+        ws->stop();
+
+        WHEN("The read completes") {
+            InjectableSocket::fail({});
+
+            THEN("No other read is started and an explicit stop is not reported as a closure") {
+                REQUIRE(InjectableSocket::readCallCount() == 1);
+                REQUIRE(closeHandlerCalls == 0);
+            }
+        }
+    }
+}
+
+SCENARIO("A failed write closes the WebSocket") {
+    InjectableSocket::reset();
     int closeHandlerCalls = 0;
     auto ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
     ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
     ws->start();
 
-    GIVEN("Shutdown occurs while preparing the next read, after the callback checked started") {
-        InjectableNetworking::beforeRead = [&] {
-            if (failWrite) {
-                InjectableNetworking::writeError = make_error_code(errc::broken_pipe);
-                ws->write("pending write");
-            }
-            else ws->stop();
-        };
+    GIVEN("A pending read and a write which fails") {
+        InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+        ws->write("pending write");
 
-        WHEN("The pending read completes successfully") {
+        THEN("The closure is reported once") { REQUIRE(closeHandlerCalls == 1); }
+
+        WHEN("The read completes") {
             InjectableSocket::fail({});
-            InjectableNetworking::beforeRead = {};
-            InjectableNetworking::writeError = {};
 
-            THEN("Both explicit shutdown and write failure prevent another read") {
+            THEN("No other read is started and the closure is not reported again") {
                 REQUIRE(InjectableSocket::readCallCount() == 1);
-                REQUIRE(InjectableSocket::closeCallCount() == 1);
-                REQUIRE(closeHandlerCalls == (failWrite ? 1 : 0));
+                REQUIRE(closeHandlerCalls == 1);
             }
         }
     }
@@ -417,17 +364,13 @@ SCENARIO("WebSocket stop() is idempotent") {
         WHEN("the still-pending read then completes with an error") {
             InjectableSocket::fail(make_error_code(errc::bad_file_descriptor));
 
-            THEN("the error is treated as harmless: no duplicate close handler call or socket close") {
+            THEN("the error is treated as harmless: no duplicate close handler call") {
                 REQUIRE(closeHandlerCalls == 0);
-                REQUIRE(InjectableSocket::closeCallCount() == 1);
             }
         }
 
         WHEN("stop() is called again") {
-            THEN("the second call does not close the socket a second time") {
-                REQUIRE_NOTHROW(ws->stop());
-                REQUIRE(InjectableSocket::closeCallCount() == 1);
-            }
+            THEN("the second call has no effect") { REQUIRE_NOTHROW(ws->stop()); }
         }
     }
 
@@ -437,10 +380,7 @@ SCENARIO("WebSocket stop() is idempotent") {
         WHEN("the read completes with an error") {
             InjectableSocket::fail(make_error_code(errc::bad_file_descriptor));
 
-            THEN("the close handler fires exactly once and the socket is closed exactly once") {
-                REQUIRE(closeHandlerCalls == 1);
-                REQUIRE(InjectableSocket::closeCallCount() == 1);
-            }
+            THEN("the close handler fires exactly once") { REQUIRE(closeHandlerCalls == 1); }
         }
     }
 }

@@ -232,13 +232,11 @@ public:
     explicit BasicWF(WebFrontConfig config)
         : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot),
           httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
-        httpServer.onUpgrade([this](typename Net::Socket&& socket, http::Protocol protocol) {
-            if (shuttingDown) return; // late upgrade completing while the destructor drains the server
-            if (protocol == http::Protocol::WebSocket)
-                for (bool inserted = false; !inserted; ++idsCounter)
-                    std::tie(std::ignore, inserted) = webLinks.try_emplace(idsCounter, std::move(socket), idsCounter, [this](WebLinkEvent event) {
-                        onEvent(event);
-                    });
+        httpServer.onUpgrade([this](typename Net::Socket&& socket) {
+            for (bool inserted = false; !inserted; ++idsCounter)
+                std::tie(std::ignore, inserted) = webLinks.try_emplace(idsCounter, std::move(socket), idsCounter, [this](WebLinkEvent event) {
+                    onEvent(event);
+                });
         });
     }
 
@@ -253,7 +251,6 @@ public:
         if (serverThread.joinable())
             serverThread.join();
         // Complete every pending operation while the objects their handlers use are still alive.
-        shuttingDown = true;
         webLinks.clear();
         httpServer.drain();
     }
@@ -365,7 +362,6 @@ private:
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
     std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId)>> cppFunctions;
-    bool                                                                   shuttingDown{false};
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
 private:

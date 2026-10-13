@@ -20,7 +20,6 @@ concept Features = requires {
     typename T::Acceptor;
     typename T::Endpoint;
     typename T::IoContext;
-    typename T::Resolver;
     typename T::Socket;
     typename T::ConstBuffer;
     typename T::MutableBuffer;
