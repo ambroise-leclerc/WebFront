@@ -50,20 +50,20 @@ jobs:
         if: matrix.config.compiler == 'msvc'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Setup standalone CMake minimum
+      - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
         with:
-          cmake-version: '3.31.10'
+          cmake-version: '4.4.4'
 
-      - name: Install Clang 22
+      - name: Install Clang 23
         if: matrix.config.compiler == 'clang'
         run: |
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y clang-22 lld-22 lldb-22
-          echo "CC=clang-22" >> $GITHUB_ENV
-          echo "CXX=clang++-22" >> $GITHUB_ENV
+          sudo apt-get install -y clang-23 lld-23 lldb-23
+          echo "CC=clang-23" >> $GITHUB_ENV
+          echo "CXX=clang++-23" >> $GITHUB_ENV
 
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1.3
@@ -76,6 +76,26 @@ jobs:
         with:
           xcode-version: latest
         if: matrix.config.compiler == 'appleClang'
+
+      - name: Report compiler and sender support
+        shell: bash
+        run: |
+          cat > cpp_lib_senders_probe.cpp <<'EOF'
+          #include <version>
+          #ifdef __cpp_lib_senders
+          #pragma message("__cpp_lib_senders is defined")
+          #else
+          #pragma message("__cpp_lib_senders is NOT defined")
+          #endif
+          int main() {}
+          EOF
+          if [ "${{ matrix.config.compiler }}" = "msvc" ]; then
+            cl /nologo /std:c++latest /c cpp_lib_senders_probe.cpp || true
+          else
+            ${CXX:-c++} --version | head -1
+            ${CXX:-c++} -std=c++26 -fsyntax-only cpp_lib_senders_probe.cpp 2>&1 | grep -i "__cpp_lib_senders" || true
+          fi
+          rm -f cpp_lib_senders_probe.cpp
 
       - name: Install Coverage Tools
         if: matrix.config.coverage

@@ -1,16 +1,18 @@
 {
 	"name": "C++",
-	"image": "mcr.microsoft.com/devcontainers/cpp:ubuntu-24.04",
-	"runArgs": [ "--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined"],
-	"settings": {
-		"terminal.integrated.shell.linux": "/bin/bash"
+	"build": {
+		"dockerfile": "../Dockerfile",
+		"context": ".."
 	},
+	"runArgs": [ "--cap-add=SYS_PTRACE", "--security-opt", "seccomp=unconfined"],
 	"customizations": {
 		"vscode": {
+			"settings": {
+				"terminal.integrated.defaultProfile.linux": "bash"
+			},
 			"extensions": [
 				"ms-vscode.cpptools"
 			]
 		}
-	},
-	"remoteUser": "vscode"
+	}
 }

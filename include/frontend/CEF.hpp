@@ -48,6 +48,10 @@ public:
 
 #ifdef WEBFRONT_EMBED_CEF
 
+    // CEF defines macros such as NO_UNIQUE_ADDRESS and ALWAYS_INLINE that break stdexec's preprocessor
+    // machinery when it is included afterwards: pull stdnet (and stdexec) in first.
+    #include <network>
+
     #include "cef_app.h"
     #include "cef_browser.h"
     #include "cef_browser_process_handler.h"

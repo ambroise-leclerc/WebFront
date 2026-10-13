@@ -1,6 +1,6 @@
 #pragma once
 
-#include <networking/TCPNetworkingTS.hpp>
+#include <networking/TCPNetworkingStdnet.hpp>
 
 #include <array>
 #include <atomic>
@@ -12,7 +12,7 @@
 // A test-owned endpoint that accepts HTTP requests but always refuses WebSocket upgrades.
 // Binding port zero keeps the initial-connection-failure tests independent of other services.
 class RejectedWebSocketServer {
-    using Net = webfront::networking::TCPNetworkingTS;
+    using Net = webfront::networking::TCPStdnet;
 
     struct Session : std::enable_shared_from_this<Session> {
         Net::Socket                       socket;

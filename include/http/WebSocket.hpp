@@ -341,7 +341,7 @@ private:
     void read() {
         auto self(this->shared_from_this());
         const auto buffer = Net::Buffer(readBuffer);
-        // Networking TS completion handlers are not invoked inline by async_read_some().
+        // stdnet completion handlers are not invoked inline by async_read_some().
         std::lock_guard lock(lifecycleMutex);
         if (!started) return;
         socket.async_read_some(buffer, [this, self](std::error_code ec, std::size_t bytesTransferred) {

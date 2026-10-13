@@ -6,7 +6,7 @@
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
 #include "JsFunction.hpp"
-#include "networking/TCPNetworkingTS.hpp"
+#include "networking/TCPNetworkingStdnet.hpp"
 #include "system/DefaultFS.hpp"
 #include "system/IndexFS.hpp"
 #include "system/WindowsCompat.hpp"
@@ -32,7 +32,7 @@ namespace webfront {
 
 inline constexpr std::string_view version = "0.1.0";
 
-using NetProvider     = networking::TCPNetworkingTS;
+using NetProvider     = networking::TCPStdnet;
 using ConnectionError = std::runtime_error;
 
 template <typename WebFront>
