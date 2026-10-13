@@ -104,29 +104,35 @@ SCENARIO("A throwing completion handler is contained by the stdnet provider") {
 
 namespace {
 
+using Clock = std::chrono::steady_clock;
+
+// Performs one read on `socket`, appending to `received`. Returns false on error or when `deadline` passes.
+bool readSome(networking::TCPStdnet::IoContext& context, networking::TCPStdnet::Socket& socket, std::string& received,
+              Clock::time_point deadline) {
+    std::array<char, 512> buffer{};
+    bool done = false;
+    std::error_code failure;
+    socket.async_read_some(networking::TCPStdnet::Buffer(buffer), [&](std::error_code ec, std::size_t size) {
+        failure = ec;
+        if (!ec) received.append(buffer.data(), size);
+        done = true;
+    });
+    while (!done && Clock::now() < deadline) context.run_for(100ms);
+    if (!done) {
+        // Timed out: the pending read references these locals. Cancel it and run its completion before they go.
+        std::error_code ignored;
+        socket.close(ignored);
+        while (!done) context.run_for(100ms);
+        return false;
+    }
+    return !failure;
+}
+
 // Reads from `socket` until the end of the HTTP headers, failing after five seconds.
 std::string readHeaders(networking::TCPStdnet::IoContext& context, networking::TCPStdnet::Socket& socket) {
     std::string received;
-    std::array<char, 512> buffer{};
-    const auto deadline = std::chrono::steady_clock::now() + 5s;
-    while (received.find("\r\n\r\n") == std::string::npos && std::chrono::steady_clock::now() < deadline) {
-        bool done = false;
-        std::error_code failure;
-        socket.async_read_some(networking::TCPStdnet::Buffer(buffer), [&](std::error_code ec, std::size_t size) {
-            failure = ec;
-            if (!ec) received.append(buffer.data(), size);
-            done = true;
-        });
-        while (!done && std::chrono::steady_clock::now() < deadline) context.run_for(100ms);
-        if (!done) {
-            // Timed out: the pending read references this iteration's locals. Cancel it and run its
-            // completion before they go out of scope.
-            std::error_code ignored;
-            socket.close(ignored);
-            while (!done) context.run_for(100ms);
-        }
-        if (failure) break;
-    }
+    const auto deadline = Clock::now() + 5s;
+    while (received.find("\r\n\r\n") == std::string::npos && readSome(context, socket, received, deadline)) {}
     return received;
 }
 
