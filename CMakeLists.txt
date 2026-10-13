@@ -175,8 +175,10 @@ if(WEBFRONT_USE_MDDLOG)
     webfront_add_mddlog()
 endif()
 
-# Warnings are opt-in per target (WebFront_warnings) so they never leak into consuming projects.
-target_link_libraries(WebFront INTERFACE WebFront_options stdnet::stdnet)
+# Warnings, sanitizers, coverage and linker choices (WebFront_warnings, WebFront_options) are opt-in per
+# internal target, so they never leak into consuming projects; consumers only inherit the C++ standard.
+target_compile_features(WebFront INTERFACE cxx_std_23)
+target_link_libraries(WebFront INTERFACE stdnet::stdnet)
 target_include_directories(WebFront INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 # Ajouter les headers CEF à WebFront comme headers système pour éviter les warnings
 if(EXISTS "${CEF_ROOT}")

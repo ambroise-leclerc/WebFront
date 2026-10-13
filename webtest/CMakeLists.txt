@@ -4,7 +4,7 @@ include(CEFSupport)
 add_executable(webtest JasmineTest.cpp)
 
 # Link basic libraries
-target_link_libraries(webtest PRIVATE WebFront WebFront_warnings)
+target_link_libraries(webtest PRIVATE WebFront WebFront_warnings WebFront_options)
 
 # Setup complete CEF integration for webtest (same as WebFrontApp)
 # This includes:

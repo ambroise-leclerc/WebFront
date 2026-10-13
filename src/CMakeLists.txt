@@ -12,10 +12,10 @@ include(CEFSupport)
 #   ./src/HelloWorld       embedded starter page, no assets
 #   ./src/WebFrontGreeter  editable UI (src/greeter) calling a deduced C++ callback
 add_executable(HelloWorld HelloWorld.cpp)
-target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings)
+target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings WebFront_options)
 
 add_executable(WebFrontGreeter Greeter.cpp)
-target_link_libraries(WebFrontGreeter PRIVATE WebFront WebFront_warnings)
+target_link_libraries(WebFrontGreeter PRIVATE WebFront WebFront_warnings WebFront_options)
 # Publish the greeter assets to <build>/src/greeter, whatever the build configuration, so the
 # documented relative document root works. The target runs on every build and only touches files
 # that changed, so edits to index.html or greeter.mjs are picked up without relinking the executable.
@@ -29,7 +29,7 @@ add_dependencies(WebFrontGreeter WebFrontGreeterAssets)
 
 # Native-module and React demo (src/module-demo.html, src/react.html)
 add_executable(WebFrontApp ModuleDemo.cpp)
-target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings)
+target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_options)
 
 # ==============================================================================
 # CEF Integration
