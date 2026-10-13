@@ -118,6 +118,13 @@ std::string readHeaders(networking::TCPStdnet::IoContext& context, networking::T
             done = true;
         });
         while (!done && std::chrono::steady_clock::now() < deadline) context.run_for(100ms);
+        if (!done) {
+            // Timed out: the pending read references this iteration's locals. Cancel it and run its
+            // completion before they go out of scope.
+            std::error_code ignored;
+            socket.close(ignored);
+            while (!done) context.run_for(100ms);
+        }
         if (failure) break;
     }
     return received;
