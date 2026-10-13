@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 // A test-owned endpoint that accepts HTTP requests but always refuses WebSocket upgrades.
 // Binding port zero keeps the initial-connection-failure tests independent of other services.
@@ -57,6 +58,16 @@ public:
 
     ~RejectedWebSocketServer() {
         context.stop();
+        worker.join();
+        // Cancel what is still pending, then run the cancellation completions while the state their
+        // callbacks reference is alive: the operations own their sessions and leak otherwise.
+        std::error_code ignored;
+        acceptor.close(ignored);
+        for (const auto& weakSession : sessions)
+            if (auto session = weakSession.lock()) session->socket.close(ignored);
+        sessions.clear();
+        context.restart();
+        context.poll();
     }
 
     const std::string& url() const {
@@ -71,6 +82,7 @@ private:
     Net::Acceptor         acceptor;
     std::atomic<unsigned> rejected{0};
     std::string           endpointUrl;
+    std::vector<std::weak_ptr<Session>> sessions; // touched by the worker, then by the destructor after the join
     // Join before destroying the context and the state referenced by its callbacks.
     std::jthread worker;
 
@@ -78,7 +90,9 @@ private:
         acceptor.async_accept([this](std::error_code error, Net::Socket socket) {
             if (error)
                 return;
-            std::make_shared<Session>(std::move(socket), rejected)->read();
+            auto session = std::make_shared<Session>(std::move(socket), rejected);
+            sessions.push_back(session);
+            session->read();
             accept();
         });
     }
