@@ -13,6 +13,9 @@
 #include <thread>
 
 #include <atomic>
+#include <functional>
+#include <mutex>
+#include <vector>
 
 using namespace webfront;
 using namespace std::chrono_literals;
@@ -22,15 +25,70 @@ namespace {
 // Counts the live sockets handed to connections: a leaked connection keeps its socket alive.
 struct CountingNet : networking::TCPStdnet {
     static inline std::atomic<int> liveSockets{0};
-    static inline std::atomic<int> acceptedSockets{0};
+
+    // Writes on sockets accepted after armHold() are held back instead of being started, so a test can
+    // decide when an HTTP upgrade completes. They are released by IoContext::poll(), which Server::drain() runs.
+    using HeldWrite = std::function<void(std::error_code, std::size_t)>;
+    static inline std::mutex heldMutex;
+    static inline std::vector<HeldWrite> heldWrites;
+    static inline bool holdNewSockets = false; // sockets accepted while set have their writes held
+    // Reads started on sockets, and their number when the held upgrade completions were released:
+    // a WebSocket created by a late upgrade starts reading immediately.
+    static inline std::atomic<int> reads{0};
+    static inline std::atomic<int> readsAtRelease{-1};
+
+    static std::size_t heldCount() {
+        std::lock_guard lock(heldMutex);
+        return heldWrites.size();
+    }
+    static void armHold() {
+        std::lock_guard lock(heldMutex);
+        holdNewSockets = true;
+    }
+
+    template<class SocketType, class Buffers, class Handler>
+    static void AsyncWrite(SocketType& socket, Buffers&& buffers, Handler&& handler) {
+        if (socket.holdsWrites) {
+            std::lock_guard lock(heldMutex);
+            heldWrites.emplace_back(std::forward<Handler>(handler));
+            return;
+        }
+        TCPStdnet::AsyncWrite(socket, std::forward<Buffers>(buffers), std::forward<Handler>(handler));
+    }
+
+    class IoContext : public TCPStdnet::IoContext {
+    public:
+        std::size_t poll() {
+            std::vector<HeldWrite> released;
+            {
+                std::lock_guard lock(heldMutex);
+                released.swap(heldWrites);
+            }
+            if (!released.empty()) readsAtRelease = reads.load();
+            for (auto& write : released) write(std::error_code{}, 0);
+            return TCPStdnet::IoContext::poll() + released.size();
+        }
+    };
 
     class Socket : public TCPStdnet::Socket {
     public:
+        bool holdsWrites = false;
+
         explicit Socket(IoContext& ctx) noexcept : TCPStdnet::Socket(ctx) { ++liveSockets; }
-        Socket(TCPStdnet::Socket&& s) noexcept : TCPStdnet::Socket(std::move(s)) { ++liveSockets; }
-        Socket(Socket&& other) noexcept : TCPStdnet::Socket(std::move(other)) { ++liveSockets; }
+        Socket(TCPStdnet::Socket&& s) noexcept : TCPStdnet::Socket(std::move(s)) {
+            ++liveSockets;
+            std::lock_guard lock(heldMutex);
+            holdsWrites = holdNewSockets;
+        }
+        Socket(Socket&& other) noexcept : TCPStdnet::Socket(std::move(other)), holdsWrites(other.holdsWrites) { ++liveSockets; }
         Socket& operator=(Socket&&) noexcept = default;
         ~Socket() { --liveSockets; }
+
+        template<class Buffers, class Handler>
+        void async_read_some(const Buffers& buffers, Handler&& handler) {
+            ++reads;
+            TCPStdnet::Socket::async_read_some(buffers, std::forward<Handler>(handler));
+        }
     };
 
     class Acceptor : public TCPStdnet::Acceptor {
@@ -40,7 +98,6 @@ struct CountingNet : networking::TCPStdnet {
         template<class Handler>
         void async_accept(Handler&& handler) {
             TCPStdnet::Acceptor::async_accept([h = std::forward<Handler>(handler)](std::error_code ec, TCPStdnet::Socket&& s) mutable {
-                if (!ec) ++acceptedSockets;
                 h(ec, Socket(std::move(s)));
             });
         }
@@ -139,9 +196,9 @@ std::string readHeaders(networking::TCPStdnet::IoContext& context, networking::T
 } // namespace
 
 SCENARIO("Destroying WebFront closes established WebSockets and completes pending upgrades") {
-    GIVEN("A WebFront with an established WebSocket and a second upgrade request in flight") {
+    GIVEN("A WebFront with an established WebSocket and a second upgrade whose completion is held back") {
         const auto port = freePort();
-        CountingNet::acceptedSockets = 0;
+        CountingNet::readsAtRelease = -1;
         networking::TCPStdnet::IoContext clientContext;
         networking::TCPStdnet::Resolver resolver(clientContext);
         const auto endpoint = *resolver.resolve("127.0.0.1", port).begin();
@@ -158,15 +215,20 @@ SCENARIO("Destroying WebFront closes established WebSockets and completes pendin
             // The 101 response proves the first WebSocket is established before anything is shut down.
             // CHECK, not REQUIRE: the server thread must still be stopped and joined on failure.
             CHECK(readHeaders(clientContext, first).starts_with("HTTP/1.1 101"));
+            // Hold the second upgrade's response write: its completion (which hands the socket to a new
+            // WebLink) is released only by the drain that runs while WebFront is being destroyed.
+            CountingNet::armHold();
             second.connect(endpoint);
             second.send(std::as_bytes(std::span(request)));
-            // Wait until the server has accepted the second connection; its upgrade may still be in flight
-            // at stop() (that interleaving is timing dependent and is also covered by the sanitizer jobs).
-            for (int i = 0; i < 500 && CountingNet::acceptedSockets.load() < 2; ++i) std::this_thread::sleep_for(10ms);
-            CHECK(CountingNet::acceptedSockets.load() >= 2);
+            for (int i = 0; i < 500 && CountingNet::heldCount() == 0; ++i) std::this_thread::sleep_for(10ms);
+            CHECK(CountingNet::heldCount() > 0);
             webFront.stop();
             serverThread.join();
         }
-        THEN("no socket is leaked and no handler touches destroyed state") { REQUIRE(CountingNet::liveSockets.load() == 0); }
+        THEN("no socket is leaked and the late upgrade creates no WebLink") {
+            REQUIRE(CountingNet::liveSockets.load() == 0);
+            REQUIRE(CountingNet::readsAtRelease.load() >= 0);
+            REQUIRE(CountingNet::reads.load() == CountingNet::readsAtRelease.load());
+        }
     }
 }
