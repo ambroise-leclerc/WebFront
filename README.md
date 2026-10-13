@@ -29,7 +29,7 @@ Relevant options are:
 - `ENABLE_TESTING=ON`: build Catch2 and Jasmine test targets.
 - `ENABLE_COVERAGE=ON`: instrument the C++ tests with GCC/Clang coverage flags.
 
-CPM downloads Networking TS during configuration. It also downloads Catch2 when `ENABLE_TESTING=ON` and CEF when
+CPM downloads stdnet (and stdexec, as no standard library provides `std::execution` yet) during configuration. It also downloads Catch2 when `ENABLE_TESTING=ON` and CEF when
 `WEBFRONT_EMBED_CEF=ON`.
 
 ## Minimal native-module demo
