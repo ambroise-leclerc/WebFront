@@ -150,10 +150,10 @@ The Jasmine specs are native ES modules. They prove relative module loading, bot
 
 ## Bridge basics
 
-- JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++; the call returns a Promise.
-- C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript. `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`; calls without a result type are fire-and-forget.
+- The two directions differ. JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++; the call always returns a Promise, even for a `void` C++ callback, so await it or handle its rejection (an ignored rejected Promise raises an unhandled rejection).
+- C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript. Only the untyped form is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.
 - Bridge parameters include scalars, strings, tuples and numeric typed arrays. C++ `std::vector`, `std::array` and `std::span` map to the matching JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups.
-- Missing functions, callback exceptions, malformed returns and disconnected browsers reject the corresponding completion.
+- Missing functions, callback exceptions, malformed returns and disconnected browsers complete a C++ future exceptionally (`get()` throws) and reject a JavaScript Promise.
 
 ## Advanced: frontend aliases
 
