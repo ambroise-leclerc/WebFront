@@ -10,6 +10,7 @@
 #pragma once
 
 #include "BasicNetworking.hpp"
+#include "../tooling/Logger.hpp"
 
 #include <network>
 
@@ -51,12 +52,21 @@ struct submit_holder {
 
     template <class... Vs>
     void finish(std::error_code ec, Vs&&... vs) noexcept {
-        if constexpr (sizeof...(Vs) > 0) {
-            handler(ec, std::forward<Vs>(vs)...);
-        } else if constexpr (std::is_invocable_v<Handler&, std::error_code, std::size_t>) {
-            handler(ec, std::size_t{0}); // failure: values default to "nothing transferred"
-        } else {
-            handler(ec);
+        // A throwing handler must not skip the delete (leak) nor escape this noexcept function.
+        try {
+            if constexpr (sizeof...(Vs) > 0) {
+                handler(ec, std::forward<Vs>(vs)...);
+            } else if constexpr (std::is_invocable_v<Handler&, std::error_code, std::size_t>) {
+                handler(ec, std::size_t{0}); // failure: values default to "nothing transferred"
+            } else {
+                handler(ec);
+            }
+        }
+        catch (const std::exception& e) {
+            webfront::log::error("Exception escaped an asynchronous completion handler: {}", e.what());
+        }
+        catch (...) {
+            webfront::log::error("Unknown exception escaped an asynchronous completion handler");
         }
         delete this;
     }
@@ -72,6 +82,11 @@ void submit(Sndr&& sndr, Handler&& handler) {
 
 // End of stream, reported as an error to keep the Networking TS behaviour WebFront relies on.
 inline std::error_code eof() noexcept { return std::make_error_code(std::errc::connection_reset); }
+
+// A successful zero-byte read into a non-empty buffer is stdnet's end of stream.
+inline bool isEndOfStream(std::error_code ec, std::size_t transferred, std::size_t bufferSize) noexcept {
+    return !ec && transferred == 0 && bufferSize > 0;
+}
 
 } // namespace stdnet_bridge
 
@@ -95,7 +110,7 @@ public:
             stdnet_bridge::submit(::stdnet::async_receive(*this, buffers),
                                   [h = std::forward<Handler>(handler), size = ::stdnet::buffer_size(buffers)](
                                       std::error_code ec, std::size_t n) mutable {
-                                      if (!ec && n == 0 && size > 0) ec = stdnet_bridge::eof();
+                                      if (stdnet_bridge::isEndOfStream(ec, n, size)) ec = stdnet_bridge::eof();
                                       h(ec, n);
                                   });
         }

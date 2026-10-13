@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <stdexcept>
+
 #include <atomic>
 
 using namespace webfront;
@@ -68,5 +70,25 @@ SCENARIO("Server shutdown releases pending asynchronous operations") {
             server.stop();
         }
         THEN("no connection or socket is leaked once the server is destroyed") { REQUIRE(CountingNet::liveSockets.load() == 0); }
+    }
+}
+
+SCENARIO("A throwing completion handler is contained by the stdnet provider") {
+    GIVEN("A pending accept whose handler throws") {
+        const auto port = freePort();
+        networking::TCPStdnet::IoContext context;
+        networking::TCPStdnet::Acceptor acceptor(context);
+        networking::TCPStdnet::Resolver resolver(context);
+        auto endpoint = *resolver.resolve("127.0.0.1", port).begin();
+        acceptor.open(endpoint.protocol());
+        acceptor.bind(endpoint);
+        acceptor.listen();
+        acceptor.async_accept([](std::error_code, networking::TCPStdnet::Socket) { throw std::runtime_error("handler failure"); });
+
+        WHEN("a client connects and the context runs") {
+            networking::TCPStdnet::Socket client(context);
+            client.connect(endpoint);
+            THEN("the exception does not escape the context") { REQUIRE_NOTHROW(context.run_one()); }
+        }
     }
 }

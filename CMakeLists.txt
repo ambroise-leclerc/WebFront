@@ -91,7 +91,7 @@ macro(ADD_LOGICAL_TARGET target)
   endif()
 endmacro()
 
-CPMAddPackage("gh:ambroise-leclerc/stdnet#main")
+CPMAddPackage("gh:ambroise-leclerc/stdnet#8005774eabcba7e73188c02d2eeca2ff43c4ee3a")
 
 # Only build CEF if embedded window support is enabled
 if(WEBFRONT_EMBED_CEF)
