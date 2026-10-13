@@ -434,7 +434,21 @@ public:
         acceptor.listen();
         accept();
     }
-    ~Server() = default;
+    ~Server() {
+        // stop() cancels pending operations, but their completions only run inside the io_context.
+        // Without a final drain the operations (and the connections their handlers own) leak.
+        if constexpr (requires(typename Net::IoContext& ctx, typename Net::Acceptor& acc, std::error_code& ec) {
+                          acc.close(ec);
+                          ctx.restart();
+                          ctx.poll();
+                      }) {
+            std::error_code ec;
+            acceptor.close(ec);
+            connections.stopAll();
+            ioContext.restart();
+            ioContext.poll();
+        }
+    }
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
