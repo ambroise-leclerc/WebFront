@@ -16,13 +16,16 @@ target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings)
 
 add_executable(WebFrontGreeter Greeter.cpp)
 target_link_libraries(WebFrontGreeter PRIVATE WebFront WebFront_warnings)
-# Copy the greeter assets to <build>/src/greeter so the documented relative document root works.
-add_custom_command(TARGET WebFrontGreeter POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/greeter" "$<TARGET_FILE_DIR:WebFrontGreeter>/greeter"
+# Publish the greeter assets to <build>/src/greeter, whatever the build configuration, so the
+# documented relative document root works. The target runs on every build and only touches files
+# that changed, so edits to index.html or greeter.mjs are picked up without relinking the executable.
+add_custom_target(WebFrontGreeterAssets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/greeter" "${CMAKE_CURRENT_BINARY_DIR}/greeter"
     COMMENT "Copying greeter assets"
     VERBATIM
 )
+add_dependencies(WebFrontGreeter WebFrontGreeterAssets)
 
 # Native-module and React demo (src/module-demo.html, src/react.html)
 add_executable(WebFrontApp ModuleDemo.cpp)
