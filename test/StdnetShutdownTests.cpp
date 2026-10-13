@@ -6,7 +6,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <span>
+#include <array>
 #include <chrono>
+#include <string>
 #include <stdexcept>
 #include <thread>
 
@@ -20,6 +22,7 @@ namespace {
 // Counts the live sockets handed to connections: a leaked connection keeps its socket alive.
 struct CountingNet : networking::TCPStdnet {
     static inline std::atomic<int> liveSockets{0};
+    static inline std::atomic<int> acceptedSockets{0};
 
     class Socket : public TCPStdnet::Socket {
     public:
@@ -37,6 +40,7 @@ struct CountingNet : networking::TCPStdnet {
         template<class Handler>
         void async_accept(Handler&& handler) {
             TCPStdnet::Acceptor::async_accept([h = std::forward<Handler>(handler)](std::error_code ec, TCPStdnet::Socket&& s) mutable {
+                if (!ec) ++acceptedSockets;
                 h(ec, Socket(std::move(s)));
             });
         }
@@ -98,9 +102,33 @@ SCENARIO("A throwing completion handler is contained by the stdnet provider") {
     }
 }
 
+namespace {
+
+// Reads from `socket` until the end of the HTTP headers, failing after five seconds.
+std::string readHeaders(networking::TCPStdnet::IoContext& context, networking::TCPStdnet::Socket& socket) {
+    std::string received;
+    std::array<char, 512> buffer{};
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (received.find("\r\n\r\n") == std::string::npos && std::chrono::steady_clock::now() < deadline) {
+        bool done = false;
+        std::error_code failure;
+        socket.async_read_some(networking::TCPStdnet::Buffer(buffer), [&](std::error_code ec, std::size_t size) {
+            failure = ec;
+            if (!ec) received.append(buffer.data(), size);
+            done = true;
+        });
+        while (!done && std::chrono::steady_clock::now() < deadline) context.run_for(100ms);
+        if (failure) break;
+    }
+    return received;
+}
+
+} // namespace
+
 SCENARIO("Destroying WebFront closes established WebSockets and completes pending upgrades") {
     GIVEN("A WebFront with an established WebSocket and a second upgrade request in flight") {
         const auto port = freePort();
+        CountingNet::acceptedSockets = 0;
         networking::TCPStdnet::IoContext clientContext;
         networking::TCPStdnet::Resolver resolver(clientContext);
         const auto endpoint = *resolver.resolve("127.0.0.1", port).begin();
@@ -114,11 +142,16 @@ SCENARIO("Destroying WebFront closes established WebSockets and completes pendin
             std::thread serverThread([&webFront] { webFront.run(); });
             first.connect(endpoint);
             first.send(std::as_bytes(std::span(request)));
-            for (int i = 0; i < 500 && CountingNet::liveSockets.load() == 0; ++i) std::this_thread::sleep_for(10ms);
-            std::this_thread::sleep_for(100ms); // upgrade response written, link created
+            // The 101 response proves the first WebSocket is established before anything is shut down.
+            // CHECK, not REQUIRE: the server thread must still be stopped and joined on failure.
+            CHECK(readHeaders(clientContext, first).starts_with("HTTP/1.1 101"));
             second.connect(endpoint);
             second.send(std::as_bytes(std::span(request)));
-            webFront.stop(); // the second upgrade may still be in flight
+            // Wait until the server has accepted the second connection; its upgrade may still be in flight
+            // at stop() (that interleaving is timing dependent and is also covered by the sanitizer jobs).
+            for (int i = 0; i < 500 && CountingNet::acceptedSockets.load() < 2; ++i) std::this_thread::sleep_for(10ms);
+            CHECK(CountingNet::acceptedSockets.load() >= 2);
+            webFront.stop();
             serverThread.join();
         }
         THEN("no socket is leaked and no handler touches destroyed state") { REQUIRE(CountingNet::liveSockets.load() == 0); }

@@ -88,7 +88,9 @@ private:
 
     void accept() {
         acceptor.async_accept([this](std::error_code error, Net::Socket socket) {
-            if (error)
+            // A successful completion can still be queued when the destructor closes the acceptor: do not
+            // start a session nobody would cancel.
+            if (error || !acceptor.is_open())
                 return;
             auto session = std::make_shared<Session>(std::move(socket), rejected);
             sessions.push_back(session);
