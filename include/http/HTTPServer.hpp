@@ -19,6 +19,7 @@
 #include <list>
 #include <locale>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -317,29 +318,39 @@ class Connections {
 public:
     Connections() = default;
     Connections(const Connections&) = delete;
-    Connections(Connections&&) = default;
     Connections& operator=(const Connections&) = delete;
-    Connections& operator=(Connections&&) = default;
     ~Connections() = default;
 
     void start(std::shared_ptr<ConnectionType> connection) {
         log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.insert(connection);
+        {
+            std::lock_guard lock(mutex);
+            connections.insert(connection);
+        }
         connection->start();
     }
 
     void stop(std::shared_ptr<ConnectionType> connection) {
         log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.erase(connection);
+        {
+            std::lock_guard lock(mutex);
+            connections.erase(connection);
+        }
         connection->stop();
     }
 
+    // May be called from a thread other than the one running the io_context (Server::stop()).
     void stopAll() {
-        for (auto connection : connections) connection->stop();
-        connections.clear();
+        std::set<std::shared_ptr<ConnectionType>> stopping;
+        {
+            std::lock_guard lock(mutex);
+            stopping.swap(connections);
+        }
+        for (const auto& connection : stopping) connection->stop();
     }
 
 private:
+    std::mutex mutex;
     std::set<std::shared_ptr<ConnectionType>> connections;
 };
 
@@ -434,9 +445,16 @@ public:
         acceptor.listen();
         accept();
     }
-    ~Server() {
-        // stop() cancels pending operations, but their completions only run inside the io_context.
-        // Without a final drain the operations (and the connections their handlers own) leak.
+    ~Server() { drain(); }
+    Server(const Server&) = delete;
+    Server(Server&&) = delete;
+    Server& operator=(const Server&) = delete;
+    Server& operator=(Server&&) = delete;
+
+    /// Closes the acceptor and the HTTP connections, then runs the cancellation completions still queued in
+    /// the context. stop() only cancels: without this the operations (and the connections their handlers
+    /// own) leak. Call it, from the thread owning the context, before destroying whatever the handlers use.
+    void drain() {
         if constexpr (requires(typename Net::IoContext& ctx, typename Net::Acceptor& acc, std::error_code& ec) {
                           acc.close(ec);
                           ctx.restart();
@@ -449,10 +467,6 @@ public:
             ioContext.poll();
         }
     }
-    Server(const Server&) = delete;
-    Server(Server&&) = delete;
-    Server& operator=(const Server&) = delete;
-    Server& operator=(Server&&) = delete;
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
