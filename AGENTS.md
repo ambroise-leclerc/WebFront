@@ -2,13 +2,13 @@
 
 ## Project goal and current maturity
 
-WebFront is a C++23 header-only library for serving a browser UI from a C++ application. It embeds an HTTP/WebSocket server and exposes a binary bridge in both directions:
+WebFront is a C++23 header-only library for serving a browser UI from a C++ application. It embeds an HTTP/WebSocket server and exposes an asynchronous binary bridge for calls in both directions. The two directions are not symmetric:
 
-- JavaScript calls registered C++ callbacks with `webFront.cppFunction(name)(...)`, which returns a Promise.
-- C++ calls browser functions with `ui.jsFunction(name)(arguments...)`; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.
+- JavaScript calls registered C++ callbacks with `webFront.cppFunction(name)(...)`. This always returns a Promise, even for a `void` C++ callback, and the Promise rejects on failure, so an ignored Promise can cause an unhandled rejection.
+- C++ calls browser functions with `ui.jsFunction(name)(arguments...)`, which is fire-and-forget and ignores the result, or with `ui.jsFunction<R>(name)(arguments...)`, which returns a `std::future<R>`. Only the untyped C++ form is fire-and-forget.
 - `webFront.ready` resolves after the WebSocket handshake acknowledgement and rejects if the initial connection fails or closes.
 
-The project is an experimental foundation, not a production-ready UI framework. The newcomer path is `webfront::WebFront app; app.show();` (examples `HelloWorld` and `WebFrontGreeter`); the minimum automated demonstration is the native ES-module example plus the Jasmine browser integration test. General DOM abstractions are future work.
+The project is an experimental foundation, not a production-ready UI framework. The newcomer path is `webfront::WebFront app; app.show();` (examples `HelloWorld` and `WebFrontGreeter`); the minimum automated demonstration is the native ES-module example plus the Jasmine browser integration test. General DOM abstractions and cancellation of outstanding results are future work.
 
 ## Repository map
 
@@ -78,7 +78,7 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 Filesystems implement `open(std::filesystem::path) -> std::optional<fs::File>` and are composed with `fs::Multi<>`; the first provider returning a file wins. `NativeDebugFS` is development-only and must not be presented as a production sandbox.
 
-Bridge calls are asynchronous. An untyped `jsFunction(name)(...)` call is fire-and-forget; typed calls and `cppFunction()` return a `std::future`/Promise whose result types are limited to the bridge's scalar, string, tuple, and numeric typed-array types. Callback signatures are deduced for ordinary lambdas, function pointers, and `std::function`; generic lambdas and overloaded call operators need explicit `cppFunction<R, Args...>`. Do not imply that results are synchronous, or that richer objects cross the bridge. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.
+Bridge calls are asynchronous, and the two directions differ. `webFront.cppFunction(name)(...)` always returns a JavaScript Promise (also for `void` callbacks), so tests and examples must await or handle it. On the C++ side, only the untyped `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`. On missing functions, callback exceptions, malformed returns, and disconnects, a C++ future completes exceptionally (`get()` throws) and a JavaScript Promise rejects. Result types are limited to the bridge's scalar, string, tuple, and numeric typed-array types. Callback signatures are deduced for ordinary lambdas, function pointers, and `std::function`; generic lambdas and overloaded call operators need explicit `cppFunction<R, Args...>`. Do not write tests or documentation that present JavaScript calls as fire-and-forget, imply an untyped C++ call returns a value, or suggest that richer objects cross the bridge. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.
 
 The embedded `WebFront.js` wire format and C++ `Messages.hpp` implementation must evolve together. Any protocol change requires encoding/decoding unit tests and a real-browser regression test.
 
