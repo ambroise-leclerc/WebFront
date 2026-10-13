@@ -2,7 +2,7 @@
 
 WebFront is an experimental C++23 header-only library for browser-based user interfaces. It serves local HTML/JavaScript through an embedded HTTP server and connects the page to C++ over WebSocket.
 
-The current baseline demonstrates asynchronous, fire-and-forget calls in both directions:
+The current baseline demonstrates asynchronous calls in both directions (JavaScript calls always return a Promise; untyped C++ calls are fire-and-forget):
 
 - JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++.
 - C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript.
