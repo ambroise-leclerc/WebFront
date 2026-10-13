@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
     ccache \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Installation de GCC 16 (comme dans GitHub Actions)
+# Installation de GCC 16 (dernière 16.x du PPA, comme dans GitHub Actions)
 RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && apt-get update \
     && apt-get install -y gcc-16 g++-16 \
@@ -23,14 +23,14 @@ RUN add-apt-repository -y ppa:ubuntu-toolchain-r/test \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-16 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Installation de LLVM et Clang 22 (comme dans GitHub Actions)
+# Installation de LLVM et Clang 23 (comme dans GitHub Actions)
 RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm-archive-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" > /etc/apt/sources.list.d/llvm.list \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" > /etc/apt/sources.list.d/llvm.list \
     && apt-get update \
-    && apt-get install -y clang-22 lld-22 lldb-22 libclang-22-dev \
-    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-22 100 \
-    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-22 100 \
-    && update-alternatives --install /usr/bin/lldb lldb /usr/bin/lldb-22 100 \
+    && apt-get install -y clang-23 lld-23 lldb-23 libclang-23-dev \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-23 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-23 100 \
+    && update-alternatives --install /usr/bin/lldb lldb /usr/bin/lldb-23 100 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Installation d'un CMake récent (le paquet apt de Ubuntu 24.04 est trop ancien pour le projet)
@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y \
     libfmt-dev \
     libspdlog-dev \
     gdb \
-    llvm-22 \
+    llvm-23 \
     make \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

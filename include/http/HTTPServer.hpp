@@ -19,6 +19,7 @@
 #include <list>
 #include <locale>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <set>
@@ -317,29 +318,39 @@ class Connections {
 public:
     Connections() = default;
     Connections(const Connections&) = delete;
-    Connections(Connections&&) = default;
     Connections& operator=(const Connections&) = delete;
-    Connections& operator=(Connections&&) = default;
     ~Connections() = default;
 
     void start(std::shared_ptr<ConnectionType> connection) {
         log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.insert(connection);
+        {
+            std::lock_guard lock(mutex);
+            connections.insert(connection);
+        }
         connection->start();
     }
 
     void stop(std::shared_ptr<ConnectionType> connection) {
         log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.erase(connection);
+        {
+            std::lock_guard lock(mutex);
+            connections.erase(connection);
+        }
         connection->stop();
     }
 
+    // May be called from a thread other than the one running the io_context (Server::stop()).
     void stopAll() {
-        for (auto connection : connections) connection->stop();
-        connections.clear();
+        std::set<std::shared_ptr<ConnectionType>> stopping;
+        {
+            std::lock_guard lock(mutex);
+            stopping.swap(connections);
+        }
+        for (const auto& connection : stopping) connection->stop();
     }
 
 private:
+    std::mutex mutex;
     std::set<std::shared_ptr<ConnectionType>> connections;
 };
 
@@ -434,20 +445,52 @@ public:
         acceptor.listen();
         accept();
     }
-    ~Server() = default;
+    ~Server() { drain(); }
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
     Server& operator=(Server&&) = delete;
 
+    /// Closes the acceptor and the HTTP connections, then runs the cancellation completions still queued in
+    /// the context. stop() only cancels: without this the operations (and the connections their handlers
+    /// own) leak. Call it, from the thread owning the context, before destroying whatever the handlers use.
+    void drain() {
+        if constexpr (requires(typename Net::IoContext& ctx, typename Net::Acceptor& acc, std::error_code& ec) {
+                          acc.close(ec);
+                          ctx.restart();
+                          ctx.poll();
+                      }) {
+            std::error_code ec;
+            closeAcceptor(ec);
+            connections.stopAll();
+            // A posted stop() task that never ran stops the context when drained: poll again until idle.
+            do ioContext.restart();
+            while (ioContext.poll() != 0);
+        }
+    }
+
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
     
+    /// Thread-safe. With a provider able to post (Net::Post) the closing happens on the thread running the
+    /// context, as I/O objects must not be closed concurrently with their pending operations; the context
+    /// then stops. If nothing runs the context, drain() (called by the destructor) does the work.
     void stop() {
         log::info("Stopping HTTP server...");
-        acceptor.close();
-        connections.stopAll();
-        ioContext.stop();
+        if constexpr (requires(typename Net::IoContext& ctx) { Net::Post(ctx, [] {}); }) {
+            Net::Post(ioContext, [this] {
+                std::error_code ec;
+                closeAcceptor(ec);
+                connections.stopAll();
+                ioContext.stop();
+            });
+        }
+        else {
+            std::error_code ec;
+            closeAcceptor(ec);
+            connections.stopAll();
+            ioContext.stop();
+        }
     }
 
     void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)>&& handler) { upgradeHandler = std::move(handler); }
@@ -455,13 +498,26 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
+    // stop() runs on another thread than the context: it must not close the acceptor while a completion
+    // inspects or re-arms it. Recursive because a completion may run inline from async_accept().
+    std::recursive_mutex acceptorMutex;
     Connections<Connection<Net, FS, Policy>> connections;
     RequestHandler<Net, FS> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
+    void closeAcceptor(std::error_code& ec) {
+        std::lock_guard lock(acceptorMutex);
+        if constexpr (requires { acceptor.close(ec); }) acceptor.close(ec);
+        else acceptor.close();
+    }
+
     void accept() {
+        std::lock_guard lock(acceptorMutex);
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
-            if (!acceptor.is_open()) return;
+            {
+                std::lock_guard acceptorLock(acceptorMutex);
+                if (!acceptor.is_open()) return;
+            }
             auto newConnection = std::make_shared<Connection<Net, FS, Policy>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
