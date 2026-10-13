@@ -160,8 +160,10 @@ public:
         // for its in-flight write) before logging or releasing what it captures. No closed event
         // precedes destruction.
         handlers->retire();
-        ws->stop(); // nothing owns the connection any more: close it so its pending read can complete
         detachTransport(false);
+        // Only once the transport is quiescent (no log write can still start on the socket), close the
+        // connection: nothing owns it any more and its pending read must be able to complete.
+        ws->stop();
         const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");
         rejectPending(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
