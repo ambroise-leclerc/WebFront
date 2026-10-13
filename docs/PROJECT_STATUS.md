@@ -30,7 +30,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 ## Implemented baseline
 
 - The default example is the native ES-module demo. Its module graph uses relative imports, calls C++, and exposes a served JavaScript function that C++ calls after module readiness.
-- Registered C++ callbacks own their callable safely. Calls remain asynchronous and return no value across the bridge.
+- Registered C++ callbacks own their callable safely. Calls are asynchronous: untyped calls return no value, typed calls return a future or Promise (see below).
 - Catch2 covers `.mjs` MIME handling.
 - Jasmine native-module specs report their final status to C++. The executable verifies both bridge directions, asks JavaScript to close the CEF window, and returns nonzero on any failed condition.
 - The browser integration is a timeout-bounded CTest test for CEF-enabled Linux builds and runs under Xvfb in a focused CI job.

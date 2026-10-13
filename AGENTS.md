@@ -2,12 +2,12 @@
 
 ## Project goal and current maturity
 
-WebFront is a C++23 header-only library for serving a browser UI from a C++ application. It embeds an HTTP/WebSocket server and exposes a binary bridge for fire-and-forget calls in both directions:
+WebFront is a C++23 header-only library for serving a browser UI from a C++ application. It embeds an HTTP/WebSocket server and exposes an asynchronous binary bridge for calls in both directions. The two directions are not symmetric:
 
-- JavaScript calls registered C++ callbacks with `webFront.cppFunction(name)`.
-- C++ calls browser functions with `ui.jsFunction(name)(arguments...)`.
+- JavaScript calls registered C++ callbacks with `webFront.cppFunction(name)(...)`. This always returns a Promise, even for a `void` C++ callback, and the Promise rejects on failure, so an ignored Promise can cause an unhandled rejection.
+- C++ calls browser functions with `ui.jsFunction(name)(arguments...)`, which is fire-and-forget and ignores the result, or with `ui.jsFunction<R>(name)(arguments...)`, which returns a `std::future<R>`. Only the untyped C++ form is fire-and-forget.
 
-The project is an experimental foundation, not a production-ready UI framework. The minimum supported demonstration is the native ES-module example plus the automated Jasmine browser integration test. Function return values, remote exception propagation, and general DOM abstractions are future work.
+The project is an experimental foundation, not a production-ready UI framework. The minimum supported demonstration is the native ES-module example plus the automated Jasmine browser integration test. General DOM abstractions and cancellation of outstanding results are future work.
 
 ## Repository map
 
@@ -67,7 +67,7 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 Filesystems implement `open(std::filesystem::path) -> std::optional<fs::File>` and are composed with `fs::Multi<>`; the first provider returning a file wins. `NativeDebugFS` is development-only and must not be presented as a production sandbox.
 
-Bridge calls are asynchronous and fire-and-forget. Do not write tests or documentation that imply `cppFunction()` returns the C++ result to JavaScript, or that `JsFunction::operator()` returns a JavaScript value. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.
+Bridge calls are asynchronous, and the two directions differ. `webFront.cppFunction(name)(...)` always returns a JavaScript Promise (also for `void` callbacks), so tests and examples must await or handle it. On the C++ side, only the untyped `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`. On missing functions, callback exceptions, malformed returns, and disconnects, a C++ future completes exceptionally (`get()` throws) and a JavaScript Promise rejects. Do not write tests or documentation that present JavaScript calls as fire-and-forget or imply an untyped C++ call returns a value. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.
 
 The embedded `WebFront.js` wire format and C++ `Messages.hpp` implementation must evolve together. Any protocol change requires encoding/decoding unit tests and a real-browser regression test.
 
