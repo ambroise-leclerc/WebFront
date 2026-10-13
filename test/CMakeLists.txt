@@ -32,3 +32,25 @@ if(WEBFRONT_USE_MDDLOG)
   set_target_properties(mddlog_header_consumer PROPERTIES CXX_SCAN_FOR_MODULES OFF CXX_MODULE_STD OFF)
   add_test(NAME MddlogHeaderConsumer COMMAND mddlog_header_consumer)
 endif()
+
+# The documented newcomer commands and snippets must keep matching the built examples and CI.
+add_test(NAME NewcomerDocsMatchExamples
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckNewcomerDocs.cmake)
+
+# A minimal parent project must be able to add_subdirectory(WebFront) and link WebFront::WebFront
+# without building WebFront's examples or tests. Dependencies reuse this build's sources, so the
+# test needs no network access.
+include(FetchContent)
+FetchContent_GetProperties(stdexec)
+set(_consumer_dependency_args -DCPM_stdnet_SOURCE=${stdnet_SOURCE_DIR})
+if(stdexec_POPULATED)
+    list(APPEND _consumer_dependency_args -DFETCHCONTENT_SOURCE_DIR_STDEXEC=${stdexec_SOURCE_DIR})
+endif()
+add_test(NAME AddSubdirectoryConsumer
+    COMMAND ${CMAKE_CTEST_COMMAND}
+        --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/consumer ${CMAKE_CURRENT_BINARY_DIR}/consumer-build
+        --build-generator ${CMAKE_GENERATOR}
+        --build-config $<CONFIG>
+        --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${_consumer_dependency_args}
+            -DCMAKE_BUILD_TYPE=$<CONFIG>)
+set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)
