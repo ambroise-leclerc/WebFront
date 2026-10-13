@@ -105,7 +105,7 @@ jobs:
         
       - name: Config & Build
         run: |
-          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
+          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
   
       - name: Test

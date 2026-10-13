@@ -4,7 +4,7 @@ include(CEFSupport)
 add_executable(webtest JasmineTest.cpp)
 
 # Link basic libraries
-target_link_libraries(webtest PRIVATE WebFront)
+target_link_libraries(webtest PRIVATE WebFront WebFront_warnings)
 
 # Setup complete CEF integration for webtest (same as WebFrontApp)
 # This includes:
@@ -24,7 +24,7 @@ if(WEBFRONT_EMBED_CEF AND UNIX AND NOT APPLE)
         set_tests_properties(WebFrontBrowserIntegration PROPERTIES
             LABELS "web-integration"
             TIMEOUT 60
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/webtest
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/webtest
             RESOURCE_LOCK webfront_port_9002
         )
     else()

@@ -1,7 +1,15 @@
 ﻿cmake_minimum_required (VERSION 3.31)
 
+# Top-level detection must precede project(): an embedding parent project owns global settings.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(WEBFRONT_IS_TOP_LEVEL ON)
+else()
+    set(WEBFRONT_IS_TOP_LEVEL OFF)
+endif()
+
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
-option(ENABLE_TESTING "Enable Test Builds" ON)
+option(ENABLE_TESTING "Enable Test Builds" OFF)
+option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
 option(WEBFRONT_USE_MDDLOG "Use the compiled mddlog diagnostic adapter" OFF)
@@ -17,29 +25,24 @@ file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING R
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
-# Enable pthreads on POSIX (needed for libstdc++ internal threading in <chrono>, benchmarks, etc.)
-if (UNIX AND NOT APPLE)
-  set(THREADS_PREFER_PTHREAD_FLAG ON)
-  find_package(Threads REQUIRED)
-  if(NOT WEBFRONT_USE_MDDLOG)
-    add_compile_options($<$<COMPILE_LANGUAGE:C>:-pthread>$<$<COMPILE_LANGUAGE:CXX>:-pthread>)
-    add_link_options(-pthread)
-  endif()
-endif()
+# The library requires threads; consumers inherit the flag through the WebFront target.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
 add_library(WebFront INTERFACE)
-if(TARGET Threads::Threads)
-    target_link_libraries(WebFront INTERFACE Threads::Threads)
-endif()
+add_library(WebFront::WebFront ALIAS WebFront)
+target_link_libraries(WebFront INTERFACE Threads::Threads)
 
-# Static linkage for CEF compatibility
-if(MSVC AND NOT WEBFRONT_USE_MDDLOG)
+# Static linkage for CEF compatibility (a global setting: only the top-level project may choose it)
+if(MSVC AND NOT WEBFRONT_USE_MDDLOG AND WEBFRONT_IS_TOP_LEVEL)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
-include(StandardProjectSettings)
-include(PreventInSourceBuilds)
+if(WEBFRONT_IS_TOP_LEVEL)
+    include(StandardProjectSettings)
+    include(PreventInSourceBuilds)
+endif()
 add_library(WebFront_options INTERFACE)
 target_compile_features(WebFront_options INTERFACE cxx_std_23)
 # Do not force-define __cpp_lib_format on the command line: unlike a header setting it after
@@ -62,11 +65,13 @@ set_project_warnings(WebFront_warnings)
 include(Sanitizers)
 enable_sanitizers(WebFront_options)
 
-configure_file(Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
-include(Doxygen)
-enable_doxygen()
+if(WEBFRONT_IS_TOP_LEVEL)
+    configure_file(Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
+    include(Doxygen)
+    enable_doxygen()
 
-include(StaticAnalyzers)
+    include(StaticAnalyzers)
+endif()
 include(CPM)
 
 # Define the APPEND_PLATFORM_SOURCES macro needed by CEF
@@ -122,10 +127,10 @@ else()
     message(STATUS "WebFront: Embedded CEF window support disabled")
 endif()
 
-# Workaround: CEF ships only release libs (iterator debug level 0). Prevent MSVC debug iterator level mismatch.
+# Workaround: CEF ships only release libs (iterator debug level 0). Prevent MSVC debug iterator level
+# mismatch; the definitions propagate to every target linking WebFront (examples, tests, consumers).
 if (WEBFRONT_EMBED_CEF AND MSVC)
-    # Apply globally so test targets (e.g., JasmineTest) match libcef_dll_wrapper.
-    add_compile_definitions(_ITERATOR_DEBUG_LEVEL=0 _HAS_ITERATOR_DEBUGGING=0)
+    target_compile_definitions(WebFront INTERFACE _ITERATOR_DEBUG_LEVEL=0 _HAS_ITERATOR_DEBUGGING=0)
 endif()
 
 # Override CEF testing to prevent any test building on macOS and problematic platforms
@@ -170,8 +175,9 @@ if(WEBFRONT_USE_MDDLOG)
     webfront_add_mddlog()
 endif()
 
-target_link_libraries(WebFront INTERFACE WebFront_options WebFront_warnings stdnet::stdnet)
-target_include_directories(WebFront INTERFACE ${CMAKE_SOURCE_DIR}/include)
+# Warnings are opt-in per target (WebFront_warnings) so they never leak into consuming projects.
+target_link_libraries(WebFront INTERFACE WebFront_options stdnet::stdnet)
+target_include_directories(WebFront INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 # Ajouter les headers CEF à WebFront comme headers système pour éviter les warnings
 if(EXISTS "${CEF_ROOT}")
   target_include_directories(WebFront SYSTEM INTERFACE "${CEF_ROOT}")
@@ -183,9 +189,13 @@ endif()
 if (WIN32)
   # Prefer Windows 10 (0x0A00). Allow user override by predefining WINVER/_WIN32_WINNT.
   if (NOT DEFINED WINVER AND NOT DEFINED _WIN32_WINNT)
-    add_compile_definitions(WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+    target_compile_definitions(WebFront INTERFACE WINVER=0x0A00 _WIN32_WINNT=0x0A00)
   endif()
 endif()
+
+# Embedded asset regeneration target and CTest freshness checks.
+include(WebFrontAssets)
+webfront_add_embedded_assets()
 
 if(ENABLE_TESTING)
   enable_testing()
@@ -193,4 +203,6 @@ if(ENABLE_TESTING)
   add_subdirectory(webtest)
 endif()
 
-add_subdirectory(src)
+if(WEBFRONT_BUILD_EXAMPLES)
+  add_subdirectory(src)
+endif()

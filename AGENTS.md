@@ -2,12 +2,13 @@
 
 ## Project goal and current maturity
 
-WebFront is a C++23 header-only library for serving a browser UI from a C++ application. It embeds an HTTP/WebSocket server and exposes a binary bridge for fire-and-forget calls in both directions:
+WebFront is a C++23 header-only library for serving a browser UI from a C++ application. It embeds an HTTP/WebSocket server and exposes a binary bridge in both directions:
 
-- JavaScript calls registered C++ callbacks with `webFront.cppFunction(name)`.
-- C++ calls browser functions with `ui.jsFunction(name)(arguments...)`.
+- JavaScript calls registered C++ callbacks with `webFront.cppFunction(name)(...)`, which returns a Promise.
+- C++ calls browser functions with `ui.jsFunction(name)(arguments...)`; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.
+- `webFront.ready` resolves after the WebSocket handshake acknowledgement and rejects if the initial connection fails or closes.
 
-The project is an experimental foundation, not a production-ready UI framework. The minimum supported demonstration is the native ES-module example plus the automated Jasmine browser integration test. Function return values, remote exception propagation, and general DOM abstractions are future work.
+The project is an experimental foundation, not a production-ready UI framework. The newcomer path is `webfront::WebFront app; app.show();` (examples `HelloWorld` and `WebFrontGreeter`); the minimum automated demonstration is the native ES-module example plus the Jasmine browser integration test. General DOM abstractions are future work.
 
 ## Repository map
 
@@ -16,7 +17,7 @@ The project is an experimental foundation, not a production-ready UI framework. 
 - `include/weblink/`: bridge message encoding and routing.
 - `include/system/`: layered virtual filesystems and embedded web resources.
 - `include/frontend/`: system-browser and CEF frontend adapters.
-- `src/`: example applications and browser assets. `module-demo.html` is the minimal demo.
+- `src/`: example applications and browser assets: `HelloWorld.cpp` (no assets, embedded fallback page), `Greeter.cpp` with `greeter/` (editable UI), `ModuleDemo.cpp` with `module-demo.html` and `react.html`, and the readable embedded sources `WebFront.js` and `fallback/`.
 - `test/`: Catch2 unit tests.
 - `webtest/`: Jasmine real-browser integration test.
 - `cmake/` and `.github/workflows/`: build support and CI.
@@ -30,6 +31,14 @@ The legacy `webfront/`, `tests/`, and `webtest` directories are not interchangea
 Use out-of-source builds. CPM downloads dependencies during first configure, so network access may be required.
 
 ```bash
+# Newcomer quick start: no options, no CEF, no tests; builds HelloWorld, WebFrontGreeter, WebFrontApp
+mkdir build
+cd build
+cmake ..
+cmake --build .
+./src/HelloWorld
+./src/WebFrontGreeter
+
 # Fast, portable C++ baseline (no CEF download)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
@@ -45,7 +54,7 @@ cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-cef --target webtest --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure
 
-# Manual native-module demo (CEF-off opens the system browser)
+# Manual native-module demo (opens the system browser unless the source selects CEFFrontend)
 ./build/src/WebFrontApp
 
 # Optional React example
@@ -54,9 +63,9 @@ ctest --test-dir build-cef -L web-integration --output-on-failure
 
 Important CMake options:
 
-- `WEBFRONT_EMBED_CEF=OFF`: use the system browser; this is the normal unit-test build.
-- `WEBFRONT_EMBED_CEF=ON`: download/link CEF and enable the automated browser test.
-- `ENABLE_TESTING=ON`: build Catch2 and Jasmine test targets.
+- `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
+- `ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly.
+- `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
 
 If the environment provides a read-only default ccache directory, set `CCACHE_DIR` to a writable temporary directory for local builds. Do not encode machine-specific cache paths in project files.
@@ -65,9 +74,11 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 `BasicWF<NetProvider, Filesystem, Policy, Frontend>` owns the HTTP server, connected `WebLink` objects, registered C++ callbacks, and server thread. `BasicUI` identifies one connected browser. A frontend must satisfy `frontend::FrontendType` and decides whether the server stops when `open()` returns.
 
+`webfront::WebFront` is default-constructible (`WebFrontConfig`: loopback address, port `9002`, no document root) and `show(page = "index.html")` opens a page. Without a document root no local file access happens; `WebFrontConfig::documentRoot` serves local files for development only, after the embedded `WebFront.js` (which a root can never override) and before the embedded fallback page.
+
 Filesystems implement `open(std::filesystem::path) -> std::optional<fs::File>` and are composed with `fs::Multi<>`; the first provider returning a file wins. `NativeDebugFS` is development-only and must not be presented as a production sandbox.
 
-Bridge calls are asynchronous and fire-and-forget. Do not write tests or documentation that imply `cppFunction()` returns the C++ result to JavaScript, or that `JsFunction::operator()` returns a JavaScript value. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.
+Bridge calls are asynchronous. An untyped `jsFunction(name)(...)` call is fire-and-forget; typed calls and `cppFunction()` return a `std::future`/Promise whose result types are limited to the bridge's scalar, string, tuple, and numeric typed-array types. Callback signatures are deduced for ordinary lambdas, function pointers, and `std::function`; generic lambdas and overloaded call operators need explicit `cppFunction<R, Args...>`. Do not imply that results are synchronous, or that richer objects cross the bridge. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.
 
 The embedded `WebFront.js` wire format and C++ `Messages.hpp` implementation must evolve together. Any protocol change requires encoding/decoding unit tests and a real-browser regression test.
 
@@ -81,7 +92,7 @@ The embedded `WebFront.js` wire format and C++ `Messages.hpp` implementation mus
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
 
-Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. Update README/status documentation when commands, public behavior, or limitations change.
+Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
 
 ## Git and workspace safety
 

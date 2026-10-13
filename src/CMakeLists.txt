@@ -2,80 +2,43 @@
 # WebFrontApp Target Configuration
 # ==============================================================================
 
-find_package(Threads)
-
 # Add CMake modules path
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 # Include CEF support module
 include(CEFSupport)
 
-# Create main executable
-add_executable(WebFrontApp HelloWorld.cpp)
+# Newcomer examples. Executables land in <build>/src; run them from the build directory.
+#   ./src/HelloWorld       embedded starter page, no assets
+#   ./src/WebFrontGreeter  editable UI (src/greeter) calling a deduced C++ callback
+add_executable(HelloWorld HelloWorld.cpp)
+target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings)
 
-# Link core libraries
-target_link_libraries(WebFrontApp PRIVATE 
-    WebFront 
-    Threads::Threads
+add_executable(WebFrontGreeter Greeter.cpp)
+target_link_libraries(WebFrontGreeter PRIVATE WebFront WebFront_warnings)
+# Copy the greeter assets to <build>/src/greeter so the documented relative document root works.
+add_custom_command(TARGET WebFrontGreeter POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/greeter" "$<TARGET_FILE_DIR:WebFrontGreeter>/greeter"
+    COMMENT "Copying greeter assets"
+    VERBATIM
 )
+
+# Native-module and React demo (src/module-demo.html, src/react.html)
+add_executable(WebFrontApp ModuleDemo.cpp)
+target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings)
 
 # ==============================================================================
 # CEF Integration
 # ==============================================================================
 
-# Setup complete CEF integration for WebFrontApp
+# Setup complete CEF integration for every example, so switching an example's alias to
+# webfront::frontend::CEFFrontend works in a -DWEBFRONT_EMBED_CEF=ON build. It is a no-op otherwise.
 # This includes:
 # - CEF compilation configuration and linking
 # - Platform-specific runtime file deployment  
 # - Resource file copying (with Linux ICU fix)
 # - Locale directory setup
+setup_cef_for_target(HelloWorld)
+setup_cef_for_target(WebFrontGreeter)
 setup_cef_for_target(WebFrontApp)
-
-# ==============================================================================
-# Additional Build Rules
-# ==============================================================================
-
-# Browser bridge and fallback-page asset maintenance. Normal builds consume the checked-in
-# generated headers; the webfront-embedded-assets target regenerates them from their readable
-# sources, while CTest verifies (per asset, for clear failure attribution) that each is current.
-function(add_embedded_text_asset source header struct test_name)
-    add_custom_command(TARGET webfront-embedded-assets POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-            -DINPUT=${source}
-            -DOUTPUT=${header}
-            -DSTRUCT=${struct}
-            -P ${CMAKE_SOURCE_DIR}/cmake/EmbedTextAsset.cmake
-        COMMENT "Regenerating ${header}"
-        VERBATIM
-    )
-    if(ENABLE_TESTING)
-        add_test(NAME ${test_name}
-            COMMAND ${CMAKE_COMMAND}
-                -DINPUT=${source}
-                -DCHECK=${header}
-                -DSTRUCT=${struct}
-                -P ${CMAKE_SOURCE_DIR}/cmake/EmbedTextAsset.cmake
-        )
-    endif()
-endfunction()
-
-add_custom_target(webfront-embedded-assets COMMENT "Regenerating embedded browser bridge and fallback-page assets")
-
-add_embedded_text_asset(
-    "${CMAKE_CURRENT_SOURCE_DIR}/WebFront.js"
-    "${CMAKE_SOURCE_DIR}/include/system/WebFrontJsData.hpp"
-    WebFrontJsData
-    WebFrontJsAssetsFresh
-)
-add_embedded_text_asset(
-    "${CMAKE_CURRENT_SOURCE_DIR}/fallback/index.html"
-    "${CMAKE_SOURCE_DIR}/include/system/FallbackIndexHtmlData.hpp"
-    FallbackIndexHtmlData
-    FallbackIndexHtmlAssetFresh
-)
-add_embedded_text_asset(
-    "${CMAKE_CURRENT_SOURCE_DIR}/fallback/webfront-fallback.mjs"
-    "${CMAKE_SOURCE_DIR}/include/system/FallbackModuleData.hpp"
-    FallbackModuleData
-    FallbackModuleAssetFresh
-)
