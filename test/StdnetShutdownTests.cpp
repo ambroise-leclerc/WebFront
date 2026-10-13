@@ -1,14 +1,19 @@
 #include <http/HTTPServer.hpp>
 #include <networking/TCPNetworkingStdnet.hpp>
+#include <WebFront.hpp>
 #include <system/DefaultFS.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <span>
+#include <chrono>
 #include <stdexcept>
+#include <thread>
 
 #include <atomic>
 
 using namespace webfront;
+using namespace std::chrono_literals;
 
 namespace {
 
@@ -90,5 +95,32 @@ SCENARIO("A throwing completion handler is contained by the stdnet provider") {
             client.connect(endpoint);
             THEN("the exception does not escape the context") { REQUIRE_NOTHROW(context.run_one()); }
         }
+    }
+}
+
+SCENARIO("Destroying WebFront closes established WebSockets and completes pending upgrades") {
+    GIVEN("A WebFront with an established WebSocket and a second upgrade request in flight") {
+        const auto port = freePort();
+        networking::TCPStdnet::IoContext clientContext;
+        networking::TCPStdnet::Resolver resolver(clientContext);
+        const auto endpoint = *resolver.resolve("127.0.0.1", port).begin();
+        const std::string request =
+            "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+        networking::TCPStdnet::Socket first(clientContext);
+        networking::TCPStdnet::Socket second(clientContext);
+        {
+            BasicWF<CountingNet, fs::DefaultFS> webFront(WebFrontConfig{.address = "127.0.0.1", .port = port});
+            std::thread serverThread([&webFront] { webFront.run(); });
+            first.connect(endpoint);
+            first.send(std::as_bytes(std::span(request)));
+            for (int i = 0; i < 500 && CountingNet::liveSockets.load() == 0; ++i) std::this_thread::sleep_for(10ms);
+            std::this_thread::sleep_for(100ms); // upgrade response written, link created
+            second.connect(endpoint);
+            second.send(std::as_bytes(std::span(request)));
+            webFront.stop(); // the second upgrade may still be in flight
+            serverThread.join();
+        }
+        THEN("no socket is leaked and no handler touches destroyed state") { REQUIRE(CountingNet::liveSockets.load() == 0); }
     }
 }

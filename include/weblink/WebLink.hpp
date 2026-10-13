@@ -160,6 +160,7 @@ public:
         // for its in-flight write) before logging or releasing what it captures. No closed event
         // precedes destruction.
         handlers->retire();
+        ws->stop(); // nothing owns the connection any more: close it so its pending read can complete
         detachTransport(false);
         const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");
