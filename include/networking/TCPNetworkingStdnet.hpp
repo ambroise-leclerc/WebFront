@@ -142,6 +142,13 @@ public:
         }
     };
 
+    /// Runs `task` on a thread running `context`, which is the only thread allowed to touch the I/O objects
+    /// registered with it. The task never runs if the context is not run again.
+    template <class Task>
+    static void Post(IoContext& context, Task&& task) {
+        stdnet_bridge::submit(context.get_scheduler().schedule(), [t = std::forward<Task>(task)](std::error_code) mutable { t(); });
+    }
+
     template <class Buffers, class Handler>
     static void AsyncWrite(Socket& socket, Buffers&& buffers, Handler&& handler) {
         stdnet_bridge::submit(::stdnet::async_write(socket, std::forward<Buffers>(buffers)),

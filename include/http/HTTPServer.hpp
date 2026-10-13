@@ -461,21 +461,36 @@ public:
                           ctx.poll();
                       }) {
             std::error_code ec;
-            acceptor.close(ec);
+            closeAcceptor(ec);
             connections.stopAll();
-            ioContext.restart();
-            ioContext.poll();
+            // A posted stop() task that never ran stops the context when drained: poll again until idle.
+            do ioContext.restart();
+            while (ioContext.poll() != 0);
         }
     }
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
     
+    /// Thread-safe. With a provider able to post (Net::Post) the closing happens on the thread running the
+    /// context, as I/O objects must not be closed concurrently with their pending operations; the context
+    /// then stops. If nothing runs the context, drain() (called by the destructor) does the work.
     void stop() {
         log::info("Stopping HTTP server...");
-        acceptor.close();
-        connections.stopAll();
-        ioContext.stop();
+        if constexpr (requires(typename Net::IoContext& ctx) { Net::Post(ctx, [] {}); }) {
+            Net::Post(ioContext, [this] {
+                std::error_code ec;
+                closeAcceptor(ec);
+                connections.stopAll();
+                ioContext.stop();
+            });
+        }
+        else {
+            std::error_code ec;
+            closeAcceptor(ec);
+            connections.stopAll();
+            ioContext.stop();
+        }
     }
 
     void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)>&& handler) { upgradeHandler = std::move(handler); }
@@ -483,13 +498,26 @@ public:
 private:
     typename Net::IoContext ioContext;
     typename Net::Acceptor acceptor;
+    // stop() runs on another thread than the context: it must not close the acceptor while a completion
+    // inspects or re-arms it. Recursive because a completion may run inline from async_accept().
+    std::recursive_mutex acceptorMutex;
     Connections<Connection<Net, FS, Policy>> connections;
     RequestHandler<Net, FS> requestHandler;
     std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
 
+    void closeAcceptor(std::error_code& ec) {
+        std::lock_guard lock(acceptorMutex);
+        if constexpr (requires { acceptor.close(ec); }) acceptor.close(ec);
+        else acceptor.close();
+    }
+
     void accept() {
+        std::lock_guard lock(acceptorMutex);
         acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
-            if (!acceptor.is_open()) return;
+            {
+                std::lock_guard acceptorLock(acceptorMutex);
+                if (!acceptor.is_open()) return;
+            }
             auto newConnection = std::make_shared<Connection<Net, FS, Policy>>(std::move(socket), connections, requestHandler);
             newConnection->onUpgrade = upgradeHandler;
             if (!ec) connections.start(newConnection);
