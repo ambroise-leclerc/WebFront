@@ -16,6 +16,8 @@
 
 #include <cstddef>
 #include <exception>
+#include <mutex>
+#include <optional>
 #include <vector>
 #include <string>
 #include <system_error>
@@ -28,9 +30,67 @@ namespace stdnet_bridge {
 
 namespace ex = ::stdnet::ex;
 
+struct submit_holder_base;
+
+// An io_context which, like the Networking TS one, releases the operations still pending when it is
+// destroyed: their completion handlers are destroyed without being invoked. Without it the operation
+// states and everything their handlers capture (connections held by shared_ptr...) would leak.
+class IoContext : public ::stdnet::io_context {
+public:
+    IoContext() = default;
+    ~IoContext();
+
+    void add(submit_holder_base* holder) noexcept;
+    void remove(submit_holder_base* holder) noexcept;
+
+private:
+    std::mutex mutex;
+    submit_holder_base* head = nullptr;
+};
+
+struct submit_holder_base {
+    IoContext* owner = nullptr;
+    submit_holder_base* prev = nullptr;
+    submit_holder_base* next = nullptr;
+    virtual void releaseHandler() noexcept = 0;
+    virtual ~submit_holder_base() = default;
+};
+
+inline void IoContext::add(submit_holder_base* holder) noexcept {
+    std::lock_guard lock(mutex);
+    holder->owner = this;
+    holder->next = head;
+    if (head) head->prev = holder;
+    head = holder;
+}
+
+inline void IoContext::remove(submit_holder_base* holder) noexcept {
+    std::lock_guard lock(mutex);
+    if (holder->prev) holder->prev->next = holder->next;
+    else head = holder->next;
+    if (holder->next) holder->next->prev = holder->prev;
+    holder->owner = nullptr;
+}
+
+inline IoContext::~IoContext() {
+    // Destroy every handler first: closing the sockets they own may still touch other pending operations,
+    // which must therefore still exist. Then destroy the operations. Nothing is invoked.
+    std::vector<submit_holder_base*> abandoned;
+    {
+        std::lock_guard lock(mutex);
+        for (auto* h = head; h; h = h->next) abandoned.push_back(h);
+        head = nullptr;
+    }
+    for (auto* h : abandoned) h->releaseHandler();
+    for (auto* h : abandoned) {
+        h->owner = nullptr; // already unlinked
+        delete h;
+    }
+}
+
 // Owns the operation state of a submitted sender; deletes itself after invoking the handler.
 template <class Sndr, class Handler>
-struct submit_holder {
+struct submit_holder : submit_holder_base {
     struct receiver {
         using receiver_concept = ex::receiver_t;
         submit_holder* h;
@@ -44,22 +104,25 @@ struct submit_holder {
         ex::env<> get_env() const noexcept { return {}; }
     };
 
-    Handler handler;
+    std::optional<Handler> handler;
     ex::connect_result_t<Sndr, receiver> op;
 
     template <class S, class F>
     submit_holder(S&& s, F&& f) : handler(std::forward<F>(f)), op(ex::connect(std::forward<S>(s), receiver{this})) {}
 
+    void releaseHandler() noexcept override { handler.reset(); }
+
     template <class... Vs>
     void finish(std::error_code ec, Vs&&... vs) noexcept {
+        if (owner) owner->remove(this);
         // A throwing handler must not skip the delete (leak) nor escape this noexcept function.
         try {
             if constexpr (sizeof...(Vs) > 0) {
-                handler(ec, std::forward<Vs>(vs)...);
+                (*handler)(ec, std::forward<Vs>(vs)...);
             } else if constexpr (std::is_invocable_v<Handler&, std::error_code, std::size_t>) {
-                handler(ec, std::size_t{0}); // failure: values default to "nothing transferred"
+                (*handler)(ec, std::size_t{0}); // failure: values default to "nothing transferred"
             } else {
-                handler(ec);
+                (*handler)(ec);
             }
         }
         catch (const std::exception& e) {
@@ -74,11 +137,15 @@ struct submit_holder {
 
 // Starts a sender and invokes handler(error_code, values...) on completion (Networking TS style).
 template <class Sndr, class Handler>
-void submit(Sndr&& sndr, Handler&& handler) {
+void submit(IoContext& context, Sndr&& sndr, Handler&& handler) {
     using holder = submit_holder<std::decay_t<Sndr>, std::decay_t<Handler>>;
     auto* h = new holder(std::forward<Sndr>(sndr), std::forward<Handler>(handler));
+    context.add(h);
     ex::start(h->op);
 }
+
+// I/O objects are always created from this provider's IoContext.
+inline IoContext& ownerOf(::stdnet::io_context& context) noexcept { return static_cast<IoContext&>(context); }
 
 // End of stream, reported as an error to keep the Networking TS behaviour WebFront relies on.
 inline std::error_code eof() noexcept { return std::make_error_code(std::errc::connection_reset); }
@@ -92,7 +159,7 @@ inline bool isEndOfStream(std::error_code ec, std::size_t transferred, std::size
 
 class TCPStdnet : public BasicNetworking<::stdnet::const_buffer, ::stdnet::mutable_buffer> {
 public:
-    using IoContext = ::stdnet::io_context;
+    using IoContext = stdnet_bridge::IoContext;
     using Endpoint = ::stdnet::ip::tcp::endpoint;
     using super::ConstBuffer;
     using super::MutableBuffer;
@@ -107,7 +174,7 @@ public:
 
         template <::stdnet::mutable_buffer_sequence Buffers, class Handler>
         void async_read_some(const Buffers& buffers, Handler&& handler) {
-            stdnet_bridge::submit(::stdnet::async_receive(*this, buffers),
+            stdnet_bridge::submit(stdnet_bridge::ownerOf(context()), ::stdnet::async_receive(*this, buffers),
                                   [h = std::forward<Handler>(handler), size = ::stdnet::buffer_size(buffers)](
                                       std::error_code ec, std::size_t n) mutable {
                                       if (stdnet_bridge::isEndOfStream(ec, n, size)) ec = stdnet_bridge::eof();
@@ -124,11 +191,11 @@ public:
         void async_accept(Handler&& handler) {
             struct adapter {
                 std::decay_t<Handler> h;
-                IoContext* ctx;
+                ::stdnet::io_context* ctx;
                 void operator()(std::error_code ec, ::stdnet::ip::tcp::socket s) { h(ec, Socket(std::move(s))); }
-                void operator()(std::error_code ec, std::size_t) { h(ec, Socket(*ctx)); }
+                void operator()(std::error_code ec, std::size_t) { h(ec, Socket(stdnet_bridge::ownerOf(*ctx))); }
             };
-            stdnet_bridge::submit(::stdnet::async_accept(static_cast<::stdnet::ip::tcp::acceptor&>(*this)),
+            stdnet_bridge::submit(stdnet_bridge::ownerOf(context()), ::stdnet::async_accept(static_cast<::stdnet::ip::tcp::acceptor&>(*this)),
                                   adapter{std::forward<Handler>(handler), &context()});
         }
     };
@@ -146,12 +213,12 @@ public:
     /// registered with it. The task never runs if the context is not run again.
     template <class Task>
     static void Post(IoContext& context, Task&& task) {
-        stdnet_bridge::submit(context.get_scheduler().schedule(), [t = std::forward<Task>(task)](std::error_code) mutable { t(); });
+        stdnet_bridge::submit(context, context.get_scheduler().schedule(), [t = std::forward<Task>(task)](std::error_code) mutable { t(); });
     }
 
     template <class Buffers, class Handler>
     static void AsyncWrite(Socket& socket, Buffers&& buffers, Handler&& handler) {
-        stdnet_bridge::submit(::stdnet::async_write(socket, std::forward<Buffers>(buffers)),
+        stdnet_bridge::submit(stdnet_bridge::ownerOf(socket.context()), ::stdnet::async_write(socket, std::forward<Buffers>(buffers)),
                               std::forward<Handler>(handler));
     }
 

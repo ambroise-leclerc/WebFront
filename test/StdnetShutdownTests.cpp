@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <memory>
 #include <span>
 #include <array>
 #include <chrono>
@@ -229,6 +230,47 @@ SCENARIO("Destroying WebFront closes established WebSockets and completes pendin
             REQUIRE(CountingNet::liveSockets.load() == 0);
             REQUIRE(CountingNet::readsAtRelease.load() >= 0);
             REQUIRE(CountingNet::reads.load() == CountingNet::readsAtRelease.load());
+        }
+    }
+}
+
+SCENARIO("Destroying the stdnet provider's context releases abandoned operations without invoking them") {
+    GIVEN("An accept and a read pending on objects owned by their own handlers") {
+        const auto port = freePort();
+        std::weak_ptr<int> acceptCapture;
+        std::weak_ptr<int> readCapture;
+        bool invoked = false;
+        {
+            networking::TCPStdnet::IoContext context;
+            networking::TCPStdnet::Resolver resolver(context);
+            auto endpoint = *resolver.resolve("127.0.0.1", port).begin();
+            networking::TCPStdnet::Acceptor acceptor(context);
+            acceptor.open(endpoint.protocol());
+            acceptor.bind(endpoint);
+            acceptor.listen();
+
+            auto onAccept = std::make_shared<int>(1);
+            acceptCapture = onAccept;
+            acceptor.async_accept([onAccept, &invoked](std::error_code, networking::TCPStdnet::Socket) { invoked = true; });
+
+            // A connection whose read handler owns the socket it reads from, as WebFront's connections do.
+            networking::TCPStdnet::IoContext clientContext;
+            networking::TCPStdnet::Socket client(clientContext);
+            client.connect(endpoint);
+            auto owner = std::make_shared<std::pair<int, std::unique_ptr<networking::TCPStdnet::Socket>>>(
+                2, std::make_unique<networking::TCPStdnet::Socket>(context));
+            owner->second->connect(endpoint);
+            readCapture = std::shared_ptr<int>(owner, &owner->first);
+            std::array<char, 8> buffer{};
+            auto* socket = owner->second.get();
+            socket->async_read_some(networking::TCPStdnet::Buffer(buffer),
+                                    [owner = std::move(owner), &invoked](std::error_code, std::size_t) { invoked = true; });
+            // The context is destroyed here without being run again.
+        }
+        THEN("their handlers are destroyed but never invoked") {
+            REQUIRE(acceptCapture.expired());
+            REQUIRE(readCapture.expired());
+            REQUIRE_FALSE(invoked);
         }
     }
 }
