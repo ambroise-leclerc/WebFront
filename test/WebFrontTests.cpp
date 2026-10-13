@@ -40,15 +40,7 @@ public:
     void run() {}
     void run_one() {}
     void stop() {}
-};
-
-class WebFrontResolverMock {
-public:
-    explicit WebFrontResolverMock(WebFrontIoContextMock) {}
-
-    std::list<networking::EndpointMock> resolve(std::string_view address, std::string_view port) {
-        return {networking::EndpointMock{address, port}};
-    }
+    void restart() {}
 };
 
 class WebFrontAcceptorMock : public networking::SocketBaseMock {
@@ -62,8 +54,6 @@ public:
         openState = true;
     }
 
-    void async_accept(std::function<void(std::error_code, networking::SocketMock)>) {}
-
     bool is_open() const { return openState; }
 
     void close() { openState = false; }
@@ -73,7 +63,6 @@ class WebFrontNetworkingMock : public networking::NetworkingMock {
 public:
     using Acceptor  = WebFrontAcceptorMock;
     using IoContext = WebFrontIoContextMock;
-    using Resolver  = WebFrontResolverMock;
 };
 
 struct InitializingFrontend {

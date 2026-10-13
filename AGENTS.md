@@ -65,6 +65,8 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 `BasicWF<NetProvider, Filesystem, Policy, Frontend>` owns the HTTP server, connected `WebLink` objects, registered C++ callbacks, and server thread. `BasicUI` identifies one connected browser. A frontend must satisfy `frontend::FrontendType` and decides whether the server stops when `open()` returns.
 
+The HTTP server connections and the WebSocket read/write loops are coroutines (`networking::Task`) awaiting the senders a network provider returns (`Receive`, `Send`, `Accept`; `networking::TCPStdnet` forwards them to stdnet). A stop request cancels them from any thread and they unwind on the io_context thread, so I/O objects are never closed from another thread. Whoever owns the objects the tasks use must run `Server::drain()` before destroying them (`~BasicWF` does).
+
 Filesystems implement `open(std::filesystem::path) -> std::optional<fs::File>` and are composed with `fs::Multi<>`; the first provider returning a file wins. `NativeDebugFS` is development-only and must not be presented as a production sandbox.
 
 Bridge calls are asynchronous and fire-and-forget. Do not write tests or documentation that imply `cppFunction()` returns the C++ result to JavaScript, or that `JsFunction::operator()` returns a JavaScript value. Registered callback objects must outlive their registration through owned storage; never capture a forwarding-reference parameter by reference in a stored handler.

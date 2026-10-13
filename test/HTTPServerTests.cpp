@@ -2,7 +2,9 @@
 #include <networking/NetworkingMock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
+#include <system/DefaultFS.hpp>
 
 #include <string>
 #include <string_view>
@@ -284,4 +286,52 @@ SCENARIO("RequestHandler on a HTTP GET") {
         }
     }
 
+}
+
+namespace {
+
+// Accepts one connection which asks for a WebSocket upgrade; the end of the response write is held.
+struct UpgradingNet : networking::NetworkingMock {
+    static inline bool accepted = false;
+    static inline webfront::testing::ManualSender::Completion heldSend;
+
+    static auto Accept(Acceptor&) {
+        return networking::ex::then(networking::ex::just(), []() -> Socket {
+            if (std::exchange(accepted, true)) throw std::system_error(make_error_code(errc::operation_canceled));
+            return Socket{};
+        });
+    }
+
+    static auto Receive(Socket&, MutableBuffer buffer) {
+        return networking::ex::then(networking::ex::just(), [buffer] {
+            constexpr string_view request{"GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"};
+            copy(request.begin(), request.end(), static_cast<char*>(buffer.data()));
+            return request.size();
+        });
+    }
+
+    static webfront::testing::ManualSender Send(Socket&, const auto&) {
+        return webfront::testing::ManualSender([](webfront::testing::ManualSender::Completion completion) { heldSend = std::move(completion); });
+    }
+};
+
+}  // namespace
+
+SCENARIO("A stopped server hands no connection over") {
+    GIVEN("A connection asking for an upgrade, whose response write is still in progress") {
+        int upgrades = 0;
+        {
+            http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
+            server.onUpgrade([&upgrades](UpgradingNet::Socket&&) { ++upgrades; });
+            REQUIRE(UpgradingNet::heldSend.complete);
+
+            WHEN("the server is stopped before the response is written") {
+                server.stop();
+                UpgradingNet::heldSend.complete({}, 0);
+
+                THEN("the connection is closed instead of being upgraded") { REQUIRE(upgrades == 0); }
+            }
+        }
+    }
 }
