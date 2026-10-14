@@ -182,6 +182,19 @@ SCENARIO("A tool store installs tools in its project directory") {
                     REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>again</p>");
                 }
             }
+            AND_WHEN("installing a version fails when the lock file is written") {
+                filesystem::create_directories(project.path() / "webfront-tools.lock.json.tmp");
+                const auto failingInstall = [&](string version) {
+                    REQUIRE_THROWS_AS(install(store, plotRecord(std::move(version)), "<p>failed</p>"), runtime_error);
+                };
+                failingInstall("1.2.0");
+                failingInstall("2.0.0");
+                THEN("the installed version and its files are intact, and no other version is left") {
+                    REQUIRE(store.find("@acme/plot") == plotRecord());
+                    REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>plot</p>");
+                    REQUIRE_FALSE(filesystem::exists(store.installDir("@acme/plot", "2.0.0")));
+                }
+            }
             AND_WHEN("a new installation is abandoned") {
                 store.begin("@acme/plot", "3.0.0");
                 store.write("@acme/plot", "3.0.0", {.path = "dist/index.html", .offset = 0, .bytes = bytes("<p>v3</p>")});

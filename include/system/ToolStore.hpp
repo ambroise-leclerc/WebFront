@@ -204,7 +204,8 @@ inline std::string formatLock(const LockedTools& tools) {
 ///   <project>/.webfront/tools/<name>@<version>/   the files of each installed tool
 ///   <project>/webfront-tools.lock.json            name, version, integrity, entry and title of each
 /// An installation is staged under .webfront/tools/.staging/ and replaces the installed version
-/// only when committed, so a failed or abandoned installation leaves the installed tool intact.
+/// only when committed; a reinstalled version is kept under .webfront/tools/.backup/ until the lock
+/// file is written. A failed or abandoned installation leaves the installed tool intact.
 /// Thread-safe within a process. Errors throw std::invalid_argument (invalid input) or
 /// std::runtime_error / std::filesystem::filesystem_error (I/O).
 class ToolStore {
@@ -272,16 +273,12 @@ public:
         if (!std::filesystem::is_regular_file(staged / tools::safeRelativePath(record.entry)))
             throw std::invalid_argument("Entry page '" + record.entry + "' of " + record.name + " was not written");
 
-        auto       tools  = readLock(lockFile());
-        const auto target = installDir(record.name, record.version);
-        std::filesystem::remove_all(target);
-        std::filesystem::create_directories(target.parent_path());
-        std::filesystem::rename(staged, target);
+        auto                                 locked = readLock(lockFile());
         std::optional<std::filesystem::path> replaced;
-        if (const auto previous = tools.find(record.name); previous != tools.end() && previous->second.version != record.version)
+        if (const auto previous = locked.find(record.name); previous != locked.end() && previous->second.version != record.version)
             replaced = installDir(record.name, previous->second.version);
-        tools.insert_or_assign(record.name, record);
-        writeLock(tools);
+        locked.insert_or_assign(record.name, record);
+        installStaged(record, locked);
         pending.erase(key(record.name, record.version));
         if (replaced)
             std::filesystem::remove_all(*replaced);
@@ -334,6 +331,35 @@ private:
         if (error || written != chunk.offset)
             throw std::invalid_argument("Chunk of '" + std::string(chunk.path) + "' at offset " + std::to_string(chunk.offset)
                                         + " does not follow the bytes already written");
+    }
+
+    // Moves the staged files into place and writes the lock file. A directory already installed for
+    // this version is kept aside until the lock file is written, and restored if anything fails.
+    void installStaged(const ToolRecord& record, const tools::LockedTools& locked) const {
+        const auto target = installDir(record.name, record.version);
+        const auto backup = toolsDir() / ".backup" / tools::detail::fromUtf8(key(record.name, record.version));
+        std::filesystem::remove_all(backup);
+        const bool replacing = std::filesystem::exists(target);
+        if (replacing) {
+            std::filesystem::create_directories(backup.parent_path());
+            std::filesystem::rename(target, backup);
+        }
+        try {
+            std::filesystem::create_directories(target.parent_path());
+            std::filesystem::rename(stagingDir(record.name, record.version), target);
+            writeLock(locked);
+        } catch (...) {
+            restore(target, backup, replacing);
+            throw;
+        }
+        std::filesystem::remove_all(backup);
+    }
+
+    static void restore(const std::filesystem::path& target, const std::filesystem::path& backup, bool replacing) {
+        std::error_code ignored;
+        std::filesystem::remove_all(target, ignored);
+        if (replacing)
+            std::filesystem::rename(backup, target, ignored);
     }
 
     void requirePending(std::string_view name, std::string_view version) const {
