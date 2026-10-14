@@ -471,6 +471,20 @@ SCENARIO("A C++ callback can receive the browser that called it") {
             REQUIRE(handler(data, CallerMock{3}) == "3:hi");
         }
     }
+    GIVEN("a callable taking the caller by mutable reference, adapted to its declared type") {
+        auto handler = detail::makeCppFunctionHandler<Policy, std::string, std::string>(
+            detail::adaptCaller<CallerMock&>([](CallerMock& caller, const std::string& text) {
+                caller.id += 1;
+                return std::to_string(caller.id) + ":" + text;
+            }));
+        CallerMock caller{3};
+        const auto data = smallStringData("hi");
+
+        THEN("it receives the caller itself") {
+            REQUIRE(handler(data, caller) == "4:hi");
+            REQUIRE(caller.id == 4);
+        }
+    }
     GIVEN("a responder for such a handler") {
         ResultLinkMock link;
         auto           handler   = detail::makeCppFunctionHandler<Policy, std::string>([](CallerMock caller) {
@@ -497,6 +511,12 @@ SCENARIO("A UI first parameter selects the caller form of cppFunction") {
     }
     GIVEN("an application") {
         FrontendWF webFront("9161");
+        THEN("the caller may be taken by value, by const or mutable reference, or by rvalue reference") {
+            REQUIRE_NOTHROW(webFront.cppFunction("byValue", [](AppUI) {}));
+            REQUIRE_NOTHROW(webFront.cppFunction("byConstReference", [](const AppUI&) {}));
+            REQUIRE_NOTHROW(webFront.cppFunction("byReference", [](AppUI&) {}));
+            REQUIRE_NOTHROW(webFront.cppFunction("byRvalueReference", [](AppUI&&) {}));
+        }
         THEN("caller callbacks register through deduction and explicit types") {
             REQUIRE_NOTHROW(webFront.cppFunction("deduced", [](AppUI, std::string) {}));
             REQUIRE_NOTHROW(webFront.template cppFunction<int, const AppUI&, double>("explicit", [](const AppUI&, double) {

@@ -90,7 +90,7 @@ auto makeCppFunctionHandler(Function&& function) {
     using StoredFunction = std::decay_t<Function>;
     auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
 
-    return [callable = std::move(callable)](std::span<const std::byte> data, const auto&... caller) -> R {
+    return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) -> R {
         std::tuple<Args...> parameters;
         auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
             (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
@@ -119,6 +119,7 @@ template <typename R, typename... Args>
 struct callable_traits_impl<R (*)(Args...)> {
     using Return      = R;
     using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+    using RawArgs     = std::tuple<Args...>;
 };
 template <typename R, typename... Args>
 struct callable_traits_impl<R (*)(Args...) noexcept> : callable_traits_impl<R (*)(Args...)> {};
@@ -127,12 +128,14 @@ template <typename R, typename... Args>
 struct callable_traits_impl<std::function<R(Args...)>> {
     using Return      = R;
     using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+    using RawArgs     = std::tuple<Args...>;
 };
 
 template <typename C, typename R, typename... Args>
 struct callable_traits_impl<R (C::*)(Args...)> {
     using Return      = R;
     using DecayedArgs = std::tuple<std::decay_t<Args>...>;
+    using RawArgs     = std::tuple<Args...>;
 };
 template <typename C, typename R, typename... Args>
 struct callable_traits_impl<R (C::*)(Args...) const> : callable_traits_impl<R (C::*)(Args...)> {};
@@ -165,8 +168,15 @@ struct has_callable_traits_impl<T, std::void_t<typename callable_traits<T>::Retu
 template <typename T>
 concept has_callable_traits = has_callable_traits_impl<T>::value;
 
-// Bridges a deduced <Return, tuple<DecayedArgs...>> pair back to the explicit-template cppFunction
-// overload, so the deduced and explicit registration paths share one dispatch/response implementation.
+/// Passes the calling UI, received as an lvalue, as the callable's declared first parameter type
+/// Caller (UI, const UI&, UI& or UI&&), followed by the decoded parameters.
+template <typename Caller, typename Function>
+auto adaptCaller(Function&& function) {
+    return [function = std::forward<Function>(function)](auto& caller, auto&&... args) mutable -> decltype(auto) {
+        return std::invoke(function, static_cast<Caller>(caller), std::forward<decltype(args)>(args)...);
+    };
+}
+
 /// True when a callable's first parameter is the application's UI: the calling browser is then
 /// passed to it instead of being read from the call data.
 template <typename UI, typename... Args>
@@ -174,6 +184,19 @@ struct takes_caller : std::false_type {};
 template <typename UI, typename First, typename... Rest>
 struct takes_caller<UI, First, Rest...> : std::is_same<std::remove_cvref_t<First>, UI> {};
 
+/// The deduced parameters to register: the decayed ones, except a caller UI, which keeps its declared
+/// type so that adaptCaller can pass it as a mutable or rvalue reference.
+template <typename UI, typename RawArgs, typename DecayedArgs>
+struct caller_aware_args {
+    using type = DecayedArgs;
+};
+template <typename UI, typename RawFirst, typename... RawRest, typename DecayedFirst, typename... DecayedRest>
+struct caller_aware_args<UI, std::tuple<RawFirst, RawRest...>, std::tuple<DecayedFirst, DecayedRest...>> {
+    using type = std::conditional_t<std::is_same_v<DecayedFirst, UI>, std::tuple<RawFirst, DecayedRest...>, std::tuple<DecayedFirst, DecayedRest...>>;
+};
+
+// Bridges a deduced <Return, tuple<DecayedArgs...>> pair back to the explicit-template cppFunction
+// overload, so the deduced and explicit registration paths share one dispatch/response implementation.
 template <typename R, typename Tuple>
 struct ApplyArgs;
 template <typename R, typename... Args>
@@ -197,7 +220,7 @@ websocket::Frame<Net> makeFailureFrame(msg::CallId callId, const std::exception&
 
 template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
-    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId, const auto&... caller) mutable {
+    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId, auto&&... caller) mutable {
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
@@ -320,7 +343,7 @@ public:
             auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
             auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
             cppFunctions.try_emplace(std::move(functionName),
-                                     [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, const UI&) mutable {
+                                     [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI) mutable {
                                          responder(data, link, callId);
                                      });
         }
@@ -345,8 +368,9 @@ public:
                       "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
                       "lambdas, overloaded operator(), and other advanced callables require explicit "
                       "cppFunction<ReturnType, ArgTypes...>(name, callable).");
-        detail::ApplyArgs<typename detail::callable_traits<Callable>::Return, typename detail::callable_traits<Callable>::DecayedArgs>::invoke(
-          *this, std::move(functionName), std::forward<Function>(function));
+        using Traits = detail::callable_traits<Callable>;
+        using Args   = typename detail::caller_aware_args<UI, typename Traits::RawArgs, typename Traits::DecayedArgs>::type;
+        detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
     }
 
     enum class WindowAction { none, closeWindow };
@@ -396,10 +420,11 @@ public:
 private:
     template <typename R, typename Caller, typename... Args>
     void registerWithCaller(std::string functionName, auto&& function) {
-        auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
+        auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));
+        auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::move(adapted));
         auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
         cppFunctions.try_emplace(std::move(functionName),
-                                 [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, const UI& caller) mutable {
+                                 [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
                                      responder(data, link, callId, caller);
                                  });
     }
@@ -411,7 +436,7 @@ private:
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
     std::shared_ptr<detail::UIStartedSubscribers<UI>>                        uiSubscribers = std::make_shared<detail::UIStartedSubscribers<UI>>();
-    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, const UI&)>> cppFunctions;
+    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>> cppFunctions;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
 private:

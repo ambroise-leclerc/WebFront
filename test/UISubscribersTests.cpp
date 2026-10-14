@@ -117,3 +117,19 @@ SCENARIO("Handlers may change the subscriptions while being notified") {
         }
     }
 }
+
+SCENARIO("A handler may own another subscription to the same browsers") {
+    GIVEN("a handler whose capture owns a second subscription") {
+        auto subscribers = make_shared<Subscribers>();
+        auto inner       = make_shared<UISubscription>(subscribers->subscribe([](FakeUI) {}));
+        auto outer       = subscribers->subscribe([inner](FakeUI) {});
+        inner.reset();  // the outer handler's capture is now the only owner of the inner subscription
+
+        WHEN("the outer subscription is reset") {
+            outer.reset();  // destroying the outer handler unsubscribes the inner one
+            THEN("both are unsubscribed, without deadlock") {
+                REQUIRE(subscribers->size() == 0);
+            }
+        }
+    }
+}
