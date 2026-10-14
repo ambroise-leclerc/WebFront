@@ -30,27 +30,25 @@ inline bool isLowSurrogate(std::uint32_t unit) {
     return unit >= 0xDC00 && unit <= 0xDFFF;
 }
 
-inline void appendUtf8(std::string& value, std::uint32_t code) {
-    if (code < 0x80) {
-        value += static_cast<char>(code);
-        return;
-    }
+inline std::string toUtf8(std::uint32_t code) {
+    if (code < 0x80)
+        return std::string(1, static_cast<char>(code));
     constexpr std::array<std::uint32_t, 4> leadBits{0, 0xC0, 0xE0, 0xF0};
     const int                              continuations = code < 0x800 ? 1 : (code < 0x10000 ? 2 : 3);
-    value                                               += static_cast<char>(leadBits[static_cast<std::size_t>(continuations)] | (code >> (6 * continuations)));
+    std::string                            value(1, static_cast<char>(leadBits[static_cast<std::size_t>(continuations)] | (code >> (6 * continuations))));
     for (int shift = 6 * (continuations - 1); shift >= 0; shift -= 6)
         value += static_cast<char>(0x80 | ((code >> shift) & 0x3F));
+    return value;
 }
 
-inline void appendQuoted(std::string& quoted, char c) {
+inline std::string quoted(char c) {
     constexpr std::string_view hexDigits = "0123456789abcdef";
     const auto                 code      = static_cast<unsigned char>(c);
     if (c == '"' || c == '\\')
-        (quoted += '\\') += c;
-    else if (code < 0x20)
-        ((quoted += "\\u00") += hexDigits[code >> 4]) += hexDigits[code & 0xF];
-    else
-        quoted += c;
+        return {'\\', c};
+    if (code < 0x20)
+        return {'\\', 'u', '0', '0', hexDigits[code >> 4], hexDigits[code & 0xF]};
+    return std::string(1, c);
 }
 
 }  // namespace detail
@@ -59,7 +57,7 @@ inline void appendQuoted(std::string& quoted, char c) {
 inline std::string quote(std::string_view text) {
     std::string quoted = "\"";
     for (const char c : text)
-        detail::appendQuoted(quoted, c);
+        quoted += detail::quoted(c);
     return quoted += '"';
 }
 
@@ -86,7 +84,7 @@ public:
         expect('"');
         std::string value;
         for (char c = next(); c != '"'; c = next())
-            appendCharacter(value, c);
+            value += character(c);
         return value;
     }
 
@@ -118,8 +116,8 @@ private:
     std::string_view text;
     std::size_t      index = 0;
 
-    [[noreturn]] void fail(const std::string& reason) const {
-        throw std::runtime_error(reason + " at offset " + std::to_string(index));
+    [[noreturn]] void fail(const char* reason) const {
+        throw std::runtime_error(std::string(reason) + " at offset " + std::to_string(index));
     }
 
     void skipWhitespace() {
@@ -146,7 +144,7 @@ private:
 
     void expect(char c) {
         if (!consumeIf(c))
-            fail(std::string("'") + c + "' expected");
+            fail("unexpected character");
     }
 
     void skipArray() {
@@ -166,23 +164,20 @@ private:
         index += length;
     }
 
-    void appendCharacter(std::string& value, char c) {
+    std::string character(char c) {
         if (static_cast<unsigned char>(c) < 0x20)
             fail("control character in a string");
-        if (c == '\\')
-            escaped(value);
-        else
-            value += c;
+        return c == '\\' ? escaped() : std::string(1, c);
     }
 
-    void escaped(std::string& value) {
+    std::string escaped() {
         const char c = next();
         if (c == 'u')
-            return detail::appendUtf8(value, codePoint());
+            return detail::toUtf8(codePoint());
         const auto found = detail::escapeCodes.find(c);
         if (found == std::string_view::npos)
             fail("invalid escape");
-        value += detail::escapedValues[found];
+        return std::string(1, detail::escapedValues[found]);
     }
 
     std::uint32_t hex4() {
