@@ -388,32 +388,6 @@ SCENARIO("C++ function responders encode values and failures") {
         }
     }
 
-    GIVEN("a result too long for the wire, alone or inside a tuple") {
-        ResultLinkMock link;
-        const bool     inTuple = GENERATE(false, true);
-        if (inTuple) {
-            auto responder = detail::makeCppFunctionResponder<Net, Policy, std::tuple<int, std::string>>(
-              [](std::span<const std::byte>) { return std::tuple<int, std::string>{1, std::string(65536, 'x')}; });
-            responder({}, link, 9);
-        } else {
-            auto responder = detail::makeCppFunctionResponder<Net, Policy, std::string>(
-              [](std::span<const std::byte>) { return std::string(65536, 'x'); });
-            responder({}, link, 9);
-        }
-
-        auto        result  = msg::FunctionReturn<Policy>::castFromRawData(link.message);
-        auto        payload = result->payload();
-        std::string message;
-        result->decodeParameter(message, payload);
-
-        THEN("a single well-formed exception rejects the JavaScript Promise") {
-            REQUIRE(result->getCallId() == 9);
-            REQUIRE(result->getParametersCount() == 1);
-            REQUIRE(message == "WebFront strings cannot exceed 65535 bytes");
-            REQUIRE(payload.empty());
-        }
-    }
-
     GIVEN("a fire-and-forget call") {
         ResultLinkMock link;
         bool called = false;
@@ -424,6 +398,46 @@ SCENARIO("C++ function responders encode values and failures") {
         THEN("the callback runs without sending a result") {
             REQUIRE(called);
             REQUIRE(link.message.empty());
+        }
+    }
+}
+
+namespace {
+
+// The single string parameter of the return message a responder sent.
+std::string sentString(const ResultLinkMock& link) {
+    auto        result  = msg::FunctionReturn<http::DefaultBuffersPolicy>::castFromRawData(link.message);
+    auto        payload = result->payload();
+    std::string value;
+    result->decodeParameter(value, payload);
+    if (result->getParametersCount() != 1 || !payload.empty())
+        throw std::runtime_error("The return message does not hold exactly one parameter");
+    return value;
+}
+
+template <typename R>
+std::string respondWith(R value) {
+    ResultLinkMock link;
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, R>([value](std::span<const std::byte>) {
+        return value;
+    });
+    responder({}, link, 9);
+    return sentString(link);
+}
+
+}  // namespace
+
+SCENARIO("C++ results too long for the wire reject the JavaScript Promise") {
+    const std::string overlong(65536, 'x');
+
+    GIVEN("a callback returning a string over 65535 bytes") {
+        THEN("a single well-formed exception is sent") {
+            REQUIRE(respondWith(overlong) == "WebFront strings cannot exceed 65535 bytes");
+        }
+    }
+    GIVEN("a callback returning such a string inside a tuple") {
+        THEN("the partly encoded result is replaced by a single well-formed exception") {
+            REQUIRE(respondWith(std::tuple<int, std::string>{1, overlong}) == "WebFront strings cannot exceed 65535 bytes");
         }
     }
 }

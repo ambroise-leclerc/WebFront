@@ -174,47 +174,48 @@ vector<byte> messageBytes(const websocket::Frame<networking::NetworkingMock>& fr
 
 }  // namespace
 
+// Encodes 'value' alone in a function return and decodes it back as a string.
+template <typename T>
+string roundTrip(const T& value) {
+    msg::FunctionReturn<>                        message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(value, frame);
+    const auto bytes   = messageBytes(frame);
+    auto       decoded = msg::FunctionReturn<>::castFromRawData(bytes);
+    auto       payload = decoded->payload();
+    string     text;
+    decoded->decodeParameter(text, payload);
+    if (!payload.empty())
+        throw runtime_error("Trailing data after the decoded string");
+    return text;
+}
+
 SCENARIO("Strings beyond the 16-bit wire length are rejected instead of truncated") {
-    using Net = networking::NetworkingMock;
-
-    GIVEN("a function return message") {
+    GIVEN("a string of exactly 65535 bytes") {
+        const string text(65535, 'x');
+        THEN("it crosses the wire whole") {
+            REQUIRE(roundTrip(text) == text);
+        }
+    }
+    GIVEN("a string of 65536 bytes and a function return message") {
+        const string                                 text(65536, 'x');
         msg::FunctionReturn<> message;
-        websocket::Frame<Net> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
 
-        WHEN("a string of exactly 65535 bytes is encoded") {
-            const string text(65535, 'x');
-            message.encodeParameter(text, frame);
-            THEN("it decodes back whole") {
-                const auto bytes   = messageBytes(frame);
-                auto       decoded = msg::FunctionReturn<>::castFromRawData(bytes);
-                auto       payload = decoded->payload();
-                string     value;
-                decoded->decodeParameter(value, payload);
-                REQUIRE(value == text);
-                REQUIRE(payload.empty());
-            }
+        THEN("encoding throws without counting the parameter") {
+            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
+            REQUIRE(message.getParametersCount() == 0);
         }
-        WHEN("a string of 65536 bytes is encoded") {
-            const string text(65536, 'x');
-            THEN("encoding throws and leaves the message and its frame untouched") {
-                REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
-                REQUIRE(message.getParametersCount() == 0);
-                REQUIRE(message.getPayloadSize() == 0);
-                REQUIRE(frame.size() == message.header().size());
-            }
+        THEN("the message and its frame are left untouched") {
+            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
+            REQUIRE(message.getPayloadSize() == 0);
+            REQUIRE(frame.size() == message.header().size());
         }
-        WHEN("an exception message longer than 65535 bytes is encoded") {
-            const runtime_error error{string(65534, 'x') + "\xc3\xa9" + string(10, 'y')};
-            message.encodeParameter(error, frame);
-            THEN("the message is cut to fit, before the first character that does not fit whole") {
-                const auto bytes   = messageBytes(frame);
-                auto       decoded = msg::FunctionReturn<>::castFromRawData(bytes);
-                auto       payload = decoded->payload();
-                string     value;
-                decoded->decodeParameter(value, payload);
-                REQUIRE(value == string(65534, 'x'));
-                REQUIRE(payload.empty());
-            }
+    }
+    GIVEN("an exception message longer than 65535 bytes, with a two-byte character across the limit") {
+        const runtime_error error{string(65534, 'x') + "\xc3\xa9" + string(10, 'y')};
+        THEN("the message is cut before the first character that does not fit whole") {
+            REQUIRE(roundTrip(error) == string(65534, 'x'));
         }
     }
 }
