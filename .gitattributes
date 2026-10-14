@@ -57,6 +57,13 @@ src/fallback/index.html                     text eol=lf
 src/fallback/webfront-fallback.mjs          text eol=lf
 include/system/FallbackIndexHtmlData.hpp    text eol=lf
 include/system/FallbackModuleData.hpp       text eol=lf
+src/components/terminal/*                   text eol=lf
+third_party/xterm/*                         text eol=lf
+include/system/TerminalIndexHtmlData.hpp    text eol=lf
+include/system/TerminalModuleData.hpp       text eol=lf
+include/system/XtermModuleData.hpp          text eol=lf
+include/system/XtermCssData.hpp             text eol=lf
+include/system/XtermFitAddonData.hpp        text eol=lf
 
 # Serialisation
 *.json     text

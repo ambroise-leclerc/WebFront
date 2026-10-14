@@ -1,4 +1,5 @@
 import { importedValue } from './module-fixture.mjs';
+import './terminal-specs.mjs';
 
 const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';
