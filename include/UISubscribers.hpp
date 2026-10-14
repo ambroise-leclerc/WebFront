@@ -1,6 +1,7 @@
 /// @brief Subscriptions to connected browsers (BasicWF::subscribeUIStarted).
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -80,11 +81,20 @@ private:
     std::uint64_t                                                   nextId = 0;
     std::vector<std::pair<std::uint64_t, std::shared_ptr<Handler>>> handlers;
 
+    // The removed handler is destroyed after the lock is released: its captures may own another
+    // subscription to these subscribers, whose destruction unsubscribes and takes the lock again.
     void unsubscribe(std::uint64_t id) {
-        std::scoped_lock lock{mutex};
-        std::erase_if(handlers, [id](const auto& entry) {
-            return entry.first == id;
-        });
+        std::shared_ptr<Handler> removed;
+        {
+            std::scoped_lock lock{mutex};
+            auto             found = std::ranges::find(handlers, id, [](const auto& entry) {
+                return entry.first;
+            });
+            if (found == handlers.end())
+                return;
+            removed = std::move(found->second);
+            handlers.erase(found);
+        }
     }
 
     [[nodiscard]] std::vector<std::shared_ptr<Handler>> snapshot() const {
