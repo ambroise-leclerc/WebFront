@@ -360,8 +360,17 @@ private:
 
     void spawn(networking::Task task) { networking::Spawn(Net::Scheduler(acceptor), stopSource.get_token(), std::move(task)); }
 
+    // A failed accept (an aborted connection, no file descriptor left...) must not end the accepting.
     networking::Task acceptConnections() {
-        for (;;) spawn(serve(co_await Net::Accept(acceptor)));
+        while (!stopSource.stop_requested()) {
+            try {
+                spawn(serve(co_await Net::Accept(acceptor)));
+            }
+            catch (const std::system_error& error) {
+                if (error.code() == std::errc::operation_canceled) co_return;
+                log::error("Accept failed: {}", error.what());
+            }
+        }
     }
 
     networking::Task serve(typename Net::Socket socket) {
