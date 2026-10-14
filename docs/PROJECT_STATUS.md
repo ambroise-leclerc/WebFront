@@ -1,6 +1,6 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14.
 
 The default build remains header-only. `WEBFRONT_USE_MDDLOG=ON` adds a WebFront-owned
 compiled diagnostic adapter while keeping consuming translation units module-free.
@@ -17,6 +17,15 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
 - The CTest cases `NewcomerDocsMatchExamples` and `AddSubdirectoryConsumer` guard the documented commands, snippets and subproject integration.
 - Verified 2026-10-13 on Linux (Ubuntu 24.04, GCC 13.3, CMake 4.4.4): option-free build; CEF-off testing build with all CTest cases passing; Hello and Greeter pages served and driven in a real Chromium (connected badge, empty-input message, `Hello, Ada!`). **Not verified in that environment:** the CEF-enabled build and the Jasmine/Xvfb integration (the CEF download was blocked), Windows, macOS and Clang.
 - Limitation: a configured document root serves arbitrary local files and is a development convenience, not a production sandbox or packaging format.
+
+## UI components: the terminal
+
+- First opt-in UI component (#230), designed in [UI_COMPONENTS.md](UI_COMPONENTS.md): `webfront::Terminal` (`include/components/Terminal.hpp`) registers C++ commands behind an embedded xterm.js 6.0.0 terminal (`fs::TerminalFS`, served under `webfront/components/terminal/`; composed with `fs::DefaultFSWith<>`). Example: `WebFrontTerminal` (`src/Terminal.cpp`). The bridge protocol is unchanged.
+- Line editing, history and Tab completion run in the browser; C++ receives whole lines and returns the output as the Promise result. A command exception rejects the Promise and is printed as an error. Output is capped at 60000 bytes because bridge strings carry a 16-bit length.
+- Covered by Catch2 (`TerminalTests.cpp`, `TerminalFSTests.cpp`), five asset freshness CTest cases and Jasmine specs (`webtest/js/terminal-specs.mjs`) in the browser integration test.
+- Verified 2026-10-14 on Linux (GCC 16.1, Unix Makefiles generator): CEF-off build with all 100 CTest cases passing; the example driven in headless Chromium (commands, errors, quoting, completion, history, `help`, `clear`); and the Jasmine suite, terminal specs included, run in headless Chromium through a scratch copy of the runner that replaces `CEFFrontend`. A deliberately broken terminal spec made that run fail. **Not verified:** the CEF/Xvfb CTest itself, Windows, macOS and Clang.
+- Limitations: no output streaming, no cancellation, no per-browser sessions, and single-row line redraw (see the design note). The planned `wf` tool manager (#234, npm-hosted web tools installed during debugging) is designed but not implemented; it needs #233.
+- Found while building it, not fixed here: neither string encoder rejects strings over 65535 bytes (#231); `MimeType::toString()` maps `csv` to `text/css` (#232); with GCC 16.1 and the Ninja generator, CMake's module dependency scanning (`-fmodules-ts`) crashes the compiler inside stdexec, while Unix Makefiles builds work.
 
 ## Intended product
 
