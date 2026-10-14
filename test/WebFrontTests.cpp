@@ -208,6 +208,7 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
 
     GIVEN("a frontend that completes when the window session ends") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
+        const int  previousOpenCalls = ClosingFrontend::openCalls;  // other scenarios share this frontend
         FrontendWF webFront("9000");
 
         WHEN("openWindow is called") {
@@ -216,7 +217,7 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
             THEN("BasicWF requests server shutdown after the frontend returns") {
                 REQUIRE(action == FrontendWF::WindowAction::closeWindow);
                 REQUIRE(ClosingFrontend::initializeCalls == 1);
-                REQUIRE(ClosingFrontend::openCalls == 1);
+                REQUIRE(ClosingFrontend::openCalls == previousOpenCalls + 1);
                 REQUIRE(ClosingFrontend::lastPort == "9000");
                 REQUIRE(ClosingFrontend::lastFile == "react.html");
             }
