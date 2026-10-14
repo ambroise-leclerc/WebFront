@@ -63,8 +63,14 @@ inline bool consistsOf(std::string_view text, std::string_view allowed) {
 }
 
 // Neither "." nor ".." can be a name part, since no part starts with '.'.
+// The HTTP server rejects every URL containing "..", so a name or path containing it could be
+// installed but never served.
+inline bool hasDoubleDot(std::string_view text) {
+    return text.find("..") != std::string_view::npos;
+}
+
 inline bool isNamePart(std::string_view part) {
-    if (part.empty())
+    if (part.empty() || hasDoubleDot(part))
         return false;
     return std::string_view("._").find(part.front()) == std::string_view::npos && consistsOf(part, nameCharacters);
 }
@@ -83,12 +89,23 @@ inline bool isPackageName(std::string_view name) {
 inline bool isVersion(std::string_view version) {
     if (version.empty() || version.size() > 256)
         return false;
+    if (hasDoubleDot(version))
+        return false;
     return std::isdigit(static_cast<unsigned char>(version.front())) != 0 && consistsOf(version, versionCharacters);
 }
 
 inline bool hasSafeCharacters(std::string_view path) {
     using namespace std::string_view_literals;
-    return path.size() <= 4096 && path.find_first_of("\\:\0"sv) == std::string_view::npos;
+    if (path.size() > 4096 || hasDoubleDot(path))
+        return false;
+    return path.find_first_of("\\:*?\"<>|\0"sv) == std::string_view::npos;
+}
+
+// Titles and integrities are listed one tool per line, fields separated by tabs.
+inline bool hasControlCharacters(std::string_view text) {
+    return std::ranges::any_of(text, [](char c) {
+        return static_cast<unsigned char>(c) < 0x20 || c == 0x7F;
+    });
 }
 
 // Appends a component unless it is empty, "." or ".." (or "...", which no package needs).
@@ -117,7 +134,8 @@ inline void validateVersion(std::string_view version) {
 
 /// Converts a '/'-separated path received from the browser into a relative path that stays inside
 /// its directory. Rejects empty and absolute paths, empty, "." and ".." components, backslashes,
-/// colons (drive letters and alternate streams) and NUL characters with std::invalid_argument.
+/// colons (drive letters and alternate streams), the other characters Windows forbids in file names
+/// (*?"<>|) and NUL, on every platform, with std::invalid_argument.
 inline std::filesystem::path safeRelativePath(std::string_view path) {
     std::filesystem::path result;
     bool                  safe = detail::hasSafeCharacters(path);
@@ -144,6 +162,8 @@ inline void validateRecord(const ToolRecord& record) {
     validatePackageName(record.name);
     validateVersion(record.version);
     safeRelativePath(record.entry);
+    if (hasControlCharacters(record.title + record.integrity))
+        throw std::invalid_argument("Control characters in the title or integrity of " + record.name);
 }
 
 inline ToolRecord readRecord(json::Reader& reader, const std::string& name) {
@@ -204,7 +224,7 @@ inline std::string formatLock(const LockedTools& tools) {
 ///   <project>/.webfront/tools/<name>@<version>/   the files of each installed tool
 ///   <project>/webfront-tools.lock.json            name, version, integrity, entry and title of each
 /// An installation is staged under .webfront/tools/.staging/ and replaces the installed version
-/// only when committed; a reinstalled version is kept under .webfront/tools/.backup/ until the lock
+/// only when committed; a reinstalled version is kept as <name>@<version>~backup until the lock
 /// file is written. A failed or abandoned installation leaves the installed tool intact.
 /// Thread-safe within a process. Errors throw std::invalid_argument (invalid input) or
 /// std::runtime_error / std::filesystem::filesystem_error (I/O).
@@ -281,7 +301,7 @@ public:
         installStaged(record, locked);
         pending.erase(key(record.name, record.version));
         if (replaced)
-            std::filesystem::remove_all(*replaced);
+            removeLeftover(*replaced);
     }
 
     /// Uninstalls a tool. Returns false if it is not installed.
@@ -295,7 +315,7 @@ public:
         const auto directory = installDir(name, found->second.version);
         tools.erase(found);
         writeLock(tools);
-        std::filesystem::remove_all(directory);
+        removeLeftover(directory);
         return true;
     }
 
@@ -339,11 +359,13 @@ private:
     // this version is kept aside until the lock file is written, and restored if anything fails.
     void installStaged(const ToolRecord& record, const tools::LockedTools& locked) const {
         const auto target = installDir(record.name, record.version);
-        const auto backup = toolsDir() / ".backup" / tools::detail::fromUtf8(key(record.name, record.version));
+        // Next to the target, so renaming does not need write access to the directory itself; '~'
+        // cannot appear in a version, so no installed version has this name.
+        auto backup = target;
+        backup     += "~backup";
         std::filesystem::remove_all(backup);
         const bool replacing = std::filesystem::exists(target);
         if (replacing) {
-            std::filesystem::create_directories(backup.parent_path());
             std::filesystem::rename(target, backup);
         }
         try {
@@ -354,7 +376,14 @@ private:
             restore(target, backup, replacing);
             throw;
         }
-        std::filesystem::remove_all(backup);
+        removeLeftover(backup);
+    }
+
+    // Once the lock file is written the operation has succeeded: a directory that cannot be deleted
+    // is left behind rather than reported as a failure of an operation that took effect.
+    static void removeLeftover(const std::filesystem::path& directory) {
+        std::error_code ignored;
+        std::filesystem::remove_all(directory, ignored);
     }
 
     static void restore(const std::filesystem::path& target, const std::filesystem::path& backup, bool replacing) {

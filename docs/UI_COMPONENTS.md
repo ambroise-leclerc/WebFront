@@ -149,7 +149,7 @@ header-only C++ library.
    `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)`. Files are sent in chunks to
    stay under the bridge's frame limits; typed arrays already cross the bridge. Progress is shown in
    the browser, so no C++ push is needed.
-5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes and colons, and a chunk
+5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes, and the characters Windows forbids in file names, and a chunk
    whose offset does not follow the bytes already written. Files are staged under
    `<project>/.webfront/tools/.staging/`.
 6. `webfront.pkg.commit(pkg, version, integrity, entry, title)` checks that the entry page was
@@ -173,7 +173,10 @@ webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.*
 - `fs::ToolStore` (`include/system/ToolStore.hpp`, with the small JSON reader of `include/utils/Json.hpp`) validates npm names (`@scope/` allowed),
   versions and paths, stages and commits installations, and reads and writes the lock file through
   a temporary file renamed over it. The lock file is read strictly, and a record whose name,
-  version or entry could leave the tools directory is rejected.
+  version or entry could leave the tools directory is rejected. Names, versions and paths may not
+  contain `..` anywhere, because the HTTP server rejects such URLs, and titles and integrities may not
+  contain control characters, which would break the `webfront.pkg.list()` format. Once the lock file
+  is written, a directory that cannot be deleted is left behind instead of failing the operation.
 - `fs::BasicPackageFS<Location>` (`include/system/PackageFS.hpp`) takes the project directory from
   `Location::get()`; `fs::PackageFS` uses the working directory at startup (`fs::CurrentDirectory`).
   `ToolManager<App, Location>` must use the same `Location`.
