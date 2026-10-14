@@ -15,6 +15,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -316,9 +317,14 @@ protected:
         incrementPayloadSize(1 + sizeof(size));
     }
 
+    /// Strings carry a 16-bit length on the wire.
+    static constexpr size_t maxStringBytes = std::numeric_limits<std::uint16_t>::max();
+
     template <typename WebSocketFrame>
     void encodeString(const char* str, size_t size, WebSocketFrame& frame) {
         using namespace std;
+        if (size > maxStringBytes)
+            throw std::length_error("WebFront strings cannot exceed 65535 bytes");
         if (size < 256)
             encodeTypeHeader(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
         else
@@ -356,10 +362,21 @@ protected:
     void encodeException(const std::exception& e, WebSocketFrame& frame) {
         using namespace std;
         std::cout << "Exception : " << e.what() << '\n';
-        auto textSize = char_traits<char>::length(e.what());
-        encodeTypeHeader(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
-        frame.addBuffer(span(reinterpret_cast<const std::byte*>(e.what()), textSize));
-        incrementPayloadSize(textSize);
+        const auto text = fitStringLength(e.what());
+        encodeTypeHeader(msg::CodedType::exception, static_cast<uint16_t>(text.size()), frame);
+        frame.addBuffer(span(reinterpret_cast<const std::byte*>(text.data()), text.size()));
+        incrementPayloadSize(text.size());
+    }
+
+    /// An error message must still reach the other side, so an overlong one is cut to the wire limit
+    /// before the first UTF-8 character that would not fit whole.
+    static std::string_view fitStringLength(std::string_view text) {
+        if (text.size() <= maxStringBytes)
+            return text;
+        size_t cut = maxStringBytes;
+        while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
+            --cut;
+        return text.substr(0, cut);
     }
 
     template <typename Array, typename WebSocketFrame>
@@ -431,20 +448,18 @@ public:
     void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
-        setParametersCount(getParametersCount() + 1);
+        // Counted once encoded, so a parameter that fails to encode is not counted. A tuple is one
+        // parameter: its elements, encoded recursively, must not inflate the top-level count.
+        const auto parametersCountBefore = getParametersCount();
 
         if constexpr (is_tuple_v<ParamType>) {
             uint8_t nbParams = static_cast<uint8_t>(tuple_size<ParamType>::value);
             encodeTypeHeader(msg::CodedType::tuple, nbParams, frame);
-            // The tuple itself is one parameter; encoding its elements recursively must not
-            // inflate the top-level parametersCount, so restore it once they're all encoded.
-            const auto parametersCountBeforeElements = getParametersCount();
             std::apply(
                 [&](auto&... tupleArgs) {
                     ((encodeParameter(tupleArgs, frame)), ...);
                 },
                 t);
-            setParametersCount(parametersCountBeforeElements);
         } else if constexpr (is_same_v<ParamType, bool>)
             encodeBool(t, frame);
         else if constexpr (is_arithmetic_v<ParamType>)
@@ -466,6 +481,7 @@ public:
             static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
         else if constexpr (is_base_of_v<std::exception, ParamType>)
             encodeException(t, frame);
+        setParametersCount(static_cast<uint8_t>(parametersCountBefore + 1));
 
         std::cout << "bufferIndex = " << encodeBufferIndex << " ,payloadSize = " << getPayloadSize() << "\n";
     }

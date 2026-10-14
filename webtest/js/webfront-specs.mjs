@@ -130,6 +130,18 @@ describe('WebFront browser integration', () => {
             .toBeRejectedWithError('C++ callback failed');
     });
 
+    it('rejects a C++ result longer than the 65535-byte string limit', async () => {
+        await expectAsync(webFront.cppFunction('returnOverlongFromCpp')())
+            .toBeRejectedWithError('WebFront strings cannot exceed 65535 bytes');
+    });
+
+    it('sends strings up to the limit and rejects longer ones before sending', async () => {
+        const lengthInCpp = webFront.cppFunction('lengthInCpp');
+        await expectAsync(lengthInCpp('x'.repeat(65535))).toBeResolvedTo(65535);
+        await expectAsync(lengthInCpp('x'.repeat(65536)))
+            .toBeRejectedWithError(RangeError, 'WebFront strings cannot exceed 65535 UTF-8 bytes');
+    });
+
     it('allows C++ to await a JavaScript result', async () => {
         await expectAsync(cppResultCall).toBeResolvedTo('js-result:from-cpp');
     });

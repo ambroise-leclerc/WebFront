@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <tooling/Logger.hpp>
 #include <networking/NetworkingMock.hpp>
@@ -384,6 +385,32 @@ SCENARIO("C++ function responders encode values and failures") {
 
         THEN("a stable fallback message is encoded") {
             REQUIRE(message == "Unknown C++ exception");
+        }
+    }
+
+    GIVEN("a result too long for the wire, alone or inside a tuple") {
+        ResultLinkMock link;
+        const bool     inTuple = GENERATE(false, true);
+        if (inTuple) {
+            auto responder = detail::makeCppFunctionResponder<Net, Policy, std::tuple<int, std::string>>(
+              [](std::span<const std::byte>) { return std::tuple<int, std::string>{1, std::string(65536, 'x')}; });
+            responder({}, link, 9);
+        } else {
+            auto responder = detail::makeCppFunctionResponder<Net, Policy, std::string>(
+              [](std::span<const std::byte>) { return std::string(65536, 'x'); });
+            responder({}, link, 9);
+        }
+
+        auto        result  = msg::FunctionReturn<Policy>::castFromRawData(link.message);
+        auto        payload = result->payload();
+        std::string message;
+        result->decodeParameter(message, payload);
+
+        THEN("a single well-formed exception rejects the JavaScript Promise") {
+            REQUIRE(result->getCallId() == 9);
+            REQUIRE(result->getParametersCount() == 1);
+            REQUIRE(message == "WebFront strings cannot exceed 65535 bytes");
+            REQUIRE(payload.empty());
         }
     }
 
