@@ -17,7 +17,7 @@ The project is an experimental foundation, not a production-ready UI framework. 
 - `include/weblink/`: bridge message encoding and routing.
 - `include/system/`: layered virtual filesystems and embedded web resources.
 - `include/frontend/`: system-browser and CEF frontend adapters.
-- `include/components/`: opt-in UI components (`Terminal.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`.
+- `include/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`, and installed tools by `include/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
 - `src/`: example applications and browser assets: `HelloWorld.cpp` (no assets, embedded fallback page), `Greeter.cpp` with `greeter/` (editable UI), `ModuleDemo.cpp` with `module-demo.html` and `react.html`, `Terminal.cpp` (terminal component demo), and the readable embedded sources `WebFront.js`, `fallback/` and `components/`.
 - `test/`: Catch2 unit tests.
 - `webtest/`: Jasmine real-browser integration test.
