@@ -242,39 +242,10 @@ SCENARIO("A tool store installs tools in its project directory") {
                     REQUIRE(contentOf(store.installDir("@acme/plot", "2.0.0") / "dist" / "index.html") == "<p>v2</p>");
                 }
             }
-            AND_WHEN("a version differing only by case is installed, as on a case-insensitive volume") {
-                install(store, plotRecord("1.2.0-alpha"), "<p>alpha</p>");
-                install(store, plotRecord("1.2.0-Alpha"), "<p>Alpha</p>");
-                THEN("the cleanup of the replaced version keeps the new files") {
-                    REQUIRE(store.find("@acme/plot")->version == "1.2.0-Alpha");
-                    REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0-Alpha") / "dist" / "index.html") == "<p>Alpha</p>");
-                }
-            }
             AND_WHEN("the same version is installed again") {
                 install(store, plotRecord(), "<p>again</p>");
                 THEN("its files are replaced") {
                     REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>again</p>");
-                }
-            }
-            AND_WHEN("installing a version fails when the lock file is written") {
-                filesystem::create_directories(project.path() / "webfront-tools.lock.json.tmp");
-                const auto failingInstall = [&](string version) {
-                    REQUIRE_THROWS_AS(install(store, plotRecord(std::move(version)), "<p>failed</p>"), runtime_error);
-                };
-                failingInstall("1.2.0");
-                failingInstall("2.0.0");
-                THEN("the installed version and its files are intact, and no other version is left") {
-                    REQUIRE(store.find("@acme/plot") == plotRecord());
-                    REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>plot</p>");
-                    REQUIRE_FALSE(filesystem::exists(store.installDir("@acme/plot", "2.0.0")));
-                }
-            }
-            AND_WHEN("a new installation is abandoned") {
-                store.begin("@acme/plot", "3.0.0");
-                store.write("@acme/plot", "3.0.0", {.path = "dist/index.html", .offset = 0, .bytes = bytes("<p>v3</p>")});
-                THEN("the installed version is untouched") {
-                    REQUIRE(store.find("@acme/plot")->version == "1.2.0");
-                    REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>plot</p>");
                 }
             }
             AND_WHEN("it is removed") {
@@ -338,6 +309,9 @@ SCENARIO("A tool store rejects inconsistent installations") {
             }
         }
     }
+}
+
+SCENARIO("A tool store refuses lock files it cannot read") {
     GIVEN("a lock file that exists but cannot be read") {
         TemporaryDirectory project;
         const auto         lockFile = project.path() / "webfront-tools.lock.json";
@@ -378,6 +352,44 @@ SCENARIO("A tool store rejects inconsistent installations") {
         fs::ToolStore store{project.path()};
         THEN("reading the installed tools reports it") {
             REQUIRE_THROWS_AS(store.installed(), runtime_error);
+        }
+    }
+}
+
+SCENARIO("A tool store keeps the installed version when a replacement does not complete") {
+    GIVEN("a project with an installed tool") {
+        TemporaryDirectory project;
+        fs::ToolStore      store{project.path()};
+        install(store, plotRecord());
+
+        WHEN("a version differing only by case is installed, as on a case-insensitive volume") {
+            install(store, plotRecord("1.2.0-alpha"), "<p>alpha</p>");
+            install(store, plotRecord("1.2.0-Alpha"), "<p>Alpha</p>");
+            THEN("the cleanup of the replaced version keeps the new files") {
+                REQUIRE(store.find("@acme/plot")->version == "1.2.0-Alpha");
+                REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0-Alpha") / "dist" / "index.html") == "<p>Alpha</p>");
+            }
+        }
+        WHEN("installing a version fails when the lock file is written") {
+            filesystem::create_directories(project.path() / "webfront-tools.lock.json.tmp");
+            const auto failingInstall = [&](string version) {
+                REQUIRE_THROWS_AS(install(store, plotRecord(std::move(version)), "<p>failed</p>"), runtime_error);
+            };
+            failingInstall("1.2.0");
+            failingInstall("2.0.0");
+            THEN("the installed version and its files are intact, and no other version is left") {
+                REQUIRE(store.find("@acme/plot") == plotRecord());
+                REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>plot</p>");
+                REQUIRE_FALSE(filesystem::exists(store.installDir("@acme/plot", "2.0.0")));
+            }
+        }
+        WHEN("a new installation is abandoned") {
+            store.begin("@acme/plot", "3.0.0");
+            store.write("@acme/plot", "3.0.0", {.path = "dist/index.html", .offset = 0, .bytes = bytes("<p>v3</p>")});
+            THEN("the installed version is untouched") {
+                REQUIRE(store.find("@acme/plot")->version == "1.2.0");
+                REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>plot</p>");
+            }
         }
     }
 }

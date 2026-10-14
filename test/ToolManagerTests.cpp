@@ -112,24 +112,6 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
                 REQUIRE(served(packages, "webfront/tools/@acme/plot/dist/index.html") == "<p>plot</p>");
                 REQUIRE(served(packages, "/webfront/tools/@acme/plot/dist/index.html") == "<p>plot</p>");
             }
-            AND_WHEN("a tool whose entry needs escaping in a URL is installed") {
-                const string entry = "dist/a+b c%41\xc3\xa9#[].html";
-                app.call<void, string, string>("webfront.pkg.begin", "logs", "1.0.0");
-                app.call<void, string, string, string, double, vector<uint8_t>>("webfront.pkg.writeFile", "logs", "1.0.0", entry, 0, bytes("<p>logs</p>"));
-                app.call<void, string, string, string, string, string>("webfront.pkg.commit", "logs", "1.0.0", "", entry, "Logs");
-                THEN("its listed URL is absolute, encoded, and leads the server to the file") {
-                    const auto list = app.call<string, double>("webfront.pkg.list", 0);
-                    const auto url  = list.substr(list.find("logs\t1.0.0\t") + 11);
-                    REQUIRE(url.starts_with("/webfront/tools/logs/dist/a%2Bb%20c%2541%C3%A9%23%5B%5D.html\t"));
-                    TestPackageFS packages{"ignored"};
-                    REQUIRE(served(packages, uri::decode(url.substr(0, url.find('\t')))) == "<p>logs</p>");
-                    http::RequestHandler<networking::NetworkingMock, TestPackageFS> handler{"."};
-                    http::Request                                                   request;
-                    request.method = http::Request::Method::Get;
-                    request.uri    = url.substr(0, url.find('\t'));
-                    REQUIRE(handler.handleRequest(request).statusCode == http::Response::ok);
-                }
-            }
             AND_WHEN("wf remove uninstalls it") {
                 REQUIRE(app.run("wf remove @acme/plot") == "Removed @acme/plot.");
                 THEN("it is no longer listed nor served") {
@@ -144,6 +126,35 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
                 THEN("the registered functions still own the store") {
                     REQUIRE(contains(app.run("wf list"), "@acme/plot@1.2.0"));
                 }
+            }
+        }
+    }
+}
+
+SCENARIO("Installed tools are listed with URLs the HTTP server resolves") {
+    GIVEN("a terminal with a tool manager on an application") {
+        TemporaryDirectory project;
+        TestProject::directory = project.path();
+        RecordingApp                           app;
+        Terminal                               terminal{app};
+        ToolManager<RecordingApp, TestProject> manager{app, terminal};
+
+        WHEN("a tool whose entry needs escaping in a URL is installed") {
+            const string entry = "dist/a+b c%41\xc3\xa9#[].html";
+            app.call<void, string, string>("webfront.pkg.begin", "logs", "1.0.0");
+            app.call<void, string, string, string, double, vector<uint8_t>>("webfront.pkg.writeFile", "logs", "1.0.0", entry, 0, bytes("<p>logs</p>"));
+            app.call<void, string, string, string, string, string>("webfront.pkg.commit", "logs", "1.0.0", "", entry, "Logs");
+            THEN("its listed URL is absolute, encoded, and leads the server to the file") {
+                const auto list = app.call<string, double>("webfront.pkg.list", 0);
+                const auto url  = list.substr(list.find("logs\t1.0.0\t") + 11);
+                REQUIRE(url.starts_with("/webfront/tools/logs/dist/a%2Bb%20c%2541%C3%A9%23%5B%5D.html\t"));
+                TestPackageFS packages{"ignored"};
+                REQUIRE(served(packages, uri::decode(url.substr(0, url.find('\t')))) == "<p>logs</p>");
+                http::RequestHandler<networking::NetworkingMock, TestPackageFS> handler{"."};
+                http::Request                                                   request;
+                request.method = http::Request::Method::Get;
+                request.uri    = url.substr(0, url.find('\t'));
+                REQUIRE(handler.handleRequest(request).statusCode == http::Response::ok);
             }
         }
     }
