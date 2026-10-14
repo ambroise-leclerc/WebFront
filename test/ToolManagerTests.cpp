@@ -1,6 +1,7 @@
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <components/ToolManager.hpp>
+#include <http/Encodings.hpp>
 
 #include <any>
 #include <array>
@@ -98,7 +99,7 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
             app.call<void, string, string, string, string, string>("webfront.pkg.commit", "@acme/plot", "1.2.0", "sha512-abc", "dist/index.html", "Live plot");
 
             THEN("the page lists it with the URL of its entry") {
-                REQUIRE(app.call<string>("webfront.pkg.list") == "@acme/plot\t1.2.0\twebfront/tools/@acme/plot/dist/index.html\tLive plot\n");
+                REQUIRE(app.call<string>("webfront.pkg.list") == "@acme/plot\t1.2.0\t/webfront/tools/@acme/plot/dist/index.html\tLive plot\n");
             }
             THEN("wf list shows it") {
                 REQUIRE(app.run("wf list") == "@acme/plot@1.2.0  Live plot");
@@ -107,6 +108,19 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
                 TestPackageFS packages{"ignored"};
                 REQUIRE(served(packages, "webfront/tools/@acme/plot/dist/index.html") == "<p>plot</p>");
                 REQUIRE(served(packages, "/webfront/tools/@acme/plot/dist/index.html") == "<p>plot</p>");
+            }
+            AND_WHEN("a tool whose entry needs escaping in a URL is installed") {
+                const string entry = "dist/a+b c%41\xc3\xa9#?.html";
+                app.call<void, string, string>("webfront.pkg.begin", "logs", "1.0.0");
+                app.call<void, string, string, string, double, vector<uint8_t>>("webfront.pkg.writeFile", "logs", "1.0.0", entry, 0, bytes("<p>logs</p>"));
+                app.call<void, string, string, string, string, string>("webfront.pkg.commit", "logs", "1.0.0", "", entry, "Logs");
+                THEN("its listed URL is absolute, encoded, and leads the server to the file") {
+                    const auto list = app.call<string>("webfront.pkg.list");
+                    const auto url  = list.substr(list.find("logs\t1.0.0\t") + 11);
+                    REQUIRE(url.starts_with("/webfront/tools/logs/dist/a%2Bb%20c%2541%C3%A9%23%3F.html\t"));
+                    TestPackageFS packages{"ignored"};
+                    REQUIRE(served(packages, uri::decode(url.substr(0, url.find('\t')))) == "<p>logs</p>");
+                }
             }
             AND_WHEN("wf remove uninstalls it") {
                 REQUIRE(app.run("wf remove @acme/plot") == "Removed @acme/plot.");
