@@ -131,9 +131,25 @@ SCENARIO("The lock file is read and written as JSON") {
                              R"({"other": 1} x)",
                              R"({"other": "abc)",
                              R"({"tools": {"p": {"x": }}})",
+                             R"({"tools": {}, "other": garbage})",
+                             R"({"tools": {}, "lockfileVersion": 1e+})",
+                             R"({"a": 01})",
+                             R"({"a": -})",
+                             R"({"a": 1.})",
+                             R"({"a": .5})",
+                             R"({"a": +1})",
+                             R"({"a": 1e})",
+                             R"({"a": tru})",
+                             R"({"a": nulls})",
                              "{\"tools\": {\"p\": {\"title\": \"a\nb\"}}}");
         THEN("parsing throws") {
             REQUIRE_THROWS(fs::tools::parseLock(json));
+        }
+    }
+    GIVEN("numbers and literals of the JSON grammar among the unknown members") {
+        const auto json = R"({"a": -0.5e+10, "b": 1E5, "c": 0, "d": true, "e": false, "f": null, "g": 12.25, "h": -0, "i": 3e-2, "tools": {}})";
+        THEN("they are skipped") {
+            REQUIRE(fs::tools::parseLock(json).empty());
         }
     }
     GIVEN("a record pointing outside the tools directory") {
@@ -254,6 +270,39 @@ SCENARIO("A tool store rejects inconsistent installations") {
             }
         }
     }
+    GIVEN("a lock file that exists but cannot be read") {
+        TemporaryDirectory project;
+        const auto         lockFile = project.path() / "webfront-tools.lock.json";
+        filesystem::create_directory(lockFile);
+        fs::ToolStore store{project.path()};
+        THEN("reading the installed tools fails instead of reporting none") {
+            REQUIRE_THROWS_AS(store.installed(), runtime_error);
+        }
+        THEN("an installation fails without replacing the lock file") {
+            store.begin("plot", "1.0.0");
+            store.write("plot", "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("x")});
+            REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"}), runtime_error);
+            REQUIRE(filesystem::is_directory(lockFile));
+        }
+    }
+#ifndef _WIN32
+    GIVEN("a lock file without read permission") {
+        TemporaryDirectory project;
+        const auto         lockFile = project.path() / "webfront-tools.lock.json";
+        ofstream(lockFile) << R"({"tools": {"logs": {"version": "1.0.0", "entry": "index.html"}}})";
+        filesystem::permissions(lockFile, filesystem::perms::none);
+        const bool    readable = ifstream(lockFile).is_open();  // e.g. when the tests run as root
+        fs::ToolStore store{project.path()};
+        THEN("an installation fails instead of dropping the recorded tools") {
+            store.begin("plot", "1.0.0");
+            store.write("plot", "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("x")});
+            if (!readable)
+                REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"}), runtime_error);
+            filesystem::permissions(lockFile, filesystem::perms::owner_read | filesystem::perms::owner_write);
+            REQUIRE(store.find("logs"));
+        }
+    }
+#endif
     GIVEN("a malformed lock file") {
         TemporaryDirectory project;
         ofstream(project.path() / "webfront-tools.lock.json") << "{ not json";

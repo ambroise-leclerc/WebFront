@@ -226,7 +226,7 @@ public:
     }
 
     /// The installed tools; an absent lock file means none. Throws std::runtime_error if the lock
-    /// file is malformed.
+    /// file cannot be read or is malformed, so its tools are never dropped by mistake.
     [[nodiscard]] tools::LockedTools installed() const {
         return readLock(lockFile());
     }
@@ -300,9 +300,11 @@ public:
     }
 
     static tools::LockedTools readLock(const std::filesystem::path& file) {
+        if (!std::filesystem::exists(file))
+            return {};
         std::ifstream stream(file, std::ios::binary);
         if (!stream.is_open())
-            return {};
+            throw std::runtime_error("Cannot read " + file.filename().string());
         std::ostringstream content;
         content << stream.rdbuf();
         try {

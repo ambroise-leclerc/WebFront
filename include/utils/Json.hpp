@@ -22,6 +22,53 @@ inline constexpr std::string_view tokenCharacters = "abcdefghijklmnopqrstuvwxyzA
 inline constexpr std::string_view escapeCodes     = "\"\\/bfnrt";
 inline constexpr std::string_view escapedValues   = "\"\\/\b\f\n\r\t";
 
+inline constexpr std::array<std::string_view, 3> literals{"true", "false", "null"};
+
+inline bool isAt(std::string_view token, std::size_t position, std::string_view characters) {
+    return position < token.size() && characters.find(token[position]) != std::string_view::npos;
+}
+
+inline std::size_t digitCount(std::string_view token, std::size_t position) {
+    return std::min(token.find_first_not_of("0123456789", position), token.size()) - std::min(position, token.size());
+}
+
+// Each step returns the position after its part, or npos when the part is malformed.
+inline std::size_t afterInteger(std::string_view token) {
+    const std::size_t start  = isAt(token, 0, "-") ? 1 : 0;
+    const auto        digits = digitCount(token, start);
+    if (digits == 0)
+        return std::string_view::npos;
+    return digits > 1 && token[start] == '0' ? std::string_view::npos : start + digits;
+}
+
+inline std::size_t afterFraction(std::string_view token, std::size_t position) {
+    if (!isAt(token, position, "."))
+        return position;
+    const auto digits = digitCount(token, position + 1);
+    return digits == 0 ? std::string_view::npos : position + 1 + digits;
+}
+
+inline std::size_t afterExponent(std::string_view token, std::size_t position) {
+    if (!isAt(token, position, "eE"))
+        return position;
+    const std::size_t start  = isAt(token, position + 1, "+-") ? position + 2 : position + 1;
+    const auto        digits = digitCount(token, start);
+    return digits == 0 ? std::string_view::npos : start + digits;
+}
+
+/// A JSON number: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
+inline bool isNumber(std::string_view token) {
+    const auto integer = afterInteger(token);
+    if (integer == std::string_view::npos)
+        return false;
+    const auto fraction = afterFraction(token, integer);
+    return fraction != std::string_view::npos && afterExponent(token, fraction) == token.size();
+}
+
+inline bool isLiteralOrNumber(std::string_view token) {
+    return std::ranges::find(literals, token) != literals.end() || isNumber(token);
+}
+
 inline bool isHighSurrogate(std::uint32_t unit) {
     return unit >= 0xD800 && unit <= 0xDBFF;
 }
@@ -88,7 +135,7 @@ public:
         return value;
     }
 
-    /// Skips any value: object, array, string, number, true, false or null.
+    /// Skips any value: object, array, string, number, true, false or null, checking its grammar.
     void skipValue() {
         switch (peek()) {
             case '{':
@@ -159,8 +206,8 @@ private:
 
     void skipToken() {
         const auto length = std::min(text.find_first_not_of(detail::tokenCharacters, index), text.size()) - index;
-        if (length == 0)
-            fail("value expected");
+        if (!detail::isLiteralOrNumber(text.substr(index, length)))
+            fail("invalid value");
         index += length;
     }
 

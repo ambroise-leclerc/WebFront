@@ -14,6 +14,24 @@
 
 namespace webfront::fs {
 
+namespace detail {
+
+inline std::string encodePath(std::string_view path) {
+    constexpr std::string_view kept      = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/@";
+    constexpr std::string_view hexDigits = "0123456789ABCDEF";
+    std::string                encoded;
+    for (const char c : path) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (kept.find(c) != std::string_view::npos)
+            encoded += c;
+        else
+            encoded += {'%', hexDigits[byte >> 4], hexDigits[byte & 0xF]};
+    }
+    return encoded;
+}
+
+}  // namespace detail
+
 /// Default project location of the installed tools: the process's working directory when the
 /// application starts.
 struct CurrentDirectory {
@@ -33,9 +51,10 @@ public:
 
     explicit BasicPackageFS(std::filesystem::path /*docRoot*/) : project(Location::get()) {}
 
-    /// URL path of a file of an installed tool, such as the page of its entry.
+    /// Absolute URL path of a file of an installed tool, such as the page of its entry. Characters
+    /// other than unreserved ones, '/' and '@' are percent-encoded, so the server decodes it back.
     static std::string url(std::string_view name, std::string_view path) {
-        return std::string(prefix) + std::string(name) + "/" + std::string(path);
+        return "/" + std::string(prefix) + detail::encodePath(name) + "/" + detail::encodePath(path);
     }
 
     std::optional<File> open(std::filesystem::path file) const {

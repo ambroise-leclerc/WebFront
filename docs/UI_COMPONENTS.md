@@ -177,7 +177,7 @@ webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.*
 - `fs::BasicPackageFS<Location>` (`include/system/PackageFS.hpp`) takes the project directory from
   `Location::get()`; `fs::PackageFS` uses the working directory at startup (`fs::CurrentDirectory`).
   `ToolManager<App, Location>` must use the same `Location`.
-- `webfront.pkg.list()` returns one `name\tversion\tentry URL\ttitle` line per tool, for `wf open`.
+- `webfront.pkg.list()` returns one `name\tversion\tentry URL\ttitle` line per tool, for `wf open`. The URL is absolute and percent-encoded, so every accepted file name reaches `PackageFS`.
 - The registered functions share ownership of the store, so a `ToolManager` may be destroyed before
   the application.
 
