@@ -170,7 +170,7 @@ webfront::Terminal terminal{app};
 webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.* functions
 ```
 
-- `fs::ToolStore` (`include/system/ToolStore.hpp`) validates npm names (`@scope/` allowed),
+- `fs::ToolStore` (`include/system/ToolStore.hpp`, with the small JSON reader of `include/utils/Json.hpp`) validates npm names (`@scope/` allowed),
   versions and paths, stages and commits installations, and reads and writes the lock file through
   a temporary file renamed over it. The lock file is read strictly, and a record whose name,
   version or entry could leave the tools directory is rejected.

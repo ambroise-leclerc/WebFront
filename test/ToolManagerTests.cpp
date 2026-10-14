@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -125,7 +126,7 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
         }
         THEN("a negative, fractional or too large offset is rejected") {
             app.call<void, string, string>("webfront.pkg.begin", "plot", "1.0.0");
-            for (const double offset : {-1.0, 0.5, 1e300})
+            for (const double offset : {-1.0, 0.5, 1e300, numeric_limits<double>::infinity(), numeric_limits<double>::quiet_NaN()})
                 REQUIRE_THROWS_AS(
                     (app.call<void, string, string, string, double, vector<uint8_t>>("webfront.pkg.writeFile", "plot", "1.0.0", "a.js", offset, bytes("x"))),
                     invalid_argument);
@@ -136,6 +137,8 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
             REQUIRE(app.run("wf help") == app.run("wf"));
             REQUIRE_THROWS_AS(app.run("wf frobnicate"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf remove a b"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf list all"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove plot"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove ../x"), invalid_argument);
         }
@@ -148,8 +151,8 @@ SCENARIO("PackageFS serves only the files of installed tools") {
         TestProject::directory = project.path();
         fs::ToolStore store{project.path()};
         store.begin("plot", "1.0.0");
-        store.write("plot", "1.0.0", "index.html", 0, bytes("<p>plot</p>"));
-        store.write("plot", "1.0.0", "assets/app.js", 0, bytes("go()"));
+        store.write("plot", "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("<p>plot</p>")});
+        store.write("plot", "1.0.0", {.path = "assets/app.js", .offset = 0, .bytes = bytes("go()")});
         store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"});
         ofstream(project.path() / "secret.txt") << "secret";
         TestPackageFS packages{"ignored"};

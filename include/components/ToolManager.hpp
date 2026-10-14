@@ -14,6 +14,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace webfront {
@@ -23,13 +24,33 @@ using ToolsApp = BasicWF<NetProvider, fs::DefaultFSWith<fs::TerminalFS, fs::Pack
 
 namespace tools::detail {
 
+// JavaScript numbers are exact integers up to 2^53.
 inline std::uint64_t toOffset(double offset) {
-    if (!(offset >= 0) || offset > 9007199254740992.0 || std::floor(offset) != offset)
+    const bool integral = std::floor(offset) == offset;  // false for NaN
+    if (!integral || offset < 0 || offset > 9007199254740992.0)
         throw std::invalid_argument("Invalid file offset");
     return static_cast<std::uint64_t>(offset);
 }
 
-inline void listTools(const fs::ToolStore& store, std::ostream& output) {
+inline void requireArguments(CommandArgs args, std::size_t count) {
+    if (args.size() != count)
+        throw std::invalid_argument("Wrong number of arguments. Type 'wf help'.");
+}
+
+inline void usage(std::ostream& output) {
+    output << "wf list              List the installed tools\n"
+              "wf remove <package>  Uninstall a tool";
+}
+
+inline void removeTool(fs::ToolStore& store, CommandArgs args, std::ostream& output) {
+    requireArguments(args, 2);
+    if (!store.remove(args[1]))
+        throw std::invalid_argument(args[1] + " is not installed");
+    output << "Removed " << args[1] << ".";
+}
+
+inline void listTools(const fs::ToolStore& store, CommandArgs args, std::ostream& output) {
+    requireArguments(args, 1);
     const auto installed = store.installed();
     if (installed.empty()) {
         output << "No tool installed.";
@@ -46,10 +67,21 @@ inline void listTools(const fs::ToolStore& store, std::ostream& output) {
     }
 }
 
+inline void runWf(fs::ToolStore& store, CommandArgs args, std::ostream& output) {
+    const std::string_view command = args.empty() ? "help" : std::string_view(args[0]);
+    if (command == "help")
+        return usage(output);
+    if (command == "list")
+        return listTools(store, args, output);
+    if (command == "remove")
+        return removeTool(store, args, output);
+    throw std::invalid_argument("Unknown wf command '" + std::string(command) + "'. Type 'wf help'.");
+}
+
 }  // namespace tools::detail
 
 /// Adds the 'wf' command to a terminal and the bridge functions the page uses to install tools:
-///   webfront.pkg.begin(name, packageVersion)
+///   webfront.pkg.begin(name, version)
 ///   webfront.pkg.writeFile(name, version, path, offset, Uint8Array)
 ///   webfront.pkg.commit(name, version, integrity, entry, title)
 ///   webfront.pkg.list() -> one "name\tversion\tentry URL\ttitle" line per installed tool
@@ -76,7 +108,7 @@ public:
                                    const std::string&               path,
                                    double                           offset,
                                    const std::vector<std::uint8_t>& bytes) {
-                registry->write(name, packageVersion, path, tools::detail::toOffset(offset), bytes);
+                registry->write(name, packageVersion, {.path = path, .offset = tools::detail::toOffset(offset), .bytes = bytes});
             });
         app.template cppFunction<void, std::string, std::string, std::string, std::string, std::string>(
             "webfront.pkg.commit",
@@ -94,7 +126,7 @@ public:
             return lines;
         });
         terminal.command("wf", "Manage web tools: wf list | wf remove <package>", [registry = toolStore](CommandArgs args, std::ostream& output) {
-            run(*registry, args, output);
+            tools::detail::runWf(*registry, args, output);
         });
     }
 
@@ -104,23 +136,6 @@ public:
 
 private:
     std::shared_ptr<fs::ToolStore> toolStore;
-
-    static void run(fs::ToolStore& registry, CommandArgs args, std::ostream& output) {
-        if (args.empty() || args[0] == "help") {
-            output << "wf list              List the installed tools\n"
-                      "wf remove <package>  Uninstall a tool";
-            return;
-        }
-        if (args[0] == "list" && args.size() == 1)
-            return tools::detail::listTools(registry, output);
-        if (args[0] == "remove" && args.size() == 2) {
-            if (!registry.remove(args[1]))
-                throw std::invalid_argument(args[1] + " is not installed");
-            output << "Removed " << args[1] << ".";
-            return;
-        }
-        throw std::invalid_argument("Unknown or malformed wf command. Type 'wf help'.");
-    }
 };
 
 template <typename App>
