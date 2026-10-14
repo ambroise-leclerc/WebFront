@@ -159,6 +159,67 @@ SCENARIO("FunctionReturn") {
     }
 }
 
+namespace {
+
+// The message bytes a frame carries, without the WebSocket header.
+vector<byte> messageBytes(const websocket::Frame<networking::NetworkingMock>& frame) {
+    vector<byte> bytes;
+    const auto   buffers = frame.toBuffers();
+    for (auto buffer = next(buffers.begin()); buffer != buffers.end(); ++buffer) {
+        const auto* first = static_cast<const byte*>(buffer->data());
+        bytes.insert(bytes.end(), first, first + buffer->size());
+    }
+    return bytes;
+}
+
+}  // namespace
+
+// Encodes 'value' alone in a function return and decodes it back as a string.
+template <typename T>
+string roundTrip(const T& value) {
+    msg::FunctionReturn<>                        message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(value, frame);
+    const auto bytes   = messageBytes(frame);
+    auto       decoded = msg::FunctionReturn<>::castFromRawData(bytes);
+    auto       payload = decoded->payload();
+    string     text;
+    decoded->decodeParameter(text, payload);
+    if (!payload.empty())
+        throw runtime_error("Trailing data after the decoded string");
+    return text;
+}
+
+SCENARIO("Strings beyond the 16-bit wire length are rejected instead of truncated") {
+    GIVEN("a string of exactly 65535 bytes") {
+        const string text(65535, 'x');
+        THEN("it crosses the wire whole") {
+            REQUIRE(roundTrip(text) == text);
+        }
+    }
+    GIVEN("a string of 65536 bytes and a function return message") {
+        const string                                 text(65536, 'x');
+        msg::FunctionReturn<> message;
+        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+
+        THEN("encoding throws without counting the parameter") {
+            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
+            REQUIRE(message.getParametersCount() == 0);
+        }
+        THEN("the message and its frame are left untouched") {
+            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
+            REQUIRE(message.getPayloadSize() == 0);
+            REQUIRE(frame.size() == message.header().size());
+        }
+    }
+    GIVEN("an exception message longer than 65535 bytes, with a two-byte character across the limit") {
+        const runtime_error error{string(65534, 'x') + "\xc3\xa9" + string(10, 'y')};
+        THEN("the message is cut before the first character that does not fit whole") {
+            REQUIRE(roundTrip(error) == string(65534, 'x'));
+        }
+    }
+}
+
 SCENARIO("Function call correlation identifiers") {
     msg::FunctionCall<> message;
     message.setCallId(42);

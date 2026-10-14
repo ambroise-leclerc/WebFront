@@ -113,6 +113,8 @@ private:
         });
         webFront.cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
         webFront.cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
+        webFront.cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
+        webFront.cppFunction<size_t, string>("lengthInCpp", [](const string& value) { return value.size(); });
         webFront.cppFunction<void,
                              vector<uint8_t>,
                              vector<int8_t>,

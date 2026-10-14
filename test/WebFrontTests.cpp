@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <tooling/Logger.hpp>
 #include <networking/NetworkingMock.hpp>
@@ -397,6 +398,46 @@ SCENARIO("C++ function responders encode values and failures") {
         THEN("the callback runs without sending a result") {
             REQUIRE(called);
             REQUIRE(link.message.empty());
+        }
+    }
+}
+
+namespace {
+
+// The single string parameter of the return message a responder sent.
+std::string sentString(const ResultLinkMock& link) {
+    auto        result  = msg::FunctionReturn<http::DefaultBuffersPolicy>::castFromRawData(link.message);
+    auto        payload = result->payload();
+    std::string value;
+    result->decodeParameter(value, payload);
+    if (result->getParametersCount() != 1 || !payload.empty())
+        throw std::runtime_error("The return message does not hold exactly one parameter");
+    return value;
+}
+
+template <typename R>
+std::string respondWith(R value) {
+    ResultLinkMock link;
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, R>([value](std::span<const std::byte>) {
+        return value;
+    });
+    responder({}, link, 9);
+    return sentString(link);
+}
+
+}  // namespace
+
+SCENARIO("C++ results too long for the wire reject the JavaScript Promise") {
+    const std::string overlong(65536, 'x');
+
+    GIVEN("a callback returning a string over 65535 bytes") {
+        THEN("a single well-formed exception is sent") {
+            REQUIRE(respondWith(overlong) == "WebFront strings cannot exceed 65535 bytes");
+        }
+    }
+    GIVEN("a callback returning such a string inside a tuple") {
+        THEN("the partly encoded result is replaced by a single well-formed exception") {
+            REQUIRE(respondWith(std::tuple<int, std::string>{1, overlong}) == "WebFront strings cannot exceed 65535 bytes");
         }
     }
 }
