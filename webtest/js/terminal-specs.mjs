@@ -56,6 +56,22 @@ describe('WebFront terminal component', () => {
         expect(text.split('\n').at(-1)).toBe('test>');
     });
 
+    it('reports an application without terminal functions instead of failing to mount', async () => {
+        const element = document.createElement('div');
+        document.body.appendChild(element);
+        const missing = {
+            ready: Promise.resolve(),
+            cppFunction: (name) => () => Promise.reject(new Error(`C++ function '${name}' was not found`)),
+        };
+        const failed = await mount(element, { bridge: missing });
+        await failed.flush();
+        expect(failed.editor).toBeNull();
+        expect(failed.terminal.buffer.active.getLine(0).translateToString(true))
+            .toContain("Terminal unavailable: C++ function 'webfront.terminal.");
+        failed.terminal.dispose();
+        element.remove();
+    });
+
     // Specs run in random order, so this one does not depend on the history left by the others.
     it('completes a command name with Tab and recalls history', async () => {
         await type('gre', '\t');

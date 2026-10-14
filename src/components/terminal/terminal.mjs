@@ -11,20 +11,37 @@ const ansi = {
     left: (count) => (count > 0 ? `\x1b[${count}D` : ""),
 };
 
-// Visible width of a string, ignoring ANSI escape sequences. Wide characters count as one column,
-// which is enough for prompts and command lines in this first version.
-function visibleLength(text) {
-    return Array.from(text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")).length;
-}
-
 function commonPrefix(words) {
     return words.reduce((prefix, word) => {
+        const limit = Math.min(prefix.length, word.length);
         let length = 0;
-        while (length < prefix.length && length < word.length && prefix[length] === word[length])
+        while (length < limit && prefix[length] === word[length])
             ++length;
         return prefix.slice(0, length);
     });
 }
+
+// Editing keys, as xterm.js reports them in onData, mapped to LineEditor actions.
+const keyActions = new Map([
+    ["\r", (editor) => editor.submit()],
+    ["\x7f", (editor) => editor.erase(-1)],
+    ["\b", (editor) => editor.erase(-1)],
+    ["\x1b[3~", (editor) => editor.erase(0)],
+    ["\x1b[D", (editor) => editor.moveTo(editor.cursor - 1)],
+    ["\x1b[C", (editor) => editor.moveTo(editor.cursor + 1)],
+    ["\x1b[H", (editor) => editor.moveTo(0)],
+    ["\x1bOH", (editor) => editor.moveTo(0)],
+    ["\x01", (editor) => editor.moveTo(0)],
+    ["\x1b[F", (editor) => editor.moveTo(editor.chars.length)],
+    ["\x1bOF", (editor) => editor.moveTo(editor.chars.length)],
+    ["\x05", (editor) => editor.moveTo(editor.chars.length)],
+    ["\x1b[A", (editor) => editor.recall(-1)],
+    ["\x1b[B", (editor) => editor.recall(1)],
+    ["\t", (editor) => editor.track(editor.completeLine())],
+    ["\x03", (editor) => editor.cancelLine()],
+    ["\x0c", (editor) => editor.redraw(ansi.clearScreen)],
+    ["\x15", (editor) => editor.killBeforeCursor()],
+]);
 
 /// Line editor driven by the terminal's input data. `write(text)` displays text; `run(line)` and
 /// `complete(line)` return Promises of the C++ output and of "\n"-separated completion candidates.
@@ -58,29 +75,20 @@ export class LineEditor {
     handle(data) {
         if (this.busy)
             return;
-        switch (data) {
-            case "\r": return this.submit();
-            case "\x7f": case "\b": return this.erase(-1);
-            case "\x1b[3~": return this.erase(0);
-            case "\x1b[D": return this.moveTo(this.cursor - 1);
-            case "\x1b[C": return this.moveTo(this.cursor + 1);
-            case "\x1b[H": case "\x1bOH": case "\x01": return this.moveTo(0);
-            case "\x1b[F": case "\x1bOF": case "\x05": return this.moveTo(this.chars.length);
-            case "\x1b[A": return this.recall(-1);
-            case "\x1b[B": return this.recall(1);
-            case "\t": return this.track(this.completeLine());
-            case "\x03": return this.cancelLine();
-            case "\x0c": return this.redraw(ansi.clearScreen);
-            case "\x15": return this.killBeforeCursor();
-        }
-        if (data.startsWith("\x1b"))
-            return;
-        // Typed or pasted text: printable characters are inserted, a carriage return submits the
-        // line and the rest of a multi-line paste is dropped, since commands run one at a time.
+        const action = keyActions.get(data);
+        if (action)
+            return action(this);
+        if (!data.startsWith("\x1b"))
+            return this.insertText(data);
+    }
+
+    // Typed or pasted text: printable characters are inserted, a carriage return submits the line
+    // and the rest of a multi-line paste is dropped, since commands run one at a time.
+    insertText(data) {
         const [text, ...rest] = data.split("\r");
         this.insert(Array.from(text).filter((char) => char >= " " && char !== "\x7f"));
         if (rest.length > 0)
-            this.submit();
+            return this.submit();
     }
 
     insert(chars) {
@@ -219,7 +227,14 @@ export async function mount(element, {bridge = globalThis.webFront, terminalOpti
     }
 
     const call = (name) => bridge.cppFunction(`webfront.terminal.${name}`);
-    const [prompt, banner] = await Promise.all([call("prompt")(), call("banner")()]);
+    let prompt, banner;
+    try {
+        [prompt, banner] = await Promise.all([call("prompt")(), call("banner")()]);
+    } catch (error) {
+        // For example a page served by an application without webfront::Terminal.
+        write(ansi.red(`Terminal unavailable: ${error?.message ?? error}`) + "\r\n");
+        return {terminal, editor: null, flush};
+    }
     const editor = new LineEditor({write, run: call("run"), complete: call("complete"), prompt});
     if (banner)
         write(banner.replaceAll("\n", "\r\n") + "\r\n");

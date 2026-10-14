@@ -35,43 +35,69 @@ struct TerminalOptions {
 
 namespace terminal {
 
+namespace detail {
+
+/// Shell-style word splitting, one character at a time; see tokenize().
+class LineSplitter {
+public:
+    explicit LineSplitter(std::string_view text) : line(text) {}
+
+    std::vector<std::string> split() {
+        while (index < line.size())
+            take(line[index++]);
+        endWord();
+        return std::move(words);
+    }
+
+private:
+    std::string_view         line;
+    std::size_t              index = 0;
+    std::vector<std::string> words;
+    std::string              word;
+    bool                     inWord = false;
+
+    void take(char c) {
+        if (c == ' ' || c == '\t')
+            return endWord();
+        inWord = true;
+        if (c == '\\')
+            word += next("Trailing backslash");
+        else if (c == '\'' || c == '"')
+            readQuoted(c);
+        else
+            word += c;
+    }
+
+    char next(const char* error) {
+        if (index == line.size())
+            throw std::invalid_argument(error);
+        return line[index++];
+    }
+
+    void readQuoted(char quote) {
+        for (char c = next("Unterminated quote"); c != quote; c = next("Unterminated quote"))
+            word += quote == '"' && c == '\\' ? escapedInDoubleQuotes() : c;
+    }
+
+    // A backslash ending the line stays literal; the missing closing quote is reported next.
+    char escapedInDoubleQuotes() {
+        return index < line.size() ? line[index++] : '\\';
+    }
+
+    void endWord() {
+        if (inWord)
+            words.push_back(std::exchange(word, {}));
+        inWord = false;
+    }
+};
+
+}  // namespace detail
+
 /// Splits a command line into words. Whitespace separates words; single quotes keep their content
 /// verbatim, double quotes keep it but honor backslash escapes, and an unquoted backslash escapes
 /// the next character. Throws std::invalid_argument on an unterminated quote or a trailing backslash.
 inline std::vector<std::string> tokenize(std::string_view line) {
-    std::vector<std::string> words;
-    std::string              word;
-    bool                     inWord = false;
-    for (std::size_t index = 0; index < line.size(); ++index) {
-        const char c = line[index];
-        if (c == ' ' || c == '\t') {
-            if (inWord)
-                words.push_back(std::exchange(word, {}));
-            inWord = false;
-        } else if (c == '\\') {
-            if (++index == line.size())
-                throw std::invalid_argument("Trailing backslash");
-            word  += line[index];
-            inWord = true;
-        } else if (c == '\'' || c == '"') {
-            inWord = true;
-            for (++index;; ++index) {
-                if (index == line.size())
-                    throw std::invalid_argument("Unterminated quote");
-                if (line[index] == c)
-                    break;
-                if (c == '"' && line[index] == '\\' && index + 1 < line.size())
-                    ++index;
-                word += line[index];
-            }
-        } else {
-            word  += c;
-            inWord = true;
-        }
-    }
-    if (inWord)
-        words.push_back(std::move(word));
-    return words;
+    return detail::LineSplitter{line}.split();
 }
 
 /// Bridge strings carry a 16-bit length, so a command output is capped below that limit, on a
@@ -187,10 +213,12 @@ private:
     static std::string toTerminalLineEndings(std::string text) {
         std::string converted;
         converted.reserve(text.size());
-        for (std::size_t index = 0; index < text.size(); ++index) {
-            if (text[index] == '\n' && (index == 0 || text[index - 1] != '\r'))
+        char previous = '\0';
+        for (const char c : text) {
+            if (c == '\n' && previous != '\r')
                 converted += '\r';
-            converted += text[index];
+            converted += c;
+            previous   = c;
         }
         return converted;
     }
