@@ -75,7 +75,7 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 ## Architecture and invariants
 
-`BasicWF<NetProvider, Filesystem, Policy, Frontend>` owns the HTTP server, connected `WebLink` objects, registered C++ callbacks, and server thread. `BasicUI` identifies one connected browser. A frontend must satisfy `frontend::FrontendType` and decides whether the server stops when `open()` returns.
+`BasicWF<NetProvider, Filesystem, Policy, Frontend>` owns the HTTP server, connected `WebLink` objects, registered C++ callbacks, and server thread. `BasicUI` identifies one connected browser. `onUIStarted` sets the application's single handler for connected browsers; reusable code must use `subscribeUIStarted`, which adds a handler for as long as the returned `UISubscription` lives (the handle stays safe after the application is destroyed). A callback whose first parameter is the application's `UI` type receives the calling browser instead of reading it from the call data. A frontend must satisfy `frontend::FrontendType` and decides whether the server stops when `open()` returns.
 
 The HTTP server connections and the WebSocket read/write loops are coroutines (`networking::Task`) awaiting the senders a network provider returns (`Receive`, `Send`, `Accept`; `networking::TCPStdnet` forwards them to stdnet). A stop request cancels them from any thread and they unwind on the io_context thread, so I/O objects are never closed from another thread. Whoever owns the objects the tasks use must run `Server::drain()` before destroying them (`~BasicWF` does).
 

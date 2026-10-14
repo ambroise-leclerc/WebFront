@@ -33,6 +33,11 @@ const cppArraysCall = new Promise((resolve) => {
     resolveCppArraysCall = resolve;
 });
 
+let resolveCallerCall;
+const callerCall = new Promise((resolve) => {
+    resolveCallerCall = resolve;
+});
+
 let resolveCppResult;
 const cppResultCall = new Promise((resolve) => {
     resolveCppResult = resolve;
@@ -46,6 +51,10 @@ globalThis.webfrontTests = {
 
     receiveArraysFromCpp(...arrays) {
         resolveCppArraysCall(arrays);
+    },
+
+    receiveFromCaller(token) {
+        resolveCallerCall(token);
     },
 
     returnToCpp(value) {
@@ -140,6 +149,11 @@ describe('WebFront browser integration', () => {
         await expectAsync(lengthInCpp('x'.repeat(65535))).toBeResolvedTo(65535);
         await expectAsync(lengthInCpp('x'.repeat(65536)))
             .toBeRejectedWithError(RangeError, 'WebFront strings cannot exceed 65535 UTF-8 bytes');
+    });
+
+    it('lets a C++ callback call back the browser that called it', async () => {
+        await webFront.cppFunction('callBackCaller')('caller-token');
+        await expectAsync(callerCall).toBeResolvedTo('caller-token');
     });
 
     it('allows C++ to await a JavaScript result', async () => {
