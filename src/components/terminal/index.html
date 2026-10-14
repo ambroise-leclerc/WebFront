@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebFront Terminal</title>
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { height: 100%; margin: 0; background: #0d1117; }
+  #terminal { position: absolute; inset: 0.5rem; }
+</style>
+</head>
+<body>
+<div id="terminal" aria-label="WebFront terminal"></div>
+<script src="/WebFront.js"></script>
+<script type="module">
+  import {mount} from "./terminal.mjs";
+  globalThis.webfrontTerminal = await mount(document.getElementById("terminal"));
+</script>
+</body>
+</html>

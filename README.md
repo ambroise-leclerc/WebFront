@@ -73,6 +73,27 @@ Exceptions thrown by the C++ callback reject the JavaScript Promise. `webFront.r
 
 Callback signatures are deduced for ordinary and `mutable` lambdas, function pointers and `std::function`. Generic lambdas and overloaded call operators cannot be deduced; register those with `app.cppFunction<ReturnType, Args...>(name, callable)`.
 
+## A terminal for your application
+
+`WebFrontTerminal` gives a C++ program a command-line interface in the browser: an embedded [xterm.js](https://xtermjs.org/) terminal whose line editor (history, Tab completion) sends each line to commands registered in C++. It is the first opt-in UI component; it needs no document root and no network access.
+
+```cpp
+#include <components/Terminal.hpp>
+
+webfront::TerminalApp app;
+webfront::Terminal terminal{app, {.prompt = "demo> "}};
+terminal.command("greet", "Greet someone", [](webfront::CommandArgs args) {
+    return "Hello, " + (args.empty() ? std::string{"world"} : args[0]) + "!";
+});
+app.show(terminal.page);
+```
+
+A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the planned `wf` tool manager.
+
+```bash
+./src/WebFrontTerminal
+```
+
 ## Embedded window with CEF (opt-in)
 
 By default WebFront opens your system browser. To get an application window instead, enable the Chromium Embedded Framework when configuring. CEF is a **large download** and is never fetched unless you ask for it:
