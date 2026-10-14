@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace webfront;
@@ -124,6 +126,14 @@ SCENARIO("JsFunction") {
                 REQUIRE(checkString(30, "maFunction"));
                 REQUIRE(checkType(40, msg::CodedType::string));
                 REQUIRE(checkSize16(41, 1980));
+            }
+        }
+
+        WHEN("print is called with a string too long for the wire") {
+            encodedBuffer.assign({0xEE});
+            THEN("the call throws before anything is sent") {
+                REQUIRE_THROWS_AS(print(std::string(65536, 'x')), std::length_error);
+                REQUIRE(encodedBuffer == std::vector<uint8_t>{0xEE});
             }
         }
 
