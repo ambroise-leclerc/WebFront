@@ -3,6 +3,7 @@
 /// @brief a Networking mock implementation for testing purposes
 #pragma once
 #include "BasicNetworking.hpp"
+#include "Tasks.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,14 +14,38 @@
 
 namespace webfront::networking {
 
-class IoContextMock {};
+/// A sender of a T which only ever stops: the operation it stands for never completes.
+template <typename T>
+struct StoppedSender {
+    using sender_concept        = ex::sender_t;
+    using completion_signatures = ex::completion_signatures<ex::set_value_t(T), ex::set_stopped_t()>;
+
+    template <typename Receiver>
+    struct Operation {
+        Receiver receiver;
+        void start() noexcept { ex::set_stopped(std::move(receiver)); }
+    };
+
+    template <typename Receiver>
+    Operation<Receiver> connect(Receiver receiver) const {
+        return {std::move(receiver)};
+    }
+};
+
+class IoContextMock {
+public:
+    void run() {}
+    void run_one() {}
+    void stop() {}
+    void restart() {}
+};
 
 class EndpointMock {
     std::string originalAddress, originalPort;
 
 public:
     EndpointMock(std::string_view address, std::string_view port) : originalAddress(address), originalPort(port) {}
-    auto protocol() { return originalPort; }
+    auto protocol() const { return originalPort; }
 };
 
 class SocketBaseMock {
@@ -42,16 +67,6 @@ public:
     static const int max_connections = 2;
 };
 
-class ResolverMock {
-public:
-    ResolverMock(IoContextMock){};
-    std::list<EndpointMock> resolve(std::string_view address, std::string_view port) {
-        std::list<EndpointMock> endpoints;
-        endpoints.push_back(EndpointMock{address, port});
-        return endpoints;
-    }
-};
-
 class SocketMock : public SocketBaseMock {
 public:
     inline static std::array<std::byte, 8192> debugBuffer;
@@ -64,8 +79,6 @@ public:
         debugBuffer.fill({});
         bufferIndex = 0;
     }
-
-    void async_read_some(auto /*Buffer*/, auto /*completionFunction*/) {}
 
     size_t write_some(auto inputBuffer, std::error_code&) {
         std::copy_n(reinterpret_cast<const std::byte*>(inputBuffer.data()), inputBuffer.size(), &debugBuffer[bufferIndex]);
@@ -86,7 +99,6 @@ public:
         log::debug("AcceptorMock::open({})", protocol);
         isOpen = true;
     }
-    void async_accept(std::function<void(std::error_code, SocketMock)>) { log::debug("AcceptorMock::aync_accept()"); }
     bool is_open() const { return isOpen; }
 };
 
@@ -95,31 +107,22 @@ public:
     using Acceptor = AcceptorMock;
     using Endpoint = EndpointMock;
     using IoContext = IoContextMock;
-    using Resolver = ResolverMock;
     using Socket = SocketMock;
     using super::ConstBuffer;
     using super::MutableBuffer;
 
-    template<typename WriteHandler>
-    static void AsyncWrite(Socket socket, auto buffers, WriteHandler writeHandler) {
-        auto writeRes = std::async(std::launch::async, [&]() {
-            std::error_code ec;
-            size_t bytesTransferred = 0;
-            for (const auto& buffer : buffers) {
-                bytesTransferred += socket.write_some(buffer, ec);
-                if (ec) {
-                    writeHandler(ec, bytesTransferred);
-                    return;
-                }
-            }
+    static EndpointMock Resolve(std::string_view address, std::string_view port) { return {address, port}; }
+    static auto Scheduler(auto&) { return ex::inline_scheduler{}; }
 
-            writeHandler(ec, bytesTransferred);
-        });
+    /// Nothing is ever received or accepted: the tasks awaiting these operations end at once.
+    static StoppedSender<std::size_t> Receive(Socket&, MutableBuffer) { return {}; }
+    static StoppedSender<Socket> Accept(auto&) { return {}; }
+    static auto Send(Socket& socket, const auto& buffers) {
+        std::error_code ec;
+        std::size_t bytesTransferred = 0;
+        for (const auto& buffer : buffers) bytesTransferred += socket.write_some(buffer, ec);
+        return ex::just(bytesTransferred);
     }
-
-    struct Error {
-        static inline const auto OperationAborted = std::make_error_code(std::errc::operation_canceled);
-    };
 };
 
 } // namespace webfront::networking

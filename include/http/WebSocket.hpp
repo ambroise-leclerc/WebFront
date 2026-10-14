@@ -5,6 +5,7 @@
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "../tooling/HexDump.hpp"
+#include "../networking/Tasks.hpp"
 #include "../tooling/Logger.hpp"
 
 #include <array>
@@ -267,9 +268,8 @@ class WebSocket : public std::enable_shared_from_this<WebSocket<Net, Policy>> {
     typename Net::Socket socket;
 
 public:
-    /// WebSocket instances must be heap-allocated and owned via shared_ptr so that
-    /// pending async read/write operations can keep the object alive with shared_from_this(),
-    /// even if the owner (e.g. WebLink) is destroyed while an operation is in flight.
+    /// WebSocket instances must be heap-allocated and owned via shared_ptr: the tasks reading and writing
+    /// the socket keep the object alive, even if the owner (e.g. WebLink) is destroyed while they run.
     /// Call start() once message handlers are attached.
     [[nodiscard]] static std::shared_ptr<WebSocket> create(typename Net::Socket netSocket) {
         return std::shared_ptr<WebSocket>(new WebSocket(std::move(netSocket)));
@@ -282,12 +282,13 @@ public:
 
     void start() {
         started = true;
-        read();
+        spawn(readFrames(this->shared_from_this()));
     }
 
+    /// Thread-safe. Cancels the pending read and write; the socket closes once their tasks have ended.
     void stop() {
         if (claimClose())
-            socket.close();
+            stopSource.request_stop();
     }
 
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
@@ -307,24 +308,20 @@ public:
     }
     /// Frames queued and not yet completed by the network, including the one being written.
     [[nodiscard]] std::size_t pendingWrites() const {
-        std::lock_guard lock(writeState->mutex);
-        return writeState->queue.size();
+        std::lock_guard lock(writeMutex);
+        return writeQueue.size();
     }
 
 private:
-    struct WriteState {
-        std::mutex mutex;
-        std::deque<std::shared_ptr<Frame<Net>>> queue;
-    };
-
     std::array<std::byte, Policy::receptionBufferSize> readBuffer;
     FrameDecoder decoder;
     std::function<void(std::string_view)> textHandler;
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
     std::function<void(std::error_code)> writeErrorHandler;
-    std::shared_ptr<WriteState> writeState{std::make_shared<WriteState>()};
-    std::mutex lifecycleMutex;
+    mutable std::mutex writeMutex;
+    std::deque<std::shared_ptr<Frame<Net>>> writeQueue;  // the first frame is the one being written
+    networking::ex::inplace_stop_source stopSource;
     std::atomic_bool started;
 
 private:
@@ -332,27 +329,27 @@ private:
         log::debug("WebSocket constructor");
     }
 
-    /** @brief Claims shutdown after any in-progress read initiation has finished. */
-    bool claimClose() {
-        std::lock_guard lock(lifecycleMutex);
-        return started.exchange(false);
-    }
+    bool claimClose() { return started.exchange(false); }
 
-    void read() {
-        auto self(this->shared_from_this());
-        const auto buffer = Net::Buffer(readBuffer);
-        // stdnet completion handlers are not invoked inline by async_read_some().
-        std::lock_guard lock(lifecycleMutex);
-        if (!started) return;
-        socket.async_read_some(buffer, [this, self](std::error_code ec, std::size_t bytesTransferred) {
-            if (ec) {
-                closeOnError(ec);
-                return;
+    void spawn(networking::Task task) { networking::Spawn(Net::Scheduler(socket), stopSource.get_token(), std::move(task)); }
+
+    // The tasks take a shared_ptr to this object: it keeps the WebSocket alive while they run.
+    networking::Task readFrames(std::shared_ptr<WebSocket>) {
+        std::error_code failure;
+        try {
+            while (started) {
+                const auto received = co_await Net::Receive(socket, Net::Buffer(readBuffer));
+                if (received == 0) {
+                    failure = std::make_error_code(std::errc::connection_reset);  // the browser closed the connection
+                    break;
+                }
+                processFrames(std::span(readBuffer.data(), received));
             }
-            processFrames(std::span(readBuffer.data(), bytesTransferred));
-            if (started)
-                read();
-        });
+        }
+        catch (const std::system_error& error) {
+            failure = error.code();
+        }
+        if (failure) closeOnError(failure);
     }
 
     void processFrames(std::span<const std::byte> received) {
@@ -390,11 +387,12 @@ private:
     void closeOnError(std::error_code ec) {
         if (!claimClose())
             return;
-        if (ec != Net::Error::OperationAborted)
+        if (ec != std::errc::operation_canceled)
             log::error("WebSocket I/O error: {}:{}", ec.value(), ec.message());
+        // Report the closure before stopping: it detaches the producers, whose writes would fail once stopped.
         if (closeHandler)
             closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-        socket.close();
+        stopSource.request_stop();
     }
 
     void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
@@ -402,35 +400,38 @@ private:
     bool enqueue(Frame<Net> frame, std::size_t maxPending) {
         frame.freeze();
         auto pendingFrame = std::make_shared<Frame<Net>>(std::move(frame));
-        bool startWrite;
         {
-            std::lock_guard lock(writeState->mutex);
-            if (writeState->queue.size() >= maxPending) return false;
-            startWrite = writeState->queue.empty();
-            writeState->queue.push_back(std::move(pendingFrame));
+            std::lock_guard lock(writeMutex);
+            if (writeQueue.size() >= maxPending) return false;
+            writeQueue.push_back(std::move(pendingFrame));
+            if (writeQueue.size() > 1) return true;  // the running writeFrames() task will get to it
         }
-        if (startWrite) writeNext();
+        spawn(writeFrames(this->shared_from_this()));
         return true;
     }
 
-    void writeNext() {
-        std::shared_ptr<Frame<Net>> pendingFrame;
-        {
-            std::lock_guard lock(writeState->mutex);
-            pendingFrame = writeState->queue.front();
-        }
-        auto self(this->shared_from_this());
-        Net::AsyncWrite(socket, pendingFrame->toBuffers(), [this, self, pendingFrame](std::error_code ec, std::size_t /*bytesTransferred*/) {
-            bool hasNext;
-            {
-                std::lock_guard lock(writeState->mutex);
-                writeState->queue.pop_front();
-                if (ec) writeState->queue.clear();
-                hasNext = !writeState->queue.empty();
+    // Writes the queued frames in order and ends when the queue is empty.
+    networking::Task writeFrames(std::shared_ptr<WebSocket>) {
+        try {
+            for (auto frame = nextFrame(false); frame; frame = nextFrame(true)) {
+                // A stopped WebSocket cancels the write: it fails like a write on a closed connection.
+                co_await networking::ex::stopped_as_error(Net::Send(socket, frame->toBuffers()), std::make_error_code(std::errc::operation_canceled));
             }
-            if (ec) onWriteFailed(ec);
-            else if (hasNext) writeNext();
-        });
+        }
+        catch (const std::system_error& error) {
+            {
+                std::lock_guard lock(writeMutex);
+                writeQueue.clear();
+            }
+            onWriteFailed(error.code());
+        }
+    }
+
+    // The frame to write, after having removed the written one if `written`; null when none remains.
+    std::shared_ptr<Frame<Net>> nextFrame(bool written) {
+        std::lock_guard lock(writeMutex);
+        if (written) writeQueue.pop_front();
+        return writeQueue.empty() ? nullptr : writeQueue.front();
     }
 
     /// The producer is detached before the diagnostic; the flag only gates the close sequence.
