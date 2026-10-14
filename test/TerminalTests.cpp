@@ -42,6 +42,32 @@ bool contains(const string& text, const string& part) {
     return text.find(part) != string::npos;
 }
 
+// A shell with one command per accepted handler shape, plus a throwing one.
+struct SampleShell {
+    terminal::Shell shell;
+    vector<string>  received;
+
+    SampleShell() {
+        shell.command("greet", "Greet someone", terminal::adaptHandler([](CommandArgs args) {
+                          return "Hello, " + (args.empty() ? string{"world"} : args[0]) + "!";
+                      }));
+        shell.command("record", "Record its arguments", terminal::adaptHandler([this](CommandArgs args) {
+                          received.assign(args.begin(), args.end());
+                      }));
+        shell.command("lines", "Write two lines", terminal::adaptHandler([](CommandArgs, ostream& output) {
+                          output << "one\ntwo";
+                      }));
+        shell.command("answer", "No argument", terminal::adaptHandler([] {
+                          return 42;
+                      }));
+        shell.command("fail", "Throw", terminal::adaptHandler([](CommandArgs) -> string {
+                          throw runtime_error("command failed");
+                      }));
+    }
+    SampleShell(const SampleShell&)            = delete;
+    SampleShell& operator=(const SampleShell&) = delete;
+};
+
 }  // namespace
 
 SCENARIO("Terminal lines are split into words") {
@@ -69,25 +95,10 @@ SCENARIO("Terminal lines are split into words") {
     }
 }
 
-SCENARIO("The terminal shell dispatches lines to registered commands") {
-    GIVEN("a shell with commands of every accepted handler shape") {
-        terminal::Shell shell;
-        vector<string>  received;
-        shell.command("greet", "Greet someone", terminal::adaptHandler([](CommandArgs args) {
-                          return "Hello, " + (args.empty() ? string{"world"} : args[0]) + "!";
-                      }));
-        shell.command("record", "Record its arguments", terminal::adaptHandler([&received](CommandArgs args) {
-                          received.assign(args.begin(), args.end());
-                      }));
-        shell.command("lines", "Write two lines", terminal::adaptHandler([](CommandArgs, ostream& output) {
-                          output << "one\ntwo";
-                      }));
-        shell.command("answer", "No argument", terminal::adaptHandler([] {
-                          return 42;
-                      }));
-        shell.command("fail", "Throw", terminal::adaptHandler([](CommandArgs) -> string {
-                          throw runtime_error("command failed");
-                      }));
+SCENARIO("The terminal shell runs commands of every accepted handler shape") {
+    GIVEN("a shell with sample commands") {
+        SampleShell sample;
+        auto&       shell = sample.shell;
 
         THEN("a returning command's result is its output") {
             REQUIRE(shell.run("greet Ada") == "Hello, Ada!");
@@ -96,7 +107,7 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
         }
         THEN("the command receives its arguments without its name") {
             REQUIRE(shell.run("record 'a b' c").empty());
-            REQUIRE(received == vector<string>{"a b", "c"});
+            REQUIRE(sample.received == vector<string>{"a b", "c"});
         }
         THEN("written line breaks become terminal line breaks") {
             REQUIRE(shell.run("lines") == "one\r\ntwo");
@@ -105,6 +116,14 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
             REQUIRE(shell.run("").empty());
             REQUIRE(shell.run("   ").empty());
         }
+    }
+}
+
+SCENARIO("The terminal shell reports failing lines") {
+    GIVEN("a shell with sample commands") {
+        SampleShell sample;
+        auto&       shell = sample.shell;
+
         THEN("an unknown command or a malformed line produces an error message, not an exception") {
             const auto unknown = shell.run("nope");
             REQUIRE(contains(unknown, "Unknown command 'nope'"));
@@ -114,6 +133,14 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
         THEN("a command's exception propagates, so the JavaScript Promise rejects") {
             REQUIRE_THROWS_AS(shell.run("fail"), runtime_error);
         }
+    }
+}
+
+SCENARIO("The terminal shell completes and documents its commands") {
+    GIVEN("a shell with sample commands") {
+        SampleShell sample;
+        auto&       shell = sample.shell;
+
         THEN("command names complete by prefix, in order") {
             REQUIRE(shell.complete("") == "answer\nfail\ngreet\nlines\nrecord");
             REQUIRE(shell.complete("gr") == "greet");
@@ -130,13 +157,21 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
                        "lines   Write two lines\n"
                        "record  Record its arguments");
         }
+    }
+}
+
+SCENARIO("The terminal shell rejects invalid registrations") {
+    GIVEN("a shell with sample commands") {
+        SampleShell sample;
+        auto&       shell = sample.shell;
+
         THEN("a duplicate or malformed name is rejected") {
             auto name = GENERATE(string{"greet"}, string{""}, string{"two words"}, string{"quo'te"});
             REQUIRE_THROWS_AS(shell.command(name, "rejected", terminal::adaptHandler([] {})), invalid_argument);
         }
         THEN("a command without a handler is rejected") {
             REQUIRE_THROWS_AS(shell.command("ok", "no handler", terminal::Shell::Handler{}), invalid_argument);
-            REQUIRE_FALSE(shell.contains("ok"));
+            REQUIRE(shell.complete("ok").empty());
         }
     }
 }

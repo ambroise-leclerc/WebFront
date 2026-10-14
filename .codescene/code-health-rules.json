@@ -19,6 +19,13 @@
         { "name": "String Heavy Function Arguments", "weight": 0.0 },
         { "name": "Low Cohesion", "weight": 0.0 }
       ]
+    },
+    {
+      "matching_content_path": "include/components/Terminal.hpp",
+      "matching_content_path_doc": "A text command-line interface: its API and helpers take command names, help texts and command lines, which are strings by nature. Wrapping them in structs only to lower the ratio would make the public API (terminal.command(name, help, handler)) harder to read.",
+      "rules": [
+        { "name": "String Heavy Function Arguments", "weight": 0.0 }
+      ]
     }
   ]
 }

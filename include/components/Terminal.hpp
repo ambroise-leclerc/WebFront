@@ -61,21 +61,27 @@ private:
             return endWord();
         inWord = true;
         if (c == '\\')
-            word += next("Trailing backslash");
+            readEscaped();
         else if (c == '\'' || c == '"')
             readQuoted(c);
         else
             word += c;
     }
 
-    char next(const char* error) {
+    void readEscaped() {
         if (index == line.size())
-            throw std::invalid_argument(error);
+            throw std::invalid_argument("Trailing backslash");
+        word += line[index++];
+    }
+
+    char nextQuoted() {
+        if (index == line.size())
+            throw std::invalid_argument("Unterminated quote");
         return line[index++];
     }
 
     void readQuoted(char quote) {
-        for (char c = next("Unterminated quote"); c != quote; c = next("Unterminated quote"))
+        for (char c = nextQuoted(); c != quote; c = nextQuoted())
             word += quote == '"' && c == '\\' ? escapedInDoubleQuotes() : c;
     }
 
@@ -104,16 +110,30 @@ inline std::vector<std::string> tokenize(std::string_view line) {
 /// UTF-8 character boundary, with a visible notice.
 inline constexpr std::size_t maxOutputBytes = 60000;
 
-inline std::string capOutput(std::string output) {
-    if (output.size() <= maxOutputBytes)
-        return output;
+namespace detail {
+
+/// Prepares text for the terminal: "\n" becomes "\r\n", then the result is capped to
+/// maxOutputBytes.
+inline std::string toTerminalText(std::string_view text) {
+    std::string converted;
+    converted.reserve(text.size());
+    char previous = '\0';
+    for (const char c : text) {
+        if (c == '\n' && previous != '\r')
+            converted += '\r';
+        converted += c;
+        previous   = c;
+    }
+    if (converted.size() <= maxOutputBytes)
+        return converted;
     std::size_t cut = maxOutputBytes;
-    while (cut > 0 && (static_cast<unsigned char>(output[cut]) & 0xC0) == 0x80)
+    while (cut > 0 && (static_cast<unsigned char>(converted[cut]) & 0xC0) == 0x80)
         --cut;
-    output.resize(cut);
-    output += "\r\n\x1b[33m[output truncated]\x1b[0m";
-    return output;
+    converted.resize(cut);
+    return converted + "\r\n\x1b[33m[output truncated]\x1b[0m";
 }
+
+}  // namespace detail
 
 /// Command registry and dispatcher, independent of any connection. Thread-safe: commands may be
 /// registered while the server thread runs others.
@@ -131,11 +151,6 @@ public:
         std::scoped_lock lock{mutex};
         if (!commands.try_emplace(name, Command{std::move(help), std::make_shared<Handler>(std::move(handler))}).second)
             throw std::invalid_argument("Terminal command '" + name + "' is already registered");
-    }
-
-    [[nodiscard]] bool contains(std::string_view name) const {
-        std::scoped_lock lock{mutex};
-        return commands.contains(std::string(name));
     }
 
     /// Runs one line and returns its output, using "\n" line endings converted to "\r\n" for the
@@ -162,7 +177,7 @@ public:
 
         std::ostringstream output;
         (*handler)(CommandArgs{words}.subspan(1), output);
-        return capOutput(toTerminalLineEndings(output.str()));
+        return detail::toTerminalText(output.view());
     }
 
     /// Completes the command name of a line: returns the matching names separated by "\n", or an
@@ -207,20 +222,7 @@ private:
     // Messages may quote the user's line, so they are capped like command output, before the
     // color codes are added so the closing reset always survives.
     static std::string errorMessage(std::string_view message) {
-        return "\x1b[31m" + capOutput(toTerminalLineEndings(std::string(message))) + "\x1b[0m";
-    }
-
-    static std::string toTerminalLineEndings(std::string text) {
-        std::string converted;
-        converted.reserve(text.size());
-        char previous = '\0';
-        for (const char c : text) {
-            if (c == '\n' && previous != '\r')
-                converted += '\r';
-            converted += c;
-            previous   = c;
-        }
-        return converted;
+        return "\x1b[31m" + detail::toTerminalText(message) + "\x1b[0m";
     }
 };
 
