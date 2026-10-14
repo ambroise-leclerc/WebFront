@@ -487,19 +487,19 @@ SCENARIO("A C++ callback can receive the browser that called it") {
 
 SCENARIO("A UI first parameter selects the caller form of cppFunction") {
     using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
-    using UI         = FrontendWF::UI;
+    using AppUI      = FrontendWF::UI;
 
     THEN("only a first parameter of the application's UI type is the caller") {
-        STATIC_REQUIRE(detail::takes_caller<UI, UI, std::string>::value);
-        STATIC_REQUIRE(detail::takes_caller<UI, const UI&>::value);
-        STATIC_REQUIRE_FALSE(detail::takes_caller<UI, std::string, UI>::value);
-        STATIC_REQUIRE_FALSE(detail::takes_caller<UI>::value);
+        STATIC_REQUIRE(detail::takes_caller<AppUI, AppUI, std::string>::value);
+        STATIC_REQUIRE(detail::takes_caller<AppUI, const AppUI&>::value);
+        STATIC_REQUIRE_FALSE(detail::takes_caller<AppUI, std::string, AppUI>::value);
+        STATIC_REQUIRE_FALSE(detail::takes_caller<AppUI>::value);
     }
     GIVEN("an application") {
         FrontendWF webFront("9161");
         THEN("caller callbacks register through deduction and explicit types") {
-            REQUIRE_NOTHROW(webFront.cppFunction("deduced", [](UI, std::string) {}));
-            REQUIRE_NOTHROW(webFront.template cppFunction<int, const UI&, double>("explicit", [](const UI&, double) {
+            REQUIRE_NOTHROW(webFront.cppFunction("deduced", [](AppUI, std::string) {}));
+            REQUIRE_NOTHROW(webFront.template cppFunction<int, const AppUI&, double>("explicit", [](const AppUI&, double) {
                 return 1;
             }));
         }
@@ -507,7 +507,7 @@ SCENARIO("A UI first parameter selects the caller form of cppFunction") {
             UISubscription subscription;
             {
                 FrontendWF scoped("9162");
-                subscription = scoped.subscribeUIStarted([](UI) {});
+                subscription = scoped.subscribeUIStarted([](AppUI) {});
                 REQUIRE(subscription.active());
             }
             REQUIRE_NOTHROW(subscription.reset());
