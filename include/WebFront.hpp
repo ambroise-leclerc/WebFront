@@ -174,12 +174,25 @@ struct ApplyArgs<R, std::tuple<Args...>> {
     }
 };
 
+/// A self-contained return message carrying only 'error'.
+template <typename Net, http::BuffersPolicyType Policy>
+websocket::Frame<Net> makeFailureFrame(msg::CallId callId, const std::exception& error) {
+    msg::FunctionReturn<Policy> failure;
+    failure.setCallId(callId);
+    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(failure.header().data()), failure.header().size())};
+    failure.encodeParameter(error, frame);
+    frame.freeze();
+    return frame;
+}
+
 template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
     return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId) mutable {
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+        // A failure may come from the callback or from encoding its value (a string over the wire
+        // limit), which can leave 'result' partly encoded: failures are sent in a fresh message.
         try {
             if constexpr (std::is_void_v<R>)
                 callable(data);
@@ -189,12 +202,9 @@ auto makeCppFunctionResponder(Callable&& callable) {
                 frame.freeze();
             }
         } catch (const std::exception& error) {
-            result.encodeParameter(error, frame);
-            frame.freeze();
+            frame = makeFailureFrame<Net, Policy>(callId, error);
         } catch (...) {
-            std::runtime_error error{"Unknown C++ exception"};
-            result.encodeParameter(error, frame);
-            frame.freeze();
+            frame = makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"});
         }
         if (callId != 0)
             link.sendFrame(std::move(frame));

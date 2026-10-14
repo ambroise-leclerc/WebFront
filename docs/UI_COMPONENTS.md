@@ -95,9 +95,9 @@ These belong to the core, not to the component, and are not changed by stage 1:
 2. A `cppFunction` callback does not know which `UI` called it, so a component cannot answer
    asynchronously or stream to the right browser (#233).
 3. Outstanding calls cannot be cancelled (already listed in `PROJECT_STATUS.md`).
-4. `msg::FunctionCall::encodeString` writes a string's length as 16 bits without checking it, so a
-   C++ string over 65535 bytes is corrupted on the wire instead of being rejected. The terminal caps
-   its output to stay below that limit (#231; the JavaScript encoder has the same defect).
+4. Bridge strings are limited to 65535 bytes. Until #231 the C++ encoder wrapped longer lengths and
+   corrupted the message; it now rejects them (the JavaScript encoder always did). The terminal caps
+   its output and error messages below that limit so they are shown rather than rejected.
 
 ## Stage 2 design: the `wf` tool manager (#234)
 
