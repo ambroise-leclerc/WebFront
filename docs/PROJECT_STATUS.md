@@ -25,7 +25,7 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
 - Covered by Catch2 (`TerminalTests.cpp`, `TerminalFSTests.cpp`), five asset freshness CTest cases and Jasmine specs (`webtest/js/terminal-specs.mjs`) in the browser integration test.
 - Verified 2026-10-14 on Linux (GCC 16.1, Unix Makefiles generator): CEF-off build with all 100 CTest cases passing; the example driven in headless Chromium (commands, errors, quoting, completion, history, `help`, `clear`); and the Jasmine suite, terminal specs included, run in headless Chromium through a scratch copy of the runner that replaces `CEFFrontend`. A deliberately broken terminal spec made that run fail. **Not verified:** the CEF/Xvfb CTest itself, Windows, macOS and Clang.
 - Limitations: no output streaming, no cancellation, no per-browser sessions, and single-row line redraw (see the design note). The planned `wf` tool manager (#234, npm-hosted web tools installed during debugging) is designed but not implemented; it needs #233.
-- Found while building it, not fixed here: neither string encoder rejects strings over 65535 bytes (#231); `MimeType::toString()` maps `csv` to `text/css` (#232); with GCC 16.1 and the Ninja generator, CMake's module dependency scanning (`-fmodules-ts`) crashes the compiler inside stdexec, while Unix Makefiles builds work.
+- Found while building it: neither string encoder rejects strings over 65535 bytes (#231, open); `MimeType::toString()` mapped `csv` to `text/css` (#232, fixed: a `static_assert` now ties the name table to the enum); with GCC 16.1 and the Ninja generator, CMake's module dependency scanning (`-fmodules-ts`) crashes the compiler inside stdexec, while Unix Makefiles builds work.
 
 ## Intended product
 
