@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -101,7 +102,7 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
             app.call<void, string, string, string, string, string>("webfront.pkg.commit", "@acme/plot", "1.2.0", "sha512-abc", "dist/index.html", "Live plot");
 
             THEN("the page lists it with the URL of its entry") {
-                REQUIRE(app.call<string>("webfront.pkg.list") == "@acme/plot\t1.2.0\t/webfront/tools/@acme/plot/dist/index.html\tLive plot\n");
+                REQUIRE(app.call<string, double>("webfront.pkg.list", 0) == "@acme/plot\t1.2.0\t/webfront/tools/@acme/plot/dist/index.html\tLive plot\n");
             }
             THEN("wf list shows it") {
                 REQUIRE(app.run("wf list") == "@acme/plot@1.2.0  Live plot");
@@ -117,7 +118,7 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
                 app.call<void, string, string, string, double, vector<uint8_t>>("webfront.pkg.writeFile", "logs", "1.0.0", entry, 0, bytes("<p>logs</p>"));
                 app.call<void, string, string, string, string, string>("webfront.pkg.commit", "logs", "1.0.0", "", entry, "Logs");
                 THEN("its listed URL is absolute, encoded, and leads the server to the file") {
-                    const auto list = app.call<string>("webfront.pkg.list");
+                    const auto list = app.call<string, double>("webfront.pkg.list", 0);
                     const auto url  = list.substr(list.find("logs\t1.0.0\t") + 11);
                     REQUIRE(url.starts_with("/webfront/tools/logs/dist/a%2Bb%20c%2541%C3%A9%23%5B%5D.html\t"));
                     TestPackageFS packages{"ignored"};
@@ -133,7 +134,7 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
                 REQUIRE(app.run("wf remove @acme/plot") == "Removed @acme/plot.");
                 THEN("it is no longer listed nor served") {
                     REQUIRE(app.run("wf list") == "No tool installed.");
-                    REQUIRE(app.call<string>("webfront.pkg.list").empty());
+                    REQUIRE(app.call<string, double>("webfront.pkg.list", 0).empty());
                     TestPackageFS packages{"ignored"};
                     REQUIRE_FALSE(served(packages, "webfront/tools/@acme/plot/dist/index.html"));
                 }
@@ -173,6 +174,45 @@ SCENARIO("The tool manager rejects malformed calls and commands") {
             REQUIRE_THROWS_AS(app.run("wf list all"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove plot"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove ../x"), invalid_argument);
+        }
+    }
+}
+
+SCENARIO("The tool list is paged below the bridge's string limit") {
+    GIVEN("more tools with long titles than one bridge string can carry") {
+        TemporaryDirectory project;
+        TestProject::directory = project.path();
+        RecordingApp                           app;
+        Terminal                               terminal{app};
+        ToolManager<RecordingApp, TestProject> manager{app, terminal};
+        constexpr size_t                       toolCount = 70;
+        for (size_t index = 0; index < toolCount; ++index) {
+            const auto name = "tool" + to_string(index);
+            manager.store().begin(name, "1.0.0");
+            manager.store().write(name, "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("x")});
+            manager.store().commit({.name = name, .version = "1.0.0", .entry = "index.html", .title = string(1024, 't')});
+        }
+
+        WHEN("the page reads the list from index 0 until an empty page") {
+            vector<string> lines;
+            size_t         pages = 0;
+            for (string page = app.call<string, double>("webfront.pkg.list", 0); !page.empty();
+                 page        = app.call<string, double>("webfront.pkg.list", static_cast<double>(lines.size()))) {
+                REQUIRE(page.size() <= tools::detail::maxListBytes);
+                REQUIRE(page.ends_with('\n'));
+                for (size_t start = 0, end = page.find('\n'); end != string::npos; start = end + 1, end = page.find('\n', start))
+                    lines.push_back(page.substr(0, page.find('\t', start)).substr(start));
+                ++pages;
+            }
+            THEN("every tool is listed once, over several pages") {
+                REQUIRE(pages > 1);
+                REQUIRE(lines.size() == toolCount);
+                REQUIRE(set<string>(lines.begin(), lines.end()).size() == toolCount);
+            }
+        }
+        THEN("an index past the end gives an empty page and an invalid index is rejected") {
+            REQUIRE(app.call<string, double>("webfront.pkg.list", toolCount).empty());
+            REQUIRE_THROWS_AS((app.call<string, double>("webfront.pkg.list", -1)), invalid_argument);
         }
     }
 }

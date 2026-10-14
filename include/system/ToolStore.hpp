@@ -14,6 +14,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -158,12 +159,43 @@ inline constexpr std::array<std::pair<std::string_view, std::string ToolRecord::
      }
 };
 
+// Bounds every webfront.pkg.list() line well below one bridge string.
+inline constexpr std::size_t maxTextBytes = 1024;
+
 inline void validateRecord(const ToolRecord& record) {
     validatePackageName(record.name);
     validateVersion(record.version);
     safeRelativePath(record.entry);
+    if (std::max(record.title.size(), record.integrity.size()) > maxTextBytes)
+        throw std::invalid_argument("Title or integrity of " + record.name + " longer than " + std::to_string(maxTextBytes) + " bytes");
     if (hasControlCharacters(record.title + record.integrity))
         throw std::invalid_argument("Control characters in the title or integrity of " + record.name);
+}
+
+/// What the stores of one project directory share within the process.
+struct ProjectState {
+    std::mutex            mutex;
+    std::set<std::string> pending;
+};
+
+/// Returns the state of a project directory, the same for every store of that directory in the
+/// process however its path is spelled, so their transactions are serialized.
+inline std::shared_ptr<ProjectState> projectState(const std::filesystem::path& project) {
+    static std::mutex                                                   registryMutex;
+    static std::map<std::filesystem::path, std::weak_ptr<ProjectState>> registry;
+    std::error_code                                                     error;
+    auto                                                                key = std::filesystem::weakly_canonical(project, error);
+    if (error)
+        key = std::filesystem::absolute(project).lexically_normal();
+    std::scoped_lock lock{registryMutex};
+    std::erase_if(registry, [](const auto& entry) {
+        return entry.second.expired();
+    });
+    auto& entry = registry[key];
+    auto  state = entry.lock();
+    if (!state)
+        entry = state = std::make_shared<ProjectState>();
+    return state;
 }
 
 inline ToolRecord readRecord(json::Reader& reader, const std::string& name) {
@@ -226,11 +258,12 @@ inline std::string formatLock(const LockedTools& tools) {
 /// An installation is staged under .webfront/tools/.staging/ and replaces the installed version
 /// only when committed; a reinstalled version is kept as <name>@<version>~backup until the lock
 /// file is written. A failed or abandoned installation leaves the installed tool intact.
-/// Thread-safe within a process. Errors throw std::invalid_argument (invalid input) or
+/// Thread-safe within a process, also between stores of the same project; several processes must
+/// not install into the same project at the same time. Errors throw std::invalid_argument (invalid input) or
 /// std::runtime_error / std::filesystem::filesystem_error (I/O).
 class ToolStore {
 public:
-    explicit ToolStore(std::filesystem::path projectDirectory) : project(std::move(projectDirectory)) {}
+    explicit ToolStore(std::filesystem::path projectDirectory) : project(std::move(projectDirectory)), state(tools::detail::projectState(project)) {}
 
     [[nodiscard]] const std::filesystem::path& projectDir() const {
         return project;
@@ -262,16 +295,16 @@ public:
     void begin(std::string_view name, std::string_view version) {
         tools::validatePackageName(name);
         tools::validateVersion(version);
-        std::scoped_lock lock{mutex};
+        std::scoped_lock lock{state->mutex};
         std::filesystem::remove_all(stagingDir(name, version));
-        pending.insert(key(name, version));
+        state->pending.insert(key(name, version));
     }
 
     /// Writes a chunk of a staged file. Offset 0 creates or truncates the file; any other offset must
     /// equal the number of bytes already written, so a missing or repeated chunk is detected.
     void write(std::string_view name, std::string_view version, const FileChunk& chunk) {
         const auto       relative = tools::safeRelativePath(chunk.path);
-        std::scoped_lock lock{mutex};
+        std::scoped_lock lock{state->mutex};
         requirePending(name, version);
         const auto target = stagingDir(name, version) / relative;
         if (chunk.offset != 0)
@@ -287,7 +320,7 @@ public:
     /// records it in the lock file. The entry page must have been written.
     void commit(const ToolRecord& record) {
         tools::detail::validateRecord(record);
-        std::scoped_lock lock{mutex};
+        std::scoped_lock lock{state->mutex};
         requirePending(record.name, record.version);
         const auto staged = stagingDir(record.name, record.version);
         if (!std::filesystem::is_regular_file(staged / tools::safeRelativePath(record.entry)))
@@ -299,15 +332,15 @@ public:
             replaced = installDir(record.name, previous->second.version);
         locked.insert_or_assign(record.name, record);
         installStaged(record, locked);
-        pending.erase(key(record.name, record.version));
+        state->pending.erase(key(record.name, record.version));
         if (replaced)
-            removeLeftover(*replaced);
+            removeReplaced(*replaced, installDir(record.name, record.version));
     }
 
     /// Uninstalls a tool. Returns false if it is not installed.
     bool remove(std::string_view name) {
         tools::validatePackageName(name);
-        std::scoped_lock lock{mutex};
+        std::scoped_lock lock{state->mutex};
         auto             tools = readLock(lockFile());
         const auto       found = tools.find(name);
         if (found == tools.end())
@@ -335,9 +368,8 @@ public:
     }
 
 private:
-    std::filesystem::path project;
-    std::mutex            mutex;
-    std::set<std::string> pending;
+    std::filesystem::path                        project;
+    std::shared_ptr<tools::detail::ProjectState> state;
 
     static std::string key(std::string_view name, std::string_view version) {
         return std::string(name) + "@" + std::string(version);
@@ -386,6 +418,14 @@ private:
         std::filesystem::remove_all(directory, ignored);
     }
 
+    // On a case-insensitive volume, versions differing only by case ("1.0.0-alpha" and
+    // "1.0.0-Alpha") name the same directory, which now holds the new version.
+    static void removeReplaced(const std::filesystem::path& replaced, const std::filesystem::path& installed) {
+        std::error_code error;
+        if (!std::filesystem::equivalent(replaced, installed, error))
+            removeLeftover(replaced);
+    }
+
     static void restore(const std::filesystem::path& target, const std::filesystem::path& backup, bool replacing) {
         std::error_code ignored;
         std::filesystem::remove_all(target, ignored);
@@ -394,7 +434,7 @@ private:
     }
 
     void requirePending(std::string_view name, std::string_view version) const {
-        if (!pending.contains(key(name, version)))
+        if (!state->pending.contains(key(name, version)))
             throw std::invalid_argument("No installation of " + key(name, version) + " in progress");
     }
 

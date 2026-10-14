@@ -4,12 +4,16 @@
 #include <system/ToolStore.hpp>
 #include <utils/Json.hpp>
 
+#include <atomic>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
@@ -238,6 +242,14 @@ SCENARIO("A tool store installs tools in its project directory") {
                     REQUIRE(contentOf(store.installDir("@acme/plot", "2.0.0") / "dist" / "index.html") == "<p>v2</p>");
                 }
             }
+            AND_WHEN("a version differing only by case is installed, as on a case-insensitive volume") {
+                install(store, plotRecord("1.2.0-alpha"), "<p>alpha</p>");
+                install(store, plotRecord("1.2.0-Alpha"), "<p>Alpha</p>");
+                THEN("the cleanup of the replaced version keeps the new files") {
+                    REQUIRE(store.find("@acme/plot")->version == "1.2.0-Alpha");
+                    REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0-Alpha") / "dist" / "index.html") == "<p>Alpha</p>");
+                }
+            }
             AND_WHEN("the same version is installed again") {
                 install(store, plotRecord(), "<p>again</p>");
                 THEN("its files are replaced") {
@@ -304,6 +316,11 @@ SCENARIO("A tool store rejects inconsistent installations") {
             filesystem::create_directories(project.path() / "webfront-tools.lock.json.tmp");
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"}), runtime_error);
         }
+        THEN("a title or integrity longer than 1024 bytes is rejected") {
+            REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html", .title = string(1025, 't')}), invalid_argument);
+            REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .integrity = string(1025, 'i'), .entry = "index.html"}), invalid_argument);
+            REQUIRE_NOTHROW(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html", .title = string(1024, 't')}));
+        }
         THEN("a title or integrity with control characters is rejected") {
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html", .title = "two\nlines"}), invalid_argument);
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .integrity = "a\tb", .entry = "index.html"}), invalid_argument);
@@ -336,6 +353,7 @@ SCENARIO("A tool store rejects inconsistent installations") {
             REQUIRE(filesystem::is_directory(lockFile));
         }
     }
+
 #ifndef _WIN32
     GIVEN("a lock file without read permission") {
         TemporaryDirectory project;
@@ -360,6 +378,45 @@ SCENARIO("A tool store rejects inconsistent installations") {
         fs::ToolStore store{project.path()};
         THEN("reading the installed tools reports it") {
             REQUIRE_THROWS_AS(store.installed(), runtime_error);
+        }
+    }
+}
+
+SCENARIO("Stores of the same project share their transactions") {
+    GIVEN("two stores of one project") {
+        TemporaryDirectory project;
+        fs::ToolStore      first{project.path()};
+        fs::ToolStore      second{project.path() / "."};
+
+        THEN("an installation begun in one can be completed in the other") {
+            first.begin("plot", "1.0.0");
+            second.write("plot", "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("x")});
+            second.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"});
+            REQUIRE(first.find("plot"));
+        }
+        WHEN("both install tools at the same time") {
+            constexpr int toolsPerStore = 25;
+            atomic<int>   failures{0};
+            const auto    installMany = [&failures](fs::ToolStore& store, const string& prefix) {
+                for (int index = 0; index < toolsPerStore; ++index) {
+                    try {
+                        install(store, {.name = prefix + to_string(index), .version = "1.0.0", .entry = "index.html"});
+                    } catch (const exception&) {
+                        ++failures;
+                    }
+                }
+            };
+            {
+                jthread a{installMany, ref(first), "a"};
+                jthread b{installMany, ref(second), "b"};
+            }
+            THEN("every installation succeeds and is recorded with its files") {
+                REQUIRE(failures == 0);
+                const auto installed = first.installed();
+                REQUIRE(installed.size() == 2 * toolsPerStore);
+                for (const auto& [name, record] : installed)
+                    REQUIRE(filesystem::is_regular_file(first.installDir(name, record.version) / "index.html"));
+            }
         }
     }
 }

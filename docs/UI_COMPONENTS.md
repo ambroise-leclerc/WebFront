@@ -175,12 +175,17 @@ webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.*
   a temporary file renamed over it. The lock file is read strictly, and a record whose name,
   version or entry could leave the tools directory is rejected. Names, versions and paths may not
   contain `..` anywhere, because the HTTP server rejects such URLs, and titles and integrities may not
-  contain control characters, which would break the `webfront.pkg.list()` format. Once the lock file
+  contain control characters, which would break the `webfront.pkg.list()` format, nor exceed 1024
+  bytes, so that every line fits in a list page. Stores of the same project share one lock and one
+  set of pending installations within the process; versions differing only by case, which name the
+  same directory on a case-insensitive volume, replace each other without losing files. Once the lock file
   is written, a directory that cannot be deleted is left behind instead of failing the operation.
 - `fs::BasicPackageFS<Location>` (`include/system/PackageFS.hpp`) takes the project directory from
   `Location::get()`; `fs::PackageFS` uses the working directory at startup (`fs::CurrentDirectory`).
   `ToolManager<App, Location>` must use the same `Location`.
-- `webfront.pkg.list()` returns one `name\tversion\tentry URL\ttitle` line per tool, for `wf open`. The URL is absolute and percent-encoded, so every accepted file name reaches `PackageFS`.
+- `webfront.pkg.list(first)` returns the `name\tversion\tentry URL\ttitle` lines of the tools from
+  index `first`, as many as fit below the bridge's string limit, for `wf open`; the page calls it again
+  from the next index until it gets an empty string. The URL is absolute and percent-encoded, so every accepted file name reaches `PackageFS`.
 - The registered functions share ownership of the store, so a `ToolManager` may be destroyed before
   the application.
 

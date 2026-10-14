@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <ostream>
 #include <stdexcept>
@@ -25,12 +26,33 @@ using ToolsApp = BasicWF<NetProvider, fs::DefaultFSWith<fs::TerminalFS, fs::Pack
 namespace tools::detail {
 
 // JavaScript numbers are exact integers up to 2^53.
-inline std::uint64_t toOffset(double offset) {
-    const bool integral = std::floor(offset) == offset;  // false for NaN
-    const bool inRange  = offset >= 0 && offset <= 9007199254740992.0;
+inline std::uint64_t toIndex(double value) {
+    const bool integral = std::floor(value) == value;  // false for NaN
+    const bool inRange  = value >= 0 && value <= 9007199254740992.0;
     if (!integral || !inRange)
-        throw std::invalid_argument("Invalid file offset");
-    return static_cast<std::uint64_t>(offset);
+        throw std::invalid_argument("Invalid file offset or list index");
+    return static_cast<std::uint64_t>(value);
+}
+
+/// Bridge strings carry a 16-bit length; a list page stays below it, like terminal output.
+inline constexpr std::size_t maxListBytes = 60000;
+
+/// The lines of the installed tools from index 'first', as many whole lines as fit in
+/// maxListBytes; empty past the last tool. A line always fits, since names, versions, paths and
+/// texts are bounded by the store's validation.
+inline std::string listPage(const fs::ToolStore& store, std::uint64_t first) {
+    const auto  installed = store.installed();
+    std::string page;
+    auto        tool = installed.begin();
+    std::advance(tool, static_cast<std::ptrdiff_t>(std::min<std::uint64_t>(first, installed.size())));
+    for (; tool != installed.end(); ++tool) {
+        const auto& [name, record] = *tool;
+        const auto line            = name + "\t" + record.version + "\t" + fs::PackageFS::url(name, record.entry) + "\t" + record.title + "\n";
+        if (page.size() + line.size() > maxListBytes)
+            break;
+        page += line;
+    }
+    return page;
 }
 
 inline void requireArguments(CommandArgs args, std::size_t count) {
@@ -85,7 +107,9 @@ inline void runWf(fs::ToolStore& store, CommandArgs args, std::ostream& output) 
 ///   webfront.pkg.begin(name, version)
 ///   webfront.pkg.writeFile(name, version, path, offset, Uint8Array)
 ///   webfront.pkg.commit(name, version, integrity, entry, title)
-///   webfront.pkg.list() -> one "name\tversion\tentry URL\ttitle" line per installed tool
+///   webfront.pkg.list(first) -> "name\tversion\tentry URL\ttitle\n" lines of the installed tools
+///                               from index 'first', paged below the bridge's string limit: the
+///                               page calls it again from the next index until it gets ""
 /// The tools live in Location::get(), which must match the application's fs::BasicPackageFS
 /// (ToolsApp uses fs::CurrentDirectory). The registered functions share ownership of the store, so
 /// a ToolManager may be destroyed before the application.
@@ -109,7 +133,7 @@ public:
                                    const std::string&               path,
                                    double                           offset,
                                    const std::vector<std::uint8_t>& bytes) {
-                registry->write(name, packageVersion, {.path = path, .offset = tools::detail::toOffset(offset), .bytes = bytes});
+                registry->write(name, packageVersion, {.path = path, .offset = tools::detail::toIndex(offset), .bytes = bytes});
             });
         app.template cppFunction<void, std::string, std::string, std::string, std::string, std::string>(
             "webfront.pkg.commit",
@@ -120,11 +144,8 @@ public:
                                    const std::string& title) {
                 registry->commit({.name = name, .version = packageVersion, .integrity = integrity, .entry = entry, .title = title});
             });
-        app.template cppFunction<std::string>("webfront.pkg.list", [registry = toolStore] {
-            std::string lines;
-            for (const auto& [name, record] : registry->installed())
-                lines += name + "\t" + record.version + "\t" + PackageFS::url(name, record.entry) + "\t" + record.title + "\n";
-            return lines;
+        app.template cppFunction<std::string, double>("webfront.pkg.list", [registry = toolStore](double first) {
+            return tools::detail::listPage(*registry, tools::detail::toIndex(first));
         });
         terminal.command("wf", "Manage web tools: wf list | wf remove <package>", [registry = toolStore](CommandArgs args, std::ostream& output) {
             tools::detail::runWf(*registry, args, output);
