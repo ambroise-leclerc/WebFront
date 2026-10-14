@@ -387,11 +387,12 @@ private:
     void closeOnError(std::error_code ec) {
         if (!claimClose())
             return;
-        stopSource.request_stop();
         if (ec != std::errc::operation_canceled)
             log::error("WebSocket I/O error: {}:{}", ec.value(), ec.message());
+        // Report the closure before stopping: it detaches the producers, whose writes would fail once stopped.
         if (closeHandler)
             closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
+        stopSource.request_stop();
     }
 
     void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
