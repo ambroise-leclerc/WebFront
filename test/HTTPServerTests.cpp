@@ -291,13 +291,23 @@ SCENARIO("RequestHandler on a HTTP GET") {
 namespace {
 
 // Accepts one connection which asks for a WebSocket upgrade; the end of the response write is held.
+// The first accept fails if failFirstAccept is set, and the accepts after the connection are cancelled.
 struct UpgradingNet : networking::NetworkingMock {
-    static inline bool accepted = false;
+    static inline int  accepts           = 0;
+    static inline bool failFirstAccept   = false;
     static inline webfront::testing::ManualSender::Completion heldSend;
+
+    static void reset(bool failFirst) {
+        accepts         = 0;
+        failFirstAccept = failFirst;
+        heldSend        = {};
+    }
 
     static auto Accept(Acceptor&) {
         return networking::ex::then(networking::ex::just(), []() -> Socket {
-            if (std::exchange(accepted, true)) throw std::system_error(make_error_code(errc::operation_canceled));
+            const int number = ++accepts;
+            if (failFirstAccept && number == 1) throw std::system_error(make_error_code(errc::connection_aborted));
+            if (number > (failFirstAccept ? 2 : 1)) throw std::system_error(make_error_code(errc::operation_canceled));
             return Socket{};
         });
     }
@@ -321,6 +331,7 @@ struct UpgradingNet : networking::NetworkingMock {
 SCENARIO("A stopped server hands no connection over") {
     GIVEN("A connection asking for an upgrade, whose response write is still in progress") {
         int upgrades = 0;
+        UpgradingNet::reset(false);
         {
             http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
             server.onUpgrade([&upgrades](UpgradingNet::Socket&&) { ++upgrades; });
@@ -333,5 +344,14 @@ SCENARIO("A stopped server hands no connection over") {
                 THEN("the connection is closed instead of being upgraded") { REQUIRE(upgrades == 0); }
             }
         }
+    }
+}
+
+SCENARIO("A failed accept does not stop the server from accepting") {
+    GIVEN("A first accept which fails, then a connection") {
+        UpgradingNet::reset(true);
+        http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
+
+        THEN("the connection is served") { REQUIRE(UpgradingNet::heldSend.complete); }
     }
 }

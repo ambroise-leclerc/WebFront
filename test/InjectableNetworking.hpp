@@ -52,10 +52,12 @@ public:
         Operation(Receiver r, std::function<void(Completion)> start) : receiver(std::move(r)), onStart(std::move(start)) {}
 
         void start() noexcept {
-            // A stop request already made completes the task, which may destroy this operation inside emplace().
-            const auto done = finished;
-            stopCallback.emplace(networking::ex::get_stop_token(networking::ex::get_env(receiver)), OnStop{this});
-            if (*done) return;
+            auto token = networking::ex::get_stop_token(networking::ex::get_env(receiver));
+            if (token.stop_requested()) {
+                finish([](Receiver& r) { networking::ex::set_stopped(std::move(r)); });
+                return;  // completing may destroy this operation: touch no member afterwards
+            }
+            stopCallback.emplace(std::move(token), OnStop{this});
             onStart({[this, done = finished](std::error_code error, std::size_t size) {
                          if (*done) return;
                          finish([&](Receiver& r) {
