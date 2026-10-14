@@ -499,21 +499,24 @@ SCENARIO("A C++ callback can receive the browser that called it") {
     }
 }
 
+// Only a first parameter of the application's UI type, with any reference or const, is the caller.
+using CallerTestUI = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>::UI;
+static_assert(detail::takes_caller<CallerTestUI, CallerTestUI, std::string>::value);
+static_assert(detail::takes_caller<CallerTestUI, const CallerTestUI&>::value);
+static_assert(!detail::takes_caller<CallerTestUI, std::string, CallerTestUI>::value);
+static_assert(!detail::takes_caller<CallerTestUI>::value);
+
 SCENARIO("A UI first parameter selects the caller form of cppFunction") {
     using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
     using AppUI      = FrontendWF::UI;
 
-    THEN("only a first parameter of the application's UI type is the caller") {
-        STATIC_REQUIRE(detail::takes_caller<AppUI, AppUI, std::string>::value);
-        STATIC_REQUIRE(detail::takes_caller<AppUI, const AppUI&>::value);
-        STATIC_REQUIRE_FALSE(detail::takes_caller<AppUI, std::string, AppUI>::value);
-        STATIC_REQUIRE_FALSE(detail::takes_caller<AppUI>::value);
-    }
     GIVEN("an application") {
         FrontendWF webFront("9161");
-        THEN("the caller may be taken by value, by const or mutable reference, or by rvalue reference") {
+        THEN("the caller may be taken by value or by const reference") {
             REQUIRE_NOTHROW(webFront.cppFunction("byValue", [](AppUI) {}));
             REQUIRE_NOTHROW(webFront.cppFunction("byConstReference", [](const AppUI&) {}));
+        }
+        THEN("the caller may be taken by mutable or rvalue reference") {
             REQUIRE_NOTHROW(webFront.cppFunction("byReference", [](AppUI&) {}));
             REQUIRE_NOTHROW(webFront.cppFunction("byRvalueReference", [](AppUI&&) {}));
         }
