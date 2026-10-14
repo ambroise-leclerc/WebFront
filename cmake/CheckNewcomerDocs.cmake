@@ -1,0 +1,93 @@
+# Verifies that the newcomer commands and snippets documented in the README still match the
+# examples, the CMake targets and the CI/contributor commands. Run with:
+#   cmake -DROOT=<checkout> -P cmake/CheckNewcomerDocs.cmake
+cmake_minimum_required(VERSION 3.31)
+
+if(NOT ROOT)
+    message(FATAL_ERROR "ROOT must point at the WebFront checkout")
+endif()
+
+function(_read var relative_path)
+    file(READ "${ROOT}/${relative_path}" content)
+    string(REPLACE "\r\n" "\n" content "${content}")
+    set(${var} "${content}" PARENT_SCOPE)
+endfunction()
+
+set(failures "")
+function(_require haystack needle description)
+    string(FIND "${haystack}" "${needle}" position)
+    if(position EQUAL -1)
+        list(APPEND failures "${description}: missing '${needle}'")
+        set(failures "${failures}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+_read(readme README.md)
+_read(agents AGENTS.md)
+_read(hello src/HelloWorld.cpp)
+_read(greeter src/Greeter.cpp)
+_read(greeter_js src/greeter/greeter.mjs)
+_read(src_cmake src/CMakeLists.txt)
+_read(root_cmake CMakeLists.txt)
+_read(ci .github/workflows/BuildAndTest.yml)
+
+# Option-free quick start: exact commands, in order.
+_require("${readme}" "mkdir build\ncd build\ncmake ..\ncmake --build .\n" "README option-free build")
+_require("${readme}" "./src/HelloWorld" "README Hello launch command")
+_require("${readme}" "./src/WebFrontGreeter" "README greeter launch command")
+_require("${src_cmake}" "add_executable(HelloWorld HelloWorld.cpp)" "examples CMake")
+_require("${src_cmake}" "add_executable(WebFrontGreeter Greeter.cpp)" "examples CMake")
+_require("${src_cmake}" "/greeter" "greeter asset copy")
+_require("${root_cmake}" "option(ENABLE_TESTING \"Enable Test Builds\" OFF)" "testing default")
+_require("${root_cmake}" "option(WEBFRONT_EMBED_CEF \"Enable embedded CEF window support\" OFF)" "CEF default")
+_require("${root_cmake}" "add_library(WebFront::WebFront ALIAS WebFront)" "namespaced alias")
+_require("${readme}" "target_link_libraries(MyApp PRIVATE WebFront::WebFront)" "README subproject example")
+
+# The minimal program shown in the README is the real source.
+foreach(line "#include <WebFront.hpp>" "using App = webfront::WebFront;" "App app;" "app.show();")
+    _require("${readme}" "${line}" "README Hello snippet")
+    _require("${hello}" "${line}" "HelloWorld.cpp")
+endforeach()
+string(REGEX MATCHALL "[^\n]*(filesystem|log|cppFunction|onUIStarted|port|\"index)[^\n]*" noisy "${hello}")
+foreach(line IN LISTS noisy)
+    if(NOT line MATCHES "^ *//")
+        list(APPEND failures "HelloWorld.cpp must stay minimal, found: ${line}")
+    endif()
+endforeach()
+_require("${hello}" "//   using App = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;" "HelloWorld.cpp CEF hint")
+_require("${readme}" "using App = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;" "README CEF alias")
+_require("${readme}" "cmake -DWEBFRONT_EMBED_CEF=ON .." "README CEF configure")
+
+# Greeter snippets.
+foreach(line "App app{webfront::WebFrontConfig{.documentRoot = \"src/greeter\"}};" "app.cppFunction(\"greet\", [](std::string name) {" "app.show();")
+    _require("${readme}" "${line}" "README greeter C++ snippet")
+    _require("${greeter}" "${line}" "Greeter.cpp")
+endforeach()
+foreach(line "await webFront.ready;" "const greet = webFront.cppFunction(\"greet\");")
+    _require("${readme}" "${line}" "README greeter JS snippet")
+    _require("${greeter_js}" "${line}" "greeter.mjs")
+endforeach()
+foreach(asset index.html greeter.mjs)
+    if(NOT EXISTS "${ROOT}/src/greeter/${asset}")
+        list(APPEND failures "missing greeter asset ${asset}")
+    endif()
+endforeach()
+
+# The screenshot is committed and referenced.
+_require("${readme}" "](docs/images/hello-world.png)" "README screenshot")
+if(NOT EXISTS "${ROOT}/docs/images/hello-world.png")
+    list(APPEND failures "docs/images/hello-world.png is missing")
+endif()
+
+# Documented contributor commands equal the CI/agent commands.
+foreach(text readme agents)
+    _require("${${text}}" "-DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON" "${text} CEF-off test command")
+    _require("${${text}}" "ctest --test-dir build --output-on-failure" "${text} ctest command")
+endforeach()
+_require("${ci}" "-DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON" "CI configure command")
+
+if(failures)
+    list(JOIN failures "\n  " joined)
+    message(FATAL_ERROR "Newcomer documentation drifted from the code:\n  ${joined}")
+endif()
+message(STATUS "Newcomer documentation matches the examples and CI")

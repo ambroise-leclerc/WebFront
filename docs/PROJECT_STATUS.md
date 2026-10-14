@@ -1,6 +1,6 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13.
 
 The default build remains header-only. `WEBFRONT_USE_MDDLOG=ON` adds a WebFront-owned
 compiled diagnostic adapter while keeping consuming translation units module-free.
@@ -8,6 +8,15 @@ See [the optional integration contract](mddlog-integration.md) for dependencies,
 qualified tools and verification. With the option on, browser logs travel through
 mddlog's bounded transport consumer and WebLink captures link/call context. mddlog
 ADR-003, which this integration implements, was accepted on 2026-10-02.
+
+## Newcomer-first workflow (epic #205)
+
+- `webfront::WebFront app; app.show();` is a complete program (`src/HelloWorld.cpp`). With no document root WebFront serves an embedded "Hello, WebFront!" page whose status badge shows **connected** only after `webFront.ready` resolves (WebSocket handshake acknowledgement) and an error state if the initial connection fails. `ready` does not track later disconnects.
+- `WebFrontGreeter` (`src/Greeter.cpp`, `src/greeter/`) uses an explicit development document root and a deduced `greet(std::string)` callback; the page awaits the returned Promise and shows success or errors via `textContent`.
+- The option-free `cmake ..` / `cmake --build .` build downloads neither CEF nor Catch2 (`ENABLE_TESTING` and `WEBFRONT_EMBED_CEF` default to `OFF`) and builds the examples into `<build>/src`. As a subproject only `WebFront::WebFront` is added: no examples, tests, warning flags, or global compiler settings leak into the parent.
+- The CTest cases `NewcomerDocsMatchExamples` and `AddSubdirectoryConsumer` guard the documented commands, snippets and subproject integration.
+- Verified 2026-10-13 on Linux (Ubuntu 24.04, GCC 13.3, CMake 4.4.4): option-free build; CEF-off testing build with all CTest cases passing; Hello and Greeter pages served and driven in a real Chromium (connected badge, empty-input message, `Hello, Ada!`). **Not verified in that environment:** the CEF-enabled build and the Jasmine/Xvfb integration (the CEF download was blocked), Windows, macOS and Clang.
+- Limitation: a configured document root serves arbitrary local files and is a development convenience, not a production sandbox or packaging format.
 
 ## Intended product
 
@@ -30,7 +39,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 ## Implemented baseline
 
 - The default example is the native ES-module demo. Its module graph uses relative imports, calls C++, and exposes a served JavaScript function that C++ calls after module readiness.
-- Registered C++ callbacks own their callable safely. Calls remain asynchronous and return no value across the bridge.
+- Registered C++ callbacks own their callable safely. Calls are asynchronous: untyped calls return no value, typed calls return a future or Promise (see below).
 - Catch2 covers `.mjs` MIME handling.
 - Jasmine native-module specs report their final status to C++. The executable verifies both bridge directions, asks JavaScript to close the CEF window, and returns nonzero on any failed condition.
 - The browser integration is a timeout-bounded CTest test for CEF-enabled Linux builds and runs under Xvfb in a focused CI job.
