@@ -264,6 +264,32 @@ SCENARIO("Registered C++ function handlers own and invoke their callable") {
     }
 }
 
+SCENARIO("show opens the default page and returns when the window session ends") {
+    GIVEN("a default-constructed application whose frontend completes after open") {
+        using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
+        FrontendWF webFront;
+        const int  previousOpenCalls = ClosingFrontend::openCalls;
+
+        WHEN("show is called without arguments") {
+            webFront.show();
+
+            THEN("the default page is opened on the default port") {
+                REQUIRE(ClosingFrontend::openCalls == previousOpenCalls + 1);
+                REQUIRE(ClosingFrontend::lastPort == "9002");
+                REQUIRE(ClosingFrontend::lastFile == "index.html");
+            }
+        }
+
+        WHEN("show is called with a page") {
+            webFront.show("greeter.html");
+
+            THEN("that page is opened") {
+                REQUIRE(ClosingFrontend::lastFile == "greeter.html");
+            }
+        }
+    }
+}
+
 SCENARIO("cppFunction deduces a callable's signature from itself") {
     THEN("callable_traits resolves the return type and decayed, owning parameter types") {
         auto voidLambda = [](int) {};
