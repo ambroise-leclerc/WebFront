@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <system/ToolStore.hpp>
+#include <utils/Json.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -50,7 +51,22 @@ SCENARIO("Package names, versions and paths from the browser are validated") {
         }
     }
     GIVEN("names that could leave the tools directory or are not npm names") {
-        auto name = GENERATE("", ".", "..", "../x", "@acme", "@acme/", "@/plot", "@acme/../x", "@acme/a/b", "Plot", "_plot", "a b", "a\\b");
+        auto name = GENERATE("",
+                             ".",
+                             "..",
+                             "../x",
+                             "@acme",
+                             "@acme/",
+                             "@/plot",
+                             "@acme/../x",
+                             "@acme/a/b",
+                             "Plot",
+                             "_plot",
+                             "a b",
+                             "a\\b",
+                             "a..b",
+                             "@acme/a..b",
+                             "@a..b/c");
         THEN("they are rejected") {
             REQUIRE_THROWS_AS(fs::tools::validatePackageName(name), invalid_argument);
         }
@@ -62,13 +78,33 @@ SCENARIO("Package names, versions and paths from the browser are validated") {
         }
     }
     GIVEN("invalid versions") {
-        auto version = GENERATE("", "..", "v1.0.0", "1.0/0", "1.0 0");
+        auto version = GENERATE("", "..", "v1.0.0", "1.0/0", "1.0 0", "1..0");
         THEN("they are rejected") {
             REQUIRE_THROWS_AS(fs::tools::validateVersion(version), invalid_argument);
         }
     }
     GIVEN("unsafe paths") {
-        auto path = GENERATE(as<string>{}, "", "/etc/passwd", "../x", "a/../../x", "a/./b", "a//b", "a/", "..", "C:/x", "c:x", "a\\..\\b", string("a\0b", 3));
+        auto path = GENERATE(as<string>{},
+                             "",
+                             "/etc/passwd",
+                             "../x",
+                             "a/../../x",
+                             "a/./b",
+                             "a//b",
+                             "a/",
+                             "..",
+                             "C:/x",
+                             "c:x",
+                             "a\\..\\b",
+                             "a?.js",
+                             "a*.js",
+                             "a<b",
+                             "a>b",
+                             "a|b",
+                             "a\"b",
+                             "main..html",
+                             "a/b..c/d",
+                             string("a\0b", 3));
         THEN("they are rejected") {
             REQUIRE_THROWS_AS(fs::tools::safeRelativePath(path), invalid_argument);
         }
@@ -79,7 +115,7 @@ SCENARIO("The lock file is read and written as JSON") {
     GIVEN("two installed tools") {
         fs::tools::LockedTools tools;
         tools.emplace("@acme/plot", plotRecord());
-        tools.emplace("logs", fs::ToolRecord{.name = "logs", .version = "0.1.0", .integrity = "", .entry = "index.html", .title = "Say \"hi\"\\\n\x01"});
+        tools.emplace("logs", fs::ToolRecord{.name = "logs", .version = "0.1.0", .integrity = "", .entry = "index.html", .title = "Say \"hi\" \\o/"});
 
         WHEN("they are formatted and parsed back") {
             const auto json = fs::tools::formatLock(tools);
@@ -109,13 +145,16 @@ SCENARIO("The lock file is read and written as JSON") {
         }
     }
     GIVEN("every escape of the JSON grammar") {
-        const auto json = R"({"tools": {"plot": {"version": "1.0.0", "entry": "index.html", "title": "\"\\\b\f\n\r\t\u20AC\u0041"}}})";
+        json::Reader reader{R"("\"\\\/\b\f\n\r\t\u20AC\u0041")"};
         THEN("each one is decoded") {
-            REQUIRE(fs::tools::parseLock(json).at("plot").title
-                    == "\"\\\b\f\n\r\t\xe2\x82\xac"
+            REQUIRE(reader.string()
+                    == "\"\\/\b\f\n\r\t\xe2\x82\xac"
                        "A");
         }
     }
+}
+
+SCENARIO("The lock file reader is strict") {
     GIVEN("malformed JSON") {
         auto json = GENERATE("",
                              "{",
@@ -152,10 +191,17 @@ SCENARIO("The lock file is read and written as JSON") {
             REQUIRE(fs::tools::parseLock(json).empty());
         }
     }
-    GIVEN("a record pointing outside the tools directory") {
+    GIVEN("strings with control characters") {
+        THEN("quoting escapes them") {
+            REQUIRE(json::quote("a\nb\x01") == R"("a\u000ab\u0001")");
+        }
+    }
+    GIVEN("a record pointing outside the tools directory or breaking the listing") {
         auto json = GENERATE(R"({"tools": {"../x": {"version": "1.0.0", "entry": "index.html"}}})",
                              R"({"tools": {"plot": {"version": "../1", "entry": "index.html"}}})",
-                             R"({"tools": {"plot": {"version": "1.0.0", "entry": "../../secret"}}})");
+                             R"({"tools": {"plot": {"version": "1.0.0", "entry": "../../secret"}}})",
+                             R"({"tools": {"plot": {"version": "1.0.0", "entry": "index.html", "title": "a\nb"}}})",
+                             R"({"tools": {"plot": {"version": "1.0.0", "entry": "index.html", "integrity": "a\tb"}}})");
         THEN("parsing rejects it") {
             REQUIRE_THROWS_AS(fs::tools::parseLock(json), invalid_argument);
         }
@@ -258,6 +304,11 @@ SCENARIO("A tool store rejects inconsistent installations") {
             filesystem::create_directories(project.path() / "webfront-tools.lock.json.tmp");
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"}), runtime_error);
         }
+        THEN("a title or integrity with control characters is rejected") {
+            REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html", .title = "two\nlines"}), invalid_argument);
+            REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .integrity = "a\tb", .entry = "index.html"}), invalid_argument);
+            REQUIRE(store.installed().empty());
+        }
         THEN("a commit whose entry page was not written is rejected") {
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "missing.html"}), invalid_argument);
             REQUIRE(store.installed().empty());
@@ -312,3 +363,61 @@ SCENARIO("A tool store rejects inconsistent installations") {
         }
     }
 }
+
+#ifndef _WIN32
+namespace {
+
+// Makes a directory read-only (its entries cannot be deleted) until destroyed.
+class ReadOnlyDirectory {
+public:
+    explicit ReadOnlyDirectory(filesystem::path path) : directory(std::move(path)) {
+        filesystem::permissions(directory, filesystem::perms::owner_read | filesystem::perms::owner_exec);
+    }
+    ReadOnlyDirectory(const ReadOnlyDirectory&)            = delete;
+    ReadOnlyDirectory& operator=(const ReadOnlyDirectory&) = delete;
+    ~ReadOnlyDirectory() {
+        error_code ignored;
+        filesystem::permissions(directory, filesystem::perms::owner_all, ignored);
+    }
+
+private:
+    filesystem::path directory;
+};
+
+}  // namespace
+
+SCENARIO("Directories that cannot be deleted do not fail completed operations") {
+    GIVEN("an installed version whose files cannot be deleted") {
+        TemporaryDirectory project;
+        fs::ToolStore      store{project.path()};
+        install(store, {.name = "plot", .version = "1.0.0", .entry = "index.html"});
+        const auto installed = store.installDir("plot", "1.0.0");
+        const auto backup    = project.path() / ".webfront" / "tools" / "plot@1.0.0~backup";
+
+        WHEN("another version replaces it") {
+            const ReadOnlyDirectory readOnly{installed};
+            REQUIRE_NOTHROW(install(store, {.name = "plot", .version = "2.0.0", .entry = "index.html"}));
+            THEN("the new version is installed") {
+                REQUIRE(store.find("plot")->version == "2.0.0");
+            }
+        }
+        WHEN("the same version is reinstalled") {
+            const ReadOnlyDirectory readOnly{installed};
+            REQUIRE_NOTHROW(install(store, {.name = "plot", .version = "1.0.0", .entry = "index.html"}, "<p>again</p>"));
+            THEN("the new files are installed") {
+                REQUIRE(contentOf(installed / "index.html") == "<p>again</p>");
+            }
+            // The read-only directory was moved to the backup, which could not be deleted.
+            error_code ignored;
+            filesystem::permissions(backup, filesystem::perms::owner_all, ignored);
+        }
+        WHEN("it is removed") {
+            const ReadOnlyDirectory readOnly{installed};
+            THEN("the removal succeeds") {
+                REQUIRE(store.remove("plot"));
+                REQUIRE(store.installed().empty());
+            }
+        }
+    }
+}
+#endif
