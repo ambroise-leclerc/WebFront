@@ -178,8 +178,10 @@ private:
     mutable std::mutex                          mutex;
     std::map<std::string, Command, std::less<>> commands;
 
+    // Messages may quote the user's line, so they are capped like command output, before the
+    // color codes are added so the closing reset always survives.
     static std::string errorMessage(std::string_view message) {
-        return "\x1b[31m" + toTerminalLineEndings(std::string(message)) + "\x1b[0m";
+        return "\x1b[31m" + capOutput(toTerminalLineEndings(std::string(message))) + "\x1b[0m";
     }
 
     static std::string toTerminalLineEndings(std::string text) {

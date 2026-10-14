@@ -66,7 +66,7 @@ int main() {
 - **Output and errors:** the command output is the Promise result, with `"\n"` converted to
   `"\r\n"` and ANSI escape sequences passed through. An unknown command or a malformed line prints
   a red message. An exception thrown by a command rejects the Promise, and the page prints
-  `Error: <what()>`. Output is capped at 60000 bytes, cut on a UTF-8 character boundary, with a
+  `Error: <what()>`. Output and error messages (which may quote the line) are capped at 60000 bytes, cut on a UTF-8 character boundary, with a
   notice, because bridge strings carry a 16-bit length.
 - **Lifetime and threads:** the registered bridge functions share ownership of the command
   registry, so the `Terminal` object may go out of scope before the application. The registry is
