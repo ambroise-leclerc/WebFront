@@ -1,73 +1,37 @@
 #pragma once
 
+#include <networking/Tasks.hpp>
 #include <networking/TCPNetworkingStdnet.hpp>
 
 #include <array>
 #include <atomic>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <vector>
 
 // A test-owned endpoint that accepts HTTP requests but always refuses WebSocket upgrades.
 // Binding port zero keeps the initial-connection-failure tests independent of other services.
 class RejectedWebSocketServer {
     using Net = webfront::networking::TCPStdnet;
-
-    struct Session : std::enable_shared_from_this<Session> {
-        Net::Socket                       socket;
-        std::atomic<unsigned>&            rejected;
-        std::array<char, 1024>            buffer{};
-        std::string                       request;
-        static constexpr std::string_view response{"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"};
-
-        Session(Net::Socket connection, std::atomic<unsigned>& count) : socket(std::move(connection)), rejected(count) { }
-
-        void read() {
-            socket.async_read_some(Net::Buffer(buffer), [self = shared_from_this()](std::error_code error, std::size_t size) {
-                if (error)
-                    return;
-                self->request.append(self->buffer.data(), size);
-                if (self->request.find("\r\n\r\n") != std::string::npos) {
-                    ++self->rejected;
-                    Net::AsyncWrite(self->socket, Net::Buffer(response), [self](std::error_code, std::size_t) {
-                        std::error_code ignored;
-                        self->socket.close(ignored);
-                    });
-                } else if (self->request.size() < 16384) {
-                    self->read();
-                }
-            });
-        }
-    };
+    using Task = webfront::networking::Task;
 
 public:
     RejectedWebSocketServer() : acceptor(context) {
-        Net::Resolver resolver(context);
-        Net::Endpoint endpoint = *resolver.resolve("127.0.0.1", "0").begin();
+        const Net::Endpoint endpoint = Net::Resolve("127.0.0.1", "0");
         acceptor.open(endpoint.protocol());
         acceptor.bind(endpoint);
         acceptor.listen();
         endpointUrl = "ws://127.0.0.1:" + std::to_string(acceptor.local_endpoint().port());
-        accept();
+        spawn(acceptConnections());
         worker = std::jthread([this] {
             context.run();
         });
     }
 
+    // Stopping cancels the pending operations; the worker returns once their tasks have ended.
     ~RejectedWebSocketServer() {
-        context.stop();
+        stopSource.request_stop();
         worker.join();
-        // Cancel what is still pending, then run the cancellation completions while the state their
-        // callbacks reference is alive: the operations own their sessions and leak otherwise.
-        std::error_code ignored;
-        acceptor.close(ignored);
-        for (const auto& weakSession : sessions)
-            if (auto session = weakSession.lock()) session->socket.close(ignored);
-        sessions.clear();
-        context.restart();
-        context.poll();
     }
 
     const std::string& url() const {
@@ -78,24 +42,33 @@ public:
     }
 
 private:
+    static constexpr std::string_view response{"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"};
+
     Net::IoContext        context;
     Net::Acceptor         acceptor;
+    webfront::networking::ex::inplace_stop_source stopSource;
     std::atomic<unsigned> rejected{0};
     std::string           endpointUrl;
-    std::vector<std::weak_ptr<Session>> sessions; // touched by the worker, then by the destructor after the join
-    // Join before destroying the context and the state referenced by its callbacks.
-    std::jthread worker;
+    std::jthread          worker;
 
-    void accept() {
-        acceptor.async_accept([this](std::error_code error, Net::Socket socket) {
-            // A successful completion can still be queued when the destructor closes the acceptor: do not
-            // start a session nobody would cancel.
-            if (error || !acceptor.is_open())
-                return;
-            auto session = std::make_shared<Session>(std::move(socket), rejected);
-            sessions.push_back(session);
-            session->read();
-            accept();
-        });
+    void spawn(Task task) {
+        webfront::networking::Spawn(Net::Scheduler(acceptor), stopSource.get_token(), std::move(task));
+    }
+
+    Task acceptConnections() {
+        for (;;) spawn(reject(co_await Net::Accept(acceptor)));
+    }
+
+    Task reject(Net::Socket socket) {
+        std::array<char, 1024> buffer{};
+        std::string            request;
+        while (request.find("\r\n\r\n") == std::string::npos && request.size() < 16384) {
+            const auto received = co_await Net::Receive(socket, Net::Buffer(buffer));
+            if (received == 0)
+                co_return;
+            request.append(buffer.data(), received);
+        }
+        ++rejected;
+        co_await Net::Send(socket, Net::Buffer(response));
     }
 };

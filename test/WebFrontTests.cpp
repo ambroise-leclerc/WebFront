@@ -40,15 +40,7 @@ public:
     void run() {}
     void run_one() {}
     void stop() {}
-};
-
-class WebFrontResolverMock {
-public:
-    explicit WebFrontResolverMock(WebFrontIoContextMock) {}
-
-    std::list<networking::EndpointMock> resolve(std::string_view address, std::string_view port) {
-        return {networking::EndpointMock{address, port}};
-    }
+    void restart() {}
 };
 
 class WebFrontAcceptorMock : public networking::SocketBaseMock {
@@ -62,8 +54,6 @@ public:
         openState = true;
     }
 
-    void async_accept(std::function<void(std::error_code, networking::SocketMock)>) {}
-
     bool is_open() const { return openState; }
 
     void close() { openState = false; }
@@ -73,7 +63,6 @@ class WebFrontNetworkingMock : public networking::NetworkingMock {
 public:
     using Acceptor  = WebFrontAcceptorMock;
     using IoContext = WebFrontIoContextMock;
-    using Resolver  = WebFrontResolverMock;
 };
 
 struct InitializingFrontend {
@@ -219,6 +208,7 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
 
     GIVEN("a frontend that completes when the window session ends") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ClosingFrontend>;
+        const int  previousOpenCalls = ClosingFrontend::openCalls;  // other scenarios share this frontend
         FrontendWF webFront("9000");
 
         WHEN("openWindow is called") {
@@ -227,7 +217,7 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
             THEN("BasicWF requests server shutdown after the frontend returns") {
                 REQUIRE(action == FrontendWF::WindowAction::closeWindow);
                 REQUIRE(ClosingFrontend::initializeCalls == 1);
-                REQUIRE(ClosingFrontend::openCalls == 1);
+                REQUIRE(ClosingFrontend::openCalls == previousOpenCalls + 1);
                 REQUIRE(ClosingFrontend::lastPort == "9000");
                 REQUIRE(ClosingFrontend::lastFile == "react.html");
             }

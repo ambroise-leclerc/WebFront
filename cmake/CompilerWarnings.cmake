@@ -28,6 +28,7 @@ function(set_project_warnings project_name)
       /w14905 # wide string literal cast to 'LPSTR'
       /w14906 # string literal cast to 'LPWSTR'
       /w14928 # illegal copy-initialization; more than one user-defined conversion has been implicitly applied
+      /wd4714 # '__forceinline' function not inlined: stdexec's coroutine helpers, which are not ours to change
       /analyze # Enable Code Analysis
       /analyze:external- # Disable Code Analysis for external headers
       /analyze:stacksize 65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB)

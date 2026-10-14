@@ -74,6 +74,8 @@ If the environment provides a read-only default ccache directory, set `CCACHE_DI
 
 `BasicWF<NetProvider, Filesystem, Policy, Frontend>` owns the HTTP server, connected `WebLink` objects, registered C++ callbacks, and server thread. `BasicUI` identifies one connected browser. A frontend must satisfy `frontend::FrontendType` and decides whether the server stops when `open()` returns.
 
+The HTTP server connections and the WebSocket read/write loops are coroutines (`networking::Task`) awaiting the senders a network provider returns (`Receive`, `Send`, `Accept`; `networking::TCPStdnet` forwards them to stdnet). A stop request cancels them from any thread and they unwind on the io_context thread, so I/O objects are never closed from another thread. Whoever owns the objects the tasks use must run `Server::drain()` before destroying them (`~BasicWF` does).
+
 `webfront::WebFront` is default-constructible (`WebFrontConfig`: loopback address, port `9002`, no document root) and `show(page = "index.html")` opens a page. Without a document root no local file access happens; `WebFrontConfig::documentRoot` serves local files for development only, after the embedded `WebFront.js` (which a root can never override) and before the embedded fallback page.
 
 Filesystems implement `open(std::filesystem::path) -> std::optional<fs::File>` and are composed with `fs::Multi<>`; the first provider returning a file wins. `NativeDebugFS` is development-only and must not be presented as a production sandbox.
