@@ -158,6 +158,23 @@ SCENARIO("Terminal output is capped below the bridge's string limit") {
     }
 }
 
+SCENARIO("Terminal error messages are capped below the bridge's string limit") {
+    GIVEN("a shell and an unknown command name as long as the largest bridge string") {
+        terminal::Shell shell;
+        const string    name(65535, 'x');
+
+        WHEN("it runs") {
+            const auto output = shell.run(name);
+            THEN("the diagnostic fits a 16-bit length, keeps its colors and is marked as truncated") {
+                REQUIRE(output.size() < 65536);
+                REQUIRE(output.starts_with("\x1b[31mUnknown command 'xxx"));
+                REQUIRE(contains(output, "[output truncated]"));
+                REQUIRE(output.ends_with("\x1b[0m"));
+            }
+        }
+    }
+}
+
 SCENARIO("Terminal registers its bridge functions and built-in commands on the application") {
     GIVEN("a terminal on an application") {
         RecordingApp app;
