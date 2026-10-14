@@ -28,7 +28,7 @@ For example, with an upstream Clang/libc++ toolchain providing its std module ma
 ```bash
 cmake -S . -B build-mddlog -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE=/path/to/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake \
-  -DWEBFRONT_USE_MDDLOG=ON -DWEBFRONT_MDDLOG_SOURCE_DIR=/path/to/mddlog
+  -DENABLE_TESTING=ON -DWEBFRONT_USE_MDDLOG=ON -DWEBFRONT_MDDLOG_SOURCE_DIR=/path/to/mddlog
 cmake --build build-mddlog --parallel
 ctest --test-dir build-mddlog --output-on-failure --no-tests=error
 ```
@@ -149,7 +149,7 @@ Without the option, the same calls map to the historical synchronous sink, and
   close and destruction; `cppFunction` with `js-cpp:<CallId>` for calls from JavaScript;
   `jsFunction` with `cpp-js:<CallId>` for returns of C++-initiated calls.
 
-`main` in `HelloWorld.cpp` and `JasmineTest.cpp` now keeps the console handle and removes
+`main` in `ModuleDemo.cpp` and `JasmineTest.cpp` now keeps the console handle and removes
 it before returning. `LoggerTests.cpp` already stored and removed its handle and remains
 unchanged.
 
