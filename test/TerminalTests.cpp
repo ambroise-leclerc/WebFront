@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <components/Terminal.hpp>
 
 #include <functional>
@@ -45,25 +46,25 @@ bool contains(const string& text, const string& part) {
 
 SCENARIO("Terminal lines are split into words") {
     GIVEN("lines with whitespace, quotes and escapes") {
-        THEN("whitespace separates words and runs of it are ignored") {
-            REQUIRE(terminal::tokenize("  greet \t Ada  ") == vector<string>{"greet", "Ada"});
-            REQUIRE(terminal::tokenize("").empty());
-            REQUIRE(terminal::tokenize("   ").empty());
+        auto [line, words] = GENERATE(table<string, vector<string>>({
+            {          "  greet \t Ada  ",              {"greet", "Ada"}}, // whitespace runs separate words
+            {                          "",                            {}}, // an empty line has no word
+            {                       "   ",                            {}}, // nor has a blank one
+            {R"(say "hello world" 'a b')", {"say", "hello world", "a b"}},
+            {                 R"(x "" y)",                {"x", "", "y"}}, // empty quotes give an empty word
+            {           R"(pre"fix"post)",                {"prefixpost"}}, // quotes join adjacent text
+            {                   R"(a\ b)",                       {"a b"}}, // a backslash escapes outside quotes,
+            {           R"("say \"hi\"")",               {R"(say "hi")"}}, // inside double quotes,
+            {                  R"('a\b')",                    {R"(a\b)"}}, // but not inside single quotes
+        }));
+        THEN("the line '" + line + "' is split as expected") {
+            REQUIRE(terminal::tokenize(line) == words);
         }
-        THEN("quotes group words, and empty quotes give an empty word") {
-            REQUIRE(terminal::tokenize(R"(say "hello world" 'a b')") == vector<string>{"say", "hello world", "a b"});
-            REQUIRE(terminal::tokenize(R"(x "" y)") == vector<string>{"x", "", "y"});
-            REQUIRE(terminal::tokenize(R"(pre"fix"post)") == vector<string>{"prefixpost"});
-        }
-        THEN("backslashes escape outside quotes and inside double quotes, not inside single quotes") {
-            REQUIRE(terminal::tokenize(R"(a\ b)") == vector<string>{"a b"});
-            REQUIRE(terminal::tokenize(R"("say \"hi\"")") == vector<string>{R"(say "hi")"});
-            REQUIRE(terminal::tokenize(R"('a\b')") == vector<string>{R"(a\b)"});
-        }
-        THEN("an unterminated quote or a trailing backslash is rejected") {
-            REQUIRE_THROWS_AS(terminal::tokenize(R"(say "hello)"), invalid_argument);
-            REQUIRE_THROWS_AS(terminal::tokenize("say 'hello"), invalid_argument);
-            REQUIRE_THROWS_AS(terminal::tokenize(R"(say \)"), invalid_argument);
+    }
+    GIVEN("malformed lines") {
+        auto line = GENERATE(string{R"(say "hello)"}, string{"say 'hello"}, string{R"(say \)"}, string{R"("a\)"});
+        THEN("an unterminated quote or a trailing backslash is rejected: " + line) {
+            REQUIRE_THROWS_AS(terminal::tokenize(line), invalid_argument);
         }
     }
 }
@@ -88,12 +89,14 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
                           throw runtime_error("command failed");
                       }));
 
-        THEN("the command receives its arguments without its name") {
+        THEN("a returning command's result is its output") {
             REQUIRE(shell.run("greet Ada") == "Hello, Ada!");
             REQUIRE(shell.run("greet") == "Hello, world!");
+            REQUIRE(shell.run("answer ignored") == "42");
+        }
+        THEN("the command receives its arguments without its name") {
             REQUIRE(shell.run("record 'a b' c").empty());
             REQUIRE(received == vector<string>{"a b", "c"});
-            REQUIRE(shell.run("answer ignored") == "42");
         }
         THEN("written line breaks become terminal line breaks") {
             REQUIRE(shell.run("lines") == "one\r\ntwo");
@@ -111,10 +114,12 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
         THEN("a command's exception propagates, so the JavaScript Promise rejects") {
             REQUIRE_THROWS_AS(shell.run("fail"), runtime_error);
         }
-        THEN("command names complete by prefix, in order, and arguments are not completed") {
+        THEN("command names complete by prefix, in order") {
             REQUIRE(shell.complete("") == "answer\nfail\ngreet\nlines\nrecord");
             REQUIRE(shell.complete("gr") == "greet");
             REQUIRE(shell.complete("zz").empty());
+        }
+        THEN("arguments are not completed") {
             REQUIRE(shell.complete("greet A").empty());
         }
         THEN("help lists every command with its aligned description") {
@@ -126,10 +131,10 @@ SCENARIO("The terminal shell dispatches lines to registered commands") {
                        "record  Record its arguments");
         }
         THEN("a duplicate or malformed name is rejected") {
-            auto handler = terminal::adaptHandler([] {});
-            REQUIRE_THROWS_AS(shell.command("greet", "again", handler), invalid_argument);
-            REQUIRE_THROWS_AS(shell.command("", "empty", handler), invalid_argument);
-            REQUIRE_THROWS_AS(shell.command("two words", "space", handler), invalid_argument);
+            auto name = GENERATE(string{"greet"}, string{""}, string{"two words"}, string{"quo'te"});
+            REQUIRE_THROWS_AS(shell.command(name, "rejected", terminal::adaptHandler([] {})), invalid_argument);
+        }
+        THEN("a command without a handler is rejected") {
             REQUIRE_THROWS_AS(shell.command("ok", "no handler", terminal::Shell::Handler{}), invalid_argument);
             REQUIRE_FALSE(shell.contains("ok"));
         }
@@ -148,9 +153,11 @@ SCENARIO("Terminal output is capped below the bridge's string limit") {
 
         WHEN("it runs") {
             const auto output = shell.run("flood");
-            THEN("the output is truncated on a character boundary with a notice") {
+            THEN("the output fits a 16-bit length and ends with a notice") {
                 REQUIRE(output.size() < 65536);
                 REQUIRE(output.ends_with("[output truncated]\x1b[0m"));
+            }
+            THEN("it is cut before the first character that would not fit whole") {
                 REQUIRE(output.substr(0, terminal::maxOutputBytes - 1) == string(terminal::maxOutputBytes - 1, 'x'));
                 REQUIRE(output[terminal::maxOutputBytes - 1] == '\r');
             }
@@ -165,10 +172,12 @@ SCENARIO("Terminal error messages are capped below the bridge's string limit") {
 
         WHEN("it runs") {
             const auto output = shell.run(name);
-            THEN("the diagnostic fits a 16-bit length, keeps its colors and is marked as truncated") {
+            THEN("the diagnostic fits a 16-bit length and is marked as truncated") {
                 REQUIRE(output.size() < 65536);
-                REQUIRE(output.starts_with("\x1b[31mUnknown command 'xxx"));
                 REQUIRE(contains(output, "[output truncated]"));
+            }
+            THEN("the diagnostic keeps its colors") {
+                REQUIRE(output.starts_with("\x1b[31mUnknown command 'xxx"));
                 REQUIRE(output.ends_with("\x1b[0m"));
             }
         }
