@@ -442,6 +442,102 @@ SCENARIO("C++ results too long for the wire reject the JavaScript Promise") {
     }
 }
 
+namespace {
+
+struct CallerMock {
+    int id;
+};
+
+// The call data of a single small string parameter, as the browser encodes it.
+std::vector<std::byte> smallStringData(std::string_view text) {
+    std::vector<std::byte> data{static_cast<std::byte>(msg::CodedType::smallString), static_cast<std::byte>(text.size())};
+    for (const char c : text)
+        data.push_back(static_cast<std::byte>(c));
+    return data;
+}
+
+}  // namespace
+
+SCENARIO("A C++ callback can receive the browser that called it") {
+    using Policy = http::DefaultBuffersPolicy;
+
+    GIVEN("a handler whose callable takes the caller before its JavaScript parameters") {
+        auto       handler = detail::makeCppFunctionHandler<Policy, std::string, std::string>([](const CallerMock& caller, const std::string& text) {
+            return std::to_string(caller.id) + ":" + text;
+        });
+        const auto data    = smallStringData("hi");
+
+        THEN("the caller is passed first and only the remaining parameters are decoded") {
+            REQUIRE(handler(data, CallerMock{3}) == "3:hi");
+        }
+    }
+    GIVEN("a callable taking the caller by mutable reference, adapted to its declared type") {
+        auto handler = detail::makeCppFunctionHandler<Policy, std::string, std::string>(
+            detail::adaptCaller<CallerMock&>([](CallerMock& caller, const std::string& text) {
+                caller.id += 1;
+                return std::to_string(caller.id) + ":" + text;
+            }));
+        CallerMock caller{3};
+        const auto data = smallStringData("hi");
+
+        THEN("it receives the caller itself") {
+            REQUIRE(handler(data, caller) == "4:hi");
+            REQUIRE(caller.id == 4);
+        }
+    }
+    GIVEN("a responder for such a handler") {
+        ResultLinkMock link;
+        auto           handler   = detail::makeCppFunctionHandler<Policy, std::string>([](CallerMock caller) {
+            return std::to_string(caller.id);
+        });
+        auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, Policy, std::string>(std::move(handler));
+        responder({}, link, 5, CallerMock{11});
+
+        THEN("the caller reaches the callable and the result is returned") {
+            REQUIRE(sentString(link) == "11");
+        }
+    }
+}
+
+// Only a first parameter of the application's UI type, with any reference or const, is the caller.
+using CallerTestUI = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>::UI;
+static_assert(detail::takes_caller<CallerTestUI, CallerTestUI, std::string>::value);
+static_assert(detail::takes_caller<CallerTestUI, const CallerTestUI&>::value);
+static_assert(!detail::takes_caller<CallerTestUI, std::string, CallerTestUI>::value);
+static_assert(!detail::takes_caller<CallerTestUI>::value);
+
+SCENARIO("A UI first parameter selects the caller form of cppFunction") {
+    using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+    using AppUI      = FrontendWF::UI;
+
+    GIVEN("an application") {
+        FrontendWF webFront("9161");
+        THEN("the caller may be taken by value or by const reference") {
+            REQUIRE_NOTHROW(webFront.cppFunction("byValue", [](AppUI) {}));
+            REQUIRE_NOTHROW(webFront.cppFunction("byConstReference", [](const AppUI&) {}));
+        }
+        THEN("the caller may be taken by mutable or rvalue reference") {
+            REQUIRE_NOTHROW(webFront.cppFunction("byReference", [](AppUI&) {}));
+            REQUIRE_NOTHROW(webFront.cppFunction("byRvalueReference", [](AppUI&&) {}));
+        }
+        THEN("caller callbacks register through deduction and explicit types") {
+            REQUIRE_NOTHROW(webFront.cppFunction("deduced", [](AppUI, std::string) {}));
+            REQUIRE_NOTHROW(webFront.template cppFunction<int, const AppUI&, double>("explicit", [](const AppUI&, double) {
+                return 1;
+            }));
+        }
+        THEN("browser subscriptions can be taken, and released after the application") {
+            UISubscription subscription;
+            {
+                FrontendWF scoped("9162");
+                subscription = scoped.subscribeUIStarted([](AppUI) {});
+                REQUIRE(subscription.active());
+            }
+            REQUIRE_NOTHROW(subscription.reset());
+        }
+    }
+}
+
 SCENARIO("WebFrontConfig has newcomer-friendly defaults") {
     THEN("the defaults are loopback binding, port 9002, and no local document root") {
         WebFrontConfig config;

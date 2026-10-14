@@ -175,6 +175,13 @@ The Jasmine specs are native ES modules. They prove relative module loading, bot
 - C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript. Only the untyped form is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.
 - Bridge parameters include scalars, strings, tuples and numeric typed arrays. C++ `std::vector`, `std::array` and `std::span` map to the matching JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups.
 - Missing functions, callback exceptions, malformed returns and disconnected browsers complete a C++ future exceptionally (`get()` throws) and reject a JavaScript Promise.
+- A callback whose first parameter is the application's `UI` type receives the browser that called it, for example to call it back later; JavaScript passes only the other parameters:
+  ```cpp
+  app.cppFunction("subscribe", [](webfront::UI caller, std::string topic) {
+      caller.jsFunction("onEvent")(topic);
+  });
+  ```
+- `onUIStarted(handler)` sets the application's handler for each connected browser. Code that must not replace it, such as a reusable component, uses `auto subscription = app.subscribeUIStarted(handler);`; the handler stays registered while `subscription` lives.
 
 ## Advanced: frontend aliases
 

@@ -41,6 +41,7 @@ struct TestState {
     atomic<bool> jsTupleObserved{false};
     atomic<bool> cppResultObserved{false};
     atomic<bool> jasmineReported{false};
+    atomic<bool> subscriberNotified{false};
     atomic<bool> passed{false};
 };
 
@@ -80,6 +81,7 @@ private:
     RejectedWebSocketServer rejectedWebSocket;
     TestState            state;
     optional<TestWF::UI> connectedUI;
+    UISubscription                   uiSubscription;
     future<string> cppResult;
     static constexpr chrono::seconds cppResultWaitTimeout{10};
 
@@ -96,6 +98,12 @@ private:
 
     void registerCallbacks() {
         webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
+        uiSubscription = webFront.subscribeUIStarted([this](TestWF::UI) {
+            state.subscriberNotified = true;
+        });
+        webFront.cppFunction("callBackCaller", [](TestWF::UI caller, const string& token) {
+            caller.jsFunction("webfrontTests.receiveFromCaller")(token);
+        });
         webFront.onUIStarted([this](TestWF::UI ui) {
             connectedUI.emplace(ui);
         });
@@ -207,8 +215,8 @@ private:
     void reportJasmine(const string& overallStatus, const string& failures) {
         state.jasmineReported = true;
         state.cppResultObserved = cppResultMatches();
-        state.passed = overallStatus == "passed" && state.browserReady && browserCallsObserved()
-                       && state.cppResultObserved && rejectedWebSocket.rejectedRequests() >= 2;
+        state.passed = overallStatus == "passed" && state.browserReady && state.subscriberNotified && browserCallsObserved() && state.cppResultObserved
+                       && rejectedWebSocket.rejectedRequests() >= 2;
         if (!failures.empty())
             log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());

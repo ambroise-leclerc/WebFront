@@ -87,13 +87,14 @@ int main() {
 
 ## Core gaps found by the terminal
 
-These belong to the core, not to the component, and are not changed by stage 1:
+These belong to the core, not to the component. Stage 1 did not change them; the first two are
+now resolved:
 
-1. `onUIStarted` keeps a single handler. A component that needs the connected `UI` (for example to
-   push output) would replace the application's handler. Components need a subscription that can
-   be added to rather than set (#233).
-2. A `cppFunction` callback does not know which `UI` called it, so a component cannot answer
-   asynchronously or stream to the right browser (#233).
+1. `onUIStarted` keeps a single handler, which a component would replace. Resolved by #233:
+   components call `subscribeUIStarted(handler)` and keep the returned `UISubscription`.
+2. A `cppFunction` callback did not know which `UI` called it. Resolved by #233: a callback whose
+   first parameter is the application's `UI` receives the calling browser, so a component can answer
+   later or stream to it.
 3. Outstanding calls cannot be cancelled (already listed in `PROJECT_STATUS.md`).
 4. Bridge strings are limited to 65535 bytes. Until #231 the C++ encoder wrapped longer lengths and
    corrupted the message; it now rejects them (the JavaScript encoder always did). The terminal caps
@@ -162,6 +163,6 @@ production plugin system.
 
 ### Prerequisites
 
-- Core gaps 1 and 2 above, for progress and output streaming initiated by C++.
+- Core gaps 1 and 2 above, for progress and output streaming initiated by C++ (done in #233).
 - A filesystem provider writing outside the build tree, with tests using temporary directories.
 - Browser tests that use a local fake registry: tests must not need the public network.
