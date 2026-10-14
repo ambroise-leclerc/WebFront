@@ -27,6 +27,10 @@ add_custom_target(WebFrontGreeterAssets ALL
 )
 add_dependencies(WebFrontGreeter WebFrontGreeterAssets)
 
+# Terminal component demo: a command-line interface to C++ in the browser (embedded xterm.js)
+add_executable(WebFrontTerminal Terminal.cpp)
+target_link_libraries(WebFrontTerminal PRIVATE WebFront WebFront_warnings WebFront_options)
+
 # Native-module and React demo (src/module-demo.html, src/react.html)
 add_executable(WebFrontApp ModuleDemo.cpp)
 target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_options)
@@ -45,3 +49,4 @@ target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_op
 setup_cef_for_target(HelloWorld)
 setup_cef_for_target(WebFrontGreeter)
 setup_cef_for_target(WebFrontApp)
+setup_cef_for_target(WebFrontTerminal)

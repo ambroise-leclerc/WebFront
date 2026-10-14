@@ -1,7 +1,9 @@
+#include <components/Terminal.hpp>
 #include <system/FileSystem.hpp>
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
+#include <system/TerminalFS.hpp>
 #include <tooling/Logger.hpp>
 #include <tooling/PathUtils.hpp>
 #include <WebFront.hpp>
@@ -42,7 +44,7 @@ struct TestState {
     atomic<bool> passed{false};
 };
 
-using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS>;
+using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS, fs::TerminalFS>;
 // The browser integration test needs an embedded, auto-closing window under Xvfb, so it selects
 // CEFFrontend explicitly rather than relying on webfront::WebFront's default (system) frontend.
 using TestWF = BasicWFWithFrontend<NetProvider, TestFS, frontend::CEFFrontend>;
@@ -51,6 +53,7 @@ class BrowserIntegrationTest {
 public:
     explicit BrowserIntegrationTest(const filesystem::path& docRoot) : webFront("9002", docRoot) {
         registerCallbacks();
+        registerTerminalCommands();
     }
 
 #ifdef _MSC_VER
@@ -136,6 +139,17 @@ private:
             });
         webFront.cppFunction<void, tuple<int, string>>("recordTupleFromJs", [this](const tuple<int, string>& value) {
             state.jsTupleObserved = value == tuple<int, string>{42, "tuple"};
+        });
+    }
+
+    /// Commands driven by webtest/js/terminal-specs.mjs.
+    void registerTerminalCommands() {
+        Terminal terminal{webFront, {.prompt = "test> ", .banner = "webtest terminal"}};
+        terminal.command("greet", "Greet someone", [](CommandArgs args) {
+            return "Hello, " + (args.empty() ? string{"world"} : args[0]) + "!";
+        });
+        terminal.command("fail", "Throw from C++", [](CommandArgs) -> string {
+            throw runtime_error("terminal command failed");
         });
     }
 

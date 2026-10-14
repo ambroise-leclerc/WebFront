@@ -17,11 +17,14 @@ The project is an experimental foundation, not a production-ready UI framework. 
 - `include/weblink/`: bridge message encoding and routing.
 - `include/system/`: layered virtual filesystems and embedded web resources.
 - `include/frontend/`: system-browser and CEF frontend adapters.
-- `src/`: example applications and browser assets: `HelloWorld.cpp` (no assets, embedded fallback page), `Greeter.cpp` with `greeter/` (editable UI), `ModuleDemo.cpp` with `module-demo.html` and `react.html`, and the readable embedded sources `WebFront.js` and `fallback/`.
+- `include/components/`: opt-in UI components (`Terminal.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`.
+- `src/`: example applications and browser assets: `HelloWorld.cpp` (no assets, embedded fallback page), `Greeter.cpp` with `greeter/` (editable UI), `ModuleDemo.cpp` with `module-demo.html` and `react.html`, `Terminal.cpp` (terminal component demo), and the readable embedded sources `WebFront.js`, `fallback/` and `components/`.
 - `test/`: Catch2 unit tests.
 - `webtest/`: Jasmine real-browser integration test.
 - `cmake/` and `.github/workflows/`: build support and CI.
+- `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
+- `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
 - `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
 
 The legacy `webfront/`, `tests/`, and `webtest` directories are not interchangeable: use `test/` for current C++ tests and `webtest/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.

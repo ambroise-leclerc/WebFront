@@ -38,4 +38,22 @@ function(webfront_add_embedded_assets)
     _webfront_add_embedded_text_asset(
         "${root}/src/fallback/webfront-fallback.mjs" "${root}/include/system/FallbackModuleData.hpp"
         FallbackModuleData FallbackModuleAssetFresh)
+
+    # Terminal component (include/system/TerminalFS.hpp). xterm.js files are vendored verbatim in
+    # third_party/xterm (see its VERSION file); refresh them with cmake/UpdateXterm.cmake.
+    _webfront_add_embedded_text_asset(
+        "${root}/src/components/terminal/index.html" "${root}/include/system/TerminalIndexHtmlData.hpp"
+        TerminalIndexHtmlData TerminalIndexHtmlAssetFresh)
+    _webfront_add_embedded_text_asset(
+        "${root}/src/components/terminal/terminal.mjs" "${root}/include/system/TerminalModuleData.hpp"
+        TerminalModuleData TerminalModuleAssetFresh)
+    _webfront_add_embedded_text_asset(
+        "${root}/third_party/xterm/xterm.mjs" "${root}/include/system/XtermModuleData.hpp"
+        XtermModuleData XtermModuleAssetFresh)
+    _webfront_add_embedded_text_asset(
+        "${root}/third_party/xterm/xterm.css" "${root}/include/system/XtermCssData.hpp"
+        XtermCssData XtermCssAssetFresh)
+    _webfront_add_embedded_text_asset(
+        "${root}/third_party/xterm/addon-fit.mjs" "${root}/include/system/XtermFitAddonData.hpp"
+        XtermFitAddonData XtermFitAddonAssetFresh)
 endfunction()
