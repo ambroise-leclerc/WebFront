@@ -33,9 +33,22 @@ struct MimeType {
     }
 
     [[nodiscard]] constexpr std::string_view toString() const {
-        auto names =
-          std::array{"text/plain",      "text/html", "text/css",     "application/javascript", "image/jpeg", "image/png", "image/gif", "application/json",
-                     "application/pdf", "font/ttf",  "image/x-icon", "image/svg+xml",          "image/webp", "text/css",  "text/csv"};
+        // One name per Type, in declaration order.
+        constexpr auto names = std::array{"text/plain",
+                                          "text/html",
+                                          "text/css",
+                                          "application/javascript",
+                                          "image/jpeg",
+                                          "image/png",
+                                          "image/gif",
+                                          "application/json",
+                                          "application/pdf",
+                                          "font/ttf",
+                                          "image/x-icon",
+                                          "image/svg+xml",
+                                          "image/webp",
+                                          "text/csv"};
+        static_assert(names.size() == csv + 1, "MimeType names must match the Type enumerators");
         return names[type];
     }
 };
