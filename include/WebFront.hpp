@@ -10,6 +10,7 @@
 #include "system/DefaultFS.hpp"
 #include "system/IndexFS.hpp"
 #include "system/WindowsCompat.hpp"
+#include "UISubscribers.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
 
@@ -82,22 +83,24 @@ inline int ensureFrontendInitialized() {
     return 0;
 }
 
+/// Decodes Args from the call data and invokes the callable with them, preceded by 'caller' (the
+/// calling UI, for callables that take it as their first parameter, or nothing).
 template <http::BuffersPolicyType Policy, typename R, typename... Args, typename Function>
 auto makeCppFunctionHandler(Function&& function) {
     using StoredFunction = std::decay_t<Function>;
     auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
 
-    return [callable = std::move(callable)](std::span<const std::byte> data) -> R {
+    return [callable = std::move(callable)](std::span<const std::byte> data, const auto&... caller) -> R {
         std::tuple<Args...> parameters;
         auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
             (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
             if (!data.empty())
                 throw std::runtime_error("Function call contains trailing parameter data");
             if constexpr (std::is_void_v<R>) {
-                std::invoke(*callable, std::get<Is>(tuple)...);
+                std::invoke(*callable, caller..., std::get<Is>(tuple)...);
                 return;
             } else
-                return std::invoke(*callable, std::get<Is>(tuple)...);
+                return std::invoke(*callable, caller..., std::get<Is>(tuple)...);
         };
 
         return deserializeAndCall(parameters, std::index_sequence_for<Args...>());
@@ -164,6 +167,13 @@ concept has_callable_traits = has_callable_traits_impl<T>::value;
 
 // Bridges a deduced <Return, tuple<DecayedArgs...>> pair back to the explicit-template cppFunction
 // overload, so the deduced and explicit registration paths share one dispatch/response implementation.
+/// True when a callable's first parameter is the application's UI: the calling browser is then
+/// passed to it instead of being read from the call data.
+template <typename UI, typename... Args>
+struct takes_caller : std::false_type {};
+template <typename UI, typename First, typename... Rest>
+struct takes_caller<UI, First, Rest...> : std::is_same<std::remove_cvref_t<First>, UI> {};
+
 template <typename R, typename Tuple>
 struct ApplyArgs;
 template <typename R, typename... Args>
@@ -187,7 +197,7 @@ websocket::Frame<Net> makeFailureFrame(msg::CallId callId, const std::exception&
 
 template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
-    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId) mutable {
+    return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId, const auto&... caller) mutable {
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
@@ -195,9 +205,9 @@ auto makeCppFunctionResponder(Callable&& callable) {
         // limit), which can leave 'result' partly encoded: failures are sent in a fresh message.
         try {
             if constexpr (std::is_void_v<R>)
-                callable(data);
+                callable(data, caller...);
             else {
-                auto value = callable(data);
+                auto value = callable(data, caller...);
                 result.encodeParameter(value, frame);
                 frame.freeze();
             }
@@ -276,8 +286,16 @@ public:
         httpServer.stop();
     }
 
+    /// Sets the application's handler for each connected browser, replacing any previous one.
     void onUIStarted(std::function<void(UI)>&& handler) {
         uiStartedHandler = std::move(handler);
+    }
+
+    /// Adds a handler for each browser that connects from now on, called after the onUIStarted
+    /// handler and the earlier subscribers. It stays registered while the returned subscription
+    /// lives; components use this so they never replace the application's handler.
+    [[nodiscard]] UISubscription subscribeUIStarted(std::function<void(UI)> handler) {
+        return uiSubscribers->subscribe(std::move(handler));
     }
     WebLink<Net>& getLink(WebLinkId id) {
         return webLinks.at(id);
@@ -286,6 +304,9 @@ public:
     /**
      * @brief Registers a function which will be callable from Javascript.
      *
+     * When the first of Args is UI, the callable receives the browser that called it there, and only
+     * the remaining parameters come from JavaScript.
+     *
      * @tparam R ReturnType of the CppFunction
      * @tparam Args parameters of the CppFunction
      * @param functionName
@@ -293,8 +314,16 @@ public:
      */
     template <typename R, typename... Args>
     void cppFunction(std::string functionName, auto&& function) {
-        auto callable = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
-        cppFunctions.try_emplace(functionName, detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable)));
+        if constexpr (detail::takes_caller<UI, Args...>::value)
+            registerWithCaller<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+        else {
+            auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
+            auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
+            cppFunctions.try_emplace(std::move(functionName),
+                                     [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, const UI&) mutable {
+                                         responder(data, link, callId);
+                                     });
+        }
     }
 
     /**
@@ -365,13 +394,24 @@ public:
     }
 
 private:
+    template <typename R, typename Caller, typename... Args>
+    void registerWithCaller(std::string functionName, auto&& function) {
+        auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
+        auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
+        cppFunctions.try_emplace(std::move(functionName),
+                                 [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, const UI& caller) mutable {
+                                     responder(data, link, callId, caller);
+                                 });
+    }
+
     http::Server<Net, Filesystem, Policy>                                    httpServer;
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
-    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId)>> cppFunctions;
+    std::shared_ptr<detail::UIStartedSubscribers<UI>>                        uiSubscribers = std::make_shared<detail::UIStartedSubscribers<UI>>();
+    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, const UI&)>> cppFunctions;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
 private:
@@ -380,13 +420,14 @@ private:
             case WebLinkEvent::Code::linked:
                 if (uiStartedHandler)
                     uiStartedHandler(UI{*this, event.webLinkId});
+                uiSubscribers->notify(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::closed:
                 webLinks.erase(event.webLinkId);
                 break;
             case WebLinkEvent::Code::cppFunctionCalled:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
-                    function->second(event.data, getLink(event.webLinkId), event.callId);
+                    function->second(event.data, getLink(event.webLinkId), event.callId, UI{*this, event.webLinkId});
                 else
                     getLink(event.webLinkId).sendError(event.callId, "C++ function '" + event.text + "' was not found");
                 break;
