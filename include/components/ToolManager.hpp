@@ -27,7 +27,8 @@ namespace tools::detail {
 // JavaScript numbers are exact integers up to 2^53.
 inline std::uint64_t toOffset(double offset) {
     const bool integral = std::floor(offset) == offset;  // false for NaN
-    if (!integral || offset < 0 || offset > 9007199254740992.0)
+    const bool inRange  = offset >= 0 && offset <= 9007199254740992.0;
+    if (!integral || !inRange)
         throw std::invalid_argument("Invalid file offset");
     return static_cast<std::uint64_t>(offset);
 }

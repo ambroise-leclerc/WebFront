@@ -86,13 +86,17 @@ inline bool isVersion(std::string_view version) {
     return std::isdigit(static_cast<unsigned char>(version.front())) != 0 && consistsOf(version, versionCharacters);
 }
 
-// Rejects empty, "." and ".." components (and "...", which no package needs).
-inline bool isSafeComponent(std::string_view component) {
-    return component.find_first_not_of('.') != std::string_view::npos;
+inline bool hasSafeCharacters(std::string_view path) {
+    using namespace std::string_view_literals;
+    return path.size() <= 4096 && path.find_first_of("\\:\0"sv) == std::string_view::npos;
 }
 
-inline std::invalid_argument unsafePath(std::string_view path) {
-    return std::invalid_argument("Unsafe path '" + std::string(path) + "'");
+// Appends a component unless it is empty, "." or ".." (or "...", which no package needs).
+inline bool appendComponent(std::filesystem::path& path, std::string_view component) {
+    if (component.find_first_not_of('.') == std::string_view::npos)
+        return false;
+    path /= fromUtf8(component);
+    return true;
 }
 
 }  // namespace detail
@@ -115,18 +119,12 @@ inline void validateVersion(std::string_view version) {
 /// its directory. Rejects empty and absolute paths, empty, "." and ".." components, backslashes,
 /// colons (drive letters and alternate streams) and NUL characters with std::invalid_argument.
 inline std::filesystem::path safeRelativePath(std::string_view path) {
-    using namespace std::string_view_literals;
-    if (path.size() > 4096 || path.find_first_of("\\:\0"sv) != std::string_view::npos)
-        throw detail::unsafePath(path);
     std::filesystem::path result;
-    for (const auto part : std::views::split(path, '/')) {
-        const std::string_view component(part.begin(), part.end());
-        if (!detail::isSafeComponent(component))
-            throw detail::unsafePath(path);
-        result /= detail::fromUtf8(component);
-    }
-    if (result.empty())
-        throw detail::unsafePath(path);
+    bool                  safe = detail::hasSafeCharacters(path);
+    for (const auto part : std::views::split(path, '/'))
+        safe = safe && detail::appendComponent(result, std::string_view(part.begin(), part.end()));
+    if (!safe || result.empty())
+        throw std::invalid_argument("Unsafe path '" + std::string(path) + "'");
     return result;
 }
 

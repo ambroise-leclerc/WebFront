@@ -124,6 +124,17 @@ SCENARIO("The tool manager installs tools through its bridge functions") {
                 }
             }
         }
+    }
+}
+
+SCENARIO("The tool manager rejects malformed calls and commands") {
+    GIVEN("a terminal with a tool manager on an application") {
+        TemporaryDirectory project;
+        TestProject::directory = project.path();
+        RecordingApp                           app;
+        Terminal                               terminal{app};
+        ToolManager<RecordingApp, TestProject> manager{app, terminal};
+
         THEN("a negative, fractional or too large offset is rejected") {
             app.call<void, string, string>("webfront.pkg.begin", "plot", "1.0.0");
             for (const double offset : {-1.0, 0.5, 1e300, numeric_limits<double>::infinity(), numeric_limits<double>::quiet_NaN()})
