@@ -34,7 +34,7 @@ fs::ToolRecord plotRecord(string version = "1.2.0") {
 
 void install(fs::ToolStore& store, const fs::ToolRecord& record, string_view page = "<p>plot</p>") {
     store.begin(record.name, record.version);
-    store.write(record.name, record.version, record.entry, 0, bytes(page));
+    store.write(record.name, record.version, {.path = record.entry, .offset = 0, .bytes = bytes(page)});
     store.commit(record);
 }
 
@@ -53,6 +53,12 @@ SCENARIO("Package names, versions and paths from the browser are validated") {
         auto name = GENERATE("", ".", "..", "../x", "@acme", "@acme/", "@/plot", "@acme/../x", "@acme/a/b", "Plot", "_plot", "a b", "a\\b");
         THEN("they are rejected") {
             REQUIRE_THROWS_AS(fs::tools::validatePackageName(name), invalid_argument);
+        }
+    }
+    GIVEN("names and versions longer than npm accepts") {
+        THEN("they are rejected") {
+            REQUIRE_THROWS_AS(fs::tools::validatePackageName(string(215, 'a')), invalid_argument);
+            REQUIRE_THROWS_AS(fs::tools::validateVersion("1" + string(256, '0')), invalid_argument);
         }
     }
     GIVEN("invalid versions") {
@@ -97,6 +103,19 @@ SCENARIO("The lock file is read and written as JSON") {
             REQUIRE(tools.at("plot").title == "\xc3\xa9\xf0\x9f\x98\x80/");
         }
     }
+    GIVEN("empty arrays and objects among the unknown members") {
+        THEN("they are skipped") {
+            REQUIRE(fs::tools::parseLock(R"({"a": [], "b": {}, "c": [[]], "tools": {}})").empty());
+        }
+    }
+    GIVEN("every escape of the JSON grammar") {
+        const auto json = R"({"tools": {"plot": {"version": "1.0.0", "entry": "index.html", "title": "\"\\\b\f\n\r\t\u20AC\u0041"}}})";
+        THEN("each one is decoded") {
+            REQUIRE(fs::tools::parseLock(json).at("plot").title
+                    == "\"\\\b\f\n\r\t\xe2\x82\xac"
+                       "A");
+        }
+    }
     GIVEN("malformed JSON") {
         auto json = GENERATE("",
                              "{",
@@ -104,6 +123,14 @@ SCENARIO("The lock file is read and written as JSON") {
                              R"({"tools": 1} x)",
                              R"({"tools": {"p": {"title": "\x"}}})",
                              R"({"tools": {"p": {"title": "\ud800"}}})",
+                             R"({"tools": {"p": {"title": "\udc00"}}})",
+                             R"({"tools": {"p": {"title": "\ud800\u0041"}}})",
+                             R"({"tools": {"p": {"title": "\u12G4"}}})",
+                             R"({"tools": {"p": {"title": "\u12"}}})",
+                             R"({"other": [1, }})",
+                             R"({"other": 1} x)",
+                             R"({"other": "abc)",
+                             R"({"tools": {"p": {"x": }}})",
                              "{\"tools\": {\"p\": {\"title\": \"a\nb\"}}}");
         THEN("parsing throws") {
             REQUIRE_THROWS(fs::tools::parseLock(json));
@@ -127,9 +154,9 @@ SCENARIO("A tool store installs tools in its project directory") {
 
         WHEN("a tool is installed in several chunks") {
             store.begin("@acme/plot", "1.2.0");
-            store.write("@acme/plot", "1.2.0", "dist/index.html", 0, bytes("<p>"));
-            store.write("@acme/plot", "1.2.0", "dist/index.html", 3, bytes("plot</p>"));
-            store.write("@acme/plot", "1.2.0", "package.json", 0, bytes("{}"));
+            store.write("@acme/plot", "1.2.0", {.path = "dist/index.html", .offset = 0, .bytes = bytes("<p>")});
+            store.write("@acme/plot", "1.2.0", {.path = "dist/index.html", .offset = 3, .bytes = bytes("plot</p>")});
+            store.write("@acme/plot", "1.2.0", {.path = "package.json", .offset = 0, .bytes = bytes("{}")});
             store.commit(plotRecord());
 
             THEN("its files are in its version directory and the lock file records it") {
@@ -157,7 +184,7 @@ SCENARIO("A tool store installs tools in its project directory") {
             }
             AND_WHEN("a new installation is abandoned") {
                 store.begin("@acme/plot", "3.0.0");
-                store.write("@acme/plot", "3.0.0", "dist/index.html", 0, bytes("<p>v3</p>"));
+                store.write("@acme/plot", "3.0.0", {.path = "dist/index.html", .offset = 0, .bytes = bytes("<p>v3</p>")});
                 THEN("the installed version is untouched") {
                     REQUIRE(store.find("@acme/plot")->version == "1.2.0");
                     REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0") / "dist" / "index.html") == "<p>plot</p>");
@@ -180,19 +207,27 @@ SCENARIO("A tool store rejects inconsistent installations") {
         TemporaryDirectory project;
         fs::ToolStore      store{project.path()};
         store.begin("plot", "1.0.0");
-        store.write("plot", "1.0.0", "index.html", 0, bytes("abc"));
+        store.write("plot", "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("abc")});
 
         THEN("a chunk that does not follow the written bytes is rejected") {
-            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", "index.html", 2, bytes("x")), invalid_argument);
-            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", "missing.js", 1, bytes("x")), invalid_argument);
+            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", {.path = "index.html", .offset = 2, .bytes = bytes("x")}), invalid_argument);
+            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", {.path = "missing.js", .offset = 1, .bytes = bytes("x")}), invalid_argument);
+        }
+        THEN("a file that cannot be written is reported") {
+            store.write("plot", "1.0.0", {.path = "dir/file.js", .offset = 0, .bytes = bytes("x")});
+            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", {.path = "dir", .offset = 0, .bytes = bytes("x")}), runtime_error);
         }
         THEN("an unsafe path is rejected") {
-            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", "../escape.js", 0, bytes("x")), invalid_argument);
+            REQUIRE_THROWS_AS(store.write("plot", "1.0.0", {.path = "../escape.js", .offset = 0, .bytes = bytes("x")}), invalid_argument);
             REQUIRE_FALSE(filesystem::exists(project.path() / ".webfront" / "tools" / ".staging" / "escape.js"));
         }
         THEN("writing or committing a version that was not begun is rejected") {
-            REQUIRE_THROWS_AS(store.write("plot", "2.0.0", "index.html", 0, bytes("x")), invalid_argument);
+            REQUIRE_THROWS_AS(store.write("plot", "2.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("x")}), invalid_argument);
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "2.0.0", .entry = "index.html"}), invalid_argument);
+        }
+        THEN("a lock file that cannot be written fails the commit") {
+            filesystem::create_directories(project.path() / "webfront-tools.lock.json.tmp");
+            REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"}), runtime_error);
         }
         THEN("a commit whose entry page was not written is rejected") {
             REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "missing.html"}), invalid_argument);
@@ -202,7 +237,7 @@ SCENARIO("A tool store rejects inconsistent installations") {
             store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"});
             THEN("it cannot be committed or written again without a new begin") {
                 REQUIRE_THROWS_AS(store.commit({.name = "plot", .version = "1.0.0", .entry = "index.html"}), invalid_argument);
-                REQUIRE_THROWS_AS(store.write("plot", "1.0.0", "index.html", 0, bytes("x")), invalid_argument);
+                REQUIRE_THROWS_AS(store.write("plot", "1.0.0", {.path = "index.html", .offset = 0, .bytes = bytes("x")}), invalid_argument);
             }
         }
     }
