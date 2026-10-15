@@ -510,6 +510,12 @@ SCENARIO("Directories that cannot be deleted do not fail completed operations") 
             THEN("the new files are installed") {
                 REQUIRE(contentOf(installed / "index.html") == "<p>again</p>");
             }
+            AND_WHEN("it is reinstalled again while the backup is still left behind") {
+                REQUIRE_NOTHROW(install(store, {.name = "plot", .version = "1.0.0", .entry = "index.html"}, "<p>third</p>"));
+                THEN("the newest files are installed") {
+                    REQUIRE(contentOf(installed / "index.html") == "<p>third</p>");
+                }
+            }
             // The read-only directory was moved to the backup, which could not be deleted.
             error_code ignored;
             filesystem::permissions(backup, filesystem::perms::owner_all, ignored);
