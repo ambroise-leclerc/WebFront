@@ -56,4 +56,9 @@ function(webfront_add_embedded_assets)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/addon-fit.mjs" "${root}/include/system/XtermFitAddonData.hpp"
         XtermFitAddonData XtermFitAddonAssetFresh)
+
+    # wf tool manager (include/components/ToolManager.hpp), served by include/system/PackageFS.hpp.
+    _webfront_add_embedded_text_asset(
+        "${root}/src/components/tools/wf.mjs" "${root}/include/system/ToolManagerModuleData.hpp"
+        ToolManagerModuleData ToolManagerModuleAssetFresh)
 endfunction()

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "FileSystem.hpp"
+#include "ToolManagerModuleData.hpp"
 #include "ToolStore.hpp"
 
 #include <exception>
@@ -40,14 +41,16 @@ struct CurrentDirectory {
     }
 };
 
-/// Serves webfront/tools/<name>/<path> from the installed version of <name>. The lock file is read
-/// on each request, so tools installed or removed while the application runs are served at once.
+/// Serves webfront/tools/<name>/<path> from the installed version of <name>, and the tool manager's
+/// browser module (src/components/tools/wf.mjs) at toolManagerModule. The lock file is read on each
+/// request, so tools installed or removed while the application runs are served at once.
 /// Location::get() gives the project directory; the ToolManager component must use the same one.
 /// Development only: an installed tool runs in the application's origin.
 template <typename Location = CurrentDirectory>
 class BasicPackageFS {
 public:
-    static constexpr std::string_view prefix = "webfront/tools/";
+    static constexpr std::string_view prefix            = "webfront/tools/";
+    static constexpr std::string_view toolManagerModule = "/webfront/components/tools/wf.mjs";
 
     explicit BasicPackageFS(std::filesystem::path /*docRoot*/) : project(Location::get()) {}
 
@@ -59,6 +62,8 @@ public:
 
     std::optional<File> open(std::filesystem::path file) const {
         const auto filename = file.relative_path().generic_string();
+        if (filename == toolManagerModule.substr(1))
+            return File{generated::ToolManagerModuleData{}};
         if (!filename.starts_with(prefix))
             return {};
         const auto rest = std::string_view(filename).substr(prefix.size());
