@@ -51,4 +51,3 @@ Thumbs.db
 
 # Web tools installed by the wf tool manager when running the examples
 .webfront/
-webfront-tools.lock.json

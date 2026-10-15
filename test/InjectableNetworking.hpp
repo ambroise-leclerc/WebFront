@@ -217,11 +217,11 @@ public:
     static ManualSender Send(Socket&, const auto& buffers) { return InjectableSocket::write(buffers); }
 };
 
-/// Mask a browser-to-server frame: by default a binary message in one frame (FIN set, opcode 2).
-inline std::vector<std::byte> clientFrame(std::span<const std::byte> payload, std::byte finAndOpcode = std::byte{0x82}) {
+/// Mask a browser-to-server binary frame.
+inline std::vector<std::byte> clientFrame(std::span<const std::byte> payload) {
     REQUIRE(payload.size() < 126);
     constexpr std::array<std::byte, 4> mask{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}};
-    std::vector<std::byte>             frame{finAndOpcode, std::byte{static_cast<std::uint8_t>(0x80u | payload.size())}};
+    std::vector<std::byte>             frame{std::byte{0x82}, std::byte{static_cast<std::uint8_t>(0x80u | payload.size())}};
     frame.insert(frame.end(), mask.begin(), mask.end());
     for (std::size_t index = 0; index < payload.size(); ++index)
         frame.push_back(payload[index] ^ mask[index % mask.size()]);

@@ -1,0 +1,16 @@
+{
+  "name": "webfront-test-corrupt",
+  "dist-tags": {
+    "latest": "1.0.0"
+  },
+  "versions": {
+    "1.0.0": {
+      "name": "webfront-test-corrupt",
+      "version": "1.0.0",
+      "dist": {
+        "tarball": "tarballs/webfront-test-tool-1.0.0.tgz",
+        "integrity": "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+      }
+    }
+  }
+}

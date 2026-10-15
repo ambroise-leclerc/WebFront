@@ -1,8 +1,7 @@
 // Drives the embedded terminal component (served by fs::TerminalFS) against the commands that
 // webtest/JasmineTest.cpp registers through webfront::Terminal. Trailing spaces are trimmed when
 // reading the screen, so a prompt line reads 'test>'.
-import { mount } from '/webfront/components/terminal/terminal.mjs';
-import { hooks } from './browser-command-fixture.mjs';
+import { mount, runLine, tokenize } from '/webfront/components/terminal/terminal.mjs';
 
 describe('WebFront terminal component', () => {
     let mounted;
@@ -73,6 +72,52 @@ describe('WebFront terminal component', () => {
         element.remove();
     });
 
+    it('splits lines into words like C++', () => {
+        expect(tokenize(`greet 'Ada  L' "a\\"b" c\\ d`)).toEqual(['greet', 'Ada  L', 'a"b', 'c d']);
+        expect(() => tokenize('"open')).toThrowError(SyntaxError, 'Unterminated quote');
+        expect(() => tokenize('end\\')).toThrowError(SyntaxError, 'Trailing backslash');
+    });
+
+    it('runs browser commands of extensions before C++, which gets the lines they decline', async () => {
+        const runInCpp = async (line) => `cpp:${line}`;
+        const progress = [];
+        const commands = new Map([['tool', async ([action], context) => {
+            if (action !== 'local')
+                return undefined;
+            context.write('step\n');
+            return `browser:${context.line}\nsecond line`;
+        }]]);
+        const options = {commands, runInCpp, write: (text) => progress.push(text)};
+        expect(await runLine('tool local', options)).toBe('browser:tool local\r\nsecond line');
+        expect(progress).toEqual(['step\r\n']);
+        expect(await runLine('tool other', options)).toBe('cpp:tool other');
+        expect(await runLine('greet', options)).toBe('cpp:greet');
+        expect(await runLine('tool "open', options)).toBe('cpp:tool "open');
+    });
+
+    it('reports an extension module that fails to load and keeps the terminal usable', async () => {
+        const element = document.createElement('div');
+        element.style.width = '1000px';
+        element.style.height = '120px';
+        document.body.appendChild(element);
+        const bridge = {
+            ready: Promise.resolve(),
+            cppFunction: (name) => async (line) => ({
+                'webfront.terminal.prompt': '> ',
+                'webfront.terminal.banner': '',
+                'webfront.terminal.extensions': '/webfront/components/tools/missing.mjs',
+                'webfront.terminal.run': `ran ${line}`,
+            })[name],
+        };
+        const withExtension = await mount(element, { bridge });
+        await withExtension.flush();
+        const text = withExtension.terminal.buffer.active.getLine(0).translateToString(true);
+        expect(text).toContain('Terminal extension /webfront/components/tools/missing.mjs failed to load');
+        expect(withExtension.editor).not.toBeNull();
+        withExtension.terminal.dispose();
+        element.remove();
+    });
+
     // Specs run in random order, so this one does not depend on the history left by the others.
     it('completes a command name with Tab and recalls history', async () => {
         await type('gre', '\t');
@@ -83,37 +128,5 @@ describe('WebFront terminal component', () => {
         expect(mounted.editor.line).toBe('greet Bob');
         await type('\x03');
         expect(mounted.editor.line).toBe('');
-    });
-    it('continues a command in the browser module that C++ names, with its parsed arguments', async () => {
-        const text = await type('browser echo a "b c" \'\'\r');
-        expect(text).toContain('from C++\nargs: ["a","b c",""], bridge: true\ntest>');
-    });
-
-    it('starts the prompt on a new line after browser output without a line end', async () => {
-        const text = await type('browser partial\r');
-        expect(text).toContain('from C++\nno line end\ntest>');
-    });
-
-    it('shows a browser command exception as an error on its own line', async () => {
-        const text = await type('browser fail\r');
-        expect(text).toContain('from C++\nstarted\nError: browser command failed\ntest>');
-    });
-
-    it('reports a module without run()', async () => {
-        const text = await type('nomodule\r');
-        expect(text).toContain('Error: /js/module-fixture.mjs does not export run(args, io)\ntest>');
-    });
-
-    it('aborts a running browser command with Ctrl+C and keeps the prompt locked until it ends', async () => {
-        const waiting = new Promise((resolve) => { hooks.onWait = resolve; });
-        mounted.terminal.input('browser wait\r');
-        await waiting;
-        mounted.terminal.input('ignored');
-        expect(mounted.editor.line).toBe('');
-        mounted.terminal.input('\x03');
-        await mounted.editor.whenIdle();
-        await mounted.flush();
-        hooks.onWait = null;
-        expect(screen()).toContain('from C++\nwaiting\n^C\nError: Interrupted\ntest>');
     });
 });

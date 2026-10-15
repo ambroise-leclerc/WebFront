@@ -1,12 +1,12 @@
 # UI components
 
-Status: design note, 2026-10-16. Stage 1 (the terminal component, #230) and stage 2 (the `wf` tool
+Status: design note, 2026-10-15. Stage 1 (the terminal component, #230) and stage 2 (the `wf` tool
 manager, #234) are implemented.
 
 WebFront's core is a server and a bridge. A *UI component* is a reusable piece of browser UI with a
 C++ façade, packaged so that an application gets it from a header include. The first component is an
 interactive terminal: it is useful on its own (a command-line interface to a C++ application) and is
-the host for the tool manager.
+the host for the planned tool manager.
 
 ## Anatomy of a component
 
@@ -17,7 +17,7 @@ A component has four parts.
 | Assets | An embedded `fs::Provider` serving under the reserved prefix `webfront/components/<name>/`, so it never collides with a development document root or the application's own pages. Readable sources live in `src/components/<name>/`, third-party code in `third_party/`, and generated headers are checked in and kept fresh by CTest, like `WebFront.js`. | `fs::TerminalFS` (`include/system/TerminalFS.hpp`) |
 | Browser module | A native ES module exporting `mount(element, options)`. It depends only on the global `webFront` bridge and its own assets (relative imports), and waits for `webFront.ready`. | `src/components/terminal/terminal.mjs` |
 | C++ façade | A header under `include/components/` that registers its bridge functions under `webfront.<name>.<function>`. `BasicWF::cppFunction` ignores a second registration of the same name, so the prefix is what keeps components and applications apart. | `webfront::Terminal` (`include/components/Terminal.hpp`) |
-| Wire format | Only the existing bridge types: scalars, strings (at most 65535 bytes), tuples and numeric typed arrays. Lists of words cross as `"\n"`-separated strings. A component never changes `Messages.hpp` or `WebFront.js`. | `run(line) -> [output, module, args]`, `complete(line) -> candidates` |
+| Wire format | Only the existing bridge types: scalars, strings (at most 65535 bytes), tuples and numeric typed arrays. Lists of words cross as `"\n"`-separated strings. A component never changes `Messages.hpp` or `WebFront.js`. | `run(line) -> output`, `complete(line) -> candidates` |
 
 Assets are added to an application through its filesystem type. `fs::DefaultFSWith<Extra...>` is
 `fs::DefaultFS` with extra providers placed after the protected `WebFront.js` and before the
@@ -63,17 +63,6 @@ int main() {
   without the command name. The line is split shell-style: single quotes are literal, double quotes
   honor backslash escapes, and an unquoted backslash escapes the next character. `help` and `clear`
   are built in. Duplicate, empty or whitespace-containing names throw `std::invalid_argument`.
-- **Commands continuing in the browser:** any handler shape may return a
-  `webfront::BrowserCommand{module, args}` (or a `std::optional` of one) for work the browser does
-  better, such as HTTPS downloads. C++ still parses the line, so help, completion and argument
-  checks stay in one place. After showing the command's output, the page imports `module` and awaits
-  its exported `run(args, io)`, where `io.write(text)` prints (with `"\n"` line endings),
-  `io.bridge` is the `webFront` bridge and `io.signal` is an `AbortSignal` that Ctrl+C aborts. The
-  prompt stays locked until `run` settles, and a rejection prints `Error: <message>`. The module
-  must be an absolute path on the page's origin (`/…`, not `//…`) without backslashes or control
-  characters, and the arguments must not contain NUL, otherwise the command throws
-  `std::invalid_argument`. Over the bridge, `run(line)` returns the output, the module (empty for
-  none) and the arguments, each followed by a NUL character.
 - **Output and errors:** the command output is the Promise result, with `"\n"` converted to
   `"\r\n"` and ANSI escape sequences passed through. An unknown command or a malformed line prints
   a red message. An exception thrown by a command rejects the Promise, and the page prints
@@ -86,9 +75,8 @@ int main() {
 
 ### Limitations of the first version
 
-- Output of a C++ command appears when it finishes. There is no streaming and no cancellation. A long
-  command keeps the prompt locked, and Ctrl+C cannot interrupt it. A command continuing in the
-  browser can write progressively and stop on Ctrl+C, if its module honors `io.signal`.
+- Output appears when a command finishes. There is no streaming and no cancellation. A long command
+  keeps the prompt locked, and Ctrl+C cannot interrupt it.
 - Every connected browser shares the same commands. The terminal does not know which browser sent
   a line.
 - The line editor redraws within one terminal row, so a line wider than the terminal displays
@@ -96,6 +84,17 @@ int main() {
 - There is no `exit` command. With the system browser, `show()` waits for Enter on standard input,
   and stopping the server from inside a command would drop the reply to that command.
 - A multi-line paste runs its first line only.
+
+### Browser commands: terminal extensions
+
+Some commands must run in the page, such as a download over HTTPS. `Terminal::extension(url)` adds
+a browser module that the page imports before it shows the prompt (the URLs are read from
+`webfront.terminal.extensions()`). The module may export `commands`, an object mapping a command
+name to `async (args, context) => output`. The page splits each line like C++ (`tokenize` in
+`terminal.mjs`); when its first word names a browser command, the handler runs first. `context`
+holds `line`, `bridge`, `write(text)` for progress output and `runInCpp()`. A handler returning
+`undefined` lets C++ run the line, so one command can be split between the page and C++, as `wf`
+is. A module that fails to load is reported in red and the terminal stays usable.
 
 ## Core gaps found by the terminal
 
@@ -136,7 +135,9 @@ registry.
 
 ### Commands
 
-`wf` is a terminal command, plus browser-side code for the network part:
+`wf` is a terminal command, plus browser-side code for the network part (`wf.mjs`, a terminal
+extension). `wf search`, `wf install` and `wf open` run in the page; `wf list`, `wf remove` and
+`wf help` in C++:
 
 | Command | Effect |
 | --- | --- |
@@ -152,24 +153,18 @@ The download runs in the browser, which already speaks HTTPS. This keeps TLS out
 header-only C++ library.
 
 1. The browser fetches the packument from `registry.npmjs.org/<pkg>` (CORS-enabled) and resolves
-   the version: an exact version or a dist-tag, `latest` by default. Version ranges are not
-   supported. The version's manifest must have `"webfront": {"kind": "tool"}`.
-2. It downloads the tarball, then checks `dist.integrity` with `crypto.subtle`, using the strongest
-   of its SHA-512, SHA-384 or SHA-256 hashes; a package with only a SHA-1 `shasum` is refused.
-   `crypto.subtle` needs a secure context, which `localhost` is.
-3. It gunzips with `DecompressionStream("gzip")`, refusing more than 256 MiB, and reads the archive
-   with a small tar reader (ustar with its `prefix` field, pax `path` records and GNU long names;
-   links and directories are skipped). The first path component, `package/` in npm tarballs, is
-   removed. The tarball's `package.json` must name the requested package and version and be a
-   tool; `webfront.entry` defaults to `index.html` and must be in the tarball, and `webfront.title`
-   defaults to the description, then the name.
+   the version.
+2. It downloads the tarball, then checks `dist.integrity` (SHA-512) with `crypto.subtle`.
+3. It gunzips with `DecompressionStream("gzip")` and reads the archive with a small ustar reader
+   (about 60 lines).
 4. It calls `webfront.pkg.begin(pkg, version)`, then for each file
-   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)` in chunks of 256 KiB. Progress
-   is shown in the browser, so no C++ push is needed. Browsers send such large messages in several
-   WebSocket frames, which the server reassembles.
+   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)`. Files are sent in chunks to
+   stay under the bridge's frame limits; typed arrays already cross the bridge. Progress is shown in
+   the browser, so no C++ push is needed.
 5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes, and the characters Windows forbids in file names, and a chunk
    whose offset does not follow the bytes already written. Files are staged under
-   `<project>/.webfront/tools/.staging/`.
+   `<project>/.webfront/tools/.staging/`, in a directory of their own for each installation in
+   progress, so versions differing only by case never share staged files.
 6. `webfront.pkg.commit(pkg, version, integrity, entry, title)` checks that the entry page was
    written, moves the staged files to `<project>/.webfront/tools/<pkg>@<version>/`, replacing any
    installed version, and records the tool in `<project>/webfront-tools.lock.json`. A failed or
@@ -178,7 +173,34 @@ header-only C++ library.
    which it reads on each request. The prefix stays inside the reserved `webfront/` namespace, so a
    tool never collides with the application's pages.
 
-### Implementation
+### Browser side (implemented)
+
+`src/components/tools/wf.mjs` is served by `fs::ToolManagerFS` at
+`webfront/components/tools/wf.mjs` and added to the terminal by `ToolManager`. Besides the
+`commands` it exports `search`, `install`, `installed`, `open`, `readTar`, `gunzip`,
+`verifyIntegrity` and `parseSpec`, so other pages can use them.
+
+- The registry comes from `webfront.pkg.registry()`, which returns `ToolManagerOptions::registry`
+  (`https://registry.npmjs.org/` by default; a relative URL is resolved against the page). It must
+  allow CORS requests from the application's page.
+- A version is an exact version or a dist-tag (`latest` by default); ranges are not resolved.
+- Only SHA-512 integrities are accepted. `crypto.subtle` needs a secure context, which
+  `http://localhost` is.
+- The reader accepts ustar headers (with the `prefix` field), pax extended headers (`path`) and GNU
+  long names, checks each header's checksum and keeps regular files only. The first path component
+  (`package/`) is removed, as npm does.
+- The archive's `package.json` must name the requested package and version and have a `webfront`
+  field with `kind: "tool"` and an `entry` present in the archive; the title defaults to the name.
+- Files are sent in 16 KiB chunks, one call at a time, so C++ sees every chunk in order.
+- `wf open` finds the tool in `webfront.pkg.list()` and calls `window.open(url, "_blank")`; when the
+  browser blocks the window, it prints the URL instead.
+
+The browser integration test serves a fake registry: packuments and a fixture tarball in
+`webtest/registry/` (regenerated by `make_fixture.py`, which also writes a packument with a wrong
+integrity), and a search endpoint answered by the test. Tools are installed into a temporary
+directory, never into the source tree.
+
+### C++ side (implemented)
 
 ```cpp
 #include <components/ToolManager.hpp>
@@ -188,16 +210,6 @@ webfront::Terminal terminal{app};
 webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.* functions
 ```
 
-`src/Terminal.cpp` (target `WebFrontTerminal`) includes it.
-
-- `wf search`, `wf install` and `wf open` are browser commands (see the terminal component). C++
-  checks their arguments and the package name, then the page runs
-  `/webfront/components/tools/wf.mjs` (readable source `src/components/tools/wf.mjs`, embedded and
-  served by `fs::PackageFS`). `wf open` receives the URL of the installed entry page from C++ and
-  calls `window.open`; if the browser blocks the window, it prints the URL instead. Ctrl+C stops a
-  download or an installation between two chunks.
-- `ToolManagerOptions::registry` selects the registry, `https://registry.npmjs.org` by default.
-  The browser test serves a local registry built by `webtest/MakeToolRegistry.cmake`.
 - `fs::ToolStore` (`include/system/ToolStore.hpp`, with the small JSON reader of `include/utils/Json.hpp`) validates npm names (`@scope/` allowed),
   versions and paths, stages and commits installations, and reads and writes the lock file through
   a temporary file renamed over it. The lock file is read strictly, and a record whose name,
@@ -241,21 +253,9 @@ development. A later step can serve tools from a separate origin (another port) 
 callable functions. The tool manager is a development feature, like a document root, not a
 production plugin system.
 
-### Tests
+### Prerequisites
 
-- Catch2: `ToolStoreTests.cpp` (validation, staging, lock file, in temporary directories),
-  `ToolManagerTests.cpp` (bridge functions, `wf` commands and the arguments of their browser part,
-  `PackageFS`), and `WebSocketTests.cpp` for fragmented messages.
-- Jasmine (`webtest/js/wf-specs.mjs`), against the local registry: search; installation of a tool
-  with a file larger than a chunk, an empty file and long paths, then of a scoped tool at a given
-  version; reinstallation; `wf open`; a missing package or version, a wrong hash, a package that is
-  not a tool, a tarball for another package, a path escaping the tool (rejected by C++, the other
-  tools staying installed) and Ctrl+C during a download. No test needs the public network.
-
-### Limitations
-
-- Version ranges such as `^1.2` are not resolved; dependencies of a tool are not installed, so a
-  tool must ship its built files.
-- `wf search` shows the first 20 results.
-- An interrupted or failed installation leaves its staged files until the next installation of the
-  same version.
+- Core gaps 1 and 2 above, for progress and output streaming initiated by C++ (done in #233).
+- A filesystem provider writing outside the build tree, with tests using temporary directories.
+- Browser tests that use a local fake registry: tests must not need the public network (done:
+  `webtest/js/tools-specs.mjs`).

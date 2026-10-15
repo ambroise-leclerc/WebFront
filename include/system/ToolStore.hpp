@@ -18,7 +18,6 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -87,12 +86,12 @@ inline bool isPackageName(std::string_view name) {
     return isNamePart(name.substr(1, slash - 1)) && isNamePart(name.substr(slash + 1));
 }
 
-inline bool isVersion(std::string_view packageVersion) {
-    if (packageVersion.empty() || packageVersion.size() > 256)
+inline bool isVersion(std::string_view toolVersion) {
+    if (toolVersion.empty() || toolVersion.size() > 256)
         return false;
-    if (hasDoubleDot(packageVersion))
+    if (hasDoubleDot(toolVersion))
         return false;
-    return std::isdigit(static_cast<unsigned char>(packageVersion.front())) != 0 && consistsOf(packageVersion, versionCharacters);
+    return std::isdigit(static_cast<unsigned char>(toolVersion.front())) != 0 && consistsOf(toolVersion, versionCharacters);
 }
 
 inline bool hasSafeCharacters(std::string_view path) {
@@ -128,9 +127,9 @@ inline void validatePackageName(std::string_view name) {
 
 /// Accepts a semantic version: a digit followed by letters, digits, '.', '+' or '-'. Throws
 /// std::invalid_argument.
-inline void validateVersion(std::string_view packageVersion) {
-    if (!detail::isVersion(packageVersion))
-        throw std::invalid_argument("Invalid package packageVersion '" + std::string(packageVersion) + "'");
+inline void validateVersion(std::string_view toolVersion) {
+    if (!detail::isVersion(toolVersion))
+        throw std::invalid_argument("Invalid package version '" + std::string(toolVersion) + "'");
 }
 
 /// Converts a '/'-separated path received from the browser into a relative path that stays inside
@@ -174,8 +173,12 @@ inline void validateRecord(const ToolRecord& record) {
 
 /// What the stores of one project directory share within the process.
 struct ProjectState {
-    std::mutex            mutex;
-    std::set<std::string> pending;
+    std::mutex mutex;
+    /// Staging subdirectory of each installation in progress, by exact "<name>@<version>". Numbered
+    /// rather than named after the key, so versions differing only by case never share a directory
+    /// on a case-insensitive volume.
+    std::map<std::string, std::string, std::less<>> pending;
+    std::uint64_t                                   nextStaging = 0;
 };
 
 /// Returns the state of a project directory, the same for every store of that directory in the
@@ -256,8 +259,8 @@ inline std::string formatLock(const LockedTools& tools) {
 ///   <project>/.webfront/tools/<name>@<version>/   the files of each installed tool
 ///   <project>/webfront-tools.lock.json            name, version, integrity, entry and title of each
 /// An installation is staged under .webfront/tools/.staging/ and replaces the installed version
-/// only when committed; a reinstalled version is kept as <name>@<version>~backup until the lock
-/// file is written. A failed or abandoned installation leaves the installed tool intact.
+/// only when committed; a reinstalled version is kept as <name>@<version>~backup (or ~backup<n> if
+/// an earlier backup could not be deleted) until the lock file is written. A failed or abandoned installation leaves the installed tool intact.
 /// Thread-safe within a process, also between stores of the same project; several processes must
 /// not install into the same project at the same time. Errors throw std::invalid_argument (invalid input) or
 /// std::runtime_error / std::filesystem::filesystem_error (I/O).
@@ -274,8 +277,8 @@ public:
     [[nodiscard]] std::filesystem::path lockFile() const {
         return project / "webfront-tools.lock.json";
     }
-    [[nodiscard]] std::filesystem::path installDir(std::string_view name, std::string_view packageVersion) const {
-        return toolsDir() / tools::detail::fromUtf8(std::string(name) + "@" + std::string(packageVersion));
+    [[nodiscard]] std::filesystem::path installDir(std::string_view name, std::string_view toolVersion) const {
+        return toolsDir() / tools::detail::fromUtf8(std::string(name) + "@" + std::string(toolVersion));
     }
 
     /// The installed tools; an absent lock file means none. Throws std::runtime_error if the lock
@@ -292,21 +295,26 @@ public:
     }
 
     /// Starts (or restarts) the installation of a version, discarding the files already staged for it.
-    void begin(std::string_view name, std::string_view packageVersion) {
+    void begin(std::string_view name, std::string_view toolVersion) {
         tools::validatePackageName(name);
-        tools::validateVersion(packageVersion);
+        tools::validateVersion(toolVersion);
         std::scoped_lock lock{state->mutex};
-        std::filesystem::remove_all(stagingDir(name, packageVersion));
-        state->pending.insert(key(name, packageVersion));
+        // With no installation in progress, whatever is staged was abandoned by an earlier process.
+        if (state->pending.empty())
+            std::filesystem::remove_all(stagingRoot());
+        auto& staging = state->pending[key(name, toolVersion)];
+        if (!staging.empty())
+            std::filesystem::remove_all(stagingRoot() / staging);
+        staging = std::to_string(state->nextStaging++);
+        std::filesystem::remove_all(stagingRoot() / staging);
     }
 
     /// Writes a chunk of a staged file. Offset 0 creates or truncates the file; any other offset must
     /// equal the number of bytes already written, so a missing or repeated chunk is detected.
-    void write(std::string_view name, std::string_view packageVersion, const FileChunk& chunk) {
+    void write(std::string_view name, std::string_view toolVersion, const FileChunk& chunk) {
         const auto       relative = tools::safeRelativePath(chunk.path);
         std::scoped_lock lock{state->mutex};
-        requirePending(name, packageVersion);
-        const auto target = stagingDir(name, packageVersion) / relative;
+        const auto       target = stagingDir(name, toolVersion) / relative;
         if (chunk.offset != 0)
             requireWritten(target, chunk);
         std::filesystem::create_directories(target.parent_path());
@@ -321,8 +329,7 @@ public:
     void commit(const ToolRecord& record) {
         tools::detail::validateRecord(record);
         std::scoped_lock lock{state->mutex};
-        requirePending(record.name, record.version);
-        const auto staged = stagingDir(record.name, record.version);
+        const auto       staged = stagingDir(record.name, record.version);
         if (!std::filesystem::is_regular_file(staged / tools::safeRelativePath(record.entry)))
             throw std::invalid_argument("Entry page '" + record.entry + "' of " + record.name + " was not written");
 
@@ -371,12 +378,20 @@ private:
     std::filesystem::path                        project;
     std::shared_ptr<tools::detail::ProjectState> state;
 
-    static std::string key(std::string_view name, std::string_view packageVersion) {
-        return std::string(name) + "@" + std::string(packageVersion);
+    static std::string key(std::string_view name, std::string_view toolVersion) {
+        return std::string(name) + "@" + std::string(toolVersion);
     }
 
-    [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view packageVersion) const {
-        return toolsDir() / ".staging" / tools::detail::fromUtf8(key(name, packageVersion));
+    [[nodiscard]] std::filesystem::path stagingRoot() const {
+        return toolsDir() / ".staging";
+    }
+
+    // Requires the installation to be in progress; called with the mutex held.
+    [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view toolVersion) const {
+        const auto found = state->pending.find(key(name, toolVersion));
+        if (found == state->pending.end())
+            throw std::invalid_argument("No installation of " + key(name, toolVersion) + " in progress");
+        return stagingRoot() / found->second;
     }
 
     static void requireWritten(const std::filesystem::path& target, const FileChunk& chunk) {
@@ -390,12 +405,8 @@ private:
     // Moves the staged files into place and writes the lock file. A directory already installed for
     // this version is kept aside until the lock file is written, and restored if anything fails.
     void installStaged(const ToolRecord& record, const tools::LockedTools& locked) const {
-        const auto target = installDir(record.name, record.version);
-        // Next to the target, so renaming does not need write access to the directory itself; '~'
-        // cannot appear in a version, so no installed version has this name.
-        auto backup = target;
-        backup     += "~backup";
-        std::filesystem::remove_all(backup);
+        const auto target    = installDir(record.name, record.version);
+        const auto backup    = unusedBackup(target);
         const bool replacing = std::filesystem::exists(target);
         if (replacing) {
             std::filesystem::rename(target, backup);
@@ -409,6 +420,20 @@ private:
             throw;
         }
         removeLeftover(backup);
+    }
+
+    // Next to the target, so renaming does not need write access to the directory itself; '~' cannot
+    // appear in a version, so no installed version has this name. A backup an earlier operation left
+    // behind (see removeLeftover) is deleted if possible, otherwise skipped, so it never blocks a
+    // later reinstallation.
+    static std::filesystem::path unusedBackup(const std::filesystem::path& target) {
+        for (std::size_t index = 1;; ++index) {
+            auto backup = target;
+            backup     += index == 1 ? std::string("~backup") : "~backup" + std::to_string(index);
+            removeLeftover(backup);
+            if (!std::filesystem::exists(std::filesystem::symlink_status(backup)))
+                return backup;
+        }
     }
 
     // Once the lock file is written the operation has succeeded: a directory that cannot be deleted
@@ -431,11 +456,6 @@ private:
         std::filesystem::remove_all(target, ignored);
         if (replacing)
             std::filesystem::rename(backup, target, ignored);
-    }
-
-    void requirePending(std::string_view name, std::string_view packageVersion) const {
-        if (!state->pending.contains(key(name, packageVersion)))
-            throw std::invalid_argument("No installation of " + key(name, packageVersion) + " in progress");
     }
 
     // Written next to the lock file, then renamed over it, so a reader never sees a partial file.

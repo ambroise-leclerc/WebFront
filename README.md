@@ -88,13 +88,13 @@ terminal.command("greet", "Greet someone", [](webfront::CommandArgs args) {
 app.show(terminal.page);
 ```
 
-A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. A command can instead return a `webfront::BrowserCommand` to continue in a browser module, for work such as HTTPS downloads.
-
-The example also adds `webfront::ToolManager` (`webfront::ToolsApp` serves its files): its `wf` command searches npm for packages with the `webfront-tool` keyword, installs them into `.webfront/tools/` with their integrity checked, records them in `webfront-tools.lock.json`, and opens them in a new tab (`wf search`, `wf install <package>[@<version>]`, `wf list`, `wf open`, `wf remove`). The browser downloads from the registry, so `wf search` and `wf install` need network access. It is a development feature: an installed tool runs in the application's origin and can call every registered C++ function, like a package installed with `npm install`. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the tool manager.
+A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the `wf` tool manager.
 
 ```bash
 ./src/WebFrontTerminal
 ```
+
+`WebFrontTools` (`src/Tools.cpp`) adds the `wf` tool manager to the terminal: `wf search`, `wf install <package>[@version]`, `wf list`, `wf open` and `wf remove` manage web tools published on npm with the `webfront-tool` keyword. The page downloads them from registry.npmjs.org, checks their SHA-512 integrity and stores them in the working directory (`.webfront/tools/`, recorded in `webfront-tools.lock.json`). An installed tool can call every registered C++ function: install only tools you trust, during development.
 
 ## Embedded window with CEF (opt-in)
 
