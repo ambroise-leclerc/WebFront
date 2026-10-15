@@ -20,12 +20,14 @@ function(_webfront_add_embedded_text_asset source header struct test_name)
                 -DINPUT=${source}
                 -DCHECK=${header}
                 -DSTRUCT=${struct}
+                -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
                 -P ${_WEBFRONT_ASSETS_DIR}/EmbedTextAsset.cmake
         )
     endif()
 endfunction()
 
 function(webfront_add_embedded_assets)
+    find_package(Git QUIET)
     set(root "${_WEBFRONT_ASSETS_DIR}/..")
     cmake_path(NORMAL_PATH root)
     add_custom_target(webfront-embedded-assets COMMENT "Regenerating embedded browser bridge and fallback-page assets")
