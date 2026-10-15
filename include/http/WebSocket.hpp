@@ -16,6 +16,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <span>
 #include <system_error>
@@ -182,6 +183,7 @@ private:
 class FrameDecoder {
 public:
     Header::Opcode frameType;
+    bool finalFrame = true;  ///< FIN bit: false for every fragment of a message but its last
 
 public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
@@ -202,6 +204,7 @@ public:
             headerSize = reinterpret_cast<const Header*>(input)->headerSize();
             mask = reinterpret_cast<const Header*>(input)->maskingKey();
             frameType = reinterpret_cast<const Header*>(input)->opcode();
+            finalFrame = reinterpret_cast<const Header*>(input)->FIN();
             payloadBuffer.reserve(payloadSize);
         };
         auto bufferizeHeaderData = [&](std::span<const std::byte> input) -> size_t {
@@ -323,6 +326,10 @@ private:
     std::deque<std::shared_ptr<Frame<Net>>> writeQueue;  // the first frame is the one being written
     networking::ex::inplace_stop_source stopSource;
     std::atomic_bool started;
+    // A message sent in several frames (RFC 6455, 5.4), as browsers do with large messages: its
+    // type and the payloads received so far.
+    std::optional<Header::Opcode> fragmentedType;
+    std::vector<std::byte> fragments;
 
 private:
     explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
@@ -367,12 +374,22 @@ private:
         const auto data = decoder.payload();
         switch (decoder.frameType) {
             case Header::Opcode::text:
-                if (textHandler)
-                    textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
-                break;
             case Header::Opcode::binary:
-                if (binaryHandler)
-                    binaryHandler(data);
+                if (fragmentedType)
+                    return closeOnError(std::make_error_code(std::errc::protocol_error));  // the previous message is unfinished
+                if (decoder.finalFrame)
+                    return dispatchMessage(decoder.frameType, data);
+                fragmentedType = decoder.frameType;
+                fragments.assign(data.begin(), data.end());
+                break;
+            case Header::Opcode::continuation:
+                if (!fragmentedType)
+                    return closeOnError(std::make_error_code(std::errc::protocol_error));  // no message to continue
+                fragments.insert(fragments.end(), data.begin(), data.end());
+                if (decoder.finalFrame) {
+                    const auto message = std::exchange(fragments, {});
+                    dispatchMessage(*std::exchange(fragmentedType, std::nullopt), message);
+                }
                 break;
             case Header::Opcode::connectionClose:
                 if (closeHandler)
@@ -382,6 +399,15 @@ private:
             default:
                 log::debug("Unhandled frameType");
         }
+    }
+
+    void dispatchMessage(Header::Opcode type, std::span<const std::byte> data) {
+        if (type == Header::Opcode::text) {
+            if (textHandler)
+                textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
+        }
+        else if (binaryHandler)
+            binaryHandler(data);
     }
 
     void closeOnError(std::error_code ec) {
