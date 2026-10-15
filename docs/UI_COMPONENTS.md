@@ -18,7 +18,7 @@ A component has four parts.
 | Assets | An embedded `fs::Provider` serving under the reserved prefix `webfront/components/<name>/`, so it never collides with a development document root or the application's own pages. Readable sources live in `src/components/<name>/`, third-party code in `third_party/`, and generated headers are checked in and kept fresh by CTest, like `WebFront.js`. | `fs::TerminalFS` (`include/system/TerminalFS.hpp`) |
 | Browser module | A native ES module exporting `mount(element, options)`. It depends only on the global `webFront` bridge and its own assets (relative imports), and waits for `webFront.ready`. | `src/components/terminal/terminal.mjs` |
 | C++ façade | A header under `include/components/` that registers its bridge functions under `webfront.<name>.<function>`. `BasicWF::cppFunction` ignores a second registration of the same name, so the prefix is what keeps components and applications apart. | `webfront::Terminal` (`include/components/Terminal.hpp`) |
-| Wire format | Only the existing bridge types: scalars, strings (at most 65535 bytes), tuples and numeric typed arrays. Lists of words cross as `"\n"`-separated strings. A component never changes `Messages.hpp` or `WebFront.js`. | `run(line) -> output`, `complete(line) -> candidates` |
+| Wire format | Only the existing bridge types: scalars, strings (at most 65535 bytes), tuples and numeric typed arrays. Lists of words cross as `"\n"`-separated strings. A component never changes `Messages.hpp` or `WebFront.js`. | `run(line) -> [output, module, args]`, `complete(line) -> candidates` |
 
 Assets are added to an application through its filesystem type. `fs::DefaultFSWith<Extra...>` is
 `fs::DefaultFS` with extra providers placed after the protected `WebFront.js` and before the
@@ -64,6 +64,17 @@ int main() {
   without the command name. The line is split shell-style: single quotes are literal, double quotes
   honor backslash escapes, and an unquoted backslash escapes the next character. `help` and `clear`
   are built in. Duplicate, empty or whitespace-containing names throw `std::invalid_argument`.
+- **Commands continuing in the browser:** any handler shape may return a
+  `webfront::BrowserCommand{module, args}` (or a `std::optional` of one) for work the browser does
+  better, such as HTTPS downloads. C++ still parses the line, so help, completion and argument
+  checks stay in one place. After showing the command's output, the page imports `module` and awaits
+  its exported `run(args, io)`, where `io.write(text)` prints (with `"\n"` line endings),
+  `io.bridge` is the `webFront` bridge and `io.signal` is an `AbortSignal` that Ctrl+C aborts. The
+  prompt stays locked until `run` settles, and a rejection prints `Error: <message>`. The module
+  must be an absolute path on the page's origin (`/…`, not `//…`) without backslashes or control
+  characters, and the arguments must not contain NUL, otherwise the command throws
+  `std::invalid_argument`. Over the bridge, `run(line)` returns the output, the module (empty for
+  none) and the arguments, each followed by a NUL character.
 - **Output and errors:** the command output is the Promise result, with `"\n"` converted to
   `"\r\n"` and ANSI escape sequences passed through. An unknown command or a malformed line prints
   a red message. An exception thrown by a command rejects the Promise, and the page prints
@@ -76,8 +87,9 @@ int main() {
 
 ### Limitations of the first version
 
-- Output appears when a command finishes. There is no streaming and no cancellation. A long command
-  keeps the prompt locked, and Ctrl+C cannot interrupt it.
+- Output of a C++ command appears when it finishes. There is no streaming and no cancellation. A long
+  command keeps the prompt locked, and Ctrl+C cannot interrupt it. A command continuing in the
+  browser can write progressively and stop on Ctrl+C, if its module honors `io.signal`.
 - Every connected browser shares the same commands. The terminal does not know which browser sent
   a line.
 - The line editor redraws within one terminal row, so a line wider than the terminal displays

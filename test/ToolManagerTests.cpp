@@ -18,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace std;
@@ -51,7 +52,7 @@ struct RecordingApp {
     }
 
     string run(const string& line) {
-        return call<string, string>("webfront.terminal.run", line);
+        return get<0>(call<tuple<string, string, string>, string>("webfront.terminal.run", line));
     }
 };
 

@@ -161,6 +161,13 @@ private:
         terminal.command("fail", "Throw from C++", [](CommandArgs) -> string {
             throw runtime_error("terminal command failed");
         });
+        terminal.command("browser", "Continue in webtest/js/browser-command-fixture.mjs", [](CommandArgs args, ostream& output) {
+            output << "from C++";
+            return BrowserCommand{"/js/browser-command-fixture.mjs", {args.begin(), args.end()}};
+        });
+        terminal.command("nomodule", "Continue in a module without run()", [](CommandArgs) {
+            return BrowserCommand{"/js/module-fixture.mjs", {}};
+        });
     }
 
     /// The JS side echoes back the very arrays browserReady() sent it, so the cpp* members double as the

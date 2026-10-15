@@ -43,14 +43,21 @@ const keyActions = new Map([
     ["\x15", (editor) => editor.killBeforeCursor()],
 ]);
 
-/// Line editor driven by the terminal's input data. `write(text)` displays text; `run(line)` and
-/// `complete(line)` return Promises of the C++ output and of "\n"-separated completion candidates.
+/// Line editor driven by the terminal's input data. `write(text)` displays text; `run(line)` returns
+/// a Promise of [output, browser module, NUL-terminated arguments] and `complete(line)` one of
+/// "\n"-separated completion candidates. A command continuing in the browser runs the exported
+/// `run(args, io)` of the module that `load(module)` imports, with `io = {write, bridge, signal}`;
+/// Ctrl+C aborts `signal`.
 export class LineEditor {
-    constructor({write, run, complete, prompt}) {
+    constructor({write, run, complete, prompt, bridge = null, load = (module) => import(module)}) {
         this.write = write;
         this.run = run;
         this.complete = complete;
         this.prompt = prompt;
+        this.bridge = bridge;
+        this.load = load;
+        this.abort = null;
+        this.lineStarted = false;
         this.chars = [];
         this.cursor = 0;
         this.history = [];
@@ -73,8 +80,13 @@ export class LineEditor {
     }
 
     handle(data) {
-        if (this.busy)
+        if (this.busy) {
+            if (data === "\x03" && this.abort && !this.abort.signal.aborted) {
+                this.show("^C");
+                this.abort.abort(new Error("Interrupted"));
+            }
             return;
+        }
         const action = keyActions.get(data);
         if (action)
             return action(this);
@@ -164,16 +176,50 @@ export class LineEditor {
     }
 
     async execute(line) {
+        // The prompt starts on a new line, unless the output already ends one or leaves the cursor
+        // at home (such as the 'clear' command).
+        this.lineStarted = false;
         try {
-            const output = await this.run(line);
-            // The prompt starts on a new line, unless the output already ends one or leaves the
-            // cursor at home (such as the 'clear' command).
-            if (output)
-                this.write(output.endsWith("\n") || output.endsWith("\x1b[H") ? output : output + "\r\n");
+            const [output, module, args] = await this.run(line);
+            this.show(output);
+            if (module)
+                await this.continueInBrowser(module, args.split("\0").slice(0, -1));
         } catch (error) {
-            this.write(ansi.red(`Error: ${error?.message ?? error}`) + "\r\n");
+            if (this.lineStarted)
+                this.write("\r\n");
+            this.show(ansi.red(`Error: ${error?.message ?? error}`));
         }
+        if (this.lineStarted)
+            this.write("\r\n");
         this.showPrompt();
+    }
+
+    show(text) {
+        if (!text)
+            return;
+        this.write(text);
+        this.lineStarted = !text.endsWith("\n") && !text.endsWith("\x1b[H");
+    }
+
+    // Runs the browser part of a command; its output uses "\n" line endings, like C++ output.
+    async continueInBrowser(module, args) {
+        if (this.lineStarted)
+            this.write("\r\n");
+        this.lineStarted = false;
+        this.abort = new AbortController();
+        const io = {
+            write: (text) => this.show(String(text).replace(/\r?\n/g, "\r\n")),
+            bridge: this.bridge,
+            signal: this.abort.signal,
+        };
+        try {
+            const {run} = await this.load(module);
+            if (typeof run !== "function")
+                throw new Error(`${module} does not export run(args, io)`);
+            await run(args, io);
+        } finally {
+            this.abort = null;
+        }
     }
 
     async completeLine() {
@@ -235,7 +281,7 @@ export async function mount(element, {bridge = globalThis.webFront, terminalOpti
         write(ansi.red(`Terminal unavailable: ${error?.message ?? error}`) + "\r\n");
         return {terminal, editor: null, flush};
     }
-    const editor = new LineEditor({write, run: call("run"), complete: call("complete"), prompt});
+    const editor = new LineEditor({write, run: call("run"), complete: call("complete"), prompt, bridge});
     if (banner)
         write(banner.replaceAll("\n", "\r\n") + "\r\n");
     editor.showPrompt();
