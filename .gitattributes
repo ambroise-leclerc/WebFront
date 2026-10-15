@@ -64,6 +64,8 @@ include/system/TerminalModuleData.hpp       text eol=lf
 include/system/XtermModuleData.hpp          text eol=lf
 include/system/XtermCssData.hpp             text eol=lf
 include/system/XtermFitAddonData.hpp        text eol=lf
+src/components/tools/*                      text eol=lf
+include/system/ToolManagerModuleData.hpp    text eol=lf
 
 # Serialisation
 *.json     text
