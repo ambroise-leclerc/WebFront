@@ -88,11 +88,13 @@ terminal.command("greet", "Greet someone", [](webfront::CommandArgs args) {
 app.show(terminal.page);
 ```
 
-A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the planned `wf` tool manager.
+A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the `wf` tool manager.
 
 ```bash
 ./src/WebFrontTerminal
 ```
+
+`WebFrontTools` (`src/Tools.cpp`) adds the `wf` tool manager to the terminal: `wf search`, `wf install <package>[@version]`, `wf list`, `wf open` and `wf remove` manage web tools published on npm with the `webfront-tool` keyword. The page downloads them from registry.npmjs.org, checks their SHA-512 integrity and stores them in the working directory (`.webfront/tools/`, recorded in `webfront-tools.lock.json`). An installed tool can call every registered C++ function: install only tools you trust, during development.
 
 ## Embedded window with CEF (opt-in)
 

@@ -1,5 +1,6 @@
 /// @brief WebFront terminal component: an xterm.js terminal whose line editor sends each validated
-/// line to the C++ commands registered through webfront::Terminal (include/components/Terminal.hpp).
+/// line to the C++ commands registered through webfront::Terminal (include/components/Terminal.hpp),
+/// unless a browser command of an extension module (Terminal::extension) handles it first.
 
 import {Terminal} from "./xterm.mjs";
 import {FitAddon} from "./addon-fit.mjs";
@@ -19,6 +20,88 @@ function commonPrefix(words) {
             ++length;
         return prefix.slice(0, length);
     });
+}
+
+/// Splits a line into words like terminal::tokenize in C++: whitespace separates words, single quotes
+/// keep their content verbatim, double quotes keep it but honor backslash escapes, and an unquoted
+/// backslash escapes the next character. Throws a SyntaxError on an unterminated quote or a trailing
+/// backslash.
+export function tokenize(line) {
+    const words = [];
+    let word = "";
+    let inWord = false;
+    let index = 0;
+    const next = (problem) => {
+        if (index === line.length)
+            throw new SyntaxError(problem);
+        return line[index++];
+    };
+    const endWord = () => {
+        if (inWord)
+            words.push(word);
+        word = "";
+        inWord = false;
+    };
+    while (index < line.length) {
+        const char = line[index++];
+        if (char === " " || char === "\t") {
+            endWord();
+            continue;
+        }
+        inWord = true;
+        if (char === "\\") {
+            word += next("Trailing backslash");
+        } else if (char === "'" || char === '"') {
+            // A backslash ending the line stays literal; the missing closing quote is reported next.
+            for (let quoted = next("Unterminated quote"); quoted !== char; quoted = next("Unterminated quote"))
+                word += char === '"' && quoted === "\\" ? (index < line.length ? line[index++] : "\\") : quoted;
+        } else {
+            word += char;
+        }
+    }
+    endWord();
+    return words;
+}
+
+// Browser command output uses "\n" line endings, converted like C++ output.
+const toTerminalText = (text) => text.replace(/(?<!\r)\n/g, "\r\n");
+
+/// Runs a line: a browser command of `commands` (a Map from command name to handler) when one is
+/// registered for its first word and does not return undefined, else `runInCpp(line)`. A line that
+/// cannot be split goes to C++, which reports the error.
+export async function runLine(line, {commands, runInCpp, write, bridge}) {
+    let words;
+    try {
+        words = tokenize(line);
+    } catch (error) {
+        return runInCpp(line);
+    }
+    const handler = words.length > 0 ? commands.get(words[0]) : undefined;
+    if (!handler)
+        return runInCpp(line);
+    const output = await handler(words.slice(1), {
+        line,
+        bridge,
+        write: (text) => write(toTerminalText(String(text))),
+        runInCpp: () => runInCpp(line),
+    });
+    return output === undefined ? runInCpp(line) : toTerminalText(String(output));
+}
+
+/// Imports the extension modules listed by C++ ("\n"-separated URLs) and collects their browser
+/// commands. A module that fails to load is reported and skipped.
+async function loadExtensions(urls, write) {
+    const commands = new Map();
+    for (const url of urls.split("\n").filter((entry) => entry !== "")) {
+        try {
+            const module = await import(url);
+            for (const [name, handler] of Object.entries(module.commands ?? {}))
+                commands.set(name, handler);
+        } catch (error) {
+            write(ansi.red(`Terminal extension ${url} failed to load: ${error?.message ?? error}`) + "\r\n");
+        }
+    }
+    return commands;
 }
 
 // Editing keys, as xterm.js reports them in onData, mapped to LineEditor actions.
@@ -227,15 +310,18 @@ export async function mount(element, {bridge = globalThis.webFront, terminalOpti
     }
 
     const call = (name) => bridge.cppFunction(`webfront.terminal.${name}`);
-    let prompt, banner;
+    let prompt, banner, extensions;
     try {
-        [prompt, banner] = await Promise.all([call("prompt")(), call("banner")()]);
+        [prompt, banner, extensions] = await Promise.all([call("prompt")(), call("banner")(), call("extensions")()]);
     } catch (error) {
         // For example a page served by an application without webfront::Terminal.
         write(ansi.red(`Terminal unavailable: ${error?.message ?? error}`) + "\r\n");
         return {terminal, editor: null, flush};
     }
-    const editor = new LineEditor({write, run: call("run"), complete: call("complete"), prompt});
+    const commands = await loadExtensions(extensions, write);
+    const runInCpp = call("run");
+    const run = (line) => runLine(line, {commands, runInCpp, write, bridge});
+    const editor = new LineEditor({write, run, complete: call("complete"), prompt});
     if (banner)
         write(banner.replaceAll("\n", "\r\n") + "\r\n");
     editor.showPrompt();
