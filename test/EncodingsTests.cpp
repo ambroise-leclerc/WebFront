@@ -7,12 +7,34 @@
 using namespace webfront;
 using namespace std;
 
-SCENARIO("URL encoding") { REQUIRE(uri::encode("mango & pineapple") == "mango%20%26%20pineapple"); }
+SCENARIO("URL encoding") {
+    REQUIRE(uri::encode("mango & pineapple") == "mango%20%26%20pineapple");
+    REQUIRE(uri::encode("AZaz09-_.~") == "AZaz09-_.~");
+
+    GIVEN("non-ASCII bytes") {
+        THEN("each byte is percent-encoded") {
+            REQUIRE(uri::encode("\xC3\xA9") == "%C3%A9");  // é in UTF-8
+            REQUIRE(uri::encode("caf\xC3\xA9 \xE2\x82\xAC") == "caf%C3%A9%20%E2%82%AC");
+            REQUIRE(uri::encode(string_view("\x00\x7F\x80\xFF", 4)) == "%00%7F%80%FF");
+        }
+    }
+
+    GIVEN("every byte value") {
+        string all;
+        for (int byte = 0; byte < 256; ++byte)
+            all += static_cast<char>(byte);
+        THEN("decoding the encoded string restores it") {
+            REQUIRE(uri::decode(uri::encode(all)) == all);
+        }
+    }
+}
 
 SCENARIO("URI decoding") {
     REQUIRE(uri::decode("http://path%25name%2F%25%23%21%25") == "http://path%name/%#!%");
     REQUIRE(uri::decode("http://ABC12345zef") == "http://ABC12345zef");
     REQUIRE(uri::decode("%20%RQabcABV") == " %RQabcABV");
+    REQUIRE(uri::decode("%c3%a9") == "\xC3\xA9");
+    REQUIRE(uri::decode("%\xC3\xA9%E9") == "%\xC3\xA9\xE9");  // Non-ASCII bytes after '%' are kept as they are
 }
 
 SCENARIO("URI parsing") {
