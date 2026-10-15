@@ -151,7 +151,8 @@ header-only C++ library.
    the browser, so no C++ push is needed.
 5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes, and the characters Windows forbids in file names, and a chunk
    whose offset does not follow the bytes already written. Files are staged under
-   `<project>/.webfront/tools/.staging/`.
+   `<project>/.webfront/tools/.staging/`, in a directory of their own for each installation in
+   progress, so versions differing only by case never share staged files.
 6. `webfront.pkg.commit(pkg, version, integrity, entry, title)` checks that the entry page was
    written, moves the staged files to `<project>/.webfront/tools/<pkg>@<version>/`, replacing any
    installed version, and records the tool in `<project>/webfront-tools.lock.json`. A failed or
