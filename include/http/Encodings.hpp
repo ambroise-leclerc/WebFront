@@ -21,13 +21,14 @@ namespace webfront {
 namespace uri {
 
 // Percent-encodes every byte except the RFC 3986 unreserved characters. Bytes are handled as
-// unsigned, so a non-ASCII byte (e.g. of UTF-8 text) is classified and escaped like any other.
+// unsigned, so a non-ASCII byte (e.g. of UTF-8 text) is escaped like any other.
 [[nodiscard]] inline std::string encode(std::string_view uri) {
+    static constexpr auto unreserved = std::string_view("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~");
+    static constexpr auto digits     = std::string_view("0123456789ABCDEF");
     std::string           encoded;
-    static constexpr auto digits = std::string_view("0123456789ABCDEF");
     for (const auto c : uri) {
         const auto byte = static_cast<unsigned char>(c);
-        if ((byte < 0x80 && std::isalnum(byte)) || c == '-' || c == '_' || c == '.' || c == '~')
+        if (unreserved.contains(c))
             encoded += c;
         else {
             encoded += '%';
