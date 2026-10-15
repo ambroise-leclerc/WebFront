@@ -1,4 +1,5 @@
 #include <components/Terminal.hpp>
+#include <components/ToolManager.hpp>
 #include <WebFront.hpp>
 
 #include <exception>
@@ -8,8 +9,11 @@
 
 // LCOV_EXCL_START - interactive example; the terminal shell and its page are covered by the tests.
 int main() {
-    webfront::TerminalApp app;
-    webfront::Terminal    terminal{app, {.prompt = "\x1b[32mdemo>\x1b[0m "}};
+    webfront::ToolsApp app;
+    webfront::Terminal terminal{app, {.prompt = "\x1b[32mdemo>\x1b[0m "}};
+    // 'wf' installs web tools from npm into ./.webfront/tools during development. An installed tool
+    // runs in the application's origin and can call its C++ functions: install only trusted tools.
+    webfront::ToolManager tools{app, terminal};
 
     terminal.command("greet", "Greet someone: greet [name]", [](webfront::CommandArgs args) {
         return "Hello, " + (args.empty() ? std::string{"world"} : args[0]) + "!";

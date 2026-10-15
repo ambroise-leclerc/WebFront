@@ -1,13 +1,12 @@
 # UI components
 
-Status: design note, 2026-10-14. Stage 1 (the terminal component, #230) is implemented. Stage 2
-(the `wf` tool manager, #234) is designed here; its C++ side (storage, lock file, serving, `wf list`
-and `wf remove`) is implemented, its browser side (`wf search`, `wf install`, `wf open`) is not yet.
+Status: design note, 2026-10-16. Stage 1 (the terminal component, #230) and stage 2 (the `wf` tool
+manager, #234) are implemented.
 
 WebFront's core is a server and a bridge. A *UI component* is a reusable piece of browser UI with a
 C++ façade, packaged so that an application gets it from a header include. The first component is an
 interactive terminal: it is useful on its own (a command-line interface to a C++ application) and is
-the host for the planned tool manager.
+the host for the tool manager.
 
 ## Anatomy of a component
 
@@ -153,14 +152,21 @@ The download runs in the browser, which already speaks HTTPS. This keeps TLS out
 header-only C++ library.
 
 1. The browser fetches the packument from `registry.npmjs.org/<pkg>` (CORS-enabled) and resolves
-   the version.
-2. It downloads the tarball, then checks `dist.integrity` (SHA-512) with `crypto.subtle`.
-3. It gunzips with `DecompressionStream("gzip")` and reads the archive with a small ustar reader
-   (about 60 lines).
+   the version: an exact version or a dist-tag, `latest` by default. Version ranges are not
+   supported. The version's manifest must have `"webfront": {"kind": "tool"}`.
+2. It downloads the tarball, then checks `dist.integrity` with `crypto.subtle`, using the strongest
+   of its SHA-512, SHA-384 or SHA-256 hashes; a package with only a SHA-1 `shasum` is refused.
+   `crypto.subtle` needs a secure context, which `localhost` is.
+3. It gunzips with `DecompressionStream("gzip")`, refusing more than 256 MiB, and reads the archive
+   with a small tar reader (ustar with its `prefix` field, pax `path` records and GNU long names;
+   links and directories are skipped). The first path component, `package/` in npm tarballs, is
+   removed. The tarball's `package.json` must name the requested package and version and be a
+   tool; `webfront.entry` defaults to `index.html` and must be in the tarball, and `webfront.title`
+   defaults to the description, then the name.
 4. It calls `webfront.pkg.begin(pkg, version)`, then for each file
-   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)`. Files are sent in chunks to
-   stay under the bridge's frame limits; typed arrays already cross the bridge. Progress is shown in
-   the browser, so no C++ push is needed.
+   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)` in chunks of 256 KiB. Progress
+   is shown in the browser, so no C++ push is needed. Browsers send such large messages in several
+   WebSocket frames, which the server reassembles.
 5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes, and the characters Windows forbids in file names, and a chunk
    whose offset does not follow the bytes already written. Files are staged under
    `<project>/.webfront/tools/.staging/`.
@@ -172,7 +178,7 @@ header-only C++ library.
    which it reads on each request. The prefix stays inside the reserved `webfront/` namespace, so a
    tool never collides with the application's pages.
 
-### C++ side (implemented)
+### Implementation
 
 ```cpp
 #include <components/ToolManager.hpp>
@@ -182,6 +188,16 @@ webfront::Terminal terminal{app};
 webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.* functions
 ```
 
+`src/Terminal.cpp` (target `WebFrontTerminal`) includes it.
+
+- `wf search`, `wf install` and `wf open` are browser commands (see the terminal component). C++
+  checks their arguments and the package name, then the page runs
+  `/webfront/components/tools/wf.mjs` (readable source `src/components/tools/wf.mjs`, embedded and
+  served by `fs::PackageFS`). `wf open` receives the URL of the installed entry page from C++ and
+  calls `window.open`; if the browser blocks the window, it prints the URL instead. Ctrl+C stops a
+  download or an installation between two chunks.
+- `ToolManagerOptions::registry` selects the registry, `https://registry.npmjs.org` by default.
+  The browser test serves a local registry built by `webtest/MakeToolRegistry.cmake`.
 - `fs::ToolStore` (`include/system/ToolStore.hpp`, with the small JSON reader of `include/utils/Json.hpp`) validates npm names (`@scope/` allowed),
   versions and paths, stages and commits installations, and reads and writes the lock file through
   a temporary file renamed over it. The lock file is read strictly, and a record whose name,
@@ -225,8 +241,21 @@ development. A later step can serve tools from a separate origin (another port) 
 callable functions. The tool manager is a development feature, like a document root, not a
 production plugin system.
 
-### Prerequisites
+### Tests
 
-- Core gaps 1 and 2 above, for progress and output streaming initiated by C++ (done in #233).
-- A filesystem provider writing outside the build tree, with tests using temporary directories.
-- Browser tests that use a local fake registry: tests must not need the public network.
+- Catch2: `ToolStoreTests.cpp` (validation, staging, lock file, in temporary directories),
+  `ToolManagerTests.cpp` (bridge functions, `wf` commands and the arguments of their browser part,
+  `PackageFS`), and `WebSocketTests.cpp` for fragmented messages.
+- Jasmine (`webtest/js/wf-specs.mjs`), against the local registry: search; installation of a tool
+  with a file larger than a chunk, an empty file and long paths, then of a scoped tool at a given
+  version; reinstallation; `wf open`; a missing package or version, a wrong hash, a package that is
+  not a tool, a tarball for another package, a path escaping the tool (rejected by C++, the other
+  tools staying installed) and Ctrl+C during a download. No test needs the public network.
+
+### Limitations
+
+- Version ranges such as `^1.2` are not resolved; dependencies of a tool are not installed, so a
+  tool must ship its built files.
+- `wf search` shows the first 20 results.
+- An interrupted or failed installation leaves its staged files until the next installation of the
+  same version.
