@@ -1,8 +1,10 @@
 #include <components/Terminal.hpp>
+#include <components/ToolManager.hpp>
 #include <system/FileSystem.hpp>
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
+#include <system/PackageFS.hpp>
 #include <system/TerminalFS.hpp>
 #include <tooling/Logger.hpp>
 #include <tooling/PathUtils.hpp>
@@ -10,11 +12,14 @@
 
 #include "RejectedWebSocketServer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <limits>
@@ -45,7 +50,36 @@ struct TestState {
     atomic<bool> passed{false};
 };
 
-using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS, fs::TerminalFS>;
+/// Project directory of the tools that webtest/js/wf-specs.mjs installs.
+struct WebtestProject {
+    static filesystem::path get() {
+        return WEBTEST_TOOL_PROJECT_DIR;
+    }
+};
+
+/// The local npm registry built by webtest/MakeToolRegistry.cmake, served under /registry/ so the
+/// wf specs need no public network. Packuments and the search result are JSON files, and the query
+/// of a search URL is ignored.
+struct RegistryFS {
+    explicit RegistryFS(const filesystem::path& /*docRoot*/) {}
+
+    static optional<fs::File> open(const filesystem::path& file) {
+        constexpr string_view prefix = "registry/";
+        auto                  name   = file.relative_path().generic_string();
+        if (!name.starts_with(prefix))
+            return {};
+        name.erase(min(name.find('?'), name.size()));
+        name.erase(0, prefix.size());
+        if (!name.ends_with(".tgz"))
+            name += ".json";
+        const auto path = filesystem::path(WEBTEST_REGISTRY_DIR) / name;
+        if (!filesystem::is_regular_file(path))
+            return {};
+        return fs::File{ifstream(path, ios::binary)};
+    }
+};
+
+using TestFS = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::JasmineFS, fs::TerminalFS, fs::BasicPackageFS<WebtestProject>, RegistryFS>;
 // The browser integration test needs an embedded, auto-closing window under Xvfb, so it selects
 // CEFFrontend explicitly rather than relying on webfront::WebFront's default (system) frontend.
 using TestWF = BasicWFWithFrontend<NetProvider, TestFS, frontend::CEFFrontend>;
@@ -168,6 +202,7 @@ private:
         terminal.command("nomodule", "Continue in a module without run()", [](CommandArgs) {
             return BrowserCommand{"/js/module-fixture.mjs", {}};
         });
+        ToolManager<TestWF, WebtestProject> tools{webFront, terminal, {.registry = "/registry"}};
     }
 
     /// The JS side echoes back the very arrays browserReady() sent it, so the cpp* members double as the
@@ -255,6 +290,8 @@ private:
 };
 
 int runBrowserIntegration() {
+    filesystem::remove_all(WebtestProject::get());
+    filesystem::create_directories(WebtestProject::get());
     const auto             docRoot = tooling::findTestRoot("SpecRunner.html");
     BrowserIntegrationTest test(docRoot);
     return test.run();
