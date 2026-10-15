@@ -59,7 +59,7 @@ struct WebtestProject {
 
 /// The local npm registry built by webtest/MakeToolRegistry.cmake, served under /registry/ so the
 /// wf specs need no public network. Packuments and the search result are JSON files, and the query
-/// of a search URL is ignored.
+/// of a search URL is ignored here, since the HTTP server keeps it in the path (#245).
 struct RegistryFS {
     explicit RegistryFS(const filesystem::path& /*docRoot*/) {}
 
