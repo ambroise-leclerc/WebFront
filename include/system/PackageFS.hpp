@@ -72,22 +72,27 @@ public:
         if (nameEnd == std::string_view::npos)
             return {};
         try {
-            const ToolStore store{project};
-            const auto      record = store.find(rest.substr(0, nameEnd));
-            if (!record)
-                return {};
-            const auto path = store.installDir(record->name, record->version) / tools::safeRelativePath(rest.substr(nameEnd + 1));
-            if (!std::filesystem::is_regular_file(path))
-                return {};
-            std::ifstream stream(path, std::ios::binary);
-            if (stream.is_open())
-                return File{std::move(stream)};
+            return openToolFile(rest.substr(0, nameEnd), rest.substr(nameEnd + 1));
         } catch (const std::exception&) {  // malformed lock file or unsafe path: not served
+            return {};
         }
-        return {};
     }
 
 private:
+    std::optional<File> openToolFile(std::string_view name, std::string_view relative) const {
+        const ToolStore store{project};
+        const auto      record = store.find(name);
+        if (!record)
+            return {};
+        const auto path = store.installDir(record->name, record->version) / tools::safeRelativePath(relative);
+        if (!std::filesystem::is_regular_file(path))
+            return {};
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream.is_open())
+            return {};
+        return File{std::move(stream)};
+    }
+
     std::filesystem::path project;
 };
 

@@ -139,14 +139,19 @@ inline void listTools(const fs::ToolStore& store, CommandArgs args, std::ostream
     }
 }
 
-inline std::optional<BrowserCommand> runWf(fs::ToolStore& store, const std::string& registry, CommandArgs args, std::ostream& output) {
-    const std::string_view command = args.empty() ? "help" : std::string_view(args[0]);
+// The subcommands that continue in the browser.
+inline std::optional<BrowserCommand> browserPart(const fs::ToolStore& store, const std::string& registry, std::string_view command, CommandArgs args) {
     if (command == "search")
         return searchTools(registry, args);
     if (command == "install")
         return installTool(registry, args);
     if (command == "open")
         return openTool(store, args);
+    return std::nullopt;
+}
+
+// The subcommands that run in C++; returns false for an unknown one.
+inline bool runLocally(fs::ToolStore& store, std::string_view command, CommandArgs args, std::ostream& output) {
     if (command == "help")
         usage(output);
     else if (command == "list")
@@ -154,6 +159,15 @@ inline std::optional<BrowserCommand> runWf(fs::ToolStore& store, const std::stri
     else if (command == "remove")
         removeTool(store, args, output);
     else
+        return false;
+    return true;
+}
+
+inline std::optional<BrowserCommand> runWf(fs::ToolStore& store, const std::string& registry, CommandArgs args, std::ostream& output) {
+    const std::string_view command = args.empty() ? "help" : std::string_view(args[0]);
+    if (auto browserCommand = browserPart(store, registry, command, args))
+        return browserCommand;
+    if (!runLocally(store, command, args, output))
         throw std::invalid_argument("Unknown wf command '" + std::string(command) + "'. Type 'wf help'.");
     return std::nullopt;
 }
