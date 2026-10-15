@@ -112,42 +112,58 @@ function paxRecords(data) {
     return records;
 }
 
+// The entry whose header starts at `offset`: its header, type flag, data and the offset of the next
+// entry.
+function readEntry(archive, offset) {
+    const header = archive.subarray(offset, offset + blockSize);
+    verifyChecksum(header);
+    const size = number(header, 124, 12);
+    const start = offset + blockSize;
+    if (start + size > archive.length)
+        throw new Error("Truncated tar archive");
+    return {
+        header,
+        type: header[156] === 0 ? "0" : String.fromCharCode(header[156]),
+        data: archive.subarray(start, start + size),
+        next: start + Math.ceil(size / blockSize) * blockSize,
+    };
+}
+
+// An archive ends at two zero blocks; one is enough to stop.
+function isEnd(archive, offset) {
+    return offset + blockSize > archive.length || archive.subarray(offset, offset + blockSize).every((byte) => byte === 0);
+}
+
+// The name field of a ustar header, after its prefix field.
+function headerPath(header) {
+    const name = text(header, 0, 100);
+    const prefix = text(header, 257, 5) === "ustar" ? text(header, 345, 155) : "";
+    return prefix ? `${prefix}/${name}` : name;
+}
+
+// Entries naming the next one: a pax extended header and a GNU long name. A pax global header names
+// nothing WebFront uses.
+const nameEntries = {
+    x: (names, data) => ({...names, pax: paxRecords(data).path}),
+    L: (names, data) => ({...names, long: text(data, 0, data.length)}),
+    g: (names) => names,
+};
+
 /// Reads a tar archive (ustar, with pax and GNU long names) and returns its regular files as
 /// {path, bytes}, in archive order. Directories, links and other entries are skipped.
 export function readTar(archive) {
     const files = [];
-    let offset = 0;
-    let pax = {};
-    let longName = null;
-    while (offset + blockSize <= archive.length) {
-        const header = archive.subarray(offset, offset + blockSize);
-        if (header.every((byte) => byte === 0))
-            break;
-        verifyChecksum(header);
-        const size = number(header, 124, 12);
-        const type = header[156] === 0 ? "0" : String.fromCharCode(header[156]);
-        const start = offset + blockSize;
-        if (start + size > archive.length)
-            throw new Error("Truncated tar archive");
-        const data = archive.subarray(start, start + size);
-        offset = start + Math.ceil(size / blockSize) * blockSize;
-        if (type === "x") {
-            pax = paxRecords(data);
+    let names = {};
+    for (let offset = 0; !isEnd(archive, offset);) {
+        const {header, type, data, next} = readEntry(archive, offset);
+        offset = next;
+        if (Object.hasOwn(nameEntries, type)) {
+            names = nameEntries[type](names, data);
             continue;
         }
-        if (type === "L") {
-            longName = text(data, 0, data.length);
-            continue;
-        }
-        if (type === "g")
-            continue;
-        const name = text(header, 0, 100);
-        const prefix = text(header, 257, 5) === "ustar" ? text(header, 345, 155) : "";
-        const path = pax.path ?? longName ?? (prefix ? `${prefix}/${name}` : name);
-        pax = {};
-        longName = null;
         if (type === "0" || type === "7")
-            files.push({path, bytes: data});
+            files.push({path: names.pax ?? names.long ?? headerPath(header), bytes: data});
+        names = {};
     }
     return files;
 }
@@ -164,15 +180,21 @@ function packageFiles(entries) {
     return files;
 }
 
-function toolOf(files, name, version) {
+function packageJson(files, name, version) {
     const manifest = files.get("package.json");
     if (!manifest)
         throw new Error(`${name}@${version} has no package.json`);
     const pkg = JSON.parse(utf8.decode(manifest));
     if (pkg.name !== name || pkg.version !== version)
         throw new Error(`The archive contains ${pkg.name}@${pkg.version}, not ${name}@${version}`);
-    const tool = pkg.webfront;
-    if (tool?.kind !== "tool" || typeof tool.entry !== "string")
+    return pkg;
+}
+
+const isTool = (field) => field?.kind === "tool" && typeof field.entry === "string";
+
+function toolOf(files, name, version) {
+    const tool = packageJson(files, name, version).webfront;
+    if (!isTool(tool))
         throw new Error(`${name} is not a WebFront tool: its package.json has no webfront field with kind "tool" and an entry`);
     return {entry: tool.entry.replace(/^(\.\/)+/, ""), title: typeof tool.title === "string" ? tool.title : name};
 }
@@ -202,6 +224,27 @@ export async function search(term, options) {
     }));
 }
 
+// Downloads the tarball of a manifest and returns its files with the verified integrity.
+async function download(manifest, packumentLocation, fetchImpl) {
+    const tarballUrl = new URL(manifest.dist?.tarball ?? "", packumentLocation);
+    const tarball = new Uint8Array(await (await fetchOk(tarballUrl, fetchImpl)).arrayBuffer());
+    const integrity = await verifyIntegrity(tarball, manifest.dist?.integrity);
+    return {integrity, files: packageFiles(readTar(await gunzip(tarball)))};
+}
+
+// Sends the files to webfront.pkg.writeFile in chunks; an empty file is sent as one empty chunk.
+async function upload(bridge, name, version, files) {
+    const writeFile = pkgFunction(bridge, "writeFile");
+    for (const [path, bytes] of files) {
+        let offset = 0;
+        do {
+            const chunk = bytes.subarray(offset, offset + chunkSize);
+            await writeFile(name, version, path, offset, chunk);
+            offset += chunk.length;
+        } while (offset < bytes.length);
+    }
+}
+
 /// Downloads, verifies and stores "name[@version or dist-tag]" (latest by default). `progress(text)`
 /// reports the steps. Resolves to {name, version, title, entry, files}; rejects without changing the
 /// installed version when anything fails.
@@ -212,25 +255,14 @@ export async function install(spec, {progress = () => {}, ...options} = {}) {
     const manifest = resolveManifest(await fetchJson(packumentLocation, fetchImpl), name, requested);
     const {version} = manifest;
     progress(`Downloading ${name}@${version}…`);
-    const tarballUrl = new URL(manifest.dist?.tarball ?? "", packumentLocation);
-    const tarball = new Uint8Array(await (await fetchOk(tarballUrl, fetchImpl)).arrayBuffer());
-    const integrity = await verifyIntegrity(tarball, manifest.dist?.integrity);
-    const files = packageFiles(readTar(await gunzip(tarball)));
+    const {integrity, files} = await download(manifest, packumentLocation, fetchImpl);
     const {entry, title} = toolOf(files, name, version);
     if (!files.has(entry))
         throw new Error(`The entry page ${entry} of ${name} is not in the package`);
 
     progress(`Installing ${files.size} files…`);
     await pkgFunction(bridge, "begin")(name, version);
-    const writeFile = pkgFunction(bridge, "writeFile");
-    for (const [path, bytes] of files) {
-        let offset = 0;
-        do {
-            const chunk = bytes.subarray(offset, offset + chunkSize);
-            await writeFile(name, version, path, offset, chunk);
-            offset += chunk.length;
-        } while (offset < bytes.length);
-    }
+    await upload(bridge, name, version, files);
     await pkgFunction(bridge, "commit")(name, version, integrity, entry, title);
     return {name, version, title, entry, files: files.size};
 }
@@ -264,26 +296,28 @@ function requireOne(args) {
     return args[0];
 }
 
-async function wf([command, ...args], {bridge, write}) {
-    switch (command) {
-    case "search": {
-        const found = await search(args.join(" "), {bridge});
-        if (found.length === 0)
-            return "No tool found.";
-        const width = Math.max(...found.map(({name, version}) => name.length + version.length + 1));
-        return found.map(({name, version, description}) => `${name}@${version}`.padEnd(width + 2) + description).join("\n");
-    }
-    case "install": {
+function formatFound(found) {
+    if (found.length === 0)
+        return "No tool found.";
+    const width = Math.max(...found.map(({name, version}) => name.length + version.length + 1));
+    return found.map(({name, version, description}) => `${name}@${version}`.padEnd(width + 2) + description).join("\n");
+}
+
+// The wf subcommands running in the browser; 'wf list', 'wf remove' and 'wf help' run in C++.
+const subcommands = {
+    search: async (args, {bridge}) => formatFound(await search(args.join(" "), {bridge})),
+    install: async (args, {bridge, write}) => {
         const tool = await install(requireOne(args), {bridge, progress: (step) => write(step + "\n")});
         return `Installed ${tool.name}@${tool.version}: ${tool.title}. Type 'wf open ${tool.name}'.`;
-    }
-    case "open": {
+    },
+    open: async (args, {bridge}) => {
         const tool = await open(requireOne(args), bridge);
         return tool.opened ? `Opened ${tool.title}: ${tool.url}` : `The browser blocked the new window. Open ${tool.url}`;
-    }
-    default:
-        return undefined;  // 'wf list', 'wf remove' and 'wf help' run in C++
-    }
+    },
+};
+
+async function wf([command, ...args], context) {
+    return Object.hasOwn(subcommands, command) ? subcommands[command](args, context) : undefined;
 }
 
 /// Terminal browser commands (see Terminal::extension).

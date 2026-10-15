@@ -22,44 +22,60 @@ function commonPrefix(words) {
     });
 }
 
+// Reads a line for tokenize(), one word part at a time.
+class Scanner {
+    constructor(line) {
+        this.line = line;
+        this.index = 0;
+    }
+
+    get done() {
+        return this.index === this.line.length;
+    }
+
+    next(problem) {
+        if (this.done)
+            throw new SyntaxError(problem);
+        return this.line[this.index++];
+    }
+
+    // The content of a quoted string whose opening quote was read. Inside double quotes a backslash
+    // escapes the next character; one ending the line stays literal, and the missing closing quote
+    // is reported next.
+    quoted(quote) {
+        let content = "";
+        for (let char = this.next("Unterminated quote"); char !== quote; char = this.next("Unterminated quote"))
+            content += quote === '"' && char === "\\" && !this.done ? this.next() : char;
+        return content;
+    }
+
+    // What `char`, read outside quotes, adds to the current word.
+    part(char) {
+        if (char === "\\")
+            return this.next("Trailing backslash");
+        if (char === "'" || char === '"')
+            return this.quoted(char);
+        return char;
+    }
+}
+
 /// Splits a line into words like terminal::tokenize in C++: whitespace separates words, single quotes
 /// keep their content verbatim, double quotes keep it but honor backslash escapes, and an unquoted
 /// backslash escapes the next character. Throws a SyntaxError on an unterminated quote or a trailing
 /// backslash.
 export function tokenize(line) {
     const words = [];
-    let word = "";
-    let inWord = false;
-    let index = 0;
-    const next = (problem) => {
-        if (index === line.length)
-            throw new SyntaxError(problem);
-        return line[index++];
-    };
-    const endWord = () => {
-        if (inWord)
+    const scanner = new Scanner(line);
+    let word = null;  // null between words
+    while (!scanner.done) {
+        const char = scanner.next();
+        const separator = char === " " || char === "\t";
+        if (separator && word !== null)
             words.push(word);
-        word = "";
-        inWord = false;
-    };
-    while (index < line.length) {
-        const char = line[index++];
-        if (char === " " || char === "\t") {
-            endWord();
-            continue;
-        }
-        inWord = true;
-        if (char === "\\") {
-            word += next("Trailing backslash");
-        } else if (char === "'" || char === '"') {
-            // A backslash ending the line stays literal; the missing closing quote is reported next.
-            for (let quoted = next("Unterminated quote"); quoted !== char; quoted = next("Unterminated quote"))
-                word += char === '"' && quoted === "\\" ? (index < line.length ? line[index++] : "\\") : quoted;
-        } else {
-            word += char;
-        }
+        word = separator ? null : (word ?? "") + scanner.part(char);
     }
-    endWord();
+    if (word !== null)
+        words.push(word);
     return words;
 }
 

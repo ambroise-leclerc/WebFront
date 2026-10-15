@@ -86,12 +86,12 @@ inline bool isPackageName(std::string_view name) {
     return isNamePart(name.substr(1, slash - 1)) && isNamePart(name.substr(slash + 1));
 }
 
-inline bool isVersion(std::string_view version) {
-    if (version.empty() || version.size() > 256)
+inline bool isVersion(std::string_view toolVersion) {
+    if (toolVersion.empty() || toolVersion.size() > 256)
         return false;
-    if (hasDoubleDot(version))
+    if (hasDoubleDot(toolVersion))
         return false;
-    return std::isdigit(static_cast<unsigned char>(version.front())) != 0 && consistsOf(version, versionCharacters);
+    return std::isdigit(static_cast<unsigned char>(toolVersion.front())) != 0 && consistsOf(toolVersion, versionCharacters);
 }
 
 inline bool hasSafeCharacters(std::string_view path) {
@@ -127,9 +127,9 @@ inline void validatePackageName(std::string_view name) {
 
 /// Accepts a semantic version: a digit followed by letters, digits, '.', '+' or '-'. Throws
 /// std::invalid_argument.
-inline void validateVersion(std::string_view version) {
-    if (!detail::isVersion(version))
-        throw std::invalid_argument("Invalid package version '" + std::string(version) + "'");
+inline void validateVersion(std::string_view toolVersion) {
+    if (!detail::isVersion(toolVersion))
+        throw std::invalid_argument("Invalid package version '" + std::string(toolVersion) + "'");
 }
 
 /// Converts a '/'-separated path received from the browser into a relative path that stays inside
@@ -277,8 +277,8 @@ public:
     [[nodiscard]] std::filesystem::path lockFile() const {
         return project / "webfront-tools.lock.json";
     }
-    [[nodiscard]] std::filesystem::path installDir(std::string_view name, std::string_view version) const {
-        return toolsDir() / tools::detail::fromUtf8(std::string(name) + "@" + std::string(version));
+    [[nodiscard]] std::filesystem::path installDir(std::string_view name, std::string_view toolVersion) const {
+        return toolsDir() / tools::detail::fromUtf8(std::string(name) + "@" + std::string(toolVersion));
     }
 
     /// The installed tools; an absent lock file means none. Throws std::runtime_error if the lock
@@ -295,14 +295,14 @@ public:
     }
 
     /// Starts (or restarts) the installation of a version, discarding the files already staged for it.
-    void begin(std::string_view name, std::string_view version) {
+    void begin(std::string_view name, std::string_view toolVersion) {
         tools::validatePackageName(name);
-        tools::validateVersion(version);
+        tools::validateVersion(toolVersion);
         std::scoped_lock lock{state->mutex};
         // With no installation in progress, whatever is staged was abandoned by an earlier process.
         if (state->pending.empty())
             std::filesystem::remove_all(stagingRoot());
-        auto& staging = state->pending[key(name, version)];
+        auto& staging = state->pending[key(name, toolVersion)];
         if (!staging.empty())
             std::filesystem::remove_all(stagingRoot() / staging);
         staging = std::to_string(state->nextStaging++);
@@ -311,10 +311,10 @@ public:
 
     /// Writes a chunk of a staged file. Offset 0 creates or truncates the file; any other offset must
     /// equal the number of bytes already written, so a missing or repeated chunk is detected.
-    void write(std::string_view name, std::string_view version, const FileChunk& chunk) {
+    void write(std::string_view name, std::string_view toolVersion, const FileChunk& chunk) {
         const auto       relative = tools::safeRelativePath(chunk.path);
         std::scoped_lock lock{state->mutex};
-        const auto       target = stagingDir(name, version) / relative;
+        const auto       target = stagingDir(name, toolVersion) / relative;
         if (chunk.offset != 0)
             requireWritten(target, chunk);
         std::filesystem::create_directories(target.parent_path());
@@ -378,8 +378,8 @@ private:
     std::filesystem::path                        project;
     std::shared_ptr<tools::detail::ProjectState> state;
 
-    static std::string key(std::string_view name, std::string_view version) {
-        return std::string(name) + "@" + std::string(version);
+    static std::string key(std::string_view name, std::string_view toolVersion) {
+        return std::string(name) + "@" + std::string(toolVersion);
     }
 
     [[nodiscard]] std::filesystem::path stagingRoot() const {
@@ -387,10 +387,10 @@ private:
     }
 
     // Requires the installation to be in progress; called with the mutex held.
-    [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view version) const {
-        const auto found = state->pending.find(key(name, version));
+    [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view toolVersion) const {
+        const auto found = state->pending.find(key(name, toolVersion));
         if (found == state->pending.end())
-            throw std::invalid_argument("No installation of " + key(name, version) + " in progress");
+            throw std::invalid_argument("No installation of " + key(name, toolVersion) + " in progress");
         return stagingRoot() / found->second;
     }
 
