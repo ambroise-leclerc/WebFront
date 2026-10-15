@@ -87,12 +87,12 @@ inline bool isPackageName(std::string_view name) {
     return isNamePart(name.substr(1, slash - 1)) && isNamePart(name.substr(slash + 1));
 }
 
-inline bool isVersion(std::string_view version) {
-    if (version.empty() || version.size() > 256)
+inline bool isVersion(std::string_view packageVersion) {
+    if (packageVersion.empty() || packageVersion.size() > 256)
         return false;
-    if (hasDoubleDot(version))
+    if (hasDoubleDot(packageVersion))
         return false;
-    return std::isdigit(static_cast<unsigned char>(version.front())) != 0 && consistsOf(version, versionCharacters);
+    return std::isdigit(static_cast<unsigned char>(packageVersion.front())) != 0 && consistsOf(packageVersion, versionCharacters);
 }
 
 inline bool hasSafeCharacters(std::string_view path) {
@@ -128,9 +128,9 @@ inline void validatePackageName(std::string_view name) {
 
 /// Accepts a semantic version: a digit followed by letters, digits, '.', '+' or '-'. Throws
 /// std::invalid_argument.
-inline void validateVersion(std::string_view version) {
-    if (!detail::isVersion(version))
-        throw std::invalid_argument("Invalid package version '" + std::string(version) + "'");
+inline void validateVersion(std::string_view packageVersion) {
+    if (!detail::isVersion(packageVersion))
+        throw std::invalid_argument("Invalid package packageVersion '" + std::string(packageVersion) + "'");
 }
 
 /// Converts a '/'-separated path received from the browser into a relative path that stays inside
@@ -274,8 +274,8 @@ public:
     [[nodiscard]] std::filesystem::path lockFile() const {
         return project / "webfront-tools.lock.json";
     }
-    [[nodiscard]] std::filesystem::path installDir(std::string_view name, std::string_view version) const {
-        return toolsDir() / tools::detail::fromUtf8(std::string(name) + "@" + std::string(version));
+    [[nodiscard]] std::filesystem::path installDir(std::string_view name, std::string_view packageVersion) const {
+        return toolsDir() / tools::detail::fromUtf8(std::string(name) + "@" + std::string(packageVersion));
     }
 
     /// The installed tools; an absent lock file means none. Throws std::runtime_error if the lock
@@ -292,21 +292,21 @@ public:
     }
 
     /// Starts (or restarts) the installation of a version, discarding the files already staged for it.
-    void begin(std::string_view name, std::string_view version) {
+    void begin(std::string_view name, std::string_view packageVersion) {
         tools::validatePackageName(name);
-        tools::validateVersion(version);
+        tools::validateVersion(packageVersion);
         std::scoped_lock lock{state->mutex};
-        std::filesystem::remove_all(stagingDir(name, version));
-        state->pending.insert(key(name, version));
+        std::filesystem::remove_all(stagingDir(name, packageVersion));
+        state->pending.insert(key(name, packageVersion));
     }
 
     /// Writes a chunk of a staged file. Offset 0 creates or truncates the file; any other offset must
     /// equal the number of bytes already written, so a missing or repeated chunk is detected.
-    void write(std::string_view name, std::string_view version, const FileChunk& chunk) {
+    void write(std::string_view name, std::string_view packageVersion, const FileChunk& chunk) {
         const auto       relative = tools::safeRelativePath(chunk.path);
         std::scoped_lock lock{state->mutex};
-        requirePending(name, version);
-        const auto target = stagingDir(name, version) / relative;
+        requirePending(name, packageVersion);
+        const auto target = stagingDir(name, packageVersion) / relative;
         if (chunk.offset != 0)
             requireWritten(target, chunk);
         std::filesystem::create_directories(target.parent_path());
@@ -371,12 +371,12 @@ private:
     std::filesystem::path                        project;
     std::shared_ptr<tools::detail::ProjectState> state;
 
-    static std::string key(std::string_view name, std::string_view version) {
-        return std::string(name) + "@" + std::string(version);
+    static std::string key(std::string_view name, std::string_view packageVersion) {
+        return std::string(name) + "@" + std::string(packageVersion);
     }
 
-    [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view version) const {
-        return toolsDir() / ".staging" / tools::detail::fromUtf8(key(name, version));
+    [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view packageVersion) const {
+        return toolsDir() / ".staging" / tools::detail::fromUtf8(key(name, packageVersion));
     }
 
     static void requireWritten(const std::filesystem::path& target, const FileChunk& chunk) {
@@ -433,9 +433,9 @@ private:
             std::filesystem::rename(backup, target, ignored);
     }
 
-    void requirePending(std::string_view name, std::string_view version) const {
-        if (!state->pending.contains(key(name, version)))
-            throw std::invalid_argument("No installation of " + key(name, version) + " in progress");
+    void requirePending(std::string_view name, std::string_view packageVersion) const {
+        if (!state->pending.contains(key(name, packageVersion)))
+            throw std::invalid_argument("No installation of " + key(name, packageVersion) + " in progress");
     }
 
     // Written next to the lock file, then renamed over it, so a reader never sees a partial file.

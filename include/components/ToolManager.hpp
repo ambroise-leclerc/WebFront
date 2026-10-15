@@ -79,13 +79,13 @@ inline void usage(std::ostream& output) {
 /// Splits "name[@version]"; a scoped name starts with '@'. The name is validated, the version is
 /// left to the registry since it may be a tag such as "latest".
 inline std::pair<std::string, std::string> splitSpec(std::string_view spec) {
-    const auto at      = spec.find('@', 1);
-    auto       name    = std::string(spec.substr(0, at));
-    auto       version = at == std::string_view::npos ? std::string{} : std::string(spec.substr(at + 1));
+    const auto at             = spec.find('@', 1);
+    auto       name           = std::string(spec.substr(0, at));
+    auto       packageVersion = at == std::string_view::npos ? std::string{} : std::string(spec.substr(at + 1));
     fs::tools::validatePackageName(name);
-    if (at != std::string_view::npos && version.empty())
+    if (at != std::string_view::npos && packageVersion.empty())
         throw std::invalid_argument("Missing version after '@' in '" + std::string(spec) + "'");
-    return {std::move(name), std::move(version)};
+    return {std::move(name), std::move(packageVersion)};
 }
 
 /// The browser part of 'wf search', 'wf install' and 'wf open' (src/components/tools/wf.mjs).
@@ -102,8 +102,8 @@ inline BrowserCommand searchTools(const std::string& registry, CommandArgs args)
 
 inline BrowserCommand installTool(const std::string& registry, CommandArgs args) {
     requireArguments(args, 2);
-    auto [name, version] = splitSpec(args[1]);
-    return inBrowser({"install", registry, std::move(name), std::move(version)});
+    auto [name, packageVersion] = splitSpec(args[1]);
+    return inBrowser({"install", registry, std::move(name), std::move(packageVersion)});
 }
 
 inline BrowserCommand openTool(const fs::ToolStore& store, CommandArgs args) {
