@@ -84,8 +84,9 @@ const toTerminalText = (text) => text.replace(/(?<!\r)\n/g, "\r\n");
 
 /// Runs a line: a browser command of `commands` (a Map from command name to handler) when one is
 /// registered for its first word and does not return undefined, else `runInCpp(line)`. A line that
-/// cannot be split goes to C++, which reports the error.
-export async function runLine(line, {commands, runInCpp, write, bridge}) {
+/// cannot be split goes to C++, which reports the error. Browser commands get `signal`, which Ctrl+C
+/// aborts with the reason Error("Interrupted"); a C++ command cannot be interrupted.
+export async function runLine(line, {commands, runInCpp, write, bridge, signal = new AbortController().signal}) {
     let words;
     try {
         words = tokenize(line);
@@ -98,6 +99,7 @@ export async function runLine(line, {commands, runInCpp, write, bridge}) {
     const output = await handler(words.slice(1), {
         line,
         bridge,
+        signal,
         write: (text) => write(toTerminalText(String(text))),
         runInCpp: () => runInCpp(line),
     });
@@ -149,6 +151,7 @@ export class LineEditor {
         this.write = write;
         this.run = run;
         this.complete = complete;
+        this.abort = null;
         this.prompt = prompt;
         this.chars = [];
         this.cursor = 0;
@@ -173,12 +176,21 @@ export class LineEditor {
 
     handle(data) {
         if (this.busy)
-            return;
+            return this.interrupt(data);
         const action = keyActions.get(data);
         if (action)
             return action(this);
         if (!data.startsWith("\x1b"))
             return this.insertText(data);
+    }
+
+    // While a command runs, Ctrl+C aborts its signal once and the other keys are ignored.
+    interrupt(data) {
+        const running = this.abort?.signal.aborted === false;
+        if (data !== "\x03" || !running)
+            return;
+        this.write("^C\r\n");
+        this.abort.abort(new Error("Interrupted"));
     }
 
     // Typed or pasted text: printable characters are inserted, a carriage return submits the line
@@ -263,8 +275,9 @@ export class LineEditor {
     }
 
     async execute(line) {
+        this.abort = new AbortController();
         try {
-            const output = await this.run(line);
+            const output = await this.run(line, this.abort.signal);
             // The prompt starts on a new line, unless the output already ends one or leaves the
             // cursor at home (such as the 'clear' command).
             if (output)
@@ -336,7 +349,7 @@ export async function mount(element, {bridge = globalThis.webFront, terminalOpti
     }
     const commands = await loadExtensions(extensions, write);
     const runInCpp = call("run");
-    const run = (line) => runLine(line, {commands, runInCpp, write, bridge});
+    const run = (line, signal) => runLine(line, {commands, runInCpp, write, bridge, signal});
     const editor = new LineEditor({write, run, complete: call("complete"), prompt});
     if (banner)
         write(banner.replaceAll("\n", "\r\n") + "\r\n");
