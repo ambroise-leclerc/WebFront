@@ -48,3 +48,6 @@ _ReSharper*/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Web tools installed by the wf tool manager when running the examples
+.webfront/
