@@ -371,25 +371,13 @@ private:
     }
 
     void dispatchFrame() {
-        const auto data = decoder.payload();
         switch (decoder.frameType) {
             case Header::Opcode::text:
             case Header::Opcode::binary:
-                if (fragmentedType)
-                    return closeOnError(std::make_error_code(std::errc::protocol_error));  // the previous message is unfinished
-                if (decoder.finalFrame)
-                    return dispatchMessage(decoder.frameType, data);
-                fragmentedType = decoder.frameType;
-                fragments.assign(data.begin(), data.end());
+                startMessage(decoder.payload());
                 break;
             case Header::Opcode::continuation:
-                if (!fragmentedType)
-                    return closeOnError(std::make_error_code(std::errc::protocol_error));  // no message to continue
-                fragments.insert(fragments.end(), data.begin(), data.end());
-                if (decoder.finalFrame) {
-                    const auto message = std::exchange(fragments, {});
-                    dispatchMessage(*std::exchange(fragmentedType, std::nullopt), message);
-                }
+                continueMessage(decoder.payload());
                 break;
             case Header::Opcode::connectionClose:
                 if (closeHandler)
@@ -399,6 +387,26 @@ private:
             default:
                 log::debug("Unhandled frameType");
         }
+    }
+
+    // The first frame of a text or binary message.
+    void startMessage(std::span<const std::byte> data) {
+        if (fragmentedType)
+            return closeOnError(std::make_error_code(std::errc::protocol_error));  // the previous message is unfinished
+        if (decoder.finalFrame)
+            return dispatchMessage(decoder.frameType, data);
+        fragmentedType = decoder.frameType;
+        fragments.assign(data.begin(), data.end());
+    }
+
+    void continueMessage(std::span<const std::byte> data) {
+        if (!fragmentedType)
+            return closeOnError(std::make_error_code(std::errc::protocol_error));  // no message to continue
+        fragments.insert(fragments.end(), data.begin(), data.end());
+        if (!decoder.finalFrame)
+            return;
+        const auto message = std::exchange(fragments, {});
+        dispatchMessage(*std::exchange(fragmentedType, std::nullopt), message);
     }
 
     void dispatchMessage(Header::Opcode type, std::span<const std::byte> data) {

@@ -80,18 +80,22 @@ export class LineEditor {
     }
 
     handle(data) {
-        if (this.busy) {
-            if (data === "\x03" && this.abort && !this.abort.signal.aborted) {
-                this.show("^C");
-                this.abort.abort(new Error("Interrupted"));
-            }
-            return;
-        }
+        if (this.busy)
+            return this.interrupt(data);
         const action = keyActions.get(data);
         if (action)
             return action(this);
         if (!data.startsWith("\x1b"))
             return this.insertText(data);
+    }
+
+    // While a command runs, Ctrl+C stops it once and the other keys are ignored.
+    interrupt(data) {
+        const running = this.abort?.signal.aborted === false;
+        if (data !== "\x03" || !running)
+            return;
+        this.show("^C");
+        this.abort.abort(new Error("Interrupted"));
     }
 
     // Typed or pasted text: printable characters are inserted, a carriage return submits the line

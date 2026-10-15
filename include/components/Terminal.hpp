@@ -254,16 +254,20 @@ private:
     // The page passes the module to import(), so it must not name another origin; the arguments
     // cross the bridge NUL-terminated.
     static void validate(const BrowserCommand& command) {
-        const std::string_view module   = command.module;
-        const bool             onOrigin = module.starts_with('/') && !module.starts_with("//");
-        const bool             plain    = std::ranges::none_of(module, [](char c) {
-            return c == '\\' || static_cast<unsigned char>(c) < 0x20 || c == 0x7f;
+        if (!isPathOnOrigin(command.module))
+            throw std::invalid_argument("Invalid browser command module '" + command.module + "'");
+        if (std::ranges::any_of(command.args, [](const std::string& arg) {
+                return arg.contains('\0');
+            }))
+            throw std::invalid_argument("A browser command argument contains a NUL character");
+    }
+
+    static bool isPathOnOrigin(std::string_view module) {
+        if (!module.starts_with('/') || module.starts_with("//"))
+            return false;
+        return std::ranges::none_of(module, [](char c) {
+            return static_cast<unsigned char>(c) < 0x20 || std::string_view("\\\x7f").contains(c);
         });
-        if (!onOrigin || !plain)
-            throw std::invalid_argument("Invalid browser command module '" + std::string(module) + "'");
-        for (const auto& arg : command.args)
-            if (arg.find('\0') != std::string::npos)
-                throw std::invalid_argument("A browser command argument contains a NUL character");
     }
 };
 

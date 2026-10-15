@@ -13,13 +13,10 @@ const hashAlgorithms = new Map([["sha512", "SHA-512"], ["sha384", "SHA-384"], ["
 /// Entry point called by the terminal with the arguments ToolManager passes:
 ///   ["search", registry, term], ["install", registry, name, version or ""], ["open", url].
 export async function run([command, ...args], io) {
-    if (command === "search")
-        return search(args, io);
-    if (command === "install")
-        return install(args, io);
-    if (command === "open")
-        return open(args, io);
-    throw new Error(`Unknown wf browser command '${command}'`);
+    const handler = commands.get(command);
+    if (!handler)
+        throw new Error(`Unknown wf browser command '${command}'`);
+    return handler(args, io);
 }
 
 function registryBase(registry) {
@@ -54,20 +51,34 @@ function open([url], io) {
 
 async function install([registry, name, requested], io) {
     const base = registryBase(registry);
-    const packument = await (await fetchResponse(new URL(name.replace("/", "%2f"), base), io.signal, `Package ${name}`)).json();
-    const version = packument["dist-tags"]?.[requested || "latest"] ?? requested;
+    const {version, dist} = await findTool(base, name, requested, io.signal);
+    io.write(`Downloading ${name}@${version}…`);
+    const tarball = new Uint8Array(await (await fetchResponse(new URL(dist.tarball, base), io.signal, "Tarball")).arrayBuffer());
+    const integrity = await verifyIntegrity(tarball, dist.integrity);
+    const files = packageFiles(readTar(await gunzip(tarball, maxUnpackedBytes)));
+    const {entry, title} = describeTool(files, name, version);
+    await upload({name, version, integrity, entry, title}, files, io);
+    io.write(`\r\x1b[KInstalled ${name}@${version}: ${title}. Type 'wf open ${name}' to open it.`);
+}
+
+const commands = new Map([["search", search], ["install", install], ["open", open]]);
+
+// The registry's manifest of the requested version or tag, which must be a tool with a tarball.
+async function findTool(base, name, requested, signal) {
+    const packument = await (await fetchResponse(new URL(name.replace("/", "%2f"), base), signal, `Package ${name}`)).json();
+    const tag = requested || "latest";
+    const version = packument["dist-tags"]?.[tag] ?? requested;
     const manifest = packument.versions?.[version];
     if (!manifest)
-        throw new Error(`Version '${requested || "latest"}' of ${name} not found`);
+        throw new Error(`Version '${tag}' of ${name} not found`);
     requireTool(manifest, name, version);
     if (!manifest.dist?.tarball)
         throw new Error(`The registry gives no tarball for ${name}@${version}`);
+    return {version, dist: manifest.dist};
+}
 
-    io.write(`Downloading ${name}@${version}…`);
-    const tarball = new Uint8Array(await (await fetchResponse(new URL(manifest.dist?.tarball, base), io.signal, "Tarball")).arrayBuffer());
-    const integrity = await verifyIntegrity(tarball, manifest.dist?.integrity);
-    const files = packageFiles(readTar(await gunzip(tarball, maxUnpackedBytes)));
-
+// The entry page and title of an unpacked tool, whose package.json must match the manifest.
+function describeTool(files, name, version) {
     const packageJson = parsePackageJson(files);
     if (packageJson.name !== name || packageJson.version !== version)
         throw new Error(`The tarball contains ${packageJson.name}@${packageJson.version}, not ${name}@${version}`);
@@ -75,10 +86,7 @@ async function install([registry, name, requested], io) {
     const entry = packageJson.webfront.entry ?? "index.html";
     if (!files.has(entry))
         throw new Error(`Entry page '${entry}' is missing from ${name}@${version}`);
-    const title = oneLine(packageJson.webfront.title ?? packageJson.description ?? name).slice(0, 200);
-
-    await upload({name, version, integrity, entry, title}, files, io);
-    io.write(`\r\x1b[KInstalled ${name}@${version}: ${title}. Type 'wf open ${name}' to open it.`);
+    return {entry, title: oneLine(packageJson.webfront.title ?? packageJson.description ?? name).slice(0, 200)};
 }
 
 function requireTool(manifest, name, version) {
@@ -200,41 +208,55 @@ function parsePax(data) {
     return records;
 }
 
+// The entry at offset as {header, type, data, next}, or null at the end-of-archive block.
+function readEntry(archive, offset) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.length < 512 || header.every((byte) => byte === 0))
+        return null;
+    checkChecksum(header);
+    const size = octal(header, 124, 12);
+    const start = offset + 512;
+    if (start + size > archive.length)
+        throw new Error("Truncated tar archive");
+    return {
+        header,
+        type: header[156] === 0 ? "0" : String.fromCharCode(header[156]),
+        data: archive.subarray(start, start + size),
+        next: start + Math.ceil(size / 512) * 512,
+    };
+}
+
+// Entries describing the next one: a pax extended header and a GNU long name, which record its
+// path in `names`. A pax global header is skipped.
+const metadataTypes = new Map([
+    ["x", (names, data) => { names.pax = parsePax(data).path; }],
+    ["L", (names, data) => { names.long = field(data, 0, data.length); }],
+    ["g", () => {}],
+]);
+
+const regularFileTypes = new Set(["0", "7"]);
+
+function ustarPath(header) {
+    const prefix = field(header, 257, 6) === "ustar" ? field(header, 345, 155) : "";
+    const name = field(header, 0, 100);
+    return prefix ? `${prefix}/${name}` : name;
+}
+
 /// Reads the regular files of a tar archive (ustar, with pax and GNU long names) as
 /// [{path, bytes}]. Directories, links and other entries are skipped.
 export function readTar(archive) {
     const files = [];
-    let extended = {};
-    let longName = null;
-    for (let offset = 0; offset + 512 <= archive.length;) {
-        const header = archive.subarray(offset, offset + 512);
-        if (header.every((byte) => byte === 0))
-            break;
-        checkChecksum(header);
-        const size = octal(header, 124, 12);
-        const type = header[156] === 0 ? "0" : String.fromCharCode(header[156]);
-        const start = offset + 512;
-        if (start + size > archive.length)
-            throw new Error("Truncated tar archive");
-        const data = archive.subarray(start, start + size);
-        offset = start + Math.ceil(size / 512) * 512;
-        if (type === "x") {
-            extended = parsePax(data);
+    let names = {};
+    for (let entry = readEntry(archive, 0); entry; entry = readEntry(archive, entry.next)) {
+        const record = metadataTypes.get(entry.type);
+        if (record) {
+            record(names, entry.data);
             continue;
         }
-        if (type === "L") {
-            longName = field(data, 0, data.length);
-            continue;
-        }
-        if (type === "g")
-            continue;
-        const prefix = field(header, 257, 6) === "ustar" ? field(header, 345, 155) : "";
-        const name = field(header, 0, 100);
-        const path = extended.path ?? longName ?? (prefix ? `${prefix}/${name}` : name);
-        extended = {};
-        longName = null;
-        if (type === "0" || type === "7")
-            files.push({path, bytes: data});
+        const path = names.pax ?? names.long ?? ustarPath(entry.header);
+        names = {};
+        if (regularFileTypes.has(entry.type))
+            files.push({path, bytes: entry.data});
     }
     return files;
 }
