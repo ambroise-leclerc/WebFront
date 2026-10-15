@@ -5,11 +5,9 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -20,24 +18,20 @@ namespace {
 
 // Records the functions a Terminal registers, like BasicWF::cppFunction, and calls them directly.
 struct RecordingApp {
-    using LineResult = tuple<string, string, string>;
-
     map<string, function<string()>>       nullary;
     map<string, function<string(string)>> unary;
-    function<LineResult(string)>          runLine;
 
     template <typename R, typename... Args>
     void cppFunction(string name, auto&& function) {
-        if constexpr (is_same_v<R, LineResult>)
-            runLine = std::forward<decltype(function)>(function);
-        else if constexpr (sizeof...(Args) == 0)
+        static_assert(is_same_v<R, string>);
+        if constexpr (sizeof...(Args) == 0)
             nullary.try_emplace(std::move(name), std::forward<decltype(function)>(function));
         else
             unary.try_emplace(std::move(name), std::forward<decltype(function)>(function));
     }
 
     string run(const string& line) {
-        return get<0>(runLine(line));
+        return unary.at("webfront.terminal.run")(line);
     }
     string complete(const string& line) {
         return unary.at("webfront.terminal.complete")(line);
@@ -249,102 +243,26 @@ SCENARIO("Terminal registers its bridge functions and built-in commands on the a
         THEN("a duplicate command is rejected") {
             REQUIRE_THROWS_AS(terminal->command("help", "again", [] {}), invalid_argument);
         }
+        THEN("the page lists no extension module by default") {
+            REQUIRE(app.nullary.at("webfront.terminal.extensions")().empty());
+        }
+        WHEN("extension modules are added, one of them twice") {
+            terminal->extension("/a.mjs").extension("/b/c.mjs").extension("/a.mjs");
+            THEN("the page lists each once, in order") {
+                REQUIRE(app.nullary.at("webfront.terminal.extensions")() == "/a.mjs\n/b/c.mjs");
+            }
+        }
+        THEN("an empty or multi-line extension URL is rejected") {
+            auto url = GENERATE(string{}, string{"/a.mjs\n/b.mjs"}, string{"/a.mjs\r"});
+            REQUIRE_THROWS_AS(terminal->extension(url), invalid_argument);
+            REQUIRE(app.nullary.at("webfront.terminal.extensions")().empty());
+        }
         WHEN("the Terminal object is destroyed") {
             terminal.reset();
             THEN("the registered functions still own the commands") {
                 REQUIRE(app.run("greet Ada") == "Hello, Ada!");
                 REQUIRE(contains(app.run("help"), "greet"));
             }
-        }
-    }
-}
-
-SCENARIO("Terminal commands can continue in the browser") {
-    GIVEN("commands returning browser commands in every handler shape") {
-        terminal::Shell shell;
-        shell.command("fetch", "Continue in the browser", terminal::adaptHandler([](CommandArgs args, ostream& output) {
-                          output << "Fetching\n";
-                          return BrowserCommand{
-                              "/tools/fetch.mjs",
-                              {args.begin(), args.end()}
-                          };
-                      }));
-        shell.command("maybe", "Continue only with arguments", terminal::adaptHandler([](CommandArgs args) -> optional<BrowserCommand> {
-                          if (args.empty())
-                              return nullopt;
-                          return BrowserCommand{"/tools/maybe.mjs", {}};
-                      }));
-        shell.command("plain", "No argument", terminal::adaptHandler([] {
-                          return BrowserCommand{"/plain.mjs", {}};
-                      }));
-
-        THEN("the result carries the output, the module and the arguments") {
-            const auto result = shell.execute("fetch 'a b' c");
-            REQUIRE(result.output == "Fetching\r\n");
-            REQUIRE(result.browserCommand);
-            REQUIRE(result.browserCommand->module == "/tools/fetch.mjs");
-            REQUIRE(result.browserCommand->args == vector<string>{"a b", "c"});
-            REQUIRE(shell.run("fetch") == "Fetching\r\n");
-        }
-        THEN("an empty optional continues nowhere") {
-            REQUIRE_FALSE(shell.execute("maybe").browserCommand);
-            REQUIRE(shell.execute("maybe x").browserCommand->module == "/tools/maybe.mjs");
-            REQUIRE(shell.execute("plain").browserCommand->module == "/plain.mjs");
-        }
-        THEN("ordinary commands and errors continue nowhere") {
-            REQUIRE_FALSE(shell.execute("").browserCommand);
-            REQUIRE_FALSE(shell.execute("nope").browserCommand);
-        }
-    }
-}
-
-SCENARIO("Terminal browser commands stay on the page's origin") {
-    GIVEN("a command continuing in a module chosen by its argument") {
-        terminal::Shell shell;
-        shell.command("go", "Continue in a module", terminal::adaptHandler([](CommandArgs args) {
-                          return BrowserCommand{
-                              args[0],
-                              {args.begin() + 1, args.end()}
-                          };
-                      }));
-
-        THEN("an absolute path on the origin is accepted") {
-            REQUIRE(shell.execute("go /a/b.mjs?x=1").browserCommand);
-        }
-        THEN("another origin, a relative path or control characters are rejected") {
-            const auto module = GENERATE(as<string>{}, "https://example.com/x.mjs", "//example.com/x.mjs", "x.mjs", "", "/a\\b.mjs", "/a\tb.mjs", "/a\x7f.mjs");
-            const auto line   = "go '" + module + "'";
-            CAPTURE(module);
-            REQUIRE_THROWS_AS(shell.execute(line), invalid_argument);
-        }
-        THEN("an argument containing a NUL character is rejected") {
-            REQUIRE_THROWS_AS(shell.execute(string{"go /a.mjs 'x\0y'", 15}), invalid_argument);
-        }
-    }
-}
-
-SCENARIO("Terminal sends browser commands over the bridge") {
-    GIVEN("a terminal with a command continuing in the browser") {
-        RecordingApp app;
-        Terminal     terminal{app};
-        terminal.command("fetch", "Continue in the browser", [](CommandArgs args) {
-            return BrowserCommand{
-                "/fetch.mjs",
-                {args.begin(), args.end()}
-            };
-        });
-
-        THEN("the arguments cross NUL-terminated, so an empty argument survives") {
-            REQUIRE(app.runLine("fetch a '' b")
-                    == RecordingApp::LineResult{
-                        "",
-                        "/fetch.mjs",
-                        string{"a\0\0b\0", 5}
-            });
-            REQUIRE(app.runLine("fetch") == RecordingApp::LineResult{"", "/fetch.mjs", ""});
-        }
-        THEN("an ordinary command has no module") {
-            REQUIRE(app.runLine("clear") == RecordingApp::LineResult{string{Terminal<RecordingApp>::clearScreen}, "", ""});
         }
     }
 }

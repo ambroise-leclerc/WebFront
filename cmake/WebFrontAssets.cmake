@@ -20,14 +20,12 @@ function(_webfront_add_embedded_text_asset source header struct test_name)
                 -DINPUT=${source}
                 -DCHECK=${header}
                 -DSTRUCT=${struct}
-                -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
                 -P ${_WEBFRONT_ASSETS_DIR}/EmbedTextAsset.cmake
         )
     endif()
 endfunction()
 
 function(webfront_add_embedded_assets)
-    find_package(Git QUIET)
     set(root "${_WEBFRONT_ASSETS_DIR}/..")
     cmake_path(NORMAL_PATH root)
     add_custom_target(webfront-embedded-assets COMMENT "Regenerating embedded browser bridge and fallback-page assets")
@@ -49,6 +47,10 @@ function(webfront_add_embedded_assets)
     _webfront_add_embedded_text_asset(
         "${root}/src/components/terminal/terminal.mjs" "${root}/include/system/TerminalModuleData.hpp"
         TerminalModuleData TerminalModuleAssetFresh)
+    # Browser side of the wf tool manager (include/system/ToolManagerFS.hpp).
+    _webfront_add_embedded_text_asset(
+        "${root}/src/components/tools/wf.mjs" "${root}/include/system/ToolManagerModuleData.hpp"
+        ToolManagerModuleData ToolManagerModuleAssetFresh)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/xterm.mjs" "${root}/include/system/XtermModuleData.hpp"
         XtermModuleData XtermModuleAssetFresh)
@@ -58,9 +60,4 @@ function(webfront_add_embedded_assets)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/addon-fit.mjs" "${root}/include/system/XtermFitAddonData.hpp"
         XtermFitAddonData XtermFitAddonAssetFresh)
-
-    # wf tool manager (include/components/ToolManager.hpp), served by include/system/PackageFS.hpp.
-    _webfront_add_embedded_text_asset(
-        "${root}/src/components/tools/wf.mjs" "${root}/include/system/ToolManagerModuleData.hpp"
-        ToolManagerModuleData ToolManagerModuleAssetFresh)
 endfunction()

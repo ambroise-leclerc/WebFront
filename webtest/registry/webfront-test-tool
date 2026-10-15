@@ -1,0 +1,16 @@
+{
+  "name": "webfront-test-tool",
+  "dist-tags": {
+    "latest": "1.0.0"
+  },
+  "versions": {
+    "1.0.0": {
+      "name": "webfront-test-tool",
+      "version": "1.0.0",
+      "dist": {
+        "tarball": "tarballs/webfront-test-tool-1.0.0.tgz",
+        "integrity": "sha512-WA/PcGQdG7416UoBzMF+yoZyiE37RiTyqgw8Aj5AaJWkEU/rXHvfTYM4X/0BGRWHQCxRSJKlE7MKgsJvih/t2w=="
+      }
+    }
+  }
+}

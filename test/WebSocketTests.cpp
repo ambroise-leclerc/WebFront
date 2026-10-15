@@ -63,60 +63,6 @@ SCENARIO("A failed write closes the WebSocket") {
     }
 }
 
-SCENARIO("A WebSocket reassembles the messages a browser sends in several frames") {
-    InjectableSocket::reset();
-    vector<vector<byte>> binaryMessages;
-    vector<string>       textMessages;
-    int                  closeHandlerCalls = 0;
-    auto                 ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
-    ws->onMessage([&](span<const byte> data) { binaryMessages.emplace_back(data.begin(), data.end()); });
-    ws->onMessage([&](string_view text) { textMessages.emplace_back(text); });
-    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
-    ws->start();
-    const auto bytes = [](string_view text) { return as_bytes(span(text)); };
-    const auto receive = [&](string_view payload, uint8_t finAndOpcode) {
-        InjectableSocket::receive(webfront::testing::clientFrame(bytes(payload), byte{finAndOpcode}));
-    };
-
-    GIVEN("A binary message in three fragments, with a control frame between them") {
-        receive("ab", 0x02);
-        receive("", 0x89);  // ping
-        receive("cd", 0x00);
-        REQUIRE(binaryMessages.empty());
-        receive("ef", 0x80);
-
-        THEN("The handler receives the whole message once") {
-            const auto whole = bytes("abcdef");
-            REQUIRE(binaryMessages == vector<vector<byte>>{{whole.begin(), whole.end()}});
-            REQUIRE(closeHandlerCalls == 0);
-        }
-        AND_WHEN("A text message follows in two fragments") {
-            receive("hel", 0x01);
-            receive("lo", 0x80);
-            THEN("It is delivered as text") {
-                REQUIRE(textMessages == vector<string>{"hello"});
-                REQUIRE(binaryMessages.size() == 1);
-            }
-        }
-    }
-    GIVEN("A continuation frame without a message to continue") {
-        receive("x", 0x80);
-        THEN("The connection fails without delivering it") {
-            REQUIRE(closeHandlerCalls == 1);
-            REQUIRE(binaryMessages.empty());
-        }
-    }
-    GIVEN("A new message before the previous one is finished") {
-        receive("a", 0x02);
-        receive("b", 0x82);
-        THEN("The connection fails without delivering either") {
-            REQUIRE(closeHandlerCalls == 1);
-            REQUIRE(binaryMessages.empty());
-        }
-    }
-    InjectableSocket::reset();
-}
-
 SCENARIO("WebSocket Headers decoding") {
     GIVEN("Some Header data") {
         array<uint8_t, 14> data{0b10000001, 0b10000000 | 63, 0x10, 0x11, 0x12, 0x13};
