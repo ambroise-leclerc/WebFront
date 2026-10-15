@@ -47,6 +47,10 @@ function(webfront_add_embedded_assets)
     _webfront_add_embedded_text_asset(
         "${root}/src/components/terminal/terminal.mjs" "${root}/include/system/TerminalModuleData.hpp"
         TerminalModuleData TerminalModuleAssetFresh)
+    # Browser side of the wf tool manager (include/system/ToolManagerFS.hpp).
+    _webfront_add_embedded_text_asset(
+        "${root}/src/components/tools/wf.mjs" "${root}/include/system/ToolManagerModuleData.hpp"
+        ToolManagerModuleData ToolManagerModuleAssetFresh)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/xterm.mjs" "${root}/include/system/XtermModuleData.hpp"
         XtermModuleData XtermModuleAssetFresh)

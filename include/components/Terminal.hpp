@@ -195,6 +195,29 @@ public:
         return candidates;
     }
 
+    /// Adds a browser module that the terminal page imports when it starts (see Terminal::extension).
+    /// Throws std::invalid_argument if the URL is empty or contains a line break; adding a URL twice
+    /// has no effect.
+    void extension(std::string moduleUrl) {
+        if (moduleUrl.empty() || moduleUrl.find_first_of("\r\n") != std::string::npos)
+            throw std::invalid_argument("Invalid terminal extension URL '" + moduleUrl + "'");
+        std::scoped_lock lock{mutex};
+        if (std::ranges::find(extensionUrls, moduleUrl) == extensionUrls.end())
+            extensionUrls.push_back(std::move(moduleUrl));
+    }
+
+    /// The URLs of the browser modules, in the order they were added, separated by "\n".
+    [[nodiscard]] std::string extensions() const {
+        std::scoped_lock lock{mutex};
+        std::string      urls;
+        for (const auto& url : extensionUrls) {
+            if (!urls.empty())
+                urls += '\n';
+            urls += url;
+        }
+        return urls;
+    }
+
     /// Lists every command with its help text, aligned, one per line.
     [[nodiscard]] std::string help() const {
         std::scoped_lock lock{mutex};
@@ -218,6 +241,7 @@ private:
 
     mutable std::mutex                          mutex;
     std::map<std::string, Command, std::less<>> commands;
+    std::vector<std::string>                    extensionUrls;
 
     // Messages may quote the user's line, so they are capped like command output, before the
     // color codes are added so the closing reset always survives.
@@ -270,7 +294,7 @@ using TerminalApp = BasicWF<NetProvider, fs::DefaultFSWith<fs::TerminalFS>>;
 /// Gives an application a command-line interface in the browser.
 ///
 /// The constructor registers the JavaScript-callable functions webfront.terminal.prompt, .banner,
-/// .run and .complete on the application, plus a built-in 'help' command. The registered functions
+/// .run, .complete and .extensions on the application, plus a built-in 'help' command. The registered functions
 /// own the command registry, so a Terminal object may be destroyed before the application; commands
 /// can only be added through a live Terminal. The application's filesystem must serve
 /// fs::TerminalFS (TerminalApp does).
@@ -302,6 +326,9 @@ public:
         app.template cppFunction<std::string, std::string>("webfront.terminal.complete", [registry = shell](const std::string& line) {
             return registry->complete(line);
         });
+        app.template cppFunction<std::string>("webfront.terminal.extensions", [registry = shell] {
+            return registry->extensions();
+        });
     }
 
     /// Registers a command; see terminal::adaptHandler for the accepted handler shapes and
@@ -309,6 +336,17 @@ public:
     template <typename Function>
     Terminal& command(std::string name, std::string help, Function&& handler) {
         shell->command(std::move(name), std::move(help), terminal::adaptHandler(std::forward<Function>(handler)));
+        return *this;
+    }
+
+    /// Adds a browser module that the terminal page imports before showing the prompt, such as
+    /// "/webfront/components/tools/wf.mjs". The module may export `commands`, an object mapping a
+    /// command name to `async (args, context) => output`, run in the browser before the line reaches
+    /// C++. `args` are the words after the command name, split like in C++; `context` holds `line`,
+    /// `bridge`, `write(text)` (progress output) and `runInCpp()` (the C++ output of the line). A
+    /// handler returning undefined lets C++ run the line. See terminal.mjs.
+    Terminal& extension(std::string moduleUrl) {
+        shell->extension(std::move(moduleUrl));
         return *this;
     }
 
