@@ -88,7 +88,7 @@ terminal.command("greet", "Greet someone", [](webfront::CommandArgs args) {
 app.show(terminal.page);
 ```
 
-A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the planned `wf` tool manager.
+A command's return value (or what it writes to a `std::ostream&` parameter) is printed; an exception is shown as an error. `help` and `clear` are built in. Output appears when the command finishes: there is no streaming or interruption yet. A command can instead return a `webfront::BrowserCommand` to continue in a browser module, for work such as HTTPS downloads. See [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md) for the component architecture and the planned `wf` tool manager.
 
 ```bash
 ./src/WebFrontTerminal
