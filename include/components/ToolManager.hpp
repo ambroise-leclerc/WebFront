@@ -12,16 +12,24 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace webfront {
 
 /// Application type serving the terminal page and the installed tools next to the default assets.
 using ToolsApp = BasicWF<NetProvider, fs::DefaultFSWith<fs::TerminalFS, fs::PackageFS>>;
+
+struct ToolManagerOptions {
+    /// npm registry that 'wf search' and 'wf install' query from the browser: an absolute URL, or a
+    /// path on the application's origin (used by the tests' local registry).
+    std::string registry = "https://registry.npmjs.org";
+};
 
 namespace tools::detail {
 
@@ -61,8 +69,49 @@ inline void requireArguments(CommandArgs args, std::size_t count) {
 }
 
 inline void usage(std::ostream& output) {
-    output << "wf list              List the installed tools\n"
-              "wf remove <package>  Uninstall a tool";
+    output << "wf search [<term>...]               Search the registry for tools\n"
+              "wf install <package>[@<version>]  Download, verify and install a tool\n"
+              "wf list                           List the installed tools\n"
+              "wf open <package>                 Open a tool in a new tab or window\n"
+              "wf remove <package>               Uninstall a tool";
+}
+
+/// Splits "name[@version]"; a scoped name starts with '@'. The name is validated, the version is
+/// left to the registry since it may be a tag such as "latest".
+inline std::pair<std::string, std::string> splitSpec(std::string_view spec) {
+    const auto at      = spec.find('@', 1);
+    auto       name    = std::string(spec.substr(0, at));
+    auto       version = at == std::string_view::npos ? std::string{} : std::string(spec.substr(at + 1));
+    fs::tools::validatePackageName(name);
+    if (at != std::string_view::npos && version.empty())
+        throw std::invalid_argument("Missing version after '@' in '" + std::string(spec) + "'");
+    return {std::move(name), std::move(version)};
+}
+
+/// The browser part of 'wf search', 'wf install' and 'wf open' (src/components/tools/wf.mjs).
+inline BrowserCommand inBrowser(std::vector<std::string> args) {
+    return {std::string(fs::PackageFS::toolManagerModule), std::move(args)};
+}
+
+inline BrowserCommand searchTools(const std::string& registry, CommandArgs args) {
+    std::string term;
+    for (const auto& word : args.subspan(1))
+        term += (term.empty() ? "" : " ") + word;
+    return inBrowser({"search", registry, std::move(term)});
+}
+
+inline BrowserCommand installTool(const std::string& registry, CommandArgs args) {
+    requireArguments(args, 2);
+    auto [name, version] = splitSpec(args[1]);
+    return inBrowser({"install", registry, std::move(name), std::move(version)});
+}
+
+inline BrowserCommand openTool(const fs::ToolStore& store, CommandArgs args) {
+    requireArguments(args, 2);
+    const auto record = store.find(args[1]);
+    if (!record)
+        throw std::invalid_argument(args[1] + " is not installed");
+    return inBrowser({"open", fs::PackageFS::url(record->name, record->entry)});
 }
 
 inline void removeTool(fs::ToolStore& store, CommandArgs args, std::ostream& output) {
@@ -90,20 +139,31 @@ inline void listTools(const fs::ToolStore& store, CommandArgs args, std::ostream
     }
 }
 
-inline void runWf(fs::ToolStore& store, CommandArgs args, std::ostream& output) {
+inline std::optional<BrowserCommand> runWf(fs::ToolStore& store, const std::string& registry, CommandArgs args, std::ostream& output) {
     const std::string_view command = args.empty() ? "help" : std::string_view(args[0]);
+    if (command == "search")
+        return searchTools(registry, args);
+    if (command == "install")
+        return installTool(registry, args);
+    if (command == "open")
+        return openTool(store, args);
     if (command == "help")
-        return usage(output);
-    if (command == "list")
-        return listTools(store, args, output);
-    if (command == "remove")
-        return removeTool(store, args, output);
-    throw std::invalid_argument("Unknown wf command '" + std::string(command) + "'. Type 'wf help'.");
+        usage(output);
+    else if (command == "list")
+        listTools(store, args, output);
+    else if (command == "remove")
+        removeTool(store, args, output);
+    else
+        throw std::invalid_argument("Unknown wf command '" + std::string(command) + "'. Type 'wf help'.");
+    return std::nullopt;
 }
 
 }  // namespace tools::detail
 
-/// Adds the 'wf' command to a terminal and the bridge functions the page uses to install tools:
+/// Adds the 'wf' command to a terminal and the bridge functions the page uses to install tools.
+/// 'wf search', 'wf install' and 'wf open' continue in the browser module
+/// /webfront/components/tools/wf.mjs, which PackageFS serves, and which downloads from
+/// options.registry. It calls:
 ///   webfront.pkg.begin(name, version)
 ///   webfront.pkg.writeFile(name, version, path, offset, Uint8Array)
 ///   webfront.pkg.commit(name, version, integrity, entry, title)
@@ -121,7 +181,7 @@ class ToolManager {
 public:
     using PackageFS = fs::BasicPackageFS<Location>;
 
-    ToolManager(App& app, Terminal<App>& terminal) : toolStore(std::make_shared<fs::ToolStore>(Location::get())) {
+    ToolManager(App& app, Terminal<App>& terminal, ToolManagerOptions options = {}) : toolStore(std::make_shared<fs::ToolStore>(Location::get())) {
         app.template cppFunction<void, std::string, std::string>("webfront.pkg.begin",
                                                                  [registry = toolStore](const std::string& name, const std::string& packageVersion) {
                                                                      registry->begin(name, packageVersion);
@@ -147,9 +207,11 @@ public:
         app.template cppFunction<std::string, double>("webfront.pkg.list", [registry = toolStore](double first) {
             return tools::detail::listPage(*registry, tools::detail::toIndex(first));
         });
-        terminal.command("wf", "Manage web tools: wf list | wf remove <package>", [registry = toolStore](CommandArgs args, std::ostream& output) {
-            tools::detail::runWf(*registry, args, output);
-        });
+        terminal.command("wf",
+                         "Manage web tools: wf search | install | list | open | remove",
+                         [registry = toolStore, npm = std::move(options.registry)](CommandArgs args, std::ostream& output) {
+                             return tools::detail::runWf(*registry, npm, args, output);
+                         });
     }
 
     [[nodiscard]] fs::ToolStore& store() {
@@ -161,6 +223,6 @@ private:
 };
 
 template <typename App>
-ToolManager(App&, Terminal<App>&) -> ToolManager<App>;
+ToolManager(App&, Terminal<App>&, ToolManagerOptions = {}) -> ToolManager<App>;
 
 }  // namespace webfront

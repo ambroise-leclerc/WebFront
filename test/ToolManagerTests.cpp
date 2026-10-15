@@ -51,8 +51,11 @@ struct RecordingApp {
         return any_cast<std::function<R(Args...)>&>(functions.at(name))(std::move(args)...);
     }
 
+    tuple<string, string, string> runLine(const string& line) {
+        return call<tuple<string, string, string>, string>("webfront.terminal.run", line);
+    }
     string run(const string& line) {
-        return get<0>(call<tuple<string, string, string>, string>("webfront.terminal.run", line));
+        return get<0>(runLine(line));
     }
 };
 
@@ -177,7 +180,8 @@ SCENARIO("The tool manager rejects malformed calls and commands") {
                     invalid_argument);
         }
         THEN("wf documents itself and rejects malformed commands") {
-            REQUIRE(contains(app.run("help"), "Manage web tools: wf list"));
+            REQUIRE(contains(app.run("help"), "Manage web tools: wf search | install | list | open | remove"));
+            REQUIRE(contains(app.run("wf"), "wf install <package>[@<version>]"));
             REQUIRE(contains(app.run("wf"), "wf remove <package>"));
             REQUIRE(app.run("wf help") == app.run("wf"));
             REQUIRE_THROWS_AS(app.run("wf frobnicate"), invalid_argument);
@@ -186,6 +190,13 @@ SCENARIO("The tool manager rejects malformed calls and commands") {
             REQUIRE_THROWS_AS(app.run("wf list all"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove plot"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove ../x"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf install"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf install a b"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf install Plot"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf install ../x"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf install plot@"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf open"), invalid_argument);
+            REQUIRE_THROWS_AS(app.run("wf open plot"), invalid_argument);
         }
     }
 }
@@ -277,6 +288,53 @@ SCENARIO("ToolsApp serves installed tools after the protected bridge script") {
         }
         THEN("an unknown tool falls through to the next providers") {
             REQUIRE_FALSE(files.open("webfront/tools/none/index.html"));
+        }
+    }
+}
+
+SCENARIO("wf search, install and open continue in the tool manager's browser module") {
+    GIVEN("a tool manager with a local registry and one installed tool") {
+        TemporaryDirectory project;
+        TestProject::directory = project.path();
+        RecordingApp                           app;
+        Terminal                               terminal{app};
+        ToolManager<RecordingApp, TestProject> manager{app, terminal, {.registry = "/registry"}};
+        manager.store().begin("@acme/plot", "1.2.0");
+        manager.store().write("@acme/plot", "1.2.0", {.path = "dist/main page.html", .bytes = bytes("<p>")});
+        manager.store().commit({.name = "@acme/plot", .version = "1.2.0", .integrity = "sha512-abc", .entry = "dist/main page.html", .title = "Plot"});
+        const string module{fs::PackageFS::toolManagerModule};
+
+        THEN("wf search passes the registry and the joined term") {
+            REQUIRE(app.runLine("wf search live  plot") == tuple<string, string, string>{"", module, "search\0/registry\0live plot\0"s});
+            REQUIRE(app.runLine("wf search") == tuple<string, string, string>{"", module, "search\0/registry\0\0"s});
+        }
+        THEN("wf install passes the registry, the name and the requested version") {
+            REQUIRE(get<2>(app.runLine("wf install @acme/plot@2.0.0")) == "install\0/registry\0@acme/plot\0002.0.0\0"s);
+            REQUIRE(get<2>(app.runLine("wf install plot@next")) == "install\0/registry\0plot\0next\0"s);
+            REQUIRE(get<2>(app.runLine("wf install @acme/plot")) == "install\0/registry\0@acme/plot\0\0"s);
+        }
+        THEN("wf open passes the encoded URL of the installed tool's entry") {
+            REQUIRE(app.runLine("wf open @acme/plot")
+                    == tuple<string, string, string>{"", module, "open\0/webfront/tools/@acme/plot/dist/main%20page.html\0"s});
+        }
+    }
+}
+
+SCENARIO("PackageFS serves the tool manager's browser module") {
+    GIVEN("a PackageFS without installed tools") {
+        TemporaryDirectory project;
+        TestProject::directory = project.path();
+        TestPackageFS packages{"ignored"};
+        THEN("the module is served at its absolute path") {
+            const string path{fs::PackageFS::toolManagerModule};
+            auto         module = packages.open(path);
+            REQUIRE(module);
+            REQUIRE(packages.open(path.substr(1)));
+            string            content;
+            array<char, 4096> buffer{};
+            while (const auto bytesRead = module->read(buffer))
+                content.append(buffer.data(), bytesRead);
+            REQUIRE(contains(content, "export async function run("));
         }
     }
 }
