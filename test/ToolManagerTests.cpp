@@ -1,5 +1,6 @@
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <components/ToolManager.hpp>
 #include <http/Encodings.hpp>
 #include <http/HTTPServer.hpp>
@@ -176,8 +177,9 @@ SCENARIO("The tool manager rejects malformed calls and commands") {
                     invalid_argument);
         }
         THEN("wf documents itself and rejects malformed commands") {
-            REQUIRE(contains(app.run("help"), "Manage web tools: wf list"));
-            REQUIRE(contains(app.run("wf"), "wf remove <package>"));
+            REQUIRE(contains(app.run("help"), "Manage web tools: wf search | install | list | open | remove"));
+            for (const auto* command : {"wf search [term]", "wf install <package>[@version]", "wf list", "wf open <package>", "wf remove <package>"})
+                REQUIRE(contains(app.run("wf"), command));
             REQUIRE(app.run("wf help") == app.run("wf"));
             REQUIRE_THROWS_AS(app.run("wf frobnicate"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove"), invalid_argument);
@@ -185,6 +187,27 @@ SCENARIO("The tool manager rejects malformed calls and commands") {
             REQUIRE_THROWS_AS(app.run("wf list all"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove plot"), invalid_argument);
             REQUIRE_THROWS_AS(app.run("wf remove ../x"), invalid_argument);
+        }
+        THEN("the commands of the page explain that it did not load its module when they reach C++") {
+            for (const auto* line : {"wf search", "wf install plot", "wf open plot"})
+                REQUIRE_THROWS_WITH(app.run(line), Catch::Matchers::ContainsSubstring("webfront/components/tools/wf.mjs"));
+        }
+        THEN("the terminal page loads the browser module and reads the default registry") {
+            REQUIRE(app.call<string>("webfront.terminal.extensions") == "/webfront/components/tools/wf.mjs");
+            REQUIRE(app.call<string>("webfront.pkg.registry") == "https://registry.npmjs.org/");
+        }
+    }
+}
+
+SCENARIO("The registry of the tool manager is configurable") {
+    GIVEN("a tool manager with a local registry") {
+        TemporaryDirectory project;
+        TestProject::directory = project.path();
+        RecordingApp                           app;
+        Terminal                               terminal{app};
+        ToolManager<RecordingApp, TestProject> manager{app, terminal, {.registry = "/registry/"}};
+        THEN("the page reads it") {
+            REQUIRE(app.call<string>("webfront.pkg.registry") == "/registry/");
         }
     }
 }
@@ -268,10 +291,12 @@ SCENARIO("PackageFS serves only the files of installed tools") {
 
 SCENARIO("ToolsApp serves installed tools after the protected bridge script") {
     GIVEN("the filesystem of ToolsApp") {
-        fs::DefaultFSWith<fs::TerminalFS, fs::PackageFS> files{""};
-        THEN("the bridge script, the terminal and the fallback page are still served") {
+        fs::DefaultFSWith<fs::TerminalFS, fs::ToolManagerFS, fs::PackageFS> files{""};
+        THEN("the bridge script, the terminal, the tool manager module and the fallback page are served") {
             REQUIRE(files.open("WebFront.js"));
             REQUIRE(files.open(fs::TerminalFS::page));
+            REQUIRE(files.open(fs::ToolManagerFS::module));
+            REQUIRE_FALSE(files.open(string(fs::ToolManagerFS::prefix) + "other.mjs"));
             REQUIRE(files.open("index.html"));
         }
         THEN("an unknown tool falls through to the next providers") {

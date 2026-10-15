@@ -243,6 +243,20 @@ SCENARIO("Terminal registers its bridge functions and built-in commands on the a
         THEN("a duplicate command is rejected") {
             REQUIRE_THROWS_AS(terminal->command("help", "again", [] {}), invalid_argument);
         }
+        THEN("the page lists no extension module by default") {
+            REQUIRE(app.nullary.at("webfront.terminal.extensions")().empty());
+        }
+        WHEN("extension modules are added, one of them twice") {
+            terminal->extension("/a.mjs").extension("/b/c.mjs").extension("/a.mjs");
+            THEN("the page lists each once, in order") {
+                REQUIRE(app.nullary.at("webfront.terminal.extensions")() == "/a.mjs\n/b/c.mjs");
+            }
+        }
+        THEN("an empty or multi-line extension URL is rejected") {
+            auto url = GENERATE(string{}, string{"/a.mjs\n/b.mjs"}, string{"/a.mjs\r"});
+            REQUIRE_THROWS_AS(terminal->extension(url), invalid_argument);
+            REQUIRE(app.nullary.at("webfront.terminal.extensions")().empty());
+        }
         WHEN("the Terminal object is destroyed") {
             terminal.reset();
             THEN("the registered functions still own the commands") {
