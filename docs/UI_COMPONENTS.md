@@ -1,7 +1,8 @@
 # UI components
 
 Status: design note, 2026-10-14. Stage 1 (the terminal component, #230) is implemented. Stage 2
-(the `wf` tool manager, #234) is designed here but not implemented.
+(the `wf` tool manager, #234) is designed here; its C++ side (storage, lock file, serving, `wf list`
+and `wf remove`) is implemented, its browser side (`wf search`, `wf install`, `wf open`) is not yet.
 
 WebFront's core is a server and a bridge. A *UI component* is a reusable piece of browser UI with a
 C++ façade, packaged so that an application gets it from a header include. The first component is an
@@ -132,7 +133,7 @@ registry.
 | `wf install <pkg>[@version]` | Download, verify, unpack, store, record in the lock file |
 | `wf list` | Installed tools with version and title |
 | `wf remove <pkg>` | Delete the tool's files and lock entry |
-| `wf open <pkg>` | Open `tools/<pkg>/<entry>` in a new tab or window |
+| `wf open <pkg>` | Open `webfront/tools/<pkg>/<entry>` in a new tab or window |
 
 ### Installation flow
 
@@ -144,14 +145,66 @@ header-only C++ library.
 2. It downloads the tarball, then checks `dist.integrity` (SHA-512) with `crypto.subtle`.
 3. It gunzips with `DecompressionStream("gzip")` and reads the archive with a small ustar reader
    (about 60 lines).
-4. For each file it calls `webfront.pkg.writeFile(pkg, version, path, Uint8Array)`. Files are sent
-   in chunks to stay under the bridge's frame limits; typed arrays already cross the bridge.
-   Progress is shown in the browser, so no C++ push is needed.
-5. C++ rejects absolute paths and `..` components, writes under
-   `<project>/.webfront/tools/<pkg>@<version>/`, and updates `webfront-tools.lock.json` (name,
-   version, integrity, entry) after the last file. The project directory is configurable.
-6. A new `fs::PackageFS` serves `tools/<pkg>/…` from the installed versions recorded in the lock
-   file.
+4. It calls `webfront.pkg.begin(pkg, version)`, then for each file
+   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)`. Files are sent in chunks to
+   stay under the bridge's frame limits; typed arrays already cross the bridge. Progress is shown in
+   the browser, so no C++ push is needed.
+5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes, and the characters Windows forbids in file names, and a chunk
+   whose offset does not follow the bytes already written. Files are staged under
+   `<project>/.webfront/tools/.staging/`, in a directory of their own for each installation in
+   progress, so versions differing only by case never share staged files.
+6. `webfront.pkg.commit(pkg, version, integrity, entry, title)` checks that the entry page was
+   written, moves the staged files to `<project>/.webfront/tools/<pkg>@<version>/`, replacing any
+   installed version, and records the tool in `<project>/webfront-tools.lock.json`. A failed or
+   abandoned installation leaves the installed version untouched.
+7. `fs::PackageFS` serves `webfront/tools/<pkg>/…` from the versions recorded in the lock file,
+   which it reads on each request. The prefix stays inside the reserved `webfront/` namespace, so a
+   tool never collides with the application's pages.
+
+### C++ side (implemented)
+
+```cpp
+#include <components/ToolManager.hpp>
+
+webfront::ToolsApp app;  // DefaultFSWith<TerminalFS, PackageFS>
+webfront::Terminal terminal{app};
+webfront::ToolManager tools{app, terminal};  // adds 'wf' and the webfront.pkg.* functions
+```
+
+- `fs::ToolStore` (`include/system/ToolStore.hpp`, with the small JSON reader of `include/utils/Json.hpp`) validates npm names (`@scope/` allowed),
+  versions and paths, stages and commits installations, and reads and writes the lock file through
+  a temporary file renamed over it. The lock file is read strictly, and a record whose name,
+  version or entry could leave the tools directory is rejected. Names, versions and paths may not
+  contain `..` anywhere, because the HTTP server rejects such URLs, and titles and integrities may not
+  contain control characters, which would break the `webfront.pkg.list()` format, nor exceed 1024
+  bytes, so that every line fits in a list page. Stores of the same project share one lock and one
+  set of pending installations within the process; versions differing only by case, which name the
+  same directory on a case-insensitive volume, replace each other without losing files. Once the lock file
+  is written, a directory that cannot be deleted is left behind instead of failing the operation.
+- `fs::BasicPackageFS<Location>` (`include/system/PackageFS.hpp`) takes the project directory from
+  `Location::get()`; `fs::PackageFS` uses the working directory at startup (`fs::CurrentDirectory`).
+  `ToolManager<App, Location>` must use the same `Location`.
+- `webfront.pkg.list(first)` returns the `name\tversion\tentry URL\ttitle` lines of the tools from
+  index `first`, as many as fit below the bridge's string limit, for `wf open`; the page calls it again
+  from the next index until it gets an empty string. The URL is absolute and percent-encoded, so every accepted file name reaches `PackageFS`.
+- The registered functions share ownership of the store, so a `ToolManager` may be destroyed before
+  the application.
+
+The lock file is meant to be committed with the project, the `.webfront/` directory is not:
+
+```json
+{
+  "lockfileVersion": 1,
+  "tools": {
+    "@acme/webfront-plot": {
+      "version": "1.2.0",
+      "integrity": "sha512-…",
+      "entry": "dist/index.html",
+      "title": "Live plot"
+    }
+  }
+}
+```
 
 ### Security
 
