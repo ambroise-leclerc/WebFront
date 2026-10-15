@@ -8,6 +8,7 @@
 #include "Terminal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -69,7 +70,7 @@ inline void requireArguments(CommandArgs args, std::size_t count) {
         throw std::invalid_argument("Wrong number of arguments. Type 'wf help'.");
 }
 
-inline void usage(std::ostream& output) {
+inline void usage(fs::ToolStore&, CommandArgs, std::ostream& output) {
     output << "wf search [term]                Search the registry for web tools\n"
               "wf install <package>[@version]  Download, verify and install a tool\n"
               "wf list                         List the installed tools\n"
@@ -91,7 +92,7 @@ inline void removeTool(fs::ToolStore& store, CommandArgs args, std::ostream& out
     output << "Removed " << args[1] << ".";
 }
 
-inline void listTools(const fs::ToolStore& store, CommandArgs args, std::ostream& output) {
+inline void listTools(fs::ToolStore& store, CommandArgs args, std::ostream& output) {
     requireArguments(args, 1);
     const auto installed = store.installed();
     if (installed.empty()) {
@@ -109,15 +110,24 @@ inline void listTools(const fs::ToolStore& store, CommandArgs args, std::ostream
     }
 }
 
+struct WfCommand {
+    std::string_view name;
+    void (*run)(fs::ToolStore&, CommandArgs, std::ostream&);
+};
+
+// The subcommands running in C++; the page runs the others (browserCommands).
+inline constexpr std::array<WfCommand, 3> wfCommands{
+    WfCommand{  "help",      &usage},
+    WfCommand{  "list",  &listTools},
+    WfCommand{"remove", &removeTool},
+};
+inline constexpr std::array<std::string_view, 3> browserCommands{"search", "install", "open"};
+
 inline void runWf(fs::ToolStore& store, CommandArgs args, std::ostream& output) {
     const std::string_view command = args.empty() ? "help" : std::string_view(args[0]);
-    if (command == "help")
-        return usage(output);
-    if (command == "list")
-        return listTools(store, args, output);
-    if (command == "remove")
-        return removeTool(store, args, output);
-    if (command == "search" || command == "install" || command == "open")
+    if (const auto found = std::ranges::find(wfCommands, command, &WfCommand::name); found != wfCommands.end())
+        return found->run(store, args, output);
+    if (std::ranges::find(browserCommands, command) != browserCommands.end())
         return browserOnly(command);
     throw std::invalid_argument("Unknown wf command '" + std::string(command) + "'. Type 'wf help'.");
 }
