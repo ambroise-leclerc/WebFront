@@ -394,6 +394,40 @@ SCENARIO("A tool store keeps the installed version when a replacement does not c
     }
 }
 
+SCENARIO("Installations of versions differing only by case do not share their staged files") {
+    GIVEN("a project") {
+        TemporaryDirectory project;
+        fs::ToolStore      store{project.path()};
+        const auto         stage = [&store](const fs::ToolRecord& record, string_view page) {
+            store.begin(record.name, record.version);
+            store.write(record.name, record.version, {.path = record.entry, .offset = 0, .bytes = bytes(page)});
+        };
+
+        WHEN("the installations of 1.2.0-alpha and 1.2.0-Alpha are interleaved") {
+            stage(plotRecord("1.2.0-alpha"), "<p>alpha</p>");
+            stage(plotRecord("1.2.0-Alpha"), "<p>Alpha</p>");
+            THEN("each commit installs the files written for its own version") {
+                store.commit(plotRecord("1.2.0-alpha"));
+                REQUIRE(store.find("@acme/plot")->version == "1.2.0-alpha");
+                REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0-alpha") / "dist" / "index.html") == "<p>alpha</p>");
+                store.commit(plotRecord("1.2.0-Alpha"));
+                REQUIRE(store.find("@acme/plot")->version == "1.2.0-Alpha");
+                REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0-Alpha") / "dist" / "index.html") == "<p>Alpha</p>");
+            }
+        }
+        WHEN("an installation is restarted while another case variant is staged") {
+            stage(plotRecord("1.2.0-alpha"), "<p>alpha</p>");
+            stage(plotRecord("1.2.0-Alpha"), "<p>Alpha</p>");
+            store.begin("@acme/plot", "1.2.0-Alpha");
+            THEN("only the restarted installation loses its staged files") {
+                REQUIRE_THROWS_AS(store.commit(plotRecord("1.2.0-Alpha")), invalid_argument);
+                store.commit(plotRecord("1.2.0-alpha"));
+                REQUIRE(contentOf(store.installDir("@acme/plot", "1.2.0-alpha") / "dist" / "index.html") == "<p>alpha</p>");
+            }
+        }
+    }
+}
+
 SCENARIO("Stores of the same project share their transactions") {
     GIVEN("two stores of one project") {
         TemporaryDirectory project;

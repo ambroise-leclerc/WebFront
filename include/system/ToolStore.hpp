@@ -18,7 +18,6 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -174,8 +173,12 @@ inline void validateRecord(const ToolRecord& record) {
 
 /// What the stores of one project directory share within the process.
 struct ProjectState {
-    std::mutex            mutex;
-    std::set<std::string> pending;
+    std::mutex mutex;
+    /// Staging subdirectory of each installation in progress, by exact "<name>@<version>". Numbered
+    /// rather than named after the key, so versions differing only by case never share a directory
+    /// on a case-insensitive volume.
+    std::map<std::string, std::string, std::less<>> pending;
+    std::uint64_t                                   nextStaging = 0;
 };
 
 /// Returns the state of a project directory, the same for every store of that directory in the
@@ -296,8 +299,14 @@ public:
         tools::validatePackageName(name);
         tools::validateVersion(version);
         std::scoped_lock lock{state->mutex};
-        std::filesystem::remove_all(stagingDir(name, version));
-        state->pending.insert(key(name, version));
+        // With no installation in progress, whatever is staged was abandoned by an earlier process.
+        if (state->pending.empty())
+            std::filesystem::remove_all(stagingRoot());
+        auto& staging = state->pending[key(name, version)];
+        if (!staging.empty())
+            std::filesystem::remove_all(stagingRoot() / staging);
+        staging = std::to_string(state->nextStaging++);
+        std::filesystem::remove_all(stagingRoot() / staging);
     }
 
     /// Writes a chunk of a staged file. Offset 0 creates or truncates the file; any other offset must
@@ -305,8 +314,7 @@ public:
     void write(std::string_view name, std::string_view version, const FileChunk& chunk) {
         const auto       relative = tools::safeRelativePath(chunk.path);
         std::scoped_lock lock{state->mutex};
-        requirePending(name, version);
-        const auto target = stagingDir(name, version) / relative;
+        const auto       target = stagingDir(name, version) / relative;
         if (chunk.offset != 0)
             requireWritten(target, chunk);
         std::filesystem::create_directories(target.parent_path());
@@ -321,8 +329,7 @@ public:
     void commit(const ToolRecord& record) {
         tools::detail::validateRecord(record);
         std::scoped_lock lock{state->mutex};
-        requirePending(record.name, record.version);
-        const auto staged = stagingDir(record.name, record.version);
+        const auto       staged = stagingDir(record.name, record.version);
         if (!std::filesystem::is_regular_file(staged / tools::safeRelativePath(record.entry)))
             throw std::invalid_argument("Entry page '" + record.entry + "' of " + record.name + " was not written");
 
@@ -375,8 +382,16 @@ private:
         return std::string(name) + "@" + std::string(version);
     }
 
+    [[nodiscard]] std::filesystem::path stagingRoot() const {
+        return toolsDir() / ".staging";
+    }
+
+    // Requires the installation to be in progress; called with the mutex held.
     [[nodiscard]] std::filesystem::path stagingDir(std::string_view name, std::string_view version) const {
-        return toolsDir() / ".staging" / tools::detail::fromUtf8(key(name, version));
+        const auto found = state->pending.find(key(name, version));
+        if (found == state->pending.end())
+            throw std::invalid_argument("No installation of " + key(name, version) + " in progress");
+        return stagingRoot() / found->second;
     }
 
     static void requireWritten(const std::filesystem::path& target, const FileChunk& chunk) {
@@ -431,11 +446,6 @@ private:
         std::filesystem::remove_all(target, ignored);
         if (replacing)
             std::filesystem::rename(backup, target, ignored);
-    }
-
-    void requirePending(std::string_view name, std::string_view version) const {
-        if (!state->pending.contains(key(name, version)))
-            throw std::invalid_argument("No installation of " + key(name, version) + " in progress");
     }
 
     // Written next to the lock file, then renamed over it, so a reader never sees a partial file.
