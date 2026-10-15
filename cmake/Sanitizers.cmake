@@ -3,7 +3,8 @@ function(enable_sanitizers target)
     option(ENABLE_COVERAGE "Enable coverage reporting for gcc/clang" FALSE)
 
     if(ENABLE_COVERAGE)
-      target_compile_options(${target} INTERFACE --coverage -O0 -g)
+      # The server tests run threads: non-atomic counters can race and give lcov negative counts.
+      target_compile_options(${target} INTERFACE --coverage -fprofile-update=atomic -O0 -g)
       target_link_libraries(${target} INTERFACE --coverage)
     endif()
 

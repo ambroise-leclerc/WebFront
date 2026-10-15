@@ -31,6 +31,10 @@ add_dependencies(WebFrontGreeter WebFrontGreeterAssets)
 add_executable(WebFrontTerminal Terminal.cpp)
 target_link_libraries(WebFrontTerminal PRIVATE WebFront WebFront_warnings WebFront_options)
 
+# wf tool manager demo: install web tools from the npm registry into the working directory
+add_executable(WebFrontTools Tools.cpp)
+target_link_libraries(WebFrontTools PRIVATE WebFront WebFront_warnings WebFront_options)
+
 # Native-module and React demo (src/module-demo.html, src/react.html)
 add_executable(WebFrontApp ModuleDemo.cpp)
 target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_options)
@@ -50,3 +54,4 @@ setup_cef_for_target(HelloWorld)
 setup_cef_for_target(WebFrontGreeter)
 setup_cef_for_target(WebFrontApp)
 setup_cef_for_target(WebFrontTerminal)
+setup_cef_for_target(WebFrontTools)
