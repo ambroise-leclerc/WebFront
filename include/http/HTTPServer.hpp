@@ -255,47 +255,17 @@ public:
     RequestHandler& operator=(RequestHandler&&) = default;
 
     Response handleRequest(Request request) {
-        auto requestUri = uri::decode(request.uri);
-        log::debug("Request uri - raw:'{}' decoded:'{}'", request.uri, requestUri);
-        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
-            return Response::getStatusResponse(Response::badRequest);
-        auto requestPath = std::filesystem::path(requestUri).relative_path();
-        log::debug("  -> requestPath : {}", requestPath.string());
-        //uri::URI verifUri{requestUri};
-        //log::debug("(URI)   -> Path : {}   Query : {}", verifUri.path, verifUri.query);
-        if (!requestPath.has_filename()) requestPath /= "index.html";
+        auto requestPath = filePath(request.uri);
+        if (!requestPath) return Response::getStatusResponse(Response::badRequest);
 
         Response response;
         switch (request.method) {
-        case Request::Method::Get: {
-            if (request.isUpgradeRequest("websocket")) {
-                auto key = request.getHeaderValue("Sec-WebSocket-Key");
-                if (key) {
-                    response.statusCode = Response::StatusCode::switchingProtocols;
-                    response.headers.emplace_back("Upgrade", "websocket");
-                    response.headers.emplace_back("Connection", "Upgrade");
-                    response.headers.emplace_back("Sec-WebSocket-Accept", websocket::getHashedSecKey(key.value()));
-                    response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
-                    return response;
-                }
-            }
-
-            auto file = fs.open(requestPath);
-            if (!file) return Response::getStatusResponse(Response::notFound);
-            if (file->isEncoded()) {
-                if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
-                    log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
-                    return Response::getStatusResponse(Response::variantAlsoNegotiates);
-                }
-            }
-
-            std::array<char, 512> buffer{0, 0};
-            while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
-            if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
-
-        } break;
+        case Request::Method::Get:
+            if (auto upgrade = webSocketUpgrade(request)) return *upgrade;
+            if (auto error = readFile(request, *requestPath, response)) return *error;
+            break;
         case Request::Method::Head:
-            if (!fs.open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            if (!fs.open(*requestPath)) return Response::getStatusResponse(Response::notFound);
             break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
@@ -303,12 +273,58 @@ public:
 
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
+        response.headers.emplace_back("Content-Type", MimeType(requestPath->extension().string()).toString());
 
         return response;
     }
 
 private:
+    // The file a request URI names, or nothing when the URI is not a safe absolute path.
+    static std::optional<std::filesystem::path> filePath(const std::string& uri) {
+        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
+        const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
+        auto       requestUri = uri::decode(rawPath);
+        log::debug("Request uri - raw:'{}' decoded path:'{}'", uri, requestUri);
+        if (!isSafePath(requestUri)) return {};
+        auto requestPath = std::filesystem::path(requestUri).relative_path();
+        log::debug("  -> requestPath : {}", requestPath.string());
+        if (!requestPath.has_filename()) requestPath /= "index.html";
+        return requestPath;
+    }
+
+    static bool isSafePath(std::string_view path) {
+        if (!path.starts_with('/')) return false;
+        return path.find("..") == std::string_view::npos;
+    }
+
+    static std::optional<Response> webSocketUpgrade(const Request& request) {
+        if (!request.isUpgradeRequest("websocket")) return {};
+        auto key = request.getHeaderValue("Sec-WebSocket-Key");
+        if (!key) return {};
+        Response response;
+        response.statusCode = Response::StatusCode::switchingProtocols;
+        response.headers.emplace_back("Upgrade", "websocket");
+        response.headers.emplace_back("Connection", "Upgrade");
+        response.headers.emplace_back("Sec-WebSocket-Accept", websocket::getHashedSecKey(key.value()));
+        response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
+        return response;
+    }
+
+    // Reads the file into the response content, or returns the error response.
+    std::optional<Response> readFile(const Request& request, const std::filesystem::path& requestPath, Response& response) {
+        auto file = fs.open(requestPath);
+        if (!file) return Response::getStatusResponse(Response::notFound);
+        if (file->isEncoded() && !request.headersContain("Accept-Encoding", file->getEncoding())) {
+            log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
+            return Response::getStatusResponse(Response::variantAlsoNegotiates);
+        }
+
+        std::array<char, 512> buffer{0, 0};
+        while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
+        if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
+        return {};
+    }
+
     FS fs;
 };
 

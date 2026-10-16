@@ -6,8 +6,14 @@
 #include "Mocks.hpp"
 #include <system/DefaultFS.hpp>
 
+#include <algorithm>
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace webfront;
 using namespace webfront::http;
@@ -353,5 +359,67 @@ SCENARIO("A failed accept does not stop the server from accepting") {
         http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
 
         THEN("the connection is served") { REQUIRE(UpgradingNet::heldSend.complete); }
+    }
+}
+
+// Serves "index.html", "app.js" and "a?b.txt", and records every path it is asked to open.
+struct RecordingFS {
+    static inline vector<string> opened;
+
+    explicit RecordingFS(filesystem::path) {}
+
+    static optional<fs::File> open(filesystem::path file) {
+        opened.push_back(file.generic_string());
+        static constexpr array<string_view, 3> names{"index.html", "app.js", "a?b.txt"};
+        if (ranges::find(names, file.generic_string()) == names.end())
+            return {};
+        return fs::File{ifstream{}};
+    }
+};
+
+SCENARIO("RequestHandler ignores the query string of a request") {
+    RecordingFS::opened.clear();
+    RequestHandler<Net, RecordingFS> handler{"."};
+    const auto get = [&](string uri, Request::Method method = Request::Method::Get) {
+        Request request;
+        request.method = method;
+        request.uri    = std::move(uri);
+        return handler.handleRequest(request).statusCode;
+    };
+
+    GIVEN("A GET request with a query") {
+        THEN("The file is looked up without it") {
+            REQUIRE(get("/app.js?v=2&debug=1") == Response::ok);
+            REQUIRE(RecordingFS::opened == vector<string>{"app.js"});
+        }
+    }
+    GIVEN("A query on a file that does not exist") {
+        THEN("The request fails with not found") {
+            REQUIRE(get("/missing.js?v=2") == Response::notFound);
+            REQUIRE(RecordingFS::opened == vector<string>{"missing.js"});
+        }
+    }
+    GIVEN("A query on the root") {
+        THEN("The default page is served") {
+            REQUIRE(get("/?x=1") == Response::ok);
+            REQUIRE(RecordingFS::opened == vector<string>{"index.html"});
+        }
+    }
+    GIVEN("A HEAD request with a query") {
+        THEN("The file is found") {
+            REQUIRE(get("/app.js?v=2", Request::Method::Head) == Response::ok);
+        }
+    }
+    GIVEN("A percent-encoded question mark") {
+        THEN("It is part of the file name, not a query") {
+            REQUIRE(get("/a%3Fb.txt") == Response::ok);
+            REQUIRE(RecordingFS::opened == vector<string>{"a?b.txt"});
+        }
+    }
+    GIVEN("Encoded dots in the path, or a question mark in the query") {
+        THEN("The '..' check applies to the decoded path only") {
+            REQUIRE(get("/%2E%2E/secret.txt") == Response::badRequest);
+            REQUIRE(get("/app.js?path=../x") == Response::ok);
+        }
     }
 }
