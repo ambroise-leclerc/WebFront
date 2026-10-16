@@ -8,6 +8,7 @@
 #include "Mocks.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <list>
@@ -38,9 +39,10 @@ struct ResultLinkMock {
 
 class WebFrontIoContextMock {
 public:
+    static inline std::atomic<int> stopCalls{0};
     void run() {}
     void run_one() {}
-    void stop() {}
+    void stop() { ++stopCalls; }
     void restart() {}
 };
 
@@ -113,6 +115,12 @@ struct ClosingFrontend {
     }
 };
 
+struct FailingFrontend {
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+    static void initialize() {}
+    static void open(std::string_view, std::string_view) { throw std::runtime_error("frontend startup failed"); }
+};
+
 int freeFunctionForDeductionTest(double value) {
     return static_cast<int>(value);
 }
@@ -120,6 +128,8 @@ int freeFunctionForDeductionTest(double value) {
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
+    STATIC_REQUIRE(frontend::FrontendType<frontend::WebView2Frontend>);
+    STATIC_REQUIRE(frontend::WebView2Frontend::action == frontend::Action::closeServerAfterOpen);
     THEN("the default frontend is always the system browser, regardless of CEF availability") {
         REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::DefaultBrowserFrontend>);
     }
@@ -129,6 +139,19 @@ SCENARIO("Frontend selection aliases") {
         REQUIRE(std::is_same_v<typename FrontendWF::FrontendProvider, OpeningFrontend>);
     }
 }
+
+#if !defined(WEBFRONT_EMBED_WEBVIEW2) || !defined(_WIN32)
+SCENARIO("Selecting WebView2 without support fails clearly") {
+    GIVEN("a build without Windows WebView2 support") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::WebView2Frontend>;
+        App app("9200");
+        THEN("opening the frontend explains which option to enable") {
+            REQUIRE_THROWS_WITH(app.openWindow("index.html"),
+                "WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON");
+        }
+    }
+}
+#endif
 
 SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
     GIVEN("a build without CEF support") {
@@ -184,6 +207,20 @@ SCENARIO("BasicWF initializes a custom frontend once") {
 
             THEN("the frontend initialization runs only once") {
                 REQUIRE(InitializingFrontend::initializeCalls == 1);
+            }
+        }
+    }
+}
+
+SCENARIO("A frontend startup failure stops the server before propagating") {
+    GIVEN("an embedded frontend that fails to open") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingFrontend>;
+        App app("9200");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        WHEN("the application opens the frontend") {
+            THEN("show requests server shutdown before propagating the diagnostic") {
+                REQUIRE_THROWS_WITH(app.show(), "frontend startup failed");
+                REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
             }
         }
     }

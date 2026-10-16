@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Action.hpp"
 #include "CEF.hpp"
 #include "DefaultBrowser.hpp"
+#include "WebView2.hpp"
 
 #include <concepts>
 #include <cstdlib>
@@ -9,11 +11,6 @@
 #include <type_traits>
 
 namespace webfront::frontend {
-
-enum class Action {
-    keepServerRunning,
-    closeServerAfterOpen
-};
 
 template <typename Frontend>
 concept FrontendType = requires(std::string_view port, std::string_view file) {

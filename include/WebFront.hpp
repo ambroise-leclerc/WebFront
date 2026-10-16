@@ -391,8 +391,8 @@ public:
             return WindowAction::none;
     }
 
-    // Starts the HTTP server in a background thread, opens the window (blocking for embedded CEF),
-    // then stops the server when the window closes (CEF case). For external browser we keep it running.
+    // Starts the server in a background thread and opens the frontend. An embedded window's close
+    // or a frontend exception stops and joins the server. An external browser keeps it running.
     void openAndRun(std::string_view htmlFilename) {
         // Launch server only once or restart if previous thread ended
         if (!serverThread.joinable()) {
@@ -400,7 +400,15 @@ public:
                 run();
             });
         }
-        auto action = openWindow(htmlFilename);
+        WindowAction action;
+        try {
+            action = openWindow(htmlFilename);
+        } catch (...) {
+            stop();
+            if (serverThread.joinable())
+                serverThread.join();
+            throw;
+        }
         if (action == WindowAction::closeWindow) {
             stop();
             if (serverThread.joinable())

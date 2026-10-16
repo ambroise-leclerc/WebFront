@@ -32,7 +32,7 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
 
 ## Intended product
 
-WebFront is a C++23 header-only experiment for browser-based C++ user interfaces. A C++ process serves local HTML/JavaScript and exchanges typed function-call messages with the page over WebSocket. It supports an embedded CEF frontend or the system browser.
+WebFront is a C++23 header-only experiment for browser-based C++ user interfaces. A C++ process serves local HTML/JavaScript and exchanges typed function-call messages with the page over WebSocket. It supports the system browser, embedded CEF, and an optional Windows WebView2 frontend.
 
 The minimum demonstration milestone is deliberately narrower than the long-term vision: serve a native ES-module graph and automatically prove one JavaScript-to-C++ call and one C++-to-served-JavaScript call with Jasmine.
 
@@ -70,6 +70,49 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - The default frontend always uses the system browser, including CEF-enabled builds. Applications opt into embedded windows through
   `WebFrontWithFrontend<frontend::CEFFrontend>`; selecting CEF without compiled support throws during construction. On macOS,
   executable discovery and framework paths follow the running target and CMake's `../Frameworks` deployment layout.
+- Windows has an optional `WebView2Frontend` (#137), enabled with `WEBFRONT_EMBED_WEBVIEW2=ON` and selected explicitly.
+  Its pinned NuGet SDK and static loader are fetched only when enabled; the Evergreen runtime remains a prerequisite.
+  The adapter owns STA COM, the window/message loop, resizing, navigation and controller shutdown, with writable per-executable
+  profiles in LocalAppData. `WebFrontApp` selects it with `WEBFRONT_DEMO_FRONTEND=WebView2`.
+  Windows builds require an MSVC-compatible compiler; MinGW is rejected before SDK setup. Application paths are percent-encoded.
+  Native focus and move messages forward to `MoveFocus(PROGRAMMATIC)` and `NotifyParentWindowPositionChanged`;
+  controller mocks cover these messages, reentrant shutdown and the startup background. HRESULT diagnostics use eight-digit hexadecimal values.
+  SDK loader selection follows the compiler's x86/x64/ARM64 target, including x64 builds on ARM64 hosts;
+  a portable CMake regression simulates cross-target builds without downloading the SDK.
+  Only initial navigation failure is fatal; later navigation errors and transient renderer unresponsiveness keep the window open.
+  Closing or failing during startup cancels its timer and preserves the first error. The loop returns when the window is destroyed,
+  even if a runtime never completes creation; weak references protect late callbacks. Renderer exits remain fatal rather than reloading the page.
+  Profile identity uses a case-sensitive FNV-64 executable-path hash. The adapter supplies no DPI-awareness manifest;
+  applications must provide one to avoid blurry Windows scaling on HiDPI displays.
+  This is a development frontend for trusted content: navigation and popup requests are unrestricted, DevTools and context menus
+  remain enabled, and the adapter supplies no origin-based bridge authorization. Windows/Shell/WRL header names leak into consumers;
+  qualify `std::byte`. Implementation types live under `frontend::detail::webview2`. The initial timeout is a fixed named 30-second constant.
+  URL path encoding currently differs from the default-browser and CEF adapters, which still concatenate the page argument.
+  The Windows CI matrix runs the shared Jasmine bridge suite and timed lifecycle tests under WebView2; CEF/Xvfb remains the Linux lane.
+  The WebView2 browser label runs separately with `--no-tests=error`. CI's Evergreen bootstrapper URL is mutable;
+  a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.
+- Local verification for #137 (2026-10-17, Windows, MSVC 19.44, x64): the CEF-off build passes all 143 CTest cases;
+  the WebView2-enabled build also passes all 146 non-browser CTest cases. All examples, the adapter and the Jasmine runner compile.
+  All 11 browser CTest cases pass with an intact official Microsoft runtime 155.0.4283.62: shared Jasmine bridge checks,
+  repeated no-bridge closure, early native closure, rejected `ready`, initial and later navigation failures, incompatible COM,
+  missing runtime, queued startup timers and missing creation callbacks after closure or failure, and a page whose filename contains a space and `#`.
+  The new timer, navigation, process-policy, path-encoding and compiler-guard regressions failed before their fixes.
+  The loader-architecture regression also failed before selecting by compiler target. The native socket shutdown test
+  now waits for the bridge handshake, so it cannot stop between the HTTP 101 response and WebLink creation.
+  Startup closure tests hold an actual environment-creation completion handler without invoking it, then invoke it after
+  session destruction. No production pending-creation counter is kept. Focus, move, background and HRESULT regressions failed before their fixes.
+  The native-module demo loads its UI and its JavaScript-to-C++ callback was exercised from the native window.
+  Signal Studio (`WebFrontApp react.html`) uses the embedded React, ReactDOM and Babel assets to display a synthetic waveform
+  generated by a C++ callback. The README screenshot includes its real WebView2 native window frame.
+  Two C++ scenarios check the sample data and parameter validation; the shared Jasmine suite drives the actual React page,
+  checks local asset loading, changes a parameter, and verifies recovery after a rejected C++ call.
+  The system's Evergreen 155.0.4283.45 installation remains broken: reading its compressed `ffmpeg.dll` fails with
+  `ERROR_BAD_COMPRESSION_BUFFER` (605, HRESULT `0x8007025D`), even when only computing its SHA-256. This DLL is hard-linked
+  between EdgeCore, Edge and EdgeWebView. An independent Win32 probe reproduced the renderer launch failure (reason 4, exit code 71).
+  For local validation, the official runtime CAB was extracted under an ignored build directory and selected with
+  `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`; the runtime executable and `ffmpeg.dll` both have valid Microsoft signatures.
+  No system runtime files or security settings were changed. Fixed-version runtime packaging remains out of scope.
+  CEF/Xvfb was not run on this Windows host; the available WSL launcher fails during its own initialization.
 
 Local verification on 2026-07-19 completed successfully: the CEF-off build passed all 47 CTest cases, including deterministic asset and typed-array protocol coverage, and a CEF-enabled build passed `WebFrontBrowserIntegration` under Xvfb. The browser test exercised every supported numeric typed array from C++ to JavaScript and JavaScript to C++, ordinary tuple arrays, final Jasmine reporting, and automatic CEF shutdown.
 
@@ -80,4 +123,4 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 - Ordinary JavaScript arrays encode as tuple-like parameters; only numeric typed arrays use the homogeneous array wire representation.
 - `NativeDebugFS` exposes development files and is not a production packaging format.
 - CEF is a large optional dependency. Only the focused Linux integration job should download it for the minimal baseline.
-- React/Babel assets remain examples rather than the core demonstration. Modern Node/Vite integration, WebView2, overlays, and packaged filesystems require separate product decisions.
+- React/Babel assets remain examples rather than the core demonstration. Modern Node/Vite integration, overlays, and packaged filesystems require separate product decisions. WebView2 fixed-version runtime packaging remains out of scope.

@@ -11,8 +11,12 @@ list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesT
 list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp ReactFSTests.cpp BabelFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp TerminalTests.cpp TerminalFSTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp ToolStoreTests.cpp ToolManagerTests.cpp)
+list(APPEND TESTS_LIST SignalDemoTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
+endif()
+if(WEBFRONT_EMBED_WEBVIEW2)
+  list(APPEND TESTS_LIST WebView2Tests.cpp)
 endif()
 add_executable(tests ${TESTS_LIST})
 target_link_libraries(tests PRIVATE WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
@@ -36,6 +40,10 @@ endif()
 # The documented newcomer commands and snippets must keep matching the built examples and CI.
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckNewcomerDocs.cmake)
+add_test(NAME WebView2UnsupportedToolchain
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWebView2Toolchain.cmake)
+add_test(NAME WebView2LoaderArchitecture
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWebView2Architecture.cmake)
 
 # A minimal parent project must be able to add_subdirectory(WebFront) and link WebFront::WebFront
 # without building WebFront's examples or tests. Dependencies reuse this build's sources, so the
