@@ -153,6 +153,21 @@ SCENARIO("A WebSocket limits the size of the messages it reassembles") {
         InjectableSocket::receive(frame);
     };
 
+    GIVEN("A ping of 125 bytes, more than the message limit") {
+        receive(string(125, 'p'), 0x89);
+        THEN("The connection stays open, since control frames have their own limit") {
+            REQUIRE_FALSE(closeCode);
+            receive("ok", 0x82);
+            REQUIRE(messages.size() == 1);
+        }
+    }
+    GIVEN("The header of a ping announcing 126 bytes") {
+        // FIN and ping; masked 16-bit length 126; masking key.
+        InjectableSocket::receive(vector<byte>{byte{0x89}, byte{0xfe}, byte{0}, byte{126}, byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}});
+        THEN("The connection fails with protocol_error") {
+            REQUIRE(closeCode == static_cast<uint16_t>(std::make_error_code(std::errc::protocol_error).value()));
+        }
+    }
     GIVEN("A continuation announcing more than what is left of the limit") {
         receive("ab", 0x02);
         receiveHeader("cde", 0x80);
