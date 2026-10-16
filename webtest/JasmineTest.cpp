@@ -66,14 +66,15 @@ struct TestToolsProject {
 
 /// Search endpoint of the fake npm registry used by webtest/js/tools-specs.mjs; its packuments and
 /// tarball are plain files under webtest/registry/ (see make_fixture.py), served by NativeDebugFS.
-/// Only answers a query restricted to the webfront-tool keyword, as wf.mjs sends it.
+/// The server drops the query string before looking up files, so tools-specs.mjs checks the query
+/// wf.mjs sends.
 class FakeRegistrySearchFS {
 public:
     explicit FakeRegistrySearchFS(filesystem::path docRoot) : root(std::move(docRoot)) {}
 
     optional<fs::File> open(filesystem::path file) const {
         const auto request = file.relative_path().generic_string();
-        if (!request.starts_with("registry/-/v1/search?") || request.find("text=keywords:webfront-tool") == string::npos)
+        if (request != "registry/-/v1/search")
             return {};
         ifstream stream(root / "registry" / "search.json", ios::binary);
         if (!stream.is_open())
