@@ -6,8 +6,7 @@
 #pragma once
 
 #include "BasicNetworking.hpp"
-
-#include <network>
+#include "SenderHeaders.hpp"
 
 #include <string>
 #include <string_view>

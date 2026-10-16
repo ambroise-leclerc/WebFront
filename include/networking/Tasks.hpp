@@ -2,10 +2,7 @@
 #pragma once
 
 #include "../tooling/Logger.hpp"
-
-#include <network>
-
-#include <exec/start_detached.hpp>
+#include "SenderHeaders.hpp"
 
 #include <exception>
 
