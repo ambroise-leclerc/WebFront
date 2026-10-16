@@ -195,10 +195,25 @@ jobs:
           color: ${{ steps.badge.outputs.color }}
 
   web-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
     runs-on: ubuntu-24.04
-    name: Ubuntu CEF Jasmine integration
+    # Clang 19+ expands stdexec attributes that GCC leaves empty, so only Clang catches CEF macro clashes (#243)
+    name: Ubuntu CEF Jasmine integration${{ matrix.compiler == 'clang' && ' (Clang)' || '' }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Install Clang 23
+        if: matrix.compiler == 'clang'
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 lld-23
+          echo "CC=clang-23" >> $GITHUB_ENV
+          echo "CXX=clang++-23" >> $GITHUB_ENV
 
       - name: Install virtual display
         run: |
