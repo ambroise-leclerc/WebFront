@@ -146,7 +146,11 @@ describe('WebFront wf tool manager', () => {
     });
 
     it('searches the registry for web tools', async () => {
+        const fetched = spyOn(window, 'fetch').and.callThrough();
         const output = await run('wf search test');
+        const url = new URL(fetched.calls.mostRecent().args[0], location.href);
+        expect(url.pathname).toBe('/registry/-/v1/search');
+        expect(url.searchParams.get('text')).toBe('keywords:webfront-tool test');
         expect(output).toContain(`${toolName}@1.0.0  Fixture of the WebFront browser integration test`);
     });
 
