@@ -371,9 +371,6 @@ private:
     }
 
     void dispatchFrame() {
-        // Control frames (close, ping, pong) cannot be fragmented (RFC 6455, 5.5).
-        if (!decoder.finalFrame && decoder.frameType >= Header::Opcode::connectionClose)
-            return closeOnError(std::make_error_code(std::errc::protocol_error));
         switch (decoder.frameType) {
             case Header::Opcode::text:
             case Header::Opcode::binary:
@@ -382,14 +379,22 @@ private:
             case Header::Opcode::continuation:
                 continueMessage(decoder.payload());
                 break;
-            case Header::Opcode::connectionClose:
-                if (closeHandler)
-                    closeHandler(CloseEvent{});
-                stop();
-                break;
             default:
-                log::debug("Unhandled frameType");
+                dispatchControlFrame();
         }
+    }
+
+    // Control frames (close, ping, pong) and reserved opcodes: none may be fragmented (RFC 6455, 5.5).
+    void dispatchControlFrame() {
+        if (!decoder.finalFrame)
+            return closeOnError(std::make_error_code(std::errc::protocol_error));
+        if (decoder.frameType != Header::Opcode::connectionClose) {
+            log::debug("Unhandled frameType");
+            return;
+        }
+        if (closeHandler)
+            closeHandler(CloseEvent{});
+        stop();
     }
 
     // The first frame of a text or binary message.
