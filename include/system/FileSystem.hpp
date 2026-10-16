@@ -6,9 +6,9 @@
 #include "../details/C++23Support.hpp"
 #include "tooling/Logger.hpp"
 
+#include <algorithm>
 #include <array>
-#include <bit>
-#include <cstring>
+#include <cstdint>
 #include <fstream>
 #include <filesystem>
 #include <ios>
@@ -62,35 +62,18 @@ private:
     const std::string encoding{};
     std::ifstream fstream;
 
-    union UIntByte {
-        uint64_t uInt;
-        uint8_t byte[sizeof(uInt)];
-    };
-
+    // The generated headers pack the bytes into big-endian 64-bit words. Each byte is taken from
+    // its word by position, so a read may stop in the middle of a word.
     size_t readData(std::span<char> buffer) {
-        constexpr auto bytesPerInt = sizeof(decltype(data)::value_type);
-        UIntByte chunk{};
-        for (size_t index = 0; (index < buffer.size()); ++index) {
-            if (eof()) return index;
-
-            if (readIndex % bytesPerInt == 0) chunk = convert(data[readIndex / bytesPerInt]);
-
-            buffer[index] = static_cast<char>(chunk.byte[readIndex % bytesPerInt]);
-            readIndex++;
-            if (readIndex == size) eofBit = true;
+        constexpr size_t bitsPerByte = 8;
+        constexpr size_t bytesPerInt = sizeof(decltype(data)::value_type);
+        const auto       count       = std::min(buffer.size(), size - readIndex);
+        for (size_t index = 0; index < count; ++index, ++readIndex) {
+            const auto shift = (bytesPerInt - 1 - readIndex % bytesPerInt) * bitsPerByte;
+            buffer[index]    = static_cast<char>(static_cast<uint8_t>(data[readIndex / bytesPerInt] >> shift));
         }
-        return buffer.size();
-    }
-
-    static UIntByte convert(uint64_t input) {
-        UIntByte result;
-        uint64_t bigEndian;
-        if constexpr (std::endian::native == std::endian::little)
-            bigEndian = std::byteswap(input);
-        else
-            bigEndian = input;
-        std::memcpy(result.byte, &bigEndian, sizeof(bigEndian));
-        return result;
+        eofBit = readIndex == size;
+        return count;
     }
 
     size_t readFStream(std::span<char> buffer) {
