@@ -189,10 +189,19 @@ public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
     std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
     [[nodiscard]] size_t consumed() const { return consumedSize; }
+    /// True when the last frame's header announced more than its budget: nothing was reserved for it.
+    [[nodiscard]] bool rejected() const { return oversized; }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
     bool parse(std::span<const std::byte> buffer) {
+        return parse(buffer, [](Header::Opcode) { return std::numeric_limits<size_t>::max(); });
+    }
+
+    // Same, rejecting a frame whose header announces more than maxPayload(opcode) bytes before
+    // reserving them: parse() then returns false and rejected() true.
+    template<typename Budget>
+    bool parse(std::span<const std::byte> buffer, Budget&& maxPayload) {
         consumedSize = 0;
         auto decodePayload = [&](std::span<const std::byte> encoded) -> size_t {
             for (auto in : encoded) payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
@@ -205,7 +214,10 @@ public:
             mask = reinterpret_cast<const Header*>(input)->maskingKey();
             frameType = reinterpret_cast<const Header*>(input)->opcode();
             finalFrame = reinterpret_cast<const Header*>(input)->FIN();
-            payloadBuffer.reserve(payloadSize);
+            oversized = payloadSize > maxPayload(frameType);
+            if (!oversized)
+                payloadBuffer.reserve(payloadSize);
+            return !oversized;
         };
         auto bufferizeHeaderData = [&](std::span<const std::byte> input) -> size_t {
             for (size_t index = 0; index < input.size(); ++index) {
@@ -219,8 +231,10 @@ public:
         case DecodingState::starting:
             if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
                 reinterpret_cast<const Header*>(buffer.data())->dump();
-                decodeHeader(buffer.data());
+                const auto accepted = decodeHeader(buffer.data());
                 consumedSize = headerSize;
+                if (!accepted)
+                    return false;
                 if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
             }
@@ -233,7 +247,8 @@ public:
             auto consumedData = bufferizeHeaderData(buffer);
             consumedSize = consumedData;
             if (headerBuffer.isComplete(headerBufferParser)) {
-                decodeHeader(headerBuffer.raw.data());
+                if (!decodeHeader(headerBuffer.raw.data()))
+                    return false;
                 if (decodePayload(buffer.subspan(consumedData, std::min(buffer.size() - consumedData, payloadSize))) == payloadSize) return true;
                 state = DecodingState::decodingPayload;
             }
@@ -253,6 +268,7 @@ public:
         payloadBuffer.clear();
         state = DecodingState::starting;
         consumedSize = 0;
+        oversized = false;
     }
 
 private:
@@ -262,6 +278,7 @@ private:
     size_t headerBufferParser;
     size_t payloadSize, headerSize;
     size_t consumedSize;
+    bool oversized = false;
     std::array<std::byte, 4> mask;
     uint8_t maskIndex;
 };
@@ -327,7 +344,8 @@ private:
     networking::ex::inplace_stop_source stopSource;
     std::atomic_bool started;
     // A message sent in several frames (RFC 6455, 5.4), as browsers do with large messages: its
-    // type and the payloads received so far, at most http::maxMessageSize<Policy>() bytes.
+    // type and the payloads received so far, at most http::maxMessageSize<Policy>() bytes
+    // (payloadBudget()).
     std::optional<Header::Opcode> fragmentedType;
     std::vector<std::byte> fragments;
 
@@ -361,8 +379,10 @@ private:
 
     void processFrames(std::span<const std::byte> received) {
         while (!received.empty() && started) {
-            const auto frameComplete = decoder.parse(received);
-            received                 = received.subspan(decoder.consumed());
+            const auto frameComplete = decoder.parse(received, [this](Header::Opcode type) { return payloadBudget(type); });
+            if (decoder.rejected())
+                return closeOnError(std::make_error_code(std::errc::message_size));
+            received = received.subspan(decoder.consumed());
             if (!frameComplete)
                 break;
             dispatchFrame();
@@ -397,14 +417,19 @@ private:
         stop();
     }
 
+    // The largest payload a frame may announce: what is left of maxMessageSize for a continuation,
+    // all of it for another frame. Checked on the header, before the payload is buffered.
+    size_t payloadBudget(Header::Opcode type) const {
+        constexpr auto limit = http::maxMessageSize<Policy>();
+        return type == Header::Opcode::continuation ? limit - fragments.size() : limit;
+    }
+
     // The first frame of a text or binary message.
     void startMessage(std::span<const std::byte> data) {
         if (fragmentedType)
             return closeOnError(std::make_error_code(std::errc::protocol_error));  // the previous message is unfinished
         if (decoder.finalFrame)
             return dispatchMessage(decoder.frameType, data);
-        if (data.size() > http::maxMessageSize<Policy>())
-            return closeOnError(std::make_error_code(std::errc::message_size));
         fragmentedType = decoder.frameType;
         fragments.assign(data.begin(), data.end());
     }
@@ -412,8 +437,6 @@ private:
     void continueMessage(std::span<const std::byte> data) {
         if (!fragmentedType)
             return closeOnError(std::make_error_code(std::errc::protocol_error));  // no message to continue
-        if (data.size() > http::maxMessageSize<Policy>() - fragments.size())
-            return closeOnError(std::make_error_code(std::errc::message_size));
         fragments.insert(fragments.end(), data.begin(), data.end());
         if (!decoder.finalFrame)
             return;
