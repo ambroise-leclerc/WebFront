@@ -6,8 +6,11 @@
 /// .writeFile and .commit.
 
 const blockSize = 512;
-/// Files cross the bridge in chunks of this many bytes.
-export const chunkSize = 16384;
+/// Files cross the bridge in chunks of this many bytes; the browser sends a large one in several
+/// WebSocket frames, which the server reassembles.
+export const chunkSize = 256 * 1024;
+/// Largest unpacked tarball accepted, against decompression bombs.
+export const maxUnpackedBytes = 256 * 1024 * 1024;
 const utf8 = new TextDecoder();
 
 /// Splits "name[@version]", where the name may be scoped ("@scope/name@1.0.0"). The version is ""
@@ -27,15 +30,15 @@ function registryBase(registry) {
 // The registry encodes the slash of a scoped name.
 const packumentUrl = (base, name) => new URL(name.replace("/", "%2f"), base);
 
-async function fetchOk(url, fetchImpl) {
-    const response = await fetchImpl(url);
+async function fetchOk(url, fetchImpl, signal) {
+    const response = await fetchImpl(url, {signal});
     if (!response.ok)
         throw new Error(`${url}: HTTP ${response.status}`);
     return response;
 }
 
-async function fetchJson(url, fetchImpl) {
-    return (await fetchOk(url, fetchImpl)).json();
+async function fetchJson(url, fetchImpl, signal) {
+    return (await fetchOk(url, fetchImpl, signal)).json();
 }
 
 function resolveManifest(packument, name, requested) {
@@ -65,9 +68,20 @@ export async function verifyIntegrity(bytes, integrity) {
     return actual;
 }
 
-export async function gunzip(bytes) {
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+/// Gunzips bytes, failing once more than `limit` bytes come out.
+export async function gunzip(bytes, limit = maxUnpackedBytes) {
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+    const chunks = [];
+    let total = 0;
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+        total += read.value.length;
+        if (total > limit) {
+            await reader.cancel();
+            throw new Error(`The tarball unpacks to more than ${limit} bytes`);
+        }
+        chunks.push(read.value);
+    }
+    return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
 
 // A NUL-terminated header field.
@@ -205,18 +219,19 @@ const pkgFunction = (bridge, name) => bridge.cppFunction(`webfront.pkg.${name}`)
 ///   bridge    the WebFront bridge (globalThis.webFront)
 ///   registry  the npm registry URL (default: webfront.pkg.registry(), set in ToolManagerOptions)
 ///   fetch     the fetch function
-async function settings({bridge = globalThis.webFront, registry, fetch: fetchImpl = (...args) => globalThis.fetch(...args)} = {}) {
-    return {bridge, fetchImpl, base: registryBase(registry ?? (await pkgFunction(bridge, "registry")()))};
+///   signal    an AbortSignal stopping the downloads and the upload
+async function settings({bridge = globalThis.webFront, registry, fetch: fetchImpl = (...args) => globalThis.fetch(...args), signal} = {}) {
+    return {bridge, fetchImpl, signal, base: registryBase(registry ?? (await pkgFunction(bridge, "registry")()))};
 }
 
 /// Searches the registry for packages with the webfront-tool keyword. Returns {name, version,
 /// description} objects.
 export async function search(term, options) {
-    const {fetchImpl, base} = await settings(options);
+    const {fetchImpl, signal, base} = await settings(options);
     const url = new URL("-/v1/search", base);
     url.searchParams.set("text", `keywords:webfront-tool ${term}`.trim());
     url.searchParams.set("size", "20");
-    const result = await fetchJson(url, fetchImpl);
+    const result = await fetchJson(url, fetchImpl, signal);
     return (result.objects ?? []).map(({package: found}) => ({
         name: found.name,
         version: found.version,
@@ -225,19 +240,20 @@ export async function search(term, options) {
 }
 
 // Downloads the tarball of a manifest and returns its files with the verified integrity.
-async function download(manifest, packumentLocation, fetchImpl) {
+async function download(manifest, packumentLocation, fetchImpl, signal) {
     const tarballUrl = new URL(manifest.dist?.tarball ?? "", packumentLocation);
-    const tarball = new Uint8Array(await (await fetchOk(tarballUrl, fetchImpl)).arrayBuffer());
+    const tarball = new Uint8Array(await (await fetchOk(tarballUrl, fetchImpl, signal)).arrayBuffer());
     const integrity = await verifyIntegrity(tarball, manifest.dist?.integrity);
     return {integrity, files: packageFiles(readTar(await gunzip(tarball)))};
 }
 
 // Sends the files to webfront.pkg.writeFile in chunks; an empty file is sent as one empty chunk.
-async function upload(bridge, name, version, files) {
+async function upload(files, {bridge, name, version, signal}) {
     const writeFile = pkgFunction(bridge, "writeFile");
     for (const [path, bytes] of files) {
         let offset = 0;
         do {
+            signal?.throwIfAborted();
             const chunk = bytes.subarray(offset, offset + chunkSize);
             await writeFile(name, version, path, offset, chunk);
             offset += chunk.length;
@@ -247,22 +263,23 @@ async function upload(bridge, name, version, files) {
 
 /// Downloads, verifies and stores "name[@version or dist-tag]" (latest by default). `progress(text)`
 /// reports the steps. Resolves to {name, version, title, entry, files}; rejects without changing the
-/// installed version when anything fails.
+/// installed version when anything fails or `signal` is aborted.
 export async function install(spec, {progress = () => {}, ...options} = {}) {
     const {name, version: requested} = parseSpec(spec);
-    const {bridge, fetchImpl, base} = await settings(options);
+    const {bridge, fetchImpl, signal, base} = await settings(options);
     const packumentLocation = packumentUrl(base, name);
-    const manifest = resolveManifest(await fetchJson(packumentLocation, fetchImpl), name, requested);
+    const manifest = resolveManifest(await fetchJson(packumentLocation, fetchImpl, signal), name, requested);
     const {version} = manifest;
     progress(`Downloading ${name}@${version}…`);
-    const {integrity, files} = await download(manifest, packumentLocation, fetchImpl);
+    const {integrity, files} = await download(manifest, packumentLocation, fetchImpl, signal);
     const {entry, title} = toolOf(files, name, version);
     if (!files.has(entry))
         throw new Error(`The entry page ${entry} of ${name} is not in the package`);
 
     progress(`Installing ${files.size} files…`);
     await pkgFunction(bridge, "begin")(name, version);
-    await upload(bridge, name, version, files);
+    await upload(files, {bridge, name, version, signal});
+    signal?.throwIfAborted();
     await pkgFunction(bridge, "commit")(name, version, integrity, entry, title);
     return {name, version, title, entry, files: files.size};
 }
@@ -305,9 +322,9 @@ function formatFound(found) {
 
 // The wf subcommands running in the browser; 'wf list', 'wf remove' and 'wf help' run in C++.
 const subcommands = {
-    search: async (args, {bridge}) => formatFound(await search(args.join(" "), {bridge})),
-    install: async (args, {bridge, write}) => {
-        const tool = await install(requireOne(args), {bridge, progress: (step) => write(step + "\n")});
+    search: async (args, {bridge, signal}) => formatFound(await search(args.join(" "), {bridge, signal})),
+    install: async (args, {bridge, signal, write}) => {
+        const tool = await install(requireOne(args), {bridge, signal, progress: (step) => write(step + "\n")});
         return `Installed ${tool.name}@${tool.version}: ${tool.title}. Type 'wf open ${tool.name}'.`;
     },
     open: async (args, {bridge}) => {

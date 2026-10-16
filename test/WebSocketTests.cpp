@@ -7,6 +7,7 @@
 
 #include <array>
 #include <functional>
+#include <optional>
 #include <system_error>
 #include <vector>
 #include <string>
@@ -61,6 +62,153 @@ SCENARIO("A failed write closes the WebSocket") {
             }
         }
     }
+}
+
+SCENARIO("A WebSocket reassembles the messages a browser sends in several frames") {
+    InjectableSocket::reset();
+    vector<vector<byte>> binaryMessages;
+    vector<string>       textMessages;
+    int                  closeHandlerCalls = 0;
+    auto                 ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    ws->onMessage([&](span<const byte> data) { binaryMessages.emplace_back(data.begin(), data.end()); });
+    ws->onMessage([&](string_view text) { textMessages.emplace_back(text); });
+    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
+    ws->start();
+    const auto bytes = [](string_view text) { return as_bytes(span(text)); };
+    const auto receive = [&](string_view payload, uint8_t finAndOpcode) {
+        InjectableSocket::receive(webfront::testing::clientFrame(bytes(payload), byte{finAndOpcode}));
+    };
+
+    GIVEN("A binary message in three fragments, with a control frame between them") {
+        receive("ab", 0x02);
+        receive("", 0x89);  // ping
+        receive("cd", 0x00);
+        REQUIRE(binaryMessages.empty());
+        receive("ef", 0x80);
+
+        THEN("The handler receives the whole message once") {
+            const auto whole = bytes("abcdef");
+            REQUIRE(binaryMessages == vector<vector<byte>>{{whole.begin(), whole.end()}});
+            REQUIRE(closeHandlerCalls == 0);
+        }
+        AND_WHEN("A text message follows in two fragments") {
+            receive("hel", 0x01);
+            receive("lo", 0x80);
+            THEN("It is delivered as text") {
+                REQUIRE(textMessages == vector<string>{"hello"});
+                REQUIRE(binaryMessages.size() == 1);
+            }
+        }
+    }
+    GIVEN("A continuation frame without a message to continue") {
+        receive("x", 0x80);
+        THEN("The connection fails without delivering it") {
+            REQUIRE(closeHandlerCalls == 1);
+            REQUIRE(binaryMessages.empty());
+        }
+    }
+    GIVEN("A new message before the previous one is finished") {
+        receive("a", 0x02);
+        receive("b", 0x82);
+        THEN("The connection fails without delivering either") {
+            REQUIRE(closeHandlerCalls == 1);
+            REQUIRE(binaryMessages.empty());
+        }
+    }
+    GIVEN("A fragmented ping") {
+        receive("p", 0x09);
+        THEN("The connection fails, since control frames cannot be fragmented") {
+            REQUIRE(closeHandlerCalls == 1);
+        }
+    }
+    InjectableSocket::reset();
+}
+
+SCENARIO("A WebSocket limits the size of the messages it reassembles") {
+    InjectableSocket::reset();
+    vector<vector<byte>> messages;
+    optional<uint16_t>   closeCode;
+    using Limited = http::CustomBuffersPolicy<8192, 8192, 32768, 4>;
+    auto ws       = websocket::WebSocket<InjectableNetworking, Limited>::create(InjectableSocket{});
+    ws->onMessage([&](span<const byte> data) { messages.emplace_back(data.begin(), data.end()); });
+    ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
+    ws->start();
+    const auto receive = [&](string_view payload, uint8_t finAndOpcode) {
+        InjectableSocket::receive(webfront::testing::clientFrame(as_bytes(span(payload)), byte{finAndOpcode}));
+    };
+    const auto messageSize = static_cast<uint16_t>(std::make_error_code(std::errc::message_size).value());
+
+    GIVEN("Fragments adding up to the limit") {
+        receive("ab", 0x02);
+        receive("cd", 0x80);
+        THEN("The message is delivered") {
+            REQUIRE(messages.size() == 1);
+            REQUIRE_FALSE(closeCode);
+        }
+    }
+    // Only the header of a frame (2 bytes, then the 4-byte mask): the payload never comes.
+    const auto receiveHeader = [&](string_view payload, uint8_t finAndOpcode) {
+        auto frame = webfront::testing::clientFrame(as_bytes(span(payload)), byte{finAndOpcode});
+        frame.resize(6);
+        InjectableSocket::receive(frame);
+    };
+
+    GIVEN("A ping of 125 bytes, more than the message limit") {
+        receive(string(125, 'p'), 0x89);
+        THEN("The connection stays open, since control frames have their own limit") {
+            REQUIRE_FALSE(closeCode);
+            receive("ok", 0x82);
+            REQUIRE(messages.size() == 1);
+        }
+    }
+    GIVEN("The header of a ping announcing 126 bytes") {
+        // FIN and ping; masked 16-bit length 126; masking key.
+        InjectableSocket::receive(vector<byte>{byte{0x89}, byte{0xfe}, byte{0}, byte{126}, byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}});
+        THEN("The connection fails with protocol_error") {
+            REQUIRE(closeCode == static_cast<uint16_t>(std::make_error_code(std::errc::protocol_error).value()));
+        }
+    }
+    GIVEN("A continuation announcing more than what is left of the limit") {
+        receive("ab", 0x02);
+        receiveHeader("cde", 0x80);
+        THEN("The connection fails with message_size on its header") {
+            REQUIRE(messages.empty());
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    GIVEN("The header of a first fragment announcing more than the limit") {
+        receiveHeader("abcde", 0x02);
+        THEN("The connection fails with message_size without waiting for the payload") {
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    GIVEN("The header of a message in one frame announcing more than the limit") {
+        receiveHeader("abcde", 0x82);
+        THEN("The connection fails with message_size") {
+            REQUIRE(messages.empty());
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    InjectableSocket::reset();
+}
+
+SCENARIO("A WebSocket rejects a frame announcing gigabytes before buffering it") {
+    InjectableSocket::reset();
+    optional<uint16_t> closeCode;
+    auto               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    ws->onMessage([](span<const byte>) {});
+    ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
+    ws->start();
+
+    GIVEN("The header of a first fragment announcing 8 GiB, with the default limit") {
+        // FIN clear, binary; masked 64-bit length 0x200000000; masking key.
+        InjectableSocket::receive(vector<byte>{byte{0x02}, byte{0xff}, byte{0}, byte{0}, byte{0}, byte{2}, byte{0}, byte{0}, byte{0}, byte{0},
+                                               byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}});
+        THEN("The connection fails with message_size") {
+            REQUIRE(closeCode == static_cast<uint16_t>(std::make_error_code(std::errc::message_size).value()));
+        }
+    }
+    InjectableSocket::reset();
 }
 
 SCENARIO("WebSocket Headers decoding") {
