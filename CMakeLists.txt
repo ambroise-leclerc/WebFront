@@ -122,7 +122,7 @@ if(WEBFRONT_EMBED_CEF)
     set(ENABLE_CEF_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
     set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
 
-    CPMAddPackage("gh:ambroise-leclerc/CEF@137.0.17d")
+    CPMAddPackage("gh:ambroise-leclerc/CEF@154.0.34")
 else()
     message(STATUS "WebFront: Embedded CEF window support disabled")
 endif()
