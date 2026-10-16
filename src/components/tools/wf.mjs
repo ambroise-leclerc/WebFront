@@ -248,7 +248,7 @@ async function download(manifest, packumentLocation, fetchImpl, signal) {
 }
 
 // Sends the files to webfront.pkg.writeFile in chunks; an empty file is sent as one empty chunk.
-async function upload(bridge, name, version, files, signal) {
+async function upload(files, {bridge, name, version, signal}) {
     const writeFile = pkgFunction(bridge, "writeFile");
     for (const [path, bytes] of files) {
         let offset = 0;
@@ -278,7 +278,7 @@ export async function install(spec, {progress = () => {}, ...options} = {}) {
 
     progress(`Installing ${files.size} files…`);
     await pkgFunction(bridge, "begin")(name, version);
-    await upload(bridge, name, version, files, signal);
+    await upload(files, {bridge, name, version, signal});
     signal?.throwIfAborted();
     await pkgFunction(bridge, "commit")(name, version, integrity, entry, title);
     return {name, version, title, entry, files: files.size};
