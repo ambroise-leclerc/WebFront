@@ -393,6 +393,12 @@ SCENARIO("RequestHandler ignores the query string of a request") {
             REQUIRE(RecordingFS::opened == vector<string>{"app.js"});
         }
     }
+    GIVEN("A query on a file that does not exist") {
+        THEN("The request fails with not found") {
+            REQUIRE(get("/missing.js?v=2") == Response::notFound);
+            REQUIRE(RecordingFS::opened == vector<string>{"missing.js"});
+        }
+    }
     GIVEN("A query on the root") {
         THEN("The default page is served") {
             REQUIRE(get("/?x=1") == Response::ok);
