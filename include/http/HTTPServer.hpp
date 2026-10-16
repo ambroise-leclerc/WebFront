@@ -255,14 +255,14 @@ public:
     RequestHandler& operator=(RequestHandler&&) = default;
 
     Response handleRequest(Request request) {
-        auto requestUri = uri::decode(request.uri);
-        log::debug("Request uri - raw:'{}' decoded:'{}'", request.uri, requestUri);
+        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
+        const auto rawPath    = std::string_view(request.uri).substr(0, request.uri.find('?'));
+        auto       requestUri = uri::decode(rawPath);
+        log::debug("Request uri - raw:'{}' decoded path:'{}'", request.uri, requestUri);
         if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
             return Response::getStatusResponse(Response::badRequest);
         auto requestPath = std::filesystem::path(requestUri).relative_path();
         log::debug("  -> requestPath : {}", requestPath.string());
-        //uri::URI verifUri{requestUri};
-        //log::debug("(URI)   -> Path : {}   Query : {}", verifUri.path, verifUri.query);
         if (!requestPath.has_filename()) requestPath /= "index.html";
 
         Response response;
