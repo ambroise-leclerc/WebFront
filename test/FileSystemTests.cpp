@@ -4,7 +4,11 @@
 #include "Mocks.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 using namespace std;
 using namespace webfront;
@@ -115,6 +119,31 @@ SCENARIO("filesystem::Multi can combine multiple FileSystems") {
                 REQUIRE(MockIndexFS::openingsCounter == 3);
                 REQUIRE(MockJsLibFS::openingsCounter == 2);
                 REQUIRE(MockMixFS::openingsCounter == 1);
+            }
+        }
+    }
+}
+
+// "0123456789abcdefghi" packed like the generated asset headers: big-endian 64-bit words, the last
+// one padded with zeros.
+struct DigitsAndLetters {
+    static constexpr size_t             dataSize{19};
+    static constexpr array<uint64_t, 3> data{0x3031323334353637, 0x3839616263646566, 0x6768690000000000};
+};
+
+static string readAll(fs::File file, size_t bufferSize) {
+    string       content;
+    vector<char> buffer(bufferSize);
+    while (const auto count = file.read(buffer))
+        content.append(buffer.data(), count);
+    return content;
+}
+
+SCENARIO("An embedded file reads the same bytes whatever the buffer size") {
+    for (const size_t bufferSize : array<size_t, 6>{1, 3, 7, 8, 13, 4096}) {
+        GIVEN("A buffer of " + to_string(bufferSize) + " bytes") {
+            THEN("Embedded data reads back unchanged, across its 64-bit words") {
+                REQUIRE(readAll(fs::File{DigitsAndLetters{}}, bufferSize) == "0123456789abcdefghi");
             }
         }
     }
