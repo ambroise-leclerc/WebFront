@@ -41,11 +41,17 @@ set(CEF_WINDOWS_RUNTIME_FILES
     "libcef.dll"
     "chrome_elf.dll"
     "d3dcompiler_47.dll"
-    "libEGL.dll"
-    "libGLESv2.dll"
     "vk_swiftshader.dll"
     "vulkan-1.dll"
     "v8_context_snapshot.bin"
+)
+
+# Windows runtime files shipped by some CEF versions only (CEF 154 no longer ships the ANGLE DLLs)
+set(CEF_WINDOWS_OPTIONAL_RUNTIME_FILES
+    "libEGL.dll"
+    "libGLESv2.dll"
+    "dxcompiler.dll"
+    "dxil.dll"
     "vk_swiftshader_icd.json"
 )
 
@@ -183,10 +189,16 @@ function(copy_cef_runtime_files target_name cef_build_dir)
     set(target_dir "$<TARGET_FILE_DIR:${target_name}>")
     
     if(WIN32)
-        _cef_copy_files_to_target(${target_name} 
-            "${cef_build_dir}" 
+        set(runtime_files ${CEF_WINDOWS_RUNTIME_FILES})
+        foreach(file_name IN LISTS CEF_WINDOWS_OPTIONAL_RUNTIME_FILES)
+            if(EXISTS "${cef_build_dir}/${file_name}")
+                list(APPEND runtime_files "${file_name}")
+            endif()
+        endforeach()
+        _cef_copy_files_to_target(${target_name}
+            "${cef_build_dir}"
             "${target_dir}"
-            "${CEF_WINDOWS_RUNTIME_FILES}"
+            "${runtime_files}"
             "Copying CEF runtime files to output directory"
         )
     elseif(APPLE)
