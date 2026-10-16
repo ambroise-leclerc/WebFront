@@ -75,8 +75,8 @@ int main() {
 
 ### Limitations of the first version
 
-- Output appears when a command finishes. There is no streaming and no cancellation. A long command
-  keeps the prompt locked, and Ctrl+C cannot interrupt it.
+- Output appears when a command finishes. There is no streaming. A long command keeps the prompt
+  locked; Ctrl+C interrupts a browser command (below) but not a C++ one.
 - Every connected browser shares the same commands. The terminal does not know which browser sent
   a line.
 - The line editor redraws within one terminal row, so a line wider than the terminal displays
@@ -92,7 +92,8 @@ a browser module that the page imports before it shows the prompt (the URLs are 
 `webfront.terminal.extensions()`). The module may export `commands`, an object mapping a command
 name to `async (args, context) => output`. The page splits each line like C++ (`tokenize` in
 `terminal.mjs`); when its first word names a browser command, the handler runs first. `context`
-holds `line`, `bridge`, `write(text)` for progress output and `runInCpp()`. A handler returning
+holds `line`, `bridge`, `write(text)` for progress output, `runInCpp()` and `signal`, an
+`AbortSignal` that Ctrl+C aborts with the reason `Error("Interrupted")`. A handler returning
 `undefined` lets C++ run the line, so one command can be split between the page and C++, as `wf`
 is. A module that fails to load is reported in red and the terminal stays usable.
 
@@ -155,11 +156,11 @@ header-only C++ library.
 1. The browser fetches the packument from `registry.npmjs.org/<pkg>` (CORS-enabled) and resolves
    the version.
 2. It downloads the tarball, then checks `dist.integrity` (SHA-512) with `crypto.subtle`.
-3. It gunzips with `DecompressionStream("gzip")` and reads the archive with a small ustar reader
+3. It gunzips with `DecompressionStream("gzip")`, refusing more than 256 MiB of output, and reads the archive with a small ustar reader
    (about 60 lines).
 4. It calls `webfront.pkg.begin(pkg, version)`, then for each file
-   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)`. Files are sent in chunks to
-   stay under the bridge's frame limits; typed arrays already cross the bridge. Progress is shown in
+   `webfront.pkg.writeFile(pkg, version, path, offset, Uint8Array)`. Files are sent in 256 KiB
+   chunks; typed arrays already cross the bridge. Progress is shown in
    the browser, so no C++ push is needed.
 5. C++ rejects absolute paths, empty, `.` and `..` components, backslashes, and the characters Windows forbids in file names, and a chunk
    whose offset does not follow the bytes already written. Files are staged under
@@ -191,7 +192,10 @@ header-only C++ library.
   (`package/`) is removed, as npm does.
 - The archive's `package.json` must name the requested package and version and have a `webfront`
   field with `kind: "tool"` and an `entry` present in the archive; the title defaults to the name.
-- Files are sent in 16 KiB chunks, one call at a time, so C++ sees every chunk in order.
+- Files are sent in 256 KiB chunks, one call at a time, so C++ sees every chunk in order. The
+  browser sends such a call in several WebSocket frames, which the server reassembles.
+- Ctrl+C aborts the downloads and stops the upload before the next chunk; the installation is then
+  not committed.
 - `wf open` finds the tool in `webfront.pkg.list()` and calls `window.open(url, "_blank")`; when the
   browser blocks the window, it prints the URL instead.
 

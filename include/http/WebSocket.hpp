@@ -16,6 +16,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <span>
 #include <system_error>
@@ -182,64 +183,33 @@ private:
 class FrameDecoder {
 public:
     Header::Opcode frameType;
+    bool finalFrame = true;  ///< FIN bit: false for every fragment of a message but its last
 
 public:
     FrameDecoder() : payloadBuffer(sizeof(Header)) { reset(); }
     std::span<const std::byte> payload() const { return std::span(payloadBuffer.data(), payloadSize); }
     [[nodiscard]] size_t consumed() const { return consumedSize; }
+    /// True when the last frame's header announced more than its budget: nothing was reserved for it.
+    [[nodiscard]] bool rejected() const { return oversized; }
 
     // Parses some incoming data and tries to decode it.
     // @return true if the frame is complete, false if it needs more data
     bool parse(std::span<const std::byte> buffer) {
-        consumedSize = 0;
-        auto decodePayload = [&](std::span<const std::byte> encoded) -> size_t {
-            for (auto in : encoded) payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
-            consumedSize += encoded.size();
-            return payloadBuffer.size();
-        };
-        auto decodeHeader = [&](auto input) {
-            payloadSize = reinterpret_cast<const Header*>(input)->payloadSize();
-            headerSize = reinterpret_cast<const Header*>(input)->headerSize();
-            mask = reinterpret_cast<const Header*>(input)->maskingKey();
-            frameType = reinterpret_cast<const Header*>(input)->opcode();
-            payloadBuffer.reserve(payloadSize);
-        };
-        auto bufferizeHeaderData = [&](std::span<const std::byte> input) -> size_t {
-            for (size_t index = 0; index < input.size(); ++index) {
-                headerBuffer.raw[headerBufferParser++] = *(input.data() + index);
-                if (headerBuffer.isComplete(headerBufferParser)) return index + 1;
-            }
-            return input.size();
-        };
+        return parse(buffer, [](Header::Opcode) { return std::numeric_limits<size_t>::max(); });
+    }
 
+    // Same, rejecting a frame whose header announces more than maxPayload(opcode) bytes before
+    // reserving them: parse() then returns false and rejected() true.
+    template<typename Budget>
+    bool parse(std::span<const std::byte> buffer, Budget&& maxPayload) {
+        consumedSize = 0;
         switch (state) {
         case DecodingState::starting:
-            if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
-                reinterpret_cast<const Header*>(buffer.data())->dump();
-                decodeHeader(buffer.data());
-                consumedSize = headerSize;
-                if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
-                state = DecodingState::decodingPayload;
-            }
-            else {
-                consumedSize = bufferizeHeaderData(buffer);
-                state = DecodingState::partialHeader;
-            }
-            break;
-        case DecodingState::partialHeader: {
-            auto consumedData = bufferizeHeaderData(buffer);
-            consumedSize = consumedData;
-            if (headerBuffer.isComplete(headerBufferParser)) {
-                decodeHeader(headerBuffer.raw.data());
-                if (decodePayload(buffer.subspan(consumedData, std::min(buffer.size() - consumedData, payloadSize))) == payloadSize) return true;
-                state = DecodingState::decodingPayload;
-            }
-        } break;
-        case DecodingState::decodingPayload: {
-            const auto remaining = payloadSize - payloadBuffer.size();
-            decodePayload(buffer.first(std::min(remaining, buffer.size())));
-            return consumedSize == remaining;
-        }
+            return parseStart(buffer, maxPayload);
+        case DecodingState::partialHeader:
+            return parsePartialHeader(buffer, maxPayload);
+        case DecodingState::decodingPayload:
+            return parsePayload(buffer);
         }
         return false;
     }
@@ -250,15 +220,86 @@ public:
         payloadBuffer.clear();
         state = DecodingState::starting;
         consumedSize = 0;
+        oversized = false;
     }
 
 private:
+    // A frame whose header may be complete in `buffer`; otherwise its first bytes are kept.
+    template<typename Budget>
+    bool parseStart(std::span<const std::byte> buffer, Budget& maxPayload) {
+        const auto* header = reinterpret_cast<const Header*>(buffer.data());
+        if (!header->isComplete(buffer.size())) {
+            consumedSize = bufferizeHeaderData(buffer);
+            state        = DecodingState::partialHeader;
+            return false;
+        }
+        header->dump();
+        consumedSize = header->headerSize();
+        return startPayload(*header, buffer.subspan(consumedSize), maxPayload);
+    }
+
+    template<typename Budget>
+    bool parsePartialHeader(std::span<const std::byte> buffer, Budget& maxPayload) {
+        consumedSize = bufferizeHeaderData(buffer);
+        if (!headerBuffer.isComplete(headerBufferParser))
+            return false;
+        return startPayload(headerBuffer, buffer.subspan(consumedSize), maxPayload);
+    }
+
+    // Decodes a complete header, then the start of its payload found in `rest`.
+    template<typename Budget>
+    bool startPayload(const Header& header, std::span<const std::byte> rest, Budget& maxPayload) {
+        if (!decodeHeader(header, maxPayload))
+            return false;
+        if (decodePayload(rest.first(std::min(rest.size(), payloadSize))) == payloadSize)
+            return true;
+        state = DecodingState::decodingPayload;
+        return false;
+    }
+
+    bool parsePayload(std::span<const std::byte> buffer) {
+        const auto remaining = payloadSize - payloadBuffer.size();
+        decodePayload(buffer.first(std::min(remaining, buffer.size())));
+        return consumedSize == remaining;
+    }
+
+    // Rejects a frame announcing more than maxPayload(opcode) bytes before reserving them.
+    template<typename Budget>
+    bool decodeHeader(const Header& header, Budget& maxPayload) {
+        payloadSize = header.payloadSize();
+        headerSize  = header.headerSize();
+        mask        = header.maskingKey();
+        frameType   = header.opcode();
+        finalFrame  = header.FIN();
+        oversized   = payloadSize > maxPayload(frameType);
+        if (!oversized)
+            payloadBuffer.reserve(payloadSize);
+        return !oversized;
+    }
+
+    size_t decodePayload(std::span<const std::byte> encoded) {
+        for (auto in : encoded)
+            payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
+        consumedSize += encoded.size();
+        return payloadBuffer.size();
+    }
+
+    size_t bufferizeHeaderData(std::span<const std::byte> input) {
+        for (size_t index = 0; index < input.size(); ++index) {
+            headerBuffer.raw[headerBufferParser++] = input[index];
+            if (headerBuffer.isComplete(headerBufferParser))
+                return index + 1;
+        }
+        return input.size();
+    }
+
     enum class DecodingState { starting, partialHeader, decodingPayload } state;
     std::vector<std::byte> payloadBuffer;
     Header headerBuffer;
     size_t headerBufferParser;
     size_t payloadSize, headerSize;
     size_t consumedSize;
+    bool oversized = false;
     std::array<std::byte, 4> mask;
     uint8_t maskIndex;
 };
@@ -323,6 +364,11 @@ private:
     std::deque<std::shared_ptr<Frame<Net>>> writeQueue;  // the first frame is the one being written
     networking::ex::inplace_stop_source stopSource;
     std::atomic_bool started;
+    // A message sent in several frames (RFC 6455, 5.4), as browsers do with large messages: its
+    // type and the payloads received so far, at most http::maxMessageSize<Policy>() bytes
+    // (payloadBudget()).
+    std::optional<Header::Opcode> fragmentedType;
+    std::vector<std::byte> fragments;
 
 private:
     explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
@@ -354,8 +400,10 @@ private:
 
     void processFrames(std::span<const std::byte> received) {
         while (!received.empty() && started) {
-            const auto frameComplete = decoder.parse(received);
-            received                 = received.subspan(decoder.consumed());
+            const auto frameComplete = decoder.parse(received, [this](Header::Opcode type) { return payloadBudget(type); });
+            if (decoder.rejected())
+                return rejectFrame();
+            received = received.subspan(decoder.consumed());
             if (!frameComplete)
                 break;
             dispatchFrame();
@@ -364,24 +412,80 @@ private:
     }
 
     void dispatchFrame() {
-        const auto data = decoder.payload();
         switch (decoder.frameType) {
             case Header::Opcode::text:
-                if (textHandler)
-                    textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
-                break;
             case Header::Opcode::binary:
-                if (binaryHandler)
-                    binaryHandler(data);
+                startMessage(decoder.payload());
                 break;
-            case Header::Opcode::connectionClose:
-                if (closeHandler)
-                    closeHandler(CloseEvent{});
-                stop();
+            case Header::Opcode::continuation:
+                continueMessage(decoder.payload());
                 break;
             default:
-                log::debug("Unhandled frameType");
+                dispatchControlFrame();
         }
+    }
+
+    // Control frames (close, ping, pong) and reserved opcodes: none may be fragmented (RFC 6455, 5.5).
+    void dispatchControlFrame() {
+        if (!decoder.finalFrame)
+            return closeOnError(std::make_error_code(std::errc::protocol_error));
+        if (decoder.frameType != Header::Opcode::connectionClose) {
+            log::debug("Unhandled frameType");
+            return;
+        }
+        if (closeHandler)
+            closeHandler(CloseEvent{});
+        stop();
+    }
+
+    // Control frames (close, ping, pong) carry at most 125 bytes (RFC 6455, 5.5), whatever maxMessageSize.
+    static constexpr size_t maxControlPayload = 125;
+
+    static bool isControl(Header::Opcode type) { return type >= Header::Opcode::connectionClose; }
+
+    // The largest payload a frame may announce: 125 bytes for a control frame, what is left of
+    // maxMessageSize for a continuation, all of it for another frame. Checked on the header, before
+    // the payload is buffered.
+    size_t payloadBudget(Header::Opcode type) const {
+        constexpr auto limit = http::maxMessageSize<Policy>();
+        if (isControl(type))
+            return maxControlPayload;
+        return type == Header::Opcode::continuation ? limit - fragments.size() : limit;
+    }
+
+    // A frame announcing more than its budget: an oversized control frame breaks the protocol, an
+    // oversized message exceeds maxMessageSize.
+    void rejectFrame() {
+        closeOnError(std::make_error_code(isControl(decoder.frameType) ? std::errc::protocol_error : std::errc::message_size));
+    }
+
+    // The first frame of a text or binary message.
+    void startMessage(std::span<const std::byte> data) {
+        if (fragmentedType)
+            return closeOnError(std::make_error_code(std::errc::protocol_error));  // the previous message is unfinished
+        if (decoder.finalFrame)
+            return dispatchMessage(decoder.frameType, data);
+        fragmentedType = decoder.frameType;
+        fragments.assign(data.begin(), data.end());
+    }
+
+    void continueMessage(std::span<const std::byte> data) {
+        if (!fragmentedType)
+            return closeOnError(std::make_error_code(std::errc::protocol_error));  // no message to continue
+        fragments.insert(fragments.end(), data.begin(), data.end());
+        if (!decoder.finalFrame)
+            return;
+        const auto message = std::exchange(fragments, {});
+        dispatchMessage(*std::exchange(fragmentedType, std::nullopt), message);
+    }
+
+    void dispatchMessage(Header::Opcode type, std::span<const std::byte> data) {
+        if (type == Header::Opcode::text) {
+            if (textHandler)
+                textHandler(std::string_view(reinterpret_cast<const char*>(data.data()), data.size()));
+        }
+        else if (binaryHandler)
+            binaryHandler(data);
     }
 
     void closeOnError(std::error_code ec) {

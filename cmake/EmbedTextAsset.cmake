@@ -50,6 +50,25 @@ endwhile()
 
 set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct ${STRUCT} {\n    static constexpr std::string_view encoding{};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
 
+# A Windows checkout converting either file to CRLF would make it look stale, so both must keep
+# LF through .gitattributes. Checked only in a git work tree, on every platform.
+if(DEFINED CHECK AND GIT_EXECUTABLE)
+    get_filename_component(source_dir "${INPUT}" DIRECTORY)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" check-attr eol -- "${INPUT}" "${CHECK}"
+        WORKING_DIRECTORY "${source_dir}"
+        OUTPUT_VARIABLE attributes
+        RESULT_VARIABLE not_in_work_tree
+        ERROR_QUIET)
+    if(NOT not_in_work_tree)
+        string(REGEX MATCHALL "eol: lf\n" lf_lines "${attributes}")
+        list(LENGTH lf_lines lf_count)
+        if(NOT lf_count EQUAL 2)
+            message(FATAL_ERROR "${INPUT} and ${CHECK} must have 'text eol=lf' in .gitattributes:\n${attributes}")
+        endif()
+    endif()
+endif()
+
 if(DEFINED CHECK)
     file(READ "${CHECK}" expected)
     if(NOT contents STREQUAL expected)
