@@ -203,61 +203,13 @@ public:
     template<typename Budget>
     bool parse(std::span<const std::byte> buffer, Budget&& maxPayload) {
         consumedSize = 0;
-        auto decodePayload = [&](std::span<const std::byte> encoded) -> size_t {
-            for (auto in : encoded) payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
-            consumedSize += encoded.size();
-            return payloadBuffer.size();
-        };
-        auto decodeHeader = [&](auto input) {
-            payloadSize = reinterpret_cast<const Header*>(input)->payloadSize();
-            headerSize = reinterpret_cast<const Header*>(input)->headerSize();
-            mask = reinterpret_cast<const Header*>(input)->maskingKey();
-            frameType = reinterpret_cast<const Header*>(input)->opcode();
-            finalFrame = reinterpret_cast<const Header*>(input)->FIN();
-            oversized = payloadSize > maxPayload(frameType);
-            if (!oversized)
-                payloadBuffer.reserve(payloadSize);
-            return !oversized;
-        };
-        auto bufferizeHeaderData = [&](std::span<const std::byte> input) -> size_t {
-            for (size_t index = 0; index < input.size(); ++index) {
-                headerBuffer.raw[headerBufferParser++] = *(input.data() + index);
-                if (headerBuffer.isComplete(headerBufferParser)) return index + 1;
-            }
-            return input.size();
-        };
-
         switch (state) {
         case DecodingState::starting:
-            if (reinterpret_cast<const Header*>(buffer.data())->isComplete(buffer.size())) {
-                reinterpret_cast<const Header*>(buffer.data())->dump();
-                const auto accepted = decodeHeader(buffer.data());
-                consumedSize = headerSize;
-                if (!accepted)
-                    return false;
-                if (decodePayload(buffer.subspan(headerSize, std::min(buffer.size() - headerSize, payloadSize))) == payloadSize) return true;
-                state = DecodingState::decodingPayload;
-            }
-            else {
-                consumedSize = bufferizeHeaderData(buffer);
-                state = DecodingState::partialHeader;
-            }
-            break;
-        case DecodingState::partialHeader: {
-            auto consumedData = bufferizeHeaderData(buffer);
-            consumedSize = consumedData;
-            if (headerBuffer.isComplete(headerBufferParser)) {
-                if (!decodeHeader(headerBuffer.raw.data()))
-                    return false;
-                if (decodePayload(buffer.subspan(consumedData, std::min(buffer.size() - consumedData, payloadSize))) == payloadSize) return true;
-                state = DecodingState::decodingPayload;
-            }
-        } break;
-        case DecodingState::decodingPayload: {
-            const auto remaining = payloadSize - payloadBuffer.size();
-            decodePayload(buffer.first(std::min(remaining, buffer.size())));
-            return consumedSize == remaining;
-        }
+            return parseStart(buffer, maxPayload);
+        case DecodingState::partialHeader:
+            return parsePartialHeader(buffer, maxPayload);
+        case DecodingState::decodingPayload:
+            return parsePayload(buffer);
         }
         return false;
     }
@@ -272,6 +224,75 @@ public:
     }
 
 private:
+    // A frame whose header may be complete in `buffer`; otherwise its first bytes are kept.
+    template<typename Budget>
+    bool parseStart(std::span<const std::byte> buffer, Budget& maxPayload) {
+        const auto* header = reinterpret_cast<const Header*>(buffer.data());
+        if (!header->isComplete(buffer.size())) {
+            consumedSize = bufferizeHeaderData(buffer);
+            state        = DecodingState::partialHeader;
+            return false;
+        }
+        header->dump();
+        consumedSize = header->headerSize();
+        return startPayload(*header, buffer.subspan(consumedSize), maxPayload);
+    }
+
+    template<typename Budget>
+    bool parsePartialHeader(std::span<const std::byte> buffer, Budget& maxPayload) {
+        consumedSize = bufferizeHeaderData(buffer);
+        if (!headerBuffer.isComplete(headerBufferParser))
+            return false;
+        return startPayload(headerBuffer, buffer.subspan(consumedSize), maxPayload);
+    }
+
+    // Decodes a complete header, then the start of its payload found in `rest`.
+    template<typename Budget>
+    bool startPayload(const Header& header, std::span<const std::byte> rest, Budget& maxPayload) {
+        if (!decodeHeader(header, maxPayload))
+            return false;
+        if (decodePayload(rest.first(std::min(rest.size(), payloadSize))) == payloadSize)
+            return true;
+        state = DecodingState::decodingPayload;
+        return false;
+    }
+
+    bool parsePayload(std::span<const std::byte> buffer) {
+        const auto remaining = payloadSize - payloadBuffer.size();
+        decodePayload(buffer.first(std::min(remaining, buffer.size())));
+        return consumedSize == remaining;
+    }
+
+    // Rejects a frame announcing more than maxPayload(opcode) bytes before reserving them.
+    template<typename Budget>
+    bool decodeHeader(const Header& header, Budget& maxPayload) {
+        payloadSize = header.payloadSize();
+        headerSize  = header.headerSize();
+        mask        = header.maskingKey();
+        frameType   = header.opcode();
+        finalFrame  = header.FIN();
+        oversized   = payloadSize > maxPayload(frameType);
+        if (!oversized)
+            payloadBuffer.reserve(payloadSize);
+        return !oversized;
+    }
+
+    size_t decodePayload(std::span<const std::byte> encoded) {
+        for (auto in : encoded)
+            payloadBuffer.push_back(in ^ mask[maskIndex++ % 4]);
+        consumedSize += encoded.size();
+        return payloadBuffer.size();
+    }
+
+    size_t bufferizeHeaderData(std::span<const std::byte> input) {
+        for (size_t index = 0; index < input.size(); ++index) {
+            headerBuffer.raw[headerBufferParser++] = input[index];
+            if (headerBuffer.isComplete(headerBufferParser))
+                return index + 1;
+        }
+        return input.size();
+    }
+
     enum class DecodingState { starting, partialHeader, decodingPayload } state;
     std::vector<std::byte> payloadBuffer;
     Header headerBuffer;
