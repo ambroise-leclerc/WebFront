@@ -146,24 +146,51 @@ SCENARIO("A WebSocket limits the size of the messages it reassembles") {
             REQUIRE_FALSE(closeCode);
         }
     }
-    GIVEN("Fragments adding up to more than the limit") {
+    // Only the header of a frame (2 bytes, then the 4-byte mask): the payload never comes.
+    const auto receiveHeader = [&](string_view payload, uint8_t finAndOpcode) {
+        auto frame = webfront::testing::clientFrame(as_bytes(span(payload)), byte{finAndOpcode});
+        frame.resize(6);
+        InjectableSocket::receive(frame);
+    };
+
+    GIVEN("A continuation announcing more than what is left of the limit") {
         receive("ab", 0x02);
-        receive("cde", 0x80);
+        receiveHeader("cde", 0x80);
+        THEN("The connection fails with message_size on its header") {
+            REQUIRE(messages.empty());
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    GIVEN("The header of a first fragment announcing more than the limit") {
+        receiveHeader("abcde", 0x02);
+        THEN("The connection fails with message_size without waiting for the payload") {
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    GIVEN("The header of a message in one frame announcing more than the limit") {
+        receiveHeader("abcde", 0x82);
         THEN("The connection fails with message_size") {
             REQUIRE(messages.empty());
             REQUIRE(closeCode == messageSize);
         }
     }
-    GIVEN("A first fragment larger than the limit") {
-        receive("abcde", 0x02);
+    InjectableSocket::reset();
+}
+
+SCENARIO("A WebSocket rejects a frame announcing gigabytes before buffering it") {
+    InjectableSocket::reset();
+    optional<uint16_t> closeCode;
+    auto               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    ws->onMessage([](span<const byte>) {});
+    ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
+    ws->start();
+
+    GIVEN("The header of a first fragment announcing 8 GiB, with the default limit") {
+        // FIN clear, binary; masked 64-bit length 0x200000000; masking key.
+        InjectableSocket::receive(vector<byte>{byte{0x02}, byte{0xff}, byte{0}, byte{0}, byte{0}, byte{2}, byte{0}, byte{0}, byte{0}, byte{0},
+                                               byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}});
         THEN("The connection fails with message_size") {
-            REQUIRE(closeCode == messageSize);
-        }
-    }
-    GIVEN("A message in one frame larger than the limit") {
-        receive("abcde", 0x82);
-        THEN("It is delivered, since it needs no reassembly") {
-            REQUIRE(messages.size() == 1);
+            REQUIRE(closeCode == static_cast<uint16_t>(std::make_error_code(std::errc::message_size).value()));
         }
     }
     InjectableSocket::reset();

@@ -23,7 +23,7 @@ concept BuffersPolicyType = requires {
     { T::functionCallBufferSize } -> std::convertible_to<size_t>;
 };
 
-/// Largest WebSocket message reassembled from several frames when a policy has no maxMessageSize.
+/// Largest WebSocket message received when a policy has no maxMessageSize.
 inline constexpr size_t defaultMaxMessageSize = 64 * 1024 * 1024;
 
 /// Default buffer sizes as specified in issue #40
@@ -45,7 +45,8 @@ struct CustomBuffersPolicy {
 };
 
 /// The policy's optional maxMessageSize: a WebSocket closes the connection with
-/// std::errc::message_size when the frames of one message add up to more.
+/// std::errc::message_size as soon as a frame header announces a message larger than this, in one
+/// frame or adding up its fragments, before buffering its payload.
 template<BuffersPolicyType Policy>
 constexpr size_t maxMessageSize() {
     if constexpr (requires { { Policy::maxMessageSize } -> std::convertible_to<size_t>; })
