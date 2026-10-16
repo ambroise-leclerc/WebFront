@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Window with a rejected ready Promise</title>
+<script>
+    // The page itself loads from WebFront, but its bridge can never connect.
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+        constructor() { super("ws://127.0.0.1:0/"); }
+    };
+</script>
+<script src="WebFront.js"></script>
+<script>
+    // An unexpected resolution leaves the window open so CTest fails on its timeout.
+    webFront.ready.catch(() => window.close());
+</script>

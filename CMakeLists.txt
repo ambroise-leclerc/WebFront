@@ -19,6 +19,7 @@ if(WEBFRONT_USE_MDDLOG)
 endif()
 
 option(WEBFRONT_EMBED_CEF "Enable embedded CEF window support" OFF)
+option(WEBFRONT_EMBED_WEBVIEW2 "Enable embedded WebView2 window support (Windows only)" OFF)
 
 set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
@@ -73,6 +74,9 @@ if(WEBFRONT_IS_TOP_LEVEL)
     include(StaticAnalyzers)
 endif()
 include(CPM)
+if(WEBFRONT_EMBED_WEBVIEW2)
+    include(WebView2Support)
+endif()
 
 # Define the APPEND_PLATFORM_SOURCES macro needed by CEF
 macro(APPEND_PLATFORM_SOURCES variable_name)

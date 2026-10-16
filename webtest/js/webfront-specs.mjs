@@ -1,6 +1,7 @@
 import { importedValue } from './module-fixture.mjs';
 import './terminal-specs.mjs';
 import './tools-specs.mjs';
+import './react-demo-specs.mjs';
 
 const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';

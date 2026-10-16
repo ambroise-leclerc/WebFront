@@ -1,10 +1,12 @@
 #include <components/Terminal.hpp>
 #include <components/ToolManager.hpp>
+#include <system/BabelFS.hpp>
 #include <system/FileSystem.hpp>
 #include <system/IndexFS.hpp>
 #include <system/JasmineFS.hpp>
 #include <system/NativeFS.hpp>
 #include <system/PackageFS.hpp>
+#include <system/ReactFS.hpp>
 #include <system/TerminalFS.hpp>
 #include <system/ToolManagerFS.hpp>
 #include <tooling/Logger.hpp>
@@ -12,6 +14,7 @@
 #include <WebFront.hpp>
 
 #include "RejectedWebSocketServer.hpp"
+#include "../src/SignalDemo.hpp"
 
 #include <array>
 #include <atomic>
@@ -86,16 +89,39 @@ private:
     filesystem::path root;
 };
 
-using TestFS = fs::Multi<FakeRegistrySearchFS,
+// Serve the actual example page so the React regression exercises the shipped UI.
+class ReactDemoFS {
+public:
+    explicit ReactDemoFS(filesystem::path root) : page(root.parent_path() / "src" / "react.html") {}
+
+    optional<fs::File> open(filesystem::path file) const {
+        if (file.relative_path().generic_string() != "demos/react.html")
+            return {};
+        ifstream stream(page, ios::binary);
+        if (!stream)
+            return {};
+        return fs::File{std::move(stream)};
+    }
+
+private:
+    filesystem::path page;
+};
+
+using TestFS = fs::Multi<ReactDemoFS,
+                         FakeRegistrySearchFS,
                          fs::NativeDebugFS,
                          fs::IndexFS,
                          fs::JasmineFS,
+                         fs::ReactFS,
+                         fs::BabelFS,
                          fs::TerminalFS,
                          fs::ToolManagerFS,
                          fs::BasicPackageFS<TestToolsProject>>;
-// The browser integration test needs an embedded, auto-closing window under Xvfb, so it selects
-// CEFFrontend explicitly rather than relying on webfront::WebFront's default (system) frontend.
-using TestWF = BasicWFWithFrontend<NetProvider, TestFS, frontend::CEFFrontend>;
+// CMake chooses an embedded frontend; the same specs run under CEF/Xvfb and Windows WebView2.
+#ifndef WEBFRONT_TEST_FRONTEND
+    #define WEBFRONT_TEST_FRONTEND webfront::frontend::CEFFrontend
+#endif
+using TestWF = BasicWFWithFrontend<NetProvider, TestFS, WEBFRONT_TEST_FRONTEND>;
 
 class BrowserIntegrationTest {
 public:
@@ -105,8 +131,7 @@ public:
     }
 
 #ifdef _MSC_VER
-    // openAndRun() never returns normally here: TestWF selects CEFFrontend explicitly, and its
-    // open() unconditionally throws in a CEF-off build (this is intentional - see #206). MSVC's
+    // With an unavailable embedded frontend, openAndRun() unconditionally throws. MSVC's
     // inliner detects that and flags the return below as unreachable, uniquely among our compilers,
     // turning it into an error under /WX; see the matching suppression in include/WebFront.hpp.
     #pragma warning(push)
@@ -144,6 +169,7 @@ private:
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
     void registerCallbacks() {
+        webFront.cppFunction("signal.generate", &demo::generateSignal);
         webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
         uiSubscription = webFront.subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;

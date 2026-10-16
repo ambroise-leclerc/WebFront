@@ -8,7 +8,7 @@ Audit applied: 2026-07-19. The backlog was reduced to work that has concrete int
 |---|---|---|
 | #39 Typed arrays in bridge messages | Active, first priority. The wire enum already reserves numeric array types, but their codecs are incomplete and the readable browser bridge source was removed in 2023. | Restore a reproducible `WebFront.js` source/embedding pipeline, implement owning numeric arrays in both directions, and cover them in Catch2 and Jasmine. |
 | #35 Asynchronous bridge results and errors | Active, second priority. Existing calls remain fire-and-forget even though a partial return-message type exists. | Add correlation identifiers, C++ futures, JavaScript promises, exception propagation, missing-function errors, and disconnect cleanup after #39. |
-| #137 Optional WebView2 frontend | Retained but deferred. Closed PR #175 was untested and targeted the example rather than the current frontend abstraction. | Implement a fresh opt-in `frontend::WebView2` only with native Windows compilation and lifecycle/bridge testing. |
+| #137 Optional WebView2 frontend | Implemented through `frontend::WebView2Frontend`, with pinned opt-in SDK, owned Windows/COM lifecycle and writable profiles. Closed PR #175 was not reused. | Windows MSVC CI includes shared Jasmine and timed lifecycle tests. All 11 browser cases pass locally with an intact official runtime; the machine's installed Evergreen DLL has a compression read error (see PROJECT_STATUS.md). |
 
 Issue #199 tracks this one-time repository cleanup and closes with its documentation PR.
 
