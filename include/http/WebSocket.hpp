@@ -402,7 +402,7 @@ private:
         while (!received.empty() && started) {
             const auto frameComplete = decoder.parse(received, [this](Header::Opcode type) { return payloadBudget(type); });
             if (decoder.rejected())
-                return closeOnError(std::make_error_code(std::errc::message_size));
+                return rejectFrame();
             received = received.subspan(decoder.consumed());
             if (!frameComplete)
                 break;
@@ -438,11 +438,25 @@ private:
         stop();
     }
 
-    // The largest payload a frame may announce: what is left of maxMessageSize for a continuation,
-    // all of it for another frame. Checked on the header, before the payload is buffered.
+    // Control frames (close, ping, pong) carry at most 125 bytes (RFC 6455, 5.5), whatever maxMessageSize.
+    static constexpr size_t maxControlPayload = 125;
+
+    static bool isControl(Header::Opcode type) { return type >= Header::Opcode::connectionClose; }
+
+    // The largest payload a frame may announce: 125 bytes for a control frame, what is left of
+    // maxMessageSize for a continuation, all of it for another frame. Checked on the header, before
+    // the payload is buffered.
     size_t payloadBudget(Header::Opcode type) const {
         constexpr auto limit = http::maxMessageSize<Policy>();
+        if (isControl(type))
+            return maxControlPayload;
         return type == Header::Opcode::continuation ? limit - fragments.size() : limit;
+    }
+
+    // A frame announcing more than its budget: an oversized control frame breaks the protocol, an
+    // oversized message exceeds maxMessageSize.
+    void rejectFrame() {
+        closeOnError(std::make_error_code(isControl(decoder.frameType) ? std::errc::protocol_error : std::errc::message_size));
     }
 
     // The first frame of a text or binary message.

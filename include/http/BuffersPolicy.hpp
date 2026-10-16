@@ -46,7 +46,8 @@ struct CustomBuffersPolicy {
 
 /// The policy's optional maxMessageSize: a WebSocket closes the connection with
 /// std::errc::message_size as soon as a frame header announces a message larger than this, in one
-/// frame or adding up its fragments, before buffering its payload.
+/// frame or adding up its fragments, before buffering its payload. Control frames (close, ping,
+/// pong) have their own 125-byte protocol limit instead.
 template<BuffersPolicyType Policy>
 constexpr size_t maxMessageSize() {
     if constexpr (requires { { Policy::maxMessageSize } -> std::convertible_to<size_t>; })
