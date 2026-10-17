@@ -3,6 +3,7 @@
 #include "../system/WindowsCompat.hpp"
 #include "../tooling/Logger.hpp"
 #include "CEFPaths.hpp"
+#include "Url.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -430,7 +431,7 @@ inline void open(std::string_view port, std::string_view file) {
     CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient);
 
     // Build the URL
-    std::string url = "http://localhost:" + std::string(port) + "/" + std::string(file);
+    const std::string url = frontend::detail::applicationUrl(port, file);
 
     log::info("Opening URL: {}", url);
 

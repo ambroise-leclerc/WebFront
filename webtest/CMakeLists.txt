@@ -6,21 +6,12 @@ add_executable(webtest JasmineTest.cpp)
 # Link basic libraries
 target_link_libraries(webtest PRIVATE WebFront WebFront_warnings WebFront_options)
 
-set(_webfront_test_frontend CEF)
-if(WEBFRONT_EMBED_WEBVIEW2)
-    set(_webfront_test_frontend WebView2)
-endif()
-set(WEBFRONT_WEBTEST_FRONTEND "${_webfront_test_frontend}" CACHE STRING "Browser test frontend: CEF or WebView2")
-set_property(CACHE WEBFRONT_WEBTEST_FRONTEND PROPERTY STRINGS CEF WebView2)
-if(NOT WEBFRONT_WEBTEST_FRONTEND MATCHES "^(CEF|WebView2)$")
-    message(FATAL_ERROR "WEBFRONT_WEBTEST_FRONTEND must be CEF or WebView2")
-endif()
-target_compile_definitions(webtest PRIVATE WEBFRONT_TEST_FRONTEND=webfront::frontend::${WEBFRONT_WEBTEST_FRONTEND}Frontend)
+include(Frontends)
+webfront_default_embedded_frontend(_webfront_test_frontend FALLBACK CEF)
+webfront_select_frontend(WEBFRONT_WEBTEST_FRONTEND "${_webfront_test_frontend}" "Browser test frontend" EMBEDDED_ONLY REQUIRE_AVAILABLE)
+target_compile_definitions(webtest PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
 
 if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WebView2")
-    if(NOT WEBFRONT_EMBED_WEBVIEW2)
-        message(FATAL_ERROR "WebView2 browser tests require WEBFRONT_EMBED_WEBVIEW2=ON")
-    endif()
     add_test(NAME WebFrontWebView2Integration COMMAND webtest)
     set_tests_properties(WebFrontWebView2Integration PROPERTIES
         LABELS "web-integration" TIMEOUT 90

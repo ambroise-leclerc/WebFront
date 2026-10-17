@@ -39,12 +39,9 @@ target_link_libraries(WebFrontTools PRIVATE WebFront WebFront_warnings WebFront_
 add_executable(WebFrontApp ModuleDemo.cpp)
 target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_options)
 
-set(WEBFRONT_DEMO_FRONTEND DefaultBrowser CACHE STRING "Module demo frontend: DefaultBrowser, CEF or WebView2")
-set_property(CACHE WEBFRONT_DEMO_FRONTEND PROPERTY STRINGS DefaultBrowser CEF WebView2)
-if(NOT WEBFRONT_DEMO_FRONTEND MATCHES "^(DefaultBrowser|CEF|WebView2)$")
-    message(FATAL_ERROR "WEBFRONT_DEMO_FRONTEND must be DefaultBrowser, CEF or WebView2")
-endif()
-target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_DEMO_FRONTEND=webfront::frontend::${WEBFRONT_DEMO_FRONTEND}Frontend)
+include(Frontends)
+webfront_select_frontend(WEBFRONT_DEMO_FRONTEND DefaultBrowser "Module demo frontend")
+target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_DEMO_FRONTEND=${WEBFRONT_DEMO_FRONTEND_TYPE})
 
 # ==============================================================================
 # CEF Integration
