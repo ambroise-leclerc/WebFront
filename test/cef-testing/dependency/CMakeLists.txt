@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.31)
+project(CEF NONE)
+option(BUILD_TESTING "Dependency tests" ON)
+if(NOT BUILD_TESTING STREQUAL "OFF")
+    message(FATAL_ERROR "CEF dependencies must configure with BUILD_TESTING=OFF, got '${BUILD_TESTING}'")
+endif()
+set_property(GLOBAL PROPERTY test_cef_configured TRUE)

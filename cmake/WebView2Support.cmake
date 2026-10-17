@@ -55,3 +55,16 @@ target_compile_definitions(WebFront INTERFACE WEBFRONT_EMBED_WEBVIEW2)
 target_link_libraries(WebFront INTERFACE
     "${WebView2SDK_SOURCE_DIR}/build/native/${_webview2_arch}/WebView2LoaderStatic.lib"
     ole32 oleaut32 user32 shell32 shlwapi version)
+
+# Additional lifecycle coverage for this engine, alongside the shared Jasmine runner.
+function(webfront_add_webview2_tests)
+    add_executable(webview2_lifecycle WebView2Lifecycle.cpp WebView2HeaderConsumer.cpp)
+    target_link_libraries(webview2_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
+    foreach(mode no-bridge early-close rejected-ready navigation-failure mta missing-runtime
+                 closed-startup-timeout failed-startup-timeout late-navigation-failure path-encoding runtime-ready)
+        add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
+        set_tests_properties(WebView2Lifecycle-${mode} PROPERTIES
+            LABELS "web-integration" TIMEOUT 45 RESOURCE_LOCK webfront_port_9002
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/webtest)
+    endforeach()
+endfunction()
