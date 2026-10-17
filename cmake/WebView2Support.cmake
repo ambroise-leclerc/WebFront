@@ -1,4 +1,5 @@
 # The SDK is independent of the Evergreen runtime installed on the end user's machine.
+# This standalone SDK module also guards the Windows ABI when used without the registry.
 if(NOT WIN32)
     message(FATAL_ERROR "WEBFRONT_EMBED_WEBVIEW2 is supported only on Windows")
 endif()
@@ -55,3 +56,17 @@ target_compile_definitions(WebFront INTERFACE WEBFRONT_EMBED_WEBVIEW2)
 target_link_libraries(WebFront INTERFACE
     "${WebView2SDK_SOURCE_DIR}/build/native/${_webview2_arch}/WebView2LoaderStatic.lib"
     ole32 oleaut32 user32 shell32 shlwapi version)
+
+# Register lifecycle coverage once, alongside the shared Jasmine runner; paths are module-relative.
+function(webfront_add_webview2_tests)
+    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../webtest" ABSOLUTE)
+    add_executable(webview2_lifecycle
+        "${webtest_source_dir}/WebView2Lifecycle.cpp"
+        "${webtest_source_dir}/WebView2HeaderConsumer.cpp")
+    target_link_libraries(webview2_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
+    foreach(mode no-bridge early-close rejected-ready navigation-failure mta missing-runtime
+                 closed-startup-timeout failed-startup-timeout late-navigation-failure path-encoding runtime-ready)
+        add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
+        webfront_set_browser_test_properties("WebView2Lifecycle-${mode}" "${webtest_source_dir}" 45)
+    endforeach()
+endfunction()

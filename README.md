@@ -188,13 +188,15 @@ When WebFront is not the top-level project it builds neither its examples nor it
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available |
+| `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available (Windows, Linux and macOS only). Other platforms fail at configure time |
 | `WEBFRONT_EMBED_WEBVIEW2` | `OFF` | Download the pinned WebView2 SDK and link its static loader (Windows only) |
 | `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF` or `WebView2` (enable the matching SDK) |
-| `WEBFRONT_WEBTEST_FRONTEND` | `WebView2` when enabled, otherwise `CEF` | Embedded frontend for the shared Jasmine runner |
+| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine runner; WebView2 takes priority over CEF on Windows; explicit selection overrides the default |
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
 | `ENABLE_COVERAGE` | `OFF` | Instrument the C++ tests (GCC/Clang) |
+
+Frontend selectors keep their cached value on reconfiguration, even when another engine is enabled later. On Windows, use `-DWEBFRONT_WEBTEST_FRONTEND=WebView2` to switch an existing CEF runner, or `-UWEBFRONT_WEBTEST_FRONTEND` to recompute the default. CEF browser tests are validated only on Linux/Xvfb; selecting CEF on Windows or macOS builds the runner but emits a warning and registers no browser test.
 
 ## Contributing: build and test
 
@@ -219,7 +221,7 @@ The Jasmine specs are native ES modules. They prove relative module loading, bot
 On Windows, the same Jasmine suite and additional lifecycle tests run in WebView2 (Evergreen runtime required):
 
 ```powershell
-cmake -S . -B build-webview2 -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEMO_FRONTEND=WebView2
+cmake -S . -B build-webview2 -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEMO_FRONTEND=WebView2 -DWEBFRONT_WEBTEST_FRONTEND=WebView2
 cmake --build build-webview2 --config Release --parallel
 ctest --test-dir build-webview2 -C Release --output-on-failure
 ```

@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.31)
+project(CEF NONE)
+option(BUILD_TESTING "Dependency tests" ON)
+if(NOT BUILD_TESTING STREQUAL "OFF")
+    message(FATAL_ERROR "CEF dependencies must configure with BUILD_TESTING=OFF, got '${BUILD_TESTING}'")
+endif()
+# Model the real SDK wrapper without a compiler or downloaded binaries.
+if(WRAPPER_KIND STREQUAL "interface")
+    add_library(libcef_dll_wrapper INTERFACE)
+elseif(NOT WRAPPER_KIND STREQUAL "missing")
+    add_library(libcef_dll_wrapper STATIC IMPORTED GLOBAL)
+endif()
+# CEF 154 declares these targets even with BUILD_TESTING=OFF.
+foreach(target cef_sanity_test cef_resources_test cef_window_test)
+    add_custom_target(${target} ALL)
+endforeach()
+set_property(GLOBAL PROPERTY test_cef_configured TRUE)
