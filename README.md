@@ -188,10 +188,10 @@ When WebFront is not the top-level project it builds neither its examples nor it
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available |
+| `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available (Windows, Linux and macOS only). Other platforms fail at configure time |
 | `WEBFRONT_EMBED_WEBVIEW2` | `OFF` | Download the pinned WebView2 SDK and link its static loader (Windows only) |
 | `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF` or `WebView2` (enable the matching SDK) |
-| `WEBFRONT_WEBTEST_FRONTEND` | `WebView2` when enabled, otherwise `CEF` | Embedded frontend for the shared Jasmine runner |
+| `WEBFRONT_WEBTEST_FRONTEND` | First enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine runner; WebView2 takes priority over CEF on Windows; explicit selection overrides the default |
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
 | `ENABLE_COVERAGE` | `OFF` | Instrument the C++ tests (GCC/Clang) |
