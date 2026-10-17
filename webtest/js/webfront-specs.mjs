@@ -4,6 +4,16 @@ import './tools-specs.mjs';
 import './react-demo-specs.mjs';
 
 describe('Frontend page URL', () => {
+    it('opens a filename containing spaces and a literal hash', () => {
+        expect(decodeURIComponent(location.pathname)).toBe('/encoded path #.html');
+    });
+    it('serves a filename containing a literal plus through the C++ URL builder', async () => {
+        const url = await webFront.cppFunction('plusPageUrl')();
+        expect(new URL(url).pathname).toBe('/a%2Bb.html');
+        const response = await fetch(url);
+        expect(response.ok).toBeTrue();
+        expect(await response.text()).toContain('<title>WebFront automated browser tests</title>');
+    });
     it('preserves the query and fragment passed by C++', () => {
         expect(location.search).toBe('?webfront=1');
         expect(location.hash).toBe('#integration');

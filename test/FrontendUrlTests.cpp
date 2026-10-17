@@ -31,6 +31,13 @@ SCENARIO("The system browser session waits only after a successful launch") {
         REQUIRE(launchedUrl == "http://127.0.0.1:9002/index.html");
         REQUIRE(input.peek() == 'r');
     }
+    GIVEN("the page used by the WebView2 path-encoding regression") {
+        webfront::browser::open("9002", "encoded path %23.html?x=1#example", {recordLaunch, input, output});
+        THEN("the desktop launcher receives the encoded path and the query and fragment intact") {
+            REQUIRE(launchedUrl == "http://127.0.0.1:9002/encoded%20path%20%23.html?x=1#example");
+            REQUIRE(input.peek() == 'r');
+        }
+    }
     GIVEN("a failed desktop launcher") {
         REQUIRE_THROWS_WITH(webfront::browser::open("9002", "index.html", {rejectLaunch, input, output}), "desktop launcher failed");
         REQUIRE(input.peek() == '\n');
@@ -48,6 +55,20 @@ SCENARIO("Every frontend builds the application URL the same way") {
             REQUIRE(applicationUrl("9002", "index.html") == "http://127.0.0.1:9002/index.html");
             REQUIRE(applicationUrl("9002", "demos/react.html") == "http://127.0.0.1:9002/demos/react.html");
             REQUIRE(applicationUrl("9002", "") == "http://127.0.0.1:9002/");
+        }
+    }
+
+    GIVEN("path separators and a literal backslash") {
+        THEN("URL path separators survive and the backslash is percent-encoded") {
+            REQUIRE(applicationUrl("9002", "folder/sub folder/page.html") == "http://127.0.0.1:9002/folder/sub%20folder/page.html");
+            REQUIRE(applicationUrl("9002", "folder\\page.html") == "http://127.0.0.1:9002/folder%5Cpage.html");
+        }
+    }
+
+    GIVEN("a plus sign in a filename, query and fragment") {
+        THEN("the path plus survives the server decoder without changing query or fragment syntax") {
+            REQUIRE(applicationUrl("9002", "a+b.html?value=a+b#c+d") == "http://127.0.0.1:9002/a%2Bb.html?value=a+b#c+d");
+            REQUIRE(applicationUrl("9002", "a%2Bb.html") == "http://127.0.0.1:9002/a%2Bb.html");
         }
     }
 

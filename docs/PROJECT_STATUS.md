@@ -118,7 +118,13 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   For local validation, the official runtime CAB was extracted under an ignored build directory and selected with
   `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`; the runtime executable and `ffmpeg.dll` both have valid Microsoft signatures.
   No system runtime files or security settings were changed. Fixed-version runtime packaging remains out of scope.
-  CEF/Xvfb was not run on this Windows host; the available WSL launcher fails during its own initialization.
+
+- Follow-up verification for #254 (2026-10-17, Ubuntu 26.10 under WSL2, GCC 15.3, CEF 154.0.34):
+  `WebFrontBrowserIntegration` passes under Xvfb. The shared Jasmine suite loads `encoded path %23.html`
+  and verifies the decoded filename, query and fragment. This completes the CEF check alongside the
+  Windows CEF-off baseline (153 CTest cases) and the WebView2 Jasmine and path-encoding checks.
+  The URL builder also escapes a literal path `+` as `%2B`, with a failing-before Catch2 regression
+  and a browser check that fetches `a+b.html` using a C++-constructed URL.
 
 Local verification on 2026-07-19 completed successfully: the CEF-off build passed all 47 CTest cases, including deterministic asset and typed-array protocol coverage, and a CEF-enabled build passed `WebFrontBrowserIntegration` under Xvfb. The browser test exercised every supported numeric typed array from C++ to JavaScript and JavaScript to C++, ordinary tuple arrays, final Jasmine reporting, and automatic CEF shutdown.
 

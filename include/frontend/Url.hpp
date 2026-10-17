@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../http/Encodings.hpp"
+
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -13,19 +15,25 @@ inline bool hasPercentEncoding(std::string_view page, std::size_t index) {
     return hex.find(page[index + 1]) != std::string_view::npos && hex.find(page[index + 2]) != std::string_view::npos;
 }
 
+inline bool isLiteralPageByte(char byte, bool inPath) {
+    // The server decoder maps '+' to a space, so a path plus must be escaped.
+    if (byte == '+')
+        return !inPath;
+    constexpr std::string_view literal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/?:@!$&()*,;=#";
+    return literal.find(byte) != std::string_view::npos;
+}
+
 inline std::string encodePageReference(std::string_view page) {
-    constexpr std::string_view literal = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/?:@!$&()*+,;=#";
-    constexpr char             hex[]   = "0123456789ABCDEF";
-    std::string                encoded;
+    const auto  pathEnd = page.find_first_of("?#");
+    std::string encoded;
+    encoded.reserve(page.size());
     for (std::size_t index = 0; index < page.size(); ++index) {
         const auto byte    = static_cast<unsigned char>(page[index]);
         const bool escaped = byte == '%' && hasPercentEncoding(page, index);
-        if (escaped || literal.find(static_cast<char>(byte)) != std::string_view::npos) {
+        if (escaped || isLiteralPageByte(page[index], index < pathEnd)) {
             encoded += static_cast<char>(byte);
         } else {
-            encoded += '%';
-            encoded += hex[byte >> 4];
-            encoded += hex[byte & 15];
+            uri::detail::appendPercentEncodedByte(encoded, byte);
         }
     }
     return encoded;

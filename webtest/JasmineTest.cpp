@@ -107,7 +107,28 @@ private:
     filesystem::path page;
 };
 
-using TestFS = fs::Multi<ReactDemoFS,
+// Load the full Jasmine suite at the filename used by the WebView2 lifecycle regression.
+// A missing escape for the literal hash would request a different file and never report a result.
+class EncodedRunnerFS {
+public:
+    explicit EncodedRunnerFS(filesystem::path root) : page(root / "SpecRunner.html") { }
+
+    optional<fs::File> open(filesystem::path file) const {
+        const auto request = file.relative_path().generic_string();
+        if (request != "encoded path #.html" && request != "a+b.html")
+            return {};
+        ifstream stream(page, ios::binary);
+        if (!stream)
+            return {};
+        return fs::File{std::move(stream)};
+    }
+
+private:
+    filesystem::path page;
+};
+
+using TestFS = fs::Multi<EncodedRunnerFS,
+                         ReactDemoFS,
                          FakeRegistrySearchFS,
                          fs::NativeDebugFS,
                          fs::IndexFS,
@@ -140,7 +161,7 @@ public:
     int run() {
         log::info("Starting automated Jasmine browser integration test");
         // Exercise the same page-reference contract under both embedded frontends.
-        webFront.openAndRun("SpecRunner.html?webfront=1#integration");
+        webFront.openAndRun("encoded path %23.html?webfront=1#integration");
         return result();
     }
 #ifdef _MSC_VER
@@ -170,6 +191,7 @@ private:
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
     void registerCallbacks() {
+        webFront.cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
         webFront.cppFunction("signal.generate", &demo::generateSignal);
         webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
         uiSubscription = webFront.subscribeUIStarted([this](TestWF::UI) {
