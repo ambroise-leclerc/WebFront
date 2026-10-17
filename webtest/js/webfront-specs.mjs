@@ -3,6 +3,14 @@ import './terminal-specs.mjs';
 import './tools-specs.mjs';
 import './react-demo-specs.mjs';
 
+describe('Frontend page URL', () => {
+    it('preserves the query and fragment passed by C++', () => {
+        expect(location.search).toBe('?webfront=1');
+        expect(location.hash).toBe('#integration');
+        expect(location.hostname).toBe('127.0.0.1');
+    });
+});
+
 const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';
 const status = document.getElementById('bridge-status');

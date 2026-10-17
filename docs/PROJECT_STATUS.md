@@ -74,7 +74,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   Its pinned NuGet SDK and static loader are fetched only when enabled; the Evergreen runtime remains a prerequisite.
   The adapter owns STA COM, the window/message loop, resizing, navigation and controller shutdown, with writable per-executable
   profiles in LocalAppData. `WebFrontApp` selects it with `WEBFRONT_DEMO_FRONTEND=WebView2`.
-  Windows builds require an MSVC-compatible compiler; MinGW is rejected before SDK setup. Application paths are percent-encoded.
+  Windows builds require an MSVC-compatible compiler; MinGW is rejected before SDK setup. Built-in frontends share URI-reference encoding.
   Native focus and move messages forward to `MoveFocus(PROGRAMMATIC)` and `NotifyParentWindowPositionChanged`;
   controller mocks cover these messages, reentrant shutdown and the startup background. HRESULT diagnostics use eight-digit hexadecimal values.
   SDK loader selection follows the compiler's x86/x64/ARM64 target, including x64 builds on ARM64 hosts;
@@ -86,21 +86,27 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   applications must provide one to avoid blurry Windows scaling on HiDPI displays.
   This is a development frontend for trusted content: navigation and popup requests are unrestricted, DevTools and context menus
   remain enabled, and the adapter supplies no origin-based bridge authorization. Windows/Shell/WRL header names leak into consumers;
-  qualify `std::byte`. Implementation types live under `frontend::detail::webview2`. The initial timeout is a fixed named 30-second constant.
-  All frontends share one percent-encoding URL builder (`frontend/Url.hpp`), and the default browser quotes its command and accepts only a numeric port.
+  qualify `std::byte`. Implementation types live under `frontend::detail::webview2`. The runtime-creation timeout defaults to 30 seconds,
+  is configurable through `WebView2Options`, and stops before page navigation. Profile directories are also configurable.
+  All built-in frontends receive the configured address and preserve URI query/fragment syntax and existing percent escapes.
+  Controller closure is idempotent and reports HRESULT failures; DPI-change messages apply the suggested window bounds.
   The Windows CI matrix runs the shared Jasmine bridge suite and timed lifecycle tests under WebView2; CEF/Xvfb remains the Linux lane.
   The WebView2 browser label runs separately with `--no-tests=error`. CI's Evergreen bootstrapper URL is mutable;
   a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.
-- Local verification for #137 (2026-10-17, Windows, MSVC 19.44, x64): the CEF-off build passes all 143 CTest cases;
-  the WebView2-enabled build also passes all 146 non-browser CTest cases. All examples, the adapter and the Jasmine runner compile.
-  All 11 browser CTest cases pass with an intact official Microsoft runtime 155.0.4283.62: shared Jasmine bridge checks,
+- Local verification for #137 (2026-10-17, Windows, MSVC 19.44, x64): the CEF-off build passes all 153 CTest cases;
+  the WebView2-enabled build also passes all 158 non-browser CTest cases. All examples, the adapter and the Jasmine runner compile.
+  All 12 browser CTest cases pass with an intact official Microsoft runtime 155.0.4283.62: shared Jasmine bridge checks,
   repeated no-bridge closure, early native closure, rejected `ready`, initial and later navigation failures, incompatible COM,
-  missing runtime, queued startup timers and missing creation callbacks after closure or failure, and a page whose filename contains a space and `#`.
+  missing runtime, queued startup timers and missing creation callbacks after closure or failure, a held page resource after runtime creation,
+  and a page whose filename contains a space and `#` with a separate query and fragment.
   The new timer, navigation, process-policy, path-encoding and compiler-guard regressions failed before their fixes.
   The loader-architecture regression also failed before selecting by compiler target. The native socket shutdown test
   now waits for the bridge handshake, so it cannot stop between the HTTP 101 response and WebLink creation.
   Startup closure tests hold an actual environment-creation completion handler without invoking it, then invoke it after
   session destruction. No production pending-creation counter is kept. Focus, move, background and HRESULT regressions failed before their fixes.
+  Early native closure is posted from a same-thread window-creation hook, without polling window titles.
+  Architecture tests exercise explicit compiler IDs, generator-platform fallback and target-macro fallback for clang-cl,
+  including rejection of unknown targets and ARM64EC. A real TCP test confirms that construction listens before run() starts.
   The native-module demo loads its UI and its JavaScript-to-C++ callback was exercised from the native window.
   Signal Studio (`WebFrontApp react.html`) uses the embedded React, ReactDOM and Babel assets to display a synthetic waveform
   generated by a C++ callback. The README screenshot includes its real WebView2 native window frame.

@@ -68,6 +68,16 @@ const std::string upgradeRequest =
 
 }  // namespace
 
+SCENARIO("The HTTP listener is ready before its event loop starts") {
+    const auto port = freePort();
+    http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
+    Stdnet::IoContext clientContext;
+    Stdnet::Socket client(clientContext);
+    // No server thread and no run()/runOne(): a synchronous connection must already succeed.
+    REQUIRE_NOTHROW(connect(client, port));
+    REQUIRE(client.is_open());
+}
+
 SCENARIO("Stopping a running server releases its connections") {
     GIVEN("A running server with an idle client connection") {
         const auto port = freePort();
@@ -113,9 +123,7 @@ SCENARIO("Destroying WebFront closes its established WebSockets") {
             webFront.onUIStarted([&](auto) {
                 linked = true;
             });
-            std::thread serverThread([&webFront] {
-                webFront.run();
-            });
+            std::thread serverThread(&decltype(webFront)::run, &webFront);
             connect(client, port);
             client.send(std::as_bytes(std::span(upgradeRequest)));
             CHECK(readHeaders(client).starts_with("HTTP/1.1 101"));

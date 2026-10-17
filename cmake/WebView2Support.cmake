@@ -6,16 +6,31 @@ if(NOT MSVC)
     message(FATAL_ERROR "WEBFRONT_EMBED_WEBVIEW2 requires an MSVC-compatible compiler (MSVC or clang-cl); MinGW is not supported")
 endif()
 
-CPMAddPackage(
-    NAME WebView2SDK
-    VERSION 1.0.3537.50
-    URL https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3537.50/microsoft.web.webview2.1.0.3537.50.nupkg
-    URL_HASH SHA256=5ea526bbd728adda0da4d31219267e96460494a427e4894c4e09d9f320f4b9aa
-    DOWNLOAD_ONLY YES
-)
-
 # The compiler target can differ from the host, particularly with Ninja on ARM64.
 string(TOLOWER "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" _webview2_target)
+if(NOT _webview2_target)
+    string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _webview2_target)
+    if(_webview2_target STREQUAL "win32")
+        set(_webview2_target x86)
+    endif()
+endif()
+if(NOT _webview2_target)
+    # clang-cl may leave the architecture ID empty. Probe its target macros, never host CPU or pointer size.
+    include(CheckCXXSourceCompiles)
+    foreach(_arch ARM64EC ARM64 X64 IX86)
+        check_cxx_source_compiles("#ifndef _M_${_arch}\n#error different target\n#endif\nint main() { return 0; }"
+            _webview2_has_${_arch})
+    endforeach()
+    if(_webview2_has_ARM64EC)
+        set(_webview2_target arm64ec)
+    elseif(_webview2_has_ARM64)
+        set(_webview2_target arm64)
+    elseif(_webview2_has_X64)
+        set(_webview2_target x64)
+    elseif(_webview2_has_IX86)
+        set(_webview2_target x86)
+    endif()
+endif()
 if(_webview2_target STREQUAL "arm64")
     set(_webview2_arch arm64)
 elseif(_webview2_target STREQUAL "x64")
@@ -23,8 +38,16 @@ elseif(_webview2_target STREQUAL "x64")
 elseif(_webview2_target STREQUAL "x86")
     set(_webview2_arch x86)
 else()
-    message(FATAL_ERROR "WebView2 SDK loader does not support compiler target '${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}'")
+    message(FATAL_ERROR "WebView2 SDK loader does not support compiler target '${_webview2_target}'")
 endif()
+
+CPMAddPackage(
+    NAME WebView2SDK
+    VERSION 1.0.3537.50
+    URL https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3537.50/microsoft.web.webview2.1.0.3537.50.nupkg
+    URL_HASH SHA256=5ea526bbd728adda0da4d31219267e96460494a427e4894c4e09d9f320f4b9aa
+    DOWNLOAD_ONLY YES
+)
 
 # Static loader: consumers need no WebView2Loader.dll deployment step.
 target_include_directories(WebFront SYSTEM INTERFACE "${WebView2SDK_SOURCE_DIR}/build/native/include")

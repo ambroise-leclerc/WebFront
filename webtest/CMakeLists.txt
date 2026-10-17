@@ -19,7 +19,7 @@ if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WebView2")
     add_executable(webview2_lifecycle WebView2Lifecycle.cpp WebView2HeaderConsumer.cpp)
     target_link_libraries(webview2_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
     foreach(mode no-bridge early-close rejected-ready navigation-failure mta missing-runtime
-                 closed-startup-timeout failed-startup-timeout late-navigation-failure path-encoding)
+                 closed-startup-timeout failed-startup-timeout late-navigation-failure path-encoding runtime-ready)
         add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
         set_tests_properties(WebView2Lifecycle-${mode} PROPERTIES
             LABELS "web-integration" TIMEOUT 45 RESOURCE_LOCK webfront_port_9002

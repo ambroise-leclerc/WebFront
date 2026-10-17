@@ -20,7 +20,7 @@ namespace webfront::frontend {
 // An embedded window must be opened from the application's main thread: toolkits such as AppKit and GTK
 // require it, and WebView2 needs an STA thread. open() blocks until the window closes, releases everything
 // it created, and reports failure by throwing; BasicWF then stops and joins the server and rethrows,
-// whatever the action. An unavailable frontend is still declared and throws from open() with a message
+// whatever the action. An unavailable frontend is still declared and throws during initialization or opening with a message
 // naming the CMake option that enables it.
 template <typename Frontend>
 concept FrontendType = requires(std::string_view port, std::string_view file) {
@@ -34,10 +34,13 @@ concept FrontendType = requires(std::string_view port, std::string_view file) {
 struct DefaultBrowserFrontend {
     static constexpr Action action{Action::keepServerRunning};
 
-    static void initialize() {}
+    static void initialize() { }
 
     static void open(std::string_view port, std::string_view file) {
         browser::open(port, file);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file) {
+        browser::open(address, port, file);
     }
 };
 
@@ -54,6 +57,9 @@ struct CEFFrontend {
 
     static void open(std::string_view port, std::string_view file) {
         cef::open(port, file);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file) {
+        cef::open(address, port, file);
     }
 };
 

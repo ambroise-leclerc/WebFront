@@ -129,7 +129,7 @@ jobs:
             # Evergreen intentionally follows Microsoft's mutable bootstrapper redirect.
             Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $installer
             $signature = Get-AuthenticodeSignature -LiteralPath $installer
-            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O=Microsoft Corporation(?:,|$)') {
               throw 'WebView2 bootstrapper must have a valid Microsoft signature'
             }
             $install = Start-Process $installer -ArgumentList '/silent', '/install' -Wait -PassThru -WindowStyle Hidden

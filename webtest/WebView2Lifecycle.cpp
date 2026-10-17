@@ -6,6 +6,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <semaphore>
 #include <string>
 #include <thread>
 
@@ -14,7 +15,12 @@ bool webView2ClosesServer();
 namespace {
 
 using TestFS = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
-using App    = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::frontend::WebView2Frontend>;
+struct LifecycleOptions {
+    static webfront::frontend::WebView2Options get() {
+        return {.startupTimeout = std::chrono::seconds{90}};
+    }
+};
+using App = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::frontend::WebView2FrontendWithOptions<LifecycleOptions>>;
 
 // Dispatch test actions on the same STA as the production message loop.
 class Actions {
@@ -155,7 +161,7 @@ int lateNavigationFailure() {
     };
     bool observed    = false;
     actions.dispatch = [&](UINT) {
-        if (!session->view || session->startupTimer)
+        if (!session->view || session->loadingInitialPage())
             return;
         KillTimer(actions.window, 1);
         EventRegistrationToken token{};
@@ -194,6 +200,70 @@ int rejectMta() {
     return rejected ? 0 : 1;
 }
 
+class SlowPageFS {
+public:
+    static inline std::atomic<bool>          waiting{false};
+    static inline std::counting_semaphore<2> release{0};
+    explicit SlowPageFS(std::filesystem::path root) : source(std::move(root)) { }
+    std::optional<webfront::fs::File> open(std::filesystem::path file) {
+        if (file.relative_path() == "slow-resource.js") {
+            waiting = true;
+            require(release.try_acquire_for(std::chrono::seconds{10}), "The slow-resource fixture was never released");
+        }
+        return source.open(file);
+    }
+
+private:
+    webfront::fs::NativeDebugFS source;
+};
+
+int runtimeReadyBeforePageLoad() {
+    using namespace webfront::frontend::detail::webview2;
+    webfront::http::Server<webfront::NetProvider, SlowPageFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread                                              worker([&](std::stop_token stop) {
+        std::stop_callback cleanup(stop, [&] {
+            SlowPageFS::release.release();
+            server.stop();
+        });
+        server.run();
+    });
+    Apartment                                                 apartment;
+    auto                                                      session = std::make_shared<Session>();
+    session->url                                                      = L"http://127.0.0.1:9002/slow-page.html";
+    session->createWindow();
+    const auto oldTimer = session->startupTimer;
+    Actions    actions;
+    bool       observed      = false;
+    bool       closeObserved = false;
+    actions.onFailure        = [&] {
+        session->fail();
+    };
+    actions.dispatch = [&](UINT) {
+        if (!SlowPageFS::waiting)
+            return;
+        KillTimer(actions.window, 1);
+        require(session->loadingInitialPage(), "The fixture must still be loading its first page");
+        require(!session->startupTimer, "Runtime watchdog still covers page loading");
+        EventRegistrationToken token{};
+        check(session->view->add_WindowCloseRequested(
+                  Microsoft::WRL::Callback<ICoreWebView2WindowCloseRequestedEventHandler>([&](ICoreWebView2*, IUnknown*) -> HRESULT {
+                      closeObserved = true;
+                      return S_OK;
+                  }).Get(),
+                  &token),
+              "observing slow-page closure");
+        observed = true;
+        PostThreadMessageW(GetCurrentThreadId(), WM_TIMER, oldTimer, 0);
+        SlowPageFS::release.release();
+    };
+    require(SetTimer(actions.window, 1, 10, nullptr) != 0, "Cannot start page-loading observer");
+    session->start(userDataFolder());
+    session->run();
+    require(observed, "The slow page was not observed before navigation completed");
+    require(closeObserved, "The initial page did not request normal closure");
+    return 0;
+}
+
 int expectOpenFailure(std::string_view port, std::string_view diagnostic) {
     try {
         webfront::frontend::WebView2Frontend::open(port, "index.html");
@@ -203,23 +273,38 @@ int expectOpenFailure(std::string_view port, std::string_view diagnostic) {
     return 1;
 }
 
-void closeNativeWindow(DWORD threadId, std::atomic<bool>& closeSent, std::stop_token stop) {
-    while (!stop.stop_requested() && !closeSent) {
-        EnumThreadWindows(
-            threadId,
-            [](HWND window, LPARAM context) -> BOOL {
-                wchar_t title[64]{};
-                GetWindowTextW(window, title, 64);
-                if (std::wstring_view(title) != L"WebFront Application")
-                    return TRUE;
-                PostMessageW(window, WM_CLOSE, 0, 0);
-                reinterpret_cast<std::atomic<bool>*>(context)->store(true);
-                return FALSE;
-            },
-            reinterpret_cast<LPARAM>(&closeSent));
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+class EarlyNativeClose {
+public:
+    bool closeSent = false;
+
+    explicit EarlyNativeClose(bool enabled) {
+        if (!enabled)
+            return;
+        current = this;
+        hook    = SetWindowsHookExW(WH_CBT, onWindowEvent, nullptr, GetCurrentThreadId());
+        require(hook != nullptr, "Cannot observe native window creation");
     }
-}
+    ~EarlyNativeClose() {
+        if (hook)
+            UnhookWindowsHookEx(hook);
+        current = nullptr;
+    }
+
+private:
+    HHOOK                                        hook    = nullptr;
+    static inline thread_local EarlyNativeClose* current = nullptr;
+
+    static LRESULT CALLBACK onWindowEvent(int code, WPARAM wParam, LPARAM lParam) {
+        if (code == HCBT_CREATEWND && current) {
+            const auto window = reinterpret_cast<HWND>(wParam);
+            wchar_t    name[80]{};
+            GetClassNameW(window, name, 80);
+            if (std::wstring_view(name).starts_with(L"WebFront.WebView2."))
+                current->closeSent = PostMessageW(window, WM_CLOSE, 0, 0) != FALSE;
+        }
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+};
 
 bool comReleased() {
     APTTYPE          apartment{};
@@ -241,16 +326,10 @@ int showTwice(std::string_view page, bool earlyClose = false) {
         app.onUIStarted([&](App::UI) {
             connected = true;
         });
-        const auto        threadId  = GetCurrentThreadId();
-        std::atomic<bool> closeSent = false;
-        std::jthread      closer([&](std::stop_token stop) {
-            if (earlyClose)
-                closeNativeWindow(threadId, closeSent, stop);
-        });
+        EarlyNativeClose closer(earlyClose);
         app.show(page);
-        closer.request_stop();
         if (earlyClose)
-            require(closeSent, "Native close was not sent");
+            require(closer.closeSent, "Native close was not sent during window creation");
         require(!connected, "Unexpected bridge connection");
         require(comReleased(), "STA COM initialization was not released");
     }
@@ -261,41 +340,42 @@ int run(std::string_view mode) {
     if (!webView2ClosesServer())
         return 1;
     const std::map<std::string_view, std::function<int()>> cases{
+        {          "runtime-ready",runtimeReadyBeforePageLoad                                   },
         { "closed-startup-timeout",
          [] {
          return startupCompletion(false);
-         }                                               },
+         }                                                    },
         { "failed-startup-timeout",
          [] {
          return startupCompletion(true);
-         }                                               },
-        {"late-navigation-failure", lateNavigationFailure},
-        {                    "mta",             rejectMta},
+         }                                                    },
+        {"late-navigation-failure",      lateNavigationFailure},
+        {                    "mta",                  rejectMta},
         {        "missing-runtime",
          [] {
          SetEnvironmentVariableW(L"WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", L"C:\\WebFront-runtime-does-not-exist");
          return expectOpenFailure("9002", "Evergreen Runtime");
-         }                                               },
+         }                                                    },
         {     "navigation-failure",
          [] {
          return expectOpenFailure("0", "navigation failed");
-         }                                               },
+         }                                                    },
         {              "no-bridge",
          [] {
          return showTwice("no-bridge.html");
-         }                                               },
+         }                                                    },
         {            "early-close",
          [] {
          return showTwice("no-bridge.html", true);
-         }                                               },
+         }                                                    },
         {         "rejected-ready",
          [] {
          return showTwice("rejected-ready.html");
-         }                                               },
+         }                                                    },
         {          "path-encoding",
          [] {
-         return showTwice("encoded path #.html");
-         }                                               },
+         return showTwice("encoded path %23.html?x=1#example");
+         }                                                    },
     };
     const auto test = cases.find(mode);
     return test == cases.end() ? 1 : test->second();
