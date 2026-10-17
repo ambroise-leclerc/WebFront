@@ -31,15 +31,19 @@ inline std::string encodePageReference(std::string_view page) {
     return encoded;
 }
 
-inline std::string applicationHost(std::string_view address) {
-    if (address == "0.0.0.0")
-        return "127.0.0.1";
-    if (address == "::")
-        return "[::1]";
+inline void validateApplicationAddress(std::string_view address) {
     if (address.empty())
         throw std::invalid_argument("WebFront: empty frontend address");
     if (address.find_first_of("/?#@ \t\r\n\\\"'") != std::string_view::npos)
         throw std::invalid_argument("WebFront: invalid frontend address");
+}
+
+inline std::string applicationHost(std::string_view address) {
+    validateApplicationAddress(address);
+    if (address == "0.0.0.0")
+        return "127.0.0.1";
+    if (address == "::")
+        return "[::1]";
     if (address.find(':') != std::string_view::npos && address.front() != '[')
         return "[" + std::string(address) + "]";
     return std::string(address);
