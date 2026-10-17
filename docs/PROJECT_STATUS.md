@@ -87,7 +87,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   This is a development frontend for trusted content: navigation and popup requests are unrestricted, DevTools and context menus
   remain enabled, and the adapter supplies no origin-based bridge authorization. Windows/Shell/WRL header names leak into consumers;
   qualify `std::byte`. Implementation types live under `frontend::detail::webview2`. The initial timeout is a fixed named 30-second constant.
-  URL path encoding currently differs from the default-browser and CEF adapters, which still concatenate the page argument.
+  All frontends share one percent-encoding URL builder (`frontend/Url.hpp`), and the default browser quotes its command and accepts only a numeric port.
   The Windows CI matrix runs the shared Jasmine bridge suite and timed lifecycle tests under WebView2; CEF/Xvfb remains the Linux lane.
   The WebView2 browser label runs separately with `--no-tests=error`. CI's Evergreen bootstrapper URL is mutable;
   a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.

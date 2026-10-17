@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Action.hpp"
+#include "Url.hpp"
 
 #include <stdexcept>
 #include <string_view>
@@ -61,19 +62,7 @@ inline std::wstring utf16(std::string_view text) {
 }
 
 inline std::wstring applicationUrl(std::string_view port, std::string_view file) {
-    std::string    url   = "http://localhost:" + std::string(port) + "/";
-    constexpr char hex[] = "0123456789ABCDEF";
-    for (const unsigned char byte : file) {
-        constexpr std::string_view pathCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/";
-        if (pathCharacters.find(static_cast<char>(byte)) != std::string_view::npos) {
-            url += static_cast<char>(byte);
-        } else {
-            url += '%';
-            url += hex[byte >> 4];
-            url += hex[byte & 15];
-        }
-    }
-    return utf16(url);
+    return utf16(frontend::detail::applicationUrl(port, file));
 }
 
 inline std::wstring executablePath() {

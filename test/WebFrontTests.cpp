@@ -15,6 +15,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -121,6 +122,19 @@ struct FailingFrontend {
     static void open(std::string_view, std::string_view) { throw std::runtime_error("frontend startup failed"); }
 };
 
+struct ThreadRecordingFrontend {
+    static inline std::thread::id openThread;
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+    static void initialize() {}
+    static void open(std::string_view, std::string_view) { openThread = std::this_thread::get_id(); }
+};
+
+struct FailingNonBlockingFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static void initialize() {}
+    static void open(std::string_view, std::string_view) { throw std::runtime_error("launcher failed"); }
+};
+
 int freeFunctionForDeductionTest(double value) {
     return static_cast<int>(value);
 }
@@ -222,6 +236,35 @@ SCENARIO("A frontend startup failure stops the server before propagating") {
                 REQUIRE_THROWS_WITH(app.show(), "frontend startup failed");
                 REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
             }
+        }
+    }
+}
+
+SCENARIO("The frontend contract: open() runs on the calling thread and a closing frontend stops the server") {
+    GIVEN("an embedded frontend that records the thread it is opened on") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ThreadRecordingFrontend>;
+        App app("9201");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        WHEN("the application shows the interface") {
+            app.show();
+            THEN("open() ran on the thread that called show(), not on the server thread") {
+                REQUIRE(ThreadRecordingFrontend::openThread == std::this_thread::get_id());
+            }
+            THEN("show() returned after the server was asked to stop") {
+                REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
+            }
+        }
+    }
+}
+
+SCENARIO("The frontend contract: a failing open() stops the server whatever its action") {
+    GIVEN("a frontend that only launches an external program and fails to do so") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingNonBlockingFrontend>;
+        App app("9202");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        THEN("the exception propagates and the server is stopped") {
+            REQUIRE_THROWS_WITH(app.show(), "launcher failed");
+            REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
         }
     }
 }

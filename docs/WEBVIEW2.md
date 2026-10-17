@@ -1,5 +1,7 @@
 # WebView2 frontend
 
+This page covers what is specific to WebView2. The rules shared by every frontend are in [Frontends](FRONTENDS.md).
+
 [Back to the README](../README.md#choose-how-your-interface-opens)
 
 The **Microsoft Edge WebView2 Evergreen Runtime** must be installed separately. If it is absent, opening throws an actionable error before creating a window. App installers can redistribute Microsoft's small online Evergreen bootstrapper or the offline Evergreen standalone installer; see [Microsoft's runtime distribution guide](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution). Fixed-version runtime packaging is outside this adapter's scope.
@@ -16,5 +18,4 @@ The adapter implementation lives in `frontend::detail::webview2` and is not a su
 
 The initial-navigation watchdog is currently a fixed 30-second internal constant. A slow first runtime launch, including antivirus scanning, can exceed it. Public timeout configuration is not available yet.
 
-WebView2 and CEF both use `http://localhost:` URLs. A server bound only to `127.0.0.1` relies on the browser falling back to IPv4 if localhost resolves to IPv6 first; the adapter does not control this resolution order. Path encoding is currently specific to WebView2: `DefaultBrowserFrontend` and `CEFFrontend` still concatenate the page argument, so filenames containing spaces or `#` are not handled consistently across frontends. Shared URL construction remains follow-up work.
-
+Every frontend builds its URL with the shared `frontend::detail::applicationUrl()`: `http://localhost:<port>/` followed by the page path, with `/` kept literal and every other byte except RFC 3986 unreserved characters percent-encoded, so filenames containing spaces or `#` behave the same in the default browser, CEF and WebView2. A server bound only to `127.0.0.1` relies on the browser falling back to IPv4 if `localhost` resolves to IPv6 first; the adapter does not control this resolution order.

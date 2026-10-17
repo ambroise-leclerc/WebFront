@@ -128,6 +128,8 @@ The application code and interface assets stay the same whichever frontend you s
 | Embedded CEF window | Windows, Linux, macOS | Enable CEF at configuration time; a large download |
 | Embedded WebView2 window | Windows | Enable the SDK and install the Evergreen Runtime |
 
+Every frontend follows the same contract (threading, blocking, errors); see [Frontends](docs/FRONTENDS.md).
+
 ### Embedded window with CEF (opt-in)
 
 By default WebFront opens your system browser. To get an application window instead, enable the Chromium Embedded Framework when configuring. CEF is a **large download** and is never fetched unless you ask for it:

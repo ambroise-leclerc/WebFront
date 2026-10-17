@@ -11,7 +11,7 @@ list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesT
 list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp ReactFSTests.cpp BabelFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp TerminalTests.cpp TerminalFSTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp ToolStoreTests.cpp ToolManagerTests.cpp)
-list(APPEND TESTS_LIST SignalDemoTests.cpp)
+list(APPEND TESTS_LIST SignalDemoTests.cpp FrontendUrlTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()
@@ -40,6 +40,8 @@ endif()
 # The documented newcomer commands and snippets must keep matching the built examples and CI.
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckNewcomerDocs.cmake)
+add_test(NAME FrontendSelection
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckFrontendSelection.cmake)
 add_test(NAME WebView2UnsupportedToolchain
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWebView2Toolchain.cmake)
 add_test(NAME WebView2LoaderArchitecture
