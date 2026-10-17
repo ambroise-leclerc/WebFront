@@ -1,0 +1,83 @@
+# Exercises cmake/Frontends.cmake: registered names, defaults, rejection of unknown or unavailable
+# frontends and the generated C++ type name. Each case runs in its own cmake -P process so that a
+# FATAL_ERROR can be observed. Run with:
+#   cmake -DROOT=<checkout> -P cmake/CheckFrontendSelection.cmake
+cmake_minimum_required(VERSION 3.31)
+
+if(NOT ROOT)
+    message(FATAL_ERROR "ROOT must point at the WebFront checkout")
+endif()
+
+if(CASE)
+    include("${ROOT}/cmake/Frontends.cmake")
+    set(WEBFRONT_EMBED_CEF ${CEF})
+    set(WEBFRONT_EMBED_WEBVIEW2 ${WEBVIEW2})
+    if(CASE STREQUAL "default")
+        webfront_default_embedded_frontend(chosen FALLBACK CEF)
+        message("CHOSEN=${chosen}")
+    elseif(CASE STREQUAL "select")
+        set(WEBFRONT_TEST_SELECTOR "${VALUE}")
+        webfront_select_frontend(WEBFRONT_TEST_SELECTOR DefaultBrowser "Test" ${FLAGS})
+        message("TYPE=${WEBFRONT_TEST_SELECTOR_TYPE}")
+    endif()
+    return()
+endif()
+
+set(failures "")
+function(run_case name expect_success expected_text)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DCASE=${CASE_NAME} -DCEF=${CASE_CEF} -DWEBVIEW2=${CASE_WEBVIEW2}
+                -DVALUE=${CASE_VALUE} "-DFLAGS=${CASE_FLAGS}" -P "${CMAKE_CURRENT_LIST_FILE}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    set(text "${output}${error}")
+    if(expect_success AND NOT result EQUAL 0)
+        list(APPEND failures "${name}: expected success, got: ${text}")
+    elseif(NOT expect_success AND result EQUAL 0)
+        list(APPEND failures "${name}: expected a configuration error, got: ${text}")
+    endif()
+    if(NOT text MATCHES "${expected_text}")
+        list(APPEND failures "${name}: '${text}' does not match '${expected_text}'")
+    endif()
+    set(failures "${failures}" PARENT_SCOPE)
+endfunction()
+
+# Defaults: a native web view wins over CEF, CEF is the fallback.
+set(CASE_NAME default)
+set(CASE_CEF OFF)
+set(CASE_WEBVIEW2 ON)
+run_case("default prefers WebView2" TRUE "CHOSEN=WebView2")
+set(CASE_CEF ON)
+set(CASE_WEBVIEW2 ON)
+run_case("default with both enabled" TRUE "CHOSEN=WebView2")
+set(CASE_CEF ON)
+set(CASE_WEBVIEW2 OFF)
+run_case("default with CEF only" TRUE "CHOSEN=CEF")
+set(CASE_CEF OFF)
+set(CASE_WEBVIEW2 OFF)
+run_case("default falls back to CEF" TRUE "CHOSEN=CEF")
+
+# Selection.
+set(CASE_NAME select)
+set(CASE_CEF OFF)
+set(CASE_WEBVIEW2 OFF)
+set(CASE_VALUE DefaultBrowser)
+set(CASE_FLAGS "")
+run_case("browser type" TRUE "TYPE=webfront::frontend::DefaultBrowserFrontend")
+set(CASE_VALUE CEF)
+run_case("CEF without its option stays valid" TRUE "TYPE=webfront::frontend::CEFFrontend")
+set(CASE_VALUE WebView2)
+run_case("demo accepts an unavailable frontend" TRUE "TYPE=webfront::frontend::WebView2Frontend")
+set(CASE_FLAGS "EMBEDDED_ONLY;REQUIRE_AVAILABLE")
+run_case("WebView2 tests need the option" FALSE "requires WEBFRONT_EMBED_WEBVIEW2=ON")
+set(CASE_WEBVIEW2 ON)
+run_case("WebView2 tests with the option" TRUE "TYPE=webfront::frontend::WebView2Frontend")
+set(CASE_VALUE DefaultBrowser)
+run_case("embedded-only rejects the browser" FALSE "must be one of: WebView2, CEF")
+set(CASE_VALUE Bogus)
+set(CASE_FLAGS "")
+run_case("unknown frontend" FALSE "must be one of: DefaultBrowser, WebView2, CEF")
+
+if(failures)
+    list(JOIN failures "\n" text)
+    message(FATAL_ERROR "Frontend selection regressions:\n${text}")
+endif()

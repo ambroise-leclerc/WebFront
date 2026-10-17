@@ -274,7 +274,7 @@ public:
 
     explicit BasicWF(WebFrontConfig config)
         : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot),
-          httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
+          httpAddress(config.address), httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
             for (bool inserted = false; !inserted; ++idsCounter)
                 std::tie(std::ignore, inserted) = webLinks.try_emplace(idsCounter, std::move(socket), idsCounter, [this](WebLinkEvent event) {
@@ -384,23 +384,35 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
-        Frontend::open(httpPort, htmlFilename);
+        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename); })
+            Frontend::open(httpAddress, httpPort, htmlFilename);
+        else
+            Frontend::open(httpPort, htmlFilename);
         if constexpr (Frontend::action == frontend::Action::closeServerAfterOpen)
             return WindowAction::closeWindow;
         else
             return WindowAction::none;
     }
 
-    // Starts the HTTP server in a background thread, opens the window (blocking for embedded CEF),
-    // then stops the server when the window closes (CEF case). For external browser we keep it running.
+    // Starts the server in a background thread and opens the frontend. An embedded window's close
+    // or a frontend exception stops and joins the server. An external browser keeps it running.
     void openAndRun(std::string_view htmlFilename) {
+        // The constructor has already bound and listened; this thread services the queued I/O.
         // Launch server only once or restart if previous thread ended
         if (!serverThread.joinable()) {
             serverThread = std::thread([this] {
                 run();
             });
         }
-        auto action = openWindow(htmlFilename);
+        WindowAction action;
+        try {
+            action = openWindow(htmlFilename);
+        } catch (...) {
+            stop();
+            if (serverThread.joinable())
+                serverThread.join();
+            throw;
+        }
         if (action == WindowAction::closeWindow) {
             stop();
             if (serverThread.joinable())
@@ -430,6 +442,7 @@ private:
     }
 
     http::Server<Net, Filesystem, Policy>                                    httpServer;
+    std::string                                                              httpAddress;
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;

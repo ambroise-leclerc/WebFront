@@ -23,6 +23,13 @@ jobs:
               coverage: false
             }
           - {
+              name: "Windows MSVC WebView2",
+              os: windows-2025,
+              compiler: msvc,
+              coverage: false,
+              webview2: true
+            }
+          - {
               name: "Ubuntu GCC with Coverage",
               os: ubuntu-24.04,
               compiler: gcc,
@@ -105,17 +112,50 @@ jobs:
         
       - name: Config & Build
         run: |
-          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
+          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.webview2 && '-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_DEMO_FRONTEND=WebView2' || '' }} ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
+
+      - name: Ensure WebView2 Evergreen runtime
+        if: matrix.config.webview2
+        shell: pwsh
+        run: |
+          function Get-WebView2Runtime {
+            $runtimeRoots = @("${env:ProgramFiles(x86)}/Microsoft/EdgeWebView/Application", "$env:LOCALAPPDATA/Microsoft/EdgeWebView/Application")
+            $runtimeRoots | Where-Object { Test-Path $_ } | ForEach-Object { Get-ChildItem $_ -Filter msedgewebview2.exe -Recurse }
+          }
+          $runtime = Get-WebView2Runtime
+          if (-not $runtime) {
+            $installer = Join-Path $env:RUNNER_TEMP 'WebView2EvergreenBootstrapper.exe'
+            # Evergreen intentionally follows Microsoft's mutable bootstrapper redirect.
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $installer
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O=Microsoft Corporation(?:,|$)') {
+              throw 'WebView2 bootstrapper must have a valid Microsoft signature'
+            }
+            $install = Start-Process $installer -ArgumentList '/silent', '/install' -Wait -PassThru -WindowStyle Hidden
+            if ($install.ExitCode -ne 0) { throw "WebView2 runtime installation failed: $($install.ExitCode)" }
+            $runtime = Get-WebView2Runtime
+          }
+          if (-not $runtime) { throw 'WebView2 runtime executable not found after provisioning' }
+          foreach ($executable in $runtime) {
+            $version = $executable.VersionInfo.FileVersion
+            if (-not $version) { throw "WebView2 runtime version is missing: $($executable.FullName)" }
+            Write-Host "WebView2 runtime $version at $($executable.FullName)"
+          }
   
       - name: Test
         working-directory: ${{github.workspace}}/build
-        run: ctest --verbose -C ${{env.BUILD_TYPE}}
+        run: ctest --verbose --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}} ${{ matrix.config.webview2 && '-LE web-integration' || '' }}
+
+      - name: Test WebView2 browser lifecycle
+        if: matrix.config.webview2
+        working-directory: ${{github.workspace}}/build
+        run: ctest -L web-integration --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}}
 
       - name: Rerun Failed Tests (if any)
         if: failure()
         working-directory: ${{github.workspace}}/build
-        run: ctest --rerun-failed --output-on-failure -C ${{env.BUILD_TYPE}}
+        run: ctest --rerun-failed --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}}
 
       - name: Collect Coverage
         if: matrix.config.coverage
@@ -148,7 +188,7 @@ jobs:
           esac
           
           # Set filename
-          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}.json" >> $GITHUB_OUTPUT
+          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}${{ matrix.config.webview2 && '-webview2' || '' }}.json" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Update Gist
@@ -227,4 +267,4 @@ jobs:
         run: cmake --build ${{github.workspace}}/build-cef --target webtest --parallel 1
 
       - name: Run Jasmine bridge test
-        run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure
+        run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error

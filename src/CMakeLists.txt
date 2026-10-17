@@ -39,6 +39,10 @@ target_link_libraries(WebFrontTools PRIVATE WebFront WebFront_warnings WebFront_
 add_executable(WebFrontApp ModuleDemo.cpp)
 target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_options)
 
+include(Frontends)
+webfront_select_frontend(WEBFRONT_DEMO_FRONTEND DefaultBrowser "Module demo frontend")
+target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_DEMO_FRONTEND=${WEBFRONT_DEMO_FRONTEND_TYPE})
+
 # ==============================================================================
 # CEF Integration
 # ==============================================================================

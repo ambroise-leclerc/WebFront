@@ -3,6 +3,8 @@
 // Switching to an embedded Chromium window only changes this alias (CEF must be enabled at
 // configure time with -DWEBFRONT_EMBED_CEF=ON):
 //   using App = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
+// On Windows, -DWEBFRONT_EMBED_WEBVIEW2=ON enables this alternative:
+//   using App = webfront::WebFrontWithFrontend<webfront::frontend::WebView2Frontend>;
 using App = webfront::WebFront;
 
 // LCOV_EXCL_START - interactive example; its page is served and verified by the unit tests.

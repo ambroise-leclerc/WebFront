@@ -1,169 +1,168 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="en-GB">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>HelloWorld UI</title>
-    <!-- Import React, React-DOM and Babel -->
-    <script type="application/javascript" src="react@18/umd/react.production.min.js"></script>
-    <script type="application/javascript" src="react-dom@18/umd/react-dom.production.min.js"></script>
-    <script type="application/javascript" src="babel-standalone@7.22.5/babel.min.js"></script>
-
-    <style>
-        :root {
-            --bg: #0f172a;          /* slate-900 */
-            --card: #0b1224;        /* slightly lighter */
-            --muted: #94a3b8;       /* slate-400 */
-            --text: #e2e8f0;        /* slate-200 */
-            --primary: #6366f1;     /* indigo-500 */
-            --primary-hover: #4f46e5; /* indigo-600 */
-            --ring: rgba(99, 102, 241, 0.35);
-        }
-        * { box-sizing: border-box; }
-        html, body { height: 100%; }
-        body {
-            margin: 0;
-            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
-            background: radial-gradient(1200px 600px at 10% 10%, #111827 0%, var(--bg) 40%),
-                        radial-gradient(1400px 700px at 90% 90%, #111827 0%, var(--bg) 45%),
-                        var(--bg);
-            color: var(--text);
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        .center {
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-            padding: 24px;
-        }
-        .card {
-            width: 100%;
-            max-width: 520px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)) padding-box,
-                        linear-gradient(180deg, rgba(99,102,241,0.35), rgba(14,165,233,0.25)) border-box,
-                        var(--card);
-            border: 1px solid transparent;
-            border-radius: 16px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.03);
-            padding: 24px;
-            backdrop-filter: blur(6px);
-        }
-        .title {
-            margin: 0 0 4px 0;
-            font-weight: 700;
-            letter-spacing: 0.2px;
-        }
-        .subtitle {
-            margin: 0 0 20px 0;
-            color: var(--muted);
-            font-size: 14px;
-        }
-        .stack { display: grid; gap: 12px; }
-        .row { display: grid; gap: 12px; grid-template-columns: 1fr auto; align-items: start; }
-        .input {
-            width: 100%;
-            padding: 12px 14px;
-            color: var(--text);
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(148,163,184,0.25);
-            border-radius: 10px;
-            outline: none;
-            transition: box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
-        }
-        .input::placeholder { color: #7c8aa0; }
-        .input:focus {
-            border-color: var(--primary);
-            box-shadow: 0 0 0 6px var(--ring);
-            background: rgba(255,255,255,0.06);
-        }
-        .button {
-            padding: 12px 16px;
-            background: linear-gradient(180deg, var(--primary), var(--primary-hover));
-            color: white;
-            border: 0;
-            border-radius: 10px;
-            font-weight: 600;
-            letter-spacing: 0.2px;
-            cursor: pointer;
-            transition: transform 80ms ease, filter 160ms ease, box-shadow 160ms ease;
-            box-shadow: 0 10px 20px rgba(79,70,229,0.35);
-        }
-        .button:hover { filter: brightness(1.05); }
-        .button:active { transform: translateY(1px); }
-        .output {
-            margin-top: 8px;
-            min-height: 22px;
-            color: var(--muted);
-            font-size: 14px;
-        }
-        footer {
-            margin-top: 16px;
-            color: var(--muted);
-            font-size: 12px;
-            text-align: center;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal Studio · WebFront</title>
+<script src="/WebFront.js"></script>
+<script src="/react@18/umd/react.production.min.js"></script>
+<script src="/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="/babel-standalone@7.22.5/babel.min.js"></script>
+<style>
+:root { color-scheme: light; font-family: "Segoe UI", system-ui, sans-serif; color: #26352e; background: #f5f4ef; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; opacity: .6; }
+button:focus-visible, input:focus-visible { outline: 3px solid #cc643f; outline-offset: 4px; }
+.app { min-height: 100vh; display: grid; grid-template-columns: 174px 1fr; }
+aside { padding: 32px 20px 22px; background: #203c32; color: #e7ede6; display: flex; flex-direction: column; }
+.brand { font-weight: 650; font-size: 21px; letter-spacing: -.7px; display: flex; align-items: center; gap: 9px; }
+.brand-mark { width: 23px; height: 23px; border: 2px solid #b7c9a1; border-radius: 7px 2px 7px 2px; transform: rotate(-8deg); }
+.aside-label, .eyebrow { text-transform: uppercase; font-size: 10px; font-weight: 650; letter-spacing: 1.8px; }
+.aside-label { margin: 49px 12px 15px; color: #a6b9ad; }
+.nav-current { padding: 12px; border-radius: 6px; background: #345044; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.nav-current span { color: #dbab7a; font-size: 20px; }
+.aside-bottom { margin-top: auto; padding-top: 40px; font-size: 11px; line-height: 1.9; color: #aec0b3; }
+.aside-bottom strong { color: #e4ecdf; font-weight: 500; }
+main { padding: 24px 34px 18px; min-width: 0; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+.eyebrow { color: #788278; margin: 0 0 8px; }
+h1 { font-size: 31px; font-weight: 550; letter-spacing: -1.2px; margin: 0; }
+.intro { margin: 8px 0 0; font-size: 12px; color: #748075; }
+.connection { font-size: 11px; border: 1px solid #d8dfcf; background: #edf1e7; padding: 8px 12px; border-radius: 20px; white-space: nowrap; }
+.dot { display: inline-block; width: 6px; height: 6px; background: #608251; border-radius: 50%; margin-right: 7px; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 238px; gap: 20px; }
+.plot-card { background: #fffefa; border: 1px solid #dedfd5; border-radius: 9px; overflow: hidden; }
+.panel-heading { padding: 17px 20px; display: flex; align-items: center; justify-content: space-between; }
+h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.small { font-size: 10px; color: #7a857b; }
+.legend { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #798379; }
+.legend i { width: 14px; height: 2px; background: #db8b5b; }
+.plot { padding: 17px 14px 5px; background: #172d27; }
+.plot svg { width: 100%; height: 210px; display: block; overflow: visible; }
+.axis { display: flex; justify-content: space-between; padding: 7px 13px 14px; color: #99aca0; font: 9px Consolas, monospace; }
+.plot-footer { display: flex; justify-content: space-between; padding: 13px 20px; font-size: 10px; color: #748075; }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+.metric { background: #fffefa; border: 1px solid #dedfd5; border-radius: 7px; padding: 15px 16px; }
+.metric-label { color: #758075; font-size: 10px; margin-bottom: 9px; }
+.metric-value { font-size: 25px; font-weight: 500; letter-spacing: -.7px; font-variant-numeric: tabular-nums; }
+.metric-value small { font-size: 11px; color: #829080; margin-left: 4px; letter-spacing: 0; }
+.settings { background: #eaece2; border: 1px solid #dce0d1; border-radius: 9px; padding: 20px; display: flex; flex-direction: column; }
+.settings .small { margin: 8px 0 26px; line-height: 1.6; }
+.control { margin-bottom: 22px; }
+.control label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 12px; }
+output { color: #455c43; font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; margin: 0; accent-color: #60754c; height: 4px; cursor: pointer; }
+.range-limits { display: flex; justify-content: space-between; font-size: 9px; color: #8a9382; margin-top: 9px; }
+.run { margin-top: auto; width: 100%; background: #284b3a; color: #f3f4e8; border: 0; border-radius: 5px; padding: 12px; font-size: 11px; font-weight: 600; }
+.run:hover { background: #365e46; }
+.settings-foot { font-size: 9px; color: #7d8876; text-align: center; margin: 11px 0 0; }
+.note { margin-top: 20px; border-top: 1px solid #dcdfd2; padding-top: 17px; display: flex; gap: 18px; align-items: center; }
+.note-icon { width: 35px; height: 35px; flex-shrink: 0; border: 1px solid #d8ddcf; border-radius: 7px; display: grid; place-items: center; color: #65765b; font: 12px Consolas, monospace; }
+.note h2 { font-size: 11px; margin-bottom: 5px; }
+.note p { font-size: 10px; color: #7b8577; margin: 0; line-height: 1.7; }
+code { font-family: Consolas, monospace; }
+footer { display: flex; justify-content: space-between; font-size: 9px; color: #8a9384; margin-top: 24px; gap: 10px; }
+.error { color: #a53b27; font-size: 12px; }
+@media (max-width: 1050px) { .app { grid-template-columns: 142px 1fr; } main { padding: 24px; } .workspace { grid-template-columns: minmax(0, 1fr) 210px; gap: 14px; } aside { padding: 28px 14px 20px; } }
+@media (max-width: 780px) { .app { display: block; } aside { display: none; } .workspace { grid-template-columns: 1fr; } .plot svg { height: 220px; } .settings .small { margin-bottom: 16px; } }
+</style>
 </head>
-
 <body>
-    <div id="root" class="center"></div>
+<div id="root"><p role="status">Opening Signal Studio…</p></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
 
-    <script type="text/babel">
-        const { useState } = React;
+function Control({ id, label, value, min, max, step, unit, onChange, disabled }) {
+    return <div className="control">
+        <label htmlFor={id}>{label}<output htmlFor={id}>{value.toFixed(step < 1 ? 2 : 0)} {unit}</output></label>
+        <input id={id} type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+            onChange={event => onChange(Number(event.target.value))} />
+        <div className="range-limits"><span>{min} {unit}</span><span>{max} {unit}</span></div>
+    </div>;
+}
 
-        function App() {
-            const [text, setText] = useState("");
-            const [output, setOutput] = useState("");
+function App() {
+    const [frequency, setFrequency] = useState(4);
+    const [amplitude, setAmplitude] = useState(0.8);
+    const [harmonics, setHarmonics] = useState(0.35);
+    const [samples, setSamples] = useState([]);
+    const [busy, setBusy] = useState(true);
+    const [error, setError] = useState('');
 
-            const send = () => {
-                const message = text.trim() || "Hello from HelloWorld";
-                try {
-                    if (window.webFront && typeof window.webFront.cppFunction === 'function') {
-                        const print = window.webFront.cppFunction('print');
-                        print(message);
-                    } else {
-                        console.log(message);
-                    }
-                    setOutput(`Sent: ${message}`);
-                } catch (e) {
-                    console.error(e);
-                    setOutput('Could not send message');
-                }
-            };
+    async function generate() {
+        setBusy(true);
+        setError('');
+        try {
+            await webFront.ready;
+            const values = await webFront.cppFunction('signal.generate')(frequency, amplitude, harmonics);
+            setSamples(Array.from(values));
+        } catch (failure) {
+            setError(`Could not generate signal: ${failure.message}`);
+        } finally {
+            setBusy(false);
+        }
+    }
 
-            return (
-                <div className="card">
-                    <h2 className="title">HelloWorld</h2>
-                    <p className="subtitle">A minimal, modern UI with a text box and a button.</p>
-                    <div className="stack">
-                        <div className="row">
-                            <input
-                                className="input"
-                                placeholder="Type something..."
-                                value={text}
-                                onChange={(e) => setText(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
-                            />
-                            <button className="button" onClick={send}>Send</button>
+    useEffect(() => { generate(); }, []);
+
+    const peak = samples.reduce((maximum, value) => Math.max(maximum, Math.abs(value)), 0);
+    const rms = samples.length ? Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length) : 0;
+    const plotRange = Math.max(1, peak * 1.2);
+    const path = samples.map((value, index) => `${index ? 'L' : 'M'}${(index / (samples.length - 1) * 640).toFixed(2)},${(120 - value / plotRange * 100).toFixed(2)}`).join(' ');
+
+    return <div className="app" data-state={busy ? 'busy' : error ? 'error' : 'ready'}>
+        <aside>
+            <div className="brand"><span className="brand-mark" />WebFront</div>
+            <div className="aside-label">Workspace</div>
+            <div className="nav-current"><span>∿</span>Signal studio</div>
+            <div className="aside-bottom"><strong>A little C++. A complete GUI.</strong><br />React 18 · C++23<br />All assets served locally.</div>
+        </aside>
+        <main>
+            <header>
+                <div><p className="eyebrow">The C++ workbench</p><h1>Signal Studio</h1><p className="intro">Shape a waveform. Let C++ do the maths.</p></div>
+                <span className="connection" role="status"><span className="dot" />{samples.length ? 'C++ engine connected' : 'Connecting to C++…'}</span>
+            </header>
+            <div className="workspace">
+                <section>
+                    <div className="plot-card">
+                        <div className="panel-heading"><h2>Waveform</h2><span className="legend"><i />Generated signal</span></div>
+                        <div className="plot">
+                            <svg viewBox="-12 -8 664 256" preserveAspectRatio="none" role="img" aria-label="Signal samples calculated in C++">
+                                <defs><pattern id="grid" width="64" height="48" patternUnits="userSpaceOnUse"><path d="M 64 0 L 0 0 0 48" fill="none" stroke="#294238" strokeWidth="0.8" /></pattern></defs>
+                                <rect width="640" height="240" fill="url(#grid)" />
+                                <line x1="0" y1="120" x2="640" y2="120" stroke="#496052" strokeDasharray="3 5" />
+                                <path id="signal-path" d={path} fill="none" stroke="#dfa777" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            <div className="axis"><span>0 ms</span><span>250 ms</span><span>500 ms</span><span>750 ms</span><span>1,000 ms</span></div>
                         </div>
-                        <div className="output">{output}</div>
+                        <div className="plot-footer"><span>Time domain / 1 second</span><span>{samples.length} samples · Float64</span></div>
                     </div>
-                    <footer>Powered by React 18</footer>
-                </div>
-            );
-        }
+                    <div className="metrics">
+                        <div className="metric"><div className="metric-label">Peak amplitude</div><div className="metric-value" id="peak">{peak.toFixed(3)}<small>V</small></div></div>
+                        <div className="metric"><div className="metric-label">RMS level</div><div className="metric-value" id="rms">{rms.toFixed(3)}<small>V</small></div></div>
+                        <div className="metric"><div className="metric-label">Sample buffer</div><div className="metric-value">{samples.length}<small>points</small></div></div>
+                    </div>
+                </section>
+                <section className="settings" aria-label="Signal parameters">
+                    <h2>Make it your own</h2><p className="small">Adjust the parameters, then send<br />them to the C++ engine.</p>
+                    <Control id="frequency" label="Frequency" value={frequency} min={1} max={12} step={1} unit="Hz" onChange={setFrequency} disabled={busy} />
+                    <Control id="amplitude" label="Amplitude" value={amplitude} min={0.1} max={1.5} step={0.05} unit="V" onChange={setAmplitude} disabled={busy} />
+                    <Control id="harmonics" label="Harmonic mix" value={harmonics} min={0} max={1} step={0.05} unit="" onChange={setHarmonics} disabled={busy} />
+                    <button className="run" onClick={generate} disabled={busy}>{busy ? 'Calculating…' : 'Generate signal'} <span aria-hidden="true">↗</span></button>
+                    <p className="settings-foot">Ordinary C++ functions. Real results.</p>
+                </section>
+            </div>
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="note"><span className="note-icon">&lt;/&gt;</span><div><h2>Your application stays C++.</h2><p>The waveform comes from a C++ callback as a typed array. React takes care of the view.<br /><code>app.cppFunction("signal.generate", &amp;demo::generateSignal);</code></p></div></div>
+            <footer><span>WEBFRONT / REACT EXAMPLE</span><span>Local computation · No CDN · No build step for JavaScript</span></footer>
+        </main>
+    </div>;
+}
 
-        const rootElement = document.getElementById('root');
-        if (ReactDOM.createRoot) {
-            ReactDOM.createRoot(rootElement).render(<App />);
-        } else {
-            ReactDOM.render(<App />, rootElement);
-        }
-    </script>
-
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
 </body>
-
 </html>

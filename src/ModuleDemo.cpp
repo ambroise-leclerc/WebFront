@@ -7,6 +7,8 @@
 #include <tooling/Logger.hpp>
 #include <tooling/PathUtils.hpp>
 
+#include "SignalDemo.hpp"
+
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -20,7 +22,10 @@ using namespace webfront;
 // LCOV_EXCL_START - interactive example; behavior is covered by the browser integration target.
 int main(int argc, char** argv) {
     using HelloFS     = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
-    using WebFrontDbg = BasicWF<NetProvider, HelloFS>;
+#ifndef WEBFRONT_DEMO_FRONTEND
+    #define WEBFRONT_DEMO_FRONTEND webfront::frontend::DefaultBrowserFrontend
+#endif
+    using WebFrontDbg = BasicWFWithFrontend<NetProvider, HelloFS, WEBFRONT_DEMO_FRONTEND>;
 
     const string httpPort = "9002";
     const string mainHtml = argc > 1 ? argv[1] : "module-demo.html";
@@ -33,6 +38,8 @@ int main(int argc, char** argv) {
     WebFrontDbg webFront(httpPort, docRoot);
     optional<WebFrontDbg::UI> connectedUI;
 
+    webFront.cppFunction("signal.generate", &demo::generateSignal);
+
     webFront.cppFunction<void, std::string>("print", [](const std::string& text) {
         std::cout << text << '\n';
     });
@@ -41,17 +48,8 @@ int main(int argc, char** argv) {
             connectedUI->jsFunction("webfrontModule.receiveFromCpp")("Hello from C++ through WebFront");
     });
 
-    const bool useReactExample = filesystem::path(mainHtml).filename() == "react.html";
-    webFront.onUIStarted([&connectedUI, useReactExample](WebFrontDbg::UI ui) {
+    webFront.onUIStarted([&connectedUI](WebFrontDbg::UI ui) {
         connectedUI.emplace(ui);
-        if (!useReactExample)
-            return;
-
-        ui.addScript("var addText = function(text, num) {          \n"
-                     "  const print = webFront.cppFunction('print');\n"
-                     "  print(text + ' of ' + num);                \n"
-                     "}                                            \n");
-        ui.jsFunction("addText")("Hello World", 2025);
     });
 
     webFront.openAndRun(mainHtml);

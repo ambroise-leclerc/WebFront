@@ -8,12 +8,14 @@
 #include "Mocks.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <list>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -38,9 +40,10 @@ struct ResultLinkMock {
 
 class WebFrontIoContextMock {
 public:
+    static inline std::atomic<int> stopCalls{0};
     void run() {}
     void run_one() {}
-    void stop() {}
+    void stop() { ++stopCalls; }
     void restart() {}
 };
 
@@ -113,6 +116,39 @@ struct ClosingFrontend {
     }
 };
 
+struct FailingFrontend {
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+    static void initialize() {}
+    static void open(std::string_view, std::string_view) { throw std::runtime_error("frontend startup failed"); }
+};
+
+struct ThreadRecordingFrontend {
+    static inline std::thread::id openThread;
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+    static void initialize() {}
+    static void open(std::string_view, std::string_view) { openThread = std::this_thread::get_id(); }
+};
+
+struct FailingNonBlockingFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static void initialize() {}
+    static void open(std::string_view, std::string_view) { throw std::runtime_error("launcher failed"); }
+};
+
+struct AddressFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static inline std::string         lastAddress;
+    static inline std::string         lastPort;
+    static inline std::string         lastFile;
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
+    static void                       open(std::string_view address, std::string_view port, std::string_view file) {
+        lastAddress = address;
+        lastPort    = port;
+        lastFile    = file;
+    }
+};
+
 int freeFunctionForDeductionTest(double value) {
     return static_cast<int>(value);
 }
@@ -120,6 +156,8 @@ int freeFunctionForDeductionTest(double value) {
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
+    STATIC_REQUIRE(frontend::FrontendType<frontend::WebView2Frontend>);
+    STATIC_REQUIRE(frontend::WebView2Frontend::action == frontend::Action::closeServerAfterOpen);
     THEN("the default frontend is always the system browser, regardless of CEF availability") {
         REQUIRE(std::is_same_v<frontend::DefaultFrontend, frontend::DefaultBrowserFrontend>);
     }
@@ -129,6 +167,19 @@ SCENARIO("Frontend selection aliases") {
         REQUIRE(std::is_same_v<typename FrontendWF::FrontendProvider, OpeningFrontend>);
     }
 }
+
+#if !defined(WEBFRONT_EMBED_WEBVIEW2) || !defined(_WIN32)
+SCENARIO("Selecting WebView2 without support fails clearly") {
+    GIVEN("a build without Windows WebView2 support") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, frontend::WebView2Frontend>;
+        App app("9200");
+        THEN("opening the frontend explains which option to enable") {
+            REQUIRE_THROWS_WITH(app.openWindow("index.html"),
+                "WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON");
+        }
+    }
+}
+#endif
 
 SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
     GIVEN("a build without CEF support") {
@@ -189,6 +240,49 @@ SCENARIO("BasicWF initializes a custom frontend once") {
     }
 }
 
+SCENARIO("A frontend startup failure stops the server before propagating") {
+    GIVEN("an embedded frontend that fails to open") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingFrontend>;
+        App app("9200");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        WHEN("the application opens the frontend") {
+            THEN("show requests server shutdown before propagating the diagnostic") {
+                REQUIRE_THROWS_WITH(app.show(), "frontend startup failed");
+                REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
+            }
+        }
+    }
+}
+
+SCENARIO("The frontend contract: open() runs on the calling thread and a closing frontend stops the server") {
+    GIVEN("an embedded frontend that records the thread it is opened on") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, ThreadRecordingFrontend>;
+        App app("9201");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        WHEN("the application shows the interface") {
+            app.show();
+            THEN("open() ran on the thread that called show(), not on the server thread") {
+                REQUIRE(ThreadRecordingFrontend::openThread == std::this_thread::get_id());
+            }
+            THEN("show() returned after the server was asked to stop") {
+                REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
+            }
+        }
+    }
+}
+
+SCENARIO("The frontend contract: a failing open() stops the server whatever its action") {
+    GIVEN("a frontend that only launches an external program and fails to do so") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, FailingNonBlockingFrontend>;
+        App app("9202");
+        const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+        THEN("the exception propagates and the server is stopped") {
+            REQUIRE_THROWS_WITH(app.show(), "launcher failed");
+            REQUIRE(WebFrontIoContextMock::stopCalls.load() > previousStopCalls);
+        }
+    }
+}
+
 SCENARIO("BasicWF delegates window opening to the selected frontend") {
     GIVEN("a frontend that keeps the server running after open") {
         using FrontendWF = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, OpeningFrontend>;
@@ -224,6 +318,17 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
             }
         }
     }
+}
+
+SCENARIO("BasicWF forwards the configured address to address-aware frontends") {
+    using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, AddressFrontend>;
+    App app{
+        WebFrontConfig{.address = "127.0.0.2", .port = "9010"}
+    };
+    app.openWindow("index.html?x=1#result");
+    REQUIRE(AddressFrontend::lastAddress == "127.0.0.2");
+    REQUIRE(AddressFrontend::lastPort == "9010");
+    REQUIRE(AddressFrontend::lastFile == "index.html?x=1#result");
 }
 
 SCENARIO("Registered C++ function handlers own and invoke their callable") {

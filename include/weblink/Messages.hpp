@@ -340,7 +340,7 @@ protected:
         if (encodeBufferIndex + 1 > buffer.size())
             throw http::BufferOverflowException("FunctionCall encode buffer overflow");
         frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
-        buffer[encodeBufferIndex++] = static_cast<byte>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
         incrementPayloadSize(1);
         std::cout << "-> encoded to bool of size 1 in a span.";
     }
@@ -351,8 +351,8 @@ protected:
         if (encodeBufferIndex + 1 + sizeof(number) > buffer.size())
             throw http::BufferOverflowException("FunctionCall encode buffer overflow");
         frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
-        buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
-        copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(msg::CodedType::number);
+        copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
         encodeBufferIndex += sizeof(number);
         incrementPayloadSize(1 + sizeof(number));
         std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";

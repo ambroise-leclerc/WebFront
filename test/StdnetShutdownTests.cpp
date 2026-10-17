@@ -68,6 +68,16 @@ const std::string upgradeRequest =
 
 }  // namespace
 
+SCENARIO("The HTTP listener is ready before its event loop starts") {
+    const auto port = freePort();
+    http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
+    Stdnet::IoContext clientContext;
+    Stdnet::Socket client(clientContext);
+    // No server thread and no run()/runOne(): a synchronous connection must already succeed.
+    REQUIRE_NOTHROW(connect(client, port));
+    REQUIRE(client.is_open());
+}
+
 SCENARIO("Stopping a running server releases its connections") {
     GIVEN("A running server with an idle client connection") {
         const auto port = freePort();
@@ -104,18 +114,33 @@ SCENARIO("Destroying a server which is not running releases its connections") {
 
 SCENARIO("Destroying WebFront closes its established WebSockets") {
     GIVEN("A WebFront with an established WebSocket") {
-        const auto port = freePort();
+        const auto        port = freePort();
         Stdnet::IoContext clientContext;
         Stdnet::Socket    client(clientContext);
         {
             BasicWF<CountingNet, fs::DefaultFS> webFront(WebFrontConfig{.address = "127.0.0.1", .port = port});
-            std::thread                         serverThread([&webFront] { webFront.run(); });
+            std::atomic<bool>                   linked = false;
+            webFront.onUIStarted([&](auto) {
+                linked = true;
+            });
+            std::thread serverThread(&decltype(webFront)::run, &webFront);
             connect(client, port);
             client.send(std::as_bytes(std::span(upgradeRequest)));
             CHECK(readHeaders(client).starts_with("HTTP/1.1 101"));
+            // The HTTP response can arrive before onUpgrade creates the WebLink. Complete the
+            // masked bridge handshake before stopping, so this tests an established connection.
+            const std::array<unsigned char, 8>
+                handshake{0x82, 0x82, 0, 0, 0, 0, static_cast<unsigned char>(msg::Command::handshake), static_cast<unsigned char>(msg::JSEndian::little)};
+            client.send(Stdnet::ConstBuffer(handshake.data(), handshake.size()));
+            waitUntil([&] {
+                return linked.load();
+            });
+            CHECK(linked.load());
             webFront.stop();
             serverThread.join();
         }
-        THEN("no socket is left") { REQUIRE(CountingNet::liveSockets.load() == 0); }
+        THEN("no socket is left") {
+            REQUIRE(CountingNet::liveSockets.load() == 0);
+        }
     }
 }
