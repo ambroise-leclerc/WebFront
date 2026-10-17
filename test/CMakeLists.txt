@@ -42,6 +42,24 @@ add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckNewcomerDocs.cmake)
 add_test(NAME FrontendSelection
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckFrontendSelection.cmake)
+# Exercise configuration-dependent CTest discovery and generator switches on single-config CI hosts.
+# The fixture configures no compiler and builds nothing; Ninja is optional for contributor builds.
+find_program(WEBFRONT_TEST_NINJA_EXECUTABLE ninja)
+if(WEBFRONT_TEST_NINJA_EXECUTABLE)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/frontend-multiconfig")
+    add_test(NAME FrontendSelectionMultiConfig
+        COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+            -P ${PROJECT_SOURCE_DIR}/cmake/CheckFrontendGenerators.cmake)
+    set_tests_properties(FrontendSelectionMultiConfig PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/frontend-multiconfig")
+else()
+    message(STATUS "Skipping FrontendSelectionMultiConfig: Ninja was not found; FrontendSelection still runs")
+endif()
+# The project bootstrap exports CPM_DOWNLOAD_LOCATION. If CPM provisioning changes, pass the
+# equivalent module path here so the offline fixture still exercises the same CPM as this build.
+add_test(NAME CEFTestingState
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+        -P ${PROJECT_SOURCE_DIR}/cmake/CheckCEFTestingState.cmake)
 add_test(NAME WebView2UnsupportedToolchain
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWebView2Toolchain.cmake)
 add_test(NAME WebView2LoaderArchitecture
