@@ -139,7 +139,8 @@ public:
 #endif
     int run() {
         log::info("Starting automated Jasmine browser integration test");
-        webFront.openAndRun("SpecRunner.html");
+        // Exercise the same page-reference contract under both embedded frontends.
+        webFront.openAndRun("SpecRunner.html?webfront=1#integration");
         return result();
     }
 #ifdef _MSC_VER

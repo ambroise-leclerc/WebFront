@@ -5,11 +5,41 @@
 
 SCENARIO("WebView2 encodes application paths") {
     using webfront::frontend::detail::webview2::applicationUrl;
-    GIVEN("a UTF-8 filename containing URL delimiters") {
-        THEN("only path separators and unreserved characters remain literal") {
-            REQUIRE(applicationUrl("9002", "folder/a b#c?d%\xc3\xa9.html") == L"http://localhost:9002/folder/a%20b%23c%3Fd%25%C3%A9.html");
+    GIVEN("a UTF-8 filename containing percent-escaped URL delimiters") {
+        THEN("all frontends share URI-reference encoding") {
+            REQUIRE(applicationUrl("9002", "folder/a b%23c%3Fd%25\xc3\xa9.html") == L"http://127.0.0.1:9002/folder/a%20b%23c%3Fd%25%C3%A9.html");
+            REQUIRE(applicationUrl("127.0.0.2", "9002", "index.html?x=1#result") == L"http://127.0.0.2:9002/index.html?x=1#result");
         }
     }
+}
+
+SCENARIO("WebView2 runtime startup has a configurable deadline") {
+    using namespace webfront::frontend::detail::webview2;
+    using namespace std::chrono_literals;
+    REQUIRE_NOTHROW(Session{3min});
+    REQUIRE_THROWS_AS(Session{0ms}, std::invalid_argument);
+    REQUIRE_THROWS_AS(Session{-1ms}, std::invalid_argument);
+    Apartment apartment;
+    auto      session = std::make_shared<Session>(25ms);
+    session->createWindow();
+    REQUIRE_THROWS_WITH(session->run(), Catch::Matchers::ContainsSubstring("25 milliseconds"));
+}
+
+SCENARIO("WebView2 controller closure is idempotent and preserves errors") {
+    using webfront::frontend::detail::webview2::Session;
+    auto session            = std::make_shared<Session>();
+    auto controller         = Microsoft::WRL::Make<webfront::test::WebView2ControllerMock>();
+    session->controller     = controller;
+    controller->duringClose = [&] {
+        session->close();
+    };
+    controller->closeResult = E_FAIL;
+    session->close();
+    session->close();
+    REQUIRE(controller->closeCalls == 1);
+    REQUIRE_FALSE(session->controller);
+    REQUIRE(session->failure);
+    REQUIRE_THROWS_WITH(std::rethrow_exception(session->failure), Catch::Matchers::ContainsSubstring("closing controller"));
 }
 
 SCENARIO("WebView2 tolerates a temporarily unresponsive renderer") {
@@ -51,6 +81,17 @@ SCENARIO("WebView2 forwards native focus and movement messages") {
         SendMessageW(session->window, WM_MOVE, 0, 0);
         THEN("the WebView is notified independently of resizing") {
             REQUIRE(controller->positionCalls == 1);
+        }
+    }
+    WHEN("Windows suggests new bounds after a DPI change") {
+        RECT suggested{100, 100, 1000, 800};
+        SendMessageW(session->window, WM_DPICHANGED, MAKELONG(144, 144), reinterpret_cast<LPARAM>(&suggested));
+        RECT actual{};
+        REQUIRE(GetWindowRect(session->window, &actual));
+        THEN("the native window adopts the suggested size") {
+            REQUIRE(actual.right - actual.left == 900);
+            REQUIRE(actual.bottom - actual.top == 700);
+            REQUIRE_FALSE(session->failure);
         }
     }
     WHEN("controller shutdown sends reentrant window messages") {

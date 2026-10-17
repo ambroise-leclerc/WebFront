@@ -160,7 +160,7 @@ CMake fetches Microsoft.Web.WebView2 SDK **1.0.3537.50**, verifies its SHA-256 a
 
 The separately installed **Microsoft Edge WebView2 Evergreen Runtime** is required. Call `show()` on an STA-compatible thread, normally the main thread. The window handles resizing and keyboard focus, and closing it stops the server.
 
-This frontend currently targets development with trusted content. Navigation and popups are unrestricted; DevTools and context menus remain available. See the [WebView2 frontend notes](docs/WEBVIEW2.md) for runtime distribution, startup errors, profiles, DPI and the navigation policy.
+This frontend currently targets development with trusted content. Navigation and popups are unrestricted; DevTools and context menus remain available. See the [WebView2 frontend notes](docs/WEBVIEW2.md) for runtime distribution, configurable startup deadlines and profiles, DPI and the navigation policy.
 
 ## Use WebFront in your project
 
@@ -224,7 +224,7 @@ cmake --build build-webview2 --config Release --parallel
 ctest --test-dir build-webview2 -C Release --output-on-failure
 ```
 
-The `windows-2025` CI matrix includes both the default MSVC build and this WebView2 configuration. Every browser test has a CTest timeout. Lifecycle tests cover repeated opening, early native closure, queued startup timer messages after closure or failure, a page that never connects, a rejected `webFront.ready`, initial and later failed navigation, incompatible COM and a missing runtime. Unit tests cover path encoding, process-failure policy, native focus/move forwarding, reentrant shutdown and hexadecimal HRESULT diagnostics.
+The `windows-2025` CI matrix includes both the default MSVC build and this WebView2 configuration. Every browser test has a CTest timeout. Lifecycle tests cover repeated opening, closure requested during native window creation, queued startup timer messages after closure or failure, a held page resource after runtime creation, a page that never connects, a rejected `webFront.ready`, initial and later failed navigation, incompatible COM and a missing runtime. Unit tests cover shared URL construction, configured addresses and deadlines, process-failure policy, native focus/move/DPI forwarding, reentrant shutdown and hexadecimal HRESULT diagnostics.
 
 The shared Jasmine suite also runs the actual Signal Studio React interface against its C++ callback, including parameter changes and recovery after a failed call. Unit tests check the generated samples and parameter validation.
 
@@ -256,6 +256,8 @@ Without a page argument, `WebFrontApp` serves `src/module-demo.html`, whose entr
 ```
 
 ## Bridge basics
+
+Built-in frontends open the configured server address. Page arguments are URI references: `app.show("index.html?view=details#result")` preserves the query and fragment. Spaces and UTF-8 characters are encoded automatically; use `%23`, `%3F` and `%25` for literal `#`, `?` and `%` in a filename. Existing percent escapes are preserved consistently across frontends.
 
 - The two directions differ. JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++; the call always returns a Promise, even for a `void` C++ callback, so await it or handle its rejection (an ignored rejected Promise raises an unhandled rejection).
 - C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript. Only the untyped form is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.

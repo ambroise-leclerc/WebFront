@@ -3,8 +3,20 @@
 #include "Action.hpp"
 #include "Url.hpp"
 
+#include <chrono>
+#include <filesystem>
 #include <stdexcept>
 #include <string_view>
+
+namespace webfront::frontend {
+
+/** @brief Per-opening runtime creation deadline and persistent profile directory. */
+struct WebView2Options {
+    std::chrono::milliseconds startupTimeout{std::chrono::seconds{30}};
+    std::filesystem::path     userDataFolder{};
+};
+
+}  // namespace webfront::frontend
 
 #if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
     #include "../system/WindowsCompat.hpp"
@@ -23,8 +35,7 @@
 
 namespace webfront::frontend::detail::webview2 {
 
-inline constexpr UINT startupTimeoutMilliseconds = 30'000;
-using EnvironmentFactory                         = decltype(&CreateCoreWebView2EnvironmentWithOptions);
+using EnvironmentFactory = decltype(&CreateCoreWebView2EnvironmentWithOptions);
 
 inline void check(HRESULT result, const char* operation) {
     if (FAILED(result))
@@ -61,8 +72,12 @@ inline std::wstring utf16(std::string_view text) {
     return result;
 }
 
+inline std::wstring applicationUrl(std::string_view address, std::string_view port, std::string_view file) {
+    return utf16(frontend::detail::applicationUrl(address, port, file));
+}
+
 inline std::wstring applicationUrl(std::string_view port, std::string_view file) {
-    return utf16(frontend::detail::applicationUrl(port, file));
+    return applicationUrl("127.0.0.1", port, file);
 }
 
 inline std::wstring executablePath() {
@@ -97,6 +112,11 @@ inline std::filesystem::path userDataFolder() {
 // references, so closing during initialization cannot access a destroyed window or stack frame.
 class Session : public std::enable_shared_from_this<Session> {
 public:
+    explicit Session(std::chrono::milliseconds timeout = std::chrono::seconds{30}) {
+        if (timeout.count() <= 0 || timeout.count() > USER_TIMER_MAXIMUM)
+            throw std::invalid_argument("WebView2: startup timeout must be between 1 and USER_TIMER_MAXIMUM milliseconds");
+        startupTimeoutMilliseconds = static_cast<UINT>(timeout.count());
+    }
     HWND                                             window = nullptr;
     Microsoft::WRL::ComPtr<ICoreWebView2Environment> environment;
     Microsoft::WRL::ComPtr<ICoreWebView2Controller>  controller;
@@ -116,9 +136,16 @@ public:
 
     void close() noexcept {
         stopStartupTimer();
+        if (closed)
+            return;
         closed = true;
-        if (controller)
-            controller->Close();
+        try {
+            if (controller)
+                check(controller->Close(), "closing controller");
+        } catch (...) {
+            if (!failure)
+                failure = std::current_exception();
+        }
         view.Reset();
         controller.Reset();
         environment.Reset();
@@ -143,8 +170,13 @@ public:
             std::rethrow_exception(failure);
     }
 
+    bool loadingInitialPage() const noexcept {
+        return initialNavigationPending;
+    }
+
     static void checkProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND kind) {
         // An unresponsive renderer can recover; WebView2 also recovers auxiliary processes itself.
+        // Main renderer/browser exits deliberately fail the session: automatic reload could repeat application actions.
         if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED || kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED)
             throw std::runtime_error("WebView2: browser process failed (kind " + std::to_string(static_cast<int>(kind)) + ")");
     }
@@ -211,10 +243,29 @@ public:
 
 private:
     std::wstring className;
-    bool         registered = false;
+    bool         registered                 = false;
+    bool         initialNavigationPending   = true;
+    UINT         startupTimeoutMilliseconds = 30'000;
+
+    void requestWindowClose() noexcept {
+        // Navigation cancelled by the page's own close request is a normal shutdown.
+        initialNavigationPending = false;
+        stopStartupTimer();
+        if (window)
+            PostMessageW(window, WM_CLOSE, 0, 0);
+    }
 
     bool hasLiveController() const noexcept {
         return controller && !closed;
+    }
+
+    static bool receivedSuccessfulHttpResponse(ICoreWebView2NavigationCompletedEventArgs* args) {
+        Microsoft::WRL::ComPtr<ICoreWebView2NavigationCompletedEventArgs2> response;
+        if (FAILED(args->QueryInterface(IID_PPV_ARGS(response.GetAddressOf()))))
+            return false;
+        int status = 0;
+        check(response->get_HttpStatusCode(&status), "reading navigation HTTP status");
+        return status >= 200 && status < 400;
     }
 
     void stopStartupTimer() noexcept {
@@ -232,7 +283,7 @@ private:
         if (message.message != WM_TIMER)
             return;
         if (message.wParam == startupTimer)
-            throw std::runtime_error(std::format("WebView2: startup timed out after {} seconds", startupTimeoutMilliseconds / 1000));
+            throw std::runtime_error(std::format("WebView2: runtime startup timed out after {} milliseconds", startupTimeoutMilliseconds));
     }
 
     bool dispatchNextMessage() const {
@@ -292,19 +343,31 @@ private:
         }
     }
 
+    void handleInitialNavigationFailure(ICoreWebView2NavigationCompletedEventArgs* args) {
+        COREWEBVIEW2_WEB_ERROR_STATUS status{};
+        check(args->get_WebErrorStatus(&status), "reading navigation error");
+        if (status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED)
+            return;
+        // window.stop()/window.close() can abort loading after a successful HTTP response.
+        if (status == COREWEBVIEW2_WEB_ERROR_STATUS_CONNECTION_ABORTED && receivedSuccessfulHttpResponse(args)) {
+            initialNavigationPending = false;
+            return;
+        }
+        throw std::runtime_error("WebView2: navigation failed (WebErrorStatus " + std::to_string(static_cast<int>(status))
+                                 + "); check the local server and page path");
+    }
+
     void navigationCompleted(ICoreWebView2NavigationCompletedEventArgs* args) noexcept {
-        if (closed || !startupTimer)
+        if (closed || !initialNavigationPending)
             return;
         try {
             BOOL success = FALSE;
             check(args->get_IsSuccess(&success), "reading navigation result");
             if (!success) {
-                COREWEBVIEW2_WEB_ERROR_STATUS status{};
-                check(args->get_WebErrorStatus(&status), "reading navigation error");
-                throw std::runtime_error("WebView2: navigation failed (WebErrorStatus " + std::to_string(static_cast<int>(status))
-                                         + "); check the local server and page path");
+                handleInitialNavigationFailure(args);
+                return;
             }
-            stopStartupTimer();
+            initialNavigationPending = false;
         } catch (...) {
             fail();
         }
@@ -320,8 +383,17 @@ private:
             check(controller->NotifyParentWindowPositionChanged(), "notifying parent window position");
     }
 
-    bool handleWindowMessage(HWND handle, UINT message) {
+    void applyDpiBounds(HWND handle, LPARAM lParam) {
+        const auto& bounds = *reinterpret_cast<const RECT*>(lParam);
+        if (!SetWindowPos(handle, nullptr, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOZORDER | SWP_NOACTIVATE))
+            throw std::runtime_error("WebView2: cannot apply DPI window bounds");
+    }
+
+    bool handleWindowMessage(HWND handle, UINT message, LPARAM lParam) {
         switch (message) {
+            case WM_DPICHANGED:
+                applyDpiBounds(handle, lParam);
+                return true;
             case WM_SIZE:
                 resize();
                 return true;
@@ -354,7 +426,7 @@ private:
         }
         if (self) {
             try {
-                if (self->handleWindowMessage(handle, message))
+                if (self->handleWindowMessage(handle, message, lParam))
                     return 0;
             } catch (...) {
                 self->fail();
@@ -394,8 +466,8 @@ private:
             "registering browser process failure handler");
         check(view->add_WindowCloseRequested(
                   Microsoft::WRL::Callback<ICoreWebView2WindowCloseRequestedEventHandler>([weak](ICoreWebView2*, IUnknown*) -> HRESULT {
-                      if (const auto self = weak.lock(); self && self->window)
-                          PostMessageW(self->window, WM_CLOSE, 0, 0);
+                      if (const auto self = weak.lock())
+                          self->requestWindowClose();
                       return S_OK;
                   }).Get(),
                   &token),
@@ -413,11 +485,13 @@ private:
         check(controller->put_IsVisible(TRUE), "showing controller");
         if (GetFocus() == window)
             restoreFocus();
+        // Runtime creation is complete. Slow page resources must not consume its watchdog budget.
+        stopStartupTimer();
         check(view->Navigate(url.c_str()), "navigating to application");
     }
 };
 
-inline void open(std::string_view port, std::string_view file) {
+inline void open(std::string_view address, std::string_view port, std::string_view file, const WebView2Options& options) {
     Apartment                                                apartment;
     LPWSTR                                                   rawVersion = nullptr;
     const auto                                               available  = GetAvailableCoreWebView2BrowserVersionString(nullptr, &rawVersion);
@@ -425,9 +499,10 @@ inline void open(std::string_view port, std::string_view file) {
     if (FAILED(available) || !version)
         throw std::runtime_error("WebView2 runtime not found. Install Microsoft Edge WebView2 Evergreen Runtime: "
                                  "https://developer.microsoft.com/microsoft-edge/webview2/");
-    auto session       = std::make_shared<Session>();
-    session->url       = applicationUrl(port, file);
-    const auto profile = userDataFolder();
+    auto session       = std::make_shared<Session>(options.startupTimeout);
+    session->url       = applicationUrl(address, port, file);
+    const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
+    std::filesystem::create_directories(profile);
     session->createWindow();
     session->start(profile);
     session->run();
@@ -445,13 +520,30 @@ struct WebView2Frontend {
     static void initialize() { }
 
     static void open(std::string_view port, std::string_view file) {
+        open("127.0.0.1", port, file);
+    }
+
+    static void open(std::string_view address, std::string_view port, std::string_view file, const WebView2Options& options = {}) {
 #if defined(WEBFRONT_EMBED_WEBVIEW2) && defined(_WIN32)
-        detail::webview2::open(port, file);
+        detail::webview2::open(address, port, file, options);
 #else
+        (void)address;
         (void)port;
         (void)file;
+        (void)options;
         throw std::runtime_error("WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON");
 #endif
+    }
+};
+
+/** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
+template <typename OptionsProvider>
+struct WebView2FrontendWithOptions : WebView2Frontend {
+    static void open(std::string_view port, std::string_view page) {
+        open("127.0.0.1", port, page);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page) {
+        WebView2Frontend::open(address, port, page, OptionsProvider::get());
     }
 };
 

@@ -27,14 +27,14 @@ namespace webfront::cef {
 // Exception types for CEF initialization
 class CEFInitializationError : public std::runtime_error {
 public:
-    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) {}
+    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) { }
 };
 
 class CEFSubprocessExit : public std::exception {
     int exit_code_;
 
 public:
-    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) {}
+    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) { }
 
     [[nodiscard]] const char* what() const noexcept override {
         return "CEF subprocess should exit";
@@ -321,8 +321,8 @@ public:
         return this;
     }
 
-    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override {}
-    virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override {}
+    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override { }
+    virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override { }
     virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
         return false;
     }
@@ -397,7 +397,7 @@ private:
     #endif
 };
 
-inline void open(std::string_view port, std::string_view file) {
+inline void open(std::string_view address, std::string_view port, std::string_view file) {
     if constexpr (!webfrontEmbedCEF) {
         throw std::runtime_error("cef::open() : CEF not available");
     }
@@ -431,7 +431,7 @@ inline void open(std::string_view port, std::string_view file) {
     CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient);
 
     // Build the URL
-    const std::string url = frontend::detail::applicationUrl(port, file);
+    const auto url = frontend::detail::applicationUrl(address, port, file);
 
     log::info("Opening URL: {}", url);
 
@@ -466,16 +466,20 @@ static constexpr bool webfrontEmbedCEF{false};
 // must fail clearly and as early as possible (initialize() runs once at BasicWF construction,
 // before open() would otherwise be reached from openAndRun()).
 inline void initialize() {
-    throw std::runtime_error(
-      "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
-      "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
+    throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                             "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
-inline void open(std::string_view /*port*/, std::string_view /*file*/) {
-    throw std::runtime_error(
-      "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
-      "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
+inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/) {
+    throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                             "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
 }  // namespace webfront::cef
 #endif  // WEBFRONT_EMBED_CEF
+
+namespace webfront::cef {
+inline void open(std::string_view port, std::string_view file) {
+    open("127.0.0.1", port, file);
+}
+}  // namespace webfront::cef

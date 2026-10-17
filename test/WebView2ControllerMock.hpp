@@ -10,6 +10,8 @@ namespace webfront::test {
 class WebView2ControllerMock : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, ICoreWebView2Controller> {
 public:
     unsigned                       focusCalls     = 0;
+    unsigned                       closeCalls     = 0;
+    HRESULT                        closeResult    = S_OK;
     unsigned                       positionCalls  = 0;
     HRESULT                        focusResult    = S_OK;
     HRESULT                        positionResult = S_OK;
@@ -26,9 +28,10 @@ public:
         return positionResult;
     }
     HRESULT STDMETHODCALLTYPE Close() override {
+        ++closeCalls;
         if (duringClose)
             duringClose();
-        return S_OK;
+        return closeResult;
     }
     HRESULT STDMETHODCALLTYPE put_Bounds(RECT) override {
         return S_OK;

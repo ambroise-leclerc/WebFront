@@ -8,9 +8,8 @@
 namespace demo {
 
 inline void validateSignalParameter(double value, double minimum, double maximum) {
-    const bool finite  = std::isfinite(value);
-    const bool inRange = value >= minimum && value <= maximum;
-    if (!finite || !inRange)
+    // Ordered comparisons also reject NaN and infinities.
+    if (!(value >= minimum && value <= maximum))
         throw std::invalid_argument("Signal parameters are outside the supported range");
 }
 

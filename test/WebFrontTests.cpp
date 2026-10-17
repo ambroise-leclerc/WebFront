@@ -135,6 +135,20 @@ struct FailingNonBlockingFrontend {
     static void open(std::string_view, std::string_view) { throw std::runtime_error("launcher failed"); }
 };
 
+struct AddressFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static inline std::string         lastAddress;
+    static inline std::string         lastPort;
+    static inline std::string         lastFile;
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
+    static void                       open(std::string_view address, std::string_view port, std::string_view file) {
+        lastAddress = address;
+        lastPort    = port;
+        lastFile    = file;
+    }
+};
+
 int freeFunctionForDeductionTest(double value) {
     return static_cast<int>(value);
 }
@@ -304,6 +318,17 @@ SCENARIO("BasicWF delegates window opening to the selected frontend") {
             }
         }
     }
+}
+
+SCENARIO("BasicWF forwards the configured address to address-aware frontends") {
+    using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, AddressFrontend>;
+    App app{
+        WebFrontConfig{.address = "127.0.0.2", .port = "9010"}
+    };
+    app.openWindow("index.html?x=1#result");
+    REQUIRE(AddressFrontend::lastAddress == "127.0.0.2");
+    REQUIRE(AddressFrontend::lastPort == "9010");
+    REQUIRE(AddressFrontend::lastFile == "index.html?x=1#result");
 }
 
 SCENARIO("Registered C++ function handlers own and invoke their callable") {
