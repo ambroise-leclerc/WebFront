@@ -46,4 +46,10 @@ An empty `userDataFolder` keeps the default. Relative paths are resolved against
 
 All built-in frontends use the address in `WebFrontConfig`, rather than hard-coded `localhost`. IPv6 addresses are bracketed in the URL; wildcard binds (`0.0.0.0` and `::`) open the matching loopback address. The listener is bound and listening during application construction, before the frontend opens.
 
+The default address is `127.0.0.1`, so the browser reaches the IPv4 loopback listener directly without relying on `localhost` resolving or falling back to IPv4.
+
 The page is a UTF-8 URI reference. `show("index.html?x=1#result")` retains its query and fragment; spaces and non-ASCII bytes are percent-encoded. Already encoded `%XX` sequences are preserved. For a filename containing literal `#`, `?` or `%`, use `%23`, `%3F` or `%25`, for example `show("encoded path %23.html")`. CEF, WebView2 and the system browser share this construction.
+
+A literal `+` in the path is automatically encoded as `%2B`: `show("a+b.html")` serves the filename `a+b.html`. This avoids the server decoder's conversion of an unescaped `+` to a space. Plus signs in the query and fragment retain their original meaning.
+
+The shared Jasmine suite opens `encoded path %23.html` under both CEF and WebView2 and checks the decoded filename, query and fragment. Catch2 also checks this path at the system-browser launcher boundary and verifies shell quoting. On Windows the system browser is opened directly with `ShellExecute`, without a command shell; POSIX launches quote the URL as one argument.
