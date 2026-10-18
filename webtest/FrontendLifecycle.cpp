@@ -29,6 +29,16 @@ int show(std::string_view page) {
     return 0;
 }
 
+int expectNavigationFailure() {
+    try {
+        Frontend::open("0", "index.html");
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 0;  // The contract requires an exception, without prescribing its wording.
+    }
+    throw std::runtime_error("Failed initial navigation did not throw");
+}
+
 int run(std::string_view mode) {
     if (mode == "no-bridge")
         return show("no-bridge.html");
@@ -38,15 +48,8 @@ int run(std::string_view mode) {
         return show("rejected-ready.html");
     if (mode == "path-encoding")
         return show("encoded path %23.html?x=1#example");
-    if (mode == "navigation-failure") {
-        try {
-            Frontend::open("0", "index.html");
-        } catch (const std::exception& error) {
-            std::cerr << error.what() << '\n';
-            return 0;  // The contract requires an exception, without prescribing its wording.
-        }
-        throw std::runtime_error("Failed initial navigation did not throw");
-    }
+    if (mode == "navigation-failure")
+        return expectNavigationFailure();
     throw std::runtime_error("Unknown lifecycle scenario");
 }
 }  // namespace
