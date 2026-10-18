@@ -128,7 +128,15 @@ The application code and interface assets stay the same whichever frontend you s
 | Embedded CEF window | Windows, Linux, macOS | Enable CEF at configuration time; a large download |
 | Embedded WebView2 window | Windows | Enable the SDK and install the Evergreen Runtime |
 
-Every frontend follows the same contract (threading, blocking, errors); see [Frontends](docs/FRONTENDS.md).
+Construct the application and call `show()` on the main thread for embedded frontends. Their `open()`
+blocks until window closure; `show()` then stops and joins the server. A `keepServerRunning` frontend
+leaves the server active after opening returns; the system-browser adapter waits for Enter first.
+If opening throws, `show()` stops and joins the server before propagating the exception. Unavailable
+frontend types remain declared and throw a diagnostic naming the required CMake option.
+
+Embedded frontends target development with trusted application content and currently supply no shared
+navigation, popup or bridge-origin policy. See the [frontend contract](docs/FRONTENDS.md#the-contract)
+for initialization, threading, errors and scope.
 
 ### Embedded window with CEF (opt-in)
 
@@ -158,7 +166,7 @@ app.show(); // returns when the window closes and the server has stopped
 
 CMake fetches Microsoft.Web.WebView2 SDK **1.0.3537.50**, verifies its SHA-256 and links the static loader; no machine-wide SDK or loader DLL is required. The option defaults to `OFF` and requires Windows with an MSVC-compatible compiler (MSVC or clang-cl); MinGW is rejected at configuration time. The loader follows the compiler's x86, x64 or ARM64 target, including when it differs from the host; unsupported targets fail during configuration. It never changes `webfront::WebFront`'s system-browser default. Selecting the adapter without support throws an error explaining how to enable it.
 
-The separately installed **Microsoft Edge WebView2 Evergreen Runtime** is required. Call `show()` on an STA-compatible thread, normally the main thread. The window handles resizing and keyboard focus, and closing it stops the server.
+The separately installed **Microsoft Edge WebView2 Evergreen Runtime** is required. Follow the shared main-thread contract; WebView2 additionally requires STA-compatible COM. The window handles resizing and keyboard focus, and closing it stops the server.
 
 This frontend currently targets development with trusted content. Navigation and popups are unrestricted; DevTools and context menus remain available. See the [WebView2 frontend notes](docs/WEBVIEW2.md) for runtime distribution, configurable startup deadlines and profiles, DPI and the navigation policy.
 

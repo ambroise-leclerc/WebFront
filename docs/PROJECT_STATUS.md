@@ -9,6 +9,29 @@ qualified tools and verification. With the option on, browser logs travel throug
 mddlog's bounded transport consumer and WebLink captures link/call context. mddlog
 ADR-003, which this integration implements, was accepted on 2026-10-02.
 
+## Embedded frontend foundations (epic #253, 2026-10-18)
+
+- Shared URL construction (#254), registry-driven CMake selection (#255) and shared lifecycle tests
+  (#256, PR #264) are merged into `develop`. The five lifecycle cases run for CEF and WebView2,
+  with WebView2-specific COM/runtime/timer cases kept separately. PR #264's GitHub Actions run
+  [39105576882](https://github.com/ambroise-leclerc/WebFront/actions/runs/39105576882) passed all six
+  browser tests on Linux CEF ([GCC](https://github.com/ambroise-leclerc/WebFront/actions/runs/39105576882/job/117610570356)
+  and [Clang](https://github.com/ambroise-leclerc/WebFront/actions/runs/39105576882/job/117610570490))
+  and all fifteen on [Windows WebView2](https://github.com/ambroise-leclerc/WebFront/actions/runs/39105576882/job/117610570553).
+- The [frontend contract](FRONTENDS.md#the-contract) (#257) defines initialization once on success,
+  retry after initialization failure, main-thread construction/opening for embedded engines,
+  shutdown and join before returning or propagating an opening failure, unavailable-engine
+  diagnostics and trusted-content scope. Mock tests cover both actions with an active server loop,
+  calling-thread execution, standard/non-standard errors, failure before window creation, and
+  initialization across application types.
+- Main-thread validation stays adapter-specific; no generic main-thread flag or dispatcher is added.
+  WKWebView (#258), WebKitGTK (#259), the native alias (#261), and the shared navigation/popup/bridge
+  authorization policy (#260) remain future work.
+- Verified locally on macOS ARM64 with Clang 21.1.8: CEF-off Release build and all 161 CTest cases,
+  including `NewcomerDocsMatchExamples` and `AddSubdirectoryConsumer`. Tests using local sockets
+  required execution outside the sandbox. CEF/Xvfb and WebView2 browser verification above is from
+  the merged PR's Linux/Windows CI; these engines were not rerun locally on macOS for #257.
+
 ## Newcomer-first workflow (epic #205)
 
 - `webfront::WebFront app; app.show();` is a complete program (`src/HelloWorld.cpp`). With no document root WebFront serves an embedded "Hello, WebFront!" page whose status badge shows **connected** only after `webFront.ready` resolves (WebSocket handshake acknowledgement) and an error state if the initial connection fails. `ready` does not track later disconnects.

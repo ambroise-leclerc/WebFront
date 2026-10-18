@@ -11,7 +11,7 @@ list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesT
 list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp ReactFSTests.cpp BabelFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp TerminalTests.cpp TerminalFSTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp ToolStoreTests.cpp ToolManagerTests.cpp)
-list(APPEND TESTS_LIST SignalDemoTests.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp)
+list(APPEND TESTS_LIST SignalDemoTests.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()

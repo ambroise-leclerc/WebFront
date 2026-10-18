@@ -80,6 +80,18 @@ struct InitializingFrontend {
     static void open(std::string_view, std::string_view) {}
 };
 
+struct RetryingFrontend {
+    static inline int initializeCalls = 0;
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+
+    static void initialize() {
+        if (++initializeCalls == 1)
+            throw std::runtime_error("frontend initialization failed");
+    }
+
+    static void open(std::string_view, std::string_view) {}
+};
+
 struct OpeningFrontend {
     static inline int initializeCalls = 0;
     static inline int openCalls       = 0;
@@ -235,6 +247,23 @@ SCENARIO("BasicWF initializes a custom frontend once") {
 
             THEN("the frontend initialization runs only once") {
                 REQUIRE(InitializingFrontend::initializeCalls == 1);
+            }
+        }
+    }
+}
+
+SCENARIO("Failed frontend initialization is retried and success is shared across application types") {
+    GIVEN("a frontend whose first initialization fails") {
+        using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, RetryingFrontend>;
+        using OtherApp = BasicWFWithFrontend<WebFrontNetworkingMock, fs::DefaultFS, RetryingFrontend>;
+        WHEN("construction is retried and another application type uses the frontend") {
+            THEN("construction propagates the error, retries once, and reuses successful initialization") {
+                REQUIRE_THROWS_WITH(App("9200"), "frontend initialization failed");
+                REQUIRE(RetryingFrontend::initializeCalls == 1);
+                App retry("9201");
+                REQUIRE(RetryingFrontend::initializeCalls == 2);
+                OtherApp other("9202");
+                REQUIRE(RetryingFrontend::initializeCalls == 2);
             }
         }
     }

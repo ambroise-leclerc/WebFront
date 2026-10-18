@@ -423,8 +423,8 @@ public:
     #pragma warning(pop)
 #endif
 
-    // Concise newcomer entry point: starts the server, opens the given page, and returns once the
-    // window/browser session ends (or immediately for the system-browser frontend, like openAndRun).
+    // Starts the server and opens the page on the calling thread. Embedded frontends return after
+    // window closure and server shutdown; the system browser waits for Enter and leaves the server running.
     void show(std::string_view page = "index.html") {
         openAndRun(page);
     }
