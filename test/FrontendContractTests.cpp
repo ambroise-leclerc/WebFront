@@ -54,7 +54,9 @@ public:
         state->running  = false;
         state->exited   = true;
     }
-    void run_one() { }
+    std::size_t run_one() {
+        return 0;
+    }
     void stop() {
         std::lock_guard lock(state->mutex);
         state->stopped = true;

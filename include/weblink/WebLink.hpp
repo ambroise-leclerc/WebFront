@@ -5,6 +5,7 @@
 #include "../http/WebSocket.hpp"
 #include "../tooling/Logger.hpp"
 #include "Messages.hpp"
+#include "PendingCalls.hpp"
 
 #include <algorithm>
 #include <array>
@@ -108,11 +109,6 @@ private:
 
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
-    struct PendingCall {
-        std::function<void(const msg::FunctionReturn<Policy>&)> complete;
-        std::function<void(std::exception_ptr)> reject;
-    };
-
     std::shared_ptr<HandlerGuard> handlers{std::make_shared<HandlerGuard>()};
     std::shared_ptr<websocket::WebSocket<Net, Policy>> ws;
     WebLinkId id;
@@ -124,14 +120,11 @@ class WebLink {
     std::atomic<std::uint64_t> droppedLogs{0};     /// Diagnostic frames refused by the bounded write queue
     std::function<void(WebLinkEvent)> eventsHandler;
     std::span<const std::byte> undecodedData; /// Data received but not yet consumed
-    std::mutex pendingMutex;
-    std::map<msg::CallId, PendingCall> pendingCalls;
-    msg::CallId nextCallId{1};
-    bool closed{};
+    std::shared_ptr<detail::PendingCalls<Policy>>      pending{std::make_shared<detail::PendingCalls<Policy>>()};
 
 public:
-    WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler)
-        : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket))), id(webLinkId), eventsHandler(eventHandler) {
+    WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler, networking::TaskScope& scope)
+        : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket), scope)), id(webLinkId), eventsHandler(eventHandler) {
         log::debug("New WebLink created with id:{}", id);
 
         ws->onMessage([](std::string_view text) { log::debug("onMessage(text) :{}", text); });
@@ -181,18 +174,35 @@ public:
     std::pair<msg::CallId, std::future<Result>> expectResult() {
         auto promise = std::make_shared<std::promise<Result>>();
         auto future = promise->get_future();
-        std::lock_guard lock(pendingMutex);
-        if (closed) {
-            promise->set_exception(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
-            // Explicitly typed: a bare 0 is an int and narrows into CallId, which MSVC rejects (C4242).
-            return {msg::CallId{0}, std::move(future)};
+        msg::CallId callId{};
+        try {
+            callId = pending->add({.complete =
+                                       [promise](const msg::FunctionReturn<Policy>& result) {
+                                           try {
+                                               if constexpr (std::is_void_v<Result>) {
+                                                   detail::decodeReturn<void>(result);
+                                                   promise->set_value();
+                                               } else
+                                                   promise->set_value(detail::decodeReturn<Result>(result));
+                                           } catch (...) {
+                                               promise->set_exception(std::current_exception());
+                                           }
+                                       },
+                                   .reject =
+                                       [promise](std::exception_ptr error) {
+                                           promise->set_exception(std::move(error));
+                                       }});
+        } catch (...) {
+            promise->set_exception(std::current_exception());
         }
-
-        auto callId = nextAvailableCallId();
-        pendingCalls.emplace(callId, PendingCall{
-          .complete = [promise](const msg::FunctionReturn<Policy>& result) { settleResult<Result>(*promise, result); },
-          .reject   = [promise](std::exception_ptr error) { promise->set_exception(std::move(error)); }});
         return {callId, std::move(future)};
+    }
+
+    auto pendingResults() const noexcept {
+        return std::weak_ptr(pending);
+    }
+    auto socket() const noexcept {
+        return std::weak_ptr(ws);
     }
 
 private:
@@ -253,47 +263,6 @@ private:
         if (callId != 0) sendFrame(std::move(frame));
     }
 
-    /// A return message either carries an encoded exception, which is rethrown into the promise, or the
-    /// value itself. Anything that fails to decode also surfaces as a broken promise rather than a throw
-    /// on the receive thread.
-    template<typename Result>
-    static void settleResult(std::promise<Result>& promise, const msg::FunctionReturn<Policy>& result) {
-        try {
-            auto payload = result.payload();
-            if (carriesException(result, payload)) rethrowEncodedException(result, payload);
-            decodeInto(promise, result, payload);
-        }
-        catch (...) {
-            promise.set_exception(std::current_exception());
-        }
-    }
-
-    static bool carriesException(const msg::FunctionReturn<Policy>& result, std::span<const std::byte> payload) {
-        if (result.getParametersCount() != 1 || payload.empty()) return false;
-        return static_cast<msg::CodedType>(payload.front()) == msg::CodedType::exception;
-    }
-
-    [[noreturn]] static void rethrowEncodedException(const msg::FunctionReturn<Policy>& result, std::span<const std::byte> payload) {
-        std::string message;
-        result.decodeParameter(message, payload);
-        if (!payload.empty()) throw std::runtime_error("Malformed exception return payload");
-        throw std::runtime_error(message);
-    }
-
-    template<typename Result>
-    static void decodeInto(std::promise<Result>& promise, const msg::FunctionReturn<Policy>& result, std::span<const std::byte>& payload) {
-        if constexpr (std::is_void_v<Result>) {
-            if (result.getParametersCount() != 0 || !payload.empty()) throw std::runtime_error("Malformed void return message");
-            promise.set_value();
-        }
-        else {
-            if (result.getParametersCount() != 1) throw std::runtime_error("Malformed function return message");
-            Result value{};
-            result.decodeParameter(value, payload);
-            if (!payload.empty()) throw std::runtime_error("Function return contains trailing data");
-            promise.set_value(std::move(value));
-        }
-    }
 
 public:
     void sendError(msg::CallId callId, std::string_view message) {
@@ -345,43 +314,15 @@ private:
         else log::removeTransport(*attached);
     }
 
-    msg::CallId nextAvailableCallId() {
-        for (std::size_t attempts = 0; attempts < std::numeric_limits<msg::CallId>::max(); ++attempts) {
-            const auto candidate = nextCallId++;
-            if (nextCallId == 0) nextCallId = 1;
-            if (!pendingCalls.contains(candidate)) return candidate;
-        }
-        throw std::runtime_error("Too many outstanding WebFront calls");
-    }
-
     void completePending(const msg::FunctionReturn<Policy>& result) {
         const DecimalId callText(result.getCallId());
         const log::ContextScope context({.component = "jsFunction", .webLinkId = idText.view(), .direction = log::CallDirection::CppToJs, .callId = callText.view()});
-        PendingCall pending;
-        {
-            std::lock_guard lock(pendingMutex);
-            auto found = pendingCalls.find(result.getCallId());
-            if (found == pendingCalls.end()) {
-                log::error("Received a return for unknown call {}", result.getCallId());
-                return;
-            }
-            pending = std::move(found->second);
-            pendingCalls.erase(found);
-        }
-        pending.complete(result);
+        if (!pending->complete(result))
+            log::error("Received a return for unknown call {}", result.getCallId());
     }
 
     void rejectPending(std::exception_ptr error) {
-        std::map<msg::CallId, PendingCall> pending;
-        {
-            std::lock_guard lock(pendingMutex);
-            closed = true;
-            pending.swap(pendingCalls);
-        }
-        for (auto& [callId, call] : pending) {
-            static_cast<void>(callId);
-            call.reject(error);
-        }
+        pending->close(std::move(error));
     }
 };
 

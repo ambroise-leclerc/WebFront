@@ -311,6 +311,7 @@ Built-in frontends open the configured server address. Page arguments are URI re
 
 - The two directions differ. JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++; the call always returns a Promise, even for a `void` C++ callback, so await it or handle its rejection (an ignored rejected Promise raises an unhandled rejection).
 - C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript. Only the untyped form is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.
+- `co_await ui.jsFunctionSender<R>(name)(...)` starts a typed call when awaited and supports receiver stop-token cancellation. Cancellation stops the C++ wait; JavaScript already dispatched continues. The future API remains available. See [structured execution and cancellation](docs/ASYNC_EXECUTION.md).
 - Bridge parameters include scalars, strings, tuples and numeric typed arrays. C++ `std::vector`, `std::array` and `std::span` map to the matching JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups.
 - Missing functions, callback exceptions, malformed returns and disconnected browsers complete a C++ future exceptionally (`get()` throws) and reject a JavaScript Promise.
 - A callback whose first parameter is the application's `UI` type receives the browser that called it, for example to call it back later; JavaScript passes only the other parameters:
@@ -320,6 +321,27 @@ Built-in frontends open the configured server address. Page arguments are URI re
   });
   ```
 - `onUIStarted(handler)` sets the application's handler for each connected browser. Code that must not replace it, such as a reusable component, uses `auto subscription = app.subscribeUIStarted(handler);`; the handler stays registered while `subscription` lives.
+
+WebFront owns spawned coroutines, runs them on its server thread and cancels and drains them at shutdown. No execution context or scope is needed:
+
+```cpp
+#include <WebFront.hpp>
+
+webfront::Task showSquareRoot(webfront::UI ui) {
+    auto result = co_await ui.jsFunctionSender<double>("Math.sqrt")(81);
+    co_await ui.jsFunctionSender("console.log")("sqrt(81) =", result);
+}
+
+int main() {
+    webfront::WebFront app;
+    app.onUIStarted([&app](webfront::UI ui) {
+        app.spawn(showSquareRoot(ui));
+    });
+    app.show();
+}
+```
+
+This is the compiled example [AwaitBrowser.cpp](src/AwaitBrowser.cpp); run `./src/WebFrontAwaitBrowser` from the build directory and open the browser console. `ui.spawn(task)` is also available. Both spawn methods accept calls from any thread while the application lives; coroutine bodies run on the server thread. A call rejected during shutdown returns an already stopped handle. Keep the returned handle to cancel one task with `handle.requestStop()`; discarding the handle keeps the task running. Catch browser errors inside the coroutine when recovery is needed; unhandled errors are logged. Do not block the server thread with lengthy work. See [execution and lifetime rules](docs/ASYNC_EXECUTION.md).
 
 ## Advanced: frontend aliases
 

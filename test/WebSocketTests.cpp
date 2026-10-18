@@ -1,16 +1,16 @@
-#include <http/WebSocket.hpp>
 #include "InjectableNetworking.hpp"
-#include <networking/NetworkingMock.hpp>
-
+#include "InlineTaskScope.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <http/WebSocket.hpp>
+#include <networking/NetworkingMock.hpp>
 
 #include <array>
 #include <functional>
 #include <optional>
+#include <string>
 #include <system_error>
 #include <vector>
-#include <string>
 
 using namespace webfront;
 using namespace std;
@@ -21,7 +21,8 @@ using webfront::testing::InjectableSocket;
 SCENARIO("A stopped WebSocket does not read again") {
     InjectableSocket::reset();
     int closeHandlerCalls = 0;
-    auto ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
     ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
     ws->start();
     REQUIRE(InjectableSocket::readCallCount() == 1);
@@ -43,7 +44,8 @@ SCENARIO("A stopped WebSocket does not read again") {
 SCENARIO("A failed write closes the WebSocket") {
     InjectableSocket::reset();
     int closeHandlerCalls = 0;
-    auto ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
     ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
     ws->start();
 
@@ -69,7 +71,8 @@ SCENARIO("A WebSocket reassembles the messages a browser sends in several frames
     vector<vector<byte>> binaryMessages;
     vector<string>       textMessages;
     int                  closeHandlerCalls = 0;
-    auto                 ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
     ws->onMessage([&](span<const byte> data) { binaryMessages.emplace_back(data.begin(), data.end()); });
     ws->onMessage([&](string_view text) { textMessages.emplace_back(text); });
     ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
@@ -129,7 +132,8 @@ SCENARIO("A WebSocket limits the size of the messages it reassembles") {
     vector<vector<byte>> messages;
     optional<uint16_t>   closeCode;
     using Limited = http::CustomBuffersPolicy<8192, 8192, 32768, 4>;
-    auto ws       = websocket::WebSocket<InjectableNetworking, Limited>::create(InjectableSocket{});
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking, Limited>::create(InjectableSocket{}, scope);
     ws->onMessage([&](span<const byte> data) { messages.emplace_back(data.begin(), data.end()); });
     ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
     ws->start();
@@ -195,7 +199,8 @@ SCENARIO("A WebSocket limits the size of the messages it reassembles") {
 SCENARIO("A WebSocket rejects a frame announcing gigabytes before buffering it") {
     InjectableSocket::reset();
     optional<uint16_t> closeCode;
-    auto               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
     ws->onMessage([](span<const byte>) {});
     ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
     ws->start();
@@ -502,7 +507,8 @@ SCENARIO("WebSocket decoder waits for an entire split payload") {
 SCENARIO("WebSocket stop() is idempotent") {
     InjectableSocket::reset();
     int  closeHandlerCalls = 0;
-    auto ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{});
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
     ws->onClose([&closeHandlerCalls](websocket::CloseEvent) { ++closeHandlerCalls; });
 
     GIVEN("a started WebSocket that is stopped explicitly while a read is pending") {

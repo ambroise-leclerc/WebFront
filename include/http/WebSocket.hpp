@@ -312,8 +312,8 @@ public:
     /// WebSocket instances must be heap-allocated and owned via shared_ptr: the tasks reading and writing
     /// the socket keep the object alive, even if the owner (e.g. WebLink) is destroyed while they run.
     /// Call start() once message handlers are attached.
-    [[nodiscard]] static std::shared_ptr<WebSocket> create(typename Net::Socket netSocket) {
-        return std::shared_ptr<WebSocket>(new WebSocket(std::move(netSocket)));
+    [[nodiscard]] static std::shared_ptr<WebSocket> create(typename Net::Socket netSocket, networking::TaskScope& scope) {
+        return std::shared_ptr<WebSocket>(new WebSocket(std::move(netSocket), scope));
     }
     WebSocket(const WebSocket&) = delete;
     WebSocket(WebSocket&&) = delete;
@@ -329,7 +329,7 @@ public:
     /// Thread-safe. Cancels the pending read and write; the socket closes once their tasks have ended.
     void stop() {
         if (claimClose())
-            stopSource.request_stop();
+            stopSource->request_stop();
     }
 
     void onMessage(std::function<void(std::string_view)>&& handler) { textHandler = std::move(handler); }
@@ -362,7 +362,18 @@ private:
     std::function<void(std::error_code)> writeErrorHandler;
     mutable std::mutex writeMutex;
     std::deque<std::shared_ptr<Frame<Net>>> writeQueue;  // the first frame is the one being written
-    networking::ex::inplace_stop_source stopSource;
+    networking::TaskScope&                               taskScope;
+    std::shared_ptr<networking::ex::inplace_stop_source> stopSource{std::make_shared<networking::ex::inplace_stop_source>()};
+    struct StopConnection {
+        std::shared_ptr<networking::ex::inplace_stop_source> source;
+        void                                                 operator()() noexcept {
+            // Inline cancellation may destroy the last task and its WebSocket,
+            // including this callback. Keep the stop source alive through request_stop.
+            auto keepAlive = source;
+            keepAlive->request_stop();
+        }
+    };
+    networking::ex::stop_callback_for_t<networking::ex::inplace_stop_token, StopConnection> parentStop;
     std::atomic_bool started;
     // A message sent in several frames (RFC 6455, 5.4), as browsers do with large messages: its
     // type and the payloads received so far, at most http::maxMessageSize<Policy>() bytes
@@ -371,13 +382,16 @@ private:
     std::vector<std::byte> fragments;
 
 private:
-    explicit WebSocket(typename Net::Socket netSocket) : socket(std::move(netSocket)), started(false) {
+    explicit WebSocket(typename Net::Socket netSocket, networking::TaskScope& scope)
+        : socket(std::move(netSocket)), taskScope(scope), parentStop(scope.stopToken(), StopConnection{stopSource}), started(false) {
         log::debug("WebSocket constructor");
     }
 
     bool claimClose() { return started.exchange(false); }
 
-    void spawn(networking::Task task) { networking::Spawn(Net::Scheduler(socket), stopSource.get_token(), std::move(task)); }
+    void spawn(networking::Task task) {
+        networking::Spawn(taskScope, Net::Scheduler(socket), stopSource->get_token(), std::move(task));
+    }
 
     // The tasks take a shared_ptr to this object: it keeps the WebSocket alive while they run.
     networking::Task readFrames(std::shared_ptr<WebSocket>) {
@@ -496,7 +510,7 @@ private:
         // Report the closure before stopping: it detaches the producers, whose writes would fail once stopped.
         if (closeHandler)
             closeHandler(CloseEvent{static_cast<uint16_t>(ec.value()), ec.message()});
-        stopSource.request_stop();
+        stopSource->request_stop();
     }
 
     void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }

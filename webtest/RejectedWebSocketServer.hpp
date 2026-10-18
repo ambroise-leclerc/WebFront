@@ -30,8 +30,9 @@ public:
 
     // Stopping cancels the pending operations; the worker returns once their tasks have ended.
     ~RejectedWebSocketServer() {
-        stopSource.request_stop();
+        tasks.requestStop();
         worker.join();
+        tasks.drain(context);
     }
 
     const std::string& url() const {
@@ -46,13 +47,13 @@ private:
 
     Net::IoContext        context;
     Net::Acceptor         acceptor;
-    webfront::networking::ex::inplace_stop_source stopSource;
+    webfront::networking::TaskScope tasks;
     std::atomic<unsigned> rejected{0};
     std::string           endpointUrl;
     std::jthread          worker;
 
     void spawn(Task task) {
-        webfront::networking::Spawn(Net::Scheduler(acceptor), stopSource.get_token(), std::move(task));
+        webfront::networking::Spawn(tasks, Net::Scheduler(acceptor), std::move(task));
     }
 
     Task acceptConnections() {

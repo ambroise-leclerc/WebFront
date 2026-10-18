@@ -48,6 +48,8 @@ struct TestState {
     atomic<bool> jsArraysObserved{false};
     atomic<bool> jsTupleObserved{false};
     atomic<bool> cppResultObserved{false};
+    atomic<bool> senderResultsObserved{false};
+    atomic<bool> senderCancellationObserved{false};
     atomic<bool> jasmineReported{false};
     atomic<bool> subscriberNotified{false};
     atomic<bool> passed{false};
@@ -151,6 +153,10 @@ public:
         registerTerminalCommands();
     }
 
+    ~BrowserIntegrationTest() {
+        webFront.shutdown();
+    }
+
 #ifdef _MSC_VER
     // With an unavailable embedded frontend, openAndRun() unconditionally throws. MSVC's
     // inliner detects that and flags the return below as unreachable, uniquely among our compilers,
@@ -173,6 +179,7 @@ private:
     // networking thread only after that bootstrap has completed in the browser process.
     TestWF               webFront;
     RejectedWebSocketServer rejectedWebSocket;
+    optional<TaskHandle>             cancelledTask;
     TestState            state;
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
@@ -190,7 +197,51 @@ private:
     const array<float, 2>    cppFloat{-1.5F, 42.25F};
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
+    Task checkSenderResults(TestWF::UI ui) {
+        const auto value = co_await ui.jsFunctionSender<string>("webfrontTests.senderValue")("from-sender");
+        co_await ui.jsFunctionSender("webfrontTests.senderVoid")();
+        bool exceptionObserved = false;
+        try {
+            co_await ui.jsFunctionSender<string>("webfrontTests.senderThrows")();
+        } catch (const runtime_error& error) {
+            exceptionObserved = string_view(error.what()) == "sender browser failure";
+        }
+        state.senderResultsObserved = value == "sender:from-sender" && exceptionObserved;
+        ui.jsFunction("webfrontTests.senderChecksFinished")(state.senderResultsObserved.load());
+    }
+
+    struct CancellationNotice {
+        TestWF::UI    ui;
+        atomic<bool>& observed;
+        bool          cancelled{true};
+        ~CancellationNotice() {
+            if (!cancelled)
+                return;
+            observed = true;
+            ui.jsFunction("webfrontTests.senderWasCancelled")();
+        }
+    };
+
+    Task awaitCancelledSender(TestWF::UI ui) {
+        CancellationNotice notice{ui, state.senderCancellationObserved};
+        try {
+            co_await ui.jsFunctionSender<string>("webfrontTests.senderSlow")();
+            notice.cancelled = false;
+        } catch (...) {
+            notice.cancelled = false;
+            throw;
+        }
+        throw runtime_error("Cancelled browser sender resumed with a result");
+    }
+
     void registerCallbacks() {
+        webFront.cppFunction("cancelBrowserSender", [this] {
+            if (cancelledTask)
+                cancelledTask->requestStop();
+        });
+        webFront.cppFunction("senderCancellationObserved", [this] {
+            return state.senderCancellationObserved.load();
+        });
         webFront.cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
         webFront.cppFunction("signal.generate", &demo::generateSignal);
         webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
@@ -289,6 +340,8 @@ private:
 
     void browserReady() {
         state.browserReady = true;
+        webFront.spawn(checkSenderResults(requireUI()));
+        cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
         requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
           cppU8, cppI8, cppU16, cppI16, cppU32, cppI32, cppU64, cppI64, cppFloat, cppDouble);
@@ -314,13 +367,17 @@ private:
     }
 
     void reportJasmine(const string& overallStatus, const string& failures) {
-        state.jasmineReported = true;
+        state.jasmineReported   = true;
         state.cppResultObserved = cppResultMatches();
-        state.passed = overallStatus == "passed" && state.browserReady && state.subscriberNotified && browserCallsObserved() && state.cppResultObserved
-                       && rejectedWebSocket.rejectedRequests() >= 2;
+        state.passed            = overallStatus == "passed" && state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
+                                  && rejectedWebSocket.rejectedRequests() >= 2;
         if (!failures.empty())
             log::error("Jasmine failures:\n{}", failures);
         requireUI().jsFunction("webfrontTests.close")(state.passed.load());
+    }
+
+    bool cppCallsObserved() const {
+        return state.cppResultObserved && state.senderResultsObserved && state.senderCancellationObserved;
     }
 
     bool browserCallsObserved() const {

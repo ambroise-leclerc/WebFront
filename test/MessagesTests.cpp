@@ -1,3 +1,4 @@
+#include "InlineTaskScope.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <http/WebSocket.hpp>
 #include <networking/NetworkingMock.hpp>
@@ -6,9 +7,9 @@
 
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <tuple>
-#include <stdexcept>
 #include <vector>
 
 using namespace std;
@@ -93,7 +94,8 @@ SCENARIO("FunctionReturn") {
         msg::FunctionReturn<>     message;
         websocket::Frame<Net>     frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
         networking::SocketMock    socket;
-        auto ws = websocket::WebSocket<Net>::create(socket);
+        webfront::testing::InlineTaskScope scope;
+        auto                               ws = websocket::WebSocket<Net>::create(socket, scope);
 
         THEN("Header command byte is functionReturn") {
             REQUIRE(static_cast<msg::Command>(message.header()[0]) == msg::Command::functionReturn);
@@ -235,7 +237,8 @@ SCENARIO("Numeric arrays are encoded and decoded as owning values") {
         msg::FunctionReturn<>     message;
         websocket::Frame<Net>     frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
         networking::SocketMock    socket;
-        auto ws = websocket::WebSocket<Net>::create(socket);
+        webfront::testing::InlineTaskScope scope;
+        auto                               ws = websocket::WebSocket<Net>::create(socket, scope);
 
         message.encodeParameter(input, frame);
         ws->write(std::move(frame));

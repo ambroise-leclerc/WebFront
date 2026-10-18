@@ -24,6 +24,10 @@ add_custom_target(WebFrontGreeterAssets ALL
 )
 add_dependencies(WebFrontGreeter WebFrontGreeterAssets)
 
+# Awaitable browser calls, launched and drained by the application.
+add_executable(WebFrontAwaitBrowser AwaitBrowser.cpp)
+target_link_libraries(WebFrontAwaitBrowser PRIVATE WebFront WebFront_warnings WebFront_options)
+
 # Terminal component demo: a command-line interface to C++ in the browser (embedded xterm.js)
 add_executable(WebFrontTerminal Terminal.cpp)
 target_link_libraries(WebFrontTerminal PRIVATE WebFront WebFront_warnings WebFront_options)
@@ -41,6 +45,6 @@ webfront_select_frontend(WEBFRONT_DEMO_FRONTEND DefaultBrowser "Module demo fron
 target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_DEMO_FRONTEND=${WEBFRONT_DEMO_FRONTEND_TYPE})
 
 # Deploy the enabled engines for all examples, including those selecting a frontend in source.
-foreach(target HelloWorld WebFrontGreeter WebFrontApp WebFrontTerminal WebFrontTools)
+foreach(target HelloWorld WebFrontGreeter WebFrontApp WebFrontTerminal WebFrontTools WebFrontAwaitBrowser)
     webfront_setup_frontends_for_target(${target})
 endforeach()

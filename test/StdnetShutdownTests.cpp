@@ -144,3 +144,56 @@ SCENARIO("Destroying WebFront closes its established WebSockets") {
         }
     }
 }
+
+namespace {
+struct TaskThreadState {
+    std::thread::id   startedOn;
+    std::thread::id   destroyedOn;
+    std::atomic<bool> started{false};
+    std::atomic<bool> destroyed{false};
+};
+struct TaskThreadGuard {
+    TaskThreadState& state;
+    ~TaskThreadGuard() {
+        state.destroyedOn = std::this_thread::get_id();
+        state.destroyed.store(true, std::memory_order_release);
+    }
+};
+Task applicationTaskOnServer(TaskThreadState& state) {
+    TaskThreadGuard guard{state};
+    state.startedOn = std::this_thread::get_id();
+    co_await testing::ManualSender([&state](auto) {
+        state.started.store(true, std::memory_order_release);
+    });
+}
+}  // namespace
+
+SCENARIO("Application task cancellation returns to the server context") {
+    GIVEN("an application task running on a real stdnet context") {
+        TaskThreadState                state;
+        BasicWF<Stdnet, fs::DefaultFS> app(WebFrontConfig{.port = "0"});
+        auto                           handle = app.spawn(applicationTaskOnServer(state));
+        std::thread                    serverThread([&] {
+            app.run();
+        });
+        const auto                     serverId = serverThread.get_id();
+        waitUntil([&] {
+            return state.started.load(std::memory_order_acquire);
+        });
+        CHECK(state.started.load(std::memory_order_acquire));
+        WHEN("another thread requests cancellation") {
+            handle.requestStop();
+            waitUntil([&] {
+                return state.destroyed.load(std::memory_order_acquire);
+            });
+            app.stop();
+            serverThread.join();
+            app.shutdown();
+            THEN("the coroutine starts and unwinds on the server context thread") {
+                CHECK(state.destroyed.load(std::memory_order_acquire));
+                CHECK(state.startedOn == serverId);
+                CHECK(state.destroyedOn == serverId);
+            }
+        }
+    }
+}

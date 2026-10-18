@@ -35,7 +35,9 @@ struct StoppedSender {
 class IoContextMock {
 public:
     void run() {}
-    void run_one() {}
+    std::size_t run_one() {
+        return 0;
+    }
     void stop() {}
     void restart() {}
 };

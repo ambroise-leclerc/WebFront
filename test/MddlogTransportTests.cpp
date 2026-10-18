@@ -197,7 +197,7 @@ public:
     LinkedBrowser() {
         InjectableSocket::reset();
         log::setLogLevel(log::Info);
-        link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{21}, [](WebLinkEvent) {});
+        link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{21}, [](WebLinkEvent) { }, scope);
         handshake();
         log::info("delivered to the browser");
         REQUIRE(log::flushTransports());
@@ -214,6 +214,7 @@ public:
         log::setLogLevel(log::Disabled);
     }
 
+    InlineTaskScope                           scope;
     unique_ptr<WebLink<InjectableNetworking>> link;
     log::TransportHealth                      before;
 };

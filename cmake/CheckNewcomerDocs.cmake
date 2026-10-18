@@ -26,6 +26,9 @@ _read(readme README.md)
 _read(agents AGENTS.md)
 _read(hello src/HelloWorld.cpp)
 _read(greeter src/Greeter.cpp)
+_read(await_example src/AwaitBrowser.cpp)
+# Omit coverage-only comments from the runnable README snippet.
+string(REGEX REPLACE "// LCOV_EXCL_[^\n]*\n" "" await_example "${await_example}")
 _read(greeter_js src/greeter/greeter.mjs)
 _read(src_cmake src/CMakeLists.txt)
 _read(root_cmake CMakeLists.txt)
@@ -88,6 +91,11 @@ endforeach()
 _require("${readme}" "-DWEBFRONT_EMBED_WEBVIEW2=ON" "README WebView2 configure")
 _require("${readme}" "using App = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;" "README CEF alias")
 _require("${readme}" "cmake -DWEBFRONT_EMBED_CEF=ON .." "README CEF configure")
+
+# The runnable coroutine snippet must stay identical to the compiled example.
+_require("${readme}" "${await_example}" "README coroutine example")
+_require("${src_cmake}" "add_executable(WebFrontAwaitBrowser AwaitBrowser.cpp)" "coroutine example target")
+_require("${readme}" "./src/WebFrontAwaitBrowser" "README coroutine example launch")
 
 # Greeter snippets.
 foreach(line "App app{webfront::WebFrontConfig{.documentRoot = \"src/greeter\"}};" "app.cppFunction(\"greet\", [](std::string name) {" "app.show();")
