@@ -1,8 +1,9 @@
 function(enable_sanitizers target)
+  cmake_parse_arguments(SANITIZER_OPTIONS "NO_COVERAGE" "" "" ${ARGN})
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID MATCHES ".*Clang")
     option(ENABLE_COVERAGE "Enable coverage reporting for gcc/clang" FALSE)
 
-    if(ENABLE_COVERAGE)
+    if(ENABLE_COVERAGE AND NOT SANITIZER_OPTIONS_NO_COVERAGE)
       # The server tests run threads: non-atomic counters can race and give lcov negative counts.
       target_compile_options(${target} INTERFACE --coverage -fprofile-update=atomic -O0 -g)
       target_link_libraries(${target} INTERFACE --coverage)
@@ -59,7 +60,10 @@ function(enable_sanitizers target)
        "${LIST_OF_SANITIZERS}"
        STREQUAL
        "")
-      target_compile_options(${target} INTERFACE -fsanitize=${LIST_OF_SANITIZERS})
+      target_compile_options(${target} INTERFACE -fsanitize=${LIST_OF_SANITIZERS} -fno-omit-frame-pointer)
+      if("undefined" IN_LIST SANITIZERS)
+        target_compile_options(${target} INTERFACE -fno-sanitize-recover=undefined)
+      endif()
       target_link_options(${target} INTERFACE -fsanitize=${LIST_OF_SANITIZERS})
     endif()
   endif()

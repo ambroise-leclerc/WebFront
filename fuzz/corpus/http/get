@@ -1,0 +1,6 @@
+GET /hello.htm HTTP/1.1
+Host: localhost
+Accept-Encoding: gzip
+Accept-Encoding: deflate
+Connection: Keep-Alive
+

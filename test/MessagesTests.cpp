@@ -445,3 +445,53 @@ SCENARIO("BufferOverflow") {
         }
     }
 }
+
+SCENARIO("Empty wire strings are decoded without indexing past the input") {
+    for (auto bytes : {
+             std::vector<std::byte>{std::byte{4}, std::byte{0}},
+             std::vector<std::byte>{std::byte{5}, std::byte{0}, std::byte{0}}
+    }) {
+        std::span<const std::byte> input(bytes);
+        std::string                value = "previous";
+        msg::FunctionCall<>::decodeParameter(value, input);
+        REQUIRE(value.empty());
+        REQUIRE(input.empty());
+    }
+}
+
+SCENARIO("Wire numbers outside an integer result range are rejected") {
+    for (double number : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), 2147483648.0, -2147483649.0}) {
+        std::array<std::byte, 9> bytes{std::byte{3}};
+        std::memcpy(bytes.data() + 1, &number, sizeof(number));
+        std::span<const std::byte> input(bytes);
+        int                        value{};
+        REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(value, input), std::runtime_error);
+    }
+}
+
+SCENARIO("Wire integer conversion keeps truncation and handles 64-bit boundaries") {
+    auto decode = []<typename T>(double number, T& value) {
+        std::array<std::byte, 9> bytes{std::byte{3}};
+        std::memcpy(bytes.data() + 1, &number, sizeof(number));
+        std::span<const std::byte> input(bytes);
+        msg::FunctionCall<>::decodeParameter(value, input);
+        REQUIRE(input.empty());
+    };
+    int value{};
+    decode(42.75, value);
+    REQUIRE(value == 42);
+    decode(-42.75, value);
+    REQUIRE(value == -42);
+    decode(2147483647.75, value);
+    REQUIRE(value == std::numeric_limits<int>::max());
+
+    std::uint64_t unsignedValue{};
+    REQUIRE_THROWS_AS(decode(18446744073709551616.0, unsignedValue), std::runtime_error);
+    REQUIRE_THROWS_AS(decode(-1.0, unsignedValue), std::runtime_error);
+    decode(9223372036854775808.0, unsignedValue);
+    REQUIRE(unsignedValue == (std::uint64_t{1} << 63));
+    std::int64_t signedValue{};
+    REQUIRE_THROWS_AS(decode(9223372036854775808.0, signedValue), std::runtime_error);
+    decode(-9223372036854775808.0, signedValue);
+    REQUIRE(signedValue == std::numeric_limits<std::int64_t>::min());
+}

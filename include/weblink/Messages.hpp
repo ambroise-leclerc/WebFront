@@ -7,6 +7,7 @@
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -520,7 +521,7 @@ private:
             const auto size = static_cast<size_t>(data[1]);
             if (data.size() < 2u + size)
                 throw std::runtime_error("Truncated smallString payload");
-            param = std::string(reinterpret_cast<const char*>(&data[2]), size);
+            param = std::string(reinterpret_cast<const char*>(data.data() + 2), size);
             data  = data.subspan(2 + size);
         } else
             throw std::runtime_error("Wrong parameter type: std::string expected");
@@ -535,10 +536,24 @@ private:
             std::copy_n(&data[1], sizeof(size), reinterpret_cast<std::byte*>(&size));
             if (data.size() < 3u + size)
                 throw std::runtime_error("Truncated string payload");
-            param = std::string(reinterpret_cast<const char*>(&data[3]), size);
+            param = std::string(reinterpret_cast<const char*>(data.data() + 3), size);
             data  = data.subspan(3 + size);
         } else
             throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+    /** @brief Rejects wire numbers that cannot be converted to the requested integer type. */
+    template <typename T>
+    static void validateIntegerRange(double value) {
+        if (!std::isfinite(value))
+            throw std::runtime_error("Number is outside the integer result range");
+        // The upper power-of-two bound is exclusive: double cannot represent
+        // INT64_MAX/UINT64_MAX exactly. Compare after truncation, as the cast does.
+        const auto truncated = std::trunc(value);
+        const auto upper     = std::ldexp(1.0, std::numeric_limits<T>::digits);
+        const auto lower     = std::is_signed_v<T> ? -upper : 0.0;
+        if (truncated < lower || truncated >= upper)
+            throw std::runtime_error("Number is outside the integer result range");
     }
 
     template <typename T>
@@ -548,6 +563,8 @@ private:
             if (data.size() < 1u + sizeof(value))
                 throw std::runtime_error("Truncated 'number' payload");
             std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
+            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>)
+                validateIntegerRange<T>(value);
             param = static_cast<T>(value);
             data  = data.subspan(1 + sizeof(value));
         } else

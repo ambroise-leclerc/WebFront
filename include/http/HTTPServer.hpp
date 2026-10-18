@@ -18,6 +18,7 @@
 #include <fstream>
 #include <functional>
 #include <list>
+#include <limits>
 #include <locale>
 #include <memory>
 #include <optional>
@@ -95,7 +96,7 @@ struct Request : Headers {
         return Method::Undefined;
     }
 
-    [[nodiscard]] std::string_view getMethodName() const { return methodNames[static_cast<size_t>(method)]; }
+    [[nodiscard]] std::string_view getMethodName() const { return method == Method::Undefined ? "Undefined" : methodNames[static_cast<size_t>(method)]; }
         
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
@@ -113,7 +114,18 @@ struct Request : Headers {
 
     bool completed() const { return state == State::completed; }
 
-private: // clang-format off
+private:
+    std::string methodBuffer;
+
+    /** @brief Accumulates a validated HTTP version digit without signed overflow. */
+    static void appendVersionDigit(int& version, char digit) {
+        const auto value = digit - '0';
+        if (version > (std::numeric_limits<int>::max() - value) / 10)
+            throw BadRequestException();
+        version = version * 10 + value;
+    }
+
+    // clang-format off
     enum class State { methodStart, method, URI, versionH, versionT1, versionT2, versionP, versionSlash, versionMajorStart, versionMajor, versionMinorStart,
                  versionMinor, newline1, headerLineStart, headerLws, headerName, spaceBeforeHeaderValue, headerValue, newline2, newline3, completed };
     State state { State::methodStart };    
@@ -131,16 +143,15 @@ private: // clang-format off
             if (cond) throw BadRequestException();
         };
 
-        static std::string buffer;
         using enum State;
         switch (state) {
             case methodStart:
                 setState(!isChar(input) || isCtrl(input) || isSpecial(input), method);
-                buffer = input;
+                methodBuffer = input;
                 break;
-            case method: if (input == ' ') { state = URI; setMethod(buffer); }
+            case method: if (input == ' ') { state = URI; setMethod(methodBuffer); }
                               else if (!isChar(input) || isCtrl(input) || isSpecial(input)) { throw BadRequestException(); }
-                              else buffer.push_back(input);
+                              else methodBuffer.push_back(input);
                 break;
             case URI: if (input == ' ') { state = versionH; break; }
                            else if (isCtrl(input)) throw BadRequestException();
@@ -150,14 +161,14 @@ private: // clang-format off
             case versionT2: setState(input != 'T', versionP); break;
             case versionP: setState(input != 'P', versionSlash); break;
             case versionSlash: setState(input != '/', versionMajorStart); httpVersionMajor = 0; httpVersionMinor = 0; break;
-            case versionMajorStart: setState(!isDigit(input), versionMajor); httpVersionMajor = httpVersionMajor * 10 + input - '0'; break;
+            case versionMajorStart: setState(!isDigit(input), versionMajor); appendVersionDigit(httpVersionMajor, input); break;
             case versionMajor: if (input == '.') state = versionMinorStart;
-                                    else if (isDigit(input)) httpVersionMajor = httpVersionMajor * 10 + input - '0';
+                                    else if (isDigit(input)) appendVersionDigit(httpVersionMajor, input);
                                     else throw BadRequestException();
                 break;
-            case versionMinorStart: setState(!isDigit(input), versionMinor); httpVersionMinor = httpVersionMinor * 10 + input - '0'; break;
+            case versionMinorStart: setState(!isDigit(input), versionMinor); appendVersionDigit(httpVersionMinor, input); break;
             case versionMinor: if (input == '\r') state = newline1;
-                                    else if (isDigit(input)) httpVersionMinor = httpVersionMinor * 10 + input - '0';
+                                    else if (isDigit(input)) appendVersionDigit(httpVersionMinor, input);
                                     else throw BadRequestException();
                 break;
             case newline1: setState(input != '\n', headerLineStart); break;

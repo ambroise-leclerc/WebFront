@@ -423,3 +423,45 @@ SCENARIO("RequestHandler ignores the query string of a request") {
         }
     }
 }
+
+SCENARIO("HTTP version digits cannot overflow their integer fields") {
+    for (const std::string version : {"99999999999999999999.1", "1.99999999999999999999"}) {
+        const auto input = "GET / HTTP/" + version + "\r\n\r\n";
+        Request    request;
+        REQUIRE_THROWS_AS(request.parseSomeData(input.begin(), input.end()), BadRequestException);
+    }
+}
+
+SCENARIO("Unknown HTTP methods have a safe display name") {
+    const std::string input = "CUSTOM / HTTP/1.1\r\n\r\n";
+    Request           request;
+    REQUIRE(request.parseSomeData(input.begin(), input.end()));
+    REQUIRE(request.getMethodName() == "Undefined");
+}
+
+SCENARIO("HTTP requests keep method parsing state across interleaved receives") {
+    GIVEN("two connections whose method names arrive in separate reads") {
+        Request           first;
+        Request           second;
+        const std::string firstStart  = "G";
+        const std::string secondStart = "PO";
+        REQUIRE_FALSE(first.parseSomeData(firstStart.begin(), firstStart.end()));
+        REQUIRE_FALSE(second.parseSomeData(secondStart.begin(), secondStart.end()));
+
+        WHEN("the first request completes before the second") {
+            const std::string firstRest  = "ET /first HTTP/1.1\r\n\r\n";
+            const std::string secondRest = "ST /second HTTP/1.1\r\n\r\n";
+            REQUIRE(first.parseSomeData(firstRest.begin(), firstRest.end()));
+            REQUIRE(second.parseSomeData(secondRest.begin(), secondRest.end()));
+
+            THEN("the first request retains its method and URI") {
+                CHECK(first.method == Request::Method::Get);
+                CHECK(first.uri == "/first");
+            }
+            AND_THEN("the second request retains its method and URI") {
+                CHECK(second.method == Request::Method::Post);
+                CHECK(second.uri == "/second");
+            }
+        }
+    }
+}

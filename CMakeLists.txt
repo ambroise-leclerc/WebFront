@@ -103,6 +103,14 @@ endif()
 include(WebFrontAssets)
 webfront_add_embedded_assets()
 
+if(ENABLE_TESTING OR ENABLE_FUZZING)
+  include(TestHardening)
+endif()
+
+if(ENABLE_FUZZING)
+  add_subdirectory(fuzz)
+endif()
+
 if(ENABLE_TESTING)
   enable_testing()
   add_subdirectory(test)

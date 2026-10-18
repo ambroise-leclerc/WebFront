@@ -203,8 +203,43 @@ When WebFront is not the top-level project it builds neither its examples nor it
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
 | `ENABLE_COVERAGE` | `OFF` | Instrument the C++ tests (GCC/Clang) |
+| `ENABLE_SANITIZER_ADDRESS` / `ENABLE_SANITIZER_UNDEFINED_BEHAVIOR` | `OFF` | Enable ASan / UBSan on internal targets (GCC/Clang) |
+| `ENABLE_SANITIZER_THREAD` | `OFF` | Enable TSan separately from ASan (GCC/Clang) |
+| `ENABLE_FUZZING` | `OFF` | Build three libFuzzer decoders with ASan+UBSan (Clang with compiler-rt/libFuzzer; Linux CI) |
 
 Frontend selectors keep their cached value on reconfiguration, even when another engine is enabled later. On Windows, use `-DWEBFRONT_WEBTEST_FRONTEND=WebView2` to switch an existing CEF runner, or `-UWEBFRONT_WEBTEST_FRONTEND` to recompute the default. CEF browser tests are validated only on Linux/Xvfb; selecting CEF on Windows or macOS builds the runner but emits a warning and registers no browser test.
+
+Test targets automatically enable the vendor's hardened standard library: `_GLIBCXX_ASSERTIONS`
+with libstdc++, `_LIBCPP_HARDENING_MODE_EXTENSIVE` with libc++, or `_MSVC_STL_HARDENING=1`
+with MSVC STL. Supporting GCC/Clang compilers also use `-ftrivial-auto-var-init=pattern`;
+older compilers emit a warning and retain the other hardening settings. These settings,
+sanitizers and fuzz instrumentation are private to internal targets; linking `WebFront::WebFront`
+does not impose them on a consumer.
+
+For ASan+UBSan, add `-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON`
+to the configure command in [Contributing: build and test](#contributing-build-and-test). For a separate TSan build use
+`-DENABLE_SANITIZER_THREAD=ON`. CI runs both configurations on the full CEF-off suite (libstdc++ for ASan+UBSan,
+libc++ for TSan, which also exercises retry after a throwing `std::call_once` callback);
+`UBSAN_OPTIONS=halt_on_error=1` makes a UBSan diagnostic fail the run.
+
+Fuzzing requires a Clang distribution with the compiler-rt libFuzzer, ASan and UBSan runtimes.
+Linux is the CI-validated configuration. Apple Clang does not ship libFuzzer: macOS requires
+an external installation such as LLVM with compiler-rt, and compatible sanitizer runtimes.
+CMake checks that these runtimes link before adding the fuzz targets.
+
+```bash
+cmake -S . -B build-fuzz -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_FUZZING=ON
+cmake --build build-fuzz --parallel
+# Repeat with http and websocket. Corpora are copied into the build tree.
+./build-fuzz/fuzz/fuzz_messages build-fuzz/fuzz/corpus/messages \
+  -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024
+```
+
+Fuzzers cover bridge headers and every owning parameter family, incremental HTTP parsing,
+and WebSocket headers/payloads with complete and chunked input. The checked-in seed corpus
+comes from unit-test examples; CI runs each decoder for 30 seconds and uploads crash inputs
+on failure. This is bounded smoke coverage, not an exhaustive security audit.
 
 ## Contributing: build and test
 
