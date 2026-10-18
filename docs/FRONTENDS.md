@@ -29,7 +29,7 @@ Embedded frontends currently target development with trusted application content
 
 1. Implement the type in `include/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
 2. Add its support module and one `webfront_register_frontend(...)` entry in `cmake/Frontends.cmake`, using the fields below.
-3. Extend `FrontendSelection` coverage and run the shared Jasmine suite. Add lifecycle tests for a page that never connects, early closure, rejected `webFront.ready`, failed initial navigation, and a page path containing a space and `#`.
+3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the five shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
 
 | Field | Meaning |
 | --- | --- |
@@ -42,9 +42,30 @@ Embedded frontends currently target development with trusted application content
 | `TEST_PLATFORMS` | Platforms with a validated browser runner, independently of engine availability. Currently Linux for CEF, Windows for WebView2. |
 | `TEST_NAME`, `TEST_TIMEOUT` | Shared Jasmine CTest name and positive timeout in seconds. |
 | `TEST_SETUP` | Optional function adding engine-specific tests. It runs even if missing Xvfb prevents Jasmine registration; the module decides which additional tests need a display. |
-| `XVFB_LINUX` | Wrap the shared test with Xvfb on Linux. Other registered test platforms run without that wrapper. |
+| `XVFB_LINUX` | Wrap the shared tests with Xvfb on Linux. Other registered test platforms run without that wrapper. |
 | `ALWAYS_AVAILABLE` | Declare a frontend without an availability option. Defaults to `POLICY lenient`, rejects `POLICY strict`, and cannot supply engine or test fields. |
 
 The selectors, cache choices, diagnostics, dependency loading and CTest registration use this entry. The optional `SETUP` and `TEST_SETUP` functions are checked immediately after the enabled support module is loaded.
 
 Registry order determines the initial cache default: the first enabled embedded engine supported on the target platform wins. Reconfiguration preserves that cached choice. Use `-DWEBFRONT_WEBTEST_FRONTEND=WebView2` to switch explicitly, or `-UWEBFRONT_WEBTEST_FRONTEND` to recompute the default. Selecting CEF on Windows or macOS emits a warning because no browser test is validated there. With no embedded engine enabled, the runner retains CEF for its diagnostic build and registers no browser test.
+
+## Lifecycle tests
+
+`webtest/FrontendLifecycle.cpp` runs the same five cases under the selected embedded engine:
+
+- `no-bridge`: close a page that never connects to the bridge and return from `show()`.
+- `early-close`: close immediately from the page's first script, before any bridge connection.
+- `rejected-ready`: reject `webFront.ready` using an unreachable WebSocket endpoint, handle the rejection and close.
+- `navigation-failure`: open an unreachable initial URL and require a navigation exception.
+- `path-encoding`: load `encoded path #.html` and verify that its query and fragment survived.
+
+Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
+`web-integration` label and the same port lock as Jasmine. Linux CEF cases use Xvfb. Build `webtest`
+to build both shared runners, or build all targets to include engine-specific runners as well. Run
+`ctest --test-dir <build> -L web-integration --output-on-failure` for the complete browser suite.
+A missing Xvfb skips both shared suites. A new frontend inherits this coverage through its registry
+entry; no engine-specific lifecycle runner is required.
+
+WebView2 retains a separate runner for COM, missing runtimes, startup timers, later navigation
+failures, slow page loading, repeated `show()` calls and native closure during window creation.
+These cases use WebView2's implementation details and keep their own CTest timeouts.
