@@ -6,10 +6,12 @@
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
 #include "JsFunction.hpp"
+#include "JsFunctionSender.hpp"
 #include "networking/TCPNetworkingStdnet.hpp"
 #include "system/DefaultFS.hpp"
 #include "system/IndexFS.hpp"
 #include "system/WindowsCompat.hpp"
+#include "Task.hpp"
 #include "UISubscribers.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
@@ -70,6 +72,18 @@ public:
     template <typename R>
     [[nodiscard]] JsFunction<WebFront, R> jsFunction(std::string_view functionName) const {
         return JsFunction<WebFront, R>{functionName, webFront, webLinkId};
+    }
+
+    /** @brief Starts a coroutine owned by the application; the returned handle can cancel it. */
+    TaskHandle spawn(Task task) const {
+        return webFront.spawn(std::move(task));
+    }
+
+    /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
+    /// stops waiting locally; a JavaScript function already dispatched keeps running.
+    template <typename R = void>
+    [[nodiscard]] JsFunctionSender<WebFront, R> jsFunctionSender(std::string_view functionName) const {
+        return JsFunctionSender<WebFront, R>{functionName, webFront, webLinkId};
     }
 };
 
@@ -277,9 +291,14 @@ public:
           httpAddress(config.address), httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
             for (bool inserted = false; !inserted; ++idsCounter)
-                std::tie(std::ignore, inserted) = webLinks.try_emplace(idsCounter, std::move(socket), idsCounter, [this](WebLinkEvent event) {
-                    onEvent(event);
-                });
+                std::tie(std::ignore, inserted) = webLinks.try_emplace(
+                    idsCounter,
+                    std::move(socket),
+                    idsCounter,
+                    [this](WebLinkEvent event) {
+                        onEvent(event);
+                    },
+                    httpServer.taskScope());
         });
     }
 
@@ -288,14 +307,30 @@ public:
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
         : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
 
-    ~BasicWF() {
-        // Ensure clean shutdown if user forgot to stop explicitly
-        stop();
-        if (serverThread.joinable())
-            serverThread.join();
-        // Complete every pending operation while the objects their handlers use are still alive.
+    ~BasicWF() noexcept {
+        stopAndJoinServer();
+        // Coroutine cleanup may use its UI, so links stay alive through the join.
+        httpServer.drainUntilJoined();
         webLinks.clear();
+    }
+
+    /** @brief Stops and joins owned work before returning. Call outside server callbacks,
+     * after any external callers of run()/runOne() have returned. Safe to repeat.
+     */
+    void shutdown() {
+        stopAndJoinServer();
+        // Application coroutine cleanup may still use its UI: retain links until join.
         httpServer.drain();
+        webLinks.clear();
+    }
+
+    /** @brief Thread-safe while the application lives. Starts on the server thread.
+     * Rejected calls return a stopped handle without starting the body.
+     * Accepted tasks can start before shutdown cancels and drains them.
+     * Ignoring the returned handle keeps the task running until completion or shutdown.
+     */
+    TaskHandle spawn(Task task) {
+        return httpServer.startTask(std::move(task));
     }
 
     void run() {
@@ -430,6 +465,12 @@ public:
     }
 
 private:
+    void stopAndJoinServer() {
+        stop();
+        if (serverThread.joinable())
+            serverThread.join();
+    }
+
     template <typename R, typename Caller, typename... Args>
     void registerWithCaller(std::string functionName, auto&& function) {
         auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));

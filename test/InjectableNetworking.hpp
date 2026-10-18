@@ -1,5 +1,6 @@
 /// @brief Socket mock driving a WebLink from the test thread, with injectable write failures.
 #pragma once
+#include "InlineTaskScope.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <http/WebSocket.hpp>
 #include <networking/NetworkingMock.hpp>

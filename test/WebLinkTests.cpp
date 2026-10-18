@@ -63,7 +63,8 @@ vector<byte> returnMessage(msg::CallId callId, Configure configure) {
 
 SCENARIO("WebLink settles correlated asynchronous results") {
     InjectableSocket::reset();
-    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) {}};
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
 
     GIVEN("a pending string result") {
         auto [callId, result] = link.expectResult<string>();
@@ -111,7 +112,8 @@ SCENARIO("WebLink settles correlated asynchronous results") {
 
 SCENARIO("WebLink rejects incomplete asynchronous results") {
     InjectableSocket::reset();
-    WebLink<InjectableNetworking> link{InjectableSocket{}, 8, [](WebLinkEvent) {}};
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 8, [](WebLinkEvent) { }, scope};
 
     GIVEN("a pending value whose return is malformed") {
         auto [callId, result] = link.expectResult<string>();
@@ -142,14 +144,18 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
     string                        calledName;
     int                           calledValue{};
     msg::CallId                   receivedCallId{};
-    WebLink<InjectableNetworking> link{InjectableSocket{}, 9, [&](WebLinkEvent event) {
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{},
+                                       9,
+                                       [&](WebLinkEvent event) {
                                            events.push_back(event.code);
                                            if (event.code == WebLinkEvent::Code::cppFunctionCalled) {
                                                calledName     = event.text;
                                                receivedCallId = event.callId;
                                                msg::FunctionCall<>::decodeParameter(calledValue, event.data);
                                            }
-                                       }};
+                                       },
+                                       scope};
 
     GIVEN("a browser handshake and function call") {
         msg::Handshake handshake;
@@ -210,11 +216,15 @@ SCENARIO("WebLink dispatches every WebSocket frame coalesced in one read") {
     InjectableSocket::reset();
     vector<WebLinkEvent::Code>    events;
     string                        calledName;
-    WebLink<InjectableNetworking> link{InjectableSocket{}, 10, [&](WebLinkEvent event) {
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{},
+                                       10,
+                                       [&](WebLinkEvent event) {
                                            events.push_back(event.code);
                                            if (event.code == WebLinkEvent::Code::cppFunctionCalled)
                                                calledName = event.text;
-                                       }};
+                                       },
+                                       scope};
 
     GIVEN("A handshake and function call delivered together") {
         msg::Handshake handshake;
@@ -243,7 +253,8 @@ SCENARIO("WebLink dispatches every WebSocket frame coalesced in one read") {
 SCENARIO("WebLink forwards logs to the browser until a write fails") {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
-    WebLink<InjectableNetworking> link{InjectableSocket{}, 41, [](WebLinkEvent) {}};
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 41, [](WebLinkEvent) { }, scope};
     browserHandshake();
     log::info("forwarded to the browser");
     drainBrowserLogs();
@@ -265,7 +276,8 @@ SCENARIO("WebLink forwards logs to the browser until a write fails") {
 SCENARIO("A write failing after its WebLink is destroyed does not reach the link or its successor") {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
-    auto link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{31}, [](WebLinkEvent) {});
+    InlineTaskScope scope;
+    auto            link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{31}, [](WebLinkEvent) { }, scope);
     browserHandshake();
     // The old link's write completes only after the link is gone, keeping its WebSocket alive.
     InjectableSocket::deferWrites();
@@ -277,7 +289,7 @@ SCENARIO("A write failing after its WebLink is destroyed does not reach the link
     InjectableSocket::deferWrites(false);
 
     // A new link, possibly at the same address, attaches its own transport.
-    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) {});
+    link = make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{32}, [](WebLinkEvent) { }, scope);
     browserHandshake();
     REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
     log::info("delivered by the new link");
@@ -291,7 +303,8 @@ SCENARIO("A write failing after its WebLink is destroyed does not reach the link
 SCENARIO("A browser that stops reading bounds the diagnostic frames queued for it") {
     InjectableSocket::reset();
     log::setLogLevel(log::Info);
-    WebLink<InjectableNetworking> link{InjectableSocket{}, 51, [](WebLinkEvent) {}};
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 51, [](WebLinkEvent) { }, scope};
     browserHandshake();
     // Only the first write reaches the network, and it does not complete.
     InjectableSocket::deferWrites();

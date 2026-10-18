@@ -42,7 +42,9 @@ class WebFrontIoContextMock {
 public:
     static inline std::atomic<int> stopCalls{0};
     void run() {}
-    void run_one() {}
+    std::size_t                    run_one() {
+        return 0;
+    }
     void stop() { ++stopCalls; }
     void restart() {}
 };

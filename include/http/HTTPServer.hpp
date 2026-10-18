@@ -4,8 +4,9 @@
 #pragma once
 #include "../networking/BasicNetworking.hpp"
 #include "../networking/Tasks.hpp"
-#include "../tooling/HexDump.hpp"
 #include "../system/FileSystem.hpp"
+#include "../Task.hpp"
+#include "../tooling/HexDump.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "MimeType.hpp"
@@ -17,8 +18,8 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <list>
 #include <limits>
+#include <list>
 #include <locale>
 #include <memory>
 #include <optional>
@@ -351,7 +352,9 @@ public:
         acceptor.listen();
         spawn(acceptConnections());
     }
-    ~Server() { drain(); }
+    ~Server() noexcept {
+        drainUntilJoined();
+    }
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
@@ -363,33 +366,55 @@ public:
     /// Thread-safe. Cancels the acceptor and the connections, and makes run() return.
     void stop() {
         log::info("Stopping HTTP server...");
-        stopSource.request_stop();
+        tasks.requestStop();
         ioContext.stop();
     }
 
     /// Runs the cancelled tasks to completion, so that no connection outlives the objects its handlers use.
     /// To be called from the thread owning the context, once nothing else runs it.
     void drain() {
-        stop();
-        ioContext.restart();
-        ioContext.run();
+        tasks.drain(ioContext);
+    }
+
+    /** @brief Destructor-safe join, retaining ownership until every task has finished. */
+    void drainUntilJoined() noexcept {
+        tasks.drainUntilJoined(ioContext);
+    }
+
+    /** @brief Scope shared with upgraded connections; the server must outlive them. */
+    networking::TaskScope& taskScope() noexcept {
+        return tasks;
+    }
+
+    /** @brief Starts an application coroutine on the server context and owns it through shutdown. */
+    TaskHandle startTask(Task task) {
+        TaskHandle handle;
+        // Register cancellation before associating, including a concurrent close.
+        auto registration = std::make_unique<detail::TaskRegistration>(handle, tasks.stopToken());
+        if (!networking::Spawn(tasks, Net::Scheduler(acceptor), detail::ownedTask(std::move(task), std::move(registration))))
+            handle.requestStop();
+        return handle;
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
-    void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) { upgradeHandler = std::move(handler); }
+    void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) {
+        upgradeHandler = std::move(handler);
+    }
 
 private:
-    typename Net::IoContext ioContext;
-    typename Net::Acceptor acceptor;
-    networking::ex::inplace_stop_source stopSource;
+    typename Net::IoContext                     ioContext;
+    typename Net::Acceptor                      acceptor;
+    networking::TaskScope                       tasks;
     RequestHandler<Net, FS> requestHandler;
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
-    void spawn(networking::Task task) { networking::Spawn(Net::Scheduler(acceptor), stopSource.get_token(), std::move(task)); }
+    void spawn(networking::Task task) {
+        networking::Spawn(tasks, Net::Scheduler(acceptor), std::move(task));
+    }
 
     // A failed accept (an aborted connection, no file descriptor left...) must not end the accepting.
     networking::Task acceptConnections() {
-        while (!stopSource.stop_requested()) {
+        while (!tasks.stopRequested()) {
             try {
                 spawn(serve(co_await Net::Accept(acceptor)));
             }
@@ -418,7 +443,7 @@ private:
             response = Response::getStatusResponse(Response::badRequest);
         }
         co_await Net::Send(socket, response.toBuffers<Net>());
-        if (response.statusCode != Response::switchingProtocols || stopSource.stop_requested())
+        if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
             socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
             upgradeHandler(std::move(socket));

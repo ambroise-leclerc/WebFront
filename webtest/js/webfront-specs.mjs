@@ -63,7 +63,24 @@ const cppResultCall = new Promise((resolve) => {
     resolveCppResult = resolve;
 });
 
+let finishSenderChecks;
+const senderChecks = new Promise(resolve => { finishSenderChecks = resolve; });
+let senderStarted;
+const senderSlowStarted = new Promise(resolve => { senderStarted = resolve; });
+let senderStopped;
+const senderCancelled = new Promise(resolve => { senderStopped = resolve; });
+let finishSlowSender;
+
 globalThis.webfrontTests = {
+    senderValue(value) { return Promise.resolve(`sender:${value}`); },
+    senderVoid() {},
+    senderThrows() { return Promise.reject(new Error('sender browser failure')); },
+    senderChecksFinished(passed) { finishSenderChecks(passed); },
+    senderSlow() {
+        senderStarted();
+        return new Promise(resolve => { finishSlowSender = resolve; });
+    },
+    senderWasCancelled() { senderStopped(); },
     receiveFromCpp(token) {
         status.textContent = `C++ called served JavaScript with: ${token}`;
         resolveCppCall(token);
@@ -90,6 +107,18 @@ globalThis.webfrontTests = {
 };
 
 describe('WebFront browser integration', () => {
+    it('resumes C++ coroutines with sender values, void completion and exceptions', async () => {
+        await expectAsync(senderChecks).toBeResolvedTo(true);
+    });
+
+    it('cancels a pending C++ sender and ignores its late JavaScript result', async () => {
+        await senderSlowStarted;
+        await webFront.cppFunction('cancelBrowserSender')();
+        await senderCancelled;
+        finishSlowSender('late result');
+        await Promise.resolve();
+        expect(await webFront.cppFunction('senderCancellationObserved')()).toBeTrue();
+    });
     it('loads native ES modules with relative imports', () => {
         expect(importedValue).toBe('relative-module-import-loaded');
     });
