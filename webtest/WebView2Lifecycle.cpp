@@ -358,7 +358,13 @@ int run(std::string_view mode) {
          }                                                    },
         {          "repeated-show",
          [] {
+         showTwice("rejected-ready.html");
+         showTwice("encoded path %23.html?x=1#example");
          return showTwice("no-bridge.html");
+         }                                                    },
+        {  "navigation-diagnostic",
+         [] {
+         return expectOpenFailure("0", "navigation failed");
          }                                                    },
         {     "native-early-close",
          [] {

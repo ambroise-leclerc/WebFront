@@ -327,6 +327,7 @@ public:
     }
 
     void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
+        // The first completed main-frame load deliberately ends startup error tracking.
         if (frame->IsMain())
             loadingInitialPage = false;
     }

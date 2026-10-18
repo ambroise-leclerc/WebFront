@@ -61,11 +61,13 @@ Registry order determines the initial cache default: the first enabled embedded 
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
 `web-integration` label and the same port lock as Jasmine. Linux CEF cases use Xvfb. Build `webtest`
-to build both shared runners, or build all targets to include engine-specific runners as well. Run
+to build both shared runners on a validated test platform, or build all targets to include engine-specific runners as well. Run
 `ctest --test-dir <build> -L web-integration --output-on-failure` for the complete browser suite.
 A missing Xvfb skips both shared suites. A new frontend inherits this coverage through its registry
 entry; no engine-specific lifecycle runner is required.
 
 WebView2 retains a separate runner for COM, missing runtimes, startup timers, later navigation
 failures, slow page loading, repeated `show()` calls and native closure during window creation.
-These cases use WebView2's implementation details and keep their own CTest timeouts.
+Repeated-show coverage includes rejected ready and encoded paths; a separate navigation case also
+checks the WebView2 error diagnostic. These cases use WebView2's implementation details and keep
+their own CTest timeouts.
