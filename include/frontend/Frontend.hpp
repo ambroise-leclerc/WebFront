@@ -12,16 +12,27 @@
 
 namespace webfront::frontend {
 
-// Frontend contract (details in docs/FRONTENDS.md). A frontend provides:
-//   static void initialize()                              called once per frontend type, when the first BasicWF is constructed;
-//   static void open(string_view port, string_view file)  called by show()/openAndRun() on the calling thread while the server runs
-//                                                         on its own; build the page URL with detail::applicationUrl();
-//   static constexpr Action action                        what BasicWF does when open() returns.
-// An embedded window must be opened from the application's main thread: toolkits such as AppKit and GTK
-// require it, and WebView2 needs an STA thread. open() blocks until the window closes, releases everything
-// it created, and reports failure by throwing; BasicWF then stops and joins the server and rethrows,
-// whatever the action. An unavailable frontend is still declared and throws during initialization or opening with a message
-// naming the CMake option that enables it.
+/**
+ * @brief Frontend contract; behavioural details and trusted-content scope are in docs/FRONTENDS.md.
+ *
+ * initialize() runs once successfully per frontend type, during the first BasicWF construction,
+ * before the listener is created. If it throws, construction fails and a later construction retries.
+ * Construct the application and call show()/openAndRun() on the main thread for embedded frontends;
+ * the adapter enforces its toolkit's thread requirements (WebView2 requires STA-compatible COM).
+ *
+ * open(port, file) runs on the calling thread while the server runs on a separate thread.
+ * With closeServerAfterOpen it blocks until window closure and releases its session resources;
+ * show() then stops and joins the server. With keepServerRunning, returning leaves the server active
+ * until stop()/destruction; this action does not require open() itself to return immediately.
+ * If open() throws, show()/openAndRun() stop and join the server before rethrowing the original
+ * exception, regardless of action. Direct openWindow() calls only delegate and return the action.
+ *
+ * An unavailable frontend remains declared and throws during initialization or opening with a
+ * diagnostic naming its enabling CMake option. Built-in frontends target trusted application content;
+ * they supply no shared navigation, popup or bridge-origin authorization policy.
+ * An optional open(address, port, file) overload receives the configured address; build URLs with
+ * detail::applicationUrl() so all frontends preserve the same URI-reference semantics.
+ */
 template <typename Frontend>
 concept FrontendType = requires(std::string_view port, std::string_view file) {
     { Frontend::initialize() } -> std::same_as<void>;
