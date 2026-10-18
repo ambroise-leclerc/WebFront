@@ -3,5 +3,8 @@
 <title>Window without a bridge</title>
 <script>
     // Closing must work even though no page has connected to the bridge.
-    setTimeout(() => window.close(), 250);
+    if (location.search === "?early-close")
+        window.close();
+    else
+        setTimeout(() => window.close(), 250);
 </script>

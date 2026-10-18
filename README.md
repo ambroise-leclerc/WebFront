@@ -191,7 +191,7 @@ When WebFront is not the top-level project it builds neither its examples nor it
 | `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available (Windows, Linux and macOS only). Other platforms fail at configure time |
 | `WEBFRONT_EMBED_WEBVIEW2` | `OFF` | Download the pinned WebView2 SDK and link its static loader (Windows only) |
 | `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF` or `WebView2` (enable the matching SDK) |
-| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine runner; WebView2 takes priority over CEF on Windows; explicit selection overrides the default |
+| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine and lifecycle runners; WebView2 takes priority over CEF on Windows; explicit selection overrides the default |
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
 | `ENABLE_COVERAGE` | `OFF` | Instrument the C++ tests (GCC/Clang) |
@@ -207,7 +207,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The automated real-browser test runs on Linux with Xvfb:
+The automated real-browser tests run on Linux with Xvfb:
 
 ```bash
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
@@ -218,7 +218,12 @@ ctest --test-dir build-cef -L web-integration --output-on-failure
 
 The Jasmine specs are native ES modules. They prove relative module loading, both bridge directions, all supported numeric typed arrays and `webFront.ready`; report the final result to C++; close the embedded window automatically; and fail CTest on an assertion, bridge, startup or timeout error. CTest also checks that the commands and snippets in this README match the built examples.
 
-On Windows, the same Jasmine suite and additional lifecycle tests run in WebView2 (Evergreen runtime required):
+The shared lifecycle suite checks closure without a bridge, immediate page closure, a rejected
+`webFront.ready`, failed initial navigation and encoded filenames. It runs with the same selected
+frontend as Jasmine; every case has a timeout and the `web-integration` label. See
+[frontend lifecycle coverage](docs/FRONTENDS.md#lifecycle-tests) for details.
+
+On Windows, the same Jasmine and lifecycle suites, plus WebView2-specific cases, run in WebView2 (Evergreen runtime required):
 
 ```powershell
 cmake -S . -B build-webview2 -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEMO_FRONTEND=WebView2 -DWEBFRONT_WEBTEST_FRONTEND=WebView2

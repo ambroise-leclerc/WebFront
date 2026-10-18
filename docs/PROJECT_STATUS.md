@@ -93,6 +93,18 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   The Windows CI matrix runs the shared Jasmine bridge suite and timed lifecycle tests under WebView2; CEF/Xvfb remains the Linux lane.
   The WebView2 browser label runs separately with `--no-tests=error`. CI's Evergreen bootstrapper URL is mutable;
   a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.
+- Embedded frontend lifecycle coverage is shared through `webtest/FrontendLifecycle.cpp` (#256),
+  selected with `WEBFRONT_TEST_FRONTEND` alongside Jasmine. Each registered test platform inherits
+  five timeout-bounded `web-integration` cases: no bridge, immediate page closure, rejected ready,
+  failed initial navigation and encoded paths. CEF/Linux uses Xvfb; WebView2 retains its separate
+  COM, runtime, native-close, repeated-show and timer regressions. Building `webtest` also builds
+  the shared lifecycle runner. CEF now closes a failed initial main-frame navigation and throws
+  after shutdown; cancelled requests and failures after the initial page has loaded do not trigger
+  this startup error.
+  Verified 2026-10-18 on Linux (GCC 16.1, CMake 4.2.3, CEF 154): all 156 CEF-off CTest cases and
+  all six CEF/Xvfb browser cases pass. The failed-navigation case timed out before the CEF fix and
+  passes afterward. Configure-only tests cover the shared suite under WebView2, absent Xvfb and
+  a newly registered engine; native WebView2 execution was not repeated in this Linux environment.
 - Frontend CMake options, platform constraints, selector choices/defaults and browser CTest wiring share `cmake/Frontends.cmake`. Adding an engine needs one registration plus its support module. CEF browser tests remain restricted to Linux under Xvfb until Windows/macOS runner deployment is validated; enabled WebView2 retains its Windows Jasmine and lifecycle cases. With no embedded engine enabled the CEF diagnostic runner still builds without registering a browser test.
   Verified 2026-10-17 on Linux (GCC 16.1): the complete CEF-off CTest suite and the CEF 154/Xvfb browser integration pass. The optional `FrontendSelectionMultiConfig` case is registered when Ninja is available. Configure-only fixtures cover platform defaults, unsupported platforms, Xvfb wiring and a new registered engine. Native CEF execution on Windows/macOS remains unvalidated: those CI lanes keep CEF disabled; Windows runs the WebView2 browser suite. CEF setup leaves dependency sources untouched, excludes upstream demo targets from the default build and requires a real static wrapper at configure time; the Apple configuration path is covered by an offline fixture, not native execution.
 - Local verification for #137 (2026-10-17, Windows, MSVC 19.44, x64): the CEF-off build passes all 153 CTest cases;

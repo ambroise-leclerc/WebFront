@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -58,6 +59,8 @@ public:
     #include "cef_browser_process_handler.h"
     #include "cef_client.h"
     #include "cef_command_line.h"
+    #include "cef_frame.h"
+    #include "cef_load_handler.h"
     #include "views/cef_browser_view.h"
     #include "views/cef_window.h"
     #include "views/cef_window_delegate.h"
@@ -311,9 +314,32 @@ private:
     #endif
 };
 
-class SimpleCEFClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler {
+class SimpleCEFClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler, public CefLoadHandler {
 public:
     SimpleCEFClient() = default;
+
+    // Read after the message loop and shutdown: callbacks report failures without throwing
+    // through CEF. Once the first page has loaded, later navigation failures stay in the UI.
+    std::string navigationFailure;
+
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override {
+        return this;
+    }
+
+    void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
+        // The first completed main-frame load deliberately ends startup error tracking.
+        if (frame->IsMain())
+            loadingInitialPage = false;
+    }
+
+    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode error, const CefString& errorText, const CefString&) override {
+        // Closing a window or replacing a navigation may abort a request normally.
+        if (!loadingInitialPage || !frame->IsMain() || error == ERR_ABORTED)
+            return;
+        navigationFailure = "CEF initial navigation failed: " + errorText.ToString();
+        browser->GetHost()->CloseBrowser(true);
+    }
+
     virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
         return this;
     }
@@ -333,6 +359,8 @@ public:
     }
 
 private:
+    bool loadingInitialPage = true;
+
     #ifdef __clang__
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Wextra-semi"
@@ -453,6 +481,8 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
 
     // Shutdown CEF
     CefShutdown();
+    if (!client->navigationFailure.empty())
+        throw std::runtime_error(client->navigationFailure);
 }
 
 }  // namespace webfront::cef

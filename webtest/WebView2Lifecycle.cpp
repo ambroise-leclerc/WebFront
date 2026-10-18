@@ -356,25 +356,19 @@ int run(std::string_view mode) {
          SetEnvironmentVariableW(L"WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", L"C:\\WebFront-runtime-does-not-exist");
          return expectOpenFailure("9002", "Evergreen Runtime");
          }                                                    },
-        {     "navigation-failure",
+        {          "repeated-show",
+         [] {
+         showTwice("rejected-ready.html");
+         showTwice("encoded path %23.html?x=1#example");
+         return showTwice("no-bridge.html");
+         }                                                    },
+        {  "navigation-diagnostic",
          [] {
          return expectOpenFailure("0", "navigation failed");
          }                                                    },
-        {              "no-bridge",
-         [] {
-         return showTwice("no-bridge.html");
-         }                                                    },
-        {            "early-close",
+        {     "native-early-close",
          [] {
          return showTwice("no-bridge.html", true);
-         }                                                    },
-        {         "rejected-ready",
-         [] {
-         return showTwice("rejected-ready.html");
-         }                                                    },
-        {          "path-encoding",
-         [] {
-         return showTwice("encoded path %23.html?x=1#example");
          }                                                    },
     };
     const auto test = cases.find(mode);
