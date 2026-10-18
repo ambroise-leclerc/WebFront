@@ -3,7 +3,10 @@
 #include <frontend/DefaultBrowser.hpp>
 #include <frontend/Url.hpp>
 
+#include <cstdint>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
 using webfront::frontend::detail::applicationUrl;
 
@@ -113,4 +116,35 @@ SCENARIO("The default browser opens a quoted, encoded URL") {
             REQUIRE(webfront::browser::shellArgument("a'b$c") == "'a'\\''b$c'");
         }
     }
+}
+
+SCENARIO("Popup URLs remain literal arguments to desktop launchers") {
+    const std::string url = "https://example.com/it's?value=$HOME&x=1";
+    REQUIRE(
+        webfront::browser::wslCommandForUrl(url).find(webfront::browser::shellArgument("Start-Process -FilePath 'https://example.com/it''s?value=$HOME&x=1'"))
+        != std::string::npos);
+#ifndef _WIN32
+    REQUIRE(webfront::browser::commandForUrl(url).find(webfront::browser::shellArgument(url)) != std::string::npos);
+#else
+    GIVEN("a UTF-8 URL passed to the Windows shell") {
+        static std::wstring received;
+        auto                execute = [](HWND, LPCWSTR operation, LPCWSTR destination, LPCWSTR, LPCWSTR, INT) -> HINSTANCE {
+            received = destination;
+            CHECK(std::wstring_view(operation) == L"open");
+            return reinterpret_cast<HINSTANCE>(std::intptr_t{33});
+        };
+        webfront::browser::detail::launchWindowsUrl("https://example.com/caf\xc3\xa9/\xf0\x9f\x9a\x80", execute);
+        THEN("ShellExecuteW receives the accent and supplementary character unchanged") {
+            REQUIRE(received == L"https://example.com/caf\u00e9/\U0001f680");
+        }
+        THEN("invalid UTF-8 and shell errors are reported") {
+            REQUIRE_THROWS_AS(webfront::browser::detail::launchWindowsUrl("https://example.com/\xc3", execute), std::runtime_error);
+            auto failedExecute = [](HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, INT) -> HINSTANCE {
+                return reinterpret_cast<HINSTANCE>(std::intptr_t{31});
+            };
+            REQUIRE_THROWS_WITH(webfront::browser::detail::launchWindowsUrl("https://example.com/", failedExecute),
+                                "Failed to open system browser (ShellExecute error 31)");
+        }
+    }
+#endif
 }

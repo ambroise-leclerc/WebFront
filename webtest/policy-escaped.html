@@ -1,0 +1,13 @@
+<!doctype html>
+<script src="/WebFront.js"></script>
+<script type="module">
+try {
+    await webFront.ready;
+    await webFront.cppFunction(location.search === '?popup' ? 'policyEscaped' : 'policyNavigated')();
+} catch (error) {
+    console.error('Policy destination could not report its result', error);
+} finally {
+    // C++ requires the report, so a failed bridge returns a nonzero test status.
+    window.close();
+}
+</script>

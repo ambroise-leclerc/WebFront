@@ -45,7 +45,7 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
 ## Embedded frontend foundations (epic #253, 2026-10-18)
 
 - Shared URL construction (#254), registry-driven CMake selection (#255) and shared lifecycle tests
-  (#256, PR #264) are merged into `develop`. The five lifecycle cases run for CEF and WebView2,
+  (#256, PR #264) are merged into `develop`. The shared lifecycle cases run for CEF and WebView2,
   with WebView2-specific COM/runtime/timer cases kept separately. PR #264's GitHub Actions run
   [39105576882](https://github.com/ambroise-leclerc/WebFront/actions/runs/39105576882) passed all six
   browser tests on Linux CEF ([GCC](https://github.com/ambroise-leclerc/WebFront/actions/runs/39105576882/job/117610570356)
@@ -58,9 +58,14 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
   calling-thread execution, standard/non-standard errors, failure before window creation, and
   initialization across application types.
 - Main-thread validation stays adapter-specific; no generic main-thread flag or dispatcher is added.
-  WKWebView (#258), WebKitGTK (#259), the native alias (#261), and the shared navigation/popup/bridge
-  authorization policy (#260) remain future work.
-- Verified locally on macOS ARM64 with Clang 21.1.8: CEF-off Release build and all 161 CTest cases,
+  WKWebView (#258), WebKitGTK (#259) and the native alias (#261) remain future work.
+- The [shared content policy](CONTENT_POLICY.md) (#260) adds server-side bridge Origin checks,
+  per-application navigation allow-lists and popup handling in CEF/WebView2, and configurable
+  DevTools/context menus. External popup forwarding requires the engine's user-initiation flag;
+  rejected bridge origins include a diagnostic body and warning log for alternate-host configuration.
+  Local CEF-off validation passes all 192 CTest cases; browser coverage
+  includes foreign/opaque-origin probes and shared navigation/popup lifecycle regressions.
+- Earlier #257 validation on macOS ARM64 with Clang 21.1.8 passed the CEF-off Release build and its then-current 161 CTest cases,
   including `NewcomerDocsMatchExamples` and `AddSubdirectoryConsumer`. Tests using local sockets
   required execution outside the sandbox. CEF/Xvfb and WebView2 browser verification above is from
   the merged PR's Linux/Windows CI; these engines were not rerun locally on macOS for #257.
@@ -140,8 +145,8 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   even if a runtime never completes creation; weak references protect late callbacks. Renderer exits remain fatal rather than reloading the page.
   Profile identity uses a case-sensitive FNV-64 executable-path hash. The adapter supplies no DPI-awareness manifest;
   applications must provide one to avoid blurry Windows scaling on HiDPI displays.
-  This is a development frontend for trusted content: navigation and popup requests are unrestricted, DevTools and context menus
-  remain enabled, and the adapter supplies no origin-based bridge authorization. Windows/Shell/WRL header names leak into consumers;
+  The [shared content policy](CONTENT_POLICY.md) restricts embedded navigation and popups and authorizes bridge origins server-side;
+  DevTools and context menus remain configurable and enabled by default. Windows/Shell/WRL header names leak into consumers;
   qualify `std::byte`. Implementation types live under `frontend::detail::webview2`. The runtime-creation timeout defaults to 30 seconds,
   is configurable through `WebView2Options`, and stops before page navigation. Profile directories are also configurable.
   All built-in frontends receive the configured address and preserve URI query/fragment syntax and existing percent escapes.
@@ -151,8 +156,9 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.
 - Embedded frontend lifecycle coverage is shared through `webtest/FrontendLifecycle.cpp` (#256),
   selected with `WEBFRONT_TEST_FRONTEND` alongside Jasmine. Each registered test platform inherits
-  five timeout-bounded `web-integration` cases: no bridge, immediate page closure, rejected ready,
-  failed initial navigation and encoded paths. CEF/Linux uses Xvfb; WebView2 retains its separate
+  seven timeout-bounded `web-integration` cases: no bridge, immediate page closure, rejected ready,
+  failed initial navigation, encoded paths, blocked navigation/popups and an explicit navigation
+  allow-list. CEF/Linux uses Xvfb; WebView2 retains its separate
   COM, runtime, native-close, repeated-show and timer regressions. Building `webtest` also builds
   the shared lifecycle runner. CEF now closes a failed initial main-frame navigation and throws
   after shutdown; cancelled requests and failures after the initial page has loaded do not trigger

@@ -1,0 +1,7 @@
+<!doctype html>
+<script type="module">
+import { watchOriginProbe } from './js/origin-probe.mjs';
+const parameters = new URLSearchParams(location.search);
+const token = parameters.get('token');
+watchOriginProbe(parameters.get('socket'), outcome => parent.postMessage({token, outcome}, '*'));
+</script>

@@ -2,6 +2,8 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
+#include "../ApplicationOrigin.hpp"
+#include "../ContentPolicy.hpp"
 #include "../networking/BasicNetworking.hpp"
 #include "../networking/Tasks.hpp"
 #include "../system/FileSystem.hpp"
@@ -200,11 +202,12 @@ private:
 
 struct Response : Headers {
     enum StatusCode : uint16_t {
-        switchingProtocols = 101,
-        ok = 200,
-        badRequest = 400,
-        notFound = 404,
-        notImplemented = 501,
+        switchingProtocols    = 101,
+        ok                    = 200,
+        badRequest            = 400,
+        forbidden             = 403,
+        notFound              = 404,
+        notImplemented        = 501,
         variantAlsoNegotiates = 506
     };
     StatusCode statusCode;
@@ -248,6 +251,8 @@ private:
         case switchingProtocols: return "Switching Protocols";
         case ok: return "OK";
         case badRequest: return "Bad Request";
+        case forbidden:
+            return "Forbidden";
         case notFound: return "Not Found";
         case notImplemented: return "Not Implemented";
         case variantAlsoNegotiates: return "Variant Also Negotiates";
@@ -259,7 +264,8 @@ private:
 template<networking::Features Net, fs::Provider FS>
 class RequestHandler {
 public:
-    explicit RequestHandler(std::filesystem::path root) : fs(root) {}
+    explicit RequestHandler(std::filesystem::path root, detail::BoundContentPolicy policy = detail::BoundContentPolicy{})
+        : fs(root), contentPolicy(std::move(policy)) { }
     ~RequestHandler() = default;
     RequestHandler(const RequestHandler&) = default;
     RequestHandler(RequestHandler&&) = default;
@@ -309,8 +315,11 @@ private:
         return path.find("..") == std::string_view::npos;
     }
 
-    static std::optional<Response> webSocketUpgrade(const Request& request) {
+    std::optional<Response> webSocketUpgrade(const Request& request) const {
         if (!request.isUpgradeRequest("websocket")) return {};
+        const auto origins = request.getHeadersValues("Origin");
+        if (origins.size() > 1 || !contentPolicy.allowsBridge(origins.empty() ? std::nullopt : std::optional<std::string_view>{origins.front()}))
+            return rejectWebSocketOrigin();
         auto key = request.getHeaderValue("Sec-WebSocket-Key");
         if (!key) return {};
         Response response;
@@ -319,6 +328,18 @@ private:
         response.headers.emplace_back("Connection", "Upgrade");
         response.headers.emplace_back("Sec-WebSocket-Accept", websocket::getHashedSecKey(key.value()));
         response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
+        return response;
+    }
+
+    static Response rejectWebSocketOrigin() {
+        constexpr std::string_view reason = "WebFront: WebSocket Origin rejected by content policy. Check contentPolicy.bridgeAllowedOrigins "
+                                            "and allowMissingOrigin; wildcard binds authorize loopback only.";
+        log::warn("{}", reason);
+        Response response;
+        response.statusCode = Response::forbidden;
+        response.content    = std::string(reason) + "\n";
+        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
+        response.headers.emplace_back("Content-Type", "text/plain; charset=utf-8");
         return response;
     }
 
@@ -338,13 +359,14 @@ private:
     }
 
     FS fs;
+    detail::BoundContentPolicy contentPolicy;
 };
 
 template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
 class Server {
 public:
-    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
-        : acceptor(ioContext), requestHandler(docRoot) {
+    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {})
+        : acceptor(ioContext), requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, port), std::move(policy)}) {
         const auto endpoint = Net::Resolve(address, port);
         acceptor.open(endpoint.protocol());
         acceptor.set_option(typename Net::Acceptor::reuse_address(true));

@@ -12,6 +12,7 @@ A frontend is a type with:
 | --- | --- |
 | `static void initialize()` | Called once successfully per frontend type, before the first `BasicWF` listener is created. A thrown exception aborts construction; the next construction retries. |
 | `static void open(std::string_view port, std::string_view file)` | Called by `show()` / `openAndRun()` on the calling thread, while the HTTP server runs on its own thread. |
+| `static void open(address, port, page, const ContentPolicy&)` (optional) | Preferred overload receiving the per-application [content policy](CONTENT_POLICY.md). |
 | `static constexpr Action action` | What `BasicWF` does once `open()` returns. |
 
 - **Blocking.** With `Action::closeServerAfterOpen` (embedded windows), `open()` blocks until the window is closed, releases its session resources, and returns; `BasicWF` then stops the server and joins its thread, so `show()` returns after a clean shutdown. With `Action::keepServerRunning` (the system browser), the server keeps running after `open()` returns, until `stop()` or application destruction. The action determines server lifetime, not whether opening returns immediately: the built-in system-browser adapter waits for Enter in the console after launching the page and cannot observe when the external browser closes.
@@ -21,9 +22,9 @@ A frontend is a type with:
 - **URL.** Built-in frontends also provide `open(address, port, file)`, which `BasicWF` prefers when available. Build the URL with `frontend::detail::applicationUrl(address, port, file)` in `frontend/Url.hpp`: it uses the configured address and preserves URI query/fragment syntax and existing percent escapes. Spaces and UTF-8 bytes are encoded. For literal filename delimiters use `%23`, `%3F` and `%25`. The two-argument overload uses `127.0.0.1`; wildcard binds open their matching loopback address.
 - **Selection.** `webfront::WebFront` always uses the system browser. An application opts into another frontend with `webfront::WebFrontWithFrontend<...>`; enabling an embedded engine at configuration time never changes the default.
 
-## Trusted content
+## Content policy
 
-Embedded frontends currently target development with trusted application content: navigation and popup requests are not restricted, DevTools and context menus stay available, and nothing authorizes a page by origin before it uses the C++ bridge. A production application needs its own policy; a shared one is tracked in #260.
+The [shared content policy](CONTENT_POLICY.md) defines bridge-origin authorization, embedded navigation, popup handling, DevTools and context-menu settings, including defaults and opt-outs. The system browser cannot expose embedded navigation/UI hooks; its bridge is protected by the same server check.
 
 ## Contract tests
 
@@ -39,7 +40,7 @@ initialization, frontend selection and unavailable-engine diagnostics. These tes
 
 1. Implement the type in `include/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
 2. Add its support module and one `webfront_register_frontend(...)` entry in `cmake/Frontends.cmake`, using the fields below.
-3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the five shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
+3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the seven shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
 
 | Field | Meaning |
 | --- | --- |
@@ -61,13 +62,15 @@ Registry order determines the initial cache default: the first enabled embedded 
 
 ## Lifecycle tests
 
-`webtest/FrontendLifecycle.cpp` runs the same five cases under the selected embedded engine:
+`webtest/FrontendLifecycle.cpp` runs the same seven cases under the selected embedded engine:
 
 - `no-bridge`: close a page that never connects to the bridge and return from `show()`.
 - `early-close`: close immediately from the page's first script, before any bridge connection.
 - `rejected-ready`: reject `webFront.ready` using an unreachable WebSocket endpoint, handle the rejection and close.
 - `navigation-failure`: open an unreachable initial URL and require a navigation exception.
 - `path-encoding`: load `encoded path #.html` and verify that its query and fragment survived.
+- `content-policy`: block a popup and a foreign-origin top-level navigation while keeping the original page alive.
+- `navigation-allow-list`: permit the same top-level destination through the explicit navigation allow-list.
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
 `web-integration` label and the same port lock as Jasmine. Linux CEF cases use Xvfb. Build `webtest`
@@ -75,6 +78,8 @@ to build both shared runners on a validated test platform, or build all targets 
 `ctest --test-dir <build> -L web-integration --output-on-failure` for the complete browser suite.
 A missing Xvfb skips both shared suites. A new frontend inherits this coverage through its registry
 entry; no engine-specific lifecycle runner is required.
+
+`CEFContentPolicy` additionally opens DevTools under Xvfb and checks the runtime command IDs and context-menu filtering.
 
 WebView2 retains a separate runner for COM, missing runtimes, startup timers, later navigation
 failures, slow page loading, repeated `show()` calls and native closure during window creation.

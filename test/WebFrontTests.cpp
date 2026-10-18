@@ -214,6 +214,7 @@ SCENARIO("Selecting CEFFrontend without CEF support fails clearly") {
                     REQUIRE_THROWS_WITH(frontend::CEFFrontend::open("9200", "index.html"),
                                         "webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
                                         "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
+                    REQUIRE_THROWS_AS(frontend::CEFFrontend::open("127.0.0.1", "9200", "index.html", ContentPolicy{}), std::runtime_error);
                 }
             }
         }
@@ -711,5 +712,43 @@ SCENARIO("BasicWF does not require onUIStarted to be set") {
                 }());
             }
         }
+    }
+}
+
+namespace {
+// Preserve the legacy empty-options call despite the new ContentPolicy overload.
+static_assert(requires { frontend::WebView2Frontend::open("127.0.0.1", "9002", "index.html", {}); });
+
+struct PolicyFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static inline ContentPolicy       received;
+    static inline std::string         receivedAddress;
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) {
+        throw std::runtime_error("Legacy overload selected");
+    }
+    static void open(std::string_view address, std::string_view, std::string_view, const ContentPolicy& policy) {
+        receivedAddress = address;
+        received        = policy;
+    }
+};
+}  // namespace
+
+SCENARIO("WebFront passes per-application content rules to policy-aware frontends") {
+    using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, PolicyFrontend>;
+    App app(WebFrontConfig{
+        .address       = "127.0.0.2",
+        .contentPolicy = {.navigationAllowedOrigins = {"https://docs.example"}, .popups = PopupPolicy::systemBrowser, .devToolsEnabled = false}
+    });
+    REQUIRE_NOTHROW(app.openWindow("index.html"));
+    THEN("the configured address reaches the preferred overload") {
+        REQUIRE(PolicyFrontend::receivedAddress == "127.0.0.2");
+    }
+    THEN("the navigation allow-list is preserved") {
+        REQUIRE(PolicyFrontend::received.navigationAllowedOrigins == std::vector<std::string>{"https://docs.example"});
+    }
+    THEN("popup and DevTools settings are preserved independently") {
+        REQUIRE(PolicyFrontend::received.popups == PopupPolicy::systemBrowser);
+        REQUIRE_FALSE(PolicyFrontend::received.devToolsEnabled);
     }
 }

@@ -151,9 +151,19 @@ int startupCompletion(bool failed) {
 
 int lateNavigationFailure() {
     using namespace webfront::frontend::detail::webview2;
+    // Start on allowed HTTP content; about:blank is deliberately outside the content policy.
+    webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread                                                               worker([&](std::stop_token stop) {
+        std::stop_callback cleanup(stop, [&] {
+            server.stop();
+        });
+        server.run();
+    });
     Apartment apartment;
     auto      session = std::make_shared<Session>();
-    session->url      = L"about:blank";
+    session->url                                                                       = L"http://127.0.0.1:9002/policy-controls.html";
+    // Reach the engine's network-failure path rather than the navigation-policy rejection path.
+    session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.navigationAllowedOrigins = {"http://127.0.0.1:0"}}};
     session->createWindow();
     Actions actions;
     actions.onFailure = [&] {
