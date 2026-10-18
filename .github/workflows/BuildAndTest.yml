@@ -4,7 +4,7 @@ on:
   push:
     branches: [ '**' ]
   pull_request:
-    branches: [ master develop ]
+    branches: [ master, develop ]
 
 env:
   BUILD_TYPE: Release
@@ -233,6 +233,63 @@ jobs:
           label: ${{ steps.badge.outputs.label }}
           message: ${{ job.status }}
           color: ${{ steps.badge.outputs.color }}
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+    name: Linux Clang (${{ matrix.sanitizer }})
+    env:
+      CC: clang-23
+      CXX: clang++-23
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - name: Install Clang 23 and sanitizer runtimes
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 libclang-rt-23-dev libc++-23-dev libc++abi-23-dev
+      - name: Restrict address-space randomization for ThreadSanitizer
+        if: matrix.sanitizer == 'thread'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      # libc++ keeps retry-after-exception in call_once usable under TSan.
+      - name: Configure hardened sanitizer tests
+        run: >-
+          cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
+          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON' }}
+      - name: Build
+        run: cmake --build build-sanitizers --parallel 2
+      - name: Run full CEF-off suite
+        run: ctest --test-dir build-sanitizers --output-on-failure --no-tests=error
+      - name: Fuzz decoders (30 seconds each)
+        if: matrix.sanitizer == 'address-undefined'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-sanitizers/fuzz/artifacts
+          for decoder in messages http websocket; do
+            build-sanitizers/fuzz/fuzz_$decoder build-sanitizers/fuzz/corpus/$decoder \
+              -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
+              -artifact_prefix=build-sanitizers/fuzz/artifacts/$decoder-
+          done
+      - name: Upload fuzz findings
+        if: failure() && matrix.sanitizer == 'address-undefined'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: build-sanitizers/fuzz/artifacts/
+          if-no-files-found: ignore
 
   web-integration:
     strategy:

@@ -166,3 +166,6 @@ webtest/registry/tarballs/*                 binary
 .gitignore     export-ignore
 .gitkeep       export-ignore
 
+
+# Fuzzer seeds retain exact protocol bytes, including HTTP CRLF.
+fuzz/corpus/** binary

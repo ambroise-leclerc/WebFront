@@ -1,6 +1,12 @@
 CPMAddPackage("gh:catchorg/Catch2@3.15.2")
 target_compile_features(Catch2 PRIVATE cxx_std_23)
 target_compile_features(Catch2WithMain PRIVATE cxx_std_23)
+# Keep inline standard-library definitions consistent across the test executable.
+# Instrument the test runtime, but leave dependency sources out of project coverage.
+add_library(WebFront_test_sanitizers INTERFACE)
+enable_sanitizers(WebFront_test_sanitizers NO_COVERAGE)
+target_link_libraries(Catch2 PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
+target_link_libraries(Catch2WithMain PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
 
 find_package(Threads)
 include(CTest)
@@ -19,10 +25,10 @@ if(WEBFRONT_EMBED_WEBVIEW2)
   list(APPEND TESTS_LIST WebView2Tests.cpp)
 endif()
 add_executable(tests ${TESTS_LIST})
-target_link_libraries(tests PRIVATE WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
+target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
-catch_discover_tests(tests)
+catch_discover_tests(tests PROPERTIES TIMEOUT 60)
 
 if(ENABLE_COVERAGE)
   target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)
@@ -80,5 +86,5 @@ add_test(NAME AddSubdirectoryConsumer
         --build-generator ${CMAKE_GENERATOR}
         --build-config $<CONFIG>
         --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${_consumer_dependency_args}
-            -DCMAKE_BUILD_TYPE=$<CONFIG>)
+            -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)

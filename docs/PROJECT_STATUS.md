@@ -9,6 +9,39 @@ qualified tools and verification. With the option on, browser logs travel throug
 mddlog's bounded transport consumer and WebLink captures link/call context. mddlog
 ADR-003, which this integration implements, was accepted on 2026-10-02.
 
+## Input decoder hardening (#267, 2026-10-18)
+
+- Catch2 and browser test targets enable the standard library's vendor hardening mode
+  (`_GLIBCXX_ASSERTIONS`, libc++ extensive hardening, or `_MSVC_STL_HARDENING=1`).
+  Supporting GCC/Clang compilers also initialize automatic variables with a pattern;
+  older compilers warn and retain the other hardening settings. These settings
+  are private to tests/fuzzers; `WebFront::WebFront` consumers inherit none of them.
+- `BuildAndTest.yml` runs the full CEF-off suite in separate Linux Clang ASan+UBSan
+  and TSan configurations using `cmake/Sanitizers.cmake`. The TSan lane uses libc++
+  to cover retry after a throwing `std::call_once` callback; libstdc++ with TSan
+  stalled on that existing regression. Each C++ scenario has a 60-second timeout.
+  UBSan diagnostics fail the process. The ASan lane also runs each of three libFuzzer targets for 30 seconds.
+- `ENABLE_FUZZING=ON` builds bridge-message, HTTP-request and WebSocket-frame fuzzers
+  with ASan+UBSan. Seed corpora derive from existing unit examples and live in `fuzz/`;
+  writable copies stay in the build tree and CI uploads reproducer artifacts on failure.
+  HTTP and WebSocket harnesses exercise partial receives; WebSocket decoding rejects
+  oversized advertised lengths before allocating their payloads.
+- Hardened regressions exposed out-of-bounds access when decoding empty strings and
+  displaying an unknown HTTP method, signed overflow in HTTP version parsing, and
+  undefined floating-to-integer conversions. The HTTP method buffer is now per request,
+  with a regression for interleaved partial receives on two connections. Unit regressions precede
+  the fixes; Jasmine also checks empty strings and rejected out-of-range integer arguments.
+- Verified locally on macOS ARM64: all 167 CEF-off CTest cases pass in both hardened
+  Release and ASan+UBSan builds, including `AddSubdirectoryConsumer`, which also inspects
+  generated transitive compile definitions/options and link options for instrumentation leaks. Linux sanitizer
+  and CEF/Xvfb execution is delegated to the PR CI; it was not run on this macOS host.
+- Local fuzz smoke runs on macOS ARM64 completed 92,004 message, 743,201 HTTP and
+  471,150 WebSocket inputs (15-second budgets each) without a finding after fixes.
+  Homebrew LLVM 21's ASan runtime deadlocked during initialization on macOS 27;
+  these runs used Apple Clang 21's ASan/UBSan and Homebrew's static libFuzzer instead.
+  This local workaround is not encoded in project build settings. Short smoke runs
+  do not establish exhaustive decoder or concurrency coverage.
+
 ## Embedded frontend foundations (epic #253, 2026-10-18)
 
 - Shared URL construction (#254), registry-driven CMake selection (#255) and shared lifecycle tests

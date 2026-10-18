@@ -164,6 +164,16 @@ describe('WebFront browser integration', () => {
             .toBeRejectedWithError('WebFront strings cannot exceed 65535 bytes');
     });
 
+    it('round-trips empty strings and rejects numbers outside C++ integer range', async () => {
+        await expectAsync(webFront.cppFunction('returnFromCpp')('')).toBeResolvedTo('cpp-result:');
+        const integerInCpp = webFront.cppFunction('integerInCpp');
+        for (const value of [NaN, Infinity, -Infinity, 2147483648, -2147483649]) {
+            await expectAsync(integerInCpp(value)).toBeRejectedWithError(/integer result range/);
+        }
+        await expectAsync(integerInCpp(2147483647)).toBeResolvedTo(2147483647);
+        await expectAsync(integerInCpp(-2147483648)).toBeResolvedTo(-2147483648);
+    });
+
     it('sends strings up to the limit and rejects longer ones before sending', async () => {
         const lengthInCpp = webFront.cppFunction('lengthInCpp');
         await expectAsync(lengthInCpp('x'.repeat(65535))).toBeResolvedTo(65535);
