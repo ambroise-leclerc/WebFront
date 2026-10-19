@@ -3,8 +3,10 @@ describe('The embedded React signal example', () => {
     let doc;
 
     async function waitFor(predicate) {
-        const deadline = Date.now() + 8000;
+        const deadline = Date.now() + 4000;
         while (!predicate()) {
+            if (frame?.contentWindow?.demoErrors?.length)
+                throw new Error(frame.contentWindow.demoErrors.join('\n'));
             if (Date.now() > deadline)
                 throw new Error('React example did not reach the expected state');
             await new Promise(resolve => setTimeout(resolve, 10));
@@ -20,7 +22,9 @@ describe('The embedded React signal example', () => {
         frame.style.cssText = 'width:1100px;height:720px;border:0';
         // Reuse the runner's real C++ connection; a second UI would replace its callback target.
         frame.srcdoc = html.replace('<script src="/WebFront.js"></script>',
-            '<script>window.webFront = parent.webFront;</script>');
+            `<script>window.webFront = parent.webFront; window.demoErrors = [];
+                addEventListener('error', event => demoErrors.push(event.message));
+                addEventListener('unhandledrejection', event => demoErrors.push(String(event.reason)));<\/script>`);
         document.body.appendChild(frame);
         await waitFor(() => frame.contentDocument?.querySelector('.app')?.dataset.state === 'ready');
         doc = frame.contentDocument;
@@ -35,7 +39,7 @@ describe('The embedded React signal example', () => {
         expect(Number.parseFloat(doc.querySelector('#rms').textContent)).toBeCloseTo(0.570, 3);
         expect(doc.querySelector('#signal-path').getAttribute('d').match(/L/g).length).toBe(255);
         const resources = frame.contentWindow.performance.getEntriesByType('resource');
-        expect(resources.some(entry => entry.name.includes('/react@18/'))).toBeTrue();
+        expect(resources.some(entry => entry.name.includes('/react@19.3.1/'))).toBeTrue();
         expect(resources.every(entry => new URL(entry.name).origin === location.origin)).toBeTrue();
     });
 

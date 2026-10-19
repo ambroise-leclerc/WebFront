@@ -10,10 +10,23 @@ if(NOT DEFINED STRUCT)
     message(FATAL_ERROR "STRUCT must name the generated struct, e.g. WebFrontJsData")
 endif()
 
-# Embed the source bytes directly. Compression libraries can produce different
-# deflate streams on different platforms, while the raw representation is
-# deterministic and is small enough for this development asset.
-file(READ "${INPUT}" gzip_hex HEX)
+# Normal assets retain their identity representation. Third-party payloads use the pinned,
+# vendored pure-JavaScript compressor, independent of the host's gzip/zlib implementation.
+set(encoding "")
+if(GZIP)
+    find_program(NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+    set(compressed "${CMAKE_CURRENT_BINARY_DIR}/${STRUCT}.gz")
+    execute_process(COMMAND "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../tools/assets/gzip.mjs"
+        "${INPUT}" "${compressed}" RESULT_VARIABLE result)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "gzip generation failed for ${INPUT}")
+    endif()
+    file(READ "${compressed}" gzip_hex HEX)
+    file(REMOVE "${compressed}")
+    set(encoding "gzip")
+else()
+    file(READ "${INPUT}" gzip_hex HEX)
+endif()
 
 string(LENGTH "${gzip_hex}" hex_length)
 math(EXPR data_size "${hex_length} / 2")
@@ -48,11 +61,17 @@ while(word_index LESS word_count)
     math(EXPR word_index "${word_index} + 1")
 endwhile()
 
-set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct ${STRUCT} {\n    static constexpr std::string_view encoding{};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
+if(encoding)
+    set(encoding_initializer "{\"${encoding}\"}")
+else()
+    set(encoding_initializer "{}")
+endif()
+
+set(contents "#pragma once\n\n#include <array>\n#include <cstddef>\n#include <cstdint>\n#include <string_view>\n\nnamespace webfront::fs::generated {\n\nstruct ${STRUCT} {\n    static constexpr std::string_view encoding${encoding_initializer};\n    static constexpr std::size_t dataSize{${data_size}};\n    static constexpr std::array<std::uint64_t, ${word_count}> data{${words}\n    };\n};\n\n} // namespace webfront::fs::generated\n")
 
 # A Windows checkout converting either file to CRLF would make it look stale, so both must keep
 # LF through .gitattributes. Checked only in a git work tree, on every platform.
-if(DEFINED CHECK AND GIT_EXECUTABLE)
+if(DEFINED CHECK AND GIT_EXECUTABLE AND NOT INPUT MATCHES "\\.png$")
     get_filename_component(source_dir "${INPUT}" DIRECTORY)
     execute_process(
         COMMAND "${GIT_EXECUTABLE}" check-attr eol -- "${INPUT}" "${CHECK}"

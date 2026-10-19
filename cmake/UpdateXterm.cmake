@@ -32,6 +32,7 @@ file(COPY_FILE "${work}/xterm/package/lib/xterm.mjs" "${destination}/xterm.mjs")
 file(COPY_FILE "${work}/xterm/package/css/xterm.css" "${destination}/xterm.css")
 file(COPY_FILE "${work}/xterm/package/LICENSE" "${destination}/LICENSE")
 file(COPY_FILE "${work}/fit/package/lib/addon-fit.mjs" "${destination}/addon-fit.mjs")
+file(COPY_FILE "${work}/fit/package/LICENSE" "${destination}/addon-fit-LICENSE")
 file(WRITE "${destination}/VERSION" "@xterm/xterm ${XTERM_VERSION}\n@xterm/addon-fit ${FIT_VERSION}\n")
 file(REMOVE_RECURSE "${work}")
 

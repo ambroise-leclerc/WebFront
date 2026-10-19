@@ -323,6 +323,8 @@ cmake --build build-cef --target webtest --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure
 ```
 
+The asset freshness checks require Node.js 22.18+ (24 in CI); ordinary C++ consumer builds do not require Node.js or npm.
+
 The Jasmine specs are native ES modules. They prove relative module loading, both bridge directions, all supported numeric typed arrays and `webFront.ready`; report the final result to C++; close the embedded window automatically; and fail CTest on an assertion, bridge, startup or timeout error. CTest also checks that the commands and snippets in this README match the built examples.
 
 The shared lifecycle suite checks closure without a bridge, immediate page closure, a rejected
@@ -365,7 +367,7 @@ CI runs the WebView2 browser label separately with `--no-tests=error`, so absent
 
 [Signal Studio](src/react.html) is the application pictured above. Adjust the frequency, amplitude and harmonic mix, then generate a new waveform. An ordinary [C++ function](src/SignalDemo.hpp) calculates 256 samples and returns a numeric typed array; React renders the curve and derives its peak and RMS measurements. The data is synthetic, rather than a live device feed.
 
-React 18, ReactDOM and Babel are served from WebFront's embedded resources. The example needs no npm install, CDN or separate JavaScript build. Babel translates the small JSX interface at run time for this development example.
+React and React DOM 19.3.1 share a locally embedded ES-module runtime; Babel 8.0.7 translates the editable JSX with the automatic transform at run time. The example needs no npm install, CDN or separate JavaScript build. Jasmine 7.0.2 and xterm 6.0.0 / Fit 0.11.0 are also embedded locally. JavaScript/CSS dependency assets use reproducible gzip; see [versions, regeneration and size measurements](docs/EMBEDDED_ASSETS.md).
 
 To open it in a native window on Windows, configure from the repository root (WebView2 Evergreen Runtime required):
 

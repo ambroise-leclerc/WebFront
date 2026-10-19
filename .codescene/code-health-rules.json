@@ -1,9 +1,9 @@
 {
-  "usage": "CodeScene code health rules for this repository. third_party/ holds vendored, minified distributions (see third_party/xterm/VERSION) that are copied verbatim and never edited here, so the function-level heuristics are disabled for them.",
+  "usage": "CodeScene code health rules for this repository. third_party/ holds pinned upstream distributions (see docs/EMBEDDED_ASSETS.md) that are copied verbatim or reproducibly bundled and never edited here, so function and module size heuristics are disabled for them.",
   "rule_sets": [
     {
       "matching_content_path": "third_party/**",
-      "matching_content_path_doc": "Vendored third-party code, refreshed only with cmake/UpdateXterm.cmake.",
+      "matching_content_path_doc": "Vendored third-party code, refreshed only with cmake/UpdateXterm.cmake or tools/assets/update.mjs.",
       "rules": [
         { "name": "Complex Method", "weight": 0.0 },
         { "name": "Bumpy Road Ahead", "weight": 0.0 },
@@ -14,6 +14,7 @@
         { "name": "Brain Method", "weight": 0.0 },
         { "name": "Overall Code Complexity", "weight": 0.0 },
         { "name": "Lines of Code in a Single File", "weight": 0.0 },
+        { "name": "Number of Functions in a Single Module", "weight": 0.0 },
         { "name": "Code Duplication", "weight": 0.0 },
         { "name": "Primitive Obsession", "weight": 0.0 },
         { "name": "String Heavy Function Arguments", "weight": 0.0 },

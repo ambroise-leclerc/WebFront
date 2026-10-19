@@ -48,8 +48,9 @@ int main() {
 
 `src/Terminal.cpp` (target `WebFrontTerminal`) is the complete example.
 
-- **Rendering:** [xterm.js](https://xtermjs.org/) 6.0.0 and its fit addon (MIT; the terminal used by
-  VS Code, Tabby and Hyper), vendored verbatim in `third_party/xterm/` and embedded (about 350 KB).
+- **Rendering:** [xterm.js](https://xtermjs.org/) 6.0.0 and its fit addon 0.11.0 (MIT; the terminal used by
+  VS Code, Tabby and Hyper), vendored verbatim in `third_party/xterm/` and embedded as reproducible gzip (95,272 bytes including word padding).
+  See [embedded asset maintenance](EMBEDDED_ASSETS.md) for pinned sources, licenses and regeneration commands.
   ghostty-web, Ghostty's emulator compiled to WebAssembly with an xterm-compatible API, was
   considered and set aside for now: it is under heavy development and supports Chrome only.
 - **Line editing happens in the browser.** The editor in `terminal.mjs` handles insertion, left and
