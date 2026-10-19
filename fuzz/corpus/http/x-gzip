@@ -1,0 +1,5 @@
+GET /asset.js HTTP/1.1
+Host: localhost
+Accept-Encoding: gzip;q=0
+Accept-Encoding: X-GZIP;q=0.5, *;q=0
+

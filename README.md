@@ -247,6 +247,7 @@ When WebFront is not the top-level project it builds neither its examples nor it
 ## Limitations
 
 - WebFront is an experimental foundation. APIs and the wire format may change.
+- Gzip fallback to identity runs synchronously on the server thread with a configurable 4 MiB default decoded-byte budget, including HEAD. See the [fallback budget](docs/HTTP_ASSETS.md#fallback-budget); decoded-asset caching and byte-wise reading remain follow-ups.
 - Calls are asynchronous. Results cross the bridge as `std::future` (C++ calling JavaScript, `ui.jsFunction<R>(name)`) and Promises (JavaScript calling C++, `webFront.cppFunction(name)`), limited to scalars, strings (up to 65535 bytes each), tuples and numeric typed arrays. Richer objects and a DOM abstraction are out of scope.
 - A configured document root exposes local files for **development only**; it is not a sandbox or a production packaging format.
 - Nothing authenticates the browser: the server binds to loopback by default, but any local process can connect.

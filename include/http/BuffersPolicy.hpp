@@ -26,22 +26,30 @@ concept BuffersPolicyType = requires {
 /// Largest WebSocket message received when a policy has no maxMessageSize.
 inline constexpr size_t defaultMaxMessageSize = 64 * 1024 * 1024;
 
+/// Largest identity response decoded synchronously from a gzip asset by default.
+inline constexpr size_t defaultMaxDecodedAssetSize = 4 * 1024 * 1024;
+
 /// Default buffer sizes as specified in issue #40
 struct DefaultBuffersPolicy {
     static constexpr size_t receptionBufferSize    = 8192;
     static constexpr size_t emissionBufferSize     = 8192;
     static constexpr size_t functionCallBufferSize = 32768;
     static constexpr size_t maxMessageSize         = defaultMaxMessageSize;
+    static constexpr size_t maxDecodedAssetSize    = defaultMaxDecodedAssetSize;
 };
 
 /// Custom policy template for user-defined buffer sizes
-template<size_t ReceptionSize = 8192, size_t EmissionSize = 8192, size_t FunctionCallSize = 32768,
-         size_t MaxMessageSize = defaultMaxMessageSize>
+template <size_t ReceptionSize       = 8192,
+          size_t EmissionSize        = 8192,
+          size_t FunctionCallSize    = 32768,
+          size_t MaxMessageSize      = defaultMaxMessageSize,
+          size_t MaxDecodedAssetSize = defaultMaxDecodedAssetSize>
 struct CustomBuffersPolicy {
     static constexpr size_t receptionBufferSize    = ReceptionSize;
     static constexpr size_t emissionBufferSize     = EmissionSize;
     static constexpr size_t functionCallBufferSize = FunctionCallSize;
     static constexpr size_t maxMessageSize         = MaxMessageSize;
+    static constexpr size_t maxDecodedAssetSize    = MaxDecodedAssetSize;
 };
 
 /// The policy's optional maxMessageSize: a WebSocket closes the connection with
@@ -54,6 +62,17 @@ constexpr size_t maxMessageSize() {
         return Policy::maxMessageSize;
     else
         return defaultMaxMessageSize;
+}
+
+/** @brief Optional gzip fallback budget; legacy policies retain the default. Zero disables nonempty decoded responses. */
+template <BuffersPolicyType Policy>
+constexpr size_t maxDecodedAssetSize() {
+    if constexpr (requires {
+                      { Policy::maxDecodedAssetSize } -> std::convertible_to<size_t>;
+                  })
+        return Policy::maxDecodedAssetSize;
+    else
+        return defaultMaxDecodedAssetSize;
 }
 
 static_assert(BuffersPolicyType<DefaultBuffersPolicy>);
