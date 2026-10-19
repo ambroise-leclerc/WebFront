@@ -24,10 +24,12 @@ SCENARIO("BabelFS provides Babel/standalone library access") {
             THEN("correct data is returned") {
                 REQUIRE(file.has_value());
                 REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 400000> buffer;
+                REQUIRE(file->getEncoding() == "gzip");
+                array<uint8_t, 597000> buffer;
                 auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 398150);
+                REQUIRE(buffer[0] == 0x1f);
+                REQUIRE(buffer[1] == 0x8b);
+                REQUIRE(readSize == 596730);
             }
         }
     }

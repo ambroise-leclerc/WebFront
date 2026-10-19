@@ -1,6 +1,5 @@
 # Auto detect text files and perform LF normalization
 *          text=auto
-
 #
 # The above will handle all files NOT found below
 #
@@ -49,6 +48,28 @@
 *.bat      text eol=crlf
 *.cmd      text eol=crlf
 *.ps1      text eol=crlf
+
+# Embedded headers hold the exact bytes of their text sources. Freshness tests
+# re-read those sources, so Windows checkouts must preserve LF for every asset.
+src/WebFront.js                            text eol=lf
+include/system/WebFrontJsData.hpp           text eol=lf
+src/fallback/index.html                     text eol=lf
+src/fallback/webfront-fallback.mjs          text eol=lf
+include/system/FallbackIndexHtmlData.hpp    text eol=lf
+include/system/FallbackModuleData.hpp       text eol=lf
+src/components/terminal/*                   text eol=lf
+src/components/tools/*                      text eol=lf
+include/system/ToolManagerModuleData.hpp    text eol=lf
+third_party/xterm/*                         text eol=lf
+include/system/TerminalIndexHtmlData.hpp    text eol=lf
+include/system/TerminalModuleData.hpp       text eol=lf
+include/system/XtermModuleData.hpp          text eol=lf
+include/system/XtermCssData.hpp             text eol=lf
+include/system/XtermFitAddonData.hpp        text eol=lf
+
+# The fake npm registry of the browser integration test: its packuments are served byte for byte.
+webtest/registry/*                          text eol=lf
+webtest/registry/tarballs/*                 binary
 
 # Serialisation
 *.json     text
@@ -105,6 +126,8 @@
 *.app   binary
 
 
+
+
 ###############################################################################
 # Set the merge driver for project and solution files
 #
@@ -142,3 +165,7 @@
 .gitattributes export-ignore
 .gitignore     export-ignore
 .gitkeep       export-ignore
+
+
+# Fuzzer seeds retain exact protocol bytes, including HTTP CRLF.
+fuzz/corpus/** binary

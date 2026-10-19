@@ -1,0 +1,65 @@
+﻿// Configure -DWEBFRONT_DEMO_FRONTEND=Native for the platform's embedded web view.
+// Enable WEBFRONT_EMBED_WEBVIEW2 (Windows), WEBFRONT_EMBED_WKWEBVIEW (macOS 13.3+)
+// or WEBFRONT_EMBED_WEBKITGTK (Linux); explicit adapter selections are also supported.
+#include <system/BabelFS.hpp>
+#include <system/IndexFS.hpp>
+#include <system/FileSystem.hpp>
+#include <system/NativeFS.hpp>
+#include <system/ReactFS.hpp>
+#include <WebFront.hpp>
+#include <tooling/Logger.hpp>
+#include <tooling/PathUtils.hpp>
+
+#include "SignalDemo.hpp"
+
+#include <filesystem>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <stdexcept>
+
+using namespace std;
+using namespace webfront;
+
+
+// LCOV_EXCL_START - interactive example; behavior is covered by the browser integration target.
+int main(int argc, char** argv) {
+    using HelloFS     = fs::Multi<fs::NativeDebugFS, fs::IndexFS, fs::ReactFS, fs::BabelFS>;
+#ifndef WEBFRONT_DEMO_FRONTEND
+    #define WEBFRONT_DEMO_FRONTEND webfront::frontend::DefaultBrowserFrontend
+#endif
+    using WebFrontDbg = BasicWFWithFrontend<NetProvider, HelloFS, WEBFRONT_DEMO_FRONTEND>;
+
+    const string httpPort = "9002";
+    const string mainHtml = argc > 1 ? argv[1] : "module-demo.html";
+    auto docRoot  = tooling::findDocRoot(mainHtml);
+
+    cout << "WebFront launched from " << filesystem::current_path().string() << "\n";
+    log::setLogLevel(log::Debug);
+    // clogSink captures nothing; its handle is still removed explicitly, as registrations are not RAII.
+    const auto consoleSink = log::addSinks(log::clogSink);
+    WebFrontDbg webFront(httpPort, docRoot);
+    optional<WebFrontDbg::UI> connectedUI;
+
+    webFront.cppFunction("signal.generate", &demo::generateSignal);
+
+    webFront.cppFunction<void, std::string>("print", [](const std::string& text) {
+        std::cout << text << '\n';
+    });
+    webFront.cppFunction<void>("moduleReady", [&connectedUI] {
+        if (connectedUI)
+            connectedUI->jsFunction("webfrontModule.receiveFromCpp")("Hello from C++ through WebFront");
+    });
+
+    webFront.onUIStarted([&connectedUI](WebFrontDbg::UI ui) {
+        connectedUI.emplace(ui);
+    });
+
+    webFront.openAndRun(mainHtml);
+
+    log::info("Application shutdown complete.");
+    log::removeSinks(consoleSink);
+
+    return 0;
+}
+// LCOV_EXCL_STOP

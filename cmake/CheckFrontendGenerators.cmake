@@ -1,0 +1,26 @@
+# Focused generator coverage: configure only the extension fixture, reusing its parent location.
+cmake_minimum_required(VERSION 3.31)
+if(NOT ROOT)
+    message(FATAL_ERROR "ROOT must point at the WebFront checkout")
+endif()
+include("${ROOT}/cmake/FrontendTestHelpers.cmake")
+set(directory "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/extension")
+foreach(generator Ninja "Ninja Multi-Config" Ninja)
+    file(REMOVE_RECURSE "${directory}")
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env "CMAKE_GENERATOR=${generator}"
+            "${CMAKE_COMMAND}" -S "${ROOT}/test/frontends" -B "${directory}" -DROOT=${ROOT} -DCASE=extension
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "Extension fixture with ${generator} failed: ${output}${error}")
+    endif()
+    file(STRINGS "${directory}/CMakeCache.txt" configured_generator REGEX "^CMAKE_GENERATOR:INTERNAL=")
+    if(NOT configured_generator STREQUAL "CMAKE_GENERATOR:INTERNAL=${generator}")
+        message(FATAL_ERROR "Expected '${generator}', got '${configured_generator}'")
+    endif()
+    webfront_read_frontend_tests("${directory}" tests)
+    string(JSON count LENGTH "${tests}" tests)
+    if(NOT count EQUAL 9)
+        message(FATAL_ERROR "${generator}: expected Jasmine, seven shared lifecycle cases and the engine test, got ${count}")
+    endif()
+endforeach()

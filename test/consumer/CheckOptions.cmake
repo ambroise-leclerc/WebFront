@@ -1,0 +1,6 @@
+include("${OPTIONS_FILE}")
+foreach(option IN LISTS consumerCompileOptions consumerCompileDefinitions consumerLinkOptions)
+    if(option MATCHES "fsanitize|ftrivial-auto-var-init|_GLIBCXX_ASSERTIONS|_LIBCPP_HARDENING_MODE|_MSVC_STL_HARDENING")
+        message(FATAL_ERROR "WebFront imposed an internal test option on its consumer: ${option}")
+    endif()
+endforeach()

@@ -1,12 +1,17 @@
 #pragma once
 
+#include "../ContentPolicy.hpp"
 #include "../system/WindowsCompat.hpp"
 #include "../tooling/Logger.hpp"
+#include "CEFPaths.hpp"
+#include "DefaultBrowser.hpp"
+#include "Url.hpp"
 
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -17,6 +22,7 @@
     #include <fstream>
 #elif __APPLE__
     #include <crt_externs.h>
+    #include <mach-o/dyld.h>
 #endif
 
 namespace webfront::cef {
@@ -24,14 +30,14 @@ namespace webfront::cef {
 // Exception types for CEF initialization
 class CEFInitializationError : public std::runtime_error {
 public:
-    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) {}
+    explicit CEFInitializationError(const std::string& message) : std::runtime_error("CEF initialization failed: " + message) { }
 };
 
 class CEFSubprocessExit : public std::exception {
     int exit_code_;
 
 public:
-    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) {}
+    explicit CEFSubprocessExit(int exit_code) : exit_code_(exit_code) { }
 
     [[nodiscard]] const char* what() const noexcept override {
         return "CEF subprocess should exit";
@@ -46,11 +52,21 @@ public:
 
 #ifdef WEBFRONT_EMBED_CEF
 
+    // CEF defines macros such as NO_UNIQUE_ADDRESS and ALWAYS_INLINE that break stdexec's preprocessor
+    // machinery when it is included afterwards: pull every stdnet and stdexec header WebFront uses in first.
+    #include "../networking/SenderHeaders.hpp"
+
     #include "cef_app.h"
     #include "cef_browser.h"
     #include "cef_browser_process_handler.h"
     #include "cef_client.h"
+    #include "cef_command_handler.h"
     #include "cef_command_line.h"
+    #include "cef_context_menu_handler.h"
+    #include "cef_frame.h"
+    #include "cef_id_mappers.h"
+    #include "cef_load_handler.h"
+    #include "cef_request_handler.h"
     #include "views/cef_browser_view.h"
     #include "views/cef_window.h"
     #include "views/cef_window_delegate.h"
@@ -71,9 +87,7 @@ constexpr const char* kCEFCacheDir         = "cef_cache";
 constexpr const char* kCEFLogFile          = "cef_debug.log";
 constexpr const char* kICUDataFile         = "icudtl.dat";
 constexpr const char* kLocalesDir          = "locales";
-constexpr const char* kFrameworkName       = "Chromium Embedded Framework.framework";
 constexpr const char* kResourcesDir        = "Resources";
-constexpr const char* kExecutableName      = "WebFrontApp";
 }  // namespace
 
 // Helper function to set keychain-related environment variables
@@ -87,14 +101,28 @@ inline void setKeychainEnvironment() {
     #endif
 }
 
+    #ifdef __APPLE__
+// Resolves the actual running executable's path, independent of its target name or working
+// directory. CEF needs this for the browser subprocess and to locate the Frameworks/ directory
+// deployed by CMake in the parent of the executable's directory, independent of the target name.
+inline std::filesystem::path currentExecutablePath() {
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0)
+        throw CEFInitializationError("Unable to resolve the current executable path");
+    return std::filesystem::canonical(buffer);
+}
+    #endif
+
 // Helper function to configure platform-specific paths
 inline void configurePlatformPaths(CefSettings& settings [[maybe_unused]]) {
     #ifdef __APPLE__
     // Set framework and resource paths for macOS
-    std::filesystem::path exe_dir        = std::filesystem::current_path();
-    std::filesystem::path framework_path = exe_dir / "Frameworks" / kFrameworkName;
+    std::filesystem::path exe_path       = currentExecutablePath();
+    std::filesystem::path exe_dir        = exe_path.parent_path();
+    std::filesystem::path framework_path = detail::macOSFrameworkPath(exe_path);
     std::filesystem::path resources_path = framework_path / kResourcesDir;
-    std::filesystem::path exe_path       = exe_dir / "src" / kExecutableName;
     std::filesystem::path cache_path     = exe_dir / kCEFCacheDir;
     std::filesystem::create_directories(cache_path);
 
@@ -213,7 +241,7 @@ inline CefMainArgs makeMainArgs(
 // Throws: CEFInitializationError on initialization failure
 // Throws: CEFSubprocessExit if this is a subprocess (caller should exit with the provided code)
 // Returns: void on successful main process initialization
-void initialize() {
+inline void initialize() {
     if constexpr (!webfrontEmbedCEF) {
         return;
     }
@@ -292,9 +320,127 @@ private:
     #endif
 };
 
-class SimpleCEFClient : public CefClient, public CefDisplayHandler, public CefLifeSpanHandler {
+namespace detail {
+// DevTools must not inherit the application's navigation policy or quit its message loop.
+class DevToolsWindowClient : public CefClient {
+private:
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(DevToolsWindowClient);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+}  // namespace detail
+
+class SimpleCEFClient : public CefClient,
+                        public CefDisplayHandler,
+                        public CefLifeSpanHandler,
+                        public CefLoadHandler,
+                        public CefRequestHandler,
+                        public CefContextMenuHandler,
+                        public CefCommandHandler {
 public:
-    SimpleCEFClient() = default;
+    explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
+        : contentPolicy(std::move(policy)), popupLauncher(launch) { }
+
+    void setContentPolicy(webfront::detail::BoundContentPolicy policy) {
+        contentPolicy = std::move(policy);
+    }
+
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override {
+        return this;
+    }
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+        return this;
+    }
+    CefRefPtr<CefCommandHandler> GetCommandHandler() override {
+        return this;
+    }
+
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {
+        // Frame navigations and subresources remain outside this top-level navigation policy.
+        return frame->IsMain() && !contentPolicy.allowsNavigation(request->GetURL().ToString());
+    }
+
+    bool
+    OnOpenURLFromTab(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString& url, cef_window_open_disposition_t disposition, bool userGesture) override {
+        if (disposition == CEF_WOD_CURRENT_TAB)
+            return !contentPolicy.allowsNavigation(url.ToString());
+        dispatchPopup(url.ToString(), userGesture);
+        return true;
+    }
+
+    bool OnBeforePopup(CefRefPtr<CefBrowser>,
+                       CefRefPtr<CefFrame>,
+                       int,
+                       const CefString& url,
+                       const CefString&,
+                       cef_window_open_disposition_t,
+                       bool userGesture,
+                       const CefPopupFeatures&,
+                       CefWindowInfo&,
+                       CefRefPtr<CefClient>&,
+                       CefBrowserSettings&,
+                       CefRefPtr<CefDictionaryValue>&,
+                       bool*) override {
+        dispatchPopup(url.ToString(), userGesture);
+        return true;
+    }
+
+    void OnBeforeDevToolsPopup(CefRefPtr<CefBrowser>, CefWindowInfo&, CefRefPtr<CefClient>& client, CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*)
+        override {
+        client = new detail::DevToolsWindowClient;
+    }
+
+    bool OnChromeCommand(CefRefPtr<CefBrowser>, int command, cef_window_open_disposition_t) override {
+        if (contentPolicy.options().devToolsEnabled)
+            return false;
+        for (const auto* name : {"IDC_DEV_TOOLS",
+                                 "IDC_DEV_TOOLS_CONSOLE",
+                                 "IDC_DEV_TOOLS_DEVICES",
+                                 "IDC_DEV_TOOLS_INSPECT",
+                                 "IDC_DEV_TOOLS_TOGGLE",
+                                 "IDC_CONTENT_CONTEXT_INSPECTELEMENT",
+                                 "IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS"})
+            if (command == cef_id_for_command_id_name(name))
+                return true;
+        return false;
+    }
+
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefContextMenuParams>, CefRefPtr<CefMenuModel> menu) override {
+        if (!contentPolicy.options().contextMenusEnabled)
+            menu->Clear();
+        else if (!contentPolicy.options().devToolsEnabled) {
+            menu->Remove(cef_id_for_command_id_name("IDC_CONTENT_CONTEXT_INSPECTELEMENT"));
+            menu->Remove(cef_id_for_command_id_name("IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS"));
+        }
+    }
+
+    // Read after the message loop and shutdown: callbacks report failures without throwing
+    // through CEF. Once the first page has loaded, later navigation failures stay in the UI.
+    std::string navigationFailure;
+
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override {
+        return this;
+    }
+
+    void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int) override {
+        // The first completed main-frame load deliberately ends startup error tracking.
+        if (frame->IsMain())
+            loadingInitialPage = false;
+    }
+
+    void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode error, const CefString& errorText, const CefString&) override {
+        // Closing a window or replacing a navigation may abort a request normally.
+        if (!loadingInitialPage || !frame->IsMain() || error == ERR_ABORTED)
+            return;
+        navigationFailure = "CEF initial navigation failed: " + errorText.ToString();
+        browser->GetHost()->CloseBrowser(true);
+    }
+
     virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
         return this;
     }
@@ -302,8 +448,8 @@ public:
         return this;
     }
 
-    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override {}
-    virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override {}
+    virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override { }
+    virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override { }
     virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
         return false;
     }
@@ -314,6 +460,18 @@ public:
     }
 
 private:
+    webfront::detail::BoundContentPolicy contentPolicy;
+    browser::Launcher                    popupLauncher;
+    bool loadingInitialPage = true;
+
+    void dispatchPopup(const std::string& url, bool userGesture) noexcept {
+        try {
+            contentPolicy.handlePopup(url, userGesture, popupLauncher);
+        } catch (const std::exception& error) {
+            log::error("CEF popup launch failed: {}", error.what());
+        }
+    }
+
     #ifdef __clang__
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Wextra-semi"
@@ -378,10 +536,9 @@ private:
     #endif
 };
 
-void open(std::string_view port, std::string_view file) {
-    if constexpr (!webfrontEmbedCEF) {
-        throw std::runtime_error("cef::open() : CEF not available");
-    }
+namespace detail {
+
+inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy, CefRefPtr<SimpleCEFClient> client = nullptr) {
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -409,10 +566,10 @@ void open(std::string_view port, std::string_view file) {
         throw std::runtime_error("CEF initialization failed");
     }
     // Create the browser client
-    CefRefPtr<SimpleCEFClient> client(new SimpleCEFClient);
-
-    // Build the URL
-    std::string url = "http://localhost:" + std::string(port) + "/" + std::string(file);
+    if (!client)
+        client = new SimpleCEFClient(std::move(contentPolicy));
+    else
+        client->setContentPolicy(std::move(contentPolicy));
 
     log::info("Opening URL: {}", url);
 
@@ -434,6 +591,15 @@ void open(std::string_view port, std::string_view file) {
 
     // Shutdown CEF
     CefShutdown();
+    if (!client->navigationFailure.empty())
+        throw std::runtime_error(client->navigationFailure);
+}
+
+}  // namespace detail
+
+inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {}) {
+    detail::openWindow(frontend::detail::applicationUrl(address, port, file),
+                       webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy});
 }
 
 }  // namespace webfront::cef
@@ -443,14 +609,24 @@ namespace webfront::cef {
 // Compile-time constant indicating CEF availability
 static constexpr bool webfrontEmbedCEF{false};
 
-// Stub implementations for when CEF is not available
-void initialize() {
-    // No-op when CEF is not available
+// Stub implementations for when CEF is not available. Selecting CEFFrontend without CEF support
+// must fail clearly and as early as possible (initialize() runs once at BasicWF construction,
+// before open() would otherwise be reached from openAndRun()).
+inline void initialize() {
+    throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                             "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
-void open(std::string_view /*port*/, std::string_view /*file*/) {
-    throw std::runtime_error("cef::open() : CEF not available");
+inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}) {
+    throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
+                             "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
 }  // namespace webfront::cef
 #endif  // WEBFRONT_EMBED_CEF
+
+namespace webfront::cef {
+inline void open(std::string_view port, std::string_view file) {
+    open("127.0.0.1", port, file);
+}
+}  // namespace webfront::cef

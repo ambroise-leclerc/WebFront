@@ -2,42 +2,49 @@
 # WebFrontApp Target Configuration
 # ==============================================================================
 
-find_package(Threads)
-
 # Add CMake modules path
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-# Include CEF support module
-include(CEFSupport)
+# Newcomer examples. Executables land in <build>/src; run them from the build directory.
+#   ./src/HelloWorld       embedded starter page, no assets
+#   ./src/WebFrontGreeter  editable UI (src/greeter) calling a deduced C++ callback
+add_executable(HelloWorld HelloWorld.cpp)
+target_link_libraries(HelloWorld PRIVATE WebFront WebFront_warnings WebFront_options)
 
-# Create main executable
-add_executable(WebFrontApp HelloWorld.cpp)
-
-# Link core libraries
-target_link_libraries(WebFrontApp PRIVATE 
-    WebFront 
-    Threads::Threads
+add_executable(WebFrontGreeter Greeter.cpp)
+target_link_libraries(WebFrontGreeter PRIVATE WebFront WebFront_warnings WebFront_options)
+# Publish the greeter assets to <build>/src/greeter, whatever the build configuration, so the
+# documented relative document root works. The target runs on every build and only touches files
+# that changed, so edits to index.html or greeter.mjs are picked up without relinking the executable.
+add_custom_target(WebFrontGreeterAssets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/greeter" "${CMAKE_CURRENT_BINARY_DIR}/greeter"
+    COMMENT "Copying greeter assets"
+    VERBATIM
 )
+add_dependencies(WebFrontGreeter WebFrontGreeterAssets)
 
-# ==============================================================================
-# CEF Integration
-# ==============================================================================
+# Awaitable browser calls, launched and drained by the application.
+add_executable(WebFrontAwaitBrowser AwaitBrowser.cpp)
+target_link_libraries(WebFrontAwaitBrowser PRIVATE WebFront WebFront_warnings WebFront_options)
 
-# Setup complete CEF integration for WebFrontApp
-# This includes:
-# - CEF compilation configuration and linking
-# - Platform-specific runtime file deployment  
-# - Resource file copying (with Linux ICU fix)
-# - Locale directory setup
-setup_cef_for_target(WebFrontApp)
+# Terminal component demo: a command-line interface to C++ in the browser (embedded xterm.js)
+add_executable(WebFrontTerminal Terminal.cpp)
+target_link_libraries(WebFrontTerminal PRIVATE WebFront WebFront_warnings WebFront_options)
 
-# ==============================================================================
-# Additional Build Rules
-# ==============================================================================
+# wf tool manager demo: install web tools from the npm registry into the working directory
+add_executable(WebFrontTools Tools.cpp)
+target_link_libraries(WebFrontTools PRIVATE WebFront WebFront_warnings WebFront_options)
 
-# TypeScript compilation
-add_custom_command(
-    OUTPUT WebFront.js
-    COMMAND tsc
-)
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+# Native-module and React demo (src/module-demo.html, src/react.html)
+add_executable(WebFrontApp ModuleDemo.cpp)
+target_link_libraries(WebFrontApp PRIVATE WebFront WebFront_warnings WebFront_options)
+
+include(Frontends)
+webfront_select_frontend(WEBFRONT_DEMO_FRONTEND DefaultBrowser "Module demo frontend" ALLOW_NATIVE)
+target_compile_definitions(WebFrontApp PRIVATE WEBFRONT_DEMO_FRONTEND=${WEBFRONT_DEMO_FRONTEND_TYPE})
+
+# Deploy the enabled engines for all examples, including those selecting a frontend in source.
+foreach(target HelloWorld WebFrontGreeter WebFrontApp WebFrontTerminal WebFrontTools WebFrontAwaitBrowser)
+    webfront_setup_frontends_for_target(${target})
+endforeach()

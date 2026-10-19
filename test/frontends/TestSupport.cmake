@@ -1,0 +1,7 @@
+set(test_engine_support_loaded ON)
+function(setup_test_engine target)
+    set_property(TARGET ${target} PROPERTY TEST_ENGINE_CONFIGURED ON)
+endfunction()
+function(test_engine_lifecycle)
+    add_test(NAME EngineLifecycle COMMAND "${CMAKE_COMMAND}" -E true)
+endfunction()

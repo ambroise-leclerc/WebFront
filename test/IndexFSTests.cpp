@@ -16,18 +16,34 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
         using FS = fs::IndexFS;
         WHEN("Requesting index.html") {
             auto indexFile = FS::open("index.html");
-            THEN("A correct HTML5 file with the WebFront.js script inclusion is returned") {
+            THEN("A correct HTML5 file loading WebFront.js and the fallback module is returned") {
                 REQUIRE(indexFile.has_value());
-                array<char, 1024> buffer;
-                auto readSize = indexFile->read(buffer);
 
-                string html{buffer.data(), readSize};
-                if (!indexFile->isEncoded()) {
-                    REQUIRE(html.starts_with("<!DOCTYPE html>"));
+                // The readable source (src/fallback/index.html) is embedded raw, like WebFront.js,
+                // so it is never Brotli-encoded; read it in full rather than assuming it fits a
+                // single fixed-size buffer.
+                REQUIRE_FALSE(indexFile->isEncoded());
+                string html;
+                array<char, 512> buffer;
+                while (auto readSize = indexFile->read(buffer)) html.append(buffer.data(), readSize);
 
-                    smatch match;
-                    REQUIRE(regex_search(html, match, regex("<script.*src=\"WebFront.js\".*>")));
-                }
+                REQUIRE(html.starts_with("<!DOCTYPE html>"));
+                REQUIRE(regex_search(html, regex("<script[^>]*src=\"WebFront.js\"[^>]*>")));
+                REQUIRE(regex_search(html, regex("<script[^>]*src=\"webfront-fallback.mjs\"[^>]*>")));
+            }
+        }
+
+        WHEN("Requesting webfront-fallback.mjs") {
+            auto moduleFile = FS::open("webfront-fallback.mjs");
+            THEN("The fallback module awaiting webFront.ready is returned") {
+                REQUIRE(moduleFile.has_value());
+                REQUIRE_FALSE(moduleFile->isEncoded());
+                REQUIRE(moduleFile->getEncoding().empty());
+
+                string source;
+                array<char, 512> buffer;
+                while (auto readSize = moduleFile->read(buffer)) source.append(buffer.data(), readSize);
+                REQUIRE(source.find("webFront.ready") != string::npos);
             }
         }
 
@@ -60,17 +76,15 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
             THEN("Wbefront.js V0.0.1 content should be returned") {
                 REQUIRE(webfrontJSFile.has_value());
 
-                REQUIRE(webfrontJSFile->isEncoded());
-                REQUIRE(webfrontJSFile->getEncoding() ==
-                        "gzip"); // Only gzip encoding should be used for mandatory file such as WebFront.js since android
-                                 // webviews does not support br encoding
+                // WebFront.js is embedded verbatim rather than pre-compressed: deflate streams are not
+                // reproducible across platforms, so the raw bytes are what the build can verify. Nothing
+                // downstream advertises a Content-Encoding for it (see HTTPServer::handleRequest).
+                REQUIRE_FALSE(webfrontJSFile->isEncoded());
+                REQUIRE(webfrontJSFile->getEncoding().empty());
 
-                array<uint8_t, 10> gzipHeader;
-                webfrontJSFile->read(span(reinterpret_cast<char*>(gzipHeader.data()), gzipHeader.size()));
-
-                REQUIRE(gzipHeader[0] == 0x1f);
-                REQUIRE(gzipHeader[1] == 0x8b);
-                REQUIRE(gzipHeader[2] == 0x08);
+                array<char, 3> sourceHeader{};
+                webfrontJSFile->read(sourceHeader);
+                REQUIRE(sourceHeader == array<char, 3>{'/', '/', '/'});
             }
         }
     }

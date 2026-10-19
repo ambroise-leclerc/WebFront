@@ -1,0 +1,22 @@
+<!doctype html>
+<script src="/WebFront.js"></script>
+<script type="module">
+await webFront.ready;
+const popup = window.open('/policy-escaped.html?popup', '_blank');
+if (popup !== null) {
+    await webFront.cppFunction('policyEscaped')();
+    popup.close();
+    window.close();
+} else {
+    // The lifecycle frontend reports successful native cancellation. An allowed navigation
+    // destroys this document instead and the destination reports policyNavigated.
+    addEventListener('webfront-policy-cancelled', async () => {
+        await webFront.cppFunction('policyCompleted')();
+        window.close();
+    }, { once: true });
+    const target = new URL('/policy-escaped.html?navigation', location.href);
+    target.hostname = 'localhost';
+    // Keep one history entry so WebView2 permits the destination's script closure.
+    location.replace(target.href);
+}
+</script>

@@ -4,7 +4,7 @@ on:
   push:
     branches: [ '**' ]
   pull_request:
-    branches: [ master develop ]
+    branches: [ master, develop ]
 
 env:
   BUILD_TYPE: Release
@@ -13,49 +13,96 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         config:
           - {
               name: "Windows MSVC",
-              os: windows-latest,
+              os: windows-2025,
               compiler: msvc,
               coverage: false
             }
           - {
+              name: "Windows MSVC WebView2",
+              os: windows-2025,
+              compiler: msvc,
+              coverage: false,
+              webview2: true
+            }
+          - {
               name: "Ubuntu GCC with Coverage",
-              os: ubuntu-latest,
+              os: ubuntu-24.04,
               compiler: gcc,
               coverage: true
             }
           - {
               name: "Ubuntu Clang",
-              os: ubuntu-latest,
+              os: ubuntu-24.04,
               compiler: clang,
               coverage: false
             }
           - {
               name: "macOS (Apple Silicon)",
-              os: macos-14,
+              os: macos-26,
               compiler: appleClang,
               coverage: false
             }
     runs-on: ${{ matrix.config.os }}
     name: ${{ matrix.config.name }}
-      
+
     steps:
-      - uses: actions/checkout@v4
-        
-      - name: Install LLVM and Clang
-        uses: KyleMayes/install-llvm-action@v2
+      - uses: actions/checkout@v7
+
+      - name: Initialize MSVC environment
+        if: matrix.config.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
         with:
-          version: "17.0"
+          cmake-version: '4.4.4'
+
+      - name: Install Clang 23
         if: matrix.config.compiler == 'clang'
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 lld-23 lldb-23
+          echo "CC=clang-23" >> $GITHUB_ENV
+          echo "CXX=clang++-23" >> $GITHUB_ENV
 
       - name: Setup GCC
         uses: egor-tensin/setup-gcc@v1.3
         with:
-          version: 13
+          version: 16
         if: matrix.config.compiler == 'gcc'
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+        if: matrix.config.compiler == 'appleClang'
+
+      - name: Report compiler and sender support
+        shell: bash
+        run: |
+          cat > cpp_lib_senders_probe.cpp <<'EOF'
+          #include <version>
+          #ifdef __cpp_lib_senders
+          #pragma message("__cpp_lib_senders is defined")
+          #else
+          #pragma message("__cpp_lib_senders is NOT defined")
+          #endif
+          int main() {}
+          EOF
+          if [ "${{ matrix.config.compiler }}" = "msvc" ]; then
+            cl /nologo /std:c++latest /c cpp_lib_senders_probe.cpp || true
+          else
+            ${CXX:-c++} --version | head -1
+            ${CXX:-c++} -std=c++26 -fsyntax-only cpp_lib_senders_probe.cpp 2>&1 | grep -i "__cpp_lib_senders" || true
+          fi
+          rm -f cpp_lib_senders_probe.cpp
 
       - name: Install Coverage Tools
         if: matrix.config.coverage
@@ -65,29 +112,62 @@ jobs:
         
       - name: Config & Build
         run: |
-          cmake . -B ${{github.workspace}}/build ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }} ${{ github.event_name == 'pull_request' && '-DWEBFRONT_EMBED_CEF=ON' || '' }}
+          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.webview2 && '-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_DEMO_FRONTEND=Native' || '' }} ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
+
+      - name: Ensure WebView2 Evergreen runtime
+        if: matrix.config.webview2
+        shell: pwsh
+        run: |
+          function Get-WebView2Runtime {
+            $runtimeRoots = @("${env:ProgramFiles(x86)}/Microsoft/EdgeWebView/Application", "$env:LOCALAPPDATA/Microsoft/EdgeWebView/Application")
+            $runtimeRoots | Where-Object { Test-Path $_ } | ForEach-Object { Get-ChildItem $_ -Filter msedgewebview2.exe -Recurse }
+          }
+          $runtime = Get-WebView2Runtime
+          if (-not $runtime) {
+            $installer = Join-Path $env:RUNNER_TEMP 'WebView2EvergreenBootstrapper.exe'
+            # Evergreen intentionally follows Microsoft's mutable bootstrapper redirect.
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $installer
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O=Microsoft Corporation(?:,|$)') {
+              throw 'WebView2 bootstrapper must have a valid Microsoft signature'
+            }
+            $install = Start-Process $installer -ArgumentList '/silent', '/install' -Wait -PassThru -WindowStyle Hidden
+            if ($install.ExitCode -ne 0) { throw "WebView2 runtime installation failed: $($install.ExitCode)" }
+            $runtime = Get-WebView2Runtime
+          }
+          if (-not $runtime) { throw 'WebView2 runtime executable not found after provisioning' }
+          foreach ($executable in $runtime) {
+            $version = $executable.VersionInfo.FileVersion
+            if (-not $version) { throw "WebView2 runtime version is missing: $($executable.FullName)" }
+            Write-Host "WebView2 runtime $version at $($executable.FullName)"
+          }
   
       - name: Test
         working-directory: ${{github.workspace}}/build
-        run: ctest --verbose -C ${{env.BUILD_TYPE}}
+        run: ctest --verbose --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}} ${{ matrix.config.webview2 && '-LE web-integration' || '' }}
+
+      - name: Test WebView2 browser lifecycle
+        if: matrix.config.webview2
+        working-directory: ${{github.workspace}}/build
+        run: ctest -L web-integration --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}}
 
       - name: Rerun Failed Tests (if any)
         if: failure()
         working-directory: ${{github.workspace}}/build
-        run: ctest --rerun-failed --output-on-failure -C ${{env.BUILD_TYPE}}
+        run: ctest --rerun-failed --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}}
 
       - name: Collect Coverage
         if: matrix.config.coverage
         working-directory: ${{github.workspace}}/build
         run: |
-          lcov --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/src/*' --output-file coverage.info
           lcov --list coverage.info
 
       - name: Upload Coverage
         if: matrix.config.coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ${{github.workspace}}/build/coverage.info
           fail_ci_if_error: true
@@ -108,7 +188,7 @@ jobs:
           esac
           
           # Set filename
-          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}.json" >> $GITHUB_OUTPUT
+          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}${{ matrix.config.webview2 && '-webview2' || '' }}.json" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Update Gist
@@ -145,7 +225,7 @@ jobs:
 
       - name: Update Badge
         if: always() && github.ref == 'refs/heads/master'
-        uses: schneegans/dynamic-badges-action@v1.6.0
+        uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ env.GIST_ID }}
@@ -154,3 +234,162 @@ jobs:
           message: ${{ job.status }}
           color: ${{ steps.badge.outputs.color }}
 
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+    name: Linux Clang (${{ matrix.sanitizer }})
+    env:
+      CC: clang-23
+      CXX: clang++-23
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - name: Install Clang 23 and sanitizer runtimes
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 libclang-rt-23-dev libc++-23-dev libc++abi-23-dev
+      - name: Restrict address-space randomization for ThreadSanitizer
+        if: matrix.sanitizer == 'thread'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      # libc++ keeps retry-after-exception in call_once usable under TSan.
+      - name: Configure hardened sanitizer tests
+        run: >-
+          cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
+          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON' }}
+      - name: Build
+        run: cmake --build build-sanitizers --parallel 2
+      - name: Run full CEF-off suite
+        run: ctest --test-dir build-sanitizers --output-on-failure --no-tests=error
+      - name: Fuzz decoders (30 seconds each)
+        if: matrix.sanitizer == 'address-undefined'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-sanitizers/fuzz/artifacts
+          for decoder in messages http websocket; do
+            build-sanitizers/fuzz/fuzz_$decoder build-sanitizers/fuzz/corpus/$decoder \
+              -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
+              -artifact_prefix=build-sanitizers/fuzz/artifacts/$decoder-
+          done
+      - name: Upload fuzz findings
+        if: failure() && matrix.sanitizer == 'address-undefined'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: build-sanitizers/fuzz/artifacts/
+          if-no-files-found: ignore
+
+  wkwebview-integration:
+    runs-on: macos-26
+    timeout-minutes: 25
+    name: macOS WKWebView Jasmine and lifecycle
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+      - name: Check WindowServer session
+        run: |
+          launchctl print gui/$(id -u) >/dev/null
+          pgrep -x WindowServer
+      - name: Configure system WebKit frontend
+        run: >-
+          cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+          -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
+          -DWEBFRONT_DEMO_FRONTEND=Native
+      - name: Build
+        run: cmake --build build-wkwebview --parallel 2
+      - name: Test
+        run: ctest --test-dir build-wkwebview --output-on-failure --no-tests=error
+      - name: Retain browser test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wkwebview-test-log
+          path: build-wkwebview/Testing/Temporary/LastTest.log
+
+  web-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+    runs-on: ubuntu-24.04
+    # Clang 19+ expands stdexec attributes that GCC leaves empty, so only Clang catches CEF macro clashes (#243)
+    name: Ubuntu CEF Jasmine integration${{ matrix.compiler == 'clang' && ' (Clang)' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Clang 23
+        if: matrix.compiler == 'clang'
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 lld-23
+          echo "CC=clang-23" >> $GITHUB_ENV
+          echo "CXX=clang++-23" >> $GITHUB_ENV
+
+      - name: Install virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Configure CEF integration build
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
+
+      - name: Build browser test
+        run: cmake --build ${{github.workspace}}/build-cef --target webtest --parallel 1
+
+      - name: Run Jasmine bridge test
+        run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error
+
+  webkitgtk-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    name: Ubuntu WebKitGTK Jasmine and lifecycle
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 16
+      - name: Install WebKitGTK and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb
+          pkg-config --modversion webkitgtk-6.0
+      - name: Configure WebKitGTK
+        run: >-
+          cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON
+          -DWEBFRONT_DEMO_FRONTEND=Native -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+      - name: Build
+        run: cmake --build build-webkitgtk --parallel 2
+      - name: Test
+        env:
+          # Trusted repository fixtures only; restricted runners may lack user namespaces.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: ctest --test-dir build-webkitgtk -LE web-integration --output-on-failure --no-tests=error
+      - name: Require browser coverage
+        env:
+          # Trusted repository fixtures only; restricted runners may lack user namespaces.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error

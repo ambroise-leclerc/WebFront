@@ -2,9 +2,14 @@
 /// @author Ambroise Leclerc
 /// @brief HTTPServer minimal implementation for WebSocket support - RFC1945
 #pragma once
+#include "../ApplicationOrigin.hpp"
+#include "../ContentPolicy.hpp"
 #include "../networking/BasicNetworking.hpp"
-#include "../tooling/HexDump.hpp"
+#include "../networking/Tasks.hpp"
 #include "../system/FileSystem.hpp"
+#include "../Task.hpp"
+#include "../tooling/HexDump.hpp"
+#include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
@@ -15,11 +20,12 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
+#include <list>
 #include <locale>
 #include <memory>
 #include <optional>
 #include <regex>
-#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -93,7 +99,7 @@ struct Request : Headers {
         return Method::Undefined;
     }
 
-    [[nodiscard]] std::string_view getMethodName() const { return methodNames[static_cast<size_t>(method)]; }
+    [[nodiscard]] std::string_view getMethodName() const { return method == Method::Undefined ? "Undefined" : methodNames[static_cast<size_t>(method)]; }
         
     void setMethod(std::string_view text) { method = getMethodFromString(text); }
 
@@ -111,13 +117,24 @@ struct Request : Headers {
 
     bool completed() const { return state == State::completed; }
 
-private: // clang-format off
+private:
+    std::string methodBuffer;
+
+    /** @brief Accumulates a validated HTTP version digit without signed overflow. */
+    static void appendVersionDigit(int& version, char digit) {
+        const auto value = digit - '0';
+        if (version > (std::numeric_limits<int>::max() - value) / 10)
+            throw BadRequestException();
+        version = version * 10 + value;
+    }
+
+    // clang-format off
     enum class State { methodStart, method, URI, versionH, versionT1, versionT2, versionP, versionSlash, versionMajorStart, versionMajor, versionMinorStart,
                  versionMinor, newline1, headerLineStart, headerLws, headerName, spaceBeforeHeaderValue, headerValue, newline2, newline3, completed };
     State state { State::methodStart };    
     bool completeRequest(char input) {
-        auto isChar = [](char c) { return c >= 0; };
-        auto isCtrl = [](char c) { return (c >= 0 && c <= 31) || (c == 127); };
+        auto isChar = [](char c) { return static_cast<unsigned char>(c) <= 127; };
+        auto isCtrl = [](char c) { return static_cast<unsigned char>(c) <= 31 || c == 127; };
         auto isSpecial = [](char c) {   switch (c) {
             case '(': case ')': case '<': case '>': case '@': case ',': case ';': case ':': case '\\': case '"':
             case '/': case '[': case ']': case '?': case '=': case '{': case '}': case ' ': case '\t': return true;
@@ -129,16 +146,15 @@ private: // clang-format off
             if (cond) throw BadRequestException();
         };
 
-        static std::string buffer;
         using enum State;
         switch (state) {
             case methodStart:
                 setState(!isChar(input) || isCtrl(input) || isSpecial(input), method);
-                buffer = input;
+                methodBuffer = input;
                 break;
-            case method: if (input == ' ') { state = URI; setMethod(buffer); }
+            case method: if (input == ' ') { state = URI; setMethod(methodBuffer); }
                               else if (!isChar(input) || isCtrl(input) || isSpecial(input)) { throw BadRequestException(); }
-                              else buffer.push_back(input);
+                              else methodBuffer.push_back(input);
                 break;
             case URI: if (input == ' ') { state = versionH; break; }
                            else if (isCtrl(input)) throw BadRequestException();
@@ -148,14 +164,14 @@ private: // clang-format off
             case versionT2: setState(input != 'T', versionP); break;
             case versionP: setState(input != 'P', versionSlash); break;
             case versionSlash: setState(input != '/', versionMajorStart); httpVersionMajor = 0; httpVersionMinor = 0; break;
-            case versionMajorStart: setState(!isDigit(input), versionMajor); httpVersionMajor = httpVersionMajor * 10 + input - '0'; break;
+            case versionMajorStart: setState(!isDigit(input), versionMajor); appendVersionDigit(httpVersionMajor, input); break;
             case versionMajor: if (input == '.') state = versionMinorStart;
-                                    else if (isDigit(input)) httpVersionMajor = httpVersionMajor * 10 + input - '0';
+                                    else if (isDigit(input)) appendVersionDigit(httpVersionMajor, input);
                                     else throw BadRequestException();
                 break;
-            case versionMinorStart: setState(!isDigit(input), versionMinor); httpVersionMinor = httpVersionMinor * 10 + input - '0'; break;
+            case versionMinorStart: setState(!isDigit(input), versionMinor); appendVersionDigit(httpVersionMinor, input); break;
             case versionMinor: if (input == '\r') state = newline1;
-                                    else if (isDigit(input)) httpVersionMinor = httpVersionMinor * 10 + input - '0';
+                                    else if (isDigit(input)) appendVersionDigit(httpVersionMinor, input);
                                     else throw BadRequestException();
                 break;
             case newline1: setState(input != '\n', headerLineStart); break;
@@ -186,11 +202,12 @@ private: // clang-format off
 
 struct Response : Headers {
     enum StatusCode : uint16_t {
-        switchingProtocols = 101,
-        ok = 200,
-        badRequest = 400,
-        notFound = 404,
-        notImplemented = 501,
+        switchingProtocols    = 101,
+        ok                    = 200,
+        badRequest            = 400,
+        forbidden             = 403,
+        notFound              = 404,
+        notImplemented        = 501,
         variantAlsoNegotiates = 506
     };
     StatusCode statusCode;
@@ -234,6 +251,8 @@ private:
         case switchingProtocols: return "Switching Protocols";
         case ok: return "OK";
         case badRequest: return "Bad Request";
+        case forbidden:
+            return "Forbidden";
         case notFound: return "Not Found";
         case notImplemented: return "Not Implemented";
         case variantAlsoNegotiates: return "Variant Also Negotiates";
@@ -245,7 +264,8 @@ private:
 template<networking::Features Net, fs::Provider FS>
 class RequestHandler {
 public:
-    explicit RequestHandler(std::filesystem::path root) : fs(root) {}
+    explicit RequestHandler(std::filesystem::path root, detail::BoundContentPolicy policy = detail::BoundContentPolicy{})
+        : fs(root), contentPolicy(std::move(policy)) { }
     ~RequestHandler() = default;
     RequestHandler(const RequestHandler&) = default;
     RequestHandler(RequestHandler&&) = default;
@@ -253,47 +273,17 @@ public:
     RequestHandler& operator=(RequestHandler&&) = default;
 
     Response handleRequest(Request request) {
-        auto requestUri = uri::decode(request.uri);
-        log::debug("Request uri - raw:'{}' decoded:'{}'", request.uri, requestUri);
-        if (requestUri.empty() || requestUri[0] != '/' || requestUri.find("..") != std::string::npos)
-            return Response::getStatusResponse(Response::badRequest);
-        auto requestPath = std::filesystem::path(requestUri).relative_path();
-        log::debug("  -> requestPath : {}", requestPath.string());
-        //uri::URI verifUri{requestUri};
-        //log::debug("(URI)   -> Path : {}   Query : {}", verifUri.path, verifUri.query);
-        if (!requestPath.has_filename()) requestPath /= "index.html";
+        auto requestPath = filePath(request.uri);
+        if (!requestPath) return Response::getStatusResponse(Response::badRequest);
 
         Response response;
         switch (request.method) {
-        case Request::Method::Get: {
-            if (request.isUpgradeRequest("websocket")) {
-                auto key = request.getHeaderValue("Sec-WebSocket-Key");
-                if (key) {
-                    response.statusCode = Response::StatusCode::switchingProtocols;
-                    response.headers.emplace_back("Upgrade", "websocket");
-                    response.headers.emplace_back("Connection", "Upgrade");
-                    response.headers.emplace_back("Sec-WebSocket-Accept", websocket::getHashedSecKey(key.value()));
-                    response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
-                    return response;
-                }
-            }
-
-            auto file = fs.open(requestPath);
-            if (!file) return Response::getStatusResponse(Response::notFound);
-            if (file->isEncoded()) {
-                if (!request.headersContain("Accept-Encoding", file->getEncoding())) {
-                    log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
-                    return Response::getStatusResponse(Response::variantAlsoNegotiates);
-                }
-            }
-
-            std::array<char, 512> buffer{0, 0};
-            while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
-            if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
-
-        } break;
+        case Request::Method::Get:
+            if (auto upgrade = webSocketUpgrade(request)) return *upgrade;
+            if (auto error = readFile(request, *requestPath, response)) return *error;
+            break;
         case Request::Method::Head:
-            if (!fs.open(requestPath)) return Response::getStatusResponse(Response::notFound);
+            if (!fs.open(*requestPath)) return Response::getStatusResponse(Response::notFound);
             break;
 
         default: return Response::getStatusResponse(Response::notImplemented);
@@ -301,138 +291,92 @@ public:
 
         response.statusCode = Response::ok;
         response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", MimeType(requestPath.extension().string()).toString());
+        response.headers.emplace_back("Content-Type", MimeType(requestPath->extension().string()).toString());
 
         return response;
     }
 
 private:
+    // The file a request URI names, or nothing when the URI is not a safe absolute path.
+    static std::optional<std::filesystem::path> filePath(const std::string& uri) {
+        // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
+        const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
+        auto       requestUri = uri::decode(rawPath);
+        log::debug("Request uri - raw:'{}' decoded path:'{}'", uri, requestUri);
+        if (!isSafePath(requestUri)) return {};
+        auto requestPath = std::filesystem::path(requestUri).relative_path();
+        log::debug("  -> requestPath : {}", requestPath.string());
+        if (!requestPath.has_filename()) requestPath /= "index.html";
+        return requestPath;
+    }
+
+    static bool isSafePath(std::string_view path) {
+        if (!path.starts_with('/')) return false;
+        return path.find("..") == std::string_view::npos;
+    }
+
+    std::optional<Response> webSocketUpgrade(const Request& request) const {
+        if (!request.isUpgradeRequest("websocket")) return {};
+        const auto origins = request.getHeadersValues("Origin");
+        if (origins.size() > 1 || !contentPolicy.allowsBridge(origins.empty() ? std::nullopt : std::optional<std::string_view>{origins.front()}))
+            return rejectWebSocketOrigin();
+        auto key = request.getHeaderValue("Sec-WebSocket-Key");
+        if (!key) return {};
+        Response response;
+        response.statusCode = Response::StatusCode::switchingProtocols;
+        response.headers.emplace_back("Upgrade", "websocket");
+        response.headers.emplace_back("Connection", "Upgrade");
+        response.headers.emplace_back("Sec-WebSocket-Accept", websocket::getHashedSecKey(key.value()));
+        response.headers.emplace_back("Sec-WebSocket-Protocol", "WebFront_0.1");
+        return response;
+    }
+
+    static Response rejectWebSocketOrigin() {
+        constexpr std::string_view reason = "WebFront: WebSocket Origin rejected by content policy. Check contentPolicy.bridgeAllowedOrigins "
+                                            "and allowMissingOrigin; wildcard binds authorize loopback only.";
+        log::warn("{}", reason);
+        Response response;
+        response.statusCode = Response::forbidden;
+        response.content    = std::string(reason) + "\n";
+        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
+        response.headers.emplace_back("Content-Type", "text/plain; charset=utf-8");
+        return response;
+    }
+
+    // Reads the file into the response content, or returns the error response.
+    std::optional<Response> readFile(const Request& request, const std::filesystem::path& requestPath, Response& response) {
+        auto file = fs.open(requestPath);
+        if (!file) return Response::getStatusResponse(Response::notFound);
+        if (file->isEncoded() && !request.headersContain("Accept-Encoding", file->getEncoding())) {
+            log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
+            return Response::getStatusResponse(Response::variantAlsoNegotiates);
+        }
+
+        std::array<char, 512> buffer{0, 0};
+        while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
+        if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
+        return {};
+    }
+
     FS fs;
+    detail::BoundContentPolicy contentPolicy;
 };
 
-template<typename ConnectionType>
-class Connections {
-public:
-    Connections() = default;
-    Connections(const Connections&) = delete;
-    Connections(Connections&&) = default;
-    Connections& operator=(const Connections&) = delete;
-    Connections& operator=(Connections&&) = default;
-    ~Connections() = default;
-
-    void start(std::shared_ptr<ConnectionType> connection) {
-        log::debug("Start connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.insert(connection);
-        connection->start();
-    }
-
-    void stop(std::shared_ptr<ConnectionType> connection) {
-        log::debug("Stop connection 0x{:016x}", reinterpret_cast<std::uintptr_t>(connection.get()));
-        connections.erase(connection);
-        connection->stop();
-    }
-
-    void stopAll() {
-        for (auto connection : connections) connection->stop();
-        connections.clear();
-    }
-
-private:
-    std::set<std::shared_ptr<ConnectionType>> connections;
-};
-
-enum class Protocol { HTTP, HTTPUpgrading, WebSocket };
-
-template<networking::Features Net, fs::Provider FS>
-class Connection : public std::enable_shared_from_this<Connection<Net, FS>> {
-public:
-    explicit Connection(typename Net::Socket sock, Connections<Connection>& connectionsHandler,
-                        RequestHandler<Net, FS>& handler)
-        : socket(std::move(sock)), connections(connectionsHandler), requestHandler(handler) {
-        log::debug("New connection");
-    }
-    ~Connection() = default;
-    Connection(const Connection&) = delete;
-    Connection(Connection&&) = delete;
-    Connection& operator=(const Connection&) = delete;
-    Connection& operator=(Connection&&) = delete;
-
-    void start() { read(); }
-    void stop() { socket.close(); }
-
-public:
-    std::function<void(typename Net::Socket&&, Protocol)> onUpgrade;
-
-private:
-    typename Net::Socket socket;
-    Connections<Connection<Net, FS>>& connections;
-    RequestHandler<Net, FS>& requestHandler;
-    std::array<char, 8192> buffer;
-    Request request;
-    Response response;
-    Protocol protocol = Protocol::HTTP;
-
-    void read() {
-        auto self(this->shared_from_this());
-        socket.async_read_some(Net::Buffer(buffer), [this, self](std::error_code ec, std::size_t bytesTransferred) {
-            if (!ec) {
-                switch (protocol) {
-                case Protocol::HTTP:
-                    try {
-                        request.parseSomeData(buffer.data(), buffer.data() + bytesTransferred);
-                        if (request.completed()) {
-                            log::info("Received request {} on {}", request.getMethodName(), request.uri);
-                            response = requestHandler.handleRequest(request);
-                            log::info("  responding http {}", static_cast<int>(response.statusCode));
-                            write();
-                            if (response.statusCode == Response::switchingProtocols) protocol = Protocol::HTTPUpgrading;
-                        }
-                        else
-                            read();
-                    }
-                    catch (const BadRequestException&) {
-                        response = Response::getStatusResponse(Response::badRequest);
-                        write();
-                    }
-                    break;
-
-                default: log::warn("Connection is no longer in HTTP protocol. Connection::read() is disabled.");
-                }
-            }
-            else if (ec != Net::Error::OperationAborted)
-                connections.stop(self);
-        });
-    }
-
-    void write() {
-        auto self(this->shared_from_this());
-        Net::AsyncWrite(socket, response.toBuffers<Net>(), [this, self](std::error_code ec, std::size_t /*bytesTransferred*/) {
-            if (protocol == Protocol::HTTPUpgrading) {
-                protocol = Protocol::WebSocket;
-                if (onUpgrade) onUpgrade(std::move(socket), protocol);
-            }
-            else {
-                if (!ec) socket.shutdown(Net::Socket::shutdown_both);
-                if (ec != Net::Error::OperationAborted) connections.stop(self);
-            }
-        });
-    }
-};
-
-template<networking::Features Net, fs::Provider FS>
+template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
 class Server {
 public:
-    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".")
-        : acceptor(ioContext), requestHandler(docRoot) {
-        typename Net::Resolver resolver(ioContext);
-        typename Net::Endpoint endpoint = *resolver.resolve(address, port).begin();
+    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {})
+        : acceptor(ioContext), requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, port), std::move(policy)}) {
+        const auto endpoint = Net::Resolve(address, port);
         acceptor.open(endpoint.protocol());
         acceptor.set_option(typename Net::Acceptor::reuse_address(true));
         acceptor.bind(endpoint);
         acceptor.listen();
-        accept();
+        spawn(acceptConnections());
     }
-    ~Server() = default;
+    ~Server() noexcept {
+        drainUntilJoined();
+    }
     Server(const Server&) = delete;
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
@@ -440,31 +384,91 @@ public:
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
-    
+
+    /// Thread-safe. Cancels the acceptor and the connections, and makes run() return.
     void stop() {
         log::info("Stopping HTTP server...");
-        acceptor.close();
-        connections.stopAll();
+        tasks.requestStop();
         ioContext.stop();
     }
 
-    void onUpgrade(std::function<void(typename Net::Socket&&, Protocol)>&& handler) { upgradeHandler = std::move(handler); }
+    /// Runs the cancelled tasks to completion, so that no connection outlives the objects its handlers use.
+    /// To be called from the thread owning the context, once nothing else runs it.
+    void drain() {
+        tasks.drain(ioContext);
+    }
+
+    /** @brief Destructor-safe join, retaining ownership until every task has finished. */
+    void drainUntilJoined() noexcept {
+        tasks.drainUntilJoined(ioContext);
+    }
+
+    /** @brief Scope shared with upgraded connections; the server must outlive them. */
+    networking::TaskScope& taskScope() noexcept {
+        return tasks;
+    }
+
+    /** @brief Starts an application coroutine on the server context and owns it through shutdown. */
+    TaskHandle startTask(Task task) {
+        TaskHandle handle;
+        // Register cancellation before associating, including a concurrent close.
+        auto registration = std::make_unique<detail::TaskRegistration>(handle, tasks.stopToken());
+        if (!networking::Spawn(tasks, Net::Scheduler(acceptor), detail::ownedTask(std::move(task), std::move(registration))))
+            handle.requestStop();
+        return handle;
+    }
+
+    /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
+    void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) {
+        upgradeHandler = std::move(handler);
+    }
 
 private:
-    typename Net::IoContext ioContext;
-    typename Net::Acceptor acceptor;
-    Connections<Connection<Net, FS>> connections;
+    typename Net::IoContext                     ioContext;
+    typename Net::Acceptor                      acceptor;
+    networking::TaskScope                       tasks;
     RequestHandler<Net, FS> requestHandler;
-    std::function<void(typename Net::Socket socket, Protocol protocol)> upgradeHandler;
+    std::function<void(typename Net::Socket&&)> upgradeHandler;
 
-    void accept() {
-        acceptor.async_accept([this](std::error_code ec, typename Net::Socket socket) {
-            if (!acceptor.is_open()) return;
-            auto newConnection = std::make_shared<Connection<Net, FS>>(std::move(socket), connections, requestHandler);
-            newConnection->onUpgrade = upgradeHandler;
-            if (!ec) connections.start(newConnection);
-            accept();
-        });
+    void spawn(networking::Task task) {
+        networking::Spawn(tasks, Net::Scheduler(acceptor), std::move(task));
+    }
+
+    // A failed accept (an aborted connection, no file descriptor left...) must not end the accepting.
+    networking::Task acceptConnections() {
+        while (!tasks.stopRequested()) {
+            try {
+                spawn(serve(co_await Net::Accept(acceptor)));
+            }
+            catch (const std::system_error& error) {
+                if (error.code() == std::errc::operation_canceled) co_return;
+                log::error("Accept failed: {}", error.what());
+            }
+        }
+    }
+
+    networking::Task serve(typename Net::Socket socket) {
+        Request request;
+        Response response;
+        try {
+            std::array<char, Policy::receptionBufferSize> buffer;
+            while (!request.completed()) {
+                const auto received = co_await Net::Receive(socket, Net::Buffer(buffer));
+                if (received == 0) co_return;  // the client closed the connection
+                request.parseSomeData(buffer.data(), buffer.data() + received);
+            }
+            log::info("Received request {} on {}", request.getMethodName(), request.uri);
+            response = requestHandler.handleRequest(request);
+            log::info("  responding http {}", static_cast<int>(response.statusCode));
+        }
+        catch (const BadRequestException&) {
+            response = Response::getStatusResponse(Response::badRequest);
+        }
+        co_await Net::Send(socket, response.toBuffers<Net>());
+        if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
+            socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
+        else if (upgradeHandler)
+            upgradeHandler(std::move(socket));
     }
 };
 

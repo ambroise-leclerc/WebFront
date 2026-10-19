@@ -3,17 +3,27 @@
 /// @brief Messages exchanged between webfront clients and server
 #pragma once
 
+#include "../http/BuffersPolicy.hpp"
+
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
-
-#include <iostream>
+#include <type_traits>
+#include <vector>
 
 namespace webfront::msg {
+
+using CallId = std::uint16_t;
 
 enum class JSEndian : uint8_t { little = 0, big = 1, mixed = little + big };
 enum class TxtOpcode : uint8_t { debugLog, injectScript };
@@ -22,75 +32,187 @@ enum class Command : uint8_t {
     handshake,
     ack,
     textCommand,
-    callFunction,   // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
-    functionReturn, // 1:Command  1:ParamsCount 2:padding  4:ParamsDataSize
+    callFunction,    // 1:Command  1:ParamsCount 2:CallId  4:ParamsDataSize
+    functionReturn,  // 1:Command  1:ParamsCount 2:CallId  4:ParamsDataSize
 };
 
 enum class CodedType : uint8_t {
     undefined,
-    booleanTrue,  // opcode if boolean is true
-    booleanFalse, // opcode if boolean is false
-    number,       // opcode + 8 bytes IEEE754 floating point number
-    smallString,  // opcode + 1 byte size
-    string,       // opcode + 2 bytes size
-    exception,    // opcode + 2 bytes size
-    smallArrayU8, // opcode + 1 byte size,
-    arrayU8,      // opcode + 4 bytes size,
-    array8,       // opcode + 4 bytes size,
-    arrayU16,     // opcode + 4 bytes size,
-    array16,      // opcode + 4 bytes size,
-    arrayU32,     // opcode + 4 bytes size,
-    array32,      // opcode + 4 bytes size,
-    arrayU64,     // opcode + 4 bytes size,
-    array64,      // opcode + 4 bytes size,
-    arrayFloat,   // opcode + 4 bytes size,
-    arrayDouble,  // opcode + 4 bytes size,
-    tuple,        // opcode + 1 byte for number of parameters which constitute the tuple
+    booleanTrue,   // opcode if boolean is true
+    booleanFalse,  // opcode if boolean is false
+    number,        // opcode + 8 bytes IEEE754 floating point number
+    smallString,   // opcode + 1 byte size
+    string,        // opcode + 2 bytes size
+    exception,     // opcode + 2 bytes size
+    smallArrayU8,  // opcode + 1 byte size,
+    arrayU8,       // opcode + 4 bytes size,
+    array8,        // opcode + 4 bytes size,
+    arrayU16,      // opcode + 4 bytes size,
+    array16,       // opcode + 4 bytes size,
+    arrayU32,      // opcode + 4 bytes size,
+    array32,       // opcode + 4 bytes size,
+    arrayU64,      // opcode + 4 bytes size,
+    array64,       // opcode + 4 bytes size,
+    arrayFloat,    // opcode + 4 bytes size,
+    arrayDouble,   // opcode + 4 bytes size,
+    tuple,         // opcode + 1 byte for number of parameters which constitute the tuple
 };
 
 inline std::string_view toString(CodedType t) {
     switch (t) {
-    case CodedType::booleanTrue: return "boolean (true)";
-    case CodedType::booleanFalse: return "boolean (false)";
-    case CodedType::number: return "number";
-    case CodedType::smallString: return "smallString";
-    case CodedType::string: return "string";
-    case CodedType::exception: return "exception";
-    case CodedType::smallArrayU8: return "smallArrayU8";
-    case CodedType::arrayU8: return "arrayU8";
-    case CodedType::array8: return "array8";
-    case CodedType::arrayU16: return "arrayU16";
-    case CodedType::array16: return "array16";
-    case CodedType::arrayU32: return "arrayU32";
-    case CodedType::array32: return "array32";
-    case CodedType::arrayU64: return "arrayU64";
-    case CodedType::array64: return "array64";
-    case CodedType::arrayFloat: return "arrayFloat";
-    case CodedType::arrayDouble: return "arrayDouble";
-    case CodedType::tuple: return "tuple";
-    default: return "undefined";
+        case CodedType::booleanTrue:
+            return "boolean (true)";
+        case CodedType::booleanFalse:
+            return "boolean (false)";
+        case CodedType::number:
+            return "number";
+        case CodedType::smallString:
+            return "smallString";
+        case CodedType::string:
+            return "string";
+        case CodedType::exception:
+            return "exception";
+        case CodedType::smallArrayU8:
+            return "smallArrayU8";
+        case CodedType::arrayU8:
+            return "arrayU8";
+        case CodedType::array8:
+            return "array8";
+        case CodedType::arrayU16:
+            return "arrayU16";
+        case CodedType::array16:
+            return "array16";
+        case CodedType::arrayU32:
+            return "arrayU32";
+        case CodedType::array32:
+            return "array32";
+        case CodedType::arrayU64:
+            return "arrayU64";
+        case CodedType::array64:
+            return "array64";
+        case CodedType::arrayFloat:
+            return "arrayFloat";
+        case CodedType::arrayDouble:
+            return "arrayDouble";
+        case CodedType::tuple:
+            return "tuple";
+        default:
+            return "undefined";
     }
 }
 
-template<typename _Tp, typename dummy = void>
+template <typename _Tp, typename dummy = void>
 struct is_printable : std::false_type {};
 
-template<typename T>
+template <typename T>
 struct is_printable<T, std::void_t<decltype(std::cout << std::declval<T>())>> : std::true_type {};
 
-template<typename T, typename U>
+template <typename T, typename U>
 inline constexpr bool is_printable_v = is_printable<T, U>::value;
 
-template<typename>
+template <typename>
 struct is_tuple : std::false_type {};
 
-template<typename... T>
+template <typename... T>
 struct is_tuple<std::tuple<T...>> : std::true_type {};
 
-template<typename T>
+template <typename T>
 inline constexpr bool is_tuple_v = is_tuple<T>::value;
 
-template<typename T>
+template <typename T>
+inline constexpr bool is_numeric_array_element_v = std::is_same_v<std::remove_cv_t<T>, std::uint8_t> || std::is_same_v<std::remove_cv_t<T>, std::int8_t>
+                                                   || std::is_same_v<std::remove_cv_t<T>, std::uint16_t> || std::is_same_v<std::remove_cv_t<T>, std::int16_t>
+                                                   || std::is_same_v<std::remove_cv_t<T>, std::uint32_t> || std::is_same_v<std::remove_cv_t<T>, std::int32_t>
+                                                   || std::is_same_v<std::remove_cv_t<T>, std::uint64_t> || std::is_same_v<std::remove_cv_t<T>, std::int64_t>
+                                                   || std::is_same_v<std::remove_cv_t<T>, float> || std::is_same_v<std::remove_cv_t<T>, double>;
+
+template <typename T>
+struct numeric_array_traits {
+    static constexpr bool supported = false;
+};
+
+template <typename T, typename Allocator>
+struct numeric_array_traits<std::vector<T, Allocator>> {
+    static constexpr bool supported = is_numeric_array_element_v<T>;
+    static constexpr auto extent    = std::dynamic_extent;
+    using element_type              = T;
+};
+
+template <typename T, std::size_t Size>
+struct numeric_array_traits<std::array<T, Size>> {
+    static constexpr bool supported = is_numeric_array_element_v<T>;
+    static constexpr auto extent    = Size;
+    using element_type              = T;
+};
+
+template <typename T, std::size_t Extent>
+struct numeric_array_traits<std::span<T, Extent>> {
+    static constexpr bool supported = is_numeric_array_element_v<T>;
+    static constexpr auto extent    = Extent;
+    using element_type              = T;
+};
+
+template <typename T>
+inline constexpr bool is_numeric_array_v = numeric_array_traits<std::remove_cvref_t<T>>::supported;
+
+template <typename T>
+using numeric_array_element_t = typename numeric_array_traits<std::remove_cvref_t<T>>::element_type;
+
+template <typename T>
+struct is_vector : std::false_type {};
+
+template <typename T, typename Allocator>
+struct is_vector<std::vector<T, Allocator>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_vector_v = is_vector<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+struct is_std_array : std::false_type {};
+
+template <typename T, std::size_t Size>
+struct is_std_array<std::array<T, Size>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
+
+/// The numeric array opcodes form one contiguous run, so membership is a range test rather than a
+/// case per element type. The asserts below pin the two ends against an accidental reordering.
+static_assert(static_cast<uint8_t>(CodedType::arrayU8) == static_cast<uint8_t>(CodedType::smallArrayU8) + 1);
+static_assert(static_cast<uint8_t>(CodedType::arrayDouble) + 1 == static_cast<uint8_t>(CodedType::tuple));
+
+constexpr bool isNumericArrayCode(CodedType type) {
+    return type >= CodedType::smallArrayU8 && type <= CodedType::arrayDouble;
+}
+
+template <typename T>
+consteval CodedType numericArrayCode() {
+    using Element = std::remove_cv_t<T>;
+    if constexpr (std::is_same_v<Element, std::uint8_t>)
+        return CodedType::arrayU8;
+    else if constexpr (std::is_same_v<Element, std::int8_t>)
+        return CodedType::array8;
+    else if constexpr (std::is_same_v<Element, std::uint16_t>)
+        return CodedType::arrayU16;
+    else if constexpr (std::is_same_v<Element, std::int16_t>)
+        return CodedType::array16;
+    else if constexpr (std::is_same_v<Element, std::uint32_t>)
+        return CodedType::arrayU32;
+    else if constexpr (std::is_same_v<Element, std::int32_t>)
+        return CodedType::array32;
+    else if constexpr (std::is_same_v<Element, std::uint64_t>)
+        return CodedType::arrayU64;
+    else if constexpr (std::is_same_v<Element, std::int64_t>)
+        return CodedType::array64;
+    else if constexpr (std::is_same_v<Element, float>)
+        return CodedType::arrayFloat;
+    else if constexpr (std::is_same_v<Element, double>)
+        return CodedType::arrayDouble;
+    else
+        static_assert(!sizeof(T), "Unsupported WebFront numeric array element type");
+}
+
+template <typename T>
 class MessageBase {
 public:
     [[nodiscard]] std::span<const std::byte> header() const {
@@ -99,12 +221,15 @@ public:
     [[nodiscard]] std::span<const std::byte> payload() const {
         return {header().data() + sizeof(typename T::Header), static_cast<const T*>(this)->getPayloadSize()};
     }
-    [[nodiscard]] size_t getPayloadSize() const { return 0; };
+    [[nodiscard]] size_t getPayloadSize() const {
+        return 0;
+    };
 
     static const T* castFromRawData(std::span<const std::byte> data) {
-        if (data.size() < sizeof(typename T::Header)) throw std::runtime_error("Not enough data to form a message Header");
+        if (data.size() < sizeof(typename T::Header))
+            throw std::runtime_error("Not enough data to form a message Header");
         auto message = reinterpret_cast<const T*>(data.data());
-        if ((data.size() + message->getPayloadSize()) < sizeof(typename T::Header))
+        if (message->getPayloadSize() > data.size() - sizeof(typename T::Header))
             throw std::runtime_error("Not enough data to form a complete message");
         return message;
     }
@@ -113,21 +238,23 @@ public:
 // First message sent by JS client to WebFront
 class Handshake : public MessageBase<Handshake> {
     struct Header {
-        Command command = Command::handshake;
-        JSEndian endian = {};
+        Command  command = Command::handshake;
+        JSEndian endian  = {};
     } head;
     static_assert(sizeof(Header) == 2, "Handshake header has to be 2 bytes long");
     friend class MessageBase<Handshake>;
 
 public:
-    [[nodiscard]] JSEndian getEndian() const { return head.endian; }
+    [[nodiscard]] JSEndian getEndian() const {
+        return head.endian;
+    }
 };
 
 // Message sent by WebFront to acknoledge a Handshake message
 class Ack : public MessageBase<Ack> {
     struct Header {
-        Command command = Command::ack;
-        JSEndian endian = std::endian::native == std::endian::little ? JSEndian::little : JSEndian::big;
+        Command  command = Command::ack;
+        JSEndian endian  = std::endian::native == std::endian::little ? JSEndian::little : JSEndian::big;
     } head;
     static_assert(sizeof(Header) == 2, "Ack header has to be 2 bytes long");
     friend class MessageBase<Ack>;
@@ -136,9 +263,9 @@ class Ack : public MessageBase<Ack> {
 /// Commands with a text payload
 class TextCommand : public MessageBase<TextCommand> {
     struct Header {
-        Command command = Command::textCommand;
+        Command   command = Command::textCommand;
         TxtOpcode opcode;
-        uint8_t lengthHi, lengthLo; // Payload length = (256 * lengthHi) + lengthLo
+        uint8_t   lengthHi, lengthLo;  // Payload length = (256 * lengthHi) + lengthLo
     } head;
     static_assert(sizeof(Header) == 4, "TextCommand header has to be 4 bytes long");
 
@@ -147,208 +274,388 @@ class TextCommand : public MessageBase<TextCommand> {
 
 public:
     TextCommand(TxtOpcode opcode, std::string_view text)
-        : head{.opcode = opcode,
-               .lengthHi = static_cast<uint8_t>(text.size() >> 8),
-               .lengthLo = static_cast<uint8_t>(text.size())},
+        : head{.opcode = opcode, .lengthHi = static_cast<uint8_t>(text.size() >> 8), .lengthLo = static_cast<uint8_t>(text.size())},
           payloadSpan{reinterpret_cast<const std::byte*>(text.data()), text.size()} {}
 
-    [[nodiscard]] std::span<const std::byte> payload() const { return payloadSpan; }
-    [[nodiscard]] size_t getPayloadSize() const { return static_cast<uint16_t>(256 * head.lengthHi + head.lengthLo); }
+    [[nodiscard]] std::span<const std::byte> payload() const {
+        return payloadSpan;
+    }
+    [[nodiscard]] size_t getPayloadSize() const {
+        return static_cast<uint16_t>(256 * head.lengthHi + head.lengthLo);
+    }
 };
 
-/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
-class FunctionCall : public MessageBase<FunctionCall> {
-    struct Header {
-        Command command = Command::callFunction;
-        uint8_t parametersCount = 0; // parameter 0 is the function name so parametersCount is always at least 1
-        std::array<uint8_t, 2> padding{};
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionCall header has to be 8 bytes long");
+/// Shared header layout for function call/return messages
+template <Command Cmd>
+struct FunctionCallHeader {
+    Command                command         = Cmd;
+    uint8_t                parametersCount = 0;  // parameter 0 is the function name so parametersCount is always at least 1
+    CallId                 callId{};
+    uint32_t               parametersDataSize = 0;
+};
+static_assert(sizeof(FunctionCallHeader<Command::callFunction>) == 8, "FunctionCall header has to be 8 bytes long");
 
-    std::array<std::byte, 1024> buffer; // When composing a msg, buffer doesn't represent the payload but some bufferized data
-    size_t encodeBufferIndex = 0;
-    friend class MessageBase<FunctionCall>;
+/// Shared encode/decode logic for FunctionCall and FunctionReturn
+template <typename Derived, Command Cmd, http::BuffersPolicyType Policy>
+class FunctionCallBase : public MessageBase<Derived> {
+public:
+    using Header = FunctionCallHeader<Cmd>;
 
-    template<typename T>
-    constexpr auto typeName() {
-#if defined(_MSC_VER)
-        std::string_view tName = __FUNCSIG__, prefix = "auto __cdecl JSFunction::typeName<", suffix = ">(void)";
-#elif __clang__
-        std::string_view tName = __PRETTY_FUNCTION__, prefix = "auto webfront::JSFunction::typeName() [T = ", suffix = "]";
-#elif defined(__GNUC__)
-        std::string_view tName = __PRETTY_FUNCTION__,
-                         prefix = "constexpr auto webfront::JSFunction::typeName() [with T = ", suffix = "]";
-#endif
-        tName.remove_prefix(prefix.size());
-        tName.remove_suffix(suffix.size());
-        return tName;
+protected:
+    Header                                                head{};
+    std::array<std::byte, Policy::functionCallBufferSize> buffer{};
+    size_t                                                encodeBufferIndex = 0;
+    friend class MessageBase<Derived>;
+
+    template <typename SizeType, typename WebSocketFrame>
+    void encodeTypeHeader(msg::CodedType type, SizeType size, WebSocketFrame& frame) {
+        if (encodeBufferIndex + 1 + sizeof(size) > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        frame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
+        std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
+        encodeBufferIndex += sizeof(size);
+        incrementPayloadSize(1 + sizeof(size));
+    }
+
+    /// Strings carry a 16-bit length on the wire.
+    static constexpr size_t maxStringBytes = std::numeric_limits<std::uint16_t>::max();
+
+    template <typename WebSocketFrame>
+    void encodeString(const char* str, size_t size, WebSocketFrame& frame) {
+        using namespace std;
+        if (size > maxStringBytes)
+            throw std::length_error("WebFront strings cannot exceed 65535 bytes");
+        if (size < 256)
+            encodeTypeHeader(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
+        else
+            encodeTypeHeader(msg::CodedType::string, static_cast<uint16_t>(size), frame);
+        frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
+        incrementPayloadSize(size);
+        std::cout << "-> encoded to string of size " << size << " in a span.\n";
+    }
+
+    template <typename WebSocketFrame>
+    void encodeBool(bool value, WebSocketFrame& frame) {
+        using namespace std;
+        if (encodeBufferIndex + 1 > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
+        incrementPayloadSize(1);
+        std::cout << "-> encoded to bool of size 1 in a span.";
+    }
+
+    template <typename WebSocketFrame>
+    void encodeNumber(double number, WebSocketFrame& frame) {
+        using namespace std;
+        if (encodeBufferIndex + 1 + sizeof(number) > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
+        buffer[encodeBufferIndex++] = static_cast<std::byte>(msg::CodedType::number);
+        copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
+        encodeBufferIndex += sizeof(number);
+        incrementPayloadSize(1 + sizeof(number));
+        std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";
+    }
+
+    template <typename WebSocketFrame>
+    void encodeException(const std::exception& e, WebSocketFrame& frame) {
+        using namespace std;
+        std::cout << "Exception : " << e.what() << '\n';
+        const auto text = fitStringLength(e.what());
+        encodeTypeHeader(msg::CodedType::exception, static_cast<uint16_t>(text.size()), frame);
+        frame.addBuffer(span(reinterpret_cast<const std::byte*>(text.data()), text.size()));
+        incrementPayloadSize(text.size());
+    }
+
+    /// An error message must still reach the other side, so an overlong one is cut to the wire limit
+    /// before the first UTF-8 character that would not fit whole.
+    static std::string_view fitStringLength(std::string_view text) {
+        if (text.size() <= maxStringBytes)
+            return text;
+        size_t cut = maxStringBytes;
+        while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
+            --cut;
+        return text.substr(0, cut);
+    }
+
+    template <typename Array, typename WebSocketFrame>
+    void encodeNumericArray(const Array& value, WebSocketFrame& frame) {
+        using Element           = std::remove_cv_t<numeric_array_element_t<Array>>;
+        const auto elementCount = value.size();
+        if (elementCount > std::numeric_limits<std::uint32_t>::max())
+            throw std::length_error("WebFront arrays cannot exceed 4294967295 elements");
+        if (elementCount > std::numeric_limits<std::size_t>::max() / sizeof(Element))
+            throw std::length_error("WebFront array byte size overflow");
+
+        if constexpr (std::is_same_v<Element, std::uint8_t>) {
+            constexpr auto extent = numeric_array_traits<std::remove_cvref_t<Array>>::extent;
+            if constexpr (extent == std::dynamic_extent) {
+                if (elementCount < 256)
+                    encodeTypeHeader(CodedType::smallArrayU8, static_cast<std::uint8_t>(elementCount), frame);
+                else
+                    encodeTypeHeader(CodedType::arrayU8, static_cast<std::uint32_t>(elementCount), frame);
+            } else if constexpr (extent < 256)
+                encodeTypeHeader(CodedType::smallArrayU8, static_cast<std::uint8_t>(elementCount), frame);
+            else
+                encodeTypeHeader(CodedType::arrayU8, static_cast<std::uint32_t>(elementCount), frame);
+        } else
+            encodeTypeHeader(numericArrayCode<Element>(), static_cast<std::uint32_t>(elementCount), frame);
+
+        const auto byteCount = elementCount * sizeof(Element);
+        frame.addBuffer(std::span(reinterpret_cast<const std::byte*>(value.data()), byteCount));
+        incrementPayloadSize(byteCount);
     }
 
 public:
-    void setParametersCount(uint8_t parametersCount) { head.parametersCount = parametersCount; }
-    void setPayloadSize(uint32_t size) { head.parametersDataSize = size; }
-    [[nodiscard]] uint8_t getParametersCount() const { return head.parametersCount; }
-    [[nodiscard]] size_t getPayloadSize() const { return head.parametersDataSize; }
+    void reset() {
+        head.parametersCount    = 0;
+        head.callId             = 0;
+        head.parametersDataSize = 0;
+        encodeBufferIndex       = 0;
+    }
+    void setParametersCount(uint8_t parametersCount) {
+        head.parametersCount = parametersCount;
+    }
+    void setCallId(CallId callId) {
+        head.callId = callId;
+    }
+    void setPayloadSize(uint32_t size) {
+        head.parametersDataSize = size;
+    }
+    [[nodiscard]] uint8_t getParametersCount() const {
+        return head.parametersCount;
+    }
+    [[nodiscard]] CallId getCallId() const {
+        return head.callId;
+    }
+    [[nodiscard]] size_t getPayloadSize() const {
+        return head.parametersDataSize;
+    }
     void incrementPayloadSize(auto value) {
         setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value));
     }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
+        if (getParametersCount() == 0)
+            throw std::runtime_error("Function call has no function name");
         std::string functionName;
-        auto data = payload();
+        auto        data = this->payload();
         decodeParameter(functionName, data);
         return {functionName, data};
     }
 
-    template<typename T, typename WebSocketFrame>
+    template <typename T, typename WebSocketFrame>
     void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
         using ParamType = remove_cvref_t<T>;
-        setParametersCount(getParametersCount() + 1);
-
-        if constexpr (is_printable<T>::value) {
-            std::cout << "Param: " << typeName<T>() << " -> " << typeName<ParamType>() << " : " << t << "\n";
-        }
-
-        [[maybe_unused]] auto encodeType = [&, this](msg::CodedType type, auto size, WebSocketFrame& wsFrame) {
-            wsFrame.addBuffer(std::span(&buffer[encodeBufferIndex], 1 + sizeof(size)));
-            buffer[encodeBufferIndex++] = static_cast<std::byte>(type);
-            std::copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
-            encodeBufferIndex += sizeof(size);
-            incrementPayloadSize(1 + sizeof(size));
-        };
-
-        [[maybe_unused]] auto encodeString = [&](const char* str, size_t size) constexpr {
-            if (size < 256)
-                encodeType(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
-            else
-                encodeType(msg::CodedType::string, static_cast<uint16_t>(size), frame);
-            frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
-            incrementPayloadSize(size);
-
-            std::cout << "-> encoded to string of size " << size << " in a span.\n";
-        };
+        // Counted once encoded, so a parameter that fails to encode is not counted. A tuple is one
+        // parameter: its elements, encoded recursively, must not inflate the top-level count.
+        const auto parametersCountBefore = getParametersCount();
 
         if constexpr (is_tuple_v<ParamType>) {
             uint8_t nbParams = static_cast<uint8_t>(tuple_size<ParamType>::value);
-            encodeType(msg::CodedType::tuple, nbParams, frame);
-            std::apply([&](auto&... tupleArgs) { ((encodeParameter(tupleArgs, frame)), ...); }, t);
-        }
-        else if constexpr (is_same_v<ParamType, bool>) {
-            frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
-            buffer[encodeBufferIndex++] = static_cast<byte>(t ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
-            incrementPayloadSize(1);
-            std::cout << "-> encoded to bool of size " << 1 << " in a span.";
-        }
-        else if constexpr (is_arithmetic_v<ParamType>) {
-            double number = t;
-            frame.addBuffer(span(&buffer[encodeBufferIndex], 1 + sizeof(number)));
-            buffer[encodeBufferIndex++] = static_cast<byte>(msg::CodedType::number);
-            copy_n(reinterpret_cast<const byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
-            encodeBufferIndex += sizeof(number);
-            incrementPayloadSize(1 + sizeof(number));
-            std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";
-        }
-
+            encodeTypeHeader(msg::CodedType::tuple, nbParams, frame);
+            std::apply(
+                [&](auto&... tupleArgs) {
+                    ((encodeParameter(tupleArgs, frame)), ...);
+                },
+                t);
+        } else if constexpr (is_same_v<ParamType, bool>)
+            encodeBool(t, frame);
+        else if constexpr (is_arithmetic_v<ParamType>)
+            encodeNumber(static_cast<double>(t), frame);
+        else if constexpr (is_numeric_array_v<ParamType>)
+            encodeNumericArray(t, frame);
         else if constexpr (is_array_v<ParamType>) {
             using ElementType = remove_all_extents_t<ParamType>;
-            //   cout << "Array of " << typeName<ElementType>() << "\n";
-            //   cout << typeName<ParamType>() << " is bounded : " << is_bounded_array_v<ParamType> << "\n";
-            if constexpr (is_same_v<ElementType, char>) {
-                if constexpr (is_bounded_array_v<ParamType>)
-                    encodeString(t, extent_v<ParamType> - 1);
-                else
-                    encodeString(t, char_traits<char>::length(t));
-            }
+            static_assert(is_same_v<ElementType, char>, "Arrays are not supported by JSFunction");
+            if constexpr (is_bounded_array_v<ParamType>)
+                encodeString(t, extent_v<ParamType> - 1, frame);
             else
-                static_assert(is_same_v<ElementType, char>, "Arrays are not supported by JSFunction");
-        }
-        else if constexpr (is_same_v<ParamType, const char*>)
-            encodeString(t, char_traits<char>::length(t));
-
+                encodeString(t, char_traits<char>::length(t), frame);
+        } else if constexpr (is_same_v<ParamType, const char*>)
+            encodeString(t, char_traits<char>::length(t), frame);
         else if constexpr (is_same_v<ParamType, string> or is_same_v<ParamType, string_view>)
-            encodeString(t.data(), t.size());
-
+            encodeString(t.data(), t.size(), frame);
         else if constexpr (is_pointer_v<ParamType>)
             static_assert(!is_pointer_v<ParamType>, "Pointers cannot be used by JSFunction");
-
-        else if constexpr (is_base_of_v<std::exception, ParamType>) {
-            std::cout << "Exception : " << t.what() << '\n';
-            auto textSize = char_traits<char>::length(t.what());
-            encodeType(msg::CodedType::exception, static_cast<uint16_t>(textSize), frame);
-            frame.addBuffer(span(reinterpret_cast<const std::byte*>(t.what()), textSize));
-            incrementPayloadSize(textSize);
-        }
+        else if constexpr (is_base_of_v<std::exception, ParamType>)
+            encodeException(t, frame);
+        setParametersCount(static_cast<uint8_t>(parametersCountBefore + 1));
 
         std::cout << "bufferIndex = " << encodeBufferIndex << " ,payloadSize = " << getPayloadSize() << "\n";
     }
 
-    template<typename T>
+    template <typename T>
     static void decodeParameter(T& param, std::span<const std::byte>& data) {
-        using namespace std;
-        cout << "decodeParameter with data size " << data.size() << " bytes\n";
-        if (data.size() == 0) throw runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
-        auto codedType = static_cast<CodedType>(data[0]);
-        switch (codedType) {
-        case CodedType::smallString:
-            if constexpr (is_same_v<T, string>) {
-                if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                auto size = static_cast<size_t>(data[1]);
-                if (data.size() < 2u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                param = string(reinterpret_cast<const char*>(&data[2]), size);
-                data = data.subspan(2 + size);
-            }
-            break;
-        case CodedType::string:
-        case CodedType::exception:
-            if constexpr (is_same_v<T, string>) {
-                if (data.size() < 1u) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                uint16_t size;
-                copy_n(&data[1], 2, reinterpret_cast<byte*>(&size));
-                if (data.size() < 3u + size) throw runtime_error("Erroneous data feeded to msg::FunctionCall::decodeParameter");
-                param = string(reinterpret_cast<const char*>(&data[3]), size);
-                data = data.subspan(3 + size);
-            }
-            break;
-        case CodedType::number:
-            if constexpr (is_arithmetic_v<T>) {
-                double value;
-                if (data.size() < 1u + sizeof(value))
-                    throw runtime_error("Erroneous 'number' data feeded to msg::FunctionCall::decodeParameter");
-                copy_n(&data[1], sizeof(value), reinterpret_cast<byte*>(&value));
-                param = static_cast<T>(value);
-                data = data.subspan(1 + sizeof(value));
-            }
-            break;
-        case CodedType::tuple:
-            if constexpr (is_tuple_v<T>) {
-                auto tupleSize = static_cast<size_t>(data[1]);
-                if (tuple_size_v<T> != tupleSize)
-                    throw runtime_error("Parameter is a "s + to_string(tuple_size_v<T>) +
-                                        " elements tuple but decoded tuple only has " + to_string(tupleSize) + " elements.");
-                cout << "tuple expected\n";
-                data = data.subspan(2);
-                std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
-            }
-            else
-                throw runtime_error("Wrong parameter type : std::tuple expected");
-            break;
+        if (data.empty())
+            throw std::runtime_error("Not enough data for msg::FunctionCall::decodeParameter");
+        const auto type = static_cast<CodedType>(data[0]);
+        if (type == CodedType::booleanTrue || type == CodedType::booleanFalse) return decodeBoolean(param, data);
+        if (type == CodedType::smallString) return decodeSmallString(param, data);
+        if (type == CodedType::string || type == CodedType::exception) return decodeLongString(param, data);
+        if (type == CodedType::number) return decodeNumber(param, data);
+        if (isNumericArrayCode(type)) return decodeArray(param, data);
+        if (type == CodedType::tuple) return decodeTuple(param, data);
+        throw std::runtime_error("Unsupported coded parameter type");
+    }
 
-        default: param = {};
-        }
+private:
+    /// Each decodeXxx helper consumes the bytes it decoded from 'data', so a type mismatch has to throw
+    /// rather than return: leaving 'data' unconsumed would silently desynchronise every later parameter.
+    template <typename T>
+    static void decodeBoolean(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, bool>) {
+            param = static_cast<CodedType>(data[0]) == CodedType::booleanTrue;
+            data  = data.subspan(1);
+        } else
+            throw std::runtime_error("Wrong parameter type: bool expected");
+    }
+
+    template <typename T>
+    static void decodeSmallString(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (data.size() < 2u)
+                throw std::runtime_error("Truncated smallString header");
+            const auto size = static_cast<size_t>(data[1]);
+            if (data.size() < 2u + size)
+                throw std::runtime_error("Truncated smallString payload");
+            param = std::string(reinterpret_cast<const char*>(data.data() + 2), size);
+            data  = data.subspan(2 + size);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+    template <typename T>
+    static void decodeLongString(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (data.size() < 3u)
+                throw std::runtime_error("Truncated string header");
+            uint16_t size;
+            std::copy_n(&data[1], sizeof(size), reinterpret_cast<std::byte*>(&size));
+            if (data.size() < 3u + size)
+                throw std::runtime_error("Truncated string payload");
+            param = std::string(reinterpret_cast<const char*>(data.data() + 3), size);
+            data  = data.subspan(3 + size);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+    /** @brief Rejects wire numbers that cannot be converted to the requested integer type. */
+    template <typename T>
+    static void validateIntegerRange(double value) {
+        if (!std::isfinite(value))
+            throw std::runtime_error("Number is outside the integer result range");
+        // The upper power-of-two bound is exclusive: double cannot represent
+        // INT64_MAX/UINT64_MAX exactly. Compare after truncation, as the cast does.
+        const auto truncated = std::trunc(value);
+        const auto upper     = std::ldexp(1.0, std::numeric_limits<T>::digits);
+        const auto lower     = std::is_signed_v<T> ? -upper : 0.0;
+        if (truncated < lower || truncated >= upper)
+            throw std::runtime_error("Number is outside the integer result range");
+    }
+
+    template <typename T>
+    static void decodeNumber(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_arithmetic_v<T>) {
+            double value;
+            if (data.size() < 1u + sizeof(value))
+                throw std::runtime_error("Truncated 'number' payload");
+            std::copy_n(&data[1], sizeof(value), reinterpret_cast<std::byte*>(&value));
+            if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>)
+                validateIntegerRange<T>(value);
+            param = static_cast<T>(value);
+            data  = data.subspan(1 + sizeof(value));
+        } else
+            throw std::runtime_error("Wrong parameter type: arithmetic type expected");
+    }
+
+    template <typename T>
+    static void decodeArray(T& param, std::span<const std::byte>& data) {
+        if constexpr (is_numeric_array_v<T> && (is_vector_v<T> || is_std_array_v<T>))
+            decodeNumericArray(param, data);
+        else
+            throw std::runtime_error("Wrong parameter type: owning numeric array expected");
+    }
+
+    template <typename T>
+    static void decodeTuple(T& param, std::span<const std::byte>& data) {
+        if constexpr (is_tuple_v<T>) {
+            if (data.size() < 2u)
+                throw std::runtime_error("Truncated tuple header");
+            const auto tupleSize = static_cast<size_t>(data[1]);
+            if (std::tuple_size_v<T> != tupleSize)
+                throw std::runtime_error("Parameter is a " + std::to_string(std::tuple_size_v<T>)
+                                         + " elements tuple but decoded tuple only has " + std::to_string(tupleSize) + " elements.");
+            data = data.subspan(2);
+            std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
+        } else
+            throw std::runtime_error("Wrong parameter type : std::tuple expected");
+    }
+
+    /// Wire layout of a typed array: a smallArrayU8 carries a 1-byte count, every other code a 4-byte one.
+    struct NumericArrayLayout {
+        std::size_t   headerSize;
+        std::uint32_t elementCount;
+    };
+
+    /// Validates the header against the element type Array holds and reports where its payload starts.
+    template <typename Array>
+    static NumericArrayLayout readNumericArrayHeader(std::span<const std::byte> data) {
+        using Element         = std::remove_cv_t<numeric_array_element_t<Array>>;
+        const auto type       = static_cast<CodedType>(data.front());
+        const bool smallUint8 = type == CodedType::smallArrayU8;
+        const bool matches    = smallUint8 ? std::is_same_v<Element, std::uint8_t> : type == numericArrayCode<Element>();
+        if (!matches)
+            throw std::runtime_error("Typed array element type does not match its wire type");
+
+        const std::size_t headerSize = smallUint8 ? 2 : 5;
+        if (data.size() < headerSize)
+            throw std::runtime_error("Truncated typed array header");
+
+        std::uint32_t elementCount{};
+        if (smallUint8)
+            elementCount = static_cast<std::uint8_t>(data[1]);
+        else
+            std::memcpy(&elementCount, data.data() + 1, sizeof(elementCount));
+        return {headerSize, elementCount};
+    }
+
+    template <typename Array>
+    static void decodeNumericArray(Array& param, std::span<const std::byte>& data) {
+        using Element = std::remove_cv_t<numeric_array_element_t<Array>>;
+        const auto [headerSize, elementCount] = readNumericArrayHeader<Array>(data);
+
+        if (elementCount > std::numeric_limits<std::size_t>::max() / sizeof(Element))
+            throw std::runtime_error("Typed array byte size overflow");
+        const auto byteCount = static_cast<std::size_t>(elementCount) * sizeof(Element);
+        if (data.size() - headerSize < byteCount)
+            throw std::runtime_error("Truncated typed array payload");
+
+        if constexpr (is_vector_v<Array>)
+            param.resize(elementCount);
+        else if (param.size() != elementCount)
+            throw std::runtime_error("Fixed-size array length does not match typed array payload");
+
+        if (byteCount != 0)
+            std::memcpy(param.data(), data.data() + headerSize, byteCount);
+        data = data.subspan(headerSize + byteCount);
     }
 };
 
-/// Encodes FunctionCall return values (or exceptions)
-class FunctionReturn : public FunctionCall {
-    struct Header {
-        Command command = Command::functionReturn;
-        uint8_t parametersCount = 0;
-        std::array<uint8_t, 2> padding{};
-        uint32_t parametersDataSize = 0;
-    } head;
-    static_assert(sizeof(Header) == 8, "FunctionReturn header has to be 8 bytes long");
-    friend class MessageBase<FunctionReturn>;
+/// Encodes a list of parameters : parameter 0 is the function name. Sent either by WebFront or by the JS Client
+template <http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+class FunctionCall : public FunctionCallBase<FunctionCall<Policy>, Command::callFunction, Policy> {
+    friend class MessageBase<FunctionCall<Policy>>;
+    friend class FunctionCallBase<FunctionCall<Policy>, Command::callFunction, Policy>;
 };
 
-} // namespace webfront::msg
+/// Encodes FunctionCall return values (or exceptions)
+template <http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+class FunctionReturn : public FunctionCallBase<FunctionReturn<Policy>, Command::functionReturn, Policy> {
+    friend class MessageBase<FunctionReturn<Policy>>;
+    friend class FunctionCallBase<FunctionReturn<Policy>, Command::functionReturn, Policy>;
+};
+
+}  // namespace webfront::msg

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cctype>
 #include <concepts>
 #include <span>
 #include <string>
@@ -19,16 +20,27 @@
 namespace webfront {
 namespace uri {
 
+namespace detail {
+inline void appendPercentEncodedByte(std::string& encoded, unsigned char byte) {
+    static constexpr auto digits = std::string_view("0123456789ABCDEF");
+
+    encoded += '%';
+    encoded += digits[byte >> 4];
+    encoded += digits[byte & 0x0F];
+}
+}  // namespace detail
+
+// Percent-encodes every byte except the RFC 3986 unreserved characters. Bytes are handled as
+// unsigned, so a non-ASCII byte (e.g. of UTF-8 text) is escaped like any other.
 [[nodiscard]] inline std::string encode(std::string_view uri) {
-    std::string encoded;
-    static std::array digits{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-    for (auto c : uri) {
-        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+    static constexpr auto unreserved = std::string_view("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~");
+    std::string           encoded;
+    for (const auto c : uri) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (unreserved.contains(c))
             encoded += c;
         else {
-            encoded += "%";
-            encoded += digits[static_cast<size_t>(c >> 4)];
-            encoded += digits[static_cast<size_t>(c % 16)];
+            detail::appendPercentEncodedByte(encoded, byte);
         }
     }
     return encoded;
@@ -40,7 +52,8 @@ namespace uri {
     for (std::size_t index = 0; index < uri.size(); ++index) {
         switch (uri[index]) {
         case '%':
-            if (index + 3 <= uri.size() && std::isxdigit(uri[index + 1]) && std::isxdigit(uri[index + 2])) {
+            if (index + 3 <= uri.size() && std::isxdigit(static_cast<unsigned char>(uri[index + 1]))
+                && std::isxdigit(static_cast<unsigned char>(uri[index + 2]))) {
                 auto hexToValue = [](char c) -> uint8_t {
                     if (c >= '0' && c <= '9') return uint8_t(c - '0');
                     if (c >= 'A' && c <= 'F') return uint8_t(c - 'A' + 10);

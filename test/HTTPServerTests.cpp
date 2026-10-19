@@ -2,10 +2,18 @@
 #include <networking/NetworkingMock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
+#include <system/DefaultFS.hpp>
 
+#include <algorithm>
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace webfront;
 using namespace webfront::http;
@@ -182,7 +190,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/chat");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem<>> handler{"."};
+            RequestHandler<Net, MockFileSystem<>> handler{".", detail::BoundContentPolicy{"http://example.com"}};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Switching Protocols' http response") {
@@ -280,6 +288,179 @@ SCENARIO("RequestHandler on a HTTP GET") {
                 REQUIRE(response.getHeaderValue("Content-Encoding") == "br");
                 REQUIRE(response.getHeaderValue("Content-Type") == "text/plain");
                 REQUIRE(response.getHeaderValue("Content-Length") == "0");
+            }
+        }
+    }
+
+}
+
+namespace {
+
+// Accepts one connection which asks for a WebSocket upgrade; the end of the response write is held.
+// The first accept fails if failFirstAccept is set, and the accepts after the connection are cancelled.
+struct UpgradingNet : networking::NetworkingMock {
+    static inline int  accepts           = 0;
+    static inline bool failFirstAccept   = false;
+    static inline webfront::testing::ManualSender::Completion heldSend;
+
+    static void reset(bool failFirst) {
+        accepts         = 0;
+        failFirstAccept = failFirst;
+        heldSend        = {};
+    }
+
+    static auto Accept(Acceptor&) {
+        return networking::ex::then(networking::ex::just(), []() -> Socket {
+            const int number = ++accepts;
+            if (failFirstAccept && number == 1) throw std::system_error(make_error_code(errc::connection_aborted));
+            if (number > (failFirstAccept ? 2 : 1)) throw std::system_error(make_error_code(errc::operation_canceled));
+            return Socket{};
+        });
+    }
+
+    static auto Receive(Socket&, MutableBuffer buffer) {
+        return networking::ex::then(networking::ex::just(), [buffer] {
+            constexpr string_view request{"GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"};
+            copy(request.begin(), request.end(), static_cast<char*>(buffer.data()));
+            return request.size();
+        });
+    }
+
+    static webfront::testing::ManualSender Send(Socket&, const auto&) {
+        return webfront::testing::ManualSender([](webfront::testing::ManualSender::Completion completion) { heldSend = std::move(completion); });
+    }
+};
+
+}  // namespace
+
+SCENARIO("A stopped server hands no connection over") {
+    GIVEN("A connection asking for an upgrade, whose response write is still in progress") {
+        int upgrades = 0;
+        UpgradingNet::reset(false);
+        {
+            http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
+            server.onUpgrade([&upgrades](UpgradingNet::Socket&&) { ++upgrades; });
+            REQUIRE(UpgradingNet::heldSend.complete);
+
+            WHEN("the server is stopped before the response is written") {
+                server.stop();
+                UpgradingNet::heldSend.complete({}, 0);
+
+                THEN("the connection is closed instead of being upgraded") { REQUIRE(upgrades == 0); }
+            }
+        }
+    }
+}
+
+SCENARIO("A failed accept does not stop the server from accepting") {
+    GIVEN("A first accept which fails, then a connection") {
+        UpgradingNet::reset(true);
+        http::Server<UpgradingNet, fs::DefaultFS> server("127.0.0.1", "0");
+
+        THEN("the connection is served") { REQUIRE(UpgradingNet::heldSend.complete); }
+    }
+}
+
+// Serves "index.html", "app.js" and "a?b.txt", and records every path it is asked to open.
+struct RecordingFS {
+    static inline vector<string> opened;
+
+    explicit RecordingFS(filesystem::path) {}
+
+    static optional<fs::File> open(filesystem::path file) {
+        opened.push_back(file.generic_string());
+        static constexpr array<string_view, 3> names{"index.html", "app.js", "a?b.txt"};
+        if (ranges::find(names, file.generic_string()) == names.end())
+            return {};
+        return fs::File{ifstream{}};
+    }
+};
+
+SCENARIO("RequestHandler ignores the query string of a request") {
+    RecordingFS::opened.clear();
+    RequestHandler<Net, RecordingFS> handler{"."};
+    const auto get = [&](string uri, Request::Method method = Request::Method::Get) {
+        Request request;
+        request.method = method;
+        request.uri    = std::move(uri);
+        return handler.handleRequest(request).statusCode;
+    };
+
+    GIVEN("A GET request with a query") {
+        THEN("The file is looked up without it") {
+            REQUIRE(get("/app.js?v=2&debug=1") == Response::ok);
+            REQUIRE(RecordingFS::opened == vector<string>{"app.js"});
+        }
+    }
+    GIVEN("A query on a file that does not exist") {
+        THEN("The request fails with not found") {
+            REQUIRE(get("/missing.js?v=2") == Response::notFound);
+            REQUIRE(RecordingFS::opened == vector<string>{"missing.js"});
+        }
+    }
+    GIVEN("A query on the root") {
+        THEN("The default page is served") {
+            REQUIRE(get("/?x=1") == Response::ok);
+            REQUIRE(RecordingFS::opened == vector<string>{"index.html"});
+        }
+    }
+    GIVEN("A HEAD request with a query") {
+        THEN("The file is found") {
+            REQUIRE(get("/app.js?v=2", Request::Method::Head) == Response::ok);
+        }
+    }
+    GIVEN("A percent-encoded question mark") {
+        THEN("It is part of the file name, not a query") {
+            REQUIRE(get("/a%3Fb.txt") == Response::ok);
+            REQUIRE(RecordingFS::opened == vector<string>{"a?b.txt"});
+        }
+    }
+    GIVEN("Encoded dots in the path, or a question mark in the query") {
+        THEN("The '..' check applies to the decoded path only") {
+            REQUIRE(get("/%2E%2E/secret.txt") == Response::badRequest);
+            REQUIRE(get("/app.js?path=../x") == Response::ok);
+        }
+    }
+}
+
+SCENARIO("HTTP version digits cannot overflow their integer fields") {
+    for (const std::string version : {"99999999999999999999.1", "1.99999999999999999999"}) {
+        const auto input = "GET / HTTP/" + version + "\r\n\r\n";
+        Request    request;
+        REQUIRE_THROWS_AS(request.parseSomeData(input.begin(), input.end()), BadRequestException);
+    }
+}
+
+SCENARIO("Unknown HTTP methods have a safe display name") {
+    const std::string input = "CUSTOM / HTTP/1.1\r\n\r\n";
+    Request           request;
+    REQUIRE(request.parseSomeData(input.begin(), input.end()));
+    REQUIRE(request.getMethodName() == "Undefined");
+}
+
+SCENARIO("HTTP requests keep method parsing state across interleaved receives") {
+    GIVEN("two connections whose method names arrive in separate reads") {
+        Request           first;
+        Request           second;
+        const std::string firstStart  = "G";
+        const std::string secondStart = "PO";
+        REQUIRE_FALSE(first.parseSomeData(firstStart.begin(), firstStart.end()));
+        REQUIRE_FALSE(second.parseSomeData(secondStart.begin(), secondStart.end()));
+
+        WHEN("the first request completes before the second") {
+            const std::string firstRest  = "ET /first HTTP/1.1\r\n\r\n";
+            const std::string secondRest = "ST /second HTTP/1.1\r\n\r\n";
+            REQUIRE(first.parseSomeData(firstRest.begin(), firstRest.end()));
+            REQUIRE(second.parseSomeData(secondRest.begin(), secondRest.end()));
+
+            THEN("the first request retains its method and URI") {
+                CHECK(first.method == Request::Method::Get);
+                CHECK(first.uri == "/first");
+            }
+            AND_THEN("the second request retains its method and URI") {
+                CHECK(second.method == Request::Method::Post);
+                CHECK(second.uri == "/second");
             }
         }
     }
