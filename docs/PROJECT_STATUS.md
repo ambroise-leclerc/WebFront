@@ -11,6 +11,8 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
 
 ## Concurrent spawn and shutdown (#273, 2026-10-19)
 
+Fixed on `develop` by merged [PR #275](https://github.com/ambroise-leclerc/WebFront/pull/275).
+
 `TaskScope::drain()` closes spawn admission and waits for callers already starting
 senders before checking whether the context is empty. This fixes the race where
 an associated task had not yet started or queued work, so a valid concurrent
@@ -45,10 +47,12 @@ shutdown exceptions directly, rather than masking them with `std::terminate`.
 - CI adds a dedicated `macos-26` job checking the WindowServer/login session before building
   and running the suite with timeouts. Native Intel/macOS 13.3 runtime execution is not locally
   verified. Linux CEF/Xvfb and Windows WebView2 verification run in their existing CI jobs.
-  An intermittent application-task spawn/shutdown abort is independently reproduced on `develop`
-  without WKWebView and tracked in [#273](https://github.com/ambroise-leclerc/WebFront/issues/273).
+  The application-task spawn/shutdown abort reproduced without WKWebView in
+  [#273](https://github.com/ambroise-leclerc/WebFront/issues/273) is fixed by [PR #275](https://github.com/ambroise-leclerc/WebFront/pull/275).
 
 ## Optional WebKitGTK frontend (#259, 2026-10-19)
+
+Merged into `develop` in [PR #275](https://github.com/ambroise-leclerc/WebFront/pull/275).
 
 `WEBFRONT_EMBED_WEBKITGTK=ON` enables `frontend::WebKitGTKFrontend` on Linux through
 system WebKitGTK 6.0 (GTK 4), discovered by pkg-config. It follows the embedded-window

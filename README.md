@@ -130,6 +130,11 @@ The application code and interface assets stay the same whichever frontend you s
 | Embedded WKWebView window | macOS 13.3+ | Enable Cocoa/WebKit support; the engine ships with macOS |
 | Embedded WebKitGTK window | Linux | Install WebKitGTK 6.0 development packages and enable the option |
 | Native web view alias (opt-in) | Windows, macOS, Linux | Enable the platform adapter above; select `NativeWebViewFrontend` |
+| Embedded WebKitGTK window | Linux | Install WebKitGTK 6.0 (GTK 4) development packages and enable the option |
+
+WebView2 uses Chromium; WKWebView and WebKitGTK use WebKit. Rendering can differ between
+platforms. Choose CEF when you need the same engine across desktop platforms. Each embedded
+frontend is opt-in; `webfront::WebFront` keeps the system browser as its default.
 
 Construct the application and call `show()` on the main thread for embedded frontends. Their `open()`
 blocks until window closure; `show()` then stops and joins the server. A `keepServerRunning` frontend
@@ -159,7 +164,13 @@ Selecting `CEFFrontend` in a build without CEF fails with a clear error. An embe
 
 ### Embedded window with WebKitGTK (Linux, opt-in)
 
-Install `libwebkitgtk-6.0-dev`, configure with `-DWEBFRONT_EMBED_WEBKITGTK=ON`, then select:
+On supported Ubuntu/Debian systems, install the development package and pkg-config:
+
+```bash
+sudo apt install libwebkitgtk-6.0-dev pkg-config
+```
+
+Configure with `-DWEBFRONT_EMBED_WEBKITGTK=ON`, then select:
 
 ```cpp
 using App = webfront::WebFrontWithFrontend<webfront::frontend::WebKitGTKFrontend>;
@@ -168,9 +179,22 @@ app.show();
 ```
 
 Construct and open on the process main thread with a working X11 or Wayland display.
-The window uses the system WebKitGTK 6.0 runtime and returns when closed, including
+The window uses the system WebKitGTK 6.0 / GTK 4 runtime and returns when closed, including
 pages that never connect to the bridge. GTK headers do not propagate through
-`WebFront.hpp`. See [WebKitGTK setup, profiles and tests](docs/WEBKITGTK.md).
+`WebFront.hpp`. Each executable has persistent data/cache directories under the XDG roots,
+restricted to `0700`; processes launched from the same executable share that profile.
+Automated coverage uses X11/Xvfb; native Wayland and WSLg still need desktop qualification.
+See [WebKitGTK setup, profiles and tests](docs/WEBKITGTK.md) for other distributions and runtime requirements.
+
+To run the React demo in this window from the repository root:
+
+```bash
+cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON \
+  -DWEBFRONT_DEMO_FRONTEND=WebKitGTK
+cmake --build build-webkitgtk --target WebFrontApp --parallel
+./build-webkitgtk/src/WebFrontApp react.html
+```
 
 ### Embedded window with WebView2 (Windows, opt-in)
 
@@ -303,6 +327,22 @@ navigation allow-list. It runs with the same selected
 frontend as Jasmine; every case has a timeout and the `web-integration` label. See
 [frontend lifecycle coverage](docs/FRONTENDS.md#lifecycle-tests) for details.
 
+On Linux, WebKitGTK runs the same Jasmine and shared lifecycle suites plus adapter-specific cases.
+Install the WebKitGTK development package, pkg-config and Xvfb, then configure explicitly:
+
+```bash
+sudo apt install libwebkitgtk-6.0-dev pkg-config xvfb
+cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON \
+  -DWEBFRONT_DEMO_FRONTEND=WebKitGTK -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+cmake --build build-webkitgtk --parallel
+ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error
+```
+
+CTest invokes Xvfb and gives each WebKitGTK test private XDG data/cache paths. The Ubuntu CI
+lane runs these tests with timeouts. See [WebKitGTK verification notes](docs/WEBKITGTK.md)
+for display and container setup.
+
 On Windows, the same Jasmine and lifecycle suites, plus WebView2-specific cases, run in WebView2 (Evergreen runtime required):
 
 ```powershell
@@ -331,7 +371,7 @@ cmake --build build-webview2 --config Release --target WebFrontApp
 ./build-webview2/src/Release/WebFrontApp.exe react.html
 ```
 
-This is how the screenshot was captured: the real application in its WebView2 window, including the Windows title bar and window controls. [CEF](#embedded-window-with-cef-opt-in) is the other embedded option; select `-DWEBFRONT_DEMO_FRONTEND=CEF` with CEF enabled. In the default build, launch `./src/WebFrontApp react.html` from the build directory to use the system browser instead.
+This is how the screenshot was captured: the real application in its WebView2 window, including the Windows title bar and window controls. The same React page also runs in [CEF](#embedded-window-with-cef-opt-in), [WKWebView](#embedded-window-with-wkwebview-macos-opt-in) and [WebKitGTK](#embedded-window-with-webkitgtk-linux-opt-in). Enable the chosen adapter and set `WEBFRONT_DEMO_FRONTEND` to `CEF`, `WKWebView` or `WebKitGTK`. In the default build, launch `./src/WebFrontApp react.html` from the build directory to use the system browser instead.
 
 ## Native-module demo
 
@@ -378,7 +418,14 @@ int main() {
 }
 ```
 
-This is the compiled example [AwaitBrowser.cpp](src/AwaitBrowser.cpp); run `./src/WebFrontAwaitBrowser` from the build directory and open the browser console. `ui.spawn(task)` is also available. Both spawn methods accept calls from any thread while the application lives; coroutine bodies run on the server thread. A call rejected during shutdown returns an already stopped handle. Keep the returned handle to cancel one task with `handle.requestStop()`; discarding the handle keeps the task running. Catch browser errors inside the coroutine when recovery is needed; unhandled errors are logged. Do not block the server thread with lengthy work. See [execution and lifetime rules](docs/ASYNC_EXECUTION.md).
+This is the compiled example [AwaitBrowser.cpp](src/AwaitBrowser.cpp); run `./src/WebFrontAwaitBrowser` from the build directory and open the browser console. `ui.spawn(task)` is also available. Both spawn methods accept calls from any thread while the application lives; coroutine bodies run on the server thread. A call rejected during shutdown returns an already stopped handle.
+
+`app.shutdown()` waits for already admitted calls to finish starting their tasks before draining owned work.
+Call it outside server callbacks, after external callers of `run()`/`runOne()` have returned.
+A task that ignores cancellation and waits for external completion can still cause explicit shutdown
+to report a stalled join; destruction waits for that completion.
+
+Keep the returned handle to cancel one task with `handle.requestStop()`; discarding the handle keeps the task running. Catch browser errors inside the coroutine when recovery is needed; unhandled errors are logged. Do not block the server thread with lengthy work. See [execution and lifetime rules](docs/ASYNC_EXECUTION.md).
 
 ## Advanced: frontend aliases
 
@@ -388,6 +435,7 @@ using EmbeddedFront = webfront::WebFrontWithFrontend<webfront::frontend::CEFFron
 using WindowsFront = webfront::WebFrontWithFrontend<webfront::frontend::WebView2Frontend>;
 using MacFront = webfront::WebFrontWithFrontend<webfront::frontend::WKWebViewFrontend>;
 using NativeFront = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
+using LinuxFront = webfront::WebFrontWithFrontend<webfront::frontend::WebKitGTKFrontend>;
 ```
 
 `NativeWebViewFrontend` is a pure alias: `WebView2Frontend` on Windows, `WKWebViewFrontend`
