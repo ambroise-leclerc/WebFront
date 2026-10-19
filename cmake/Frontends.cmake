@@ -267,20 +267,41 @@ endfunction()
 
 # Declares the cache variable <var> (default <default>), restricts it to the registered frontends and
 # with REQUIRE_AVAILABLE rejects a "strict" frontend whose availability option is OFF. Sets <var>_TYPE in the caller to the C++
-# type name, e.g. webfront::frontend::CEFFrontend.
+# type name, e.g. webfront::frontend::CEFFrontend. ALLOW_NATIVE adds the explicit platform alias.
 function(webfront_select_frontend var default description)
-    cmake_parse_arguments(ARG "EMBEDDED_ONLY;REQUIRE_AVAILABLE" "" "" ${ARGN})
+    cmake_parse_arguments(ARG "EMBEDDED_ONLY;REQUIRE_AVAILABLE;ALLOW_NATIVE" "" "" ${ARGN})
     set(scope "")
     if(ARG_EMBEDDED_ONLY)
         set(scope EMBEDDED_ONLY)
     endif()
     webfront_frontend_names(allowed ${scope})
+    if(ARG_ALLOW_NATIVE)
+        list(APPEND allowed Native)
+    endif()
     list(JOIN allowed ", " allowed_text)
     set(${var} "${default}" CACHE STRING "${description}: ${allowed_text}")
     set_property(CACHE ${var} PROPERTY STRINGS ${allowed})
     set(selected "${${var}}")
     if(NOT selected IN_LIST allowed)
         message(FATAL_ERROR "${var} must be one of: ${allowed_text} (got '${selected}')")
+    endif()
+    # Native is an explicit demo alias, never an engine registration or a default candidate.
+    # Keep the underlying adapter's runtime diagnostic when its option is disabled.
+    if(selected STREQUAL "Native")
+        if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+            set(native_option WEBFRONT_EMBED_WEBVIEW2)
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            set(native_option WEBFRONT_EMBED_WKWEBVIEW)
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            set(native_option WEBFRONT_EMBED_WEBKITGTK)
+        else()
+            message(FATAL_ERROR "${var}=Native supports only Windows, Darwin and Linux (got '${CMAKE_SYSTEM_NAME}')")
+        endif()
+        if(ARG_REQUIRE_AVAILABLE AND NOT ${native_option})
+            message(FATAL_ERROR "${var}=Native requires ${native_option}=ON")
+        endif()
+        set(${var}_TYPE "webfront::frontend::NativeWebViewFrontend" PARENT_SCOPE)
+        return()
     endif()
     # Enabled engines have already been platform-checked by webfront_declare_frontend_options().
     # An unavailable engine may still be selected for its runtime diagnostic (including CEF-off

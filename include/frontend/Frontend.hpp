@@ -4,6 +4,7 @@
 #include "Action.hpp"
 #include "CEF.hpp"
 #include "DefaultBrowser.hpp"
+#include "NativeWebView.hpp"
 #include "WebView2.hpp"
 #include "WKWebView.hpp"
 #include "WebKitGTK.hpp"

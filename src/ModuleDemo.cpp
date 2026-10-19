@@ -1,5 +1,6 @@
-﻿// On macOS 13.3+, configure -DWEBFRONT_EMBED_WKWEBVIEW=ON
-// -DWEBFRONT_DEMO_FRONTEND=WKWebView for an embedded system WebKit window.
+﻿// Configure -DWEBFRONT_DEMO_FRONTEND=Native for the platform's embedded web view.
+// Enable WEBFRONT_EMBED_WEBVIEW2 (Windows), WEBFRONT_EMBED_WKWEBVIEW (macOS 13.3+)
+// or WEBFRONT_EMBED_WEBKITGTK (Linux); explicit adapter selections are also supported.
 #include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
 #include <system/FileSystem.hpp>

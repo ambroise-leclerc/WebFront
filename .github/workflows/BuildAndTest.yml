@@ -112,7 +112,7 @@ jobs:
         
       - name: Config & Build
         run: |
-          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.webview2 && '-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_DEMO_FRONTEND=WebView2' || '' }} ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
+          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.webview2 && '-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_DEMO_FRONTEND=Native' || '' }} ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
           cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
 
       - name: Ensure WebView2 Evergreen runtime
@@ -312,7 +312,7 @@ jobs:
           cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release
           -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
           -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
-          -DWEBFRONT_DEMO_FRONTEND=WKWebView
+          -DWEBFRONT_DEMO_FRONTEND=Native
       - name: Build
         run: cmake --build build-wkwebview --parallel 2
       - name: Test
@@ -380,7 +380,7 @@ jobs:
         run: >-
           cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON
-          -DWEBFRONT_DEMO_FRONTEND=WebKitGTK -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+          -DWEBFRONT_DEMO_FRONTEND=Native -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
       - name: Build
         run: cmake --build build-webkitgtk --parallel 2
       - name: Test
