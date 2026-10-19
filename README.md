@@ -127,6 +127,7 @@ The application code and interface assets stay the same whichever frontend you s
 | System browser (default) | Windows, Linux, macOS | An installed browser; no embedded engine download |
 | Embedded CEF window | Windows, Linux, macOS | Enable CEF at configuration time; a large download |
 | Embedded WebView2 window | Windows | Enable the SDK and install the Evergreen Runtime |
+| Embedded WKWebView window | macOS 13.3+ | Enable Cocoa/WebKit support; the engine ships with macOS |
 
 Construct the application and call `show()` on the main thread for embedded frontends. Their `open()`
 blocks until window closure; `show()` then stops and joins the server. A `keepServerRunning` frontend
@@ -170,6 +171,22 @@ The separately installed **Microsoft Edge WebView2 Evergreen Runtime** is requir
 
 This frontend applies the [shared content policy](docs/CONTENT_POLICY.md); DevTools and context menus remain available by default. See the [WebView2 frontend notes](docs/WEBVIEW2.md) for runtime distribution, configurable startup deadlines and profiles, DPI and the navigation policy.
 
+### Embedded window with WKWebView (macOS, opt-in)
+
+On macOS 13.3 or newer, configure with `-DWEBFRONT_EMBED_WKWEBVIEW=ON` and select:
+
+```cpp
+using App = webfront::WebFrontWithFrontend<webfront::frontend::WKWebViewFrontend>;
+App app;
+app.show(); // returns after the window closes and the server stops
+```
+
+The system supplies WebKit; there is no engine download or runtime installation. Construct and
+open on the main thread. Each opening uses a non-persistent website data store. Quit and
+`window.close()` return control to C++. The module demo selects this adapter with
+`-DWEBFRONT_DEMO_FRONTEND=WKWebView`. See [WKWebView notes](docs/WKWEBVIEW.md) for lifecycle,
+inspection, content-policy limits and bundled-executable networking.
+
 ## Use WebFront in your project
 
 ```cmake
@@ -198,8 +215,9 @@ When WebFront is not the top-level project it builds neither its examples nor it
 | --- | --- | --- |
 | `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available (Windows, Linux and macOS only). Other platforms fail at configure time |
 | `WEBFRONT_EMBED_WEBVIEW2` | `OFF` | Download the pinned WebView2 SDK and link its static loader (Windows only) |
-| `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF` or `WebView2` (enable the matching SDK) |
-| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine and lifecycle runners; WebView2 takes priority over CEF on Windows; explicit selection overrides the default |
+| `WEBFRONT_EMBED_WKWEBVIEW` | `OFF` | Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only) |
+| `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF`, `WebView2` or `WKWebView` (enable the matching option) |
+| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine and lifecycle runners; WebView2 takes priority over CEF on Windows, WKWebView on macOS; explicit selection overrides the default |
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
 | `ENABLE_COVERAGE` | `OFF` | Instrument the C++ tests (GCC/Clang) |
@@ -350,6 +368,7 @@ This is the compiled example [AwaitBrowser.cpp](src/AwaitBrowser.cpp); run `./sr
 using BrowserFront = webfront::WebFrontWithFrontend<webfront::frontend::DefaultBrowserFrontend>;
 using EmbeddedFront = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
 using WindowsFront = webfront::WebFrontWithFrontend<webfront::frontend::WebView2Frontend>;
+using MacFront = webfront::WebFrontWithFrontend<webfront::frontend::WKWebViewFrontend>;
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture, development commands, conventions, test requirements and safety guidance. The current evidence-based status and backlog recommendations are in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ISSUE_AUDIT.md](docs/ISSUE_AUDIT.md).

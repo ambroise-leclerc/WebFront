@@ -7,6 +7,8 @@
 //   using App = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
 // On Windows, -DWEBFRONT_EMBED_WEBVIEW2=ON enables this alternative:
 //   using App = webfront::WebFrontWithFrontend<webfront::frontend::WebView2Frontend>;
+// On macOS 13.3+, -DWEBFRONT_EMBED_WKWEBVIEW=ON enables this alternative:
+//   using App = webfront::WebFrontWithFrontend<webfront::frontend::WKWebViewFrontend>;
 using App = webfront::WebFront;
 
 // LCOV_EXCL_START - interactive example; the greeting callback is covered by the unit tests.

@@ -170,6 +170,8 @@ int freeFunctionForDeductionTest(double value) {
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
+    STATIC_REQUIRE(frontend::FrontendType<frontend::WKWebViewFrontend>);
+    STATIC_REQUIRE(frontend::WKWebViewFrontend::action == frontend::Action::closeServerAfterOpen);
     STATIC_REQUIRE(frontend::FrontendType<frontend::WebView2Frontend>);
     STATIC_REQUIRE(frontend::WebView2Frontend::action == frontend::Action::closeServerAfterOpen);
     THEN("the default frontend is always the system browser, regardless of CEF availability") {
@@ -181,6 +183,20 @@ SCENARIO("Frontend selection aliases") {
         REQUIRE(std::is_same_v<typename FrontendWF::FrontendProvider, OpeningFrontend>);
     }
 }
+
+#if !defined(WEBFRONT_EMBED_WKWEBVIEW) || !defined(__APPLE__)
+SCENARIO("Selecting WKWebView without support fails clearly") {
+    GIVEN("a build without macOS WKWebView support") {
+        THEN("initialization and opening name the enabling option") {
+            REQUIRE_THROWS_WITH(frontend::WKWebViewFrontend::initialize(),
+                                "WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON");
+            REQUIRE_THROWS_WITH(frontend::WKWebViewFrontend::open("9200", "index.html"),
+                                "WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON");
+            REQUIRE_THROWS_AS(frontend::WKWebViewFrontend::open("127.0.0.1", "9200", "index.html", ContentPolicy{}), std::runtime_error);
+        }
+    }
+}
+#endif
 
 #if !defined(WEBFRONT_EMBED_WEBVIEW2) || !defined(_WIN32)
 SCENARIO("Selecting WebView2 without support fails clearly") {

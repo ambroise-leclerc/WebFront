@@ -85,6 +85,12 @@ webfront_register_frontend(WebView2
     PLATFORMS Windows SUPPORT WebView2Support
     TEST_PLATFORMS Windows TEST_NAME WebFrontWebView2Integration TEST_TIMEOUT 90
     TEST_SETUP webfront_add_webview2_tests)
+webfront_register_frontend(WKWebView
+    OPTION WEBFRONT_EMBED_WKWEBVIEW POLICY strict
+    DESCRIPTION "Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only)"
+    PLATFORMS Darwin SUPPORT WKWebViewSupport
+    TEST_PLATFORMS Darwin TEST_NAME WebFrontWKWebViewIntegration TEST_TIMEOUT 90
+    TEST_SETUP webfront_add_wkwebview_tests)
 webfront_register_frontend(CEF
     OPTION WEBFRONT_EMBED_CEF POLICY lenient
     DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux and macOS only). Other platforms fail at configure time"

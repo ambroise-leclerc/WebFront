@@ -71,6 +71,8 @@ add_test(NAME WebView2UnsupportedToolchain
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWebView2Toolchain.cmake)
 add_test(NAME WebView2LoaderArchitecture
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWebView2Architecture.cmake)
+add_test(NAME WKWebViewConfiguration
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckWKWebViewSupport.cmake)
 
 # A minimal parent project must be able to add_subdirectory(WebFront) and link WebFront::WebFront
 # without building WebFront's examples or tests. Dependencies reuse this build's sources, so the

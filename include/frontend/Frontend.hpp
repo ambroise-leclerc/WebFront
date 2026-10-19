@@ -5,6 +5,7 @@
 #include "CEF.hpp"
 #include "DefaultBrowser.hpp"
 #include "WebView2.hpp"
+#include "WKWebView.hpp"
 
 #include <concepts>
 #include <cstdlib>

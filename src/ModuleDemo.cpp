@@ -1,4 +1,6 @@
-﻿#include <system/BabelFS.hpp>
+﻿// On macOS 13.3+, configure -DWEBFRONT_EMBED_WKWEBVIEW=ON
+// -DWEBFRONT_DEMO_FRONTEND=WKWebView for an embedded system WebKit window.
+#include <system/BabelFS.hpp>
 #include <system/IndexFS.hpp>
 #include <system/FileSystem.hpp>
 #include <system/NativeFS.hpp>

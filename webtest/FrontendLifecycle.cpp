@@ -99,6 +99,21 @@ struct PolicyLifecycleFrontend {
             session->run();
         } else
 #endif
+#if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
+        if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
+            using namespace webfront::frontend::detail::wkwebview;
+            initialize();
+            Object pool(send(type("NSAutoreleasePool"), "new"));
+            Session session(webfront::frontend::detail::applicationUrl(address, port, page), {.contentPolicy = policy});
+            session.navigationCancelled = [&] {
+                Object script(text(cancellationScript));
+                send<void>(session.view, "evaluateJavaScript:completionHandler:", script.get(), static_cast<id>(nullptr));
+            };
+            session.create();
+            session.start();
+            session.run();
+        } else
+#endif
         {
             throw std::runtime_error("Content-policy lifecycle probe needs a native cancellation observer for this frontend");
         }
