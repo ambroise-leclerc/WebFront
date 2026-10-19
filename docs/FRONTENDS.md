@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md#choose-how-your-interface-opens)
 
-A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/frontend/Frontend.hpp`.
+A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS, `WebKitGTKFrontend` on Linux). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/frontend/Frontend.hpp`.
 
 ## The contract
 
@@ -18,7 +18,7 @@ A frontend is a type with:
 - **Blocking.** With `Action::closeServerAfterOpen` (embedded windows), `open()` blocks until the window is closed, releases its session resources, and returns; `BasicWF` then stops the server and joins its thread, so `show()` returns after a clean shutdown. With `Action::keepServerRunning` (the system browser), the server keeps running after `open()` returns, until `stop()` or application destruction. The action determines server lifetime, not whether opening returns immediately: the built-in system-browser adapter waits for Enter in the console after launching the page and cannot observe when the external browser closes.
 - **Threading.** Construct the application and call `show()` from its main thread when selecting an embedded frontend, because initialization can also have thread affinity. `show()` runs `open()` on that calling thread while the server runs separately. AppKit and GTK require toolkit-specific thread checks, and WebView2 needs an STA-compatible thread (an MTA thread is rejected with a clear error). Thread validation belongs in each adapter: the C++ concept checks signatures and supplies no main-thread detection or automatic dispatch. No `requiresMainThread` flag is currently needed; the native adapters must check their toolkit's requirements before using it.
 - **Errors.** A frontend reports failure by throwing from `open()`, whatever its action. `show()` / `openAndRun()` stop and join the server before the original exception propagates, including non-standard exceptions, so a failed start leaves no running thread behind. `openWindow()` is a lower-level delegation API: it neither starts nor joins the server, and returns the requested `WindowAction` to its caller.
-- **Unavailable frontends.** Every frontend type is always declared. In a build without its support, initialization or opening throws a message naming the CMake option that enables it (`-DWEBFRONT_EMBED_CEF=ON`, `-DWEBFRONT_EMBED_WEBVIEW2=ON`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON`).
+- **Unavailable frontends.** Every frontend type is always declared. In a build without its support, initialization or opening throws a message naming the CMake option that enables it (`-DWEBFRONT_EMBED_CEF=ON`, `-DWEBFRONT_EMBED_WEBVIEW2=ON`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON`, `-DWEBFRONT_EMBED_WEBKITGTK=ON`).
 - **URL.** Built-in frontends also provide `open(address, port, file)`, which `BasicWF` prefers when available. Build the URL with `frontend::detail::applicationUrl(address, port, file)` in `frontend/Url.hpp`: it uses the configured address and preserves URI query/fragment syntax and existing percent escapes. Spaces and UTF-8 bytes are encoded. For literal filename delimiters use `%23`, `%3F` and `%25`. The two-argument overload uses `127.0.0.1`; wildcard binds open their matching loopback address.
 - **Selection.** `webfront::WebFront` always uses the system browser. An application opts into another frontend with `webfront::WebFrontWithFrontend<...>`; enabling an embedded engine at configuration time never changes the default.
 
@@ -50,9 +50,9 @@ initialization, frontend selection and unavailable-engine diagnostics. These tes
 | `SUPPORT` | Module loaded when the engine is enabled. Registration checks that its file exists. |
 | `SETUP` | Optional function configuring each application's target, including runtime deployment. |
 | `POLICY` | `strict` rejects an unavailable engine for the browser runner; `lenient` permits a diagnostic build. CEF uses `lenient` to retain its CEF-off runner. |
-| `TEST_PLATFORMS` | Platforms with a validated browser runner, independently of engine availability. Currently Linux for CEF, Windows for WebView2 and macOS for WKWebView. |
+| `TEST_PLATFORMS` | Platforms with a validated browser runner, independently of engine availability. Currently Linux for CEF and WebKitGTK, Windows for WebView2 and macOS for WKWebView. |
 | `TEST_NAME`, `TEST_TIMEOUT` | Shared Jasmine CTest name and positive timeout in seconds. |
-| `TEST_SETUP` | Optional function adding engine-specific tests. It runs even if missing Xvfb prevents Jasmine registration; the module decides which additional tests need a display. |
+| `TEST_SETUP` | Optional function adding engine-specific tests. It receives the explicit list of registered shared tests (including Jasmine), and runs even if missing Xvfb prevents shared registration; the module decides which additional tests need a display. |
 | `XVFB_LINUX` | Wrap the shared tests with Xvfb on Linux. Other registered test platforms run without that wrapper. |
 | `ALWAYS_AVAILABLE` | Declare a frontend without an availability option. Defaults to `POLICY lenient`, rejects `POLICY strict`, and cannot supply engine or test fields. |
 
@@ -73,7 +73,7 @@ Registry order determines the initial cache default: the first enabled embedded 
 - `navigation-allow-list`: permit the same top-level destination through the explicit navigation allow-list.
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
-`web-integration` label and the same port lock as Jasmine. Linux CEF cases use Xvfb. Build `webtest`
+`web-integration` label and the same port lock as Jasmine. Linux CEF and WebKitGTK cases use Xvfb. Build `webtest`
 to build both shared runners on a validated test platform, or build all targets to include engine-specific runners as well. Run
 `ctest --test-dir <build> -L web-integration --output-on-failure` for the complete browser suite.
 A missing Xvfb skips both shared suites. A new frontend inherits this coverage through its registry

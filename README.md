@@ -128,6 +128,7 @@ The application code and interface assets stay the same whichever frontend you s
 | Embedded CEF window | Windows, Linux, macOS | Enable CEF at configuration time; a large download |
 | Embedded WebView2 window | Windows | Enable the SDK and install the Evergreen Runtime |
 | Embedded WKWebView window | macOS 13.3+ | Enable Cocoa/WebKit support; the engine ships with macOS |
+| Embedded WebKitGTK window | Linux | Install WebKitGTK 6.0 development packages and enable the option |
 
 Construct the application and call `show()` on the main thread for embedded frontends. Their `open()`
 blocks until window closure; `show()` then stops and joins the server. A `keepServerRunning` frontend
@@ -154,6 +155,21 @@ using App = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
 ```
 
 Selecting `CEFFrontend` in a build without CEF fails with a clear error. An embedded window stops the server when it closes. `webfront::WebFront` always uses the system browser, even in a CEF-enabled build.
+
+### Embedded window with WebKitGTK (Linux, opt-in)
+
+Install `libwebkitgtk-6.0-dev`, configure with `-DWEBFRONT_EMBED_WEBKITGTK=ON`, then select:
+
+```cpp
+using App = webfront::WebFrontWithFrontend<webfront::frontend::WebKitGTKFrontend>;
+App app;
+app.show();
+```
+
+Construct and open on the process main thread with a working X11 or Wayland display.
+The window uses the system WebKitGTK 6.0 runtime and returns when closed, including
+pages that never connect to the bridge. GTK headers do not propagate through
+`WebFront.hpp`. See [WebKitGTK setup, profiles and tests](docs/WEBKITGTK.md).
 
 ### Embedded window with WebView2 (Windows, opt-in)
 
@@ -214,10 +230,11 @@ When WebFront is not the top-level project it builds neither its examples nor it
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `WEBFRONT_EMBED_CEF` | `OFF` | Download and link CEF so `CEFFrontend` is available (Windows, Linux and macOS only). Other platforms fail at configure time |
+| `WEBFRONT_EMBED_WEBKITGTK` | `OFF` | Enable the system WebKitGTK 6.0 embedded frontend (Linux only) |
 | `WEBFRONT_EMBED_WEBVIEW2` | `OFF` | Download the pinned WebView2 SDK and link its static loader (Windows only) |
 | `WEBFRONT_EMBED_WKWEBVIEW` | `OFF` | Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only) |
-| `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF`, `WebView2` or `WKWebView` (enable the matching option) |
-| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine and lifecycle runners; WebView2 takes priority over CEF on Windows, WKWebView on macOS; explicit selection overrides the default |
+| `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF`, `WebView2`, `WKWebView` or `WebKitGTK` (enable the matching option) |
+| `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine and lifecycle runners; WebView2 takes priority over CEF on Windows, WKWebView on macOS, WebKitGTK on Linux; explicit selection overrides the default |
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
 | `ENABLE_COVERAGE` | `OFF` | Instrument the C++ tests (GCC/Clang) |

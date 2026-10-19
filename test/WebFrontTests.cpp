@@ -172,6 +172,7 @@ int freeFunctionForDeductionTest(double value) {
 SCENARIO("Frontend selection aliases") {
     STATIC_REQUIRE(frontend::FrontendType<frontend::WKWebViewFrontend>);
     STATIC_REQUIRE(frontend::WKWebViewFrontend::action == frontend::Action::closeServerAfterOpen);
+    STATIC_REQUIRE(frontend::FrontendType<frontend::WebKitGTKFrontend>);
     STATIC_REQUIRE(frontend::FrontendType<frontend::WebView2Frontend>);
     STATIC_REQUIRE(frontend::WebView2Frontend::action == frontend::Action::closeServerAfterOpen);
     THEN("the default frontend is always the system browser, regardless of CEF availability") {
@@ -207,6 +208,15 @@ SCENARIO("Selecting WebView2 without support fails clearly") {
             REQUIRE_THROWS_WITH(app.openWindow("index.html"),
                 "WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON");
         }
+    }
+}
+#endif
+
+#ifndef WEBFRONT_EMBED_WEBKITGTK
+SCENARIO("Selecting WebKitGTK without support fails clearly") {
+    THEN("initialization names the enabling option") {
+        REQUIRE_THROWS_WITH(frontend::WebKitGTKFrontend::initialize(),
+            "WebKitGTKFrontend is unavailable. Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON");
     }
 }
 #endif

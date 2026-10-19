@@ -6,6 +6,7 @@
 #include "DefaultBrowser.hpp"
 #include "WebView2.hpp"
 #include "WKWebView.hpp"
+#include "WebKitGTK.hpp"
 
 #include <concepts>
 #include <cstdlib>

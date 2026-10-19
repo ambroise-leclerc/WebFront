@@ -6,8 +6,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <exception>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -45,6 +47,13 @@ class TaskScope {
         }
     };
 
+    struct SpawnGuard {
+        TaskScope& scope;
+        ~SpawnGuard() {
+            scope.finishSpawn();
+        }
+    };
+
     ex::counting_scope tasks;
     using JoinOperation = ex::connect_result_t<decltype(ex::starts_on(ex::inline_scheduler{}, std::declval<ex::counting_scope&>().join())), Joined>;
     std::atomic_bool               joined{false};
@@ -52,17 +61,26 @@ class TaskScope {
     // A connection has its own stop source. This token links it to server shutdown
     // using standard stop callbacks, without relying on an implementation's fused tokens.
     ex::inplace_stop_source stopSource;
+    std::mutex              spawningMutex;
+    std::condition_variable spawningFinished;
+    std::size_t             activeSpawns = 0;
+    bool                    closed       = false;
 
 public:
     /** @brief Prevents any further task from associating with this scope. */
     void close() noexcept {
+        {
+            std::lock_guard lock(spawningMutex);
+            closed = true;
+        }
         tasks.close();
     }
 
     template <ex::sender Sender>
     bool spawn(Sender sender) {
-        if (stopRequested())
+        if (!beginSpawn())
             return false;
+        SpawnGuard guard{*this};
         // spawn associates synchronously. Observe that decision so a close
         // racing this call cannot leave the caller with an apparently live handle.
         bool associated = false;
@@ -91,6 +109,9 @@ public:
     void drain(Context& context) {
         close();
         requestStop();
+        // Association can precede start/enqueue on another thread. An empty
+        // context is not evidence of a stalled task until those calls return.
+        waitForSpawns();
         context.restart();
         if (!joining) {
             joining.reset(new JoinOperation(ex::connect(ex::starts_on(ex::inline_scheduler{}, tasks.join()), Joined{&joined})));
@@ -123,6 +144,27 @@ public:
     }
 
 private:
+    bool beginSpawn() {
+        std::lock_guard lock(spawningMutex);
+        if (closed || stopRequested())
+            return false;
+        ++activeSpawns;
+        return true;
+    }
+
+    void finishSpawn() noexcept {
+        std::lock_guard lock(spawningMutex);
+        --activeSpawns;
+        spawningFinished.notify_all();
+    }
+
+    void waitForSpawns() {
+        std::unique_lock lock(spawningMutex);
+        spawningFinished.wait(lock, [this] {
+            return activeSpawns == 0;
+        });
+    }
+
     static void reportDeferredShutdown() noexcept {
         try {
             log::error("Task shutdown has not joined yet; waiting for suspended operations to finish");

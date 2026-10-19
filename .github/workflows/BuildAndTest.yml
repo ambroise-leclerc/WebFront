@@ -358,3 +358,38 @@ jobs:
 
       - name: Run Jasmine bridge test
         run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error
+
+  webkitgtk-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    name: Ubuntu WebKitGTK Jasmine and lifecycle
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - uses: egor-tensin/setup-gcc@v1.3
+        with:
+          version: 16
+      - name: Install WebKitGTK and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb
+          pkg-config --modversion webkitgtk-6.0
+      - name: Configure WebKitGTK
+        run: >-
+          cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON
+          -DWEBFRONT_DEMO_FRONTEND=WebKitGTK -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+      - name: Build
+        run: cmake --build build-webkitgtk --parallel 2
+      - name: Test
+        env:
+          # Trusted repository fixtures only; restricted runners may lack user namespaces.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: ctest --test-dir build-webkitgtk -LE web-integration --output-on-failure --no-tests=error
+      - name: Require browser coverage
+        env:
+          # Trusted repository fixtures only; restricted runners may lack user namespaces.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error

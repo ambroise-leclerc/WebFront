@@ -21,12 +21,17 @@ releasing its scope association.
 
 `stop()` can be called from another thread. It requests cancellation and stops
 the context. After the thread running the context has returned, the owner calls
-`drain()`: close the scope, request stop, restart the context, and pump one
+`drain()`: close the scope, request stop, wait for in-flight `spawn()` calls to
+finish starting their senders, restart the context, and pump one
 completion at a time until `join()` completes. Socket cleanup still runs on the
 context thread. Joining tracks the complete operation lifetime, including its
 destruction, and does not require unrelated context work to finish. If `run_one()`
 reports no work while tasks remain, `drain()` throws `std::logic_error` instead
-of spinning. It retains the join operation, allowing a low-level owner to
+of spinning. The startup wait prevents a concurrent scope association from
+being mistaken for a stalled task before its sender has started or queued work.
+Sender startup and stop callbacks run without holding the spawn admission mutex,
+so cleanup can attempt another spawn and receive a rejection.
+It retains the join operation, allowing a low-level owner to
 complete the external operation and retry. The scope still must be joined
 before destruction. Application tasks must cooperate with cancellation;
 shutdown cannot safely abandon a suspended coroutine and its captures. The destructor
