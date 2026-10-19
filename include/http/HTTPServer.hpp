@@ -9,8 +9,10 @@
 #include "../system/FileSystem.hpp"
 #include "../Task.hpp"
 #include "../tooling/HexDump.hpp"
+#include "AcceptEncoding.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
+#include "Gzip.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
 
@@ -28,6 +30,7 @@
 #include <regex>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace webfront::http {
@@ -69,10 +72,18 @@ public:
 
     std::vector<Header> headers;
 
+    /** @brief Matches encoding tokens and q=0 exclusions across all Accept-Encoding fields. */
+    [[nodiscard]] bool acceptsEncoding(std::string_view coding) const {
+        encoding::Preferences preferences(coding);
+        for (const auto& field : getHeadersValues("Accept-Encoding"))
+            preferences.add(field);
+        return preferences.accepted();
+    }
+
 private:
     [[nodiscard]] static constexpr bool caseInsensitiveEqual(std::string_view s1, std::string_view s2) {
         return ((s1.size() == s2.size()) && std::equal(s1.begin(), s1.end(), s2.begin(), [](char c1, char c2) {
-                    return (c1 == c2 || std::toupper(c1) == std::toupper(c2));
+                    return (c1 == c2 || std::toupper(static_cast<unsigned char>(c1)) == std::toupper(static_cast<unsigned char>(c2)));
                 }));
     }
 };
@@ -207,6 +218,8 @@ struct Response : Headers {
         badRequest            = 400,
         forbidden             = 403,
         notFound              = 404,
+        notAcceptable         = 406,
+        internalServerError   = 500,
         notImplemented        = 501,
         variantAlsoNegotiates = 506
     };
@@ -247,21 +260,25 @@ struct Response : Headers {
 
 private:
     [[nodiscard]] static std::string toString(StatusCode code) {
-        switch (code) {
-        case switchingProtocols: return "Switching Protocols";
-        case ok: return "OK";
-        case badRequest: return "Bad Request";
-        case forbidden:
-            return "Forbidden";
-        case notFound: return "Not Found";
-        case notImplemented: return "Not Implemented";
-        case variantAlsoNegotiates: return "Variant Also Negotiates";
-        }
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 9> names{
+            {{switchingProtocols, "Switching Protocols"},
+             {ok, "OK"},
+             {badRequest, "Bad Request"},
+             {forbidden, "Forbidden"},
+             {notFound, "Not Found"},
+             {notAcceptable, "Not Acceptable"},
+             {internalServerError, "Internal Server Error"},
+             {notImplemented, "Not Implemented"},
+             {variantAlsoNegotiates, "Variant Also Negotiates"}}
+        };
+        for (const auto& [status, name] : names)
+            if (status == code)
+                return std::string(name);
         return {};
     }
 };
 
-template<networking::Features Net, fs::Provider FS>
+template <networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
 class RequestHandler {
 public:
     explicit RequestHandler(std::filesystem::path root, detail::BoundContentPolicy policy = detail::BoundContentPolicy{})
@@ -276,27 +293,31 @@ public:
         auto requestPath = filePath(request.uri);
         if (!requestPath) return Response::getStatusResponse(Response::badRequest);
 
-        Response response;
         switch (request.method) {
-        case Request::Method::Get:
-            if (auto upgrade = webSocketUpgrade(request)) return *upgrade;
-            if (auto error = readFile(request, *requestPath, response)) return *error;
-            break;
-        case Request::Method::Head:
-            if (!fs.open(*requestPath)) return Response::getStatusResponse(Response::notFound);
-            break;
-
-        default: return Response::getStatusResponse(Response::notImplemented);
-        };
-
-        response.statusCode = Response::ok;
-        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", MimeType(requestPath->extension().string()).toString());
-
-        return response;
+            case Request::Method::Get:
+                if (auto upgrade = webSocketUpgrade(request))
+                    return *upgrade;
+                [[fallthrough]];
+            case Request::Method::Head:
+                return fileResponse(request, *requestPath);
+            default:
+                return Response::getStatusResponse(Response::notImplemented);
+        }
     }
 
 private:
+    Response fileResponse(const Request& request, const std::filesystem::path& path) {
+        Response response;
+        if (auto error = readFile(request, path, response))
+            return *error;
+        response.statusCode = Response::ok;
+        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
+        response.headers.emplace_back("Content-Type", MimeType(path.extension().string()).toString());
+        if (request.method == Request::Method::Head)
+            response.content.clear();
+        return response;
+    }
+
     // The file a request URI names, or nothing when the URI is not a safe absolute path.
     static std::optional<std::filesystem::path> filePath(const std::string& uri) {
         // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
@@ -346,15 +367,33 @@ private:
     // Reads the file into the response content, or returns the error response.
     std::optional<Response> readFile(const Request& request, const std::filesystem::path& requestPath, Response& response) {
         auto file = fs.open(requestPath);
-        if (!file) return Response::getStatusResponse(Response::notFound);
-        if (file->isEncoded() && !request.headersContain("Accept-Encoding", file->getEncoding())) {
-            log::error("File {} encoding is not supported by client : HTTP ERROR 506", file->getEncoding());
-            return Response::getStatusResponse(Response::variantAlsoNegotiates);
-        }
-
+        if (!file)
+            return Response::getStatusResponse(Response::notFound);
         std::array<char, 512> buffer{0, 0};
         while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
-        if (file->isEncoded()) response.headers.emplace_back("Content-Encoding", file->getEncoding());
+        if (!file->isEncoded())
+            return {};
+        return negotiateEncoding(request, file->getEncoding(), response);
+    }
+
+    static Response encodingError(Response::StatusCode code) {
+        auto error = Response::getStatusResponse(code);
+        error.headers.emplace_back("Vary", "Accept-Encoding");
+        return error;
+    }
+
+    static std::optional<Response> negotiateEncoding(const Request& request, std::string_view coding, Response& response) {
+        response.headers.emplace_back("Vary", "Accept-Encoding");
+        if (request.acceptsEncoding(coding)) {
+            response.headers.emplace_back("Content-Encoding", coding);
+            return {};
+        }
+        if (!request.acceptsEncoding("identity") || !encoding::isGzip(coding))
+            return encodingError(Response::notAcceptable);
+        auto decoded = gzip::decodeGzip(response.content, maxDecodedAssetSize<Policy>());
+        if (!decoded)
+            return encodingError(Response::internalServerError);
+        response.content = std::move(*decoded);
         return {};
     }
 
@@ -427,7 +466,7 @@ private:
     typename Net::IoContext                     ioContext;
     typename Net::Acceptor                      acceptor;
     networking::TaskScope                       tasks;
-    RequestHandler<Net, FS> requestHandler;
+    RequestHandler<Net, FS, Policy>             requestHandler;
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
     void spawn(networking::Task task) {

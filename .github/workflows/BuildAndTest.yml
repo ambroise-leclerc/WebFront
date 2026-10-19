@@ -278,7 +278,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build-sanitizers/fuzz/artifacts
-          for decoder in messages http websocket; do
+          for decoder in messages http websocket gzip; do
             build-sanitizers/fuzz/fuzz_$decoder build-sanitizers/fuzz/corpus/$decoder \
               -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
               -artifact_prefix=build-sanitizers/fuzz/artifacts/$decoder-

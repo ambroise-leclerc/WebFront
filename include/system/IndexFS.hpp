@@ -25,23 +25,20 @@ public:
     using FallbackModule = generated::FallbackModuleData;
 
     struct WebFrontIco {
-        static constexpr std::string_view encoding{"br"};
-        static constexpr size_t dataSize{528};
-        static constexpr std::array<uint64_t, 67> data{
-          0xa1e81700f7658093, 0x2b7d8145c6c61015, 0xc4c80e31aa99183d, 0x54378e5eed6ed133, 0xfaca20ffde26c4fe,
-          0x907c01bcd106aa84, 0x16c239717525dc81, 0x22b0dd830e70c053, 0x2d28ed2ecb3c4fbc, 0x0430c0d5c91daf4f,
-          0x2cd10c1eb53020ac, 0xffcdde67d7cf55af, 0xdca9e2830d38c108, 0x02e090573dedc964, 0x4a677eea547dcc18,
-          0x9b828b2818b06030, 0xb1d56e2bc8a235a8, 0x57f5b1c17b35af71, 0x09dcb5b387b49237, 0x2bdf037ce083b6b6,
-          0x2cf8208817fca008, 0xc0188036006fe0f1, 0xe8c664f10f9ded6d, 0xf1602cf0eafe452b, 0xccc1e6541d9eed16,
-          0x622383f1703e31d1, 0x6c85e32b9771da2a, 0xf1fbbb4b1b9de5ce, 0x7871d6e52607625f, 0x0f11b7ddbf8ce898,
-          0x36fafcd39cf2feab, 0xdf7b812c200bd7c9, 0xa04403e83225c651, 0x5970c2e4d00fc03f, 0x8a6a815662143084,
-          0x42e7539252581640, 0xd64742491a255ac8, 0x024e89050883ccf0, 0x948edad49eb3b200, 0x2932fd7a3fa2a643,
-          0x0caee9e2e8369bc5, 0xf0a48e2c487a14ce, 0xbf9ea9b66b209da8, 0x688fa7b3abb9a366, 0xf9b40909d3d7fc74,
-          0x3a527b181930c5eb, 0xea13b3cf8b3ba3b3, 0x6a80e6e995babfbf, 0x433e003e386581fe, 0x634428651a6664dc,
-          0x8cd11a312546eb0d, 0x0b0a7259de712cf8, 0x204c13d9fc84a554, 0x5616147cfb2fc7d5, 0xd5711cb7f5dfc302,
-          0xe7762297f2d9d1f1, 0x1bb50b483ff7cab2, 0xcbaddcfaecb29b0f, 0xf00f75b5bcbebdca, 0xfedcaabc563fb7eb,
-          0xe7e86527d9eb7fec, 0x5f1ef92563fb2708, 0x74c08718f1cb0272, 0xcb0d2100faca96e8, 0x30c1a7e51d0d0c67,
-          0x7640a3c384ef0122};
+        static constexpr std::string_view         encoding{"gzip"};
+        static constexpr size_t                   dataSize{510};
+        static constexpr std::array<uint64_t, 64> data{
+            0x1f8b080000000000, 0x02ff8d524f68d360, 0x14ffb56adc4171af, 0xa211c25cea1f500a, 0x0a8d94b14b863a19, 0x1e4485509c07831d, 0xdf3cac8408358740,
+            0xe9657af1b0ab1451, 0x705e7670ae225a03, 0xb57af2a89789b7f5, 0x301ddbc18e40103c, 0xc497a4ceced37e5f, 0x7e79eff7beefbdef, 0x7df902a478a8ea20,
+            0xbf77632d0d1c0670, 0x8aa932c79851fc7f, 0x0cf6ecc8b93c56ea, 0x19ac7f7b8999e9db, 0x78f1a482ef8df3b8, 0x7e65029df9d378ec, 0x9ec5fb774dcc562d,
+            0xfcfef5136f1fa8b8, 0x5f1ec1dac7324a37, 0x2ec13bde5f35ef35, 0xb76f5357b7ebf4d3, 0xd8941f7e5a8e9d5d, 0x2660e20bd9360d6d, 0x2d9a911d86fdb745,
+            0x899c04dd446ff6a4, 0x339c68d9b1195146, 0x2c5332c93d4415cc, 0x4db229864dc3bc17, 0x3ed03f7071b0c9c8, 0xadaaf2831d9edecf, 0x66a3ea919265e733,
+            0xa4481f7373d73291, 0xae99d84774e8f5c6, 0xddacd23849d48674, 0x87d3b38da34bca99, 0xd5685e1a207257df, 0x504be9f0fab62995, 0xb91ce7e6e2facba6,
+            0x6411b5dc0eb9373d, 0x6f89baa624fada21, 0xc1fa6bd23b7f1267, 0x489807c4341f8c87, 0xc3c7bc274c214ace, 0x160aa22b85c16cb1, 0xe8448f3369594204,
+            0xe168d1302a15c330, 0x16c3a02b425d7fce, 0xbe513426fd422108, 0x425fd3c6a3c0baa6, 0x69256bd167adcd8f, 0x5fbc3caa697a30f5, 0xcaf2b5670b3138e0,
+            0xe71b170abad6831e, 0x2ee4bce6a33ed4bd, 0x36df612dfac5768a, 0x345fca41e61ef64f, 0x1c0106e68009e6d8, 0x5560ee566d27256a, 0x09532bc0de3f23cd,
+            0x980cfe0200000000,
+        };
     };
 
     using WebFrontJs = generated::WebFrontJsData;

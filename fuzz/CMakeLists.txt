@@ -18,7 +18,7 @@ if(NOT WEBFRONT_HAS_LIBFUZZER)
     message(FATAL_ERROR "ENABLE_FUZZING requires the compiler-rt libFuzzer, ASan and UBSan runtimes")
 endif()
 
-foreach(_decoder IN ITEMS Messages HTTP WebSocket)
+foreach(_decoder IN ITEMS Messages HTTP WebSocket Gzip)
     string(TOLOWER "${_decoder}" _corpus)
     add_executable(fuzz_${_corpus} ${_decoder}Fuzz.cpp)
     target_link_libraries(fuzz_${_corpus} PRIVATE WebFront WebFront_test_hardening)

@@ -56,3 +56,29 @@ SCENARIO("Embedded browser dependencies support gzip-only HTTP clients") {
         }
     }
 }
+
+SCENARIO("Embedded browser dependencies support identity-only HTTP clients") {
+    using Filesystem = fs::Multi<fs::JasmineFS, fs::ReactFS, fs::BabelFS>;
+    RequestHandler<Net, Filesystem> handler{"."};
+    for (const auto path : {"jasmine/4.6.0/jasmine.js",
+                            "react@18/umd/react.production.min.js",
+                            "react-dom@18/umd/react-dom.production.min.js",
+                            "babel-standalone@7.22.5/babel.min.js"}) {
+        GIVEN(path) {
+            Request request;
+            request.method = Request::Method::Get;
+            request.uri    = std::string("/") + path;
+            WHEN("the request has no Accept-Encoding header") {
+                auto response = handler.handleRequest(request);
+                THEN("the server returns decoded JavaScript with its actual length") {
+                    REQUIRE(response.statusCode == Response::ok);
+                    REQUIRE_FALSE(response.getHeaderValue("Content-Encoding"));
+                    REQUIRE(response.getHeaderValue("Content-Length") == std::to_string(response.content.size()));
+                    REQUIRE(response.content.find("\0", 0, 1) == std::string::npos);
+                    REQUIRE(response.content.size() > 1000);
+                    REQUIRE(response.getHeaderValue("Vary") == "Accept-Encoding");
+                }
+            }
+        }
+    }
+}
