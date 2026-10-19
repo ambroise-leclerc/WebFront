@@ -170,6 +170,18 @@ int freeFunctionForDeductionTest(double value) {
 }  // namespace
 
 SCENARIO("Frontend selection aliases") {
+#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
+    STATIC_REQUIRE(frontend::FrontendType<frontend::NativeWebViewFrontend>);
+    STATIC_REQUIRE(std::is_same_v<webfront::WebFrontWithFrontend<frontend::NativeWebViewFrontend>::FrontendProvider, frontend::NativeWebViewFrontend>);
+#endif
+#if defined(_WIN32)
+    STATIC_REQUIRE(std::is_same_v<frontend::NativeWebViewFrontend, frontend::WebView2Frontend>);
+#elif defined(__APPLE__)
+    STATIC_REQUIRE(std::is_same_v<frontend::NativeWebViewFrontend, frontend::WKWebViewFrontend>);
+#elif defined(__linux__)
+    STATIC_REQUIRE(std::is_same_v<frontend::NativeWebViewFrontend, frontend::WebKitGTKFrontend>);
+#endif
+    STATIC_REQUIRE(std::is_same_v<webfront::WebFront::FrontendProvider, frontend::DefaultBrowserFrontend>);
     STATIC_REQUIRE(frontend::FrontendType<frontend::WKWebViewFrontend>);
     STATIC_REQUIRE(frontend::WKWebViewFrontend::action == frontend::Action::closeServerAfterOpen);
     STATIC_REQUIRE(frontend::FrontendType<frontend::WebKitGTKFrontend>);
@@ -184,6 +196,22 @@ SCENARIO("Frontend selection aliases") {
         REQUIRE(std::is_same_v<typename FrontendWF::FrontendProvider, OpeningFrontend>);
     }
 }
+
+#if (defined(_WIN32) && !defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && !defined(WEBFRONT_EMBED_WKWEBVIEW))                                       \
+    || (defined(__linux__) && !defined(WEBFRONT_EMBED_WEBKITGTK))
+SCENARIO("Selecting the native web view without support preserves the platform diagnostic") {
+    #if defined(_WIN32)
+    const auto diagnostic = "WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON";
+    #elif defined(__APPLE__)
+    const auto diagnostic = "WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON";
+    #else
+    const auto diagnostic = "WebKitGTKFrontend is unavailable. Configure on Linux with -DWEBFRONT_EMBED_WEBKITGTK=ON";
+    #endif
+    THEN("opening names the platform adapter's enabling option") {
+        REQUIRE_THROWS_WITH(frontend::NativeWebViewFrontend::open("9200", "index.html"), diagnostic);
+    }
+}
+#endif
 
 #if !defined(WEBFRONT_EMBED_WKWEBVIEW) || !defined(__APPLE__)
 SCENARIO("Selecting WKWebView without support fails clearly") {

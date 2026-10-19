@@ -122,7 +122,10 @@ See [WebKitGTK notes](WEBKITGTK.md).
   calling-thread execution, standard/non-standard errors, failure before window creation, and
   initialization across application types.
 - Main-thread validation stays adapter-specific; no generic main-thread flag or dispatcher is added.
-  WKWebView (#258) now implements this check; WebKitGTK (#259) and the native alias (#261) remain future work.
+  WKWebView (#258) and WebKitGTK (#259) now implement this check. The opt-in native alias (#261)
+  selects WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux; the module demo
+  accepts `WEBFRONT_DEMO_FRONTEND=Native`. Each platform adapter must be enabled explicitly.
+  The system-browser default is unchanged; native rendering differs between Chromium and WebKit.
 - The [shared content policy](CONTENT_POLICY.md) (#260) adds server-side bridge Origin checks,
   per-application navigation allow-lists and popup handling in CEF/WebView2, and configurable
   DevTools/context menus. External popup forwarding requires the engine's user-initiation flag;

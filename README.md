@@ -128,6 +128,8 @@ The application code and interface assets stay the same whichever frontend you s
 | Embedded CEF window | Windows, Linux, macOS | Enable CEF at configuration time; a large download |
 | Embedded WebView2 window | Windows | Enable the SDK and install the Evergreen Runtime |
 | Embedded WKWebView window | macOS 13.3+ | Enable Cocoa/WebKit support; the engine ships with macOS |
+| Embedded WebKitGTK window | Linux | Install WebKitGTK 6.0 development packages and enable the option |
+| Native web view alias (opt-in) | Windows, macOS, Linux | Enable the platform adapter above; select `NativeWebViewFrontend` |
 | Embedded WebKitGTK window | Linux | Install WebKitGTK 6.0 (GTK 4) development packages and enable the option |
 
 WebView2 uses Chromium; WKWebView and WebKitGTK use WebKit. Rendering can differ between
@@ -256,7 +258,7 @@ When WebFront is not the top-level project it builds neither its examples nor it
 | `WEBFRONT_EMBED_WEBKITGTK` | `OFF` | Enable the system WebKitGTK 6.0 embedded frontend (Linux only) |
 | `WEBFRONT_EMBED_WEBVIEW2` | `OFF` | Download the pinned WebView2 SDK and link its static loader (Windows only) |
 | `WEBFRONT_EMBED_WKWEBVIEW` | `OFF` | Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only) |
-| `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF`, `WebView2`, `WKWebView` or `WebKitGTK` (enable the matching option) |
+| `WEBFRONT_DEMO_FRONTEND` | `DefaultBrowser` | Frontend for `WebFrontApp`: `DefaultBrowser`, `CEF`, `WebView2`, `WKWebView`, `WebKitGTK` or `Native` (enable the matching platform adapter) |
 | `WEBFRONT_WEBTEST_FRONTEND` | Initial cache value: first enabled embedded frontend for the platform; `CEF` if none | Embedded frontend for the shared Jasmine and lifecycle runners; WebView2 takes priority over CEF on Windows, WKWebView on macOS, WebKitGTK on Linux; explicit selection overrides the default |
 | `ENABLE_TESTING` | `OFF` | Build the Catch2 suite and the Jasmine browser test |
 | `WEBFRONT_BUILD_EXAMPLES` | `ON` when top-level | Build `HelloWorld`, `WebFrontGreeter` and `WebFrontApp` |
@@ -432,8 +434,32 @@ using BrowserFront = webfront::WebFrontWithFrontend<webfront::frontend::DefaultB
 using EmbeddedFront = webfront::WebFrontWithFrontend<webfront::frontend::CEFFrontend>;
 using WindowsFront = webfront::WebFrontWithFrontend<webfront::frontend::WebView2Frontend>;
 using MacFront = webfront::WebFrontWithFrontend<webfront::frontend::WKWebViewFrontend>;
+using NativeFront = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
 using LinuxFront = webfront::WebFrontWithFrontend<webfront::frontend::WebKitGTKFrontend>;
 ```
+
+`NativeWebViewFrontend` is a pure alias: `WebView2Frontend` on Windows, `WKWebViewFrontend`
+on macOS and `WebKitGTKFrontend` on Linux. Enable the corresponding CMake option
+(`WEBFRONT_EMBED_WEBVIEW2`, `WEBFRONT_EMBED_WKWEBVIEW` or `WEBFRONT_EMBED_WEBKITGTK`).
+At runtime, selecting the alias without that support throws the adapter's existing exception
+naming the platform option. CMake selectors using `REQUIRE_AVAILABLE` instead reject the
+configuration with `requires WEBFRONT_EMBED_<ADAPTER>=ON`; the module demo permits
+configuration without support so it can report the runtime diagnostic.
+The alias is declared only on Windows, macOS and Linux; CMake rejects `Native` on other platforms.
+The adapters' runtime, main-thread and deployment requirements still apply. The alias never
+changes `webfront::WebFront`, which always uses the system browser.
+
+The module demo accepts `-DWEBFRONT_DEMO_FRONTEND=Native`. For example, on Linux:
+
+```bash
+cmake -S . -B build-native -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_DEMO_FRONTEND=Native
+cmake --build build-native --target WebFrontApp
+./build-native/src/WebFrontApp
+```
+
+Native engines differ: Windows uses Chromium through WebView2; macOS and Linux use
+WebKit. Choose [CEF](#embedded-window-with-cef-opt-in) when identical rendering across
+platforms is required, and embed the same CEF version on every platform.
 
 See [AGENTS.md](AGENTS.md) for architecture, development commands, conventions, test requirements and safety guidance. The current evidence-based status and backlog recommendations are in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ISSUE_AUDIT.md](docs/ISSUE_AUDIT.md).
 
