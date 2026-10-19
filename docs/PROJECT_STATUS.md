@@ -2,6 +2,19 @@
 
 Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14.
 
+## Release 0.2.0 and native frontend epic (#253, 2026-10-19)
+
+All tasks in #253 are merged, including the opt-in platform alias in PR #277.
+Compile-time alias checks, CMake selector fixtures and the Windows WebView2,
+macOS WKWebView and Linux WebKitGTK browser/lifecycle CI lanes cover the delivered
+scope. Existing runtime and packaging limitations remain documented below.
+
+`webfront::version` in `include/WebFront.hpp` is the version source for CMake.
+The C++ version scenario compares the compiled constant with `PROJECT_VERSION`;
+`ReleaseVersionConsistency` also checks version tags at HEAD without network access.
+The release-version workflow checks the actual tag on tag pushes and published
+releases, so a tag such as `v0.1.1` cannot silently disagree with a `0.1.0` header.
+
 The default build remains header-only. `WEBFRONT_USE_MDDLOG=ON` adds a WebFront-owned
 compiled diagnostic adapter while keeping consuming translation units module-free.
 See [the optional integration contract](mddlog-integration.md) for dependencies,

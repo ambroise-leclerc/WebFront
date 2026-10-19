@@ -27,9 +27,19 @@ if(WEBFRONT_EMBED_WEBVIEW2)
 endif()
 add_executable(tests ${TESTS_LIST})
 target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
+configure_file(Version.hpp.in generated/Version.hpp @ONLY)
+target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 catch_discover_tests(tests PROPERTIES TIMEOUT 60)
+
+add_test(NAME ReleaseVersionConsistency
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DEXPECTED_VERSION=${PROJECT_VERSION}
+        -P ${PROJECT_SOURCE_DIR}/cmake/CheckReleaseVersion.cmake)
+add_test(NAME ReleaseVersionRegression
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+        -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-version-regression
+        -P ${PROJECT_SOURCE_DIR}/cmake/CheckReleaseVersionTests.cmake)
 
 if(ENABLE_COVERAGE)
   target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)
