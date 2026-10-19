@@ -291,6 +291,39 @@ jobs:
           path: build-sanitizers/fuzz/artifacts/
           if-no-files-found: ignore
 
+  wkwebview-integration:
+    runs-on: macos-26
+    timeout-minutes: 25
+    name: macOS WKWebView Jasmine and lifecycle
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+      - name: Check WindowServer session
+        run: |
+          launchctl print gui/$(id -u) >/dev/null
+          pgrep -x WindowServer
+      - name: Configure system WebKit frontend
+        run: >-
+          cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+          -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
+          -DWEBFRONT_DEMO_FRONTEND=WKWebView
+      - name: Build
+        run: cmake --build build-wkwebview --parallel 2
+      - name: Test
+        run: ctest --test-dir build-wkwebview --output-on-failure --no-tests=error
+      - name: Retain browser test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wkwebview-test-log
+          path: build-wkwebview/Testing/Temporary/LastTest.log
+
   web-integration:
     strategy:
       fail-fast: false

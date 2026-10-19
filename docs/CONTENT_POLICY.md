@@ -2,7 +2,7 @@
 
 `WebFrontConfig::contentPolicy` is a per-application `webfront::ContentPolicy`, copied into the
 HTTP server and passed to built-in frontends for each opening. It applies to the system browser,
-CEF and WebView2 as described below. This experimental library still targets trusted application
+CEF, WebView2 and WKWebView as described below. This experimental library still targets trusted application
 content; origin checks do not make arbitrary application scripts safe.
 
 ## Defaults and migration
@@ -60,6 +60,7 @@ inspect the native log or network diagnostics when debugging a connection from a
 | --- | --- | --- |
 | System browser | The external browser owns navigation and new windows; the adapter cannot intercept them. Server bridge checks still apply. | Controlled by the user's browser. |
 | CEF | `OnBeforeBrowse` checks top-level navigations, including redirects; `OnOpenURLFromTab` handles new-tab requests, and `OnBeforePopup` always cancels unmanaged windows. | Context-menu filtering and Chrome command handling control DevTools; context menus can be cleared. |
+| WKWebView | Navigation action/response delegates check top-level destinations; unmanaged popup creation is cancelled. All popups are blocked, including `systemBrowser`, because the public API lacks a reliable user-activation flag. | Public `inspectable` controls Safari inspection; a view override clears disabled context menus. |
 | WebView2 | `NavigationStarting` cancels disallowed top-level navigations, including redirects; `NewWindowRequested` is always marked handled. | `AreDevToolsEnabled` and `AreDefaultContextMenusEnabled` settings. |
 
 Same-origin page references, query strings and fragments continue working. A denied later
@@ -80,8 +81,7 @@ DevTools settings control the adapter's engine UI, not inspection by native host
 
 Custom frontends can opt into `open(address, port, page, const ContentPolicy&)`; `BasicWF` prefers
 it over the legacy three- and two-argument overloads. Custom adapters are responsible for mapping
-the policy to their engine; server bridge checks apply even with legacy adapters. Future WKWebView
-and WebKitGTK adapters should map these same rules to their navigation and window-creation delegates.
+the policy to their engine; server bridge checks apply even with legacy adapters. Future WebKitGTK adapters should map these same rules to their navigation and window-creation delegates.
 
 ## Regression coverage
 
@@ -91,7 +91,7 @@ connections from a foreign-origin iframe and a sandboxed opaque origin, brackete
 connections to the same endpoint. Rejected probes report only after the WebSocket close event,
 before their parent removes their frame. Positive controls run in the original test document
 and remain open until suite teardown.
-Shared CEF/Xvfb and WebView2 lifecycle cases use native navigation cancellation notifications
+Shared CEF/Xvfb, WebView2 and WKWebView lifecycle cases use native navigation cancellation notifications
 and destination-page reports to exercise blocked popups/navigation and an explicitly
 allowed navigation, without fixed scheduling delays. A CEF runtime probe checks every DevTools
 command ID, menu filtering, user-gesture popup/new-tab forwarding and actual DevTools creation via `OnBeforeDevToolsPopup`, then closes

@@ -9,6 +9,34 @@ qualified tools and verification. With the option on, browser logs travel throug
 mddlog's bounded transport consumer and WebLink captures link/call context. mddlog
 ADR-003, which this integration implements, was accepted on 2026-10-02.
 
+## Native macOS window (#258, 2026-10-19)
+
+- `WEBFRONT_EMBED_WKWEBVIEW=ON` enables `WKWebViewFrontend` on macOS 13.3+, using the system
+  Cocoa/WebKit frameworks. The implementation remains header-only C++23 through the public
+  Objective-C runtime and Clang Blocks; no `.mm` source or engine download is added.
+  The system browser remains the default. See [WKWebView notes](WKWEBVIEW.md).
+- Main-thread construction/opening, AppKit window/view ownership, resize/focus, Quit/Edit menus,
+  native/script closure, navigation failures and an initial loading deadline are handled locally.
+  Each opening has a non-persistent website data store. Top-level navigation/redirects use the
+  shared content policy; inspection and context menus follow its settings. All popups are blocked,
+  including `systemBrowser`, because public WebKit does not expose a reliable user-activation flag.
+- The old Jasmine/React/Babel assets now use gzip. WKWebView did not advertise Brotli on local
+  HTTP and Jasmine previously stalled after HTTP 506 responses; all decoded payloads were compared
+  with the previous embedded versions and are identical. Tests check encoding and gzip signatures.
+  Their combined payloads grow from 504,404 to 723,457 bytes (+43.43%); this archive workaround
+  does not add a general server fallback for unsupported content encodings.
+- Verified locally on macOS 27 ARM64 with Clang 21.1.8: all 194 CEF-off/default CTest cases and all
+  213 WKWebView-enabled cases pass, including Jasmine, 17 lifecycle cases and two executable/dylib
+  runtime-class registration tests. Apple Clang 21 and
+  upstream Clang compile the standalone header; an x86_64/macOS 13.3 syntax check also passes.
+  A binary linking CEF 154 and WKWebView opens/closes WKWebView successfully. The Jasmine executable
+  also passes from temporary `.app` bundles with and without `NSAllowsLocalNetworking` on this host.
+- CI adds a dedicated `macos-26` job checking the WindowServer/login session before building
+  and running the suite with timeouts. Native Intel/macOS 13.3 runtime execution is not locally
+  verified. Linux CEF/Xvfb and Windows WebView2 verification run in their existing CI jobs.
+  An intermittent application-task spawn/shutdown abort is independently reproduced on `develop`
+  without WKWebView and tracked in [#273](https://github.com/ambroise-leclerc/WebFront/issues/273).
+
 ## Input decoder hardening (#267, 2026-10-18)
 
 - Catch2 and browser test targets enable the standard library's vendor hardening mode
@@ -58,7 +86,7 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
   calling-thread execution, standard/non-standard errors, failure before window creation, and
   initialization across application types.
 - Main-thread validation stays adapter-specific; no generic main-thread flag or dispatcher is added.
-  WKWebView (#258), WebKitGTK (#259) and the native alias (#261) remain future work.
+  WKWebView (#258) now implements this check; WebKitGTK (#259) and the native alias (#261) remain future work.
 - The [shared content policy](CONTENT_POLICY.md) (#260) adds server-side bridge Origin checks,
   per-application navigation allow-lists and popup handling in CEF/WebView2, and configurable
   DevTools/context menus. External popup forwarding requires the engine's user-initiation flag;
@@ -93,7 +121,7 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
 
 ## Intended product
 
-WebFront is a C++23 header-only experiment for browser-based C++ user interfaces. A C++ process serves local HTML/JavaScript and exchanges typed function-call messages with the page over WebSocket. It supports the system browser, embedded CEF, and an optional Windows WebView2 frontend.
+WebFront is a C++23 header-only experiment for browser-based C++ user interfaces. A C++ process serves local HTML/JavaScript and exchanges typed function-call messages with the page over WebSocket. It supports the system browser, embedded CEF, optional Windows WebView2 and macOS WKWebView frontends.
 
 The minimum demonstration milestone is deliberately narrower than the long-term vision: serve a native ES-module graph and automatically prove one JavaScript-to-C++ call and one C++-to-served-JavaScript call with Jasmine.
 
@@ -119,7 +147,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - `WEBFRONT_EMBED_CEF=ON` uses CEF 154.0.34 (Chromium 154.0.8037.98, package `ambroise-leclerc/CEF@154.0.34`). An existing CEF 137 build directory must be reconfigured from scratch. On Windows, `libEGL.dll`, `libGLESv2.dll`, `dxcompiler.dll`, `dxil.dll` and `vk_swiftshader_icd.json` are copied only when the distribution ships them (CEF 154 has no ANGLE DLLs, #249). Verified 2026-10-16 on Linux (GCC 16.1, Unix Makefiles): the CEF build with all 138 CTest cases passing, `WebFrontBrowserIntegration` included, and the CEF-off build with all 137; with Clang 22, the CEF build of `webtest` and `WebFrontBrowserIntegration`. **Not verified:** CEF 154 on Windows and macOS (the macOS ARM64 framework requires macOS 13.0+). A parallel build of every example fails intermittently because their post-build steps copy `locales/` into the same `src/` directory at once.
 - The bridge carries all JavaScript numeric typed-array variants in both directions. C++ `std::vector`, `std::array`, and `std::span` values use the matching typed-array encoding, while decoded parameters own their storage.
 - `src/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
-- Text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `src/fallback/`; `favicon.ico` remains Brotli-encoded. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
+- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `src/fallback/`; `favicon.ico` remains Brotli-encoded. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
 - The fallback page awaits `webFront.ready` to display the initial bridge connection result. This promise resolves after the handshake acknowledgement and rejects if the initial connection fails or closes; it does not track later disconnects. Jasmine exercises failure against a test-owned HTTP server on an OS-assigned loopback port that rejects WebSocket upgrades, including the case where the application never consumes `ready`.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
 - The HTTP server looks files up by the request path without its query string (`/app.js?v=2` serves `app.js`); the path is cut at the first `?` before percent-decoding, so an encoded `%3F` stays part of the file name, and the `..` check applies to the decoded path only. The query is not passed to filesystems.

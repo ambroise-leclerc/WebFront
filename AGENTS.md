@@ -16,7 +16,7 @@ The project is an experimental foundation, not a production-ready UI framework. 
 - `include/http/`: HTTP and WebSocket protocol implementation.
 - `include/weblink/`: bridge message encoding and routing.
 - `include/system/`: layered virtual filesystems and embedded web resources.
-- `include/frontend/`: system-browser, CEF and optional Windows WebView2 frontend adapters.
+- `include/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `include/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`, and installed tools by `include/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
 - `src/`: example applications and browser assets: `HelloWorld.cpp` (no assets, embedded fallback page), `Greeter.cpp` with `greeter/` (editable UI), `ModuleDemo.cpp` with `module-demo.html` and `react.html`, `Terminal.cpp` (terminal component demo), and the readable embedded sources `WebFront.js`, `fallback/` and `components/`.
 - `test/`: Catch2 unit tests.
@@ -68,6 +68,7 @@ Important CMake options:
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases; `WEBFRONT_DEMO_FRONTEND=WebView2` selects it for the module demo.
+- `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage, and `WEBFRONT_DEMO_FRONTEND=WKWebView` selects it for the module demo.
 - `ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly.
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.

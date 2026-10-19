@@ -1,88 +1,32 @@
+#include <catch2/catch_test_macros.hpp>
 #include <system/JasmineFS.hpp>
 
-#include <catch2/catch_test_macros.hpp>
-
-#include <algorithm>
-#include <iostream>
-#include <regex>
+#include <array>
 #include <string_view>
+#include <utility>
+#include <vector>
 
-// Deliberately using large stack buffers in tests
-#ifdef _MSC_VER
-#pragma warning(disable: 6262)
-#endif
-
-using namespace std;
 using namespace webfront;
 
 SCENARIO("JasmineFS provides Jasmine testing library") {
     GIVEN("A JasmineFS") {
-        using FS = fs::JasmineFS;
-
-        WHEN("Requesting jasmine_favicon.png") {
-            auto file = FS::open("jasmine/4.6.0/jasmine_favicon.png");
-            THEN("correct data is returned") {
-                REQUIRE(file.has_value());
-                REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 2000> buffer;
-                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 1162);
-            }
-        }
-        WHEN("Requesting jasmine") {
-            auto file = FS::open("jasmine/4.6.0/jasmine.css");
-            THEN("correct data is returned") {
-                REQUIRE(file.has_value());
-                REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 7000> buffer;
-                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 6409);
-            }
-        }
-        WHEN("Requesting jasmine") {
-            auto file = FS::open("jasmine/4.6.0/jasmine.js");
-            THEN("correct data is returned") {
-                REQUIRE(file.has_value());
-                REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 55000> buffer;
-                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 50056);
-            }
-        }
-        WHEN("Requesting jasmine") {
-            auto file = FS::open("jasmine/4.6.0/jasmine-html.js");
-            THEN("correct data is returned") {
-                REQUIRE(file.has_value());
-                REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 6000> buffer;
-                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 5166);
-            }
-        }
-        WHEN("Requesting jasmine") {
-            auto file = FS::open("jasmine/4.6.0/boot0.js");
-            THEN("correct data is returned") {
-                REQUIRE(file.has_value());
-                REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 1000> buffer;
-                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 990);
-            }
-        }
-        WHEN("Requesting jasmine") {
-            auto file = FS::open("jasmine/4.6.0/boot1.js");
-            THEN("correct data is returned") {
-                REQUIRE(file.has_value());
-                REQUIRE(file->isEncoded());
-                REQUIRE(file->getEncoding() == "br");
-                array<uint8_t, 2000> buffer;
-                auto readSize = file->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
-                REQUIRE(readSize == 1475);
+        constexpr std::array<std::pair<std::string_view, std::size_t>, 6> assets{
+            {{"jasmine_favicon.png", 1290}, {"jasmine.css", 7322}, {"jasmine.js", 61551}, {"jasmine-html.js", 6057}, {"boot0.js", 1363}, {"boot1.js", 1926}}
+        };
+        for (const auto& [name, size] : assets) {
+            WHEN("requesting " << name) {
+                auto path = std::filesystem::path("jasmine/4.6.0") / name;
+                path.make_preferred();
+                auto file = fs::JasmineFS::open(path);
+                THEN("the gzip payload and advertised size are returned") {
+                    REQUIRE(file.has_value());
+                    REQUIRE(file->isEncoded());
+                    REQUIRE(file->getEncoding() == "gzip");
+                    std::vector<char> buffer(size + 1);
+                    REQUIRE(file->read(buffer) == size);
+                    REQUIRE(static_cast<unsigned char>(buffer[0]) == 0x1f);
+                    REQUIRE(static_cast<unsigned char>(buffer[1]) == 0x8b);
+                }
             }
         }
     }
