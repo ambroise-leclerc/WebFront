@@ -5,8 +5,11 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <future>
+#include <latch>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
 
@@ -46,7 +49,78 @@ struct ExternalSender {
 webfront::Task externalTask(std::function<void()>& complete) {
     co_await ExternalSender{complete};
 }
+
+struct PausedStartSender {
+    using sender_concept        = ex::sender_tag;
+    using completion_signatures = ex::completion_signatures<ex::set_value_t()>;
+    std::latch& started;
+    std::latch& release;
+    bool        failConnection = false;
+
+    template <typename Receiver>
+    struct Operation {
+        Receiver    receiver;
+        std::latch& started;
+        std::latch& release;
+        void        start() noexcept {
+            started.count_down();
+            release.wait();
+            ex::set_value(std::move(receiver));
+        }
+    };
+    template <typename Receiver>
+    auto connect(Receiver receiver) const {
+        if (failConnection)
+            throw std::runtime_error("spawn connection failed");
+        return Operation<Receiver>{std::move(receiver), started, release};
+    }
+};
 }  // namespace
+
+SCENARIO("Scope drain waits for a concurrent spawn to finish starting") {
+    webfront::networking::TaskScope     scope;
+    webfront::networking::IoContextMock context;
+    std::latch                          started(1), release(1);
+    GIVEN("a task associated with the scope but paused inside start") {
+        std::atomic<bool> accepted{false};
+        std::jthread      caller([&] {
+            accepted = scope.spawn(PausedStartSender{started, release});
+        });
+        started.wait();
+        std::latch stopping(1);
+        auto       onStop = [&] {
+            stopping.count_down();
+        };
+        ex::stop_callback_for_t<ex::inplace_stop_token, decltype(onStop)> callback(scope.stopToken(), onStop);
+        std::promise<void>                                                result;
+        auto                                                              finished = result.get_future();
+        std::jthread                                                      drainer([&] {
+            try {
+                scope.drain(context);
+                result.set_value();
+            } catch (...) {
+                result.set_exception(std::current_exception());
+            }
+        });
+        stopping.wait();
+        const auto status = finished.wait_for(std::chrono::milliseconds(100));
+        release.count_down();
+        caller.join();
+        drainer.join();
+        THEN("the empty context is not mistaken for a stalled task") {
+            CHECK(accepted.load());
+            CHECK(status == std::future_status::timeout);
+            CHECK_NOTHROW(finished.get());
+            CHECK_NOTHROW(scope.drain(context));
+        }
+    }
+    GIVEN("a sender that throws while connecting") {
+        CHECK_THROWS_AS(scope.spawn(PausedStartSender{started, release, true}), std::runtime_error);
+        THEN("draining does not wait for the failed spawn") {
+            CHECK_NOTHROW(scope.drain(context));
+        }
+    }
+}
 
 SCENARIO("Applications own spawned coroutines and expose individual cancellation") {
     GIVEN("two application coroutines suspended on cancellable operations") {
@@ -174,7 +248,7 @@ SCENARIO("Spawn and scope close agree on whether work was accepted") {
         App               app(webfront::WebFrontConfig{.port = "0"});
         std::atomic<bool> go{false};
         std::atomic<bool> invalid{false};
-        std::thread       caller([&] {
+        std::jthread      caller([&] {
             go.wait(false);
             for (int i = 0; i != 100; ++i) {
                 bool ran    = false;
@@ -185,7 +259,7 @@ SCENARIO("Spawn and scope close agree on whether work was accepted") {
         });
         go = true;
         go.notify_one();
-        app.shutdown();
+        CHECK_NOTHROW(app.shutdown());
         caller.join();
         THEN("every rejected task returns a stopped handle") {
             CHECK_FALSE(invalid.load());

@@ -9,6 +9,17 @@ qualified tools and verification. With the option on, browser logs travel throug
 mddlog's bounded transport consumer and WebLink captures link/call context. mddlog
 ADR-003, which this integration implements, was accepted on 2026-10-02.
 
+## Concurrent spawn and shutdown (#273, 2026-10-19)
+
+`TaskScope::drain()` closes spawn admission and waits for callers already starting
+senders before checking whether the context is empty. This fixes the race where
+an associated task had not yet started or queued work, so a valid concurrent
+`spawn()` caused a false stalled-join exception. Sender startup and cancellation
+callbacks run outside the admission mutex. Regression coverage pauses a sender
+inside `start()` and also checks that a throwing `connect()` releases admission.
+The application-level race test uses an automatically joined thread and reports
+shutdown exceptions directly, rather than masking them with `std::terminate`.
+
 ## Native macOS window (#258, 2026-10-19)
 
 - `WEBFRONT_EMBED_WKWEBVIEW=ON` enables `WKWebViewFrontend` on macOS 13.3+, using the system
@@ -36,6 +47,27 @@ ADR-003, which this integration implements, was accepted on 2026-10-02.
   verified. Linux CEF/Xvfb and Windows WebView2 verification run in their existing CI jobs.
   An intermittent application-task spawn/shutdown abort is independently reproduced on `develop`
   without WKWebView and tracked in [#273](https://github.com/ambroise-leclerc/WebFront/issues/273).
+
+## Optional WebKitGTK frontend (#259, 2026-10-19)
+
+`WEBFRONT_EMBED_WEBKITGTK=ON` enables `frontend::WebKitGTKFrontend` on Linux through
+system WebKitGTK 6.0 (GTK 4), discovered by pkg-config. It follows the embedded-window
+contract, checks main-thread/display requirements, uses executable-specific XDG data
+and cache directories, and loads its runtime without exposing GTK headers. The default
+browser selection and disabled configuration remain unchanged. Legacy embedded Jasmine,
+React and Babel assets use gzip so WebKitGTK can load them over loopback HTTP. Shared Jasmine and lifecycle coverage,
+plus adapter-specific failure and repeat-opening cases, run under Xvfb in the Ubuntu
+CI lane. Main-document policy checks occur before response commit; denied requests
+may already have been sent. Native Wayland, WSLg and alternating CEF/GTK windows need
+manual desktop qualification. Every WebKitGTK test explicitly appends private XDG
+paths without replacing existing environment entries. Adapter-specific tests use
+`WebKitGTKAdapter-*`; toolkit-free policy/error tests also run with the option off.
+Concurrent processes using the same executable share their persistent profile;
+development packages are needed only for configure-time detection. Profiles are
+restricted to `0700`; native-close tests run within the active GTK loop, and
+pre-run failures remain observable. Native callbacks and policy handling use
+separate named functions.
+See [WebKitGTK notes](WEBKITGTK.md).
 
 ## Input decoder hardening (#267, 2026-10-18)
 

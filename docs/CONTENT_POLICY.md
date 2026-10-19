@@ -2,7 +2,7 @@
 
 `WebFrontConfig::contentPolicy` is a per-application `webfront::ContentPolicy`, copied into the
 HTTP server and passed to built-in frontends for each opening. It applies to the system browser,
-CEF, WebView2 and WKWebView as described below. This experimental library still targets trusted application
+CEF, WebView2, WKWebView and WebKitGTK as described below. This experimental library still targets trusted application
 content; origin checks do not make arbitrary application scripts safe.
 
 ## Defaults and migration
@@ -62,6 +62,7 @@ inspect the native log or network diagnostics when debugging a connection from a
 | CEF | `OnBeforeBrowse` checks top-level navigations, including redirects; `OnOpenURLFromTab` handles new-tab requests, and `OnBeforePopup` always cancels unmanaged windows. | Context-menu filtering and Chrome command handling control DevTools; context menus can be cleared. |
 | WKWebView | Navigation action/response delegates check top-level destinations; unmanaged popup creation is cancelled. All popups are blocked, including `systemBrowser`, because the public API lacks a reliable user-activation flag. | Public `inspectable` controls Safari inspection; a view override clears disabled context menus. |
 | WebView2 | `NavigationStarting` cancels disallowed top-level navigations, including redirects; `NewWindowRequested` is always marked handled. | `AreDevToolsEnabled` and `AreDefaultContextMenusEnabled` settings. |
+| WebKitGTK | Main-document response decisions check origins before commit (the request may already have reached its destination); new-window decisions block or forward user-initiated HTTP(S) popups. Navigation actions also reject opaque schemes such as `data:` and `blob:` in every frame. | `enable-developer-extras` setting and the `context-menu` signal. |
 
 Same-origin page references, query strings and fragments continue working. A denied later
 navigation leaves the current page alive. Popup forwarding intentionally does not use the
@@ -81,7 +82,7 @@ DevTools settings control the adapter's engine UI, not inspection by native host
 
 Custom frontends can opt into `open(address, port, page, const ContentPolicy&)`; `BasicWF` prefers
 it over the legacy three- and two-argument overloads. Custom adapters are responsible for mapping
-the policy to their engine; server bridge checks apply even with legacy adapters. Future WebKitGTK adapters should map these same rules to their navigation and window-creation delegates.
+the policy to their engine; server bridge checks apply even with legacy adapters.
 
 ## Regression coverage
 

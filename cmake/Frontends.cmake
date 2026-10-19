@@ -91,6 +91,12 @@ webfront_register_frontend(WKWebView
     PLATFORMS Darwin SUPPORT WKWebViewSupport
     TEST_PLATFORMS Darwin TEST_NAME WebFrontWKWebViewIntegration TEST_TIMEOUT 90
     TEST_SETUP webfront_add_wkwebview_tests)
+webfront_register_frontend(WebKitGTK
+    OPTION WEBFRONT_EMBED_WEBKITGTK POLICY strict
+    DESCRIPTION "Enable the system WebKitGTK 6.0 embedded frontend (Linux only)"
+    PLATFORMS Linux SUPPORT WebKitGTKSupport
+    TEST_PLATFORMS Linux TEST_NAME WebFrontWebKitGTKIntegration TEST_TIMEOUT 90 XVFB_LINUX
+    TEST_SETUP webfront_add_webkitgtk_tests)
 webfront_register_frontend(CEF
     OPTION WEBFRONT_EMBED_CEF POLICY lenient
     DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux and macOS only). Other platforms fail at configure time"
@@ -199,6 +205,7 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             set(command "${XVFB_RUN_EXECUTABLE}" -a ${command})
         endif()
     endif()
+    set(shared_tests "")
     if(register_shared)
         set(lifecycle_command "$<TARGET_FILE:${lifecycle_target}>")
         if(WEBFRONT_FRONTEND_${frontend}_XVFB_LINUX AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -207,18 +214,20 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
         foreach(mode no-bridge early-close rejected-ready navigation-failure path-encoding content-policy navigation-allow-list)
             set(lifecycle_name "${frontend}Lifecycle-${mode}")
             add_test(NAME ${lifecycle_name} COMMAND ${lifecycle_command} ${mode})
+            list(APPEND shared_tests "${lifecycle_name}")
             webfront_set_browser_test_properties("${lifecycle_name}" "${assets_directory}"
                 "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
         endforeach()
         set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
         add_test(NAME ${name} COMMAND ${command})
+        list(APPEND shared_tests "${name}")
         webfront_set_browser_test_properties("${name}" "${assets_directory}"
             "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
     endif()
     # Per-engine tests may be independent of a display and must not be skipped with Jasmine.
     set(setup "${WEBFRONT_FRONTEND_${frontend}_TEST_SETUP}")
     if(NOT setup STREQUAL "")
-        cmake_language(CALL ${setup})
+        cmake_language(CALL ${setup} ${shared_tests})
     endif()
 endfunction()
 

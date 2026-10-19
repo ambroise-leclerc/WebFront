@@ -76,6 +76,18 @@ struct PolicyLifecycleFrontend {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const webfront::ContentPolicy& policy) {
+#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+        if constexpr (std::same_as<Frontend, webfront::frontend::WebKitGTKFrontend>) {
+            webfront::frontend::detail::webkitgtk::OpenOptions options{.contentPolicy = policy};
+            options.configure = [](auto& session) {
+                session.navigationCancelled = [&session] {
+                    session.evaluate(cancellationScript);
+                };
+            };
+            webfront::frontend::detail::webkitgtk::open(address, port, page, options);
+            return;
+        }
+#endif
 #ifdef WEBFRONT_EMBED_CEF
         if constexpr (std::same_as<Frontend, webfront::frontend::CEFFrontend>) {
             webfront::cef::detail::openWindow(webfront::frontend::detail::applicationUrl(address, port, page),

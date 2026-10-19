@@ -27,6 +27,7 @@ if(CASE)
     set(WEBFRONT_EMBED_CEF ${CEF})
     set(WEBFRONT_EMBED_WEBVIEW2 ${WEBVIEW2})
     set(WEBFRONT_EMBED_WKWEBVIEW ${WKWEBVIEW})
+    set(WEBFRONT_EMBED_WEBKITGTK ${WEBKITGTK})
     if(CASE STREQUAL "options" OR CASE STREQUAL "cross-root")
         webfront_declare_frontend_options()
         foreach(name IN LISTS WEBFRONT_FRONTEND_REGISTRY)
@@ -156,7 +157,7 @@ include("${ROOT}/cmake/FrontendTestHelpers.cmake")
 set(failures "")
 function(run_case name expect_success expected_text)
     execute_process(
-        COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DCASE=${CASE_NAME} -DCMAKE_SYSTEM_NAME=${CASE_PLATFORM} -DCEF=${CASE_CEF} -DWEBVIEW2=${CASE_WEBVIEW2} -DWKWEBVIEW=${CASE_WKWEBVIEW}
+        COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DCASE=${CASE_NAME} -DCMAKE_SYSTEM_NAME=${CASE_PLATFORM} -DCEF=${CASE_CEF} -DWEBVIEW2=${CASE_WEBVIEW2} -DWKWEBVIEW=${CASE_WKWEBVIEW} -DWEBKITGTK=${CASE_WEBKITGTK}
                 -DVALUE=${CASE_VALUE} "-DFLAGS=${CASE_FLAGS}" -P "${CMAKE_CURRENT_LIST_FILE}"
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
     set(text "${output}${error}")
@@ -308,14 +309,14 @@ run_case("explicit CEF overrides native default" TRUE "TYPE=webfront::frontend::
 set(CASE_CEF OFF)
 run_case("CEF-off diagnostic build stays valid" TRUE "TYPE=webfront::frontend::CEFFrontend")
 set(CASE_VALUE DefaultBrowser)
-run_case("embedded-only rejects the browser" FALSE "must be one of: WebView2, WKWebView, CEF")
+run_case("embedded-only rejects the browser" FALSE "must be one of: WebView2, WKWebView, WebKitGTK, CEF")
 set(CASE_VALUE Bogus)
 set(CASE_FLAGS "")
-run_case("unknown frontend" FALSE "must be one of: DefaultBrowser, WebView2, WKWebView, CEF")
+run_case("unknown frontend" FALSE "must be one of: DefaultBrowser, WebView2, WKWebView, WebKitGTK, CEF")
 
 # Configure-only fixtures exercise CTest commands on every platform and adding an engine using
 # only a registration and support module. They need neither a compiler nor a browser SDK.
-foreach(case cef-linux cef-macos cef-windows cef-disabled missing-xvfb missing-xvfb-hook browser webview2-windows wkwebview-macos extension)
+foreach(case webkitgtk-linux cef-linux cef-macos cef-windows cef-disabled missing-xvfb missing-xvfb-hook browser webview2-windows wkwebview-macos extension)
     # These directories belong only to this configure-only fixture. Drop their caches so a
     # changed generator or previous discovery result cannot influence the next invocation.
     file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/${case}")
@@ -365,7 +366,7 @@ foreach(case cef-linux cef-macos cef-windows cef-disabled missing-xvfb missing-x
                 continue()
             endif()
             set(expected_command "${CMAKE_COMMAND}")
-            if(case STREQUAL "cef-linux" OR case STREQUAL "extension")
+            if(case STREQUAL "cef-linux" OR case STREQUAL "extension" OR case STREQUAL "webkitgtk-linux")
                 set(expected_command "${CMAKE_COMMAND};-a;${CMAKE_COMMAND}")
             endif()
             if(test_name MATCHES "Lifecycle-(.+)$")
@@ -388,6 +389,33 @@ foreach(case cef-linux cef-macos cef-windows cef-disabled missing-xvfb missing-x
         endforeach()
     endif()
 endforeach()
+
+set(CASE_NAME options)
+set(CASE_WKWEBVIEW "")
+set(CASE_WEBKITGTK "")
+set(CASE_CEF "")
+set(CASE_WEBVIEW2 "")
+run_case("WebKitGTK defaults OFF" TRUE "OPTION=WEBFRONT_EMBED_WEBKITGTK:OFF")
+set(CASE_WEBKITGTK ON)
+set(CASE_PLATFORM Windows)
+run_case("WebKitGTK rejects Windows" FALSE "WEBFRONT_EMBED_WEBKITGTK is supported only on: Linux")
+set(CASE_PLATFORM Linux)
+set(CASE_NAME default)
+set(CASE_CEF ON)
+run_case("Linux prefers enabled WebKitGTK over CEF" TRUE "CHOSEN=WebKitGTK")
+set(CASE_NAME select)
+set(CASE_VALUE WebKitGTK)
+set(CASE_FLAGS "EMBEDDED_ONLY;REQUIRE_AVAILABLE")
+run_case("WebKitGTK selector" TRUE "TYPE=webfront::frontend::WebKitGTKFrontend")
+set(CASE_WEBKITGTK OFF)
+run_case("WebKitGTK tests require support" FALSE "requires WEBFRONT_EMBED_WEBKITGTK=ON")
+
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${ROOT}/test/frontends"
+    -B "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/webkitgtk-missing-sdk" -DROOT=${ROOT} -DCASE=webkitgtk-missing-sdk
+    RESULT_VARIABLE missing_sdk OUTPUT_VARIABLE sdk_output ERROR_VARIABLE sdk_error)
+if(missing_sdk EQUAL 0 OR NOT "${sdk_output}${sdk_error}" MATCHES "WEBFRONT_EMBED_WEBKITGTK=ON requires")
+    list(APPEND failures "Missing WebKitGTK SDK did not report its enabling option: ${sdk_output}${sdk_error}")
+endif()
 
 if(failures)
     list(JOIN failures "\n" text)
