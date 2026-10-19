@@ -48,7 +48,7 @@ shutdown exceptions directly, rather than masking them with `std::terminate`.
   and running the suite with timeouts. Native Intel/macOS 13.3 runtime execution is not locally
   verified. Linux CEF/Xvfb and Windows WebView2 verification run in their existing CI jobs.
   The application-task spawn/shutdown abort reproduced without WKWebView in
-  [#273](https://github.com/ambroise-leclerc/WebFront/issues/273) is fixed by PR #275.
+  [#273](https://github.com/ambroise-leclerc/WebFront/issues/273) is fixed by [PR #275](https://github.com/ambroise-leclerc/WebFront/pull/275).
 
 ## Optional WebKitGTK frontend (#259, 2026-10-19)
 

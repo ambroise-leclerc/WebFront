@@ -329,6 +329,7 @@ On Linux, WebKitGTK runs the same Jasmine and shared lifecycle suites plus adapt
 Install the WebKitGTK development package, pkg-config and Xvfb, then configure explicitly:
 
 ```bash
+sudo apt install libwebkitgtk-6.0-dev pkg-config xvfb
 cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON \
   -DWEBFRONT_DEMO_FRONTEND=WebKitGTK -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
