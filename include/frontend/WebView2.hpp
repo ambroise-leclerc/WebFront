@@ -1,19 +1,25 @@
 #pragma once
 
+#include "../ContentPolicy.hpp"
+#include "../tooling/Logger.hpp"
 #include "Action.hpp"
+#include "DefaultBrowser.hpp"
 #include "Url.hpp"
 
 #include <chrono>
+#include <concepts>
 #include <filesystem>
+#include <functional>
 #include <stdexcept>
 #include <string_view>
 
 namespace webfront::frontend {
 
-/** @brief Per-opening runtime creation deadline and persistent profile directory. */
+/** @brief Per-opening runtime deadline, persistent profile directory and embedded-content rules. */
 struct WebView2Options {
     std::chrono::milliseconds startupTimeout{std::chrono::seconds{30}};
     std::filesystem::path     userDataFolder{};
+    ContentPolicy             contentPolicy{};
 };
 
 }  // namespace webfront::frontend
@@ -72,6 +78,24 @@ inline std::wstring utf16(std::string_view text) {
     return result;
 }
 
+inline std::string utf8(std::wstring_view text) {
+    if (text.empty())
+        return {};
+    const auto length = static_cast<int>(text.size());
+    const int  size   = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), length, nullptr, 0, nullptr, nullptr);
+    if (!size)
+        throw std::runtime_error("WebView2: invalid UTF-16 URL");
+    std::string result(static_cast<std::size_t>(size), '\0');
+    if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), length, result.data(), size, nullptr, nullptr))
+        throw std::runtime_error("WebView2: URL conversion failed");
+    return result;
+}
+
+inline void configureContentSettings(ICoreWebView2Settings* settings, const ContentPolicy& policy) {
+    check(settings->put_AreDevToolsEnabled(policy.devToolsEnabled), "configuring DevTools");
+    check(settings->put_AreDefaultContextMenusEnabled(policy.contextMenusEnabled), "configuring context menus");
+}
+
 inline std::wstring applicationUrl(std::string_view address, std::string_view port, std::string_view file) {
     return utf16(frontend::detail::applicationUrl(address, port, file));
 }
@@ -123,6 +147,9 @@ public:
     Microsoft::WRL::ComPtr<ICoreWebView2>            view;
     std::exception_ptr                               failure;
     std::wstring                                     url;
+    webfront::detail::BoundContentPolicy             contentPolicy;
+    // Internal adapter observer, used by lifecycle probes after a successful native cancellation.
+    std::function<void()>                            navigationCancelled;
     bool                                             closed       = false;
     UINT_PTR                                         startupTimer = 0;
 
@@ -132,6 +159,45 @@ public:
             DestroyWindow(window);
         if (registered)
             UnregisterClassW(className.c_str(), GetModuleHandleW(nullptr));
+    }
+
+    void navigationStarting(ICoreWebView2NavigationStartingEventArgs* args) noexcept {
+        if (closed)
+            return;
+        try {
+            LPWSTR raw = nullptr;
+            check(args->get_Uri(&raw), "reading navigation URL");
+            const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> uri(raw, CoTaskMemFree);
+            if (contentPolicy.allowsNavigation(utf8(uri.get())))
+                return;
+            check(args->put_Cancel(TRUE), "blocking navigation");
+            if (navigationCancelled)
+                navigationCancelled();
+        } catch (...) {
+            fail();
+        }
+    }
+
+    void newWindowRequested(ICoreWebView2NewWindowRequestedEventArgs* args, browser::Launcher launch = browser::launch) noexcept {
+        try {
+            check(args->put_Handled(TRUE), "blocking unmanaged popup");
+            BOOL userInitiated = FALSE;
+            check(args->get_IsUserInitiated(&userInitiated), "reading popup user initiation");
+            LPWSTR raw = nullptr;
+            check(args->get_Uri(&raw), "reading popup URL");
+            const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> uri(raw, CoTaskMemFree);
+            const auto                                               popupUrl = utf8(uri.get());
+            // A failed external launcher must not end the application session.
+            try {
+                contentPolicy.handlePopup(popupUrl, userInitiated != FALSE, launch);
+            } catch (const std::exception& error) {
+                log::error("WebView2 popup launch failed: {}", error.what());
+            } catch (...) {
+                log::error("WebView2 popup launch failed with a non-standard exception");
+            }
+        } catch (...) {
+            fail();
+        }
     }
 
     void close() noexcept {
@@ -452,7 +518,7 @@ private:
         check(started, "starting controller creation");
     }
 
-    void configure() {
+    void registerLifecycleHandlers() {
         auto                   weak = weak_from_this();
         EventRegistrationToken token{};
         check(
@@ -481,6 +547,37 @@ private:
                   }).Get(),
                   &token),
               "registering navigation handler");
+    }
+
+    void registerPolicyHandlers() {
+        auto                                          weak = weak_from_this();
+        EventRegistrationToken                        token{};
+        Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
+        check(view->get_Settings(&settings), "getting browser settings");
+        configureContentSettings(settings.Get(), contentPolicy.options());
+        check(view->add_NavigationStarting(
+                  Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>([weak](ICoreWebView2*,
+                                                                                               ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                      if (const auto self = weak.lock())
+                          self->navigationStarting(args);
+                      return S_OK;
+                  }).Get(),
+                  &token),
+              "registering navigation policy");
+        check(view->add_NewWindowRequested(
+                  Microsoft::WRL::Callback<ICoreWebView2NewWindowRequestedEventHandler>([weak](ICoreWebView2*,
+                                                                                               ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
+                      if (const auto self = weak.lock())
+                          self->newWindowRequested(args);
+                      return S_OK;
+                  }).Get(),
+                  &token),
+              "registering popup policy");
+    }
+
+    void configure() {
+        registerLifecycleHandlers();
+        registerPolicyHandlers();
         resize();
         check(controller->put_IsVisible(TRUE), "showing controller");
         if (GetFocus() == window)
@@ -492,6 +589,7 @@ private:
 };
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const WebView2Options& options) {
+    auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, ""), options.contentPolicy};
     Apartment                                                apartment;
     LPWSTR                                                   rawVersion = nullptr;
     const auto                                               available  = GetAvailableCoreWebView2BrowserVersionString(nullptr, &rawVersion);
@@ -500,6 +598,7 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
         throw std::runtime_error("WebView2 runtime not found. Install Microsoft Edge WebView2 Evergreen Runtime: "
                                  "https://developer.microsoft.com/microsoft-edge/webview2/");
     auto session       = std::make_shared<Session>(options.startupTimeout);
+    session->contentPolicy = std::move(contentPolicy);
     session->url       = applicationUrl(address, port, file);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
     std::filesystem::create_directories(profile);
@@ -534,6 +633,12 @@ struct WebView2Frontend {
         throw std::runtime_error("WebView2Frontend is unavailable. Configure on Windows with -DWEBFRONT_EMBED_WEBVIEW2=ON");
 #endif
     }
+    template <std::same_as<ContentPolicy> Policy>
+    static void open(std::string_view address, std::string_view port, std::string_view file, const Policy& policy) {
+        WebView2Options options;
+        options.contentPolicy = policy;
+        open(address, port, file, options);
+    }
 };
 
 /** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
@@ -544,6 +649,12 @@ struct WebView2FrontendWithOptions : WebView2Frontend {
     }
     static void open(std::string_view address, std::string_view port, std::string_view page) {
         WebView2Frontend::open(address, port, page, OptionsProvider::get());
+    }
+    template <std::same_as<ContentPolicy> Policy>
+    static void open(std::string_view address, std::string_view port, std::string_view page, const Policy& policy) {
+        auto options          = OptionsProvider::get();
+        options.contentPolicy = policy;
+        WebView2Frontend::open(address, port, page, options);
     }
 };
 

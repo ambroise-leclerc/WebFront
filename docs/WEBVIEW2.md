@@ -20,7 +20,7 @@ Window destruction ends this session's message loop directly, without posting a 
 
 The adapter does not supply a DPI-awareness manifest. Applications should provide their own manifest for sharp rendering on HiDPI displays; without one Windows may scale the window and make it blurry.
 
-This experimental frontend is intended for development with trusted application content. It does not filter `NavigationStarting` by origin or intercept `NewWindowRequested`: external links can replace the application page, and `window.open()` can create windows outside `Session` management. It supplies no origin-based authorization for the C++ bridge. DevTools and default context menus remain enabled for development. A production host needs its own navigation, popup and bridge authorization policy; see [Microsoft's WebView2 security guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security).
+The [shared content policy](CONTENT_POLICY.md) defines the defaults, configuration and limitations for navigation, popups, bridge origins, DevTools and context menus. WebView2 applies it through `NavigationStarting`, `NewWindowRequested` and engine settings. Direct callers can set `WebView2Options::contentPolicy`; `BasicWF` forwards `WebFrontConfig::contentPolicy` automatically, including with `WebView2FrontendWithOptions`.
 
 The adapter implementation lives in `frontend::detail::webview2` and is not a supported public API.
 

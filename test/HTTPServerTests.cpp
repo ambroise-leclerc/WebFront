@@ -190,7 +190,7 @@ SCENARIO("Request parsing") {
         REQUIRE(request.uri == "/chat");
         REQUIRE(request.method == Request::Method::Get);
         WHEN("A RequestHandler process it") {
-            RequestHandler<Net, MockFileSystem<>> handler{"."};
+            RequestHandler<Net, MockFileSystem<>> handler{".", detail::BoundContentPolicy{"http://example.com"}};
             auto response = handler.handleRequest(request);
 
             THEN("It should respond with a 'Switching Protocols' http response") {

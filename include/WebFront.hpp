@@ -272,6 +272,7 @@ struct WebFrontConfig {
     std::string           address{"127.0.0.1"};
     std::string           port{"9002"};
     std::filesystem::path documentRoot{};
+    ContentPolicy         contentPolicy{};
 };
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
@@ -287,8 +288,12 @@ public:
     BasicWF() : BasicWF(WebFrontConfig{}) {}
 
     explicit BasicWF(WebFrontConfig config)
-        : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot),
-          httpAddress(config.address), httpPort(config.port), httpDocRoot(config.documentRoot), idsCounter(0) {
+        : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
+          httpAddress(config.address),
+          httpPort(config.port),
+          httpDocRoot(config.documentRoot),
+          contentPolicy(std::move(config.contentPolicy)),
+          idsCounter(0) {
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
             for (bool inserted = false; !inserted; ++idsCounter)
                 std::tie(std::ignore, inserted) = webLinks.try_emplace(
@@ -419,7 +424,9 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
-        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename); })
+        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy);
+        else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename); })
             Frontend::open(httpAddress, httpPort, htmlFilename);
         else
             Frontend::open(httpPort, htmlFilename);
@@ -486,6 +493,7 @@ private:
     std::string                                                              httpAddress;
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
+    ContentPolicy                                                            contentPolicy;
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;

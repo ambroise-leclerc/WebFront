@@ -1,15 +1,22 @@
 #include "InjectableNetworking.hpp"
-#include <WebFront.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <http/HTTPServer.hpp>
 #include <networking/TCPNetworkingStdnet.hpp>
 #include <system/DefaultFS.hpp>
+#include <WebFront.hpp>
 
-#include <catch2/catch_test_macros.hpp>
+#ifdef _WIN32
+    #include <system/WindowsCompat.hpp>
+#else
+    #include <poll.h>
+#endif
 
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -50,11 +57,31 @@ void waitUntil(auto condition) {
     for (int i = 0; i < 500 && !condition(); ++i) std::this_thread::sleep_for(10ms);
 }
 
-// Reads the HTTP response head of a blocking client socket.
-std::string readHeaders(Stdnet::Socket& socket) {
+void waitForHeaderData(Stdnet::Socket& socket, std::chrono::steady_clock::time_point deadline) {
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+    if (remaining <= 0)
+        throw std::runtime_error("Timed out waiting for HTTP response headers");
+    ::pollfd descriptor{};
+    descriptor.fd     = socket.native_handle();
+    descriptor.events = POLLIN;
+#ifdef _WIN32
+    const int ready = ::WSAPoll(&descriptor, 1, static_cast<int>(remaining));
+#else
+    const int ready = ::poll(&descriptor, 1, static_cast<int>(remaining));
+#endif
+    if (ready < 0)
+        throw std::runtime_error("HTTP response readiness wait failed");
+    if (ready == 0)
+        throw std::runtime_error("Timed out waiting for HTTP response headers");
+}
+
+// A single deadline bounds the whole response head, even if bytes arrive in small chunks.
+std::string readHeaders(Stdnet::Socket& socket, std::chrono::milliseconds timeout = 5s) {
+    const auto            deadline = std::chrono::steady_clock::now() + timeout;
     std::string           received;
     std::array<char, 512> buffer{};
     while (received.find("\r\n\r\n") == std::string::npos) {
+        waitForHeaderData(socket, deadline);
         const auto size = socket.receive(Stdnet::Buffer(buffer));
         if (size == 0) break;
         received.append(buffer.data(), size);
@@ -196,4 +223,49 @@ SCENARIO("Application task cancellation returns to the server context") {
             }
         }
     }
+}
+
+SCENARIO("A rejected WebSocket Origin never reaches the server upgrade callback") {
+    const auto                          port = freePort();
+    http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
+    std::atomic<int>                    upgrades = 0;
+    server.onUpgrade([&](Stdnet::Socket&&) {
+        ++upgrades;
+    });
+    std::jthread      serverThread([&](std::stop_token token) {
+        std::stop_callback stop(token, [&] {
+            server.stop();
+        });
+        server.run();
+    });
+    Stdnet::IoContext context;
+    Stdnet::Socket    client(context);
+    connect(client, port);
+    const auto request = upgradeRequest.substr(0, upgradeRequest.size() - 2) + "Origin: https://untrusted.example\r\n\r\n";
+    client.send(std::as_bytes(std::span(request)));
+    const auto response = readHeaders(client);
+    THEN("a foreign origin gets 403 without reaching the upgrade callback") {
+        CHECK(response.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+        CHECK(response.find("Sec-WebSocket-Accept:") == std::string::npos);
+        REQUIRE(upgrades == 0);
+    }
+    THEN("the same listener accepts the configured origin and invokes that callback") {
+        Stdnet::Socket authorized(context);
+        connect(authorized, port);
+        const auto allowedRequest = upgradeRequest.substr(0, upgradeRequest.size() - 2) + "Origin: http://127.0.0.1:" + port + "\r\n\r\n";
+        authorized.send(std::as_bytes(std::span(allowedRequest)));
+        CHECK(readHeaders(authorized).starts_with("HTTP/1.1 101 Switching Protocols\r\n"));
+        waitUntil([&] {
+            return upgrades.load() != 0;
+        });
+        REQUIRE(upgrades == 1);
+    }
+    THEN("an idle peer cannot block the header reader indefinitely") {
+        Stdnet::Socket idle(context);
+        connect(idle, port);
+        REQUIRE_THROWS_WITH(readHeaders(idle, 0ms), "Timed out waiting for HTTP response headers");
+        REQUIRE_THROWS_WITH(readHeaders(idle, 10ms), "Timed out waiting for HTTP response headers");
+    }
+    serverThread.request_stop();
+    serverThread.join();
 }

@@ -134,9 +134,9 @@ leaves the server active after opening returns; the system-browser adapter waits
 If opening throws, `show()` stops and joins the server before propagating the exception. Unavailable
 frontend types remain declared and throw a diagnostic naming the required CMake option.
 
-Embedded frontends target development with trusted application content and currently supply no shared
-navigation, popup or bridge-origin policy. See the [frontend contract](docs/FRONTENDS.md#the-contract)
-for initialization, threading, errors and scope.
+The [shared content policy](docs/CONTENT_POLICY.md) restricts bridge connections to the application origin,
+limits embedded navigation to that origin and blocks embedded popups by default. Explicit allow-lists and
+development opt-outs are available. See the [frontend contract](docs/FRONTENDS.md#the-contract) for initialization and threading.
 
 ### Embedded window with CEF (opt-in)
 
@@ -168,7 +168,7 @@ CMake fetches Microsoft.Web.WebView2 SDK **1.0.3537.50**, verifies its SHA-256 a
 
 The separately installed **Microsoft Edge WebView2 Evergreen Runtime** is required. Follow the shared main-thread contract; WebView2 additionally requires STA-compatible COM. The window handles resizing and keyboard focus, and closing it stops the server.
 
-This frontend currently targets development with trusted content. Navigation and popups are unrestricted; DevTools and context menus remain available. See the [WebView2 frontend notes](docs/WEBVIEW2.md) for runtime distribution, configurable startup deadlines and profiles, DPI and the navigation policy.
+This frontend applies the [shared content policy](docs/CONTENT_POLICY.md); DevTools and context menus remain available by default. See the [WebView2 frontend notes](docs/WEBVIEW2.md) for runtime distribution, configurable startup deadlines and profiles, DPI and the navigation policy.
 
 ## Use WebFront in your project
 
@@ -262,7 +262,8 @@ ctest --test-dir build-cef -L web-integration --output-on-failure
 The Jasmine specs are native ES modules. They prove relative module loading, both bridge directions, all supported numeric typed arrays and `webFront.ready`; report the final result to C++; close the embedded window automatically; and fail CTest on an assertion, bridge, startup or timeout error. CTest also checks that the commands and snippets in this README match the built examples.
 
 The shared lifecycle suite checks closure without a bridge, immediate page closure, a rejected
-`webFront.ready`, failed initial navigation and encoded filenames. It runs with the same selected
+`webFront.ready`, failed initial navigation, encoded filenames, blocked navigation/popups and an explicit
+navigation allow-list. It runs with the same selected
 frontend as Jasmine; every case has a timeout and the `web-integration` label. See
 [frontend lifecycle coverage](docs/FRONTENDS.md#lifecycle-tests) for details.
 

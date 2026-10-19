@@ -1,3 +1,4 @@
+import './content-policy-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
 import './terminal-specs.mjs';
 import './tools-specs.mjs';

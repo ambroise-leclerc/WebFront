@@ -1,4 +1,5 @@
 #include "WebView2ControllerMock.hpp"
+#include "WebView2PolicyMocks.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <frontend/WebView2.hpp>
@@ -111,4 +112,80 @@ SCENARIO("WebView2 forwards native focus and movement messages") {
     THEN("the window has a background while the runtime starts") {
         REQUIRE(GetClassLongPtrW(session->window, GCLP_HBRBACKGROUND) != 0);
     }
+}
+
+SCENARIO("WebView2 only forwards user-initiated popups") {
+    using webfront::frontend::detail::webview2::Session;
+    auto session           = std::make_shared<Session>();
+    session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.popups = webfront::PopupPolicy::systemBrowser}};
+    auto args              = Microsoft::WRL::Make<webfront::test::WebView2PopupMock>();
+    for (const BOOL initiated : {FALSE, TRUE}) {
+        WHEN((initiated ? "the user requests a popup" : "a script requests a popup without user initiation")) {
+            static bool launched = false;
+            launched             = false;
+            args->userInitiated  = initiated;
+            session->newWindowRequested(args.Get(), [](const std::string&) {
+                launched = true;
+            });
+            THEN("only the user-initiated popup reaches the external launcher") {
+                REQUIRE(launched == (initiated != FALSE));
+                REQUIRE(args->handled);
+                REQUIRE_FALSE(session->failure);
+            }
+        }
+    }
+}
+
+SCENARIO("WebView2 popup launcher failures leave the application running") {
+    using webfront::frontend::detail::webview2::Session;
+    auto session           = std::make_shared<Session>();
+    session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {.popups = webfront::PopupPolicy::systemBrowser}};
+    auto args              = Microsoft::WRL::Make<webfront::test::WebView2PopupMock>();
+    WHEN("the external launcher throws a standard exception") {
+        session->newWindowRequested(args.Get(), [](const std::string&) {
+            throw std::runtime_error("No URL association");
+        });
+        REQUIRE(args->handled);
+        REQUIRE_FALSE(session->failure);
+        REQUIRE_FALSE(session->closed);
+    }
+    WHEN("the external launcher throws a non-standard exception") {
+        session->newWindowRequested(args.Get(), [](const std::string&) {
+            throw 42;
+        });
+        REQUIRE(args->handled);
+        REQUIRE_FALSE(session->failure);
+        REQUIRE_FALSE(session->closed);
+    }
+    WHEN("marking the popup handled fails") {
+        args->handledResult = E_FAIL;
+        session->newWindowRequested(args.Get());
+        REQUIRE(session->failure);
+    }
+    WHEN("reading the popup URI fails") {
+        args->uriResult = E_FAIL;
+        session->newWindowRequested(args.Get());
+        REQUIRE(session->failure);
+    }
+    WHEN("reading popup user initiation fails") {
+        args->userInitiatedResult = E_FAIL;
+        session->newWindowRequested(args.Get());
+        REQUIRE(session->failure);
+    }
+}
+
+SCENARIO("WebView2 content controls map to engine settings") {
+    auto settings = Microsoft::WRL::Make<webfront::test::WebView2SettingsMock>();
+    using webfront::frontend::detail::webview2::configureContentSettings;
+    configureContentSettings(settings.Get(), {});
+    REQUIRE(settings->devTools);
+    REQUIRE(settings->contextMenus);
+    configureContentSettings(settings.Get(), {.devToolsEnabled = false});
+    REQUIRE_FALSE(settings->devTools);
+    REQUIRE(settings->contextMenus);
+    configureContentSettings(settings.Get(), {.contextMenusEnabled = false});
+    REQUIRE(settings->devTools);
+    REQUIRE_FALSE(settings->contextMenus);
+    settings->settingsResult = E_FAIL;
+    REQUIRE_THROWS_AS(configureContentSettings(settings.Get(), {}), std::runtime_error);
 }
