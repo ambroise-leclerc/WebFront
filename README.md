@@ -1,5 +1,7 @@
 # WebFront
 
+**[Version 0.2.0](https://github.com/ambroise-leclerc/WebFront/releases/tag/v0.2.0)** adds optional native windows on every desktop platform: WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux, with the explicit `NativeWebViewFrontend` alias. The system browser remains the default. This release also includes asynchronous bridge results, owned application coroutines, embedded UI components and input-decoding hardening.
+
 **A straightforward way to add a cross-platform GUI to your C++ application.**
 
 WebFront is a header-only C++23 graphical user interface library for Windows, Linux and macOS. Keep your application logic in C++, design the interface with HTML and CSS, and connect the two with ordinary C++ callbacks. Start with a few lines, then build the interface your application needs.
@@ -34,6 +36,7 @@ That is the complete program (`src/HelloWorld.cpp`). Build it with the classic C
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
 cd WebFront
+git checkout v0.2.0
 mkdir build
 cd build
 cmake ..

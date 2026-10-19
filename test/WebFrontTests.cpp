@@ -6,6 +6,7 @@
 #include <WebFront.hpp>
 
 #include "Mocks.hpp"
+#include "Version.hpp"
 
 #include <array>
 #include <atomic>
@@ -20,6 +21,12 @@
 #include <vector>
 
 using namespace webfront;
+
+SCENARIO("The public version matches the version detected by CMake", "[version]") {
+    THEN("consumers and CMake observe the same version") {
+        REQUIRE(webfront::version == cmakeProjectVersion);
+    }
+}
 
 namespace {
 

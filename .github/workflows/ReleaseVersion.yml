@@ -1,0 +1,30 @@
+name: Release version
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
+      - name: Detect project version with CMake
+        run: cmake -S . -B build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
+      - name: Compare release tag with header and CMake
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        shell: bash
+        run: |
+          version=$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' build/CMakeCache.txt)
+          cmake -DROOT="$GITHUB_WORKSPACE" -DEXPECTED_VERSION="$version" -DRELEASE_TAG="$RELEASE_TAG" -P cmake/CheckReleaseVersion.cmake
