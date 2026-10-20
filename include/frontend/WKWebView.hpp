@@ -90,6 +90,12 @@ inline void initialize() {
         throw std::runtime_error("WKWebView: macOS 13.3 or newer is required");
 }
 
+inline long applicationActivationPolicy() {
+    Object agentKey(text("LSUIElement"));
+    const auto agent = send(send(type("NSBundle"), "mainBundle"), "objectForInfoDictionaryKey:", agentKey.get());
+    return send<BOOL>(agent, "boolValue") ? 1L : 0L;  // Accessory for agent bundles, Regular otherwise.
+}
+
 struct MenuCommand {
     const char* title;
     const char* action;
@@ -288,7 +294,7 @@ struct Session {
         attach(delegate, this);
         installed = true;
         send<void>(app, "setDelegate:", delegate);
-        send<BOOL>(app, "setActivationPolicy:", 0L);  // NSApplicationActivationPolicyRegular
+        send<BOOL>(app, "setActivationPolicy:", applicationActivationPolicy());
         installMenu();
         send<void>(app, "finishLaunching");
 
