@@ -30,6 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -150,10 +151,13 @@ class BrowserIntegrationTest {
 public:
     explicit BrowserIntegrationTest(const filesystem::path& docRoot) : webFront("9002", docRoot) {
         registerCallbacks();
+        registerBitsetCallbacks();
         registerTerminalCommands();
     }
 
     ~BrowserIntegrationTest() {
+        if (bitsetFutureThread.joinable())
+            bitsetFutureThread.join();
         webFront.shutdown();
     }
 
@@ -184,6 +188,7 @@ private:
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     future<string> cppResult;
+    jthread bitsetFutureThread;
     static constexpr chrono::seconds cppResultWaitTimeout{10};
 
     const array<uint8_t, 2>  cppU8{0, 255};
@@ -197,29 +202,83 @@ private:
     const array<float, 2>    cppFloat{-1.5F, 42.25F};
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
-    Task checkBitsetResults(TestWF::UI ui) {
-        bool passed = true;
+    static void expectBitsetReady(future<bitset<9>>& value, string_view context) {
+        if (value.wait_for(cppResultWaitTimeout) != future_status::ready)
+            throw logic_error(string(context) + " timed out");
+    }
+
+    static void expectBitset(future<bitset<9>>& value, const bitset<9>& expected) {
+        expectBitsetReady(value, "Bitset future");
+        if (value.get() != expected)
+            throw logic_error("Bitset future returned incorrect bits");
+    }
+
+    static void expectRejected(future<bitset<9>>& value, int kind) {
+        const auto context = "Malformed bitset future for case " + to_string(kind);
+        expectBitsetReady(value, context);
         try {
-            bitset<9>  bits{0x181};
-            auto       future = ui.jsFunction<bitset<9>>("webfrontTests.bitsetEcho")(bits);
+            static_cast<void>(value.get());
+        } catch (const runtime_error&) {
+            return;
+        }
+        throw logic_error(context + " succeeded");
+    }
+
+    using BitsetFutures = array<future<bitset<9>>, 4>;
+
+    void startBitsetFutureChecks(TestWF::UI ui) {
+        // Resolve links and dispatch on the server context, alongside connection insertion.
+        BitsetFutures values;
+        values.front() = ui.jsFunction<bitset<9>>("webfrontTests.bitsetEcho")(bitset<9>{0x181}, true);
+        for (size_t kind = 0; kind < values.size() - 1; ++kind)
+            values[kind + 1] = ui.jsFunction<bitset<9>>("webfrontTests.bitsetBad")(kind, true);
+        bitsetFutureThread = jthread([this, ui, values = std::move(values)]() mutable {
+            checkBitsetFutures(ui, std::move(values));
+        });
+    }
+
+    void checkBitsetFutures(TestWF::UI ui, BitsetFutures values) {
+        bool passed = false;
+        try {
+            // Wait off the server context so it remains free to deliver any response order.
+            expectBitset(values.front(), bitset<9>{0x181});
+            for (size_t kind = 0; kind < values.size() - 1; ++kind)
+                expectRejected(values[kind + 1], static_cast<int>(kind));
+            passed = true;
+        } catch (const exception& error) {
+            log::error("Bitset future checks failed: {}", error.what());
+        }
+        webFront.spawn(reportBitsetFutureChecks(ui, passed));
+    }
+
+    Task reportBitsetFutureChecks(TestWF::UI ui, bool passed) {
+        try {
+            ui.jsFunction("webfrontTests.bitsetFutureChecksFinished")(passed);
+        } catch (const exception& error) {
+            log::error("Cannot report bitset future checks: {}", error.what());
+        }
+        co_return;
+    }
+
+    Task checkBitsetResults(TestWF::UI ui) {
+        bool passed = false;
+        try {
             const auto result = co_await ui.jsFunctionSender<bitset<9>>("webfrontTests.bitsetEcho")(bitset<9>{0x181});
-            passed            = result == bits;
+            if (result != bitset<9>{0x181})
+                throw logic_error("Bitset sender returned incorrect bits");
             for (int kind = 0; kind < 3; ++kind) {
-                auto badFuture = ui.jsFunction<bitset<9>>("webfrontTests.bitsetBad")(kind);
+                bool rejected = false;
                 try {
                     co_await ui.jsFunctionSender<bitset<9>>("webfrontTests.bitsetBad")(kind);
-                    passed = false;
-                } catch (const runtime_error&) {}
-                try {
-                    if (badFuture.wait_for(chrono::seconds(0)) != future_status::ready)
-                        throw logic_error("Bitset future did not complete before sender");
-                    badFuture.get();
-                    passed = false;
-                } catch (const runtime_error&) {}
+                } catch (const runtime_error&) {
+                    rejected = true;
+                }
+                if (!rejected)
+                    throw logic_error("Malformed bitset sender succeeded for case " + to_string(kind));
             }
-            passed = passed && future.wait_for(chrono::seconds(0)) == future_status::ready && future.get() == bits;
-        } catch (const exception&) {
-            passed = false;
+            passed = true;
+        } catch (const exception& error) {
+            log::error("Bitset sender checks failed: {}", error.what());
         }
         ui.jsFunction("webfrontTests.bitsetChecksFinished")(passed);
     }
@@ -261,6 +320,21 @@ private:
         throw runtime_error("Cancelled browser sender resumed with a result");
     }
 
+    void registerBitsetCallbacks() {
+        webFront.cppFunction("bitsetEcho", [](const bitset<9>& value) {
+            return value;
+        });
+        webFront.cppFunction("bitsetEmpty", [](bitset<0> value) {
+            return value;
+        });
+        webFront.cppFunction("bitsetGrid", [](const bitset<1024>& value) {
+            return value;
+        });
+        webFront.cppFunction("bitsetTuple", [](tuple<bitset<9>, int> value) {
+            return value;
+        });
+    }
+
     void registerCallbacks() {
         webFront.cppFunction("cancelBrowserSender", [this] {
             if (cancelledTask)
@@ -295,18 +369,6 @@ private:
         webFront.cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
         webFront.cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
         webFront.cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
-        webFront.cppFunction("bitsetEcho", [](const bitset<9>& value) {
-            return value;
-        });
-        webFront.cppFunction("bitsetEmpty", [](bitset<0> value) {
-            return value;
-        });
-        webFront.cppFunction("bitsetGrid", [](const bitset<1024>& value) {
-            return value;
-        });
-        webFront.cppFunction("bitsetTuple", [](tuple<bitset<9>, int> value) {
-            return value;
-        });
         webFront.cppFunction("integerInCpp", [](int value) {
             return value;
         });
@@ -379,6 +441,7 @@ private:
     void browserReady() {
         state.browserReady = true;
         webFront.spawn(checkSenderResults(requireUI()));
+        startBitsetFutureChecks(requireUI());
         webFront.spawn(checkBitsetResults(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);

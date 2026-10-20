@@ -516,13 +516,28 @@ vector<byte> bitsetPayload(const Values&... values) {
     REQUIRE(payload.size() == message.getPayloadSize());
     return payload;
 }
+
+template <size_t N>
+void expectPackedBitsetBytes(span<const byte> bytes, const bitset<N>& input) {
+    constexpr size_t count = N / 8 + (N % 8 != 0);
+    constexpr size_t header = count < 256 ? 2 : 5;
+    if constexpr (N != 0)
+        for (size_t b = 0; b < count; ++b) {
+            unsigned expected = 0;
+            for (size_t bit = 0; bit < 8 && b * 8 + bit < N; ++bit)
+                if (input[b * 8 + bit])
+                    expected |= 1u << bit;
+            REQUIRE(to_integer<unsigned>(bytes[header + b]) == expected);
+        }
+}
 }  // namespace
 
 SCENARIO("Bitsets use canonical packed Uint8Array bytes at every size boundary") {
     auto check = []<size_t N>() {
         bitset<N> input;
-        for (size_t i = 0; i < N; ++i)
-            input[i] = i % 3 == 0 || i + 1 == N;
+        if constexpr (N != 0)
+            for (size_t i = 0; i < N; ++i)
+                input[i] = i % 3 == 0 || i + 1 == N;
         const auto       bytes  = bitsetPayload(input);
         constexpr size_t count  = N / 8 + (N % 8 != 0);
         constexpr size_t header = count < 256 ? 2 : 5;
@@ -534,25 +549,20 @@ SCENARIO("Bitsets use canonical packed Uint8Array bytes at every size boundary")
         else
             memcpy(&length, bytes.data() + 1, sizeof(length));
         REQUIRE(length == count);
-        for (size_t b = 0; b < count; ++b) {
-            unsigned expected = 0;
-            for (size_t bit = 0; bit < 8 && b * 8 + bit < N; ++bit)
-                if (input[b * 8 + bit])
-                    expected |= 1u << bit;
-            REQUIRE(to_integer<unsigned>(bytes[header + b]) == expected);
-        }
+        expectPackedBitsetBytes(span<const byte>{bytes}, input);
         span<const byte> data{bytes};
         bitset<N>        output;
         output.set();
         msg::FunctionReturn<>::decodeParameter(output, data);
-        REQUIRE(output == input);
+        // Boolean assertions avoid MSVC STL stream diagnostics for bitset<0>.
+        REQUIRE((output == input));
         REQUIRE(data.empty());
         // All-one and all-zero patterns also exercise the partial last byte.
         input.set();
         const auto ones = bitsetPayload(input);
         data            = ones;
         msg::FunctionReturn<>::decodeParameter(output, data);
-        REQUIRE(output == input);
+        REQUIRE((output == input));
         input.reset();
         const auto zeros = bitsetPayload(input);
         data             = zeros;
@@ -583,7 +593,7 @@ SCENARIO("Packed bitsets retain owned bytes, tuple counts and the decoder cursor
     span<const byte> data{bytes};
     remove_cvref_t<decltype(expected)> output{};
     msg::FunctionReturn<>::decodeParameter(output, data);
-    REQUIRE(output == expected);
+    REQUIRE((output == expected));
     bitset<8> bits;
     msg::FunctionReturn<>::decodeParameter(bits, data);
     REQUIRE(bits.to_ulong() == 0xa5);

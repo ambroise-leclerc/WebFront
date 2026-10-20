@@ -324,9 +324,10 @@ protected:
         constexpr auto byteCount = N / 8 + (N % 8 != 0);
         static_assert(byteCount <= std::numeric_limits<std::uint32_t>::max());
         auto& bytes = packedBitsets.emplace_back(byteCount, std::uint8_t{});
-        for (std::size_t i = 0; i < N; ++i)
-            if (value[i])
-                bytes[i / 8] |= static_cast<std::uint8_t>(1u << (i % 8));
+        if constexpr (N != 0)
+            for (std::size_t i = 0; i < N; ++i)
+                if (value[i])
+                    bytes[i / 8] |= static_cast<std::uint8_t>(1u << (i % 8));
         encodeNumericArray(bytes, frame);
     }
 
@@ -661,8 +662,9 @@ private:
         if constexpr (N % 8 != 0)
             if ((std::to_integer<unsigned>(data[headerSize + byteCount - 1]) >> (N % 8)) != 0)
                 throw std::runtime_error("Nonzero bitset padding");
-        for (std::size_t i = 0; i < N; ++i)
-            param[i] = (std::to_integer<unsigned>(data[headerSize + i / 8]) & (1u << (i % 8))) != 0;
+        if constexpr (N != 0)
+            for (std::size_t i = 0; i < N; ++i)
+                param[i] = (std::to_integer<unsigned>(data[headerSize + i / 8]) & (1u << (i % 8))) != 0;
         data = data.subspan(headerSize + byteCount);
     }
 

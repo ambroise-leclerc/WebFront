@@ -11,6 +11,11 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 - Life registers `nextLife` directly and React exchanges 128 packed bytes per generation.
   Developer distribution 0.3.0 is provisioned locally; publishing it remains a maintainer step.
   Published 0.1.0 and 0.2.0 distributions remain immutable.
+- Local verification: all 252 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases
+  and 14 JavaScript checks pass. Repeated 0.3.0 provisioning produces byte-identical archives
+  and bootstrap configuration. Browser tests verify packed Life grids, playback/reset,
+  deterministic providers and offline execution from empty working directories.
+  Linux CEF/Xvfb validation for this change remains pending; no Linux runtime was available locally.
 
 ## Browser-powered development (2026-10-20)
 

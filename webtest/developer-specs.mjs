@@ -80,6 +80,27 @@ try {
     button('clear').click();
     await delay(400);
     assert(button('generation').textContent === '0000' && button('population').textContent === '0', 'Clear must discard stale replies');
+    // Paint across an octet boundary, then let C++ eliminate the two isolated cells.
+    button('view').click();
+    await waitFor(() => button('view').getAttribute('aria-pressed') === 'true', 'Plan view');
+    const canvas = life.querySelector('canvas');
+    const paint = x => {
+        const rect = canvas.getBoundingClientRect();
+        canvas.dispatchEvent(new frame.contentWindow.MouseEvent('click', {bubbles: true,
+            clientX: rect.left + (209 + x * 17 + 7) * rect.width / 960,
+            clientY: rect.top + (65 + 7) * rect.height / 680}));
+    };
+    paint(7);
+    await waitFor(() => button('population').textContent === '1', 'Plant the last bit of an octet');
+    paint(7);
+    await waitFor(() => button('population').textContent === '0', 'Toggle a packed cell off');
+    paint(7);
+    await waitFor(() => button('population').textContent === '1', 'Plant the first cell');
+    paint(8);
+    await waitFor(() => button('population').textContent === '2', 'Plant across the octet boundary');
+    button('step').click();
+    await waitFor(() => button('generation').textContent === '0001' && button('population').textContent === '0', 'C++ evolves painted packed cells');
+    button('view').click();
     button('pattern-glider').click();
     await waitFor(() => button('population').textContent === '5', 'Glider population');
     for (let i = 1; i <= 4; i++) {

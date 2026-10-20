@@ -18,12 +18,13 @@ The default `webfront::WebFront` still opens the system browser.
 
 ```cpp
 #include <WebFront.hpp>
+#include <bitset>
 
-std::string lifeStep(const std::string& cells); // Existing C++ simulation.
+std::bitset<1024> nextLife(const std::bitset<1024>& cells); // Existing C++ simulation.
 
 int main() {
     webfront::NativeApp app{"."}; // Explicit development project directory.
-    app.cppFunction("life.step", &lifeStep);
+    app.cppFunction("life.step", &nextLife);
     app.bootstrap("developer"); // Uses the version and SHA-512 pinned in WebFront.
     app.show();
 }
@@ -110,7 +111,7 @@ The distribution form has no project root or developer callbacks:
 
 int main() {
     webfront::NativeAppWithAssets<webfront::fs::LifeUI> app;
-    app.cppFunction("life.step", &webfront::demo::lifeStep);
+    app.cppFunction("life.step", &webfront::demo::nextLife);
     app.show();
 }
 ```

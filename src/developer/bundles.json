@@ -10,7 +10,7 @@
   "src/developer/embed.mjs": "cbb3fee81e3ccb5cab1b426f6e757259019df020a15dfa8316388815599bd8b9",
   "src/pi/main.tsx": "d3161b35db204ba54f782f711183e8d96aeff7c92d885c33a6ec168cf461e453",
   "src/pi/style.css": "360e2c7ae6d3699b00e18cbf67efbae7a8d8863d88926b31139e102cf38e5abd",
-  "src/life/main.tsx": "449b45e131d1166cae0360a2026c26d2ad03f448907545b28a554bcd8d882a3e",
+  "src/life/main.tsx": "d9837bded9ae01fdb8d091654236d311bcfbe9fa3ca6e46c7750857a89c0d399",
   "src/life/style.css": "9bb55eb0f0a3287e5b7dc78af9d69608b87ff42c4d9c8a653bc83a52fe293c44",
   "src/components/tools/wf.mjs": "6ee86d85ec96bf548ca25ea3ea3554b7dacbed7d047d6a9cfdc1e0f3f42de05e",
   "tools/developer/distribution.json": "9d1028e44b70a107ecaa18eb447af314e8b0ef7bd0121abec99ba20520c5d4f7",
@@ -20,5 +20,5 @@
   "tools/assets/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
   "src/developer/bootstrap.bundle.mjs": "83d18e156e78d75b52e7d19a24ae52a0e046a28d71482964ec58317bfdc97071",
   "src/developer/packages.bundle.mjs": "fd589da853f8472f9ab0b1db5440edd9f7734394e28d0205ca3867cd2fb58cb8",
-  "include/system/DeveloperReleaseData.hpp": "d06fdc2e45ff27d1c7f42be039b72d1b1af2b4ad087f55f46a4a77162d4afcc8"
+  "include/system/DeveloperReleaseData.hpp": "63d34e27862bdea05ac9eb0135e22c38fb7b3c1a728183913c7fd7ed85462bd0"
 }

@@ -4,7 +4,14 @@ import './style.css';
 
 declare const webFront: {ready: Promise<void>; cppFunction(name: string): (grid: Uint8Array) => Promise<Uint8Array>};
 const size = 32;
-const empty = () => new Uint8Array(size * size / 8);
+const byteCount = size * size / 8;
+const empty = () => new Uint8Array(byteCount);
+const isAlive = (cells: Uint8Array, i: number) => (cells[i >> 3] & (1 << (i & 7))) !== 0;
+function toggleCell(cells: Uint8Array, i: number) {
+    const next = cells.slice();
+    next[i >> 3] ^= 1 << (i & 7);
+    return next;
+}
 const shapes: Record<string, number[][]> = {
     Glider: [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]],
     Blinker: [[0, 1], [1, 1], [2, 1]],
@@ -14,7 +21,10 @@ function seed(name: string) {
     const cells = empty();
     const offsets = name === 'Galaxy' ? [[7, 7], [21, 9], [13, 22]] : [[14, 14]];
     for (const [ox, oy] of offsets)
-        for (const [x, y] of shapes[name]) cells[((y + oy) * size + x + ox) >> 3] |= 1 << (((y + oy) * size + x + ox) & 7);
+        for (const [x, y] of shapes[name]) {
+            const i = (y + oy) * size + x + ox;
+            cells[i >> 3] |= 1 << (i & 7);
+        }
     return cells;
 }
 
@@ -34,7 +44,7 @@ function Board({cells, flat, toggle}: {cells: Uint8Array; flat: boolean; toggle:
                 if (stroke) { context.strokeStyle = stroke; context.lineWidth = .7; context.stroke(); }
             };
             for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-                const alive = (cells[(y * size + x) >> 3] & (1 << ((y * size + x) & 7))) !== 0;
+                const alive = isAlive(cells, y * size + x);
                 if (flat) {
                     context.fillStyle = alive ? '#bcf8df' : 'rgba(159,202,194,.07)';
                     context.fillRect(209 + x * 17, 65 + y * 17, 15, 15);
@@ -92,7 +102,7 @@ function Life() {
             if (!current.mounted || revision !== current.revision) return;
             const next = await webFront.cppFunction('life.step')(current.cells);
             if (!current.mounted || revision !== current.revision) return;
-            if (!(next instanceof Uint8Array) || next.length !== size * size / 8) throw new Error('Invalid C++ generation');
+            if (!(next instanceof Uint8Array) || next.length !== byteCount) throw new Error('Invalid C++ generation');
             current.cells = next; setCells(next); setGeneration(value => value + 1); setError('');
         } catch (error) {
             if (current.mounted && revision === current.revision) {
@@ -119,9 +129,7 @@ function Life() {
         <section className="scene">
             <div className="intro"><span className="eyebrow">CONWAY’S GAME OF LIFE</span><h1>Order.<br/>From almost nothing.</h1>
                 <p>Three simple rules.<br/>An entire world of possibilities.</p></div>
-            <div className="world"><div className="halo"/><Board cells={cells} flat={flat} toggle={index => {
-                const next = state.current.cells.slice(); next[index >> 3] ^= 1 << (index & 7); replace(next, 'Custom');
-            }}/></div>
+            <div className="world"><div className="halo"/><Board cells={cells} flat={flat} toggle={index => replace(toggleCell(state.current.cells, index), 'Custom')}/></div>
             <aside className="glass telemetry" aria-label="Simulation statistics"><span className="eyebrow">OBSERVATION</span>
                 <div><output data-testid="generation">{generation.toString().padStart(4, '0')}</output><span>Generation</span></div>
                 <div><output data-testid="population">{population}</output><span>Living cells</span></div>
@@ -134,7 +142,7 @@ function Life() {
             <label className="speed">Tempo <input aria-label="Generations per second" type="range" min="1" max="24" value={speed} onChange={e => setSpeed(Number(e.target.value))}/><span>{speed}/s</span></label>
             <div className="patterns" aria-label="Starting pattern">{Object.keys(shapes).map(name => <button key={name} data-testid={'pattern-' + name.toLowerCase()} aria-pressed={pattern === name} onClick={() => replace(seed(name), name)}>{name}</button>)}
                 <button data-testid="clear" onClick={() => replace(empty(), 'Empty')}>Clear</button></div>
-            <button className="view" aria-pressed={flat} onClick={() => setFlat(!flat)}>{flat ? '◇ Spatial' : '▦ Plan view'}</button>
+            <button className="view" data-testid="view" aria-pressed={flat} onClick={() => setFlat(!flat)}>{flat ? '◇ Spatial' : '▦ Plan view'}</button>
         </footer>
         <p className="caption">A bitset in C++. A world in your browser. <span>WebFront · React · no Node.js runtime</span></p>
         <p className="error" role="alert">{error}</p>
