@@ -92,7 +92,8 @@ globalThis.webfrontTests = {
     },
     bitsetBad(kind, delayed = false) {
         const value = [new Uint8Array([0, 2]), new Uint8Array(1), new Int8Array(2)][kind];
-        return delayed ? new Promise(resolve => setTimeout(() => resolve(value), 50)) : value;
+        // Deliberately reply out of dispatch order while the future worker is waiting.
+        return delayed ? new Promise(resolve => setTimeout(() => resolve(value), (3 - kind) * 20)) : value;
     },
     bitsetChecksFinished(passed) { finishBitsetChecks(passed); },
     bitsetFutureChecksFinished(passed) { finishBitsetFutureChecks(passed); },

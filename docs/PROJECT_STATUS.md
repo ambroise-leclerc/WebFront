@@ -10,9 +10,10 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   byte count and zero high padding bits. Zero-sized bitsets map to an empty Uint8Array.
   JavaScript must know the logical bit count from the application contract.
 - Regression tests cover known bytes, size boundaries, malformed inputs, tuples and both
-  browser call directions, including exceptional future/sender completion. Future checks wait
-  on a joined test thread with a ten-second bound, exercise delayed JavaScript replies and log
-  explicit failure diagnostics without blocking the server context.
+  browser call directions, including exceptional future/sender completion. Future calls and
+  their final notification dispatch on the server context; a joined test thread only waits
+  for the results with a ten-second bound. Delayed JavaScript replies arrive out of dispatch
+  order, and failures log explicit diagnostics without blocking the server context.
 - Local validation on the develop-based branch: all 242 CEF-off CTest cases and the
   WKWebView Jasmine integration test pass. Linux CEF/Xvfb passes with GCC and Clang in
   [CI run 39466294828](https://github.com/ambroise-leclerc/WebFront/actions/runs/39466294828)

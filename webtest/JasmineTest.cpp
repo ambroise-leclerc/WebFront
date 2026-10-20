@@ -224,25 +224,40 @@ private:
         throw logic_error(context + " succeeded");
     }
 
-    void checkBitsetFutures(TestWF::UI ui) {
+    using BitsetFutures = array<future<bitset<9>>, 4>;
+
+    void startBitsetFutureChecks(TestWF::UI ui) {
+        // Resolve links and dispatch on the server context, alongside connection insertion.
+        BitsetFutures values;
+        values.front() = ui.jsFunction<bitset<9>>("webfrontTests.bitsetEcho")(bitset<9>{0x181}, true);
+        for (size_t kind = 0; kind < values.size() - 1; ++kind)
+            values[kind + 1] = ui.jsFunction<bitset<9>>("webfrontTests.bitsetBad")(kind, true);
+        bitsetFutureThread = jthread([this, ui, values = std::move(values)]() mutable {
+            checkBitsetFutures(ui, std::move(values));
+        });
+    }
+
+    void checkBitsetFutures(TestWF::UI ui, BitsetFutures values) {
         bool passed = false;
         try {
             // Wait off the server context so it remains free to deliver any response order.
-            auto value = ui.jsFunction<bitset<9>>("webfrontTests.bitsetEcho")(bitset<9>{0x181}, true);
-            expectBitset(value, bitset<9>{0x181});
-            for (int kind = 0; kind < 3; ++kind) {
-                auto badFuture = ui.jsFunction<bitset<9>>("webfrontTests.bitsetBad")(kind, true);
-                expectRejected(badFuture, kind);
-            }
+            expectBitset(values.front(), bitset<9>{0x181});
+            for (size_t kind = 0; kind < values.size() - 1; ++kind)
+                expectRejected(values[kind + 1], static_cast<int>(kind));
             passed = true;
         } catch (const exception& error) {
             log::error("Bitset future checks failed: {}", error.what());
         }
+        webFront.spawn(reportBitsetFutureChecks(ui, passed));
+    }
+
+    Task reportBitsetFutureChecks(TestWF::UI ui, bool passed) {
         try {
             ui.jsFunction("webfrontTests.bitsetFutureChecksFinished")(passed);
         } catch (const exception& error) {
             log::error("Cannot report bitset future checks: {}", error.what());
         }
+        co_return;
     }
 
     Task checkBitsetResults(TestWF::UI ui) {
@@ -426,7 +441,7 @@ private:
     void browserReady() {
         state.browserReady = true;
         webFront.spawn(checkSenderResults(requireUI()));
-        bitsetFutureThread = jthread([this, ui = requireUI()] { checkBitsetFutures(ui); });
+        startBitsetFutureChecks(requireUI());
         webFront.spawn(checkBitsetResults(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
