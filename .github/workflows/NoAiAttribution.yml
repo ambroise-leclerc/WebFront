@@ -38,8 +38,8 @@ jobs:
               fi
               if [ -z "$base" ] || [ "$base" = "$head" ]; then
                 # No usable default branch, or the push is the default branch itself:
-                # check the last 20 commits rather than the whole history or nothing.
-                base="$(git rev-parse -q --verify "$head~20" || git rev-list --max-parents=0 "$head" | tail -n1)"
+                # check the whole history rather than a window that could miss a commit.
+                base="$(git rev-list --max-parents=0 "$head" | tail -n1)"
               fi
             fi
           fi

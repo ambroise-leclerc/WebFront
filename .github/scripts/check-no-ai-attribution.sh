@@ -7,7 +7,7 @@ base="${1:?base revision}"
 head="${2:?head revision}"
 
 identity='(anthropic\.com|noreply@openai\.com|\bcopilot\b|\bcodex\b|\bchatgpt\b|google-labs-jules|\bclaude\b)'
-trailer='^(co-authored-by|generated-by|assisted-by):.*(claude|anthropic|chatgpt|copilot|codex|openai|jules|gemini|\bvibe\b)|generated with \[?claude|🤖 generated'
+trailer='^(co-authored-by|generated-by|assisted-by):.*(\bclaude\b|\banthropic\b|\bchatgpt\b|\bcopilot\b|\bcodex\b|\bopenai\b|\bjules\b|\bgemini\b|\bvibe\b)|generated with \[?claude\b|🤖 generated'
 
 commits="$(mktemp)"
 trap 'rm -f -- "$commits"' EXIT
