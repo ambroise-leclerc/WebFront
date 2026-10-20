@@ -12,12 +12,12 @@ head="${2:?head revision}"
 # addresses must belong to a known AI tool, not an arbitrary noreply user/bot.
 tool='(claude|copilot|copilot-swe-agent|codex|chatgpt|google-labs-jules|jules|gemini|vibe)'
 github_tool="(${tool}\\[bot\\]|copilot|copilot-swe-agent|google-labs-jules)"
-tool_email="(vibe@mistral\\.ai|(codex|chatgpt)@openai\\.com|gemini@google\\.com|noreply@(anthropic|openai)\\.com|([0-9]+\\+)?${github_tool}@users\\.noreply\\.github\\.com)"
+tool_email="(vibe@mistral\\.ai|(codex|chatgpt)@openai\\.com|gemini@google\\.com|[a-z.+-]+@anthropic\\.com|noreply@openai\\.com|([0-9]+\\+)?${github_tool}@users\\.noreply\\.github\\.com)"
 # Match a canonical tool name together with its provider domain. Do not reject
 # arbitrary Google/OpenAI/Mistral employees or people sharing a tool's first name.
 provider_identity='((Mistral[[:space:]]+)?Vibe[[:space:]]+<[^<>[:space:]]+@mistral\.ai>|Gemini[[:space:]]+<[^<>[:space:]]+@google\.com>|(Codex|ChatGPT)[[:space:]]+<[^<>[:space:]]+@openai\.com>)'
 identity="^${provider_identity}$|<${tool_email}>|^${tool}\\[bot\\][[:space:]]*<|^(copilot-swe-agent|google-labs-jules)[[:space:]]*<"
-trailer="^(co-authored-by|generated-by|assisted-by):([[:space:]]*${provider_identity}[[:space:]]*$|.*<${tool_email}>)|^claude-session:|claude\\.ai/code/session|generated (with|by)[[:space:]]+\\[?${tool}([^[:alnum:]_]|$)|assisted by[[:space:]]+\\[?${tool}([^[:alnum:]_]|$)|🤖 generated"
+trailer="^(co-authored-by|generated-by|assisted-by):([[:space:]]*${provider_identity}[[:space:]]*$|.*<${tool_email}>)|^claude-session:|claude\\.ai/code/session|generated (with|by)[[:space:]]+\\[?${tool}([^[:alnum:]_-]|$)|assisted by[[:space:]]+\\[?${tool}([^[:alnum:]_-]|$)|🤖 generated"
 
 commits="$(mktemp)"
 trap 'rm -f -- "$commits"' EXIT

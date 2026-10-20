@@ -100,9 +100,12 @@ Please run these tools on your code before submitting a pull request.
 
 The `No AI Attribution` workflow checks commit authors, committers and messages,
 plus PR titles and descriptions, for tool identities, attribution statements and
-Claude session links. Human names alone are allowed. Provider-domain rules pair
-canonical Gemini, Vibe, Codex and ChatGPT names with Google, Mistral and OpenAI
-addresses; a provider domain alone does not identify a tool. Push checks run on `master`
+Claude session links. Anthropic addresses matching `[a-z.+-]+@anthropic.com`
+are recognized alongside the other tool addresses. Human names alone are allowed.
+Provider-domain rules pair canonical Gemini, Vibe, Codex and ChatGPT names with
+Google, Mistral and OpenAI addresses; those domains alone do not identify a tool.
+Hyphenated names such as `codex-gen` do not match bare tool names in attribution
+statements. Push checks run on `master`
 and `develop`; PR checks run on opening, commit updates, reopening and metadata
 edits. A full-history fallback includes root commits. These pattern checks are
 not an exhaustive detector of every possible attribution wording.
