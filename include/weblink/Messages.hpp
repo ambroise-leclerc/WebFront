@@ -7,6 +7,7 @@
 
 #include <array>
 #include <bit>
+#include <bitset>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -118,6 +119,15 @@ struct is_tuple<std::tuple<T...>> : std::true_type {};
 
 template <typename T>
 inline constexpr bool is_tuple_v = is_tuple<T>::value;
+
+template <typename T>
+struct is_bitset : std::false_type {};
+
+template <std::size_t N>
+struct is_bitset<std::bitset<N>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_bitset_v = is_bitset<std::remove_cvref_t<T>>::value;
 
 template <typename T>
 inline constexpr bool is_numeric_array_element_v = std::is_same_v<std::remove_cv_t<T>, std::uint8_t> || std::is_same_v<std::remove_cv_t<T>, std::int8_t>
@@ -305,7 +315,20 @@ protected:
     Header                                                head{};
     std::array<std::byte, Policy::functionCallBufferSize> buffer{};
     size_t                                                encodeBufferIndex = 0;
+    // Packed bytes must outlive encodeParameter and remain stable as later parameters are added.
+    std::vector<std::vector<std::uint8_t>> packedBitsets;
     friend class MessageBase<Derived>;
+
+    template <std::size_t N, typename WebSocketFrame>
+    void encodeBitset(const std::bitset<N>& value, WebSocketFrame& frame) {
+        constexpr auto byteCount = N / 8 + (N % 8 != 0);
+        static_assert(byteCount <= std::numeric_limits<std::uint32_t>::max());
+        auto& bytes = packedBitsets.emplace_back(byteCount, std::uint8_t{});
+        for (std::size_t i = 0; i < N; ++i)
+            if (value[i])
+                bytes[i / 8] |= static_cast<std::uint8_t>(1u << (i % 8));
+        encodeNumericArray(bytes, frame);
+    }
 
     template <typename SizeType, typename WebSocketFrame>
     void encodeTypeHeader(msg::CodedType type, SizeType size, WebSocketFrame& frame) {
@@ -414,6 +437,7 @@ public:
         head.callId             = 0;
         head.parametersDataSize = 0;
         encodeBufferIndex       = 0;
+        packedBitsets.clear();
     }
     void setParametersCount(uint8_t parametersCount) {
         head.parametersCount = parametersCount;
@@ -465,6 +489,8 @@ public:
             encodeBool(t, frame);
         else if constexpr (is_arithmetic_v<ParamType>)
             encodeNumber(static_cast<double>(t), frame);
+        else if constexpr (is_bitset_v<ParamType>)
+            encodeBitset(t, frame);
         else if constexpr (is_numeric_array_v<ParamType>)
             encodeNumericArray(t, frame);
         else if constexpr (is_array_v<ParamType>) {
@@ -573,7 +599,9 @@ private:
 
     template <typename T>
     static void decodeArray(T& param, std::span<const std::byte>& data) {
-        if constexpr (is_numeric_array_v<T> && (is_vector_v<T> || is_std_array_v<T>))
+        if constexpr (is_bitset_v<T>)
+            decodeBitset(param, data);
+        else if constexpr (is_numeric_array_v<T> && (is_vector_v<T> || is_std_array_v<T>))
             decodeNumericArray(param, data);
         else
             throw std::runtime_error("Wrong parameter type: owning numeric array expected");
@@ -620,6 +648,22 @@ private:
         else
             std::memcpy(&elementCount, data.data() + 1, sizeof(elementCount));
         return {headerSize, elementCount};
+    }
+
+    template <std::size_t N>
+    static void decodeBitset(std::bitset<N>& param, std::span<const std::byte>& data) {
+        const auto [headerSize, elementCount] = readNumericArrayHeader<std::vector<std::uint8_t>>(data);
+        constexpr auto byteCount              = N / 8 + (N % 8 != 0);
+        if (elementCount != byteCount)
+            throw std::runtime_error("Bitset length does not match typed array payload");
+        if (data.size() - headerSize < byteCount)
+            throw std::runtime_error("Truncated bitset payload");
+        if constexpr (N % 8 != 0)
+            if ((std::to_integer<unsigned>(data[headerSize + byteCount - 1]) >> (N % 8)) != 0)
+                throw std::runtime_error("Nonzero bitset padding");
+        for (std::size_t i = 0; i < N; ++i)
+            param[i] = (std::to_integer<unsigned>(data[headerSize + i / 8]) & (1u << (i % 8))) != 0;
+        data = data.subspan(headerSize + byteCount);
     }
 
     template <typename Array>

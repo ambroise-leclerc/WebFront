@@ -57,6 +57,17 @@ try {
             await delay(30);
         }
     };
+    const packed = new Uint8Array(128);
+    for (const i of [330, 331, 332]) packed[i >> 3] |= 1 << (i & 7);
+    const next = await webFront.cppFunction('life.step')(packed);
+    if (!(next instanceof Uint8Array) || next.length !== 128) throw new Error('Expected 128 packed Life bytes');
+    const expected = new Uint8Array(128);
+    for (const i of [299, 331, 363]) expected[i >> 3] |= 1 << (i & 7);
+    if (!next.every((byte, i) => byte === expected[i])) throw new Error('Incorrect packed Life bit order');
+    for (const value of [new Uint8Array(127), new Int8Array(128), '0'.repeat(1024)]) {
+        const rejected = await webFront.cppFunction('life.step')(value).then(() => false, () => true);
+        if (!rejected) throw new Error('Malformed Life grid accepted');
+    }
     button('pattern-blinker').click();
     await waitFor(() => button('population').textContent === '3', 'Blinker population');
     button('step').click();

@@ -2,6 +2,16 @@
 
 Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19.
 
+## Packed bitsets (#289, 2026-10-20)
+
+- The bridge accepts `std::bitset<N>` callback arguments/results and C++ call arguments plus
+  typed future/sender results, using existing short/regular Uint8Array encodings. Bit `i` is
+  packed least-significant first into byte `i / 8`; exact lengths and zero padding are validated.
+  Zero-sized bitsets are supported. JavaScript must know the logical bit count separately.
+- Life registers `nextLife` directly and React exchanges 128 packed bytes per generation.
+  Developer distribution 0.3.0 is provisioned locally; publishing it remains a maintainer step.
+  Published 0.1.0 and 0.2.0 distributions remain immutable.
+
 ## Browser-powered development (2026-10-20)
 
 - `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
@@ -346,7 +356,7 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 
 ## Known limitations and next decisions
 
-- Result values are currently limited to the bridge's existing scalar, string, tuple, and numeric typed-array parameter types; richer object/DOM values remain out of scope.
+- Result values are currently limited to the bridge's existing scalar, string, tuple, numeric typed-array and packed bitset parameter types; richer object/DOM values remain out of scope.
 - `webfront::Task`, `app.spawn(task)`/`ui.spawn(task)` and per-task `TaskHandle::requestStop()` provide application-owned coroutine lifetime without exposing an execution context. The compiled `WebFrontAwaitBrowser` example matches the README; `app.shutdown()` stops and joins before returning; spawn is callable from any thread while the application lives and returns a stopped handle if shutdown rejects it. Destruction keeps owners alive and logs/waits if an external operation delays the join, whereas explicit shutdown reports absent context progress.
 - `ui.jsFunctionSender<R>(name)(...)` (default `R = void`) adds lazy, awaitable typed calls, with value/error/stopped completion and local receiver-token cancellation. Futures and JavaScript Promises remain supported without cancellation. JavaScript already dispatched continues; late replies are discarded. See [execution design](ASYNC_EXECUTION.md).
 - Repeated cancellation of JavaScript functions that never respond reserves their 16-bit IDs until disconnection. Enough such calls exhaust IDs and subsequent calls fail with `Too many outstanding WebFront calls`. Calls have no automatic timeout or per-write delivery acknowledgement.

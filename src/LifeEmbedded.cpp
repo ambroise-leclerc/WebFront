@@ -7,7 +7,7 @@
 int main() {
     try {
         webfront::NativeAppWithAssets<webfront::fs::LifeUI> app;
-        app.cppFunction("life.step", &webfront::demo::lifeStep);
+        app.cppFunction("life.step", &webfront::demo::nextLife);
         app.show();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

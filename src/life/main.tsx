@@ -2,23 +2,23 @@ import React, {useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import './style.css';
 
-declare const webFront: {ready: Promise<void>; cppFunction(name: string): (grid: string) => Promise<string>};
+declare const webFront: {ready: Promise<void>; cppFunction(name: string): (grid: Uint8Array) => Promise<Uint8Array>};
 const size = 32;
-const empty = () => '0'.repeat(size * size);
+const empty = () => new Uint8Array(size * size / 8);
 const shapes: Record<string, number[][]> = {
     Glider: [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]],
     Blinker: [[0, 1], [1, 1], [2, 1]],
     Galaxy: [[1, 0], [2, 0], [0, 1], [1, 1], [1, 2]],
 };
 function seed(name: string) {
-    const cells = empty().split('');
+    const cells = empty();
     const offsets = name === 'Galaxy' ? [[7, 7], [21, 9], [13, 22]] : [[14, 14]];
     for (const [ox, oy] of offsets)
-        for (const [x, y] of shapes[name]) cells[(y + oy) * size + x + ox] = '1';
-    return cells.join('');
+        for (const [x, y] of shapes[name]) cells[((y + oy) * size + x + ox) >> 3] |= 1 << (((y + oy) * size + x + ox) & 7);
+    return cells;
 }
 
-function Board({cells, flat, toggle}: {cells: string; flat: boolean; toggle: (index: number) => void}) {
+function Board({cells, flat, toggle}: {cells: Uint8Array; flat: boolean; toggle: (index: number) => void}) {
     const canvas = useRef<HTMLCanvasElement>(null);
     useEffect(() => {
         const element = canvas.current!;
@@ -34,7 +34,7 @@ function Board({cells, flat, toggle}: {cells: string; flat: boolean; toggle: (in
                 if (stroke) { context.strokeStyle = stroke; context.lineWidth = .7; context.stroke(); }
             };
             for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-                const alive = cells[y * size + x] === '1';
+                const alive = (cells[(y * size + x) >> 3] & (1 << ((y * size + x) & 7))) !== 0;
                 if (flat) {
                     context.fillStyle = alive ? '#bcf8df' : 'rgba(159,202,194,.07)';
                     context.fillRect(209 + x * 17, 65 + y * 17, 15, 15);
@@ -78,7 +78,7 @@ function Life() {
     const run = useRef(playing); run.current = playing;
     const rate = useRef(speed); rate.current = speed;
     useEffect(() => { state.current.mounted = true; return () => { state.current.mounted = false; }; }, []);
-    function replace(value: string, name: string) {
+    function replace(value: Uint8Array, name: string) {
         run.current = false; setPlaying(false); state.current.revision++;
         state.current.cells = value; setCells(value); setGeneration(0); setPattern(name); setError('');
     }
@@ -92,7 +92,7 @@ function Life() {
             if (!current.mounted || revision !== current.revision) return;
             const next = await webFront.cppFunction('life.step')(current.cells);
             if (!current.mounted || revision !== current.revision) return;
-            if (!/^[01]{1024}$/.test(next)) throw new Error('Invalid C++ generation');
+            if (!(next instanceof Uint8Array) || next.length !== size * size / 8) throw new Error('Invalid C++ generation');
             current.cells = next; setCells(next); setGeneration(value => value + 1); setError('');
         } catch (error) {
             if (current.mounted && revision === current.revision) {
@@ -112,7 +112,7 @@ function Life() {
         timer = setTimeout(tick, 1000 / rate.current);
         return () => { stopped = true; clearTimeout(timer); };
     }, [playing]);
-    const population = cells.split('1').length - 1;
+    const population = cells.reduce((count, byte) => { while (byte) { count += byte & 1; byte >>>= 1; } return count; }, 0);
     return <main className="observatory">
         <header><a className="identity" href="#"><span className="mark">✳</span> FIELD<span className="edition">/ 01</span></a>
             <span className="eyebrow">A small universe, computed in C++23</span><span className="engine"><i/> Native engine</span></header>
@@ -120,7 +120,7 @@ function Life() {
             <div className="intro"><span className="eyebrow">CONWAY’S GAME OF LIFE</span><h1>Order.<br/>From almost nothing.</h1>
                 <p>Three simple rules.<br/>An entire world of possibilities.</p></div>
             <div className="world"><div className="halo"/><Board cells={cells} flat={flat} toggle={index => {
-                const next = state.current.cells.split(''); next[index] = next[index] === '1' ? '0' : '1'; replace(next.join(''), 'Custom');
+                const next = state.current.cells.slice(); next[index >> 3] ^= 1 << (index & 7); replace(next, 'Custom');
             }}/></div>
             <aside className="glass telemetry" aria-label="Simulation statistics"><span className="eyebrow">OBSERVATION</span>
                 <div><output data-testid="generation">{generation.toString().padStart(4, '0')}</output><span>Generation</span></div>

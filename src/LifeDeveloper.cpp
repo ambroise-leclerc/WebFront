@@ -10,7 +10,7 @@ int main(int argc, char** argv) {
     }
     try {
         webfront::NativeApp app{argv[1]};
-        app.cppFunction("life.step", &webfront::demo::lifeStep);
+        app.cppFunction("life.step", &webfront::demo::nextLife);
         if (argc == 2)
             app.bootstrap("developer");
         else

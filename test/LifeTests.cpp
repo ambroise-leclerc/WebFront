@@ -49,17 +49,3 @@ SCENARIO("Life wraps both axes without treating adjacent rows as neighbors") {
         isolated.set(static_cast<std::size_t>(i));
     REQUIRE(nextLife(isolated).none());
 }
-
-SCENARIO("Life bridge validates input and preserves string orientation") {
-    using webfront::demo::lifeStep;
-    std::string horizontal(1024, '0'), vertical(1024, '0');
-    for (const auto i : {330, 331, 332})
-        horizontal[static_cast<std::size_t>(i)] = '1';
-    for (const auto i : {299, 331, 363})
-        vertical[static_cast<std::size_t>(i)] = '1';
-    REQUIRE(lifeStep(horizontal) == vertical);
-    REQUIRE(lifeStep(vertical) == horizontal);
-    REQUIRE_THROWS_AS(lifeStep("010"), std::invalid_argument);
-    REQUIRE_THROWS_AS(lifeStep(std::string(1024, 'x')), std::invalid_argument);
-    REQUIRE_THROWS_AS(lifeStep(std::string(1025, '0')), std::invalid_argument);
-}

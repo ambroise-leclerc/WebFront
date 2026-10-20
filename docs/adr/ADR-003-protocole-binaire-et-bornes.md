@@ -14,10 +14,12 @@
 | 1.7 | 2026-10-16 | Acceptée | Ambroise Leclerc | Limite de message vérifiée dès l’en-tête, avant allocation du payload. | [68f01f5](https://github.com/ambroise-leclerc/WebFront/commit/68f01f53f304ddb56155be0d47fb6fdd293de142) |
 | 1.8 | 2026-10-16 | Acceptée | Ambroise Leclerc | Plafond indépendant de 125 octets pour les trames de contrôle. | [3ebc181](https://github.com/ambroise-leclerc/WebFront/commit/3ebc181fce48240aa2cecebfe4d3f8cc4966732d) |
 
+| 1.9 | 2026-10-20 | Acceptée | Ambroise Leclerc | `std::bitset<N>` compacté dans le format Uint8Array existant, sans nouvel opcode (#289). | À renseigner après intégration. |
+
 ## Statut et date
 
 **Acceptée.** Création initiale : **2022-02-06** (version 1.0).
-Dernière évolution : **2026-10-16** (version 1.8).
+Dernière évolution : **2026-10-20** (version 1.9).
 Le corps de l’ADR décrit la décision dans sa dernière version ; les versions antérieures
 et leurs changements sont identifiés dans le tableau ci-dessus.
 
@@ -32,12 +34,21 @@ incomplets désynchronisent les paramètres ou corrompent les messages.
 
 Conserver le protocole binaire de `weblink/Messages.hpp` et de la source `src/WebFront.js`.
 Les messages d’appel et de retour portent des identifiants de corrélation sur 16 bits.
-Les types pris en charge sont les scalaires, chaînes, tuples et tableaux numériques typés ;
+Les types pris en charge sont les scalaires, chaînes, tuples, tableaux numériques typés et `std::bitset<N>` ;
 les objets JavaScript arbitraires et objets DOM ne traversent pas automatiquement le pont.
 
 Les chaînes sont limitées à 65535 octets : C++ lève `std::length_error` à l’encodage et
 JavaScript produit une `RangeError`. Un résultat de callback trop long rejette la Promise.
 Les tableaux utilisent leur encodage propre et ne sont pas soumis à la limite des chaînes.
+
+Les bitsets réutilisent les en-têtes unsigned-byte courts/réguliers sans nouvel opcode :
+exactement `N / 8 + (N % 8 != 0)` octets, bit C++ `i` dans le bit `i % 8` de l’octet
+`i / 8`. Les bits hauts inutilisés sont nuls ; le décodeur rejette un padding non nul,
+un autre type d’élément, une longueur différente ou un message tronqué. `std::bitset<0>`
+est un `Uint8Array` vide. Le stockage est construit par l’interface publique du bitset,
+sans dépendre de sa représentation, de l’endianness ou de la taille des mots hôtes.
+JavaScript doit connaître `N` par le contrat applicatif : aucun nombre de bits n’est transmis.
+Les contrats Promise/future/sender et leurs erreurs restent inchangés.
 
 Le transport distingue trames WebSocket et messages : reconstituer les messages fragmentés,
 conserver les fragments incomplets et traiter les trames coalescées dans l’ordre. La politique
@@ -61,7 +72,8 @@ fragmentation comprise. Les trames de contrôle ont leur propre plafond de 125 o
 
 ## Règles d’implémentation et de génération de code
 
-- Modifier ensemble les codecs C++ et JavaScript ; régénérer `IndexFS.hpp` depuis les sources.
+- Garder les codecs C++ et JavaScript compatibles ; modifier les deux si le format change et
+  régénérer `IndexFS.hpp` uniquement si la source JavaScript change.
 - Ajouter tests d’encodage/décodage et régression dans un vrai navigateur pour toute évolution
   du protocole, y compris erreurs et frontières des tailles.
 - Ne pas contourner une limite de chaîne par un cast de longueur ; découper les données ou

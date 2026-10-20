@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
         App               app{project.path()};
         std::atomic<bool> passed{false};
         app.cppFunction("pi", &webfront::demo::pi);
-        app.cppFunction("life.step", &webfront::demo::lifeStep);
+        app.cppFunction("life.step", &webfront::demo::nextLife);
         app.cppFunction("test.header", [&](std::string name) {
             if (name != "PiUI" && name != "LifeUI")
                 throw std::invalid_argument("Unknown generated fixture");

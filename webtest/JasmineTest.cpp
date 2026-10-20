@@ -197,6 +197,33 @@ private:
     const array<float, 2>    cppFloat{-1.5F, 42.25F};
     const array<double, 2>   cppDouble{-1.5, 42.25};
 
+    Task checkBitsetResults(TestWF::UI ui) {
+        bool passed = true;
+        try {
+            bitset<9>  bits{0x181};
+            auto       future = ui.jsFunction<bitset<9>>("webfrontTests.bitsetEcho")(bits);
+            const auto result = co_await ui.jsFunctionSender<bitset<9>>("webfrontTests.bitsetEcho")(bitset<9>{0x181});
+            passed            = result == bits;
+            for (int kind = 0; kind < 3; ++kind) {
+                auto badFuture = ui.jsFunction<bitset<9>>("webfrontTests.bitsetBad")(kind);
+                try {
+                    co_await ui.jsFunctionSender<bitset<9>>("webfrontTests.bitsetBad")(kind);
+                    passed = false;
+                } catch (const runtime_error&) {}
+                try {
+                    if (badFuture.wait_for(chrono::seconds(0)) != future_status::ready)
+                        throw logic_error("Bitset future did not complete before sender");
+                    badFuture.get();
+                    passed = false;
+                } catch (const runtime_error&) {}
+            }
+            passed = passed && future.wait_for(chrono::seconds(0)) == future_status::ready && future.get() == bits;
+        } catch (const exception&) {
+            passed = false;
+        }
+        ui.jsFunction("webfrontTests.bitsetChecksFinished")(passed);
+    }
+
     Task checkSenderResults(TestWF::UI ui) {
         const auto value = co_await ui.jsFunctionSender<string>("webfrontTests.senderValue")("from-sender");
         co_await ui.jsFunctionSender("webfrontTests.senderVoid")();
@@ -268,6 +295,18 @@ private:
         webFront.cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
         webFront.cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
         webFront.cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
+        webFront.cppFunction("bitsetEcho", [](const bitset<9>& value) {
+            return value;
+        });
+        webFront.cppFunction("bitsetEmpty", [](bitset<0> value) {
+            return value;
+        });
+        webFront.cppFunction("bitsetGrid", [](const bitset<1024>& value) {
+            return value;
+        });
+        webFront.cppFunction("bitsetTuple", [](tuple<bitset<9>, int> value) {
+            return value;
+        });
         webFront.cppFunction("integerInCpp", [](int value) {
             return value;
         });
@@ -340,6 +379,7 @@ private:
     void browserReady() {
         state.browserReady = true;
         webFront.spawn(checkSenderResults(requireUI()));
+        webFront.spawn(checkBitsetResults(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
         requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(

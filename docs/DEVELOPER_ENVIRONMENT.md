@@ -30,13 +30,13 @@ int main() {
 ```
 
 The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
-Version 0.2.0 adds the Game of Life starter; version 0.1.0 and its PI starter remain available.
+Version 0.3.0 is provisioned for packed-bitset Life and requires bridge support from #289; publication is a separate maintainer step. Published versions 0.1.0 and 0.2.0 remain immutable. Version 0.2.0 introduced the Life starter with string-based grids.
 On 2026-10-20, the 0.2.0 public download/WASM/React/PI/Life path passed in WKWebView, followed
 by compiling both resulting headers and running both applications from empty working directories.
 Pages returned HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/environment.tgz`. It pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.3.0/environment.tgz`. It pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -57,8 +57,9 @@ environment is not silently substituted.
 
 `src/Life.hpp` is a small C++23 B3/S23 simulation on a `std::bitset<1024>`.
 Each generation reads the old grid and creates a new one; the 32 × 32 world wraps on both axes.
-The core needs no React, server, thread, timer or graphics dependency. The bridge adapter validates
-and exchanges a 1024-character binary string because `std::bitset` is not a bridge wire type.
+The core needs no React, server, thread, timer or graphics dependency. `nextLife` is registered directly
+with its `const LifeGrid&` argument and bitset result. React stores and exchanges a 128-byte `Uint8Array`,
+with cell `i` in bit `i % 8` of byte `i / 8`. The bridge validates the exact unsigned-byte type and length.
 `src/LifeConsole.cpp` runs it without WebFront; build and run `WebFrontLifeConsole` to start
 with a plain console application.
 

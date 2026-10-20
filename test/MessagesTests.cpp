@@ -498,3 +498,135 @@ SCENARIO("Wire integer conversion keeps truncation and handles 64-bit boundaries
     decode(-9223372036854775808.0, signedValue);
     REQUIRE(signedValue == std::numeric_limits<std::int64_t>::min());
 }
+
+namespace {
+template <typename... Values>
+vector<byte> bitsetPayload(const Values&... values) {
+    msg::FunctionReturn<>                        message;
+    websocket::Frame<networking::NetworkingMock> frame{message.header()};
+    (message.encodeParameter(values, frame), ...);
+    REQUIRE(message.getParametersCount() == sizeof...(Values));
+    vector<byte> payload;
+    const auto   buffers = frame.toBuffers();
+    for (size_t i = 2; i < buffers.size(); ++i) {
+        const auto* start = static_cast<const byte*>(buffers[i].data());
+        if (buffers[i].size())
+            payload.insert(payload.end(), start, start + buffers[i].size());
+    }
+    REQUIRE(payload.size() == message.getPayloadSize());
+    return payload;
+}
+}  // namespace
+
+SCENARIO("Bitsets use canonical packed Uint8Array bytes at every size boundary") {
+    auto check = []<size_t N>() {
+        bitset<N> input;
+        for (size_t i = 0; i < N; ++i)
+            input[i] = i % 3 == 0 || i + 1 == N;
+        const auto       bytes  = bitsetPayload(input);
+        constexpr size_t count  = N / 8 + (N % 8 != 0);
+        constexpr size_t header = count < 256 ? 2 : 5;
+        REQUIRE(bytes.size() == header + count);
+        REQUIRE(bytes[0] == byte(count < 256 ? msg::CodedType::smallArrayU8 : msg::CodedType::arrayU8));
+        uint32_t length{};
+        if constexpr (count < 256)
+            length = to_integer<uint8_t>(bytes[1]);
+        else
+            memcpy(&length, bytes.data() + 1, sizeof(length));
+        REQUIRE(length == count);
+        for (size_t b = 0; b < count; ++b) {
+            unsigned expected = 0;
+            for (size_t bit = 0; bit < 8 && b * 8 + bit < N; ++bit)
+                if (input[b * 8 + bit])
+                    expected |= 1u << bit;
+            REQUIRE(to_integer<unsigned>(bytes[header + b]) == expected);
+        }
+        span<const byte> data{bytes};
+        bitset<N>        output;
+        output.set();
+        msg::FunctionReturn<>::decodeParameter(output, data);
+        REQUIRE(output == input);
+        REQUIRE(data.empty());
+        // All-one and all-zero patterns also exercise the partial last byte.
+        input.set();
+        const auto ones = bitsetPayload(input);
+        data            = ones;
+        msg::FunctionReturn<>::decodeParameter(output, data);
+        REQUIRE(output == input);
+        input.reset();
+        const auto zeros = bitsetPayload(input);
+        data             = zeros;
+        msg::FunctionReturn<>::decodeParameter(output, data);
+        REQUIRE(output.none());
+    };
+    check.template operator()<0>();
+    check.template operator()<1>();
+    check.template operator()<7>();
+    check.template operator()<8>();
+    check.template operator()<9>();
+    check.template operator()<63>();
+    check.template operator()<64>();
+    check.template operator()<65>();
+    check.template operator()<1024>();
+    check.template operator()<2040>();
+    check.template operator()<2048>();
+    REQUIRE(bitsetPayload(bitset<9>{0x181}) == vector<byte>{byte(msg::CodedType::smallArrayU8), byte{2}, byte{0x81}, byte{1}});
+}
+
+SCENARIO("Packed bitsets retain owned bytes, tuple counts and the decoder cursor") {
+    const auto expected = tuple{
+        bitset<9>{0x181},
+        tuple{bitset<0>{}, bitset<65>{9}},
+        string("tail")
+    };
+    const auto       bytes = bitsetPayload(expected, bitset<8>{0xa5}, 42);
+    span<const byte> data{bytes};
+    remove_cvref_t<decltype(expected)> output{};
+    msg::FunctionReturn<>::decodeParameter(output, data);
+    REQUIRE(output == expected);
+    bitset<8> bits;
+    msg::FunctionReturn<>::decodeParameter(bits, data);
+    REQUIRE(bits.to_ulong() == 0xa5);
+    int tail{};
+    msg::FunctionReturn<>::decodeParameter(tail, data);
+    REQUIRE(tail == 42);
+    REQUIRE(data.empty());
+}
+
+SCENARIO("Bitset decoding rejects wrong types, lengths, padding and truncation") {
+    const auto valid  = bitsetPayload(bitset<9>{0x181});
+    auto       reject = [](const vector<byte>& bytes) {
+        span<const byte> data{bytes};
+        bitset<9>        output{7};
+        REQUIRE_THROWS_AS(msg::FunctionReturn<>::decodeParameter(output, data), runtime_error);
+        REQUIRE(output.to_ulong() == 7);
+        REQUIRE(data.size() == bytes.size());
+    };
+    for (size_t size = 0; size < valid.size(); ++size)
+        reject(vector<byte>(valid.begin(), valid.begin() + static_cast<ptrdiff_t>(size)));
+    for (auto count : {0, 1, 3}) {
+        auto wrong = valid;
+        wrong[1]   = byte(count);
+        reject(wrong);
+    }
+    auto padding   = valid;
+    padding.back() = byte{3};
+    reject(padding);
+    reject(bitsetPayload(vector<int8_t>{1, 0}));
+    reject(bitsetPayload(vector<uint16_t>{1, 0}));
+    reject(bitsetPayload(string("01")));
+    reject(bitsetPayload(true));
+    reject(bitsetPayload(3));
+    reject(bitsetPayload(tuple{1, 2}));
+    // A regular U8 header is valid even for a small destination.
+    vector<byte> regular{byte(msg::CodedType::arrayU8), byte{2}, byte{}, byte{}, byte{}, byte{0x81}, byte{1}};
+    uint32_t     count = 2;
+    memcpy(regular.data() + 1, &count, sizeof(count));
+    for (size_t size = 1; size < regular.size(); ++size)
+        reject(vector<byte>(regular.begin(), regular.begin() + static_cast<ptrdiff_t>(size)));
+    bitset<9>        output;
+    span<const byte> data{regular};
+    msg::FunctionReturn<>::decodeParameter(output, data);
+    REQUIRE(output.to_ulong() == 0x181);
+    REQUIRE(data.empty());
+}

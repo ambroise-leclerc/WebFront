@@ -65,10 +65,10 @@ test('Pages staging retains older versions and refuses different bytes under an 
         const environment = encode('environment');
         const pi = encode('starter');
         const write = async version => {
-            const manifest = {version, integrity: integrity(environment), starters: {pi: {archive: 'pi-starter.tgz', integrity: integrity(pi)}, ...(version === '0.2.0' ? {life: {archive: 'life-starter.tgz', integrity: integrity(pi)}} : {})}};
+            const manifest = {version, integrity: integrity(environment), starters: {pi: {archive: 'pi-starter.tgz', integrity: integrity(pi)}, ...(version !== '0.1.0' ? {life: {archive: 'life-starter.tgz', integrity: integrity(pi)}} : {})}};
             await writeFile(join(distribution, 'environment.tgz'), environment);
             await writeFile(join(distribution, 'pi-starter.tgz'), pi);
-            if (version === '0.2.0') await writeFile(join(distribution, 'life-starter.tgz'), pi);
+            if (version !== '0.1.0') await writeFile(join(distribution, 'life-starter.tgz'), pi);
             await writeFile(join(distribution, 'provision.json'), JSON.stringify(manifest));
             await writeFile(join(distribution, 'DeveloperReleaseData.hpp'), bootstrapHeader(version, 'https://owner.github.io/WebFront/', manifest.integrity));
         };
@@ -80,6 +80,15 @@ test('Pages staging retains older versions and refuses different bytes under an 
         assert.equal(await readFile(join(site, 'developer/0.1.0/environment.tgz'), 'utf8'), 'environment');
         assert.match(await readFile(join(site, 'index.html'), 'utf8'), /developer\/0.2.0\/life-starter.tgz/);
         assert.equal(await readFile(join(site, 'developer/0.2.0/life-starter.tgz'), 'utf8'), 'starter');
+        await write('0.3.0');
+        await writeFile(join(distribution, 'life-starter.tgz'), 'packed-starter');
+        const manifest = JSON.parse(await readFile(join(distribution, 'provision.json')));
+        manifest.starters.life.integrity = integrity(encode('packed-starter'));
+        await writeFile(join(distribution, 'provision.json'), JSON.stringify(manifest));
+        await stageSite(distribution, site);
+        assert.equal(await readFile(join(site, 'developer/0.1.0/environment.tgz'), 'utf8'), 'environment');
+        assert.equal(await readFile(join(site, 'developer/0.2.0/life-starter.tgz'), 'utf8'), 'starter');
+        assert.equal(await readFile(join(site, 'developer/0.3.0/life-starter.tgz'), 'utf8'), 'packed-starter');
         await writeFile(join(distribution, 'DeveloperReleaseData.hpp'), 'changed');
         await assert.rejects(stageSite(distribution, site), /increment the distribution version/);
         assert.match(await readFile(join(site, 'developer/0.2.0/DeveloperReleaseData.hpp'), 'utf8'), /namespace webfront/);
