@@ -61,10 +61,6 @@ WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
 - Tester refus avec contrôles positifs dans le vrai navigateur ; vérifier que `ready` rejette.
 - Ne pas annoncer sandbox, isolation des plugins ou accès distant sécurisé.
 
-## Historique Git
-
-- **2026-10-18** — [d59db71](https://github.com/ambroise-leclerc/WebFront/commit/d59db712f1d390abe1457a5046b904bd330b85cc) : politique commune de navigation, popups et origine du bridge.
-
 ## Références et vérification
 
 - [Politique et capacités détaillées](../CONTENT_POLICY.md),

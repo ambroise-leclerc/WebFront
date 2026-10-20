@@ -76,16 +76,6 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 - Versionner le lockfile de projet, pas `.webfront/`. Ne pas promettre d’authentification ou
   d’isolation des outils.
 
-## Historique Git
-
-- **2026-10-14** — [40f5621](https://github.com/ambroise-leclerc/WebFront/commit/40f5621928fdd188f230bf08ff062f9557619046) : terminal et architecture des composants optionnels.
-- **2026-10-14** — [12a846b](https://github.com/ambroise-leclerc/WebFront/commit/12a846b653154862b6c71d4640ba396148653017) : abonnements UI et injection du navigateur appelant.
-- **2026-10-14** — [3b8940c](https://github.com/ambroise-leclerc/WebFront/commit/3b8940c7a46d5d55fbfbe1c6870f417525cf044c) : correction du deadlock de désabonnement.
-- **2026-10-14** — [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) : store transactionnel et provider des outils.
-- **2026-10-15** — [18d5bb4](https://github.com/ambroise-leclerc/WebFront/commit/18d5bb4c5db6e4dc5ecf4867378d451887b2c133) : recherche, installation et ouverture côté navigateur.
-- **2026-10-15** — [d53ffcc](https://github.com/ambroise-leclerc/WebFront/commit/d53ffcc40102c7405eb7060d7021aad366d6d7e9) : tests contre un registre local.
-- **2026-10-16** — [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) : interruption des commandes navigateur et chunks de 256 KiB.
-
 ## Références et vérification
 
 - [Architecture des composants et limites](../UI_COMPONENTS.md),

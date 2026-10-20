@@ -69,17 +69,6 @@ un échec de décodage ou dépassement du budget donne 500.
 - Pour modifier la négociation, tester gzip, identity, exclusions et flux corrompus ; ne pas
   affirmer que HEAD ou les ressources décodées sont déjà mis en cache.
 
-## Historique Git
-
-- **2023-03-16** — [dd463b4](https://github.com/ambroise-leclerc/WebFront/commit/dd463b44407f3dca13f2f55d3f10d904e2653dc4) : Création initiale : ressources web locales embarquées avec IndexFS.
-- **2023-06-09** — [683a57c](https://github.com/ambroise-leclerc/WebFront/commit/683a57caf162f9abf04d93b1e08e58fb23f3d013) : Distribution locale de React via un filesystem dédié.
-- **2023-06-11** — [450d03c](https://github.com/ambroise-leclerc/WebFront/commit/450d03c93c7dff30a0e66d991879c758c0bf02af) : Distribution locale de Babel pour les exemples JSX.
-- **2026-07-16** — [f3c8aa7](https://github.com/ambroise-leclerc/WebFront/commit/f3c8aa75c5766d4c504a04fb582de874ae4bcdd7) : démonstration native ES modules.
-- **2026-07-21** — [6f10761](https://github.com/ambroise-leclerc/WebFront/commit/6f107614b021de24a27707566223d227a013d80d) : bridge embarqué sans compression dépendante de la plateforme.
-- **2026-10-16** — [520ca23](https://github.com/ambroise-leclerc/WebFront/commit/520ca23fa694519d9f428ed3661e64dcfdf906a2) : contrôle des fins de ligne LF.
-- **2026-10-19** — [4be7358](https://github.com/ambroise-leclerc/WebFront/commit/4be73581ee6b9f569cb6e50aced73e27562aa38c) : négociation gzip avec repli identity et limites de décodage.
-- **2026-10-19** — [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) : mise à jour des distributions et génération gzip reproductible.
-
 ## Références et vérification
 
 - [Maintenance des assets](../EMBEDDED_ASSETS.md), [contrat HTTP](../HTTP_ASSETS.md),

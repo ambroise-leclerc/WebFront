@@ -93,19 +93,6 @@ d’un autre thread, mais les opérations réseau se dénouent sur le thread du 
 - Utiliser les mocks pour échecs d’acceptation, annulations et lectures fragmentées ; conserver
   un test réel de destruction pour valider aussi le backend stdnet.
 
-## Historique Git
-
-- **2022-01-16** — [3067222](https://github.com/ambroise-leclerc/WebFront/commit/3067222bdba985b9f30a05b056d88735236a3787) : reprise visant déjà C++23, avec une implémentation vendored de la Networking TS.
-- **2022-01-21** — [a8bce8c](https://github.com/ambroise-leclerc/WebFront/commit/a8bce8c96767b9c8c75fbaf00a6234121505db34) : HTTP et WebSocket utilisent `<experimental/net>` dans les en-têtes historiques.
-- **2023-02-12** — [e1c2b5c](https://github.com/ambroise-leclerc/WebFront/commit/e1c2b5c846c4da6a19de7a5ed758cf0a1dfe8195) : support des mocks réseau et chaîne de compilation C++23.
-- **2023-05-04** — [8be2994](https://github.com/ambroise-leclerc/WebFront/commit/8be29945fbb390b1db6a8f6f00e1348b698be229) : Networking TS portée par la cible de bibliothèque WebFront.
-- **2025-08-16** — [bbe4913](https://github.com/ambroise-leclerc/WebFront/commit/bbe491304583a6ea451ea5a25dc25ac9fc09488e) : regroupement du provider Networking TS antérieur ; ne date pas le choix réseau initial.
-- **2026-10-13** — [0e8bbc0](https://github.com/ambroise-leclerc/WebFront/commit/0e8bbc0d6035c3d25b9488fb9ed4c9b0d7c08d32) : remplacement de la Networking TS par stdnet.
-- **2026-10-13** — [ad6f0a7](https://github.com/ambroise-leclerc/WebFront/commit/ad6f0a7863b12fb35e0851be5648539618231190) : fermetures sur le thread du contexte.
-- **2026-10-13** — [1e765ca](https://github.com/ambroise-leclerc/WebFront/commit/1e765ca4275e4cfb9b4e7d68b204ce7d9261582c) : HTTP/WebSocket migrés vers des coroutines attendant des senders.
-- **2026-10-14** — [8404119](https://github.com/ambroise-leclerc/WebFront/commit/84041199dcc6f09ba06aa24bf4aeb4d68c197f16) : reprise de l’acceptation après échec.
-- **2026-10-16** — [ca9c35d](https://github.com/ambroise-leclerc/WebFront/commit/ca9c35d2c7a0acb2bc426d4a932cc04b21470a7b) : en-têtes sender inclus avant les macros CEF.
-
 ## Références et vérification
 
 - Précisions du fondateur : choix ASIO standalone

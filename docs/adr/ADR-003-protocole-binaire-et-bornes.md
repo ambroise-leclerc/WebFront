@@ -69,20 +69,6 @@ fragmentation comprise. Les trames de contrôle ont leur propre plafond de 125 o
 - Garder `BuffersPolicyType` et ses valeurs de repli compatibles avec les politiques existantes.
 - Rejeter les continuations mal placées et les trames de contrôle fragmentées ou trop longues.
 
-## Historique Git
-
-- **2022-02-06** — [4fd263e](https://github.com/ambroise-leclerc/WebFront/commit/4fd263e4e19598c9b81355ec0de80aa6dda8ecb3) : appels C++ vers JavaScript et encodage des arguments.
-- **2022-02-13** — [05d0a72](https://github.com/ambroise-leclerc/WebFront/commit/05d0a72ac6a4ccc714eb6d6563ad2dd8cad41c87) : messages binaires et appels JavaScript vers C++.
-- **2022-02-22** — [d88b55d](https://github.com/ambroise-leclerc/WebFront/commit/d88b55d43ab43ca029b7e8ed62f550abc8c6a7d7) : encodage/décodage des tuples et évolution des retours.
-- **2025-08-16** — [bbe4913](https://github.com/ambroise-leclerc/WebFront/commit/bbe491304583a6ea451ea5a25dc25ac9fc09488e) : regroupement de l’implémentation des messages et du WebSocket déjà présente en 2022.
-- **2026-02-28** — [0ff1363](https://github.com/ambroise-leclerc/WebFront/commit/0ff136346d2058c0136a7f06c41c111a9f6ac56e) : tailles de buffers configurables.
-- **2026-07-21** — [6f10761](https://github.com/ambroise-leclerc/WebFront/commit/6f107614b021de24a27707566223d227a013d80d) : tableaux typés et durcissement des codecs.
-- **2026-07-23** — [20f076d](https://github.com/ambroise-leclerc/WebFront/commit/20f076da1b7109bfe2f45ae35974490d9d6841d6) : correction des trames coalescées.
-- **2026-10-14** — [d143858](https://github.com/ambroise-leclerc/WebFront/commit/d1438582a19dc3dc0975f190c7b745150a46860e) : rejet des chaînes trop longues.
-- **2026-10-16** — [3636c85](https://github.com/ambroise-leclerc/WebFront/commit/3636c8519b75bdfbcae8fcc8fca0c3a5f6374c1d) : réassemblage des messages fragmentés.
-- **2026-10-16** — [68f01f5](https://github.com/ambroise-leclerc/WebFront/commit/68f01f53f304ddb56155be0d47fb6fdd293de142) : limite de taille contrôlée dès l’en-tête.
-- **2026-10-16** — [3ebc181](https://github.com/ambroise-leclerc/WebFront/commit/3ebc181fce48240aa2cecebfe4d3f8cc4966732d) : limite indépendante des trames de contrôle.
-
 ## Références et vérification
 
 - [Codec C++](../../include/weblink/Messages.hpp), [codec JS](../../src/WebFront.js),

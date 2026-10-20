@@ -71,12 +71,6 @@ terminaison gagne entre résultat, arrêt et déconnexion.
   la destruction. Synchroniser les états partagés et la destruction avec les appelants externes.
 - Tester les courses arrêt/résultat, spawn/arrêt, double terminaison et réponse tardive.
 
-## Historique Git
-
-- **2026-10-13** — [8f09ba5](https://github.com/ambroise-leclerc/WebFront/commit/8f09ba53bacc9468c5dfdaa3576c3d89d2d16ccc) : drainage des opérations pendantes à la destruction.
-- **2026-10-13** — [b4fa321](https://github.com/ambroise-leclerc/WebFront/commit/b4fa321e6c10c296a0807d56b007f4cd9ec5635c) : fermeture des WebSockets avant destruction de WebFront.
-- **2026-10-18** — [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) : scopes structurés, tâches possédées et senders navigateur annulables.
-
 ## Références et vérification
 
 - [Contrat détaillé](../ASYNC_EXECUTION.md), [TaskScope](../../include/networking/Tasks.hpp).

@@ -73,18 +73,6 @@ reste déclaré et échoue avec un diagnostic indiquant l’option nécessaire.
 - Ajouter les scénarios partagés de fermeture/échec lors d’un nouveau frontend et documenter
   les contraintes de plateforme sans annoncer une vérification non effectuée.
 
-## Historique Git
-
-- **2026-05-31** — [4eac25f](https://github.com/ambroise-leclerc/WebFront/commit/4eac25f19ec5bc3bad1ec8cf86dab8e03d2d3b82) : abstraction générique des frontends.
-- **2026-07-22** — [9a7c566](https://github.com/ambroise-leclerc/WebFront/commit/9a7c56677de28862cae8f8689e3e27e0da5d1163) : sélection du navigateur rendue explicite.
-- **2026-10-16** — [53058ad](https://github.com/ambroise-leclerc/WebFront/commit/53058ade9ae10f0eedbc62eb77a1b3b157b3b711) : WebView2 optionnel sous Windows.
-- **2026-10-17** — [9013a75](https://github.com/ambroise-leclerc/WebFront/commit/9013a75d9e5c164795227789e7be196bfd48c8ea) : contrat, URL et sélection partagés.
-- **2026-10-17** — [121899e](https://github.com/ambroise-leclerc/WebFront/commit/121899ef12276e10e1c05d12e375ee6c8b7ea113) : configuration CMake centralisée.
-- **2026-10-18** — [a3ba113](https://github.com/ambroise-leclerc/WebFront/commit/a3ba1134b1f3ad03dc01f24fd59e2b47f47c3466) : couverture de cycle de vie partagée.
-- **2026-10-18** — [99c3c57](https://github.com/ambroise-leclerc/WebFront/commit/99c3c576e22cc601f3e3a8f31436c30807b36ca7) : contrat et mocks de cycle de vie complétés.
-- **2026-10-19** — [93551a8](https://github.com/ambroise-leclerc/WebFront/commit/93551a88c31cbf4748b42013a066cf265a1c9034) : WKWebView optionnel.
-- **2026-10-19** — [e20203e](https://github.com/ambroise-leclerc/WebFront/commit/e20203ea88d79bd141a1b64d6fe0f987143d73ff) : WebKitGTK optionnel.
-- **2026-10-19** — [7be859f](https://github.com/ambroise-leclerc/WebFront/commit/7be859f18957e770cc0db8382e7d9641689ba403) : alias NativeWebView optionnel.
 
 ## Références et vérification
 

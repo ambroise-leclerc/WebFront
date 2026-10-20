@@ -68,17 +68,6 @@ ordinaires sont déduites ; les lambdas génériques et opérateurs surchargés 
   un paramètre forwarding-reference passé à l’enregistrement.
 - Tester séparément les échecs C++→JS et JS→C++, sans confondre les deux contrats.
 
-## Historique Git
-
-- **2022-02-06** — [4fd263e](https://github.com/ambroise-leclerc/WebFront/commit/4fd263e4e19598c9b81355ec0de80aa6dda8ecb3) : forme initiale des appels C++ vers JavaScript ; elle ignore les résultats.
-- **2022-02-13** — [05d0a72](https://github.com/ambroise-leclerc/WebFront/commit/05d0a72ac6a4ccc714eb6d6563ad2dd8cad41c87) : Enregistrement de callbacks C++ appelables depuis JavaScript.
-- **2026-07-20** — [481078b](https://github.com/ambroise-leclerc/WebFront/commit/481078ba9a74abf2cd1e30e3dc461ab3a8153403) : Résultats asynchrones : futures C++ et Promises JavaScript, propagation des erreurs.
-- **2026-07-21** — [6f10761](https://github.com/ambroise-leclerc/WebFront/commit/6f107614b021de24a27707566223d227a013d80d) : intégration des résultats asynchrones et tableaux typés dans la branche courante.
-- **2026-07-22** — [64ac000](https://github.com/ambroise-leclerc/WebFront/commit/64ac0006b67f4a3e99983a42a58b1345c0b4e3ab) : rejet de `ready` sur échec initial de connexion.
-- **2026-07-22** — [c065a25](https://github.com/ambroise-leclerc/WebFront/commit/c065a25a476b91a6bf2f77214f32c955b779310c) : déduction des signatures des callbacks.
-- **2026-10-13** — [aa7457b](https://github.com/ambroise-leclerc/WebFront/commit/aa7457ba98b6cf8109838e98345cfcfaa52d82f0) : clarification explicite de l’asymétrie et des erreurs.
-- **2026-10-18** — [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) : forme sender annulable ajoutée aux futures.
-
 ## Références et vérification
 
 - [API C++](../../include/WebFront.hpp), [fonctions JS](../../include/JsFunction.hpp),

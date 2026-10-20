@@ -79,20 +79,8 @@ est une exception optionnelle documentée par l’ADR-011.
   vocabulaire sender fourni par stdnet avec une bibliothèque réseau standard déjà disponible.
 - Ne pas imposer avertissements, sanitizers, couverture ou choix de linker au projet parent.
 
-## Historique Git
-
-- **2020-04-19** — [3acfe58](https://github.com/ambroise-leclerc/WebFront/commit/3acfe58b97dce207063c247ebc00906a4bbe749a) : prototype DOM et première structure de tests ; antécédent, non architecture actuelle.
-- **2022-01-16** — [3067222](https://github.com/ambroise-leclerc/WebFront/commit/3067222bdba985b9f30a05b056d88735236a3787) : reprise du projet ; `CMakeLists.txt` cible déjà `cxx_std_23`, malgré le titre du commit.
-- **2023-05-04** — [8be2994](https://github.com/ambroise-leclerc/WebFront/commit/8be29945fbb390b1db6a8f6f00e1348b698be229) : cible CMake `WebFront INTERFACE` : formalisation de la bibliothèque header-only.
-- **2025-08-16** — [bbe4913](https://github.com/ambroise-leclerc/WebFront/commit/bbe491304583a6ea451ea5a25dc25ac9fc09488e) : regroupement de développements antérieurs sous `include/`, CMake et tests ; ne date pas leur origine.
-- **2026-07-22** — [24fce3a](https://github.com/ambroise-leclerc/WebFront/commit/24fce3a993a07d73925660da7a74c195184293cc) : configuration par défaut et façade concise.
-- **2026-10-13** — [674d554](https://github.com/ambroise-leclerc/WebFront/commit/674d554ef060ae824a59762c4da3f425aebf9742) : parcours débutant et consommation CMake simplifiée.
-- **2026-10-13** — [9b69ee5](https://github.com/ambroise-leclerc/WebFront/commit/9b69ee523e60f4ec476a1dae3a022e3ccaa85c24) : confinement des options internes aux cibles WebFront.
-
 ## Références et vérification
 
-- Retour historique du fondateur sur les choix fondateurs : orientation fondatrice vers 2020,
-  à distinguer des dates des implémentations conservées dans Git.
 - [API et composition](../../include/WebFront.hpp), [CMake](../../CMakeLists.txt),
   [conventions](../../CONTRIBUTING.md), [état du projet](../PROJECT_STATUS.md).
 - Vérifier `WebFrontTests.cpp`, `DefaultFSTests.cpp`, `AddSubdirectoryConsumer` et

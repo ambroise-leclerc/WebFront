@@ -64,13 +64,6 @@ sans promesse de persistance d’audit ou de livraison garantie.
 - Lors d’un changement de transport, vérifier les deux configurations, l’échec d’écriture,
   le détachement et le débordement sans récursion.
 
-## Historique Git
-
-- **2026-10-01** — [c886ff4](https://github.com/ambroise-leclerc/WebFront/commit/c886ff4ba469310448daa79b913436f961bc5992) : façade optionnelle mddlog et adaptateur compilé.
-- **2026-10-02** — [f27be1c](https://github.com/ambroise-leclerc/WebFront/commit/f27be1c91ec8a4b7d49c03e243053e005c094632) : transport navigateur via le consommateur borné de mddlog.
-- **2026-10-02** — [579c6f1](https://github.com/ambroise-leclerc/WebFront/commit/579c6f1c2a0019197b30d51a7ff56cfd65004690) : limite des diagnostics en attente côté navigateur.
-- **2026-10-02** — [ca0e6fe](https://github.com/ambroise-leclerc/WebFront/commit/ca0e6fe389051edfc550a2fed7904cce72853413) : consignation de l’acceptation de l’ADR-003 mddlog après adoption.
-
 ## Références et vérification
 
 - [Contrat et matrice mddlog](../mddlog-integration.md),

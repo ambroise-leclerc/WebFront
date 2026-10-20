@@ -119,25 +119,8 @@ un store restent optionnels et demandent un emplacement adapté à la cible.
   de fichier. Ne pas introduire une seconde convention de résolution dans un composant.
 - Conserver métadonnées MIME/encodage et taille servie cohérentes ; voir ADR-009 pour gzip.
 
-## Historique Git
-
-- **2023-03-16** — [dd463b4](https://github.com/ambroise-leclerc/WebFront/commit/dd463b44407f3dca13f2f55d3f10d904e2653dc4) : introduction du filesystem injectable et d’`IndexFS` pour les ressources embarquées.
-- **2023-03-22** — [3133e68](https://github.com/ambroise-leclerc/WebFront/commit/3133e68332a2fc658ab3431612fc08c792204ad0) : ressources encodées et accord avec les capacités du client HTTP.
-- **2023-05-01** — [8954c22](https://github.com/ambroise-leclerc/WebFront/commit/8954c2256354005f7e7d469b3ef98ae193c746cc) : composition ordonnée de plusieurs filesystems par `Multi`.
-- **2023-05-08** — [56c647d](https://github.com/ambroise-leclerc/WebFront/commit/56c647d74c20a6efabe3460ed44ddbba263a12dd) : provider `NativeDebugFS` pour le développement.
-- **2023-05-08** — [318e890](https://github.com/ambroise-leclerc/WebFront/commit/318e890acde72393801b42141512f208741d055d) : `fs::File` prend en charge `std::ifstream` en plus des données intégrées.
-- **2023-05-10** — [6af18a8](https://github.com/ambroise-leclerc/WebFront/commit/6af18a874d73761504055e575f15f96bc7be45eb) : providers instanciés plutôt que purement statiques.
-- **2025-08-16** — [bbe4913](https://github.com/ambroise-leclerc/WebFront/commit/bbe491304583a6ea451ea5a25dc25ac9fc09488e) : regroupement des providers déjà développés en 2023 ; aucune nouvelle origine du choix.
-- **2026-07-22** — [24fce3a](https://github.com/ambroise-leclerc/WebFront/commit/24fce3a993a07d73925660da7a74c195184293cc) : filesystem par défaut et racine locale optionnelle.
-- **2026-07-22** — [6e73219](https://github.com/ambroise-leclerc/WebFront/commit/6e73219a093c9bbe5c3f14bf0ac74e8e79e2803b) : page de repli prête pour le bridge.
-- **2026-10-14** — [40f5621](https://github.com/ambroise-leclerc/WebFront/commit/40f5621928fdd188f230bf08ff062f9557619046) : providers de composants optionnels.
-- **2026-10-14** — [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) : store et provider des outils installés.
-- **2026-10-16** — [198b3c9](https://github.com/ambroise-leclerc/WebFront/commit/198b3c98f28fcd9e953ad53c23a29f4fcd13b905) : recherche des fichiers sans query string.
-
 ## Références et vérification
 
-- Retour historique du fondateur sur les choix fondateurs : orientation fondatrice vers 2020,
-  à distinguer des dates des implémentations conservées dans Git.
 - [DefaultFS](../../include/system/DefaultFS.hpp), [FileSystem](../../include/system/FileSystem.hpp),
   [NativeFS](../../include/system/NativeFS.hpp).
 - Tests : [FileSystemTests](../../test/FileSystemTests.cpp), [DefaultFSTests](../../test/DefaultFSTests.cpp),

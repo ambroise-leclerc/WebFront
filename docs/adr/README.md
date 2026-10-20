@@ -28,8 +28,8 @@ Versions use specific Git milestones: they do not invent a day for an intention 
 alone is known.
 
 Commit `bbe4913`, dated 2025-08-16, brings together earlier work; such an integration does
-not itself create a new decision version. The tables record architectural changes, while
-the detailed history also retains relevant fixes and integrations.
+not itself create a new decision version. The tables record architectural changes;
+Git retains the detailed history of fixes and integrations.
 
 WebFront remains experimental. These records do not establish production readiness,
 isolation of third-party code or regulatory compliance. Detailed limitations and platform

@@ -68,16 +68,6 @@ préexistant, ni d’une intervention humaine, ni du réseau public après confi
 - Documenter les vérifications réellement exécutées et leurs limites ; une preuve Linux ne
   vaut pas qualification de tous les moteurs et plateformes.
 
-## Historique Git
-
-- **2020-04-19** — [3acfe58](https://github.com/ambroise-leclerc/WebFront/commit/3acfe58b97dce207063c247ebc00906a4bbe749a) : première structure de tests Catch2 dans le prototype.
-- **2023-05-12** — [58e69f5](https://github.com/ambroise-leclerc/WebFront/commit/58e69f50c48f183d766886c9d38269337e6afbae) : première application de tests Jasmine dans `webtest/`.
-- **2026-07-16** — [d77668f](https://github.com/ambroise-leclerc/WebFront/commit/d77668fe64d17d0fa459008c95b56f4c8cace930) : automatisation du test bridge Jasmine avec fermeture et résultat.
-- **2026-10-13** — [674d554](https://github.com/ambroise-leclerc/WebFront/commit/674d554ef060ae824a59762c4da3f425aebf9742) : tests du parcours débutant et consommation comme sous-projet.
-- **2026-10-18** — [a3ba113](https://github.com/ambroise-leclerc/WebFront/commit/a3ba1134b1f3ad03dc01f24fd59e2b47f47c3466) : mutualisation des scénarios de cycle de vie embarqué.
-- **2026-10-18** — [d6f086d](https://github.com/ambroise-leclerc/WebFront/commit/d6f086d50350379162ab01e7bdba2a734646d24d) : durcissement des décodeurs et CI sanitizers/fuzzing.
-- **2026-10-19** — [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) : contrôles hors ligne des assets gzip reproductibles.
-
 ## Références et vérification
 
 - [Guide contributeur](../../AGENTS.md), [CI](../../.github/workflows/BuildAndTest.yml),
