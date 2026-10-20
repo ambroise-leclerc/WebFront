@@ -31,10 +31,13 @@ int main() {
 ```
 
 The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
-Version 0.3.0 is provisioned for packed-bitset Life and requires bridge support from #289; publication is a separate maintainer step. Published versions 0.1.0 and 0.2.0 remain immutable. Version 0.2.0 introduced the Life starter with string-based grids.
-On 2026-10-20, the 0.2.0 public download/WASM/React/PI/Life path passed in WKWebView, followed
-by compiling both resulting headers and running both applications from empty working directories.
-Pages returned HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
+Version 0.3.0 provides the packed-bitset Life starter and requires the bridge support from #289.
+Published versions 0.1.0 and 0.2.0 remain immutable; 0.2.0 used string-based Life grids.
+On 2026-10-20, the 0.3.0 public download/WASM/React/PI/Life path passed in WKWebView, including
+128-byte grid exchange, painting cells across an octet boundary, playback/reset and deterministic
+header generation. Both resulting headers were compiled and the applications passed offline
+native tests from empty working directories, with developer callbacks absent. Pages returned
+HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
 `https://ambroise-leclerc.github.io/WebFront/developer/0.3.0/environment.tgz`. It pins one version and
@@ -191,9 +194,11 @@ cmake --build build-native --parallel
 ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
 ```
 
-The GitHub CI prepares these fixtures for both WKWebView and CEF jobs. The Life version passed
+The GitHub CI prepares these fixtures for both WKWebView and CEF jobs. The initial 0.2.0 Life version passed
 WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 [run 39421265580](https://github.com/ambroise-leclerc/WebFront/actions/runs/39421265580).
+The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
+[run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
 `DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, PI and Life previews, C++ generation/animation and
 repeatable header generation. Its CTest fixtures then build that **browser-generated** header and run

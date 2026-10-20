@@ -9,13 +9,21 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   packed least-significant first into byte `i / 8`; exact lengths and zero padding are validated.
   Zero-sized bitsets are supported. JavaScript must know the logical bit count separately.
 - Life registers `nextLife` directly and React exchanges 128 packed bytes per generation.
-  Developer distribution 0.3.0 is provisioned locally; publishing it remains a maintainer step.
+  Developer distribution 0.3.0 is published on GitHub Pages and archived as `developer-v0.3.0`.
   Published 0.1.0 and 0.2.0 distributions remain immutable.
 - Local verification: all 252 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases
   and 14 JavaScript checks pass. Repeated 0.3.0 provisioning produces byte-identical archives
   and bootstrap configuration. Browser tests verify packed Life grids, playback/reset,
   deterministic providers and offline execution from empty working directories.
-  Linux CEF/Xvfb validation for this change remains pending; no Linux runtime was available locally.
+  CI on [b6bae2e](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423)
+  passes WKWebView, all 14 Linux CEF/Xvfb cases with GCC, and the 252-case Linux
+  thread-sanitized suite. The codec matches the implementation merged in PR #290.
+- The public 0.3.0 environment and both starters passed fresh WKWebView download/build tests.
+  Pages returned HTTP 200, CORS `*` and matching pinned bytes. Both public-path providers then
+  compiled and ran offline from empty working directories with developer callbacks absent.
+- The demo branch uses the codec and browser assertions merged in PR #290, including MSVC's
+  empty-bitset guards and future tests that tolerate arbitrary response order. JS cell access
+  uses small packed-byte helpers; painting across an octet boundary is covered by the browser test.
 
 ## Browser-powered development (2026-10-20)
 
