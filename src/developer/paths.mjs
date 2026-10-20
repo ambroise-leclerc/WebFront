@@ -1,6 +1,13 @@
+const forbidden = /[\\\0:*?"<>|]/;
+const hasUnsafePart = path => path.split('/').some(part => !part || part === '.' || part === '..');
+
+function isUnsafe(path) {
+    if (typeof path !== 'string' || !path) return true;
+    if (forbidden.test(path)) return true;
+    return hasUnsafePart(path);
+}
+
 export function safePackagePath(path) {
-    if (typeof path !== 'string' || !path || path.includes('\\') || path.includes('\0') ||
-        path.split('/').some(part => !part || part === '.' || part === '..') || /[:*?"<>|]/.test(path))
-        throw new Error(`Unsafe package path: ${path}`);
+    if (isUnsafe(path)) throw new Error(`Unsafe package path: ${path}`);
     return path;
 }

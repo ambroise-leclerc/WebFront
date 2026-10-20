@@ -15,21 +15,17 @@ struct MimeType {
     constexpr MimeType(std::string_view extension) : type(fromExtension(extension).type) {}
 
     [[nodiscard]] static constexpr MimeType fromExtension(std::string_view e) {
+        struct Mapping {
+            std::string_view extension;
+            Type             type;
+        };
+        constexpr auto mappings = std::array<Mapping, 17>{{
+            {"js", js}, {"mjs", js}, {"htm", html}, {"html", html}, {"jpg", jpg}, {"jpeg", jpg}, {"css", css}, {"png", png},
+            {"gif", gif}, {"json", json}, {"pdf", pdf}, {"ttf", ttf}, {"ico", ico}, {"svg", svg}, {"webp", webp}, {"csv", csv}, {"wasm", wasm},
+        }};
         if (e.starts_with('.')) e.remove_prefix(1);
-        if (e == "js" || e == "mjs") return js;
-        if (e == "htm" || e == "html") return html;
-        if (e == "jpg" || e == "jpeg") return jpg;
-        if (e == "css") return css;
-        if (e == "png") return png;
-        if (e == "gif") return gif;
-        if (e == "json") return json;
-        if (e == "pdf") return pdf;
-        if (e == "ttf") return ttf;
-        if (e == "ico") return ico;
-        if (e == "svg") return svg;
-        if (e == "webp") return webp;
-        if (e == "csv") return csv;
-        if (e == "wasm") return wasm;
+        for (const auto& mapping : mappings)
+            if (e == mapping.extension) return mapping.type;
         return plain;
     }
 

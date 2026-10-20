@@ -51,27 +51,30 @@ test('resolves transitive semver edges, cycles, multiple versions and required p
     assert.equal(multiple.lock.packages['b@1.0.0'].dependencies.dep, 'dep@2.0.0');
 });
 
-test('an installed lock pins transitive versions and rejects changed archives', async () => {
-    const available = {'2.1.0': 'sha512-first', '2.2.0': 'sha512-second'};
-    const requests = [];
-    const download = (tampered = false) => async (name, range) => {
+// Fake registry: dep 2.1.0 is installed, 2.2.0 is the newest; `tampered` changes the archive of 2.1.0.
+const depIntegrity = {'2.1.0': 'sha512-first', '2.2.0': 'sha512-second'};
+function lockDownloads(requests, tampered = false) {
+    return async (name, range) => {
         requests.push(`${name}@${range}`);
-        const manifest = {name, version: '1.0.0', dependencies: name === 'app' ? {dep: '^2.0.0'} : {}};
-        let version = '1.0.0';
-        if (name === 'dep') version = available[range] ? range : '2.2.0';
-        if (name === 'dep') Object.assign(manifest, {version});
-        const integrity = name === 'dep' ? (tampered && version === '2.1.0' ? 'sha512-other' : available[version]) : 'sha512-app';
+        const version = name === 'dep' ? (depIntegrity[range] ? range : '2.2.0') : '1.0.0';
+        const manifest = {name, version, dependencies: name === 'app' ? {dep: '^2.0.0'} : {}};
+        let integrity = 'sha512-app';
+        if (name === 'dep') integrity = tampered && version === '2.1.0' ? 'sha512-other' : depIntegrity[version];
         return {id: idOf(name, version), key: `${name}-${version}`, manifest, integrity, files: new Map()};
     };
-    const first = await resolvePackages(['app'], {download: async (name, range) => download()(name, range === '^2.0.0' ? '2.1.0' : range)});
+}
+
+test('an installed lock pins transitive versions and rejects changed archives', async () => {
+    const requests = [];
+    const first = await resolvePackages(['app'], {download: async (name, range) => lockDownloads(requests)(name, range === '^2.0.0' ? '2.1.0' : range)});
     assert.equal(first.lock.packages['app@1.0.0'].dependencies.dep, 'dep@2.1.0');
     requests.length = 0;
-    const again = await resolvePackages(['app@1.0.0'], {download: download(), previous: first.lock});
+    const again = await resolvePackages(['app@1.0.0'], {download: lockDownloads(requests), previous: first.lock});
     assert.equal(again.lock.packages['app@1.0.0'].dependencies.dep, 'dep@2.1.0');
     assert.ok(requests.includes('dep@2.1.0') && !requests.includes('dep@^2.0.0'), requests.join());
-    await assert.rejects(resolvePackages(['app@1.0.0'], {download: download(true), previous: first.lock}),
+    await assert.rejects(resolvePackages(['app@1.0.0'], {download: lockDownloads(requests, true), previous: first.lock}),
         /dep@2\.1\.0 no longer matches the integrity recorded in the lock/);
-    const fresh = await resolvePackages(['app@1.0.0'], {download: download()});
+    const fresh = await resolvePackages(['app@1.0.0'], {download: lockDownloads(requests)});
     assert.equal(fresh.lock.packages['app@1.0.0'].dependencies.dep, 'dep@2.2.0');
 });
 
@@ -82,11 +85,11 @@ test('rejects integrity, archive identity, traversal and installation scripts', 
         [fixture('pkg', '1.0.0', {}, {'package/../escape': encode('bad')}), /Unsafe package path/],
         [fixture('pkg', '1.0.0', {}, {'package/addon.node': encode('bad')}), /native module/],
     ]) {
-        await assert.rejects(downloadPackage('pkg', 'latest', 'https://registry.test/', registry({pkg: {bytes, version: '1.0.0'}})), pattern);
+        await assert.rejects(downloadPackage('pkg', 'latest', {registry: 'https://registry.test/', fetchImpl: registry({pkg: {bytes, version: '1.0.0'}})}), pattern);
     }
     const bytes = fixture('pkg', '1.0.0');
     const fetchImpl = async url => String(url).endsWith('.tgz') ? new Response(bytes) : Response.json({versions: {'1.0.0': {dist: {tarball: 'https://registry.test/pkg.tgz', integrity: integrity(encode('other'))}}}});
-    await assert.rejects(downloadPackage('pkg', '1.0.0', 'https://registry.test/', fetchImpl), /Integrity check failed/);
+    await assert.rejects(downloadPackage('pkg', '1.0.0', {registry: 'https://registry.test/', fetchImpl}), /Integrity check failed/);
 });
 
 test('resolves browser conditional exports and rejects private and Node imports', async () => {
@@ -131,7 +134,7 @@ test('aborted publications never commit and clean their staging transaction', as
     const bridge = {cppFunction: name => async (...args) => { calls.push([name, ...args]); return 'transaction'; }};
     const controller = new AbortController();
     controller.abort(new Error('Interrupted'));
-    await assert.rejects(publish(bridge, 'generated.hpp', new Map([['output', encode('header')]]), false, controller.signal), /Interrupted/);
+    await assert.rejects(publish(bridge, 'generated.hpp', new Map([['output', encode('header')]]), {directory: false, signal: controller.signal}), /Interrupted/);
     assert.equal(calls.some(([name]) => name.endsWith('.commit')), false);
     assert.equal(calls.at(-1)[0], 'webfront.developer.abort');
 });
@@ -144,34 +147,42 @@ test('checked-in browser bundles match their source and pinned dependency inputs
     }
 });
 
+// An in-memory project behind the webfront.developer.* bridge callbacks.
+function memoryBridge(storage) {
+    const transactions = new Map();
+    let next = 0;
+    const operations = {
+        read: ([path, offset]) => {
+            const bytes = storage.get(path);
+            if (!bytes) throw new Error('Cannot read project file: ' + path);
+            return bytes.subarray(offset, offset + 256 * 1024);
+        },
+        begin: ([destination, directory]) => {
+            const id = String(++next);
+            transactions.set(id, {destination, directory, files: new Map()});
+            return id;
+        },
+        write: ([id, path, offset, bytes]) => {
+            const files = transactions.get(id).files;
+            const previous = files.get(path) ?? new Uint8Array();
+            assert.equal(previous.length, offset);
+            files.set(path, new Uint8Array([...previous, ...bytes]));
+        },
+        commit: ([id]) => {
+            const {destination, directory, files} = transactions.get(id);
+            for (const [path, bytes] of files) storage.set(directory ? `${destination}/${path}` : destination, bytes);
+            transactions.delete(id);
+        },
+        abort: ([id]) => { transactions.delete(id); },
+    };
+    return {cppFunction: name => async (...args) => operations[name.split('.').pop()](args)};
+}
+
 test('a pinned cached environment bootstraps offline and failed refreshes preserve publications', async () => {
     globalThis.location = new URL('http://localhost:9002/webfront-bootstrap.html');
     const archive = compress(tar(new Map([['package/environment.json', encode({protocol: 1, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('export function mount() {}')]])));
     const storage = new Map([['.webfront/developer/environment.tgz', archive]]);
-    const transactions = new Map();
-    let next = 0;
-    const bridge = {cppFunction: name => async (...args) => {
-        const operation = name.split('.').pop();
-        if (operation === 'read') {
-            const bytes = storage.get(args[0]);
-            if (!bytes) throw new Error('Cannot read project file: ' + args[0]);
-            return bytes.subarray(args[1], args[1] + 256 * 1024);
-        }
-        if (operation === 'begin') {
-            const id = String(++next);
-            transactions.set(id, {destination: args[0], directory: args[1], files: new Map()});
-            return id;
-        }
-        const tx = transactions.get(args[0]);
-        if (operation === 'write') {
-            const previous = tx.files.get(args[1]) ?? new Uint8Array();
-            assert.equal(previous.length, args[2]);
-            tx.files.set(args[1], new Uint8Array([...previous, ...args[3]]));
-        } else if (operation === 'commit') {
-            for (const [path, bytes] of tx.files) storage.set(tx.directory ? `${tx.destination}/${path}` : tx.destination, bytes);
-            transactions.delete(args[0]);
-        } else if (operation === 'abort') transactions.delete(args[0]);
-    }};
+    const bridge = memoryBridge(storage);
     const config = {environment: 'https://offline.test/environment.tgz', integrity: integrity(archive)};
     const offline = async () => { throw new Error('Offline'); };
     const result = await bootstrap(bridge, config, offline);

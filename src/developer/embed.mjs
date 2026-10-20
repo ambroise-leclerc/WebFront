@@ -4,28 +4,41 @@ export function compress(bytes) {
     return gzipSync(bytes, {level: 9, mem: 8, mtime: 0});
 }
 
+const byName = ([a], [b]) => a < b ? -1 : a > b ? 1 : 0;
+const hasUnsafePart = path => path.split('/').some(part => !part || part === '.' || part === '..');
+
+function validRoute(path) {
+    if (!/^[A-Za-z0-9_./-]+$/.test(path)) return false;
+    return !hasUnsafePart(path);
+}
+
+// Eight bytes as one big-endian word; the last word is padded with zeros.
+const word = (bytes, offset) => '0x' + Array.from({length: 8}, (_, i) => (bytes[offset + i] ?? 0).toString(16).padStart(2, '0')).join('') + 'ULL';
+
+function wordsOf(bytes) {
+    const words = [];
+    for (let offset = 0; offset < bytes.length; offset += 8) words.push(word(bytes, offset));
+    return words;
+}
+
+function declarationOf(name, compressed) {
+    const words = wordsOf(compressed);
+    return `    struct ${name} {
+        static constexpr std::string_view encoding{"gzip"};
+        static constexpr std::size_t dataSize{${compressed.length}};
+        static constexpr std::array<std::uint64_t, ${words.length}> data{\n            ${words.join(',\n            ')}\n        };
+    };`;
+}
+
 // The same big-endian word layout, padding and gzip settings as EmbedTextAsset.cmake.
 export function generateProvider(files, className = 'ApplicationAssets', notices = '') {
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(className)) throw new Error('Invalid generated provider name');
     const declarations = [];
     const routes = [];
-    let index = 0;
-    for (const [path, bytes] of [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-        if (!/^[A-Za-z0-9_./-]+$/.test(path) || path.split('/').some(part => !part || part === '.' || part === '..'))
-            throw new Error(`Invalid embedded route: ${path}`);
-        const compressed = compress(bytes);
-        const words = [];
-        for (let offset = 0; offset < compressed.length; offset += 8) {
-            let word = '';
-            for (let i = 0; i < 8; ++i) word += (compressed[offset + i] ?? 0).toString(16).padStart(2, '0');
-            words.push(`0x${word}ULL`);
-        }
-        const name = `Asset${index++}`;
-        declarations.push(`    struct ${name} {
-        static constexpr std::string_view encoding{"gzip"};
-        static constexpr std::size_t dataSize{${compressed.length}};
-        static constexpr std::array<std::uint64_t, ${words.length}> data{\n            ${words.join(',\n            ')}\n        };
-    };`);
+    for (const [path, bytes] of [...files].sort(byName)) {
+        if (!validRoute(path)) throw new Error(`Invalid embedded route: ${path}`);
+        const name = `Asset${declarations.length}`;
+        declarations.push(declarationOf(name, compress(bytes)));
         routes.push(`        if (name == ${JSON.stringify(path)}) return File{${name}{}};`);
     }
     return `#pragma once

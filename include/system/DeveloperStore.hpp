@@ -50,16 +50,7 @@ public:
     std::vector<std::uint8_t> read(std::string path, std::uint64_t offset) const {
         std::scoped_lock lock(mutex);
         const auto       source = projectPath(root, path);
-        if (!std::filesystem::is_regular_file(source))
-            throw std::runtime_error("Cannot read project file: " + path);
-        std::ifstream file(source, std::ios::binary);
-        if (!file)
-            throw std::runtime_error("Cannot read project file: " + path);
-        if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
-            throw std::invalid_argument("Invalid read offset");
-        file.seekg(static_cast<std::streamoff>(offset));
-        if (!file)
-            throw std::runtime_error("Cannot seek project file: " + path);
+        std::ifstream    file   = openForReading(source, path, offset);
         std::vector<std::uint8_t> bytes(chunkSize);
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (file.bad())
@@ -80,34 +71,17 @@ public:
         std::filesystem::create_directories(stagingRoot);
         // Compare resolved paths: a symlink or a differently cased spelling must not reach the staging area.
         const auto resolved = std::filesystem::weakly_canonical(target);
-        const auto staging  = std::filesystem::weakly_canonical(stagingRoot);
-        if (resolved == root || isParent(resolved, staging) || isParent(staging, resolved))
-            throw std::invalid_argument("Invalid publication destination");
-        for (const auto& [id, tx] : transactions) {
-            (void)id;
-            if (tx.resolved == resolved || isParent(tx.resolved, resolved) || isParent(resolved, tx.resolved))
-                throw std::runtime_error("Destination is already being written");
-        }
-        std::filesystem::path stagingDirectory;
-        std::string           id;
-        do {
-            id               = std::to_string(++nextId);
-            stagingDirectory = stagingRoot / id;
-        } while (!std::filesystem::create_directory(stagingDirectory));
-        transactions.emplace(id, Transaction{stagingDirectory, target, resolved, std::move(destination), directory, replace, 0, {}, std::chrono::steady_clock::now()});
+        requireFreeDestination(resolved, std::filesystem::weakly_canonical(stagingRoot));
+        const auto [id, staging] = createStaging(stagingRoot);
+        transactions.emplace(id, Transaction{staging, target, resolved, std::move(destination), directory, replace, 0, {}, std::chrono::steady_clock::now()});
         return id;
     }
 
     void write(std::string id, std::string path, std::uint64_t offset, std::vector<std::uint8_t> bytes) {
         std::scoped_lock lock(mutex);
-        auto&            tx = transaction(id);
-        if (!tx.directory && path != "output")
-            throw std::invalid_argument("Expected output file");
-        const auto relative = fs::tools::safeRelativePath(path);
-        if (bytes.size() > chunkSize || tx.size + bytes.size() > maxTransactionBytes)
-            throw std::length_error("Developer transaction exceeds its byte limit");
-        const auto key  = relative.generic_string();
-        auto&      size = tx.files[key];
+        auto&            tx       = transaction(id);
+        const auto       relative = checkedChunk(tx, path, bytes.size());
+        auto&            size     = tx.files[relative.generic_string()];
         if (offset != size)
             throw std::invalid_argument("Non-sequential developer write");
         const auto target = tx.staging / relative;
@@ -130,22 +104,8 @@ public:
         const auto source = tx.directory ? tx.staging : tx.staging / "output";
         if (!tx.directory && !std::filesystem::is_regular_file(source))
             throw std::runtime_error("No output was staged");
-        std::filesystem::create_directories(tx.target.parent_path());
         const auto backup = tx.staging.parent_path() / (id + "-backup");
-        // A backup left by a crashed process must not make the rename below fail.
-        std::filesystem::remove_all(backup);
-        const bool exists = std::filesystem::exists(std::filesystem::symlink_status(tx.target));
-        if (exists && !tx.replace)
-            throw std::runtime_error("Starter destination already exists");
-        if (exists)
-            std::filesystem::rename(tx.target, backup);
-        try {
-            std::filesystem::rename(source, tx.target);
-        } catch (...) {
-            if (exists)
-                std::filesystem::rename(backup, tx.target);
-            throw;
-        }
+        replaceTarget(tx, source, backup);
         std::error_code ignored;
         std::filesystem::remove_all(backup, ignored);
         std::filesystem::remove_all(tx.staging, ignored);
@@ -200,6 +160,70 @@ private:
         for (const auto& entry : std::filesystem::directory_iterator(stagingRoot, error))
             if (const auto written = entry.last_write_time(error); !error && now - written >= staleStagingAfter)
                 std::filesystem::remove_all(entry.path(), error);
+    }
+
+    static std::ifstream openForReading(const std::filesystem::path& source, const std::string& path, std::uint64_t offset) {
+        if (!std::filesystem::is_regular_file(source))
+            throw std::runtime_error("Cannot read project file: " + path);
+        std::ifstream file(source, std::ios::binary);
+        if (!file)
+            throw std::runtime_error("Cannot read project file: " + path);
+        if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
+            throw std::invalid_argument("Invalid read offset");
+        file.seekg(static_cast<std::streamoff>(offset));
+        if (!file)
+            throw std::runtime_error("Cannot seek project file: " + path);
+        return file;
+    }
+
+    // The staging area and the destinations of unfinished transactions are off limits.
+    void requireFreeDestination(const std::filesystem::path& resolved, const std::filesystem::path& staging) const {
+        if (resolved == root || related(resolved, staging))
+            throw std::invalid_argument("Invalid publication destination");
+        for (const auto& entry : transactions)
+            if (related(entry.second.resolved, resolved))
+                throw std::runtime_error("Destination is already being written");
+    }
+
+    static std::pair<std::string, std::filesystem::path> createStaging(const std::filesystem::path& stagingRoot) {
+        for (;;) {
+            auto id        = std::to_string(++nextId);
+            auto directory = stagingRoot / id;
+            if (std::filesystem::create_directory(directory))
+                return {std::move(id), std::move(directory)};
+        }
+    }
+
+    static std::filesystem::path checkedChunk(const Transaction& tx, const std::string& path, std::size_t size) {
+        if (!tx.directory && path != "output")
+            throw std::invalid_argument("Expected output file");
+        auto relative = fs::tools::safeRelativePath(path);
+        if (size > chunkSize || tx.size + size > maxTransactionBytes)
+            throw std::length_error("Developer transaction exceeds its byte limit");
+        return relative;
+    }
+
+    // Moves the staged files over the target, restoring the previous content if that fails.
+    static void replaceTarget(const Transaction& tx, const std::filesystem::path& source, const std::filesystem::path& backup) {
+        std::filesystem::create_directories(tx.target.parent_path());
+        // A backup left by a crashed process must not make the rename below fail.
+        std::filesystem::remove_all(backup);
+        const bool exists = std::filesystem::exists(std::filesystem::symlink_status(tx.target));
+        if (exists && !tx.replace)
+            throw std::runtime_error("Starter destination already exists");
+        if (exists)
+            std::filesystem::rename(tx.target, backup);
+        try {
+            std::filesystem::rename(source, tx.target);
+        } catch (...) {
+            if (exists)
+                std::filesystem::rename(backup, tx.target);
+            throw;
+        }
+    }
+
+    static bool related(const std::filesystem::path& first, const std::filesystem::path& second) {
+        return isParent(first, second) || isParent(second, first);
     }
 
     static bool isParent(const std::filesystem::path& parent, const std::filesystem::path& child) {

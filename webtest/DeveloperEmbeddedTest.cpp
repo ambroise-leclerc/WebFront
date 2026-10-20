@@ -6,23 +6,8 @@
 #include <atomic>
 #include <iostream>
 
-int main() {
-    try {
-        webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
-        webfront::test::TemporaryDirectory empty;
-        const auto                         original = std::filesystem::current_path();
-        std::filesystem::current_path(empty.path());
-        using App = webfront::
-            BasicWF<webfront::NetProvider, webfront::fs::DefaultFSWith<webfront::fs::PiUI>, webfront::http::DefaultBuffersPolicy, WEBFRONT_TEST_FRONTEND>;
-        App               app;
-        std::atomic<bool> passed{false};
-        app.cppFunction("pi", &webfront::demo::pi);
-        app.cppFunction("test.report", [&](bool success, std::string message) {
-            std::cout << message << std::endl;
-            passed.store(success);
-        });
-        auto subscription = app.subscribeUIStarted([](App::UI ui) {
-            ui.addScript(R"JS(
+namespace {
+constexpr auto uiScript = R"JS(
 (async () => {
     try {
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -42,7 +27,26 @@ int main() {
         await webFront.cppFunction('test.report')(false, String(error.stack || error));
     } finally { setTimeout(() => globalThis.close(), 0); }
 })().catch(error => { console.error(error); globalThis.close(); });
-)JS");
+)JS";
+}  // namespace
+
+int main() {
+    try {
+        webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
+        webfront::test::TemporaryDirectory empty;
+        const auto                         original = std::filesystem::current_path();
+        std::filesystem::current_path(empty.path());
+        using App = webfront::
+            BasicWF<webfront::NetProvider, webfront::fs::DefaultFSWith<webfront::fs::PiUI>, webfront::http::DefaultBuffersPolicy, WEBFRONT_TEST_FRONTEND>;
+        App               app;
+        std::atomic<bool> passed{false};
+        app.cppFunction("pi", &webfront::demo::pi);
+        app.cppFunction("test.report", [&](bool success, std::string message) {
+            std::cout << message << std::endl;
+            passed.store(success);
+        });
+        auto subscription = app.subscribeUIStarted([](App::UI ui) {
+            ui.addScript(uiScript);
         });
         app.show();
         std::filesystem::current_path(original);

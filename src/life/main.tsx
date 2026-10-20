@@ -28,38 +28,47 @@ function seed(name: string) {
     return cells;
 }
 
+type Painter = CanvasRenderingContext2D;
+function fillTile(context: Painter, points: number[][], fill: string, stroke?: string) {
+    context.beginPath(); points.forEach(([x, y], i) => i ? context.lineTo(x, y) : context.moveTo(x, y));
+    context.closePath(); context.fillStyle = fill; context.fill();
+    if (stroke) { context.strokeStyle = stroke; context.lineWidth = .7; context.stroke(); }
+}
+function paintFlat(context: Painter, x: number, y: number, alive: boolean) {
+    context.fillStyle = alive ? '#bcf8df' : 'rgba(159,202,194,.07)';
+    context.fillRect(209 + x * 17, 65 + y * 17, 15, 15);
+}
+function paintSpatial(context: Painter, x: number, y: number, alive: boolean) {
+    const px = 480 + (x - y) * 13, py = 115 + (x + y) * 7;
+    const lift = alive ? 20 : 0;
+    fillTile(context, [[px, py - lift], [px + 12, py + 6 - lift], [px, py + 12 - lift], [px - 12, py + 6 - lift]],
+        alive ? '#c8ffe4' : 'rgba(145,190,182,.075)', alive ? '#eefff8' : 'rgba(160,207,195,.12)');
+    if (!alive) return;
+    fillTile(context, [[px - 12, py + 6 - lift], [px, py + 12 - lift], [px, py + 12], [px - 12, py + 6]], '#529a83');
+    fillTile(context, [[px, py + 12 - lift], [px + 12, py + 6 - lift], [px + 12, py + 6], [px, py + 12]], '#7fc5a6');
+}
+function paintBoard(element: HTMLCanvasElement, cells: Uint8Array, flat: boolean) {
+    const ratio = window.devicePixelRatio || 1;
+    const {width, height} = element.getBoundingClientRect();
+    element.width = Math.round(width * ratio); element.height = Math.round(height * ratio);
+    const context = element.getContext('2d')!;
+    context.scale(ratio * width / 960, ratio * height / 680);
+    const paint = flat ? paintFlat : paintSpatial;
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) paint(context, x, y, isAlive(cells, y * size + x));
+}
+// The cell under a point of the 960 x 680 scene, or -1 outside the board.
+function cellAt(px: number, py: number, flat: boolean) {
+    const x = flat ? Math.floor((px - 209) / 17) : Math.floor(((px - 480) / 13 + (py - 115) / 7) / 2);
+    const y = flat ? Math.floor((py - 65) / 17) : Math.floor(((py - 115) / 7 - (px - 480) / 13) / 2);
+    const inside = (value: number) => value >= 0 && value < size;
+    return inside(x) && inside(y) ? y * size + x : -1;
+}
+
 function Board({cells, flat, toggle}: {cells: Uint8Array; flat: boolean; toggle: (index: number) => void}) {
     const canvas = useRef<HTMLCanvasElement>(null);
     useEffect(() => {
         const element = canvas.current!;
-        function draw() {
-            const ratio = window.devicePixelRatio || 1;
-            const {width, height} = element.getBoundingClientRect();
-            element.width = Math.round(width * ratio); element.height = Math.round(height * ratio);
-            const context = element.getContext('2d')!;
-            context.scale(ratio * width / 960, ratio * height / 680);
-            const tile = (points: number[][], fill: string, stroke?: string) => {
-                context.beginPath(); points.forEach(([x, y], i) => i ? context.lineTo(x, y) : context.moveTo(x, y));
-                context.closePath(); context.fillStyle = fill; context.fill();
-                if (stroke) { context.strokeStyle = stroke; context.lineWidth = .7; context.stroke(); }
-            };
-            for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-                const alive = isAlive(cells, y * size + x);
-                if (flat) {
-                    context.fillStyle = alive ? '#bcf8df' : 'rgba(159,202,194,.07)';
-                    context.fillRect(209 + x * 17, 65 + y * 17, 15, 15);
-                    continue;
-                }
-                const px = 480 + (x - y) * 13, py = 115 + (x + y) * 7;
-                const lift = alive ? 20 : 0;
-                tile([[px, py - lift], [px + 12, py + 6 - lift], [px, py + 12 - lift], [px - 12, py + 6 - lift]],
-                    alive ? '#c8ffe4' : 'rgba(145,190,182,.075)', alive ? '#eefff8' : 'rgba(160,207,195,.12)');
-                if (alive) {
-                    tile([[px - 12, py + 6 - lift], [px, py + 12 - lift], [px, py + 12], [px - 12, py + 6]], '#529a83');
-                    tile([[px, py + 12 - lift], [px + 12, py + 6 - lift], [px + 12, py + 6], [px, py + 12]], '#7fc5a6');
-                }
-            }
-        }
+        const draw = () => paintBoard(element, cells, flat);
         draw();
         const observer = new ResizeObserver(draw); observer.observe(element);
         return () => observer.disconnect();
@@ -67,13 +76,23 @@ function Board({cells, flat, toggle}: {cells: Uint8Array; flat: boolean; toggle:
     return <canvas ref={canvas} role="img" aria-label="32 by 32 Game of Life. Use the pattern buttons and Step to explore."
         onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect();
-            const px = (event.clientX - rect.left) * 960 / rect.width;
-            const py = (event.clientY - rect.top) * 680 / rect.height;
-            const x = flat ? Math.floor((px - 209) / 17) : Math.floor(((px - 480) / 13 + (py - 115) / 7) / 2);
-            const y = flat ? Math.floor((py - 65) / 17) : Math.floor(((py - 115) / 7 - (px - 480) / 13) / 2);
-            if (x >= 0 && x < size && y >= 0 && y < size) toggle(y * size + x);
+            const index = cellAt((event.clientX - rect.left) * 960 / rect.width, (event.clientY - rect.top) * 680 / rect.height, flat);
+            if (index >= 0) toggle(index);
         }}/>;
 }
+
+type Session = {cells: Uint8Array; revision: number; pending: boolean; mounted: boolean};
+const isCurrent = (session: Session, revision: number) => session.mounted && revision === session.revision;
+// The next generation from C++, or null when the session moved on while waiting.
+async function nextGeneration(session: Session, revision: number) {
+    await webFront.ready;
+    if (!isCurrent(session, revision)) return null;
+    const next = await webFront.cppFunction('life.step')(session.cells);
+    if (!isCurrent(session, revision)) return null;
+    if (!(next instanceof Uint8Array) || next.length !== byteCount) throw new Error('Invalid C++ generation');
+    return next;
+}
+const countBits = (cells: Uint8Array) => cells.reduce((count, byte) => { while (byte) { count += byte & 1; byte >>>= 1; } return count; }, 0);
 
 function Life() {
     const [cells, setCells] = useState(() => seed('Galaxy'));
@@ -98,16 +117,10 @@ function Life() {
         current.pending = true; setBusy(true);
         const revision = current.revision;
         try {
-            await webFront.ready;
-            if (!current.mounted || revision !== current.revision) return;
-            const next = await webFront.cppFunction('life.step')(current.cells);
-            if (!current.mounted || revision !== current.revision) return;
-            if (!(next instanceof Uint8Array) || next.length !== byteCount) throw new Error('Invalid C++ generation');
-            current.cells = next; setCells(next); setGeneration(value => value + 1); setError('');
+            const next = await nextGeneration(current, revision);
+            if (next) { current.cells = next; setCells(next); setGeneration(value => value + 1); setError(''); }
         } catch (error) {
-            if (current.mounted && revision === current.revision) {
-                setError(String(error)); run.current = false; setPlaying(false);
-            }
+            if (isCurrent(current, revision)) { setError(String(error)); run.current = false; setPlaying(false); }
         } finally { current.pending = false; if (current.mounted) setBusy(false); }
     }
     useEffect(() => {
@@ -122,7 +135,7 @@ function Life() {
         timer = setTimeout(tick, 1000 / rate.current);
         return () => { stopped = true; clearTimeout(timer); };
     }, [playing]);
-    const population = cells.reduce((count, byte) => { while (byte) { count += byte & 1; byte >>>= 1; } return count; }, 0);
+    const population = countBits(cells);
     return <main className="observatory">
         <header><a className="identity" href="#"><span className="mark">✳</span> FIELD<span className="edition">/ 01</span></a>
             <span className="eyebrow">A small universe, computed in C++23</span><span className="engine"><i/> Native engine</span></header>

@@ -26,16 +26,16 @@ test('starter integrity, recipes and archive paths are checked before any projec
     const bridge = {cppFunction: name => async (...args) => { calls.push([name, ...args]); return 'transaction'; }};
     const config = {starters: {pi: {url: 'https://pages.test/developer/0.1.0/pi-starter.tgz', integrity: integrity(bytes)}}};
     const fetchImpl = async () => new Response(bytes);
-    const help = await createStarter(bridge, config, 'pi', 'ui', undefined, fetchImpl);
+    const help = await createStarter(bridge, config, ['pi', 'ui'], {fetchImpl});
     assert.match(help, /wf install react@19.3.1/);
     assert.match(help, /wf preview ui\/main.tsx/);
     assert.equal(calls[0][0], 'webfront.developer.beginNew');
     assert.equal(calls.at(-1)[0], 'webfront.developer.commit');
     calls.length = 0;
-    await assert.rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: integrity(encode('bad'))}}}, 'pi', 'ui', undefined, fetchImpl), /Integrity check/);
+    await assert.rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: integrity(encode('bad'))}}}, ['pi', 'ui'], {fetchImpl}), /Integrity check/);
     assert.equal(calls.length, 0);
     for (const bytes of [starter({'package/../escape': encode('bad')}), starter({'package/webfront.project.json': encode({format: 1, entry: 'main.tsx', dependencies: {react: 'latest'}})})]) {
-        await assert.rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: integrity(bytes)}}}, 'pi', 'ui', undefined, async () => new Response(bytes)));
+        await assert.rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: integrity(bytes)}}}, ['pi', 'ui'], {fetchImpl: async () => new Response(bytes)}));
         assert.equal(calls.length, 0);
     }
     delete globalThis.location;
@@ -50,7 +50,7 @@ test('starter replacement refusal aborts the publication rather than overwriting
         if (name.endsWith('.commit')) throw new Error('Starter destination already exists');
         return 'transaction';
     }};
-    await assert.rejects(createStarter(bridge, {starters: {pi: {url: '/starter.tgz', integrity: integrity(bytes)}}}, 'pi', 'ui', undefined, async () => new Response(bytes)), /already exists/);
+    await assert.rejects(createStarter(bridge, {starters: {pi: {url: '/starter.tgz', integrity: integrity(bytes)}}}, ['pi', 'ui'], {fetchImpl: async () => new Response(bytes)}), /already exists/);
     assert.equal(calls.at(-1), 'webfront.developer.abort');
     delete globalThis.location;
 });
@@ -112,7 +112,7 @@ test('Life recipes select their generated provider and reject invalid provider n
             let writes = 0;
             const bridge = {cppFunction: () => async () => { writes++; return 'transaction'; }};
             const config = {starters: {life: {url: '/life-starter.tgz', integrity: integrity(bytes)}}};
-            const create = () => createStarter(bridge, config, 'life', 'ui', undefined, async () => new Response(bytes));
+            const create = () => createStarter(bridge, config, ['life', 'ui'], {fetchImpl: async () => new Response(bytes)});
             if (provider === 'LifeUI') assert.match(await create(), /generated\/LifeUI.hpp/);
             else { await assert.rejects(create(), /provider name/); assert.equal(writes, 0); }
         }

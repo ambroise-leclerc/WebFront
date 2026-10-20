@@ -36,10 +36,18 @@ public:
             throw std::invalid_argument("Developer bootstrap requires an explicit project directory");
         if (options.environment.empty() || !options.integrity.starts_with("sha512-"))
             throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
-        const auto config = "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
-                            + ",\"registry\":" + json::quote(options.registry) + "}";
-        store             = std::make_shared<developer::Store>(project);
-        this->cppFunction("webfront.developer.config", [config] {
+        store = std::make_shared<developer::Store>(project);
+        registerBridge("{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
+                       + ",\"registry\":" + json::quote(options.registry) + "}");
+    }
+
+    void show(std::string_view page = {}) {
+        Base::show(page.empty() ? (store ? "webfront-bootstrap.html" : "index.html") : page);
+    }
+
+private:
+    void registerBridge(std::string config) {
+        this->cppFunction("webfront.developer.config", [config = std::move(config)] {
             return config;
         });
         this->cppFunction("webfront.developer.read", [owned = store](std::string path, std::uint64_t offset) {
@@ -62,11 +70,6 @@ public:
         });
     }
 
-    void show(std::string_view page = {}) {
-        Base::show(page.empty() ? (store ? "webfront-bootstrap.html" : "index.html") : page);
-    }
-
-private:
     static WebFrontConfig withProject(WebFrontConfig config, const std::filesystem::path& projectDirectory) {
         config.documentRoot = projectDirectory;
         return config;

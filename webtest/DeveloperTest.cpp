@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <iostream>
+#include <utility>
 
 namespace {
 std::string readFixtureText(const std::filesystem::path& path) {
@@ -36,6 +37,55 @@ public:
 private:
     std::filesystem::path root;
 };
+
+std::string readIntegrity(const std::filesystem::path& config) {
+    std::string            integrity;
+    const std::string      json = readFixtureText(config);
+    webfront::json::Reader reader{json};
+    reader.object([&](const std::string& key) {
+        if (key == "integrity")
+            integrity = reader.string();
+        else
+            reader.skipValue();
+    });
+    return integrity;
+}
+
+template <typename App>
+void registerCallbacks(App& app, const std::filesystem::path& project, std::atomic<bool>& passed) {
+    app.cppFunction("pi", &webfront::demo::pi);
+    app.cppFunction("life.step", &webfront::demo::nextLife);
+    app.cppFunction("test.header", [project](std::string name) {
+        if (name != "PiUI" && name != "LifeUI")
+            throw std::invalid_argument("Unknown generated fixture");
+        const auto header = readFixtureText(project / "generated" / (name + ".hpp"));
+        // The generated header is larger than a bridge string: return a stable small digest.
+        return std::to_string(std::hash<std::string>{}(header));
+    });
+    app.cppFunction("test.report", [&passed](bool success, std::string message) {
+        std::cout << message << std::endl;
+        passed.store(success);
+    });
+}
+
+template <typename App>
+void bootstrapApp(App& app, std::string_view mode, const std::string& integrity) {
+    if (mode.empty())
+        app.bootstrap("developer", {.environment = "/fixtures/environment.tgz", .integrity = integrity, .registry = "/fixtures/registry/"});
+    else if (mode == "--public")
+        app.bootstrap("developer");
+    else
+        throw std::invalid_argument("Unknown smoke-test mode");
+}
+
+void copyHeaders(const std::filesystem::path& project, const std::filesystem::path& output) {
+    std::filesystem::create_directories(output);
+    for (const auto* name : {"PiUI.hpp", "LifeUI.hpp"})
+        std::filesystem::copy_file(project / "generated" / name, output / name, std::filesystem::copy_options::overwrite_existing);
+}
+
+constexpr auto runScript =
+    "import('/fixtures/run.mjs').catch(async e => { await webFront.cppFunction('test.report')(false, String(e.stack || e)); window.close(); });";
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -46,54 +96,20 @@ int main(int argc, char** argv) {
             throw std::invalid_argument("Expected fixture directory, header output directory and optional --public");
         webfront::test::TemporaryDirectory project;
         std::filesystem::copy(argv[1], project.path() / "fixtures", std::filesystem::copy_options::recursive);
-        std::string            integrity;
-        const auto             config = project.path() / "fixtures/provision.json";
-        const std::string      json   = readFixtureText(config);
-        webfront::json::Reader reader{json};
-        reader.object([&](const std::string& key) {
-            if (key == "integrity")
-                integrity = reader.string();
-            else
-                reader.skipValue();
-        });
-        using App = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
+        const auto integrity = readIntegrity(project.path() / "fixtures/provision.json");
+        using App            = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
         App               app{project.path()};
         std::atomic<bool> passed{false};
-        app.cppFunction("pi", &webfront::demo::pi);
-        app.cppFunction("life.step", &webfront::demo::nextLife);
-        app.cppFunction("test.header", [&](std::string name) {
-            if (name != "PiUI" && name != "LifeUI")
-                throw std::invalid_argument("Unknown generated fixture");
-            const auto header = readFixtureText(project.path() / "generated" / (name + ".hpp"));
-            // The generated header is larger than a bridge string: return a stable small digest.
-            return std::to_string(std::hash<std::string>{}(header));
-        });
-        app.cppFunction("test.report", [&](bool success, std::string message) {
-            std::cout << message << std::endl;
-            passed.store(success);
-        });
-        if (argc == 4) {
-            if (std::string_view(argv[3]) != "--public")
-                throw std::invalid_argument("Unknown smoke-test mode");
-            app.bootstrap("developer");
-        } else {
-            app.bootstrap("developer", {.environment = "/fixtures/environment.tgz", .integrity = integrity, .registry = "/fixtures/registry/"});
-        }
+        registerCallbacks(app, project.path(), passed);
+        bootstrapApp(app, argc == 4 ? std::string_view(argv[3]) : std::string_view{}, integrity);
         auto subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
-            if (injected)
-                return;
-            injected = true;
-            ui.addScript(
-                "import('/fixtures/run.mjs').catch(async e => { await webFront.cppFunction('test.report')(false, String(e.stack || e)); window.close(); });");
+            if (!std::exchange(injected, true))
+                ui.addScript(runScript);
         });
         app.show();
         if (!passed.load())
             return 1;
-        std::filesystem::create_directories(argv[2]);
-        for (const auto* name : {"PiUI.hpp", "LifeUI.hpp"})
-            std::filesystem::copy_file(project.path() / "generated" / name,
-                                       std::filesystem::path(argv[2]) / name,
-                                       std::filesystem::copy_options::overwrite_existing);
+        copyHeaders(project.path(), argv[2]);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
