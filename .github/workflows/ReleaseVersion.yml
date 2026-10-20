@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   version:
+    # Developer package prereleases use their own version and validation workflow.
+    if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'developer-v')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

@@ -17,7 +17,10 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 - Versioned environment and PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
   configuration. `wf create pi` creates a fresh editable project without overwriting existing files.
-  Maintainer preparation requires Node/npm; consumers do not. Public deployment is tracked in #288.
+  Maintainer preparation requires Node/npm; consumers do not. Version 0.1.0 is served at
+  `https://ambroise-leclerc.github.io/WebFront/developer/0.1.0/`. The live WKWebView smoke test
+  downloaded the environment/starter from Pages and React dependencies from npm, then passed
+  the PI preview and deterministic header checks. Deployment and CI follow-up are tracked in #288.
 - Browser packages only: no installation scripts, native modules, Node API shims, optional
   dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
   dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.

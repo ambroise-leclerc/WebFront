@@ -29,6 +29,10 @@ int main() {
 }
 ```
 
+The [0.1.0 distribution](https://ambroise-leclerc.github.io/WebFront/) is published on GitHub Pages.
+Its archive bytes, cross-origin response and end-to-end native WKWebView download/build/preview
+path were verified on 2026-10-20. These live checks supplement the offline CTest fixtures.
+
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
 `https://ambroise-leclerc.github.io/WebFront/developer/0.1.0/environment.tgz`. It pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
