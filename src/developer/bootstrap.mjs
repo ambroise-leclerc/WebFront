@@ -111,8 +111,9 @@ async function downloadEnvironment(config, fetchImpl) {
 }
 
 function validStarter(starter) {
-    if (!starter || typeof starter.archive !== 'string' || !safePath(starter.archive)) return false;
-    return typeof starter.integrity === 'string' && starter.integrity.startsWith('sha512-');
+    if (!starter) return false;
+    if (!safePath(starter.archive)) return false;
+    return String(starter.integrity).startsWith('sha512-');
 }
 
 function pinnedStarters(manifest, environmentUrl) {

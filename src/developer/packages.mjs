@@ -59,17 +59,28 @@ async function fetchTarball(name, manifest, base, {fetchImpl, signal}) {
     return {bytes, integrity: await verifyIntegrity(bytes, manifest.dist.integrity)};
 }
 
-export async function downloadPackage(name, requested, {registry, fetchImpl = fetch, signal}) {
-    if (!safeName(name)) throw new Error(`Unsupported npm package name: ${name}`);
+function registryBase(registry) {
     const base = new URL(registry, globalThis.location?.href);
     if (!base.pathname.endsWith('/')) base.pathname += '/';
+    return base;
+}
+
+// The package.json inside the archive must be the requested package and need no install step.
+function checkedManifest(files, name, version) {
+    const pkg = JSON.parse(text.decode(files.get('package.json')));
+    if (pkg.name !== name || pkg.version !== version) throw new Error('npm archive identity mismatch');
+    if (needsInstallStep(pkg, files)) throw new Error(`${name} needs an unsupported install script or native module`);
+    return pkg;
+}
+
+export async function downloadPackage(name, requested, {registry, fetchImpl = fetch, signal}) {
+    if (!safeName(name)) throw new Error(`Unsupported npm package name: ${name}`);
+    const base = registryBase(registry);
     const context = {fetchImpl, signal};
     const {version, manifest} = selectVersion(await fetchPackument(name, base, context), name, requested);
     const {bytes, integrity} = await fetchTarball(name, manifest, base, context);
     const files = await readArchive(bytes);
-    const pkg = JSON.parse(text.decode(files.get('package.json')));
-    if (pkg.name !== name || pkg.version !== version) throw new Error('npm archive identity mismatch');
-    if (needsInstallStep(pkg, files)) throw new Error(`${name} needs an unsupported install script or native module`);
+    const pkg = checkedManifest(files, name, version);
     return {id: idOf(name, version), key: cacheKey(name, version, integrity), manifest: pkg, integrity, files};
 }
 

@@ -19,10 +19,14 @@ function validProvider(provider) {
     return /^[A-Za-z_][A-Za-z0-9_]*$/.test(provider);
 }
 
+function hasEntry(recipe, files) {
+    if (typeof recipe.entry !== 'string') return false;
+    return files.has(safePackagePath(recipe.entry));
+}
+
 export function recipeOf(files) {
     const recipe = JSON.parse(decoder.decode(files.get('webfront.project.json')));
-    if (recipe.format !== 1 || typeof recipe.entry !== 'string' || !files.has(safePackagePath(recipe.entry)))
-        throw new Error('Invalid starter project recipe');
+    if (recipe.format !== 1 || !hasEntry(recipe, files)) throw new Error('Invalid starter project recipe');
     requireExactDependencies(recipe.dependencies);
     if (recipe.provider !== undefined && !validProvider(recipe.provider))
         throw new Error('Invalid starter provider name');

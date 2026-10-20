@@ -29,16 +29,18 @@ function seed(name: string) {
 }
 
 type Painter = CanvasRenderingContext2D;
+type Cell = {x: number; y: number; alive: boolean};
+type Point = {x: number; y: number};
 function fillTile(context: Painter, points: number[][], fill: string, stroke?: string) {
     context.beginPath(); points.forEach(([x, y], i) => i ? context.lineTo(x, y) : context.moveTo(x, y));
     context.closePath(); context.fillStyle = fill; context.fill();
     if (stroke) { context.strokeStyle = stroke; context.lineWidth = .7; context.stroke(); }
 }
-function paintFlat(context: Painter, x: number, y: number, alive: boolean) {
+function paintFlat(context: Painter, {x, y, alive}: Cell) {
     context.fillStyle = alive ? '#bcf8df' : 'rgba(159,202,194,.07)';
     context.fillRect(209 + x * 17, 65 + y * 17, 15, 15);
 }
-function paintSpatial(context: Painter, x: number, y: number, alive: boolean) {
+function paintSpatial(context: Painter, {x, y, alive}: Cell) {
     const px = 480 + (x - y) * 13, py = 115 + (x + y) * 7;
     const lift = alive ? 20 : 0;
     fillTile(context, [[px, py - lift], [px + 12, py + 6 - lift], [px, py + 12 - lift], [px - 12, py + 6 - lift]],
@@ -54,10 +56,10 @@ function paintBoard(element: HTMLCanvasElement, cells: Uint8Array, flat: boolean
     const context = element.getContext('2d')!;
     context.scale(ratio * width / 960, ratio * height / 680);
     const paint = flat ? paintFlat : paintSpatial;
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) paint(context, x, y, isAlive(cells, y * size + x));
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) paint(context, {x, y, alive: isAlive(cells, y * size + x)});
 }
 // The cell under a point of the 960 x 680 scene, or -1 outside the board.
-function cellAt(px: number, py: number, flat: boolean) {
+function cellAt({x: px, y: py}: Point, flat: boolean) {
     const x = flat ? Math.floor((px - 209) / 17) : Math.floor(((px - 480) / 13 + (py - 115) / 7) / 2);
     const y = flat ? Math.floor((py - 65) / 17) : Math.floor(((py - 115) / 7 - (px - 480) / 13) / 2);
     const inside = (value: number) => value >= 0 && value < size;
@@ -76,7 +78,7 @@ function Board({cells, flat, toggle}: {cells: Uint8Array; flat: boolean; toggle:
     return <canvas ref={canvas} role="img" aria-label="32 by 32 Game of Life. Use the pattern buttons and Step to explore."
         onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect();
-            const index = cellAt((event.clientX - rect.left) * 960 / rect.width, (event.clientY - rect.top) * 680 / rect.height, flat);
+            const index = cellAt({x: (event.clientX - rect.left) * 960 / rect.width, y: (event.clientY - rect.top) * 680 / rect.height}, flat);
             if (index >= 0) toggle(index);
         }}/>;
 }
