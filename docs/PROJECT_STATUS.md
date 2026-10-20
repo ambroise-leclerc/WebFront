@@ -2,6 +2,24 @@
 
 Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19.
 
+## Packed bitsets (#289, 2026-10-20)
+
+- The bridge accepts `std::bitset<N>` callback arguments/results and C++ call arguments plus
+  typed future/sender results through the existing short/regular Uint8Array encodings.
+  Bit `i` maps to bit `i % 8` of byte `i / 8`; decoding validates the exact unsigned-byte type,
+  byte count and zero high padding bits. Zero-sized bitsets map to an empty Uint8Array.
+  JavaScript must know the logical bit count from the application contract.
+- Regression tests cover known bytes, size boundaries, malformed inputs, tuples and both
+  browser call directions, including exceptional future/sender completion. Future calls and
+  their final notification dispatch on the server context; a joined test thread only waits
+  for the results with a ten-second bound. Delayed JavaScript replies arrive out of dispatch
+  order, and failures log explicit diagnostics without blocking the server context.
+- Local validation on the develop-based branch: all 242 CEF-off CTest cases and the
+  WKWebView Jasmine integration test pass. Linux CEF/Xvfb passes with GCC and Clang in
+  [CI run 39466294828](https://github.com/ambroise-leclerc/WebFront/actions/runs/39466294828)
+  on code revision `d9327e7`; the same run also passes both Windows MSVC configurations,
+  the Linux sanitizers, WebKitGTK and macOS/WKWebView checks.
+
 ## Embedded dependency refresh (#284, 2026-10-19)
 
 - React and React DOM 19.3.1, Babel standalone 8.0.7 and Jasmine 7.0.2 replace the older embedded
@@ -313,7 +331,7 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 
 ## Known limitations and next decisions
 
-- Result values are currently limited to the bridge's existing scalar, string, tuple, and numeric typed-array parameter types; richer object/DOM values remain out of scope.
+- Result values are currently limited to the bridge's existing scalar, string, tuple, numeric typed-array and packed bitset parameter types; richer object/DOM values remain out of scope.
 - `webfront::Task`, `app.spawn(task)`/`ui.spawn(task)` and per-task `TaskHandle::requestStop()` provide application-owned coroutine lifetime without exposing an execution context. The compiled `WebFrontAwaitBrowser` example matches the README; `app.shutdown()` stops and joins before returning; spawn is callable from any thread while the application lives and returns a stopped handle if shutdown rejects it. Destruction keeps owners alive and logs/waits if an external operation delays the join, whereas explicit shutdown reports absent context progress.
 - `ui.jsFunctionSender<R>(name)(...)` (default `R = void`) adds lazy, awaitable typed calls, with value/error/stopped completion and local receiver-token cancellation. Futures and JavaScript Promises remain supported without cancellation. JavaScript already dispatched continues; late replies are discarded. See [execution design](ASYNC_EXECUTION.md).
 - Repeated cancellation of JavaScript functions that never respond reserves their 16-bit IDs until disconnection. Enough such calls exhaust IDs and subsequent calls fail with `Too many outstanding WebFront calls`. Calls have no automatic timeout or per-write delivery acknowledgement.

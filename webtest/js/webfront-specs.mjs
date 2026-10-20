@@ -72,7 +72,31 @@ let senderStopped;
 const senderCancelled = new Promise(resolve => { senderStopped = resolve; });
 let finishSlowSender;
 
+let finishBitsetChecks;
+const bitsetChecks = new Promise(resolve => { finishBitsetChecks = resolve; });
+
+let finishBitsetFutureChecks;
+const bitsetFutureChecks = new Promise(resolve => { finishBitsetFutureChecks = resolve; });
+
+function isPackedBitset(value, expected) {
+    if (!(value instanceof Uint8Array)) return false;
+    if (value.length !== expected.length) return false;
+    return expected.every((byte, index) => value[index] === byte);
+}
+
 globalThis.webfrontTests = {
+    bitsetEcho(value, delayed = false) {
+        if (!isPackedBitset(value, [0x81, 1]))
+            throw new Error('Incorrect C++ packed bitset');
+        return delayed ? new Promise(resolve => setTimeout(() => resolve(value), 50)) : value;
+    },
+    bitsetBad(kind, delayed = false) {
+        const value = [new Uint8Array([0, 2]), new Uint8Array(1), new Int8Array(2)][kind];
+        // Deliberately reply out of dispatch order while the future worker is waiting.
+        return delayed ? new Promise(resolve => setTimeout(() => resolve(value), (3 - kind) * 20)) : value;
+    },
+    bitsetChecksFinished(passed) { finishBitsetChecks(passed); },
+    bitsetFutureChecksFinished(passed) { finishBitsetFutureChecks(passed); },
     senderValue(value) { return Promise.resolve(`sender:${value}`); },
     senderVoid() {},
     senderThrows() { return Promise.reject(new Error('sender browser failure')); },
@@ -108,6 +132,25 @@ globalThis.webfrontTests = {
 };
 
 describe('WebFront browser integration', () => {
+    it('supports packed bitsets in C++ future and sender calls and rejects malformed returns', async () => {
+        await expectAsync(bitsetChecks).toBeResolvedTo(true);
+        await expectAsync(bitsetFutureChecks).toBeResolvedTo(true);
+    });
+
+    it('exchanges bitset callback arguments/results as Uint8Array including tuples and empty grids', async () => {
+        const echo = webFront.cppFunction('bitsetEcho');
+        const result = await echo(new Uint8Array([0x81, 1]));
+        expect(result instanceof Uint8Array).toBeTrue();
+        expect(Array.from(result)).toEqual([0x81, 1]);
+        expect(Array.from(await webFront.cppFunction('bitsetEmpty')(new Uint8Array()))).toEqual([]);
+        const grid = new Uint8Array(128); grid[0] = 1; grid[127] = 128;
+        expect(Array.from(await webFront.cppFunction('bitsetGrid')(grid))).toEqual(Array.from(grid));
+        const tuple = await webFront.cppFunction('bitsetTuple')([result, 42]);
+        expect(Array.from(tuple[0])).toEqual([0x81, 1]); expect(tuple[1]).toBe(42);
+        for (const value of [new Uint8Array([0, 2]), new Uint8Array(1), new Uint8Array(3), new Int8Array(2), '01'])
+            await expectAsync(echo(value)).toBeRejected();
+    });
+
     it('resumes C++ coroutines with sender values, void completion and exceptions', async () => {
         await expectAsync(senderChecks).toBeResolvedTo(true);
     });
