@@ -1,0 +1,36 @@
+name: No AI Attribution
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ master, develop ]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select commit range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ] \
+               || ! git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+            # New branch or force-push over a rewritten history: check what is not on the default branch.
+            base="$(git merge-base origin/develop "${{ github.sha }}" || git rev-list --max-parents=0 "${{ github.sha }}" | tail -n1)"
+            head="${{ github.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+      - name: Reject AI-assistance attribution in commits
+        run: .github/scripts/check-no-ai-attribution.sh "${{ steps.range.outputs.base }}" "${{ steps.range.outputs.head }}"
