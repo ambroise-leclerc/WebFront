@@ -30,3 +30,46 @@ if(WEBFRONT_EMBED_CEF AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         webfront_set_browser_test_properties(CEFContentPolicy "${CMAKE_CURRENT_SOURCE_DIR}" 45)
     endif()
 endif()
+
+# Optional offline fixtures are provisioned by maintainers, never downloaded by CTest.
+set(WEBFRONT_DEVELOPER_FIXTURES "" CACHE PATH "Prepared browser developer environment/registry fixtures")
+if(WEBFRONT_DEVELOPER_FIXTURES
+   AND ${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
+   AND CMAKE_SYSTEM_NAME IN_LIST WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_PLATFORMS)
+    if(NOT EXISTS "${WEBFRONT_DEVELOPER_FIXTURES}/provision.json")
+        message(FATAL_ERROR "Prepare WEBFRONT_DEVELOPER_FIXTURES with tools/developer/build.mjs and fixtures.mjs")
+    endif()
+    add_executable(developer_integration DeveloperTest.cpp)
+    target_link_libraries(developer_integration PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    target_compile_definitions(developer_integration PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(developer_integration)
+    set(_developer_command "$<TARGET_FILE:developer_integration>")
+    if(WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_XVFB_LINUX AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        webfront_find_xvfb(_developer_xvfb)
+        if(NOT _developer_xvfb)
+            message(FATAL_ERROR "Developer browser integration requires xvfb-run on this frontend")
+        endif()
+        set(_developer_command "${_developer_xvfb}" -a ${_developer_command})
+    endif()
+    add_test(NAME DeveloperBrowserIntegration COMMAND ${_developer_command}
+        "${WEBFRONT_DEVELOPER_FIXTURES}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated")
+    webfront_set_browser_test_properties(DeveloperBrowserIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 180)
+    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+    # Build the actual browser-generated header only after the setup test has produced it.
+    add_executable(developer_embedded EXCLUDE_FROM_ALL DeveloperEmbeddedTest.cpp)
+    target_link_libraries(developer_embedded PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    target_compile_definitions(developer_embedded PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
+        WEBFRONT_PI_ASSETS_HEADER="${CMAKE_CURRENT_BINARY_DIR}/developer-generated/PiUI.hpp")
+    webfront_setup_frontends_for_target(developer_embedded)
+    add_test(NAME DeveloperEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+        --config $<CONFIG> --target developer_embedded --parallel 2)
+    set_tests_properties(DeveloperEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
+        FIXTURES_SETUP DeveloperEmbedded LABELS "web-integration" TIMEOUT 180 RUN_SERIAL TRUE)
+    set(_embedded_command "$<TARGET_FILE:developer_embedded>")
+    if(_developer_xvfb)
+        set(_embedded_command "${_developer_xvfb}" -a ${_embedded_command})
+    endif()
+    add_test(NAME DeveloperEmbeddedIntegration COMMAND ${_embedded_command})
+    webfront_set_browser_test_properties(DeveloperEmbeddedIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 60)
+    set_tests_properties(DeveloperEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED DeveloperEmbedded)
+endif()

@@ -177,3 +177,7 @@ third_party/jasmine/*                      text eol=lf
 third_party/jasmine/*.png                  binary
 third_party/fflate/*                       text eol=lf
 include/system/*Data.hpp                   text eol=lf
+
+# Browser-powered developer bootstrap sources and generated payloads.
+src/developer/* text eol=lf
+tools/assets/package-lock.json text eol=lf

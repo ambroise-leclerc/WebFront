@@ -44,6 +44,7 @@ SCENARIO("Every MIME type has its own name") {
             { "svg",          "image/svg+xml"},
             {"webp",             "image/webp"},
             { "csv",               "text/csv"},
+            {"wasm",       "application/wasm"},
         }));
         THEN(extension + " is served as " + contentType) {
             REQUIRE(std::string(MimeType::fromExtension(extension).toString()) == contentType);

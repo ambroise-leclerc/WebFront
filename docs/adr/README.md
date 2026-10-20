@@ -1,8 +1,9 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **12 ADRs**, with unique numbers.
-The current state corresponds to commit `b031ab5` dated **2026-10-19**. Each ADR is versioned
+when making changes or generating code. It contains **15 ADRs**, with unique numbers (12 accepted decisions and 3 proposals).
+The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
+the browser-powered development proposals are dated **2026-10-20**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
 The ADRs themselves are written in French.
 
@@ -20,7 +21,7 @@ latest version. A compatible addition or clarification increments the minor vers
 a backend or contract may introduce a major version. The status “Acceptée” (Accepted) means
 that the choice recorded in that version has been integrated into the project.
 
-The author of every version is **Ambroise Leclerc**. Dates come from the commits
+The author of every version is **Ambroise Leclerc**. Dates of accepted historical versions come from the commits
 (`git show --format=%as`), searched across all retained branches. The founding intent around
 2020 — targeting C++23, anticipating its networking facilities through standalone ASIO and
 decoupling web resources from storage — remains described in the relevant ADRs’ context.
@@ -51,6 +52,9 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.5 — 2026-10-16 |
 | [ADR-011](ADR-011-diagnostics-optionnels.md) | Confining mddlog behind an optional diagnostics façade | Accepted | 2026-10-01 | 1.2 — 2026-10-02 |
 | [ADR-012](ADR-012-preuves-et-tests.md) | Demonstrating contracts through deterministic tests and browser integration | Accepted | 2020-04-19 | 1.6 — 2026-10-19 |
+| [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Proposed | 2026-10-20 | 0.1 — 2026-10-20 |
+| [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Proposed | 2026-10-20 | 0.1 — 2026-10-20 |
+| [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Proposed | 2026-10-20 | 0.1 — 2026-10-20 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -74,6 +78,7 @@ the chronology, which does not follow the numerical order.
 | A new engine or changes to window lifecycle | 006, 007, 008 |
 | Components, the terminal or installed tools | 004, 006, 008, 010 |
 | Diagnostics and log transport | 006, 011 |
+| Downloaded development environment, npm libraries and generated application assets | 008, 009, 010, 013, 014, 015 |
 
 ADRs explain decisions; [AGENTS.md](../../AGENTS.md) sets out working instructions,
 the [README](../../README.md) provides the user journey, and specialist documents define
@@ -82,6 +87,7 @@ with tests; do not implicitly change the contract to make the contradiction disa
 
 ## Maintaining the register
 
+Proposals use their actual proposal date and remain proposed until integration/validation.
 Each ADR starts with a **Versions** table listing version, date, status, author, change and
 commit. Version **1.0** corresponds to the decision’s initial creation, dated to the historical
 commit that introduces it. Each significant architectural change adds a row dated to its
@@ -90,7 +96,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-013**. Retain historical numbers and files.
+  is **ADR-016**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

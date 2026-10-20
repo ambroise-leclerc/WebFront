@@ -8,7 +8,7 @@
 namespace webfront::http {
 
 struct MimeType {
-    enum Type { plain, html, css, js, jpg, png, gif, json, pdf, ttf, ico, svg, webp, csv };
+    enum Type { plain, html, css, js, jpg, png, gif, json, pdf, ttf, ico, svg, webp, csv, wasm };
     Type type;
 
     constexpr MimeType(Type mimeType) : type(mimeType) {}
@@ -29,6 +29,7 @@ struct MimeType {
         if (e == "svg") return svg;
         if (e == "webp") return webp;
         if (e == "csv") return csv;
+        if (e == "wasm") return wasm;
         return plain;
     }
 
@@ -47,8 +48,9 @@ struct MimeType {
                                           "image/x-icon",
                                           "image/svg+xml",
                                           "image/webp",
-                                          "text/csv"};
-        static_assert(names.size() == csv + 1, "MimeType names must match the Type enumerators");
+                                          "text/csv",
+                                          "application/wasm"};
+        static_assert(names.size() == wasm + 1, "MimeType names must match the Type enumerators");
         return names[type];
     }
 };

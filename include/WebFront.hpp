@@ -531,3 +531,6 @@ using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Fronten
 using UI       = WebFront::UI;
 
 }  // namespace webfront
+
+// Optional templates instantiate only when the developer/native facade is selected.
+#include "DeveloperApp.hpp"

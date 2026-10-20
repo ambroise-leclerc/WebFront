@@ -1,0 +1,117 @@
+#include "../src/Pi.hpp"
+#include "TemporaryDirectory.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <DeveloperApp.hpp>
+#include <http/MimeType.hpp>
+
+using namespace webfront;
+using webfront::test::TemporaryDirectory;
+
+namespace {
+std::vector<std::uint8_t> bytes(std::string_view text) {
+    return {text.begin(), text.end()};
+}
+std::string read(developer::Store& store, std::string path) {
+    auto data = store.read(std::move(path), 0);
+    return {data.begin(), data.end()};
+}
+}  // namespace
+
+SCENARIO("Developer publication preserves the installed files until commit") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("an installed output") {
+        auto first = store.begin("generated/PiUI.hpp", false);
+        store.write(first, "output", 0, bytes("old"));
+        store.commit(first);
+        WHEN("the next output is interrupted") {
+            auto second = store.begin("generated/PiUI.hpp", false);
+            store.write(second, "output", 0, bytes("partial"));
+            REQUIRE(read(store, "generated/PiUI.hpp") == "old");
+            store.abort(second);
+            THEN("the installed output remains intact") {
+                REQUIRE(read(store, "generated/PiUI.hpp") == "old");
+            }
+        }
+        WHEN("a complete replacement is committed") {
+            auto second = store.begin("generated/PiUI.hpp", false);
+            store.write(second, "output", 0, bytes("new"));
+            store.commit(second);
+            THEN("the new output replaces it") {
+                REQUIRE(read(store, "generated/PiUI.hpp") == "new");
+            }
+        }
+    }
+}
+
+SCENARIO("Developer writes are bounded and paths stay inside the explicit project") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a staged preview") {
+        const auto id = store.begin(".webfront/developer/preview", true);
+        WHEN("the browser sends invalid chunks or paths") {
+            THEN("none are published") {
+                REQUIRE_THROWS(store.write(id, "../escape", 0, bytes("bad")));
+                REQUIRE_THROWS(store.write(id, "index.html", 1, bytes("bad")));
+                REQUIRE_THROWS(store.write(id, "big", 0, std::vector<std::uint8_t>(developer::chunkSize + 1)));
+                REQUIRE_THROWS(store.begin("../escape", false));
+                REQUIRE_THROWS(store.read("../escape", 0));
+                REQUIRE_THROWS(store.begin(".webfront/developer/staging/x", true));
+                REQUIRE_THROWS(store.begin(".webfront", true));
+                REQUIRE_THROWS(store.begin(".webfront/developer", true));
+                REQUIRE_THROWS(store.begin(".webfront/developer/preview/assets", true));
+            }
+        }
+        WHEN("a zero-length file and a nested file are sent") {
+            store.write(id, "empty", 0, {});
+            store.write(id, "assets/a.js", 0, bytes("abc"));
+            store.write(id, "assets/a.js", 3, bytes("def"));
+            store.commit(id);
+            THEN("both are readable after commit") {
+                REQUIRE(read(store, ".webfront/developer/preview/empty").empty());
+                REQUIRE_THROWS(store.read(".webfront/developer/preview/assets", 0));
+                REQUIRE(read(store, ".webfront/developer/preview/assets/a.js") == "abcdef");
+            }
+        }
+    }
+    GIVEN("an escaping directory symlink") {
+        TemporaryDirectory outside;
+        std::error_code    error;
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / "escape", error);
+        if (!error) {
+            THEN("reads and destinations are rejected") {
+                REQUIRE_THROWS(store.begin("escape/new.hpp", false));
+                REQUIRE_THROWS(store.read("escape/secret", 0));
+            }
+        }
+    }
+}
+
+SCENARIO("Developer filesystem serves only published resources and protects the bridge") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    fs::DeveloperFS    filesystem{project.path()};
+    GIVEN("published preview assets and private project files") {
+        const auto id = store.begin(".webfront/developer/preview", true);
+        store.write(id, "index.html", 0, bytes("preview"));
+        store.commit(id);
+        THEN("the preview and bootstrap are served but project sources are not") {
+            REQUIRE(filesystem.open("/webfront/developer/preview/index.html"));
+            REQUIRE(filesystem.open("/webfront-bootstrap.html"));
+            REQUIRE(filesystem.open("/webfront-bootstrap.mjs"));
+            REQUIRE(filesystem.open("/WebFront.js"));
+            REQUIRE_FALSE(filesystem.open("/CMakeLists.txt"));
+            REQUIRE_FALSE(filesystem.open("/webfront/developer/staging/file"));
+            REQUIRE_FALSE(filesystem.open("/webfront/developer/preview/../../secret"));
+            REQUIRE(http::MimeType("wasm").toString() == "application/wasm");
+        }
+    }
+}
+
+SCENARIO("The PI demonstration returns exact decimal strings and rejects excessive work") {
+    REQUIRE(demo::pi(0) == "3");
+    REQUIRE(demo::pi(1) == "3.1");
+    REQUIRE(demo::pi(50) == "3.14159265358979323846264338327950288419716939937510");
+    REQUIRE(demo::pi(1000).size() == 1002);
+    REQUIRE_THROWS_AS(demo::pi(1001), std::invalid_argument);
+}

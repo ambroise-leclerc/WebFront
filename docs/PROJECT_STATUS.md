@@ -2,6 +2,26 @@
 
 Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19.
 
+## Browser-powered development (2026-10-20)
+
+- `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
+  downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do
+  not require Node/npm on application developers' machines.
+- The PI demo covers local TSX, React/React DOM and scheduler, a same-window preview and an
+  application-owned generated provider. A second executable uses the provider with no developer
+  root or callbacks. Existing React/Babel/terminal providers remain supported.
+- Real WKWebView coverage exercises downloading from a local fixture registry, WASM compilation,
+  PI results, deterministic header generation, compiling that header and running from an empty
+  working directory. Linux CEF/Xvfb and other native engines require their corresponding runs;
+  WKWebView evidence does not qualify them.
+- Environment tarballs and integrity/provisioning metadata can be produced reproducibly, but no
+  package has been published or default public endpoint configured. Registry publication remains
+  an environment-distribution step. Maintainer preparation requires Node/npm; consumers do not.
+- Browser packages only: no installation scripts, native modules, Node API shims, optional
+  dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
+  dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.
+  See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
+
 ## Embedded dependency refresh (#284, 2026-10-19)
 
 - React and React DOM 19.3.1, Babel standalone 8.0.7 and Jasmine 7.0.2 replace the older embedded
