@@ -24,6 +24,7 @@ The project is an experimental foundation, not a production-ready UI framework. 
 - `cmake/` and `.github/workflows/`: build support and CI.
 - `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
+- `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
 - `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
 - `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
 
