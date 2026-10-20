@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# Fails when a commit in the given range carries AI-assistance attribution.
-# Usage: check-no-ai-attribution.sh <base> <head>   (checks commits in base..head)
+# Check commits and, when supplied, PR_TITLE and PR_BODY.
+# Usage: check-no-ai-attribution.sh <base> <head>
+# An empty base checks all ancestors of head, including root commits.
 set -euo pipefail
 
-base="${1:?base revision}"
+base="${1?base revision (empty for all history)}"
 head="${2:?head revision}"
 
-identity='(anthropic\.com|noreply@openai\.com|\bcopilot\b|\bcodex\b|\bchatgpt\b|google-labs-jules|\bclaude\b)'
-trailer='^(co-authored-by|generated-by|assisted-by):.*(\bclaude\b|\banthropic\b|\bchatgpt\b|\bcopilot\b|\bcodex\b|\bopenai\b|\bjules\b|\bgemini\b|\bvibe\b)|generated with \[?claude\b|🤖 generated'
+# POSIX ERE boundaries keep these patterns usable with GNU and BSD grep.
+# A person's name alone is never an identity or co-author match. GitHub bot
+# addresses must belong to a known AI tool, not an arbitrary noreply user/bot.
+tool='(claude|copilot|copilot-swe-agent|codex|chatgpt|google-labs-jules|jules|gemini|vibe)'
+github_tool="(${tool}\\[bot\\]|copilot|copilot-swe-agent|google-labs-jules)"
+tool_email="(noreply@(anthropic|openai)\\.com|([0-9]+\\+)?${github_tool}@users\\.noreply\\.github\\.com)"
+identity="<${tool_email}>|^${tool}\\[bot\\][[:space:]]*<|^(copilot-swe-agent|google-labs-jules)[[:space:]]*<"
+trailer="^(co-authored-by|generated-by|assisted-by):.*<${tool_email}>|^claude-session:|claude\\.ai/code/session|generated (with|by)[[:space:]]+\\[?${tool}([^[:alnum:]_]|$)|assisted by[[:space:]]+\\[?${tool}([^[:alnum:]_]|$)|🤖 generated"
 
 commits="$(mktemp)"
 trap 'rm -f -- "$commits"' EXIT
-if ! git rev-list "$base..$head" >"$commits"; then
-    echo "::error::unable to list the commits in $base..$head"
+revision="$head"
+if [ -n "$base" ]; then
+    revision="$base..$head"
+fi
+if ! git rev-list "$revision" >"$commits"; then
+    echo "::error::unable to list the commits in $revision"
     exit 1
 fi
 
@@ -21,7 +32,7 @@ while read -r sha; do
     ident="$(git show -s --format='%an <%ae>%n%cn <%ce>' "$sha")"
     message="$(git show -s --format='%B' "$sha")"
     if grep -qiE "$identity" <<<"$ident"; then
-        echo "::error::$sha has an AI author or committer: $(tr '\n' ';' <<<"$ident")"
+        echo "::error::$sha has an AI author or committer"
         status=1
     fi
     if grep -qiE "$trailer" <<<"$message"; then
@@ -29,5 +40,13 @@ while read -r sha; do
         status=1
     fi
 done <"$commits"
+
+# Do not print untrusted PR text into workflow commands/logs.
+for field in PR_TITLE PR_BODY; do
+    if grep -qiE "$trailer" <<<"${!field-}"; then
+        echo "::error::$field contains AI attribution"
+        status=1
+    fi
+done
 
 exit "$status"

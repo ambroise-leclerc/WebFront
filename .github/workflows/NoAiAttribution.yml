@@ -2,8 +2,9 @@ name: No AI Attribution
 
 on:
   push:
-    branches: [ '**' ]
+    branches: [ master, develop ]
   pull_request:
+    types: [ opened, synchronize, reopened, edited ]
     branches: [ master, develop ]
 
 permissions:
@@ -34,17 +35,25 @@ jobs:
               # New branch, or force-push over a rewritten history.
               base=""
               if git rev-parse -q --verify origin/develop >/dev/null; then
-                base="$(git merge-base origin/develop "$head")"
+                base="$(git merge-base origin/develop "$head" || true)"
               fi
               if [ -z "$base" ] || [ "$base" = "$head" ]; then
                 # No usable default branch, or the push is the default branch itself:
                 # check the whole history rather than a window that could miss a commit.
-                base="$(git rev-list --max-parents=0 "$head" | tail -n1)"
+                base=""
               fi
             fi
           fi
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "head=$head" >> "$GITHUB_OUTPUT"
 
-      - name: Reject AI-assistance attribution in commits
-        run: .github/scripts/check-no-ai-attribution.sh "${{ steps.range.outputs.base }}" "${{ steps.range.outputs.head }}"
+      - name: Test attribution checker
+        run: bash .github/scripts/test-no-ai-attribution.sh
+
+      - name: Reject AI-assistance attribution in commits and PR metadata
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: .github/scripts/check-no-ai-attribution.sh "$BASE" "$HEAD"
