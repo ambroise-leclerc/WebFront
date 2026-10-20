@@ -1,4 +1,4 @@
-# ADR-001 : Un cœur C++23 en en-têtes, intégré à l’application
+# ADR-001 : Un cœur C++23 en header-only, intégré à l’application
 
 ## Versions
 
@@ -20,17 +20,13 @@ Le présent texte expose la décision en vigueur ; le tableau retrace ses états
 ## Contexte
 
 WebFront donne à l’application C++ une interface HTML, CSS et JavaScript sans lui prescrire
-d’armature applicative. Dès 2020, son fondateur visait C++23, espérant qu’un réseau standard
-naquît de la lignée ASIO/Networking TS ; cette intention précéda les traces Git conservées.
-
-L’historique intégral (`git log --all`) atteste qu’en janvier 2022 CMake exigeait déjà
-`cxx_std_23`, malgré l’intitulé « C++20 rework initial commit ». L’organisation en en-têtes
-et la cible de bibliothèque précédèrent le regroupement de 2025. Le seul historique de HEAD
-omet ces jalons ; `webfront/` et `tests/` demeurent des archives.
+d’armature applicative. Une implémentation en C++23 était visée depuis 2020, dans l'espoir
+qu’une bibliothèque réseau standard naquît de la lignée ASIO/Networking TS ; cette intention
+précéda les traces Git conservées.
 
 ## Décision
 
-Le cœur de production forme une bibliothèque C++23 en en-têtes sous `include/`, exposée par
+Le cœur de production forme une bibliothèque C++23 en header-only sous `include/`, exposée par
 la cible CMake `WebFront::WebFront`. `src/` contient les exemples, `test/` les tests actuels.
 `BasicWF<NetProvider, Filesystem, Policy, Frontend>` compose les dépendances et possède le
 serveur, les connexions, les callbacks et le thread serveur ; `BasicUI` représente un navigateur.
