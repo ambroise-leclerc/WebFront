@@ -21,8 +21,9 @@ class BasicDeveloperApp : public BasicWF<NetProvider, fs::Multi<fs::DeveloperFS,
 
 public:
     /// An explicit project is required before enabling development file operations.
-    explicit BasicDeveloperApp(std::filesystem::path project = {}, WebFrontConfig config = {})
-        : Base(withProject(config, project)), project(project.empty() ? std::filesystem::path{} : std::filesystem::canonical(project)) { }
+    explicit BasicDeveloperApp(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
+        : Base(withProject(config, projectDirectory)),
+          project(projectDirectory.empty() ? std::filesystem::path{} : std::filesystem::canonical(projectDirectory)) { }
 
     void bootstrap(std::string_view          mode,
                    DeveloperBootstrapOptions options = {.environment = std::string(developer::release::environment),
@@ -66,8 +67,8 @@ public:
     }
 
 private:
-    static WebFrontConfig withProject(WebFrontConfig config, const std::filesystem::path& project) {
-        config.documentRoot = project;
+    static WebFrontConfig withProject(WebFrontConfig config, const std::filesystem::path& projectDirectory) {
+        config.documentRoot = projectDirectory;
         return config;
     }
     std::filesystem::path             project;
