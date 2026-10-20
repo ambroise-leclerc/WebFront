@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ master, develop ]
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -13,21 +16,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Select commit range
         id: range
         run: |
+          zero=0000000000000000000000000000000000000000
+          head="${{ github.sha }}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
-          elif [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ] \
-               || ! git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
-            # New branch or force-push over a rewritten history: check what is not on the default branch.
-            base="$(git merge-base origin/develop "${{ github.sha }}" || git rev-list --max-parents=0 "${{ github.sha }}" | tail -n1)"
-            head="${{ github.sha }}"
           else
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
+            before="${{ github.event.before }}"
+            if [ "$before" != "$zero" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+              base="$before"
+            else
+              # New branch, or force-push over a rewritten history.
+              base=""
+              if git rev-parse -q --verify origin/develop >/dev/null; then
+                base="$(git merge-base origin/develop "$head")"
+              fi
+              if [ -z "$base" ] || [ "$base" = "$head" ]; then
+                # No usable default branch, or the push is the default branch itself:
+                # check the last 20 commits rather than the whole history or nothing.
+                base="$(git rev-parse -q --verify "$head~20" || git rev-list --max-parents=0 "$head" | tail -n1)"
+              fi
+            fi
           fi
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "head=$head" >> "$GITHUB_OUTPUT"
