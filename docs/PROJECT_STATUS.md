@@ -1,6 +1,13 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19. Release 0.3.0 note: 2026-10-20.
+
+## Release 0.3.0 (2026-10-20)
+
+Version 0.3.0 is the first release after 0.2.0 (`v0.2.0`). It adds packed `std::bitset<N>`
+bridge values (#289, see the README bridge section for the byte layout) and the refreshed
+embedded assets (#284). `webfront::version`, the CMake project version and the release tag
+must agree; `ReleaseVersionConsistency` and the release workflow check this.
 
 ## Packed bitsets (#289, 2026-10-20)
 

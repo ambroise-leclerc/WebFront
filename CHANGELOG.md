@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-20
+
+### Added
+
+- `std::bitset<N>` crosses the binary bridge as a packed `Uint8Array` in both directions: callback arguments and results, C++ call arguments, and typed future and sender results. Bit `i` is bit `i % 8` of byte `i / 8`; wrong types, lengths, truncated data and nonzero padding reject the call. JavaScript must know `N` from the application contract.
+
+### Changed
+
+- Embedded React, React DOM, Babel standalone and Jasmine assets are refreshed, and gzip assets are generated reproducibly.
+- A gzip asset that a client cannot accept is served by identity fallback, within the 4 MiB default decoded-byte budget that also applies to HEAD requests.
+
+## 0.2.0
+
 ### Added
 
 - `webfront::Task`, `app.spawn(task)` and `ui.spawn(task)` launch application-owned coroutines without execution plumbing; a returned `TaskHandle` cancels an individual task. `app.shutdown()` joins owned work explicitly. Spawning during stop/shutdown returns a stopped handle when rejected; destructor joins log and wait for stalled external work instead of propagating drain errors. `jsFunctionSender(name)` defaults to `void`. `WebFrontAwaitBrowser` is a compiled example matching the README.
