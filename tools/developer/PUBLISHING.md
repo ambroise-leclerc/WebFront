@@ -1,8 +1,8 @@
 # Publishing the developer packages
 
-The version and canonical HTTPS base URL are in `distribution.json`. The environment and PI starter
+The version and canonical HTTPS base URL are in `distribution.json`. The environment and Life/PI starters
 are published under `developer/<version>/`. React, React DOM and scheduler stay on npm; this site
-hosts only WebFront's development environment, its pinned PI starter and provisioning metadata.
+hosts only WebFront's development environment, its pinned Life/PI starters and provisioning metadata.
 The package names in their manifests are identifiers, not a requirement to own or publish npm scopes.
 
 ## Build and review
@@ -49,11 +49,11 @@ Initial Pages enablement is deliberately a maintainer operation, not a side effe
 The **Developer packages** workflow builds packages on relevant pushes/PRs and retains them as an
 artifact. It compares a repeat build and the checked-in bootstrap header before permitting publication.
 It publishes only on a `developer-v<version>` tag or an explicit workflow dispatch with `publish=true`.
-Use a dedicated tag such as `developer-v0.1.0`; the C++ library's `v*` releases remain separate.
+Use a dedicated tag such as `developer-v0.2.0`; the C++ library's `v*` releases remain separate.
 
 ```sh
-git tag developer-v0.1.0
-git push origin developer-v0.1.0
+git tag developer-v0.2.0
+git push origin developer-v0.2.0
 ```
 
 Alternatively, once the workflow exists on the default branch, run it manually for a reviewed ref.
@@ -71,7 +71,7 @@ Then run the optional live smoke test (the ordinary CTest suite remains entirely
   "$PWD/build-distribution" "$PWD/build-native/webtest/public-generated" --public
 ```
 
-This mode downloads the pinned environment and starter from Pages, fetches exact React/React DOM
-versions and scheduler from npm, executes esbuild/WASM, creates an in-window PI preview and generates
-an application provider. A mismatch, download failure, browser error or failed assertion returns
+This mode downloads the pinned environment and both starters from Pages, fetches exact React/React DOM
+versions and scheduler from npm, executes esbuild/WASM, creates in-window PI and Life previews and generates
+both application providers. A mismatch, download failure, browser error or failed assertion returns
 nonzero. Keep the issue open until this real-engine check and the normal offline regression suite pass.

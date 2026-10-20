@@ -19,27 +19,27 @@ The default `webfront::WebFront` still opens the system browser.
 ```cpp
 #include <WebFront.hpp>
 
-std::string pi(std::uint32_t decimals); // Existing application function.
+std::string lifeStep(const std::string& cells); // Existing C++ simulation.
 
 int main() {
     webfront::NativeApp app{"."}; // Explicit development project directory.
-    app.cppFunction("pi", &pi);
+    app.cppFunction("life.step", &lifeStep);
     app.bootstrap("developer"); // Uses the version and SHA-512 pinned in WebFront.
     app.show();
 }
 ```
 
-The [0.1.0 distribution](https://ambroise-leclerc.github.io/WebFront/) is published on GitHub Pages.
-Its archive bytes, cross-origin response and end-to-end native WKWebView download/build/preview
-path were verified on 2026-10-20. These live checks supplement the offline CTest fixtures.
+The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
+Version 0.2.0 adds the Game of Life starter; version 0.1.0 and its PI starter remain available.
+Live download/build checks supplement the offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.1.0/environment.tgz`. It pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/environment.tgz`. It pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
 
-The environment archive contains a pinned PI starter descriptor. `wf create pi` downloads and
+The environment archive contains pinned Life and PI starter descriptors. `wf create life` downloads and
 verifies that separate archive, creates a new `ui` directory and prints the install/preview/embed
 commands. Existing directories are never replaced. The trusted environment hash protects both
 its own code and the starter descriptor; `provision.json` on the server is not a new trust anchor.
@@ -51,56 +51,77 @@ verified again before reuse, allowing subsequent launches without network access
 a readable status and Retry button. A different pinned hash requires a matching archive; the old
 environment is not silently substituted.
 
-## The PI walkthrough
+## The Game of Life walkthrough
 
-`src/PiDeveloper.cpp` is the complete developer executable. Its small bounded decimal spigot
-lives in `src/Pi.hpp`. Start with an empty project directory:
+`src/Life.hpp` is a small C++23 B3/S23 simulation on a `std::bitset<1024>`.
+Each generation reads the old grid and creates a new one; the 32 × 32 world wraps on both axes.
+The core needs no React, server, thread, timer or graphics dependency. The bridge adapter validates
+and exchanges a 1024-character binary string because `std::bitset` is not a bridge wire type.
+`src/LifeConsole.cpp` runs it without WebFront; build and run `WebFrontLifeConsole` to start
+with a plain console application.
+
+`src/LifeDeveloper.cpp` adds the native window and downloaded developer bootstrap. Configure
+`build-native` with the native frontend option above, then start with an empty project directory:
 
 ```sh
-./build-native/src/WebFrontPiDeveloper /path/to/pi-project
+./build-native/src/WebFrontLifeDeveloper /path/to/life-project
 ```
 
-The optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default
-for a local test or alternative distributor. In the downloaded terminal:
+Optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default.
+In the downloaded terminal:
 
 ```text
-wf create pi
+wf create life
 wf install react@19.3.1 react-dom@19.3.1
 wf preview ui/main.tsx
-wf embed ui/main.tsx --output generated/PiUI.hpp
+wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
-`wf create pi another-directory` selects a different new destination. The starter includes editable
-TSX/CSS and `webfront.project.json` with exact dependency versions. Edit those files in your normal
-editor; no code editor or framework needs to be embedded in the original application.
+The starter contains editable TSX/CSS and an exact-version `webfront.project.json` recipe.
+`wf create life another-directory` selects a different new destination; existing directories
+are never replaced. React DOM pulls scheduler transitively and checks its React peer.
+Edit the local files in your normal editor, then run `wf preview` again. Ctrl+C interrupts
+commands, including downloads and builds.
 
-React DOM pulls scheduler transitively and checks its React peer. The TSX calls
-`await webFront.cppFunction('pi')(digits)`; failures reject the Promise and are displayed.
-The preview opens inside the same native window. Edit the local files in your ordinary editor,
-then run `wf preview` again. Ctrl+C interrupts a browser command, including downloads or a build.
+The interface draws an isometric field with raised living cells, soft lighting and translucent
+panels. Play/pause, single step, tempo, glider/blinker/galaxy seeds, clear, cell painting and a plan
+view make the simulation interactive. Generation and population counters expose its state.
+Every step awaits `webFront.cppFunction('life.step')(cells)`; no Life rules run in JavaScript.
+Only one generation request can be outstanding. Replacing a pattern or clearing the field stops
+animation and discards stale replies. Errors stop playback and appear in the interface.
+Canvas rendering has an accessible description; patterns and simulation controls work with the
+keyboard. Individual canvas cells are pointer-editable, without keyboard cell navigation.
+No fonts, images, 3D library or additional UI framework are downloaded.
+
+![The native Game of Life demo at generation 34](images/life-preview.png)
 
 `wf embed` builds JS/CSS/resources, creates an HTML entry page, preserves dependency notices and
-writes a header-only `webfront::fs::PiUI` provider. It uses deterministic fflate gzip and the
-existing big-endian word format, with MIME types inferred from resource routes as usual.
-The filename stem determines the provider class name and must be a C++ identifier.
-The header is replaced only after all chunks have been received successfully.
-
+writes a header-only `webfront::fs::LifeUI` provider using deterministic gzip. The filename stem
+determines the C++ provider name. The header is replaced only after all chunks arrive successfully.
 The distribution form has no project root or developer callbacks:
 
 ```cpp
 #include <WebFront.hpp>
-#include "generated/PiUI.hpp"
+#include "Life.hpp"
+#include "generated/LifeUI.hpp"
 
-webfront::NativeAppWithAssets<webfront::fs::PiUI> app;
-app.cppFunction("pi", &pi);
-app.show();
+int main() {
+    webfront::NativeAppWithAssets<webfront::fs::LifeUI> app;
+    app.cppFunction("life.step", &webfront::demo::lifeStep);
+    app.show();
+}
 ```
 
-For the supplied example, reconfigure the native build with
-`-DWEBFRONT_PI_ASSETS=/absolute/path/to/pi-project/generated/PiUI.hpp`, build target
-`WebFrontPiEmbedded` and run it. Recompilation is performed explicitly by the developer.
-The binary then needs neither the project sources, the downloaded cache nor the network.
-The original embedded React/Babel providers remain supported for existing applications.
+Reconfigure the native build with
+`-DWEBFRONT_LIFE_ASSETS=/absolute/path/to/life-project/generated/LifeUI.hpp`, build target
+`WebFrontLifeEmbedded` and run it. Recompilation is explicit. The resulting binary needs neither
+project sources, downloaded cache nor network.
+
+The original PI example remains available: `WebFrontPiDeveloper`, `wf create pi`,
+`wf embed ui/main.tsx --output generated/PiUI.hpp`, and
+`-DWEBFRONT_PI_ASSETS=/absolute/path/to/generated/PiUI.hpp` / `WebFrontPiEmbedded`.
+Use a separate project directory for each starter. Existing embedded React/Babel providers
+remain supported.
 
 ## Dependencies, storage and limitations
 
@@ -141,12 +162,12 @@ node tools/developer/fixtures.mjs build-developer-environment
 ```
 
 `build.mjs` bundles the environment and compiler, includes esbuild.wasm, xterm styles and licenses,
-and writes deterministic `environment.tgz`, `pi-starter.tgz`, `provision.json` and
+and writes deterministic `environment.tgz`, `life-starter.tgz`, `pi-starter.tgz`, `provision.json` and
 `DeveloperReleaseData.hpp`. The version and public base URL are in `tools/developer/distribution.json`. Dependencies are
 pinned in `tools/assets/package-lock.json`. `--refresh-bootstrap` additionally refreshes the two
 checked-in JS bundles, their input checksums and the embedded bootstrap headers. Without that flag,
-it writes only to the output directory. The two archives have the package identifiers `@webfront/developer-environment` and
-`@webfront/pi-starter`. They are distributed as static GitHub Pages downloads; no npm publication or
+it writes only to the output directory. The archives have the package identifiers `@webfront/developer-environment`,
+`@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static GitHub Pages downloads; no npm publication or
 scope ownership is required. Node/npm is only used by maintainers to build them.
 
 To try the local archive without an HTTPS server, copy `environment.tgz` to the project's
@@ -163,13 +184,14 @@ cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DENABLE_TESTING=ON \
   -DWEBFRONT_DEVELOPER_FIXTURES="$PWD/build-developer-environment"
 cmake --build build-native --parallel
-ctest --test-dir build-native -R 'Developer' --output-on-failure
+ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
 ```
 
 The GitHub CI prepares these fixtures for both WKWebView and CEF jobs.
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, PI preview and
-repeatable generation. Its CTest fixtures then build that **browser-generated** header and run
-`DeveloperEmbeddedIntegration` from an empty working directory with no developer callbacks.
-The standard CEF-off suite also checks project transactions, path rejection, PI, MIME types,
+`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, PI and Life previews, C++ generation/animation and
+repeatable header generation. Its CTest fixtures then build that **browser-generated** header and run
+`DeveloperEmbeddedIntegration` and `LifeEmbeddedIntegration` from empty working directories
+with no developer callbacks.
+The standard CEF-off suite also checks project transactions, path rejection, PI, Life rules and boundaries, MIME types,
 bootstrap freshness, package resolution, gzip generation, interruption and offline cache reuse.

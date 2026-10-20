@@ -1,0 +1,16 @@
+#include <WebFront.hpp>
+#include WEBFRONT_LIFE_ASSETS_HEADER
+#include "Life.hpp"
+
+#include <iostream>
+
+int main() {
+    try {
+        webfront::NativeAppWithAssets<webfront::fs::LifeUI> app;
+        app.cppFunction("life.step", &webfront::demo::lifeStep);
+        app.show();
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+}

@@ -57,9 +57,10 @@ Your system browser opens the interface below. The page is included in the libra
 
 The optional [developer environment](docs/DEVELOPER_ENVIRONMENT.md) downloads its terminal and
 JavaScript/WASM build tools on demand. Install browser libraries with `wf install`, preview local
-TSX, then generate compressed C++ resource headers with `wf embed`. The PI example demonstrates
+TSX, then generate compressed C++ resource headers with `wf embed`. The Game of Life example pairs a small C++23 bitset simulation with a spatial React interface,
+then demonstrates
 recompiling an offline native application without installing Node.js or npm on the developer's machine.
-The [version-pinned environment and PI starter](https://ambroise-leclerc.github.io/WebFront/)
+The [version-pinned environment and starters](https://ambroise-leclerc.github.io/WebFront/)
 are hosted on GitHub Pages; see the guide for the complete walkthrough.
 
 ## Connect your interface to C++

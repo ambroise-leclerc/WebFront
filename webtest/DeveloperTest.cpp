@@ -1,3 +1,4 @@
+#include "../src/Life.hpp"
 #include "../src/Pi.hpp"
 #include "../test/TemporaryDirectory.hpp"
 #include <WebFront.hpp>
@@ -59,8 +60,11 @@ int main(int argc, char** argv) {
         App               app{project.path()};
         std::atomic<bool> passed{false};
         app.cppFunction("pi", &webfront::demo::pi);
-        app.cppFunction("test.header", [&] {
-            const auto header = readFixtureText(project.path() / "generated/PiUI.hpp");
+        app.cppFunction("life.step", &webfront::demo::lifeStep);
+        app.cppFunction("test.header", [&](std::string name) {
+            if (name != "PiUI" && name != "LifeUI")
+                throw std::invalid_argument("Unknown generated fixture");
+            const auto header = readFixtureText(project.path() / "generated" / (name + ".hpp"));
             // The generated header is larger than a bridge string: return a stable small digest.
             return std::to_string(std::hash<std::string>{}(header));
         });
@@ -86,9 +90,10 @@ int main(int argc, char** argv) {
         if (!passed.load())
             return 1;
         std::filesystem::create_directories(argv[2]);
-        std::filesystem::copy_file(project.path() / "generated/PiUI.hpp",
-                                   std::filesystem::path(argv[2]) / "PiUI.hpp",
-                                   std::filesystem::copy_options::overwrite_existing);
+        for (const auto* name : {"PiUI.hpp", "LifeUI.hpp"})
+            std::filesystem::copy_file(project.path() / "generated" / name,
+                                       std::filesystem::path(argv[2]) / name,
+                                       std::filesystem::copy_options::overwrite_existing);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {tar} from './archive.mjs';
-import {stageSite, bootstrapHeader, versionPath} from './site.mjs';
+import {stageSite, bootstrapHeader, versionPath, distributionFiles} from './site.mjs';
 import {compress} from '../../src/developer/embed.mjs';
 import {createStarter} from '../../src/developer/starter.mjs';
 import {bootstrap} from '../../src/developer/bootstrap.mjs';
@@ -65,9 +65,10 @@ test('Pages staging retains older versions and refuses different bytes under an 
         const environment = encode('environment');
         const pi = encode('starter');
         const write = async version => {
-            const manifest = {version, integrity: integrity(environment), starters: {pi: {integrity: integrity(pi)}}};
+            const manifest = {version, integrity: integrity(environment), starters: {pi: {archive: 'pi-starter.tgz', integrity: integrity(pi)}, ...(version === '0.2.0' ? {life: {archive: 'life-starter.tgz', integrity: integrity(pi)}} : {})}};
             await writeFile(join(distribution, 'environment.tgz'), environment);
             await writeFile(join(distribution, 'pi-starter.tgz'), pi);
+            if (version === '0.2.0') await writeFile(join(distribution, 'life-starter.tgz'), pi);
             await writeFile(join(distribution, 'provision.json'), JSON.stringify(manifest));
             await writeFile(join(distribution, 'DeveloperReleaseData.hpp'), bootstrapHeader(version, 'https://owner.github.io/WebFront/', manifest.integrity));
         };
@@ -77,7 +78,8 @@ test('Pages staging retains older versions and refuses different bytes under an 
         await write('0.2.0');
         await stageSite(distribution, site);
         assert.equal(await readFile(join(site, 'developer/0.1.0/environment.tgz'), 'utf8'), 'environment');
-        assert.match(await readFile(join(site, 'index.html'), 'utf8'), /0.2.0/);
+        assert.match(await readFile(join(site, 'index.html'), 'utf8'), /developer\/0.2.0\/life-starter.tgz/);
+        assert.equal(await readFile(join(site, 'developer/0.2.0/life-starter.tgz'), 'utf8'), 'starter');
         await writeFile(join(distribution, 'DeveloperReleaseData.hpp'), 'changed');
         await assert.rejects(stageSite(distribution, site), /increment the distribution version/);
         assert.match(await readFile(join(site, 'developer/0.2.0/DeveloperReleaseData.hpp'), 'utf8'), /namespace webfront/);
@@ -92,4 +94,20 @@ test('bootstrap configuration is pinned and rejects unsafe version/base inputs',
     assert.doesNotMatch(header, /latest/);
     assert.throws(() => versionPath('../evil'));
     assert.throws(() => bootstrapHeader('0.1.0', 'http://owner.test/', integrity(encode('environment'))));
+});
+
+test('Life recipes select their generated provider and reject invalid provider names', async () => {
+    globalThis.location = new URL('http://localhost:9002/');
+    try {
+        for (const provider of ['LifeUI', '../escape', ['LifeUI']]) {
+            const bytes = starter({'package/webfront.project.json': encode({format: 1, provider, entry: 'main.tsx', dependencies: {react: '19.3.1'}})});
+            let writes = 0;
+            const bridge = {cppFunction: () => async () => { writes++; return 'transaction'; }};
+            const config = {starters: {life: {url: '/life-starter.tgz', integrity: integrity(bytes)}}};
+            const create = () => createStarter(bridge, config, 'life', 'ui', undefined, async () => new Response(bytes));
+            if (provider === 'LifeUI') assert.match(await create(), /generated\/LifeUI.hpp/);
+            else { await assert.rejects(create(), /provider name/); assert.equal(writes, 0); }
+        }
+        assert.throws(() => distributionFiles({starters: {life: {archive: '../life-starter.tgz'}}}));
+    } finally { delete globalThis.location; }
 });

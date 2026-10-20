@@ -31,15 +31,23 @@ inline constexpr std::string_view integrity{${JSON.stringify(integrity)}};
 `;
 }
 
+// A manifest may add starters without changing the publication machinery.
+export function distributionFiles(manifest) {
+    const archives = Object.values(manifest.starters ?? {}).map(starter => starter.archive);
+    if (archives.length === 0 || archives.some(name => typeof name !== 'string' || !/^[a-z0-9-]+-starter\.tgz$/.test(name)) ||
+        new Set(archives).size !== archives.length)
+        throw new Error('Invalid distribution starter archives');
+    return ['environment.tgz', ...archives, 'provision.json', 'DeveloperReleaseData.hpp'];
+}
 const digest = bytes => 'sha512-' + createHash('sha512').update(bytes).digest('base64');
 export async function stageSite(distribution, site) {
     const manifest = JSON.parse(await readFile(join(distribution, 'provision.json')));
     const relative = versionPath(manifest.version);
-    const names = ['environment.tgz', 'pi-starter.tgz', 'provision.json', 'DeveloperReleaseData.hpp'];
+    const names = distributionFiles(manifest);
     const input = new Map();
     for (const name of names) input.set(name, await readFile(join(distribution, name)));
     if (digest(input.get('environment.tgz')) !== manifest.integrity ||
-        digest(input.get('pi-starter.tgz')) !== manifest.starters?.pi?.integrity)
+        Object.values(manifest.starters).some(starter => digest(input.get(starter.archive)) !== starter.integrity))
         throw new Error('Distribution archive checksum mismatch');
     const destination = join(site, relative);
     let exists = false;
@@ -56,7 +64,13 @@ export async function stageSite(distribution, site) {
     }
     const versions = (await readdir(join(site, 'developer'))).filter(name => /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(name)).sort();
     await writeFile(join(site, '.nojekyll'), '');
-    await writeFile(join(site, 'index.html'), `<!doctype html>\n<html lang="en"><meta charset="utf-8"><title>WebFront developer packages</title><h1>WebFront developer packages</h1><p>Use a version-pinned bootstrap header and SHA-512. React and its dependencies are downloaded separately from npm.</p><ul>${versions.map(version => `<li>${version}: <a href="developer/${version}/provision.json">manifest</a> · <a href="developer/${version}/environment.tgz">environment</a> · <a href="developer/${version}/pi-starter.tgz">PI starter</a> · <a href="developer/${version}/DeveloperReleaseData.hpp">bootstrap configuration</a></li>`).join('')}</ul></html>\n`);
+    const rows = [];
+    for (const version of versions) {
+        const previous = JSON.parse(await readFile(join(site, versionPath(version), 'provision.json')));
+        const links = distributionFiles(previous).map(name => `<a href="developer/${version}/${name}">${name}</a>`).join(' · ');
+        rows.push(`<li>${version}: ${links}</li>`);
+    }
+    await writeFile(join(site, 'index.html'), `<!doctype html>\n<html lang="en"><meta charset="utf-8"><title>WebFront developer packages</title><h1>WebFront developer packages</h1><p>Use a version-pinned bootstrap header and SHA-512. React and its dependencies are downloaded separately from npm.</p><ul>${rows.join('')}</ul></html>\n`);
     return {version: manifest.version, path: relative};
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

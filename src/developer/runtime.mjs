@@ -101,7 +101,8 @@ export async function execute(args, {bridge, config, preview, signal, write = ()
         if (command === 'preview') {
             await publish(bridge, '.webfront/developer/preview', result.files, true, signal);
             preview.hidden = false;
-            preview.src = `/webfront/developer/preview/index.html?build=${Date.now()}`;
+            // Replace transient builds without accumulating browser session history.
+            preview.contentWindow.location.replace(`/webfront/developer/preview/index.html?build=${Date.now()}`);
             return 'Preview ready.';
         }
         const className = output.split('/').pop().slice(0, -4);

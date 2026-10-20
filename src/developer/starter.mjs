@@ -12,6 +12,8 @@ export function recipeOf(files) {
         if (!/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name) ||
             typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version))
             throw new Error('Starter dependencies must name exact npm versions');
+    if (recipe.provider !== undefined && (typeof recipe.provider !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(recipe.provider)))
+        throw new Error('Invalid starter provider name');
     return recipe;
 }
 
@@ -35,5 +37,5 @@ export async function createStarter(bridge, config, name, destination = 'ui', si
     // A starter must never overwrite an existing directory, including a symlink or partial project.
     await publish(bridge, destination, files, true, signal, false);
     const install = Object.entries(recipe.dependencies).map(([pkg, version]) => `${pkg}@${version}`).join(' ');
-    return `Created ${destination}.\nwf install ${install}\nwf preview ${destination}/${recipe.entry}\nwf embed ${destination}/${recipe.entry} --output generated/PiUI.hpp`;
+    return `Created ${destination}.\nwf install ${install}\nwf preview ${destination}/${recipe.entry}\nwf embed ${destination}/${recipe.entry} --output generated/${recipe.provider ?? 'PiUI'}.hpp`;
 }

@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/developer/**'
       - 'src/pi/**'
+      - 'src/life/**'
       - 'tools/developer/**'
       - 'tools/assets/package*.json'
       - 'include/system/DeveloperReleaseData.hpp'
@@ -16,6 +17,7 @@ on:
     paths:
       - 'src/developer/**'
       - 'src/pi/**'
+      - 'src/life/**'
       - 'tools/developer/**'
       - 'tools/assets/package*.json'
       - 'include/system/DeveloperReleaseData.hpp'
@@ -42,12 +44,13 @@ jobs:
           cache-dependency-path: tools/assets/package-lock.json
       - name: Install pinned maintenance dependencies
         run: npm ci --prefix tools/assets --ignore-scripts
-      - name: Build and verify the two packages
+      - name: Build and verify the environment and starter packages
         run: |
           node tools/developer/build.mjs build-distribution
           node tools/developer/build.mjs build-distribution-repeat
           cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
           cmp build-distribution/pi-starter.tgz build-distribution-repeat/pi-starter.tgz
+          cmp build-distribution/life-starter.tgz build-distribution-repeat/life-starter.tgz
           cmp include/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
           node --test tools/developer/check.mjs tools/developer/distribution-check.mjs
       - name: Check the dedicated release tag
@@ -62,6 +65,7 @@ jobs:
           path: |
             build-distribution/environment.tgz
             build-distribution/pi-starter.tgz
+            build-distribution/life-starter.tgz
             build-distribution/provision.json
             build-distribution/DeveloperReleaseData.hpp
 

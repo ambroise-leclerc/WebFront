@@ -7,17 +7,19 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 - `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
   downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do
   not require Node/npm on application developers' machines.
-- The PI demo covers local TSX, React/React DOM and scheduler, a same-window preview and an
+- The Game of Life demo (`WebFrontLifeDeveloper`, `wf create life`) uses a compact C++23
+  bitset simulation and a spatial React/canvas interface with translucent panels, interactive
+  patterns, playback, single step and tempo. The original PI demo remains available. Both cover local TSX, React/React DOM and scheduler, a same-window preview and an
   application-owned generated provider. A second executable uses the provider with no developer
   root or callbacks. Existing React/Babel/terminal providers remain supported.
 - Real WKWebView coverage exercises downloading from a local fixture registry, WASM compilation,
-  PI results, deterministic header generation, compiling that header and running from an empty
+  PI results, C++ Life generations, playback/reset, deterministic header generation, compiling the headers and running from an empty
   working directory. Linux CEF/Xvfb and other native engines require their corresponding runs;
   WKWebView evidence does not qualify them.
-- Versioned environment and PI starter archives have a GitHub Pages publication workflow,
+- Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
-  configuration. `wf create pi` creates a fresh editable project without overwriting existing files.
-  Maintainer preparation requires Node/npm; consumers do not. Version 0.1.0 is served at
+  configuration. `wf create life` and `wf create pi` create fresh editable projects without overwriting existing files.
+  Maintainer preparation requires Node/npm; consumers do not. The original version 0.1.0 remains at
   `https://ambroise-leclerc.github.io/WebFront/developer/0.1.0/`. The live WKWebView smoke test
   downloaded the environment/starter from Pages and React dependencies from npm, then passed
   the PI preview and deterministic header checks. Deployment and CI follow-up are tracked in #288.

@@ -3,13 +3,14 @@ import {execFileSync} from 'node:child_process';
 import {readFile, mkdtemp, rm} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
+import {distributionFiles} from './site.mjs';
 const [tag, distribution] = process.argv.slice(2);
 const metadata = JSON.parse(await readFile(new URL('./distribution.json', import.meta.url)));
 const repository = process.env.GITHUB_REPOSITORY;
 if (tag !== `developer-v${metadata.version}` || !/^[\w.-]+\/[\w.-]+$/.test(repository ?? ''))
     throw new Error('Expected the dedicated distribution tag and GITHUB_REPOSITORY');
 const gh = (...args) => execFileSync('gh', args, {encoding: 'utf8'});
-const files = ['environment.tgz', 'pi-starter.tgz', 'provision.json', 'DeveloperReleaseData.hpp'];
+const files = distributionFiles(JSON.parse(await readFile(join(distribution, 'provision.json'))));
 let existing = false;
 try {
     gh('api', `repos/${repository}/releases/tags/${tag}`);

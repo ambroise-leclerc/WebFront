@@ -22,6 +22,7 @@ try {
     await runtime.execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
     const lock = await runtime.readLock(webFront);
     assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
+    const historyLength = history.length;
     await runtime.execute(['preview', 'ui/main.tsx'], context);
     const frame = context.preview;
     for (let attempt = 0; attempt < 300; ++attempt) {
@@ -37,13 +38,54 @@ try {
     }
     await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
     // Repeat the browser build to prove reproducibility, including licenses and packed gzip bytes.
-    const first = await webFront.cppFunction('test.header')();
+    const first = await webFront.cppFunction('test.header')('PiUI');
     await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
-    assert(await webFront.cppFunction('test.header')() === first, 'Header generation must be deterministic');
+    assert(await webFront.cppFunction('test.header')('PiUI') === first, 'Header generation must be deterministic');
+    // Keep the original PI regression and exercise the new primary starter in the same engine.
+    await runtime.execute(['create', 'life', 'life-ui'], context);
+    await runtime.execute(['preview', 'life-ui/main.tsx'], context);
+    for (let attempt = 0; !frame.contentDocument?.querySelector('[data-testid="pattern-blinker"]'); ++attempt) {
+        if (attempt === 200) throw new Error('Life preview did not mount');
+        await delay(50);
+    }
+    assert(history.length === historyLength, 'Preview rebuilds must not accumulate session history');
+    const life = frame.contentDocument;
+    const button = name => life.querySelector(`[data-testid="${name}"]`);
+    const waitFor = async (predicate, message) => {
+        for (let attempt = 0; !predicate(); ++attempt) {
+            if (attempt === 100) throw new Error(message);
+            await delay(30);
+        }
+    };
+    button('pattern-blinker').click();
+    await waitFor(() => button('population').textContent === '3', 'Blinker population');
+    button('step').click();
+    await waitFor(() => button('generation').textContent === '0001', 'C++ Life step');
+    assert(button('population').textContent === '3', 'Blinker must preserve its population');
+    button('play').click();
+    await waitFor(() => Number(button('generation').textContent) >= 3, 'Life animation');
+    button('play').click();
+    // Clear invalidates a possible in-flight generation and stops the timer.
+    button('clear').click();
+    await delay(400);
+    assert(button('generation').textContent === '0000' && button('population').textContent === '0', 'Clear must discard stale replies');
+    button('pattern-glider').click();
+    await waitFor(() => button('population').textContent === '5', 'Glider population');
+    for (let i = 1; i <= 4; i++) {
+        await waitFor(() => !button('step').disabled, 'Single step readiness');
+        button('step').click();
+        await waitFor(() => Number(button('generation').textContent) === i, 'Glider generation');
+    }
+    assert(button('population').textContent === '5', 'C++ glider survives four steps');
+    assert(life.querySelector('canvas').width > 0 && !life.querySelector('[role="alert"]').textContent, 'Life canvas rendered without errors');
+    await runtime.execute(['embed', 'life-ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
+    const lifeHeader = await webFront.cppFunction('test.header')('LifeUI');
+    await runtime.execute(['embed', 'life-ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
+    assert(await webFront.cppFunction('test.header')('LifeUI') === lifeHeader, 'Life header must be deterministic');
     const failed = await runtime.execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
     assert(failed, 'Missing packages must reject');
     assert(JSON.stringify(await runtime.readLock(webFront)) === JSON.stringify(lock), 'A failed install must preserve the lock');
-    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + preview + deterministic header passed');
+    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers passed');
 } catch (error) {
     console.error(error);
     await webFront.cppFunction('test.report')(false, String(error.stack ?? error));

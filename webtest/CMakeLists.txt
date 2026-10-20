@@ -72,4 +72,20 @@ if(WEBFRONT_DEVELOPER_FIXTURES
     add_test(NAME DeveloperEmbeddedIntegration COMMAND ${_embedded_command})
     webfront_set_browser_test_properties(DeveloperEmbeddedIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 60)
     set_tests_properties(DeveloperEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED DeveloperEmbedded)
+    add_executable(life_embedded EXCLUDE_FROM_ALL LifeEmbeddedTest.cpp)
+    target_link_libraries(life_embedded PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    target_compile_definitions(life_embedded PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
+        WEBFRONT_LIFE_ASSETS_HEADER="${CMAKE_CURRENT_BINARY_DIR}/developer-generated/LifeUI.hpp")
+    webfront_setup_frontends_for_target(life_embedded)
+    add_test(NAME LifeEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+        --config $<CONFIG> --target life_embedded --parallel 2)
+    set_tests_properties(LifeEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
+        FIXTURES_SETUP LifeEmbedded LABELS "web-integration" TIMEOUT 180 RUN_SERIAL TRUE)
+    set(_life_command "$<TARGET_FILE:life_embedded>")
+    if(_developer_xvfb)
+        set(_life_command "${_developer_xvfb}" -a ${_life_command})
+    endif()
+    add_test(NAME LifeEmbeddedIntegration COMMAND ${_life_command})
+    webfront_set_browser_test_properties(LifeEmbeddedIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 60)
+    set_tests_properties(LifeEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED LifeEmbedded)
 endif()

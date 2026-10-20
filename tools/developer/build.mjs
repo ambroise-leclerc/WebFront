@@ -42,18 +42,21 @@ const notices = [];
 for (const [name, path] of licenses) notices.push(`${name}\n${await readFile(resolve(root, path), 'utf8')}`);
 await writeFile(resolve(output, 'LICENSES.txt'), notices.join('\n\n'));
 // The starter is pinned by the environment's own trusted archive, not by unverified remote metadata.
-const starterFiles = new Map();
-starterFiles.set('package/main.tsx', await readFile(resolve(root, 'src/pi/main.tsx')));
-starterFiles.set('package/style.css', await readFile(resolve(root, 'src/pi/style.css')));
-const recipe = {format: 1, name: 'pi', entry: 'main.tsx', dependencies: {
-    react: dependencies.react, 'react-dom': dependencies['react-dom']}};
-starterFiles.set('package/webfront.project.json', Buffer.from(JSON.stringify(recipe, null, 2) + '\n'));
-starterFiles.set('package/package.json', Buffer.from(JSON.stringify({name: '@webfront/pi-starter', version,
-    private: true, webfront: {kind: 'starter', entry: 'main.tsx'}}, null, 2) + '\n'));
-const starterBytes = gzipSync(tar(starterFiles), {level: 9, mem: 8, mtime: 0});
-await writeFile(resolve(output, 'pi-starter.tgz'), starterBytes);
-const starterIntegrity = 'sha512-' + createHash('sha512').update(starterBytes).digest('base64');
-const starters = {pi: {archive: 'pi-starter.tgz', integrity: starterIntegrity}};
+const starters = {};
+for (const [name, provider] of [['pi', 'PiUI'], ['life', 'LifeUI']]) {
+    const starterFiles = new Map();
+    for (const file of ['main.tsx', 'style.css'])
+        starterFiles.set(`package/${file}`, await readFile(resolve(root, `src/${name}/${file}`)));
+    const recipe = {format: 1, name, provider, entry: 'main.tsx', dependencies: {
+        react: dependencies.react, 'react-dom': dependencies['react-dom']}};
+    starterFiles.set('package/webfront.project.json', Buffer.from(JSON.stringify(recipe, null, 2) + '\n'));
+    starterFiles.set('package/package.json', Buffer.from(JSON.stringify({name: `@webfront/${name}-starter`, version,
+        private: true, webfront: {kind: 'starter', entry: 'main.tsx'}}, null, 2) + '\n'));
+    const starterBytes = gzipSync(tar(starterFiles), {level: 9, mem: 8, mtime: 0});
+    const archive = `${name}-starter.tgz`;
+    await writeFile(resolve(output, archive), starterBytes);
+    starters[name] = {archive, integrity: 'sha512-' + createHash('sha512').update(starterBytes).digest('base64')};
+}
 await writeFile(resolve(output, 'environment.json'), JSON.stringify({protocol: 1, version, entry: 'runtime.mjs',
     compiler: `esbuild-wasm@${dependencies['esbuild-wasm']}`, semver: dependencies.semver, starters}, null, 2) + '\n');
 await writeFile(resolve(output, 'package.json'), JSON.stringify({name: '@webfront/developer-environment', version,
@@ -75,10 +78,10 @@ if (refresh) {
     await copyFile(resolve(root, 'tools/assets/node_modules/semver/LICENSE'), resolve(root, 'src/developer/PACKAGES-LICENSE.txt'));
     await writeFile(resolve(root, 'include/system/DeveloperReleaseData.hpp'), header);
     const inputs = {};
-    for (const path of ['src/developer/bootstrap.mjs', 'src/developer/bootstrap-entry.mjs', 'src/developer/packages.mjs', 'src/developer/starter.mjs', 'src/developer/paths.mjs', 'src/developer/runtime.mjs', 'src/developer/compiler.mjs', 'src/developer/bundler.mjs', 'src/developer/embed.mjs', 'src/pi/main.tsx', 'src/pi/style.css', 'src/components/tools/wf.mjs', 'tools/developer/distribution.json', 'tools/developer/build.mjs', 'tools/developer/site.mjs', 'tools/developer/archive.mjs', 'tools/assets/package-lock.json', 'src/developer/bootstrap.bundle.mjs', 'src/developer/packages.bundle.mjs', 'include/system/DeveloperReleaseData.hpp'])
+    for (const path of ['src/developer/bootstrap.mjs', 'src/developer/bootstrap-entry.mjs', 'src/developer/packages.mjs', 'src/developer/starter.mjs', 'src/developer/paths.mjs', 'src/developer/runtime.mjs', 'src/developer/compiler.mjs', 'src/developer/bundler.mjs', 'src/developer/embed.mjs', 'src/pi/main.tsx', 'src/pi/style.css', 'src/life/main.tsx', 'src/life/style.css', 'src/components/tools/wf.mjs', 'tools/developer/distribution.json', 'tools/developer/build.mjs', 'tools/developer/site.mjs', 'tools/developer/archive.mjs', 'tools/assets/package-lock.json', 'src/developer/bootstrap.bundle.mjs', 'src/developer/packages.bundle.mjs', 'include/system/DeveloperReleaseData.hpp'])
         inputs[path] = createHash('sha256').update(await readFile(resolve(root, path))).digest('hex');
     await writeFile(resolve(root, 'src/developer/bundles.json'), JSON.stringify(inputs, null, 2) + '\n');
     for (const [source, name] of [['src/developer/index.html', 'DeveloperIndexHtmlData'], ['src/developer/bootstrap.bundle.mjs', 'DeveloperBootstrapData']])
         execFileSync('cmake', [`-DINPUT=${resolve(root, source)}`, `-DOUTPUT=${resolve(root, 'include/system', name + '.hpp')}`, `-DSTRUCT=${name}`, '-P', resolve(root, 'cmake/EmbedTextAsset.cmake')]);
 }
-console.log(`Environment: ${output}/environment.tgz\nIntegrity: ${integrity}\nPI starter: ${output}/pi-starter.tgz`);
+console.log(`Environment: ${output}/environment.tgz\nIntegrity: ${integrity}\nStarters: ${Object.keys(starters).join(', ')}`);

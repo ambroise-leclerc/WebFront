@@ -181,3 +181,8 @@ include/system/*Data.hpp                   text eol=lf
 # Browser-powered developer bootstrap sources and generated payloads.
 src/developer/* text eol=lf
 tools/assets/package-lock.json text eol=lf
+
+# Starter archives and every hashed distribution input must be identical on Windows.
+src/pi/* text eol=lf
+src/life/* text eol=lf
+tools/developer/* text eol=lf
