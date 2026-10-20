@@ -2,7 +2,8 @@
 
 HTTP asset negotiation and fallback apply to every frontend and to custom filesystem providers.
 
-The embedded Jasmine, React, Babel and favicon payloads use gzip. If a client does not
+The embedded Jasmine, React, Babel and xterm JavaScript/CSS payloads use gzip.
+The Jasmine favicon is served as its original PNG. If a client does not
 accept gzip, the HTTP server decodes the asset and serves identity with the decoded `Content-Length` and no
 `Content-Encoding`. Encoded responses carry `Vary: Accept-Encoding`; explicit `q=0`
 exclusions are respected. Duplicate mentions accept a coding if any valid mention accepts it,
@@ -32,9 +33,9 @@ output once per match; Huffman decoding still reads individual bits. Follow-ups 
 [cold decoding off the I/O thread](https://github.com/ambroise-leclerc/WebFront/issues/283).
 
 Gzip remains the embedded format so fallback needs no compiled dependency or Brotli dictionary.
-The decoded legacy Jasmine/React/Babel payloads are unchanged. Their combined compressed
-size remains 723,457 bytes;
-returning them to Brotli would require a separate decoder dependency and is deferred.
+Pinned versions, reproducible generation and current stored/decoded resource checks are
+documented in [Embedded browser dependencies](EMBEDDED_ASSETS.md). Returning them to Brotli
+would require a separate decoder dependency and is deferred.
 
 ## Fallback budget
 

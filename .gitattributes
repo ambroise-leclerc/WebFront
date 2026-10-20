@@ -169,3 +169,11 @@ webtest/registry/tarballs/*                 binary
 
 # Fuzzer seeds retain exact protocol bytes, including HTTP CRLF.
 fuzz/corpus/** binary
+
+# Pinned third-party sources and generated dependency data keep exact bytes on Windows.
+third_party/react/*                        text eol=lf
+third_party/babel/*                        text eol=lf
+third_party/jasmine/*                      text eol=lf
+third_party/jasmine/*.png                  binary
+third_party/fflate/*                       text eol=lf
+include/system/*Data.hpp                   text eol=lf

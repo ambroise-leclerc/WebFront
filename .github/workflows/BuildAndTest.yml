@@ -52,6 +52,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Initialize MSVC environment
         if: matrix.config.compiler == 'msvc'
@@ -250,6 +253,9 @@ jobs:
       TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'
@@ -297,6 +303,9 @@ jobs:
     name: macOS WKWebView Jasmine and lifecycle
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'
@@ -334,6 +343,9 @@ jobs:
     name: Ubuntu CEF Jasmine integration${{ matrix.compiler == 'clang' && ' (Clang)' || '' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Install Clang 23
         if: matrix.compiler == 'clang'
@@ -365,6 +377,9 @@ jobs:
     name: Ubuntu WebKitGTK Jasmine and lifecycle
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'

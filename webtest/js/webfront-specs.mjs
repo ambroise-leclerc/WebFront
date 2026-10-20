@@ -254,8 +254,8 @@ jasmine.getEnv().addReporter({
         for (const failure of result.failedExpectations)
             this.failures.push(`${result.fullName}: ${failure.message}`);
     },
-    jasmineDone(result) {
-        webFront.cppFunction('reportJasmine')(result.overallStatus, this.failures.join('\n'));
+    async jasmineDone(result) {
+        await webFront.cppFunction('reportJasmine')(result.overallStatus, this.failures.join('\n'));
     }
 });
 

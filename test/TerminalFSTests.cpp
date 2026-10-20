@@ -1,3 +1,4 @@
+#include "EmbeddedAssetChecks.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <http/MimeType.hpp>
 #include <system/DefaultFS.hpp>
@@ -46,12 +47,16 @@ SCENARIO("TerminalFS serves the terminal component under its reserved prefix") {
             REQUIRE(module.find(R"(from "./xterm.mjs")") != string::npos);
             REQUIRE(module.find(R"(from "./addon-fit.mjs")") != string::npos);
         }
-        THEN("the vendored xterm.js files keep their license notice and exports") {
-            const auto xterm = read(terminalFS, prefix + "xterm.mjs");
-            REQUIRE(xterm.find("@license MIT") != string::npos);
-            REQUIRE(xterm.find("as Terminal}") != string::npos);
-            REQUIRE(read(terminalFS, prefix + "addon-fit.mjs").find("as FitAddon}") != string::npos);
-            REQUIRE(read(terminalFS, prefix + "xterm.css").find(".xterm") != string::npos);
+        THEN("the vendored xterm.js and Fit modules and CSS are gzip encoded") {
+            for (const auto& [name, size] : array<pair<string_view, size_t>, 3>{
+                     {{"xterm.mjs", fs::generated::XtermModuleData::dataSize},
+                      {"xterm.css", fs::generated::XtermCssData::dataSize},
+                      {"addon-fit.mjs", fs::generated::XtermFitAddonData::dataSize}}
+            }) {
+                auto file = terminalFS.open(prefix + string{name});
+                REQUIRE(file.has_value());
+                readEmbeddedAsset(*file, size);
+            }
         }
         THEN("each served file has the MIME type the browser needs for modules and styles") {
             auto mime = [](const string& path) {

@@ -1,6 +1,24 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19.
+
+## Embedded dependency refresh (#284, 2026-10-19)
+
+- React and React DOM 19.3.1, Babel standalone 8.0.7 and Jasmine 7.0.2 replace the older embedded
+  versions; xterm 6.0.0 and Fit 0.11.0 remain current. React now uses a local ESM bundle and the
+  automatic JSX transform; Jasmine uses its new single boot script. Editable examples still need
+  no npm install, CDN or JavaScript build step.
+- Dependency JavaScript/CSS uses deterministic gzip generated with vendored fflate 0.8.3;
+  sources, licenses, pinned maintenance tooling and offline freshness/decode checks are checked in.
+  Node.js is required for tests/asset maintenance only. Identity fallback from #274 also applies to the updated gzip payloads.
+- The CEF-off Release build passes all 239 CTest cases after integrating #274. All 20 WKWebView browser/lifecycle cases
+  pass locally, including the actual React page, C++ callback recovery and xterm/Fit resizing.
+  Linux CEF/Xvfb and Windows WebView2 coverage runs through their existing CI jobs.
+- Embedded dependency array storage falls from 1,077,552 to 827,120 bytes. Minimal HelloWorld and
+  Greeter binaries were byte-for-byte unchanged in that comparison, before integrating #274.
+  See [sources, regeneration and separate gzip /
+  upgrade measurements](EMBEDDED_ASSETS.md).
+
 
 ## Release 0.2.0 and native frontend epic (#253, 2026-10-19)
 
