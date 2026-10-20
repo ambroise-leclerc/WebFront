@@ -14,11 +14,12 @@
 | 1.7 | 2026-10-19 | Acceptée | Ambroise Leclerc | Interface WKWebView facultative sous macOS. | [93551a8](https://github.com/ambroise-leclerc/WebFront/commit/93551a88c31cbf4748b42013a066cf265a1c9034) |
 | 1.8 | 2026-10-19 | Acceptée | Ambroise Leclerc | Interface WebKitGTK facultative sous Linux. | [e20203e](https://github.com/ambroise-leclerc/WebFront/commit/e20203ea88d79bd141a1b64d6fe0f987143d73ff) |
 | 1.9 | 2026-10-19 | Acceptée | Ambroise Leclerc | Alias NativeWebViewFrontend avec sélection explicite par plateforme. | [7be859f](https://github.com/ambroise-leclerc/WebFront/commit/7be859f18957e770cc0db8382e7d9641689ba403) |
+| 1.10 | 2026-10-20 | Acceptée | Ambroise Leclerc | WKWebView respecte les bundles agents LSUIElement ; les exécutables de test ne créent plus d’icônes Dock. | À renseigner après intégration. |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2026-05-31** (version 1.0).
-Dernière révision : **2026-10-19** (version 1.9).
+Dernière révision : **2026-10-20** (version 1.10).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -45,6 +46,12 @@ du toolkit (notamment COM compatible STA pour WebView2). `open()` s’exécute c
 avec le serveur sur un thread distinct. `Action::closeServerAfterOpen` entraîne l’arrêt et la
 jonction après fermeture ; `keepServerRunning` laisse le serveur actif au retour. Si l’ouverture
 lève, `show()`/`openAndRun()` arrêtent et joignent avant de relancer l’exception d’origine.
+
+Sous macOS, WKWebView respecte `LSUIElement=true` du bundle hôte : la session utilise
+la politique d’activation Accessory et conserve une fenêtre sans icône Dock ni barre de
+menus applicative. Un hôte ordinaire garde la politique Regular. La politique antérieure
+est restaurée à la fermeture. Les tests WKWebView sont des bundles agents identifiés,
+afin d’éviter l’accumulation d’icônes d’exécutables anonymes au fil de CTest.
 
 Que la construction des URL, les choix CMake et les scénarios de cycle de vie soient partagés.
 Un frontend indisponible reste déclaré et échoue avec un diagnostic indiquant l’option requise.
