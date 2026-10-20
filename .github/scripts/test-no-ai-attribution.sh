@@ -44,7 +44,7 @@ for name in 'Claude Martin' 'Jules Dupont' 'Gemini Rossi' 'Vibe Hansen' 'Copilot
     clean="$sha"
 done
 
-for email in noreply@anthropic.com noreply@openai.com '123+copilot[bot]@users.noreply.github.com' google-labs-jules@users.noreply.github.com; do
+for email in noreply@anthropic.com noreply@openai.com vibe@mistral.ai gemini@google.com codex@openai.com chatgpt@openai.com '123+copilot[bot]@users.noreply.github.com' google-labs-jules@users.noreply.github.com; do
     sha="$(GIT_AUTHOR_EMAIL="$email" commit 'Ordinary change')"
     expect 1 "tool author: $email" "$clean" "$sha"
     clean="$sha"
@@ -56,6 +56,35 @@ for email in noreply@anthropic.com noreply@openai.com '123+copilot[bot]@users.no
         expect 1 "tool trailer: $key $email" "$clean" "$sha"
         clean="$sha"
     done
+done
+# Canonical tool names with provider addresses; domains alone are not enough.
+for ident in 'Mistral Vibe <vibe@mistral.ai>' 'Vibe <agent@mistral.ai>' 'Gemini <agent@google.com>' 'Codex <agent@openai.com>' 'ChatGPT <agent@openai.com>'; do
+    name="${ident% <*}"
+    email="${ident##*<}"
+    email="${email%>}"
+    sha="$(GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" commit 'Ordinary change')"
+    expect 1 "provider tool author: $ident" "$clean" "$sha"
+    clean="$sha"
+    sha="$(GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" commit 'Ordinary change')"
+    expect 1 "provider tool committer: $ident" "$clean" "$sha"
+    clean="$sha"
+    for key in Co-Authored-By Generated-by Assisted-by; do
+        message="$key: $ident"
+        sha="$(commit "$message")"
+        expect 1 "provider tool trailer: $message" "$clean" "$sha"
+        clean="$sha"
+        PR_TITLE="$message" expect 1 'provider tool PR title' "$clean" "$clean"
+        PR_BODY="$message" expect 1 'provider tool PR body' "$clean" "$clean"
+    done
+done
+for ident in 'Gemini Rossi <gemini.rossi@google.com>' 'Vibe Hansen <vibe.hansen@mistral.ai>' 'Claude Martin <claude@openai.com>' 'Gemini <gemini@example.org>' 'Mistral Vibe <vibe@mistral.ai.example.org>'; do
+    name="${ident% <*}"
+    email="${ident##*<}"
+    email="${email%>}"
+    sha="$(GIT_AUTHOR_NAME="$name" GIT_AUTHOR_EMAIL="$email" GIT_COMMITTER_NAME="$name" GIT_COMMITTER_EMAIL="$email" commit "Co-authored-by: $ident")"
+    expect 0 "human or unrelated provider identity: $ident" "$clean" "$sha"
+    PR_BODY="Co-authored-by: $ident" expect 0 'human PR co-author at provider' "$clean" "$sha"
+    clean="$sha"
 done
 for name in 'Claude[bot]' copilot-swe-agent google-labs-jules; do
     sha="$(GIT_AUTHOR_NAME="$name" commit 'Ordinary change')"

@@ -100,15 +100,17 @@ Please run these tools on your code before submitting a pull request.
 
 The `No AI Attribution` workflow checks commit authors, committers and messages,
 plus PR titles and descriptions, for tool identities, attribution statements and
-Claude session links. Human names alone are allowed. Push checks run on `master`
+Claude session links. Human names alone are allowed. Provider-domain rules pair
+canonical Gemini, Vibe, Codex and ChatGPT names with Google, Mistral and OpenAI
+addresses; a provider domain alone does not identify a tool. Push checks run on `master`
 and `develop`; PR checks run on opening, commit updates, reopening and metadata
 edits. A full-history fallback includes root commits. These pattern checks are
 not an exhaustive detector of every possible attribution wording.
 
 Run `bash .github/scripts/test-no-ai-attribution.sh` for the offline regression
 suite. It also runs in the workflow and as `NoAiAttributionRegression` in CTest
-when Bash and Git are available. After merging, a repository administrator must
-add `No AI Attribution / check` as a required status check in branch protection
+on UNIX when Bash and Git are available. After merging, a repository administrator
+must add `No AI Attribution` as a required status check in branch protection
 if this policy is to block merges; the workflow alone does not make it required.
 
 ## Additional Notes

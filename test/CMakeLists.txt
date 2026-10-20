@@ -41,13 +41,16 @@ add_test(NAME ReleaseVersionRegression
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-version-regression
         -P ${PROJECT_SOURCE_DIR}/cmake/CheckReleaseVersionTests.cmake)
 
-find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
-find_package(Git QUIET)
-if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)
-    add_test(NAME NoAiAttributionRegression
-        COMMAND "${WEBFRONT_TEST_BASH_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/.github/scripts/test-no-ai-attribution.sh")
-    set_tests_properties(NoAiAttributionRegression PROPERTIES TIMEOUT 60)
+# Windows bash.exe may be the WSL launcher rather than a native Bash runtime.
+if(UNIX)
+    find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
+    find_package(Git QUIET)
+    if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)
+        add_test(NAME NoAiAttributionRegression
+            COMMAND "${WEBFRONT_TEST_BASH_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/.github/scripts/test-no-ai-attribution.sh")
+        set_tests_properties(NoAiAttributionRegression PROPERTIES TIMEOUT 60)
+    endif()
 endif()
 
 if(ENABLE_COVERAGE)

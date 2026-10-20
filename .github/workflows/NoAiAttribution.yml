@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   check:
+    name: No AI Attribution
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +33,7 @@ jobs:
             if [ "$before" != "$zero" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
               base="$before"
             else
-              # New branch, or force-push over a rewritten history.
+              # Defensive fallback for branch creation or rewritten history on master/develop.
               base=""
               if git rev-parse -q --verify origin/develop >/dev/null; then
                 base="$(git merge-base origin/develop "$head" || true)"
