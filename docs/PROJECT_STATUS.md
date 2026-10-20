@@ -18,12 +18,26 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   CI on [b6bae2e](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423)
   passes WKWebView, all 14 Linux CEF/Xvfb cases with GCC, and the 252-case Linux
   thread-sanitized suite. The codec matches the implementation merged in PR #290.
+- After reconciling current `develop`, all 253 CEF-off CTest cases and 26 WKWebView
+  integration/lifecycle cases pass locally. New developer/embedded test executables use the
+  same agent bundles as the shared WKWebView suite; user-facing examples stay ordinary apps.
 - The public 0.3.0 environment and both starters passed fresh WKWebView download/build tests.
   Pages returned HTTP 200, CORS `*` and matching pinned bytes. Both public-path providers then
   compiled and ran offline from empty working directories with developer callbacks absent.
 - The demo branch uses the codec and browser assertions merged in PR #290, including MSVC's
   empty-bitset guards and future tests that tolerate arbitrary response order. JS cell access
   uses small packed-byte helpers; painting across an octet boundary is covered by the browser test.
+- Regression tests cover known bytes, size boundaries, malformed inputs, tuples and both
+  browser call directions, including exceptional future/sender completion. Future calls and
+  their final notification dispatch on the server context; a joined test thread only waits
+  for the results with a ten-second bound. Delayed JavaScript replies arrive out of dispatch
+  order, and failures log explicit diagnostics without blocking the server context.
+- Local validation on the develop-based branch: all 242 CEF-off CTest cases and the
+  WKWebView Jasmine integration test pass. Linux CEF/Xvfb passes with GCC and Clang in
+  [CI run 39466294828](https://github.com/ambroise-leclerc/WebFront/actions/runs/39466294828)
+  on code revision `d9327e7`; the same run also passes both Windows MSVC configurations,
+  the Linux sanitizers, WebKitGTK and macOS/WKWebView checks.
+
 
 ## Browser-powered development (2026-10-20)
 

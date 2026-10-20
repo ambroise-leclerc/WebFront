@@ -98,6 +98,24 @@ Please run these tools on your code before submitting a pull request.
 - All code must pass CI checks and tests before merging.
 - Request a review from at least one maintainer.
 
+The `No AI Attribution` workflow checks commit authors, committers and messages,
+plus PR titles and descriptions, for tool identities, attribution statements and
+Claude session links. Anthropic addresses matching `[a-z.+-]+@anthropic.com`
+are recognized alongside the other tool addresses. Human names alone are allowed.
+Provider-domain rules pair canonical Gemini, Vibe, Codex and ChatGPT names with
+Google, Mistral and OpenAI addresses; those domains alone do not identify a tool.
+Hyphenated names such as `codex-gen` do not match bare tool names in attribution
+statements. Push checks run on `master`
+and `develop`; PR checks run on opening, commit updates, reopening and metadata
+edits. A full-history fallback includes root commits. These pattern checks are
+not an exhaustive detector of every possible attribution wording.
+
+Run `bash .github/scripts/test-no-ai-attribution.sh` for the offline regression
+suite. It also runs in the workflow and as `NoAiAttributionRegression` in CTest
+on UNIX when Bash and Git are available. After merging, a repository administrator
+must add `No AI Attribution` as a required status check in branch protection
+if this policy is to block merges; the workflow alone does not make it required.
+
 ## Additional Notes
 
 - Write clear, descriptive commit messages.

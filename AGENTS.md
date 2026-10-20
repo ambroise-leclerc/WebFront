@@ -91,6 +91,8 @@ Bridge calls are asynchronous, and the two directions differ. `webFront.cppFunct
 
 The embedded `WebFront.js` wire format and C++ `Messages.hpp` implementation must evolve together. Any protocol change requires encoding/decoding unit tests and a real-browser regression test.
 
+Exception: a purely C++ change that reuses an existing encoding, introduces no new wire type code and does not modify the binary wire format may leave the JavaScript codec and `IndexFS.hpp` unchanged. Encoding/decoding unit tests and a real-browser regression must still demonstrate compatibility with the existing JavaScript codec. See [ADR-003](docs/adr/ADR-003-protocole-binaire-et-bornes.md).
+
 ## Coding and testing conventions
 
 - Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `CONTRIBUTING.md`.

@@ -1,23 +1,22 @@
-# ADR-005 : D’ASIO standalone à stdnet : anticiper le réseau standard sans bloquer son évolution
+# ADR-005 : D’ASIO autonome à stdnet : poursuivre le réseau sans attendre la norme
 
 ## Versions
 
-| Version | Date | État | Auteur | Évolution | Commit |
+| Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2022-01-21 | Acceptée | Ambroise Leclerc | Création initiale : HTTP et WebSocket sur la lignée ASIO/Networking TS. | [a8bce8c](https://github.com/ambroise-leclerc/WebFront/commit/a8bce8c96767b9c8c75fbaf00a6234121505db34) |
-| 1.1 | 2023-02-12 | Acceptée | Ambroise Leclerc | Provider réseau et mocks pour tester indépendamment des sockets réelles. | [e1c2b5c](https://github.com/ambroise-leclerc/WebFront/commit/e1c2b5c846c4da6a19de7a5ed758cf0a1dfe8195) |
+| 1.0 | 2022-01-21 | Acceptée | Ambroise Leclerc | Décision initiale : HTTP et WebSocket sur la lignée ASIO/Networking TS. | [a8bce8c](https://github.com/ambroise-leclerc/WebFront/commit/a8bce8c96767b9c8c75fbaf00a6234121505db34) |
+| 1.1 | 2023-02-12 | Acceptée | Ambroise Leclerc | Fournisseur réseau et simulacres pour tester indépendamment des sockets réelles. | [e1c2b5c](https://github.com/ambroise-leclerc/WebFront/commit/e1c2b5c846c4da6a19de7a5ed758cf0a1dfe8195) |
 | 1.2 | 2023-05-04 | Acceptée | Ambroise Leclerc | Dépendance Networking TS portée par la cible de bibliothèque. | [8be2994](https://github.com/ambroise-leclerc/WebFront/commit/8be29945fbb390b1db6a8f6f00e1348b698be229) |
-| 2.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | Remplacement du backend Networking TS par stdnet. | [0e8bbc0](https://github.com/ambroise-leclerc/WebFront/commit/0e8bbc0d6035c3d25b9488fb9ed4c9b0d7c08d32) |
+| 2.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | Remplacement du moteur réseau Networking TS par stdnet. | [0e8bbc0](https://github.com/ambroise-leclerc/WebFront/commit/0e8bbc0d6035c3d25b9488fb9ed4c9b0d7c08d32) |
 | 2.1 | 2026-10-13 | Acceptée | Ambroise Leclerc | Fermeture de l’acceptor et des connexions sur le thread du contexte. | [ad6f0a7](https://github.com/ambroise-leclerc/WebFront/commit/ad6f0a7863b12fb35e0851be5648539618231190) |
 | 3.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | HTTP et WebSocket convertis en coroutines attendant les senders réseau. | [1e765ca](https://github.com/ambroise-leclerc/WebFront/commit/1e765ca4275e4cfb9b4e7d68b204ce7d9261582c) |
 | 3.1 | 2026-10-16 | Acceptée | Ambroise Leclerc | Centralisation des en-têtes sender avant les macros CEF. | [ca9c35d](https://github.com/ambroise-leclerc/WebFront/commit/ca9c35d2c7a0acb2bc426d4a932cc04b21470a7b) |
 
-## Statut et date
+## État et chronologie
 
-**Acceptée.** Création initiale : **2022-01-21** (version 1.0).
-Dernière évolution : **2026-10-16** (version 3.1).
-Le corps de l’ADR décrit la décision dans sa dernière version ; les versions antérieures
-et leurs changements sont identifiés dans le tableau ci-dessus.
+**Acceptée.** Décision initiale : **2022-01-21** (version 1.0).
+Dernière révision : **2026-10-16** (version 3.1).
+Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
 
@@ -33,33 +32,33 @@ il faut distinguer cette API expérimentale de l’API `asio::` standalone d’o
 réseau effectivement entré dans le standard. En 2023, la dépendance est explicitement liée
 à la cible de bibliothèque WebFront.
 
-Les reports successifs de la standardisation remettent en cause l’attente initiale. Le
+Les reports successifs de la normalisation démentirent cette attente. Le
 fondateur situe le passage à stdnet dans le contexte du nouveau report du réseau à l’horizon
 C++29. Le projet choisit alors de progresser avec un backend fondé sur les senders, plutôt
 que d’attendre une nouvelle échéance. Cet horizon explique le choix de WebFront ; il ne
 constitue pas une garantie d’adoption ou de compatibilité future par WG21.
 
-En octobre 2026, stdnet remplace le provider Networking TS, puis HTTP/WebSocket sont convertis
-en coroutines. Le flux réseau se rapproche de son ordre logique, avec des tests sans sockets
-réelles. Le contrat actuel ci-dessous découle de cette migration ; il ne décrit pas
-l’implémentation ASIO initiale.
+En octobre 2026, stdnet supplanta le fournisseur Networking TS ; HTTP et WebSocket
+adoptèrent ensuite les coroutines. Le flux réseau retrouva ainsi son ordre logique, sans
+que les tests exigeassent des sockets réelles. Le contrat ci-dessous découle de cette
+migration ; il ne décrit pas l’implémentation ASIO initiale.
 
 ## Décision
 
-Le réseau reste une dépendance injectée. `networking::TCPStdnet` adapte les opérations
+Que le réseau demeure une dépendance injectée. `networking::TCPStdnet` adapte les opérations
 `Accept`, `Receive`, `Send` de stdnet ; les mocks fournissent le même contrat. Les boucles HTTP
 et WebSocket sont des `networking::Task` qui attendent les senders du provider.
 
-Utiliser le vocabulaire sender via `networking::ex = ::stdnet::ex`. Le choix de stdexec
+Que le vocabulaire des senders passe par `networking::ex = ::stdnet::ex`. Le choix de stdexec
 aujourd’hui, puis éventuellement de `std::execution`, appartient à stdnet. C++23 reste le
 standard du projet ; il n’existe pas ici de réseau fourni directement par la bibliothèque
 standard C++.
 
-Centraliser les en-têtes sender dans `networking/SenderHeaders.hpp`, inclus avant CEF : ses
-macros peuvent casser les attributs des en-têtes stdexec. Les requêtes d’arrêt peuvent venir
+Que les en-têtes des senders soient centralisés dans `networking/SenderHeaders.hpp`, inclus
+avant CEF : ses macros peuvent casser les attributs des en-têtes stdexec. Les requêtes d’arrêt peuvent venir
 d’un autre thread, mais les opérations réseau se dénouent sur le thread du contexte.
 
-## Alternatives et arbitrage
+## Options écartées et motifs
 
 - **ASIO standalone puis Networking TS : choix initial, aujourd’hui remplacé comme backend
   actif.** Il permettait de développer sans attendre le réseau C++23 envisagé. Les reports
@@ -80,12 +79,12 @@ d’un autre thread, mais les opérations réseau se dénouent sur le thread du 
 - **Risque :** durée de vie d’opérations suspendues et incompatibilités de macros ; joindre les
   scopes avant destruction et maintenir la couverture d’inclusion CEF.
 
-## Règles d’implémentation et de génération de code
+## Prescriptions d’implémentation et de génération de code
 
 - Préserver la frontière du provider lors d’un changement de backend ; ne pas remettre ASIO,
   `std::experimental::net` ou `stdnet` directement dans le code applicatif ou le codec.
-- Distinguer dans les commentaires l’intention historique C++23, le backend effectivement
-  employé et les perspectives C++29 ; ne pas prétendre que stdnet est le futur standard.
+- Que les commentaires distinguent l’ambition historique C++23, le moteur réseau effectivement
+  employé et l’horizon C++29 ; qu’ils ne présentent pas stdnet comme un futur standard acquis.
 - Utiliser le provider et ses senders pour les nouvelles opérations, sans ajouter une boucle
   réseau concurrente ou une seconde infrastructure de callbacks détachés.
 - Ne pas appeler `close()` sur une socket depuis un callback d’arrêt exécuté ailleurs.
@@ -93,7 +92,7 @@ d’un autre thread, mais les opérations réseau se dénouent sur le thread du 
 - Utiliser les mocks pour échecs d’acceptation, annulations et lectures fragmentées ; conserver
   un test réel de destruction pour valider aussi le backend stdnet.
 
-## Références et vérification
+## Sources et vérification
 
 - Précisions du fondateur : choix ASIO standalone
   vers 2020, anticipation C++23 et motivation du passage à stdnet face aux reports vers C++29.
@@ -101,8 +100,9 @@ d’un autre thread, mais les opérations réseau se dénouent sur le thread du 
   filiation du modèle d’opérations asynchrones Asio vers la Networking TS.
 - [WG21 P2453R0 (2022)](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2022/p2453r0.html) :
   résultats des consultations de 2021 sur les modèles asynchrones et le réseau.
-- [Registre WG21 de 2026, P4100R1](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/) :
-  proposition de réseau visant C++29 ; témoigne de l’horizon de travail, pas d’une adoption acquise.
+- [P4100R1 (WG21, 2026)](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p4100r1.pdf) :
+  document d’information sur une démarche de réseau pour C++29 ; il éclaire l’horizon des
+  travaux sans présumer d’une adoption.
 - [Provider stdnet](../../include/networking/TCPNetworkingStdnet.hpp),
   [tâches](../../include/networking/Tasks.hpp), [en-têtes sender](../../include/networking/SenderHeaders.hpp).
 - Tests : [StdnetShutdownTests](../../test/StdnetShutdownTests.cpp),

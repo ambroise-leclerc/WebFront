@@ -239,6 +239,23 @@ void committedNavigation() {
     require(initial.closed && initial.error, "A denied initial navigation was not reported");
 }
 
+void agentApplication() {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    const auto bundle = send(type("NSBundle"), "mainBundle");
+    require(utf8(send(bundle, "bundleIdentifier")) == "org.webfront.tests.wkwebview-lifecycle", "Missing test application identity");
+    Object key(text("LSUIElement"));
+    require(send<BOOL>(send(bundle, "objectForInfoDictionaryKey:", key.get()), "boolValue"), "Test bundle is not an agent");
+    const auto app = send(type("NSApplication"), "sharedApplication");
+    const auto previousPolicy = send<long>(app, "activationPolicy");
+    {
+        Session session("http://127.0.0.1:0/");
+        session.create();
+        require(send<long>(app, "activationPolicy") == 1L, "Agent session enabled a Dock icon");
+        require(send<BOOL>(session.window, "isVisible"), "Agent session did not create a visible window");
+    }
+    require(send<long>(app, "activationPolicy") == previousPolicy, "Session did not restore the host activation policy");
+}
+
 void nativeEarlyClose() {
     nativeClose(false);
 }
@@ -267,7 +284,8 @@ int main(int argc, char** argv) {
             {             "settings",             settings},
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
-            { "committed-navigation",  committedNavigation}
+            { "committed-navigation",  committedNavigation},
+            {    "agent-application",     agentApplication}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

@@ -88,4 +88,14 @@ if(WEBFRONT_DEVELOPER_FIXTURES
     add_test(NAME LifeEmbeddedIntegration COMMAND ${_life_command})
     webfront_set_browser_test_properties(LifeEmbeddedIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 60)
     set_tests_properties(LifeEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED LifeEmbedded)
+    if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WKWebView")
+        get_filename_component(_developer_wk_plist "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
+        foreach(target developer_integration developer_embedded life_embedded)
+            string(REPLACE "_" "-" identifier "${target}")
+            set_target_properties(${target} PROPERTIES
+                MACOSX_BUNDLE TRUE
+                MACOSX_BUNDLE_GUI_IDENTIFIER "org.webfront.tests.${identifier}"
+                MACOSX_BUNDLE_INFO_PLIST "${_developer_wk_plist}")
+        endforeach()
+    endif()
 endif()

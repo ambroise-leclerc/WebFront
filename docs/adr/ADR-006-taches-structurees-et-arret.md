@@ -1,25 +1,24 @@
-# ADR-006 : Posséder, annuler et joindre toutes les tâches
+# ADR-006 : Posséder, interrompre et joindre chaque tâche
 
 ## Versions
 
-| Version | Date | État | Auteur | Évolution | Commit |
+| Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | Création initiale : drainage des opérations asynchrones avant destruction du serveur. | [8f09ba5](https://github.com/ambroise-leclerc/WebFront/commit/8f09ba53bacc9468c5dfdaa3576c3d89d2d16ccc) |
+| 1.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | Décision initiale : drainage des opérations asynchrones avant destruction du serveur. | [8f09ba5](https://github.com/ambroise-leclerc/WebFront/commit/8f09ba53bacc9468c5dfdaa3576c3d89d2d16ccc) |
 | 1.1 | 2026-10-13 | Acceptée | Ambroise Leclerc | Fermeture des WebSockets et terminaison des opérations avant destruction de WebFront. | [b4fa321](https://github.com/ambroise-leclerc/WebFront/commit/b4fa321e6c10c296a0807d56b007f4cd9ec5635c) |
-| 2.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Scope structuré commun, tâches applicatives possédées, TaskHandle et annulation locale des appels sender. | [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) |
+| 2.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Portée structurée commune, tâches applicatives possédées, TaskHandle et annulation locale des appels sender. | [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) |
 
-## Statut et date
+## État et chronologie
 
-**Acceptée.** Création initiale : **2026-10-13** (version 1.0).
-Dernière évolution : **2026-10-18** (version 2.0).
-Le corps de l’ADR décrit la décision dans sa dernière version ; les versions antérieures
-et leurs changements sont identifiés dans le tableau ci-dessus.
+**Acceptée.** Décision initiale : **2026-10-13** (version 1.0).
+Dernière révision : **2026-10-18** (version 2.0).
+Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
 
-Un arrêt de contexte ne prouve pas que toutes les opérations asynchrones ont relâché leurs
-références. Les corrections de destruction ont précédé l’introduction d’un scope structuré
-commun aux opérations réseau et aux tâches applicatives.
+L’arrêt du contexte ne garantit pas que les opérations asynchrones aient libéré leurs
+références. Les correctifs de destruction précédèrent donc la portée structurée commune
+aux opérations réseau et aux tâches applicatives.
 
 ## Décision
 
@@ -40,10 +39,10 @@ sans propager cette erreur : une opération non coopérative peut le bloquer ind
 
 Un sender de fonction JS possède ses arguments encodés et envoie au démarrage. L’annulation
 termine localement en `set_stopped()` ; le JavaScript déjà envoyé continue. Une réponse tardive
-est jetée et son identifiant reste réservé jusqu’à réponse ou déconnexion. Une seule
-terminaison gagne entre résultat, arrêt et déconnexion.
+est écartée et son identifiant reste réservé jusqu’à réponse ou déconnexion. Une seule issue
+prévaut entre résultat, arrêt et déconnexion.
 
-## Alternatives et arbitrage
+## Options écartées et motifs
 
 - Tâches détachées ou destruction dès `stop()` : risque d’accès à des propriétaires détruits.
 - Scope possédé par chaque WebSocket : sa dernière tâche pourrait détruire le scope avant
@@ -60,18 +59,19 @@ terminaison gagne entre résultat, arrêt et déconnexion.
 - **Risque :** le sender termine sur le thread livrant résultat/arrêt/déconnexion ; lui-même ne
   promet pas de saut de scheduler. Les tâches lancées par WebFront reprennent sur son contexte.
 
-## Règles d’implémentation et de génération de code
+## Prescriptions d’implémentation et de génération de code
 
-- Appeler `shutdown()` hors des callbacks serveur et après retour des run callers externes.
-- Dans une coroutine, passer les données par valeur ou avec une possession explicite ; éviter
-  les lambdas coroutines temporaires à captures dont la fermeture disparaît trop tôt.
+- Que `shutdown()` soit appelé hors des callbacks serveur, après le retour des appelants
+  externes de `run()` et `runOne()`.
+- Dans une coroutine, que les données soient possédées ou passées par valeur ; que les lambdas
+  coroutines temporaires ne retiennent aucune capture dont la fermeture disparaîtrait trop tôt.
 - Les utilisateurs bas niveau de WebSocket/WebLink fournissent un `TaskScope&` extérieur et
   le drainent avant de libérer contexte et dépendances.
 - Ne pas ajouter de threads détachés, délais de réponse implicites ou abandon de coroutine à
   la destruction. Synchroniser les états partagés et la destruction avec les appelants externes.
 - Tester les courses arrêt/résultat, spawn/arrêt, double terminaison et réponse tardive.
 
-## Références et vérification
+## Sources et vérification
 
 - [Contrat détaillé](../ASYNC_EXECUTION.md), [TaskScope](../../include/networking/Tasks.hpp).
 - Tests : [StructuredShutdownTests](../../test/StructuredShutdownTests.cpp),
