@@ -163,17 +163,22 @@ private:
     }
 
     static std::ifstream openForReading(const std::filesystem::path& source, const std::string& path, std::uint64_t offset) {
+        const std::string failure = "Cannot read project file: " + path;
         if (!std::filesystem::is_regular_file(source))
-            throw std::runtime_error("Cannot read project file: " + path);
+            throw std::runtime_error(failure);
         std::ifstream file(source, std::ios::binary);
         if (!file)
-            throw std::runtime_error("Cannot read project file: " + path);
+            throw std::runtime_error(failure);
+        seek(file, offset, "Cannot seek project file: " + path);
+        return file;
+    }
+
+    static void seek(std::ifstream& file, std::uint64_t offset, const std::string& failure) {
         if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
             throw std::invalid_argument("Invalid read offset");
         file.seekg(static_cast<std::streamoff>(offset));
         if (!file)
-            throw std::runtime_error("Cannot seek project file: " + path);
-        return file;
+            throw std::runtime_error(failure);
     }
 
     // The staging area and the destinations of unfinished transactions are off limits.

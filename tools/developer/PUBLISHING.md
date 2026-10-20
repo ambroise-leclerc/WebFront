@@ -49,11 +49,12 @@ Initial Pages enablement is deliberately a maintainer operation, not a side effe
 The **Developer packages** workflow builds packages on relevant pushes/PRs and retains them as an
 artifact. It compares a repeat build and the checked-in bootstrap header before permitting publication.
 It publishes only on a `developer-v<version>` tag or an explicit workflow dispatch with `publish=true`.
-Use a dedicated tag such as `developer-v0.3.0`; the C++ library's `v*` releases remain separate.
+Use the dedicated tag `developer-v<version>` matching `distribution.json`; the C++ library's `v*` releases remain separate.
 
 ```sh
-git tag developer-v0.3.0
-git push origin developer-v0.3.0
+version=$(node -p "require('./tools/developer/distribution.json').version")
+git tag "developer-v$version"
+git push origin "developer-v$version"
 ```
 
 Alternatively, once the workflow exists on the default branch, run it manually for a reviewed ref.

@@ -222,3 +222,16 @@ SCENARIO("The staging area is protected however its path is spelled") {
         store.abort(victim);
     }
 }
+
+SCENARIO("The developer bridge refuses WebSocket clients without an Origin") {
+    GIVEN("the default application configuration") {
+        REQUIRE(WebFrontConfig{}.contentPolicy.allowMissingOrigin);
+        WHEN("it is prepared for a developer project") {
+            const auto config = developer::projectConfig({}, "project");
+            THEN("the project is the document root and a missing Origin is refused") {
+                REQUIRE(config.documentRoot == "project");
+                REQUIRE_FALSE(config.contentPolicy.allowMissingOrigin);
+            }
+        }
+    }
+}

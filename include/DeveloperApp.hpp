@@ -15,6 +15,25 @@ struct DeveloperBootstrapOptions {
     std::string registry{"https://registry.npmjs.org/"};
 };
 
+namespace developer {
+/// The project is the document root of the protected bridge. Its callbacks write the project, so a
+/// WebSocket without an Origin header (not a browser page) is refused.
+inline WebFrontConfig projectConfig(WebFrontConfig config, const std::filesystem::path& projectDirectory) {
+    config.documentRoot                     = projectDirectory;
+    config.contentPolicy.allowMissingOrigin = false;
+    return config;
+}
+
+inline void validateBootstrap(std::string_view mode, const std::filesystem::path& project, const DeveloperBootstrapOptions& options) {
+    if (mode != "developer")
+        throw std::invalid_argument("Unknown bootstrap mode");
+    if (project.empty())
+        throw std::invalid_argument("Developer bootstrap requires an explicit project directory");
+    if (options.environment.empty() || !options.integrity.starts_with("sha512-"))
+        throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
+}
+}  // namespace developer
+
 template <frontend::FrontendType Frontend = frontend::DefaultFrontend, fs::Provider... Extra>
 class BasicDeveloperApp : public BasicWF<NetProvider, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend> {
     using Base = BasicWF<NetProvider, fs::Multi<fs::DeveloperFS, Extra...>, http::DefaultBuffersPolicy, Frontend>;
@@ -22,20 +41,15 @@ class BasicDeveloperApp : public BasicWF<NetProvider, fs::Multi<fs::DeveloperFS,
 public:
     /// An explicit project is required before enabling development file operations.
     explicit BasicDeveloperApp(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
-        : Base(withProject(config, projectDirectory)),
+        : Base(developer::projectConfig(std::move(config), projectDirectory)),
           project(projectDirectory.empty() ? std::filesystem::path{} : std::filesystem::canonical(projectDirectory)) { }
 
     void bootstrap(std::string_view          mode,
                    DeveloperBootstrapOptions options = {.environment = std::string(developer::release::environment),
                                                         .integrity   = std::string(developer::release::integrity)}) {
-        if (mode != "developer")
-            throw std::invalid_argument("Unknown bootstrap mode");
         if (store)
             throw std::logic_error("Developer bootstrap is already configured");
-        if (project.empty())
-            throw std::invalid_argument("Developer bootstrap requires an explicit project directory");
-        if (options.environment.empty() || !options.integrity.starts_with("sha512-"))
-            throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
+        developer::validateBootstrap(mode, project, options);
         store = std::make_shared<developer::Store>(project);
         registerBridge("{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
                        + ",\"registry\":" + json::quote(options.registry) + "}");
@@ -70,10 +84,6 @@ private:
         });
     }
 
-    static WebFrontConfig withProject(WebFrontConfig config, const std::filesystem::path& projectDirectory) {
-        config.documentRoot = projectDirectory;
-        return config;
-    }
     std::filesystem::path             project;
     std::shared_ptr<developer::Store> store;
 };

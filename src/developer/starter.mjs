@@ -29,12 +29,14 @@ export function recipeOf(files) {
     return recipe;
 }
 
-async function downloadStarter(starter, {signal, fetchImpl}) {
+function starterUrl(starter) {
     if (!starter?.url || !starter.integrity?.startsWith('sha512-')) throw new Error('Unknown pinned starter');
     const url = new URL(starter.url, location.href);
     if (url.protocol !== 'https:' && url.origin !== location.origin) throw new Error('Starter requires HTTPS or the application origin');
-    const bytes = await responseBytes(await fetchImpl(url, {signal}));
-    await verifyIntegrity(bytes, starter.integrity);
+    return url;
+}
+
+async function unpackStarter(bytes) {
     const files = new Map();
     for (const entry of readTar(await gunzip(bytes))) {
         if (!entry.path.startsWith('package/')) throw new Error('Invalid starter archive root');
@@ -43,6 +45,12 @@ async function downloadStarter(starter, {signal, fetchImpl}) {
         files.set(path, entry.bytes);
     }
     return files;
+}
+
+async function downloadStarter(starter, {signal, fetchImpl}) {
+    const bytes = await responseBytes(await fetchImpl(starterUrl(starter), {signal}));
+    await verifyIntegrity(bytes, starter.integrity);
+    return unpackStarter(bytes);
 }
 
 export async function createStarter(bridge, config, [name, destination = 'ui'], {signal, fetchImpl = fetch} = {}) {

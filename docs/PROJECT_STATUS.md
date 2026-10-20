@@ -50,19 +50,19 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   local TSX, React/React DOM and scheduler, a same-window preview and an application-owned
   generated provider. Offline executables use those providers without developer roots/callbacks.
   Existing React/Babel/terminal providers remain supported.
-- Local validation passes 250 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases and
+- Historical snapshot at the 0.2.0 milestone (the current validation is listed above): local validation passed 250 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases and
   14 JavaScript checks. Browser coverage includes PI results, C++ Life generations, playback/reset,
   deterministic header generation and compiling/running both embedded applications from empty
   working directories. Repeated previews replace session history instead of accumulating entries.
   Linux CEF/Xvfb passes all 14 integration cases with GCC and Clang in
   [run 39421265580](https://github.com/ambroise-leclerc/WebFront/actions/runs/39421265580);
-  its WKWebView job also passes. Windows CI follow-up remains tracked in #288.
+  its WKWebView job also passed. The later Windows and sanitizer results are in the validation above.
 - Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
   configuration. `wf create life` and `wf create pi` create fresh editable projects without
   overwriting existing files. Maintainer preparation requires Node/npm; consumers do not.
-  Version 0.2.0 is served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
-  with the same archives retained in the `developer-v0.2.0` prerelease. Version 0.1.0 is preserved.
+  Version 0.2.0 was served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
+  with the same archives retained in the `developer-v0.2.0` prerelease; 0.1.0 and later versions are preserved.
   The live WKWebView smoke test downloaded both starters and the environment from Pages, fetched
   React dependencies from npm, passed PI/Life previews and deterministic generation, then compiled
   those public-path headers and ran both applications offline with developer callbacks absent.

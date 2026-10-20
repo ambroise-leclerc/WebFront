@@ -53,13 +53,18 @@ function archiveFiles(tarball) {
     return files;
 }
 
+function supported(manifest, files) {
+    if (manifest.protocol !== 1) return false;
+    if (!safePath(manifest.entry)) return false;
+    return files.has(manifest.entry);
+}
+
 export async function environmentFiles(bytes, integrity) {
     await verifyIntegrity(bytes, integrity);
     const files = archiveFiles(await gunzip(bytes));
     if (!files.has('environment.json')) throw new Error('Environment archive has no environment.json');
     const manifest = JSON.parse(decoder.decode(files.get('environment.json')));
-    if (manifest.protocol !== 1 || !safePath(manifest.entry) || !files.has(manifest.entry))
-        throw new Error('Unsupported WebFront developer environment');
+    if (!supported(manifest, files)) throw new Error('Unsupported WebFront developer environment');
     return {files, manifest};
 }
 

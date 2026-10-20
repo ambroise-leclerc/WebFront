@@ -90,6 +90,8 @@ jobs:
         with:
           name: developer-distribution
           path: build-distribution
+      - name: Check the configured Pages source before pushing
+        run: node tools/developer/pages.mjs --check
       - name: Preserve existing versions and publish the static branch
         shell: bash
         run: |

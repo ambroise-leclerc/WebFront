@@ -97,7 +97,7 @@ function pinnedDownloader({registry = 'https://registry.npmjs.org/', fetchImpl =
 }
 
 // Optional peers may be absent; others must be satisfied by a root or a direct dependency.
-function peerOf(node, name, range, nodes, roots) {
+function peerOf(node, [name, range], {nodes, roots}) {
     const peer = roots[name]?.id ?? node.dependencies[name];
     if (!peer) {
         if (node.manifest.peerDependenciesMeta?.[name]?.optional) return null;
@@ -111,7 +111,7 @@ function peerOf(node, name, range, nodes, roots) {
 function connectPeers(nodes, roots) {
     for (const node of Object.values(nodes))
         for (const [name, range] of Object.entries(node.manifest.peerDependencies ?? {})) {
-            const peer = peerOf(node, name, range, nodes, roots);
+            const peer = peerOf(node, [name, range], {nodes, roots});
             if (peer) node.dependencies[name] = peer;
         }
 }
@@ -148,11 +148,19 @@ export async function resolvePackages(specifications, options = {}) {
     return {lock: {format: 1, registry: options.registry ?? 'https://registry.npmjs.org/', roots, packages: state.nodes}, downloads: state.downloads};
 }
 
+function validIdentity(id, node) {
+    if (!safeName(node.name)) return false;
+    if (!semver.valid(node.version)) return false;
+    return id === idOf(node.name, node.version);
+}
+
+function validSource(node) {
+    if (!node.integrity?.startsWith('sha512-')) return false;
+    return node.key === cacheKey(node.name, node.version, node.integrity);
+}
+
 function validateNode(lock, id, node) {
-    if (!safeName(node.name) || !semver.valid(node.version) || id !== idOf(node.name, node.version))
-        throw new Error('Invalid locked package');
-    if (!node.integrity?.startsWith('sha512-') || node.key !== cacheKey(node.name, node.version, node.integrity))
-        throw new Error('Invalid locked package');
+    if (!validIdentity(id, node) || !validSource(node)) throw new Error('Invalid locked package');
     for (const path of node.files) safePackagePath(path);
     if (Object.values(node.dependencies).some(dependency => !lock.packages[dependency]))
         throw new Error('Dangling locked dependency');

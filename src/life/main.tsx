@@ -94,6 +94,44 @@ async function nextGeneration(session: Session, revision: number) {
 }
 const countBits = (cells: Uint8Array) => cells.reduce((count, byte) => { while (byte) { count += byte & 1; byte >>>= 1; } return count; }, 0);
 
+function Telemetry({generation, population}: {generation: number; population: number}) {
+    return <aside className="glass telemetry" aria-label="Simulation statistics"><span className="eyebrow">OBSERVATION</span>
+                <div><output data-testid="generation">{generation.toString().padStart(4, '0')}</output><span>Generation</span></div>
+                <div><output data-testid="population">{population}</output><span>Living cells</span></div>
+                <span className="boundary">32 × 32 · wrapping edges</span></aside>;
+}
+
+type ControlProps = {playing: boolean; busy: boolean; speed: number; flat: boolean; pattern: string;
+    onPlay: () => void; onStep: () => void; onSpeed: (speed: number) => void; onPattern: (name: string) => void;
+    onClear: () => void; onView: () => void};
+function Controls({playing, busy, speed, flat, pattern, onPlay, onStep, onSpeed, onPattern, onClear, onView}: ControlProps) {
+    return <footer className="glass controls"><div className="transport">
+        <button className="primary" data-testid="play" aria-pressed={playing} onClick={onPlay}>{playing ? 'Ⅱ Pause' : '▶ Play'}</button>
+        <button data-testid="step" disabled={playing || busy} onClick={onStep}>Step ↗</button></div>
+        <label className="speed">Tempo <input aria-label="Generations per second" type="range" min="1" max="24" value={speed} onChange={e => onSpeed(Number(e.target.value))}/><span>{speed}/s</span></label>
+        <div className="patterns" aria-label="Starting pattern">{Object.keys(shapes).map(name => <button key={name} data-testid={'pattern-' + name.toLowerCase()} aria-pressed={pattern === name} onClick={() => onPattern(name)}>{name}</button>)}
+            <button data-testid="clear" onClick={onClear}>Clear</button></div>
+        <button className="view" data-testid="view" aria-pressed={flat} onClick={onView}>{flat ? '◇ Spatial' : '▦ Plan view'}</button>
+    </footer>;
+}
+
+type Flag<T> = {current: T};
+// While playing, steps at the chosen rate; a step that is still pending delays the next tick.
+function usePlayback(playing: boolean, run: Flag<boolean>, rate: Flag<number>, step: () => Promise<void>) {
+    useEffect(() => {
+        if (!playing) return;
+        let stopped = false;
+        let timer: ReturnType<typeof setTimeout>;
+        async function tick() {
+            if (stopped || !run.current) return;
+            await step();
+            if (!stopped && run.current) timer = setTimeout(tick, 1000 / rate.current);
+        }
+        timer = setTimeout(tick, 1000 / rate.current);
+        return () => { stopped = true; clearTimeout(timer); };
+    }, [playing]);
+}
+
 function Life() {
     const [cells, setCells] = useState(() => seed('Galaxy'));
     const [generation, setGeneration] = useState(0);
@@ -123,18 +161,7 @@ function Life() {
             if (isCurrent(current, revision)) { setError(String(error)); run.current = false; setPlaying(false); }
         } finally { current.pending = false; if (current.mounted) setBusy(false); }
     }
-    useEffect(() => {
-        if (!playing) return;
-        let stopped = false;
-        let timer: ReturnType<typeof setTimeout>;
-        async function tick() {
-            if (stopped || !run.current) return;
-            await step();
-            if (!stopped && run.current) timer = setTimeout(tick, 1000 / rate.current);
-        }
-        timer = setTimeout(tick, 1000 / rate.current);
-        return () => { stopped = true; clearTimeout(timer); };
-    }, [playing]);
+    usePlayback(playing, run, rate, step);
     const population = countBits(cells);
     return <main className="observatory">
         <header><a className="identity" href="#"><span className="mark">✳</span> FIELD<span className="edition">/ 01</span></a>
@@ -143,20 +170,12 @@ function Life() {
             <div className="intro"><span className="eyebrow">CONWAY’S GAME OF LIFE</span><h1>Order.<br/>From almost nothing.</h1>
                 <p>Three simple rules.<br/>An entire world of possibilities.</p></div>
             <div className="world"><div className="halo"/><Board cells={cells} flat={flat} toggle={index => replace(toggleCell(state.current.cells, index), 'Custom')}/></div>
-            <aside className="glass telemetry" aria-label="Simulation statistics"><span className="eyebrow">OBSERVATION</span>
-                <div><output data-testid="generation">{generation.toString().padStart(4, '0')}</output><span>Generation</span></div>
-                <div><output data-testid="population">{population}</output><span>Living cells</span></div>
-                <span className="boundary">32 × 32 · wrapping edges</span></aside>
+            <Telemetry generation={generation} population={population}/>
             <div className="coordinates">B3 / S23 <span>CLICK THE FIELD TO PLANT A CELL</span> 32²</div>
         </section>
-        <footer className="glass controls"><div className="transport">
-            <button className="primary" data-testid="play" aria-pressed={playing} onClick={() => {run.current = !playing; setPlaying(!playing);}}>{playing ? 'Ⅱ Pause' : '▶ Play'}</button>
-            <button data-testid="step" disabled={playing || busy} onClick={() => {void step();}}>Step ↗</button></div>
-            <label className="speed">Tempo <input aria-label="Generations per second" type="range" min="1" max="24" value={speed} onChange={e => setSpeed(Number(e.target.value))}/><span>{speed}/s</span></label>
-            <div className="patterns" aria-label="Starting pattern">{Object.keys(shapes).map(name => <button key={name} data-testid={'pattern-' + name.toLowerCase()} aria-pressed={pattern === name} onClick={() => replace(seed(name), name)}>{name}</button>)}
-                <button data-testid="clear" onClick={() => replace(empty(), 'Empty')}>Clear</button></div>
-            <button className="view" data-testid="view" aria-pressed={flat} onClick={() => setFlat(!flat)}>{flat ? '◇ Spatial' : '▦ Plan view'}</button>
-        </footer>
+        <Controls playing={playing} busy={busy} speed={speed} flat={flat} pattern={pattern}
+            onPlay={() => {run.current = !playing; setPlaying(!playing);}} onStep={() => {void step();}} onSpeed={setSpeed}
+            onPattern={name => replace(seed(name), name)} onClear={() => replace(empty(), 'Empty')} onView={() => setFlat(!flat)}/>
         <p className="caption">A bitset in C++. A world in your browser. <span>WebFront · React · no Node.js runtime</span></p>
         <p className="error" role="alert">{error}</p>
     </main>;

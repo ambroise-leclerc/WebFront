@@ -61,6 +61,13 @@ async function readPackages(bridge, lock, signal) {
     return packages;
 }
 
+// Serves the worker's project reads and settles the build with its result or error.
+async function onWorkerMessage(bridge, worker, finish, data) {
+    if (data.type === 'read') worker.postMessage(await answerRead(bridge, data));
+    else if (data.type === 'result') finish(null, data.files);
+    else if (data.type === 'error') finish(new Error(data.error));
+}
+
 function buildInWorker(bridge, message, signal) {
     return new Promise((resolve, reject) => {
         const worker = new Worker(new URL('./compiler.mjs', import.meta.url), {type: 'module'});
@@ -74,11 +81,7 @@ function buildInWorker(bridge, message, signal) {
         const timeout = setTimeout(() => finish(new Error('Browser build timed out')), 120000);
         signal?.addEventListener('abort', abort, {once: true});
         worker.onerror = event => finish(new Error(event.message || 'Compiler worker failed'));
-        worker.onmessage = async ({data}) => {
-            if (data.type === 'read') worker.postMessage(await answerRead(bridge, data));
-            else if (data.type === 'result') finish(null, data.files);
-            else if (data.type === 'error') finish(new Error(data.error));
-        };
+        worker.onmessage = ({data}) => onWorkerMessage(bridge, worker, finish, data);
         if (signal?.aborted) abort();
         else worker.postMessage(message);
     });
