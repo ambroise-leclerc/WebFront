@@ -14,9 +14,10 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   PI results, deterministic header generation, compiling that header and running from an empty
   working directory. Linux CEF/Xvfb and other native engines require their corresponding runs;
   WKWebView evidence does not qualify them.
-- Environment tarballs and integrity/provisioning metadata can be produced reproducibly, but no
-  package has been published or default public endpoint configured. Registry publication remains
-  an environment-distribution step. Maintainer preparation requires Node/npm; consumers do not.
+- Versioned environment and PI starter archives have a GitHub Pages publication workflow,
+  immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
+  configuration. `wf create pi` creates a fresh editable project without overwriting existing files.
+  Maintainer preparation requires Node/npm; consumers do not. Public deployment is tracked in #288.
 - Browser packages only: no installation scripts, native modules, Node API shims, optional
   dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
   dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.

@@ -37,8 +37,12 @@ permet de réessayer. Un hash incompatible interdit le repli silencieux vers un 
 
 Le distributeur fournit URL HTTPS/CORS et empreinte par un canal de confiance. Un registre npm
 peut héberger cette archive, sans client npm chez l'utilisateur et sans serveur spécifique WebFront.
-L'implémentation ne présume pas qu'un paquet public existe : le checkout produit une archive et ses
-métadonnées de provisioning. Une publication exige un nom de paquet détenu par le distributeur.
+La première distribution vise GitHub Pages, avec des chemins `developer/<version>/` conservés
+et une configuration URL/SHA-512 épinglée dans `DeveloperReleaseData.hpp`. Le workflow refuse de
+remplacer les octets d'une version publiée et archive les versions taguées dans des prereleases
+séparées de la bibliothèque C++. Les archives gardent des identifiants de paquet, sans exiger
+publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi un starter PI distinct ;
+`wf create pi` crée son dossier sans remplacer un projet existant.
 
 ## Alternatives et conséquences
 

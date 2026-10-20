@@ -26,14 +26,12 @@ private:
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 3)
-            throw std::invalid_argument("Expected fixture directory and header output directory");
-        // Frontend construction performs CEF subprocess dispatch before temporary files are created.
+        // CEF child processes must dispatch before interpreting application arguments or creating files.
         webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
+        if (argc != 3 && argc != 4)
+            throw std::invalid_argument("Expected fixture directory, header output directory and optional --public");
         webfront::test::TemporaryDirectory project;
         std::filesystem::copy(argv[1], project.path() / "fixtures", std::filesystem::copy_options::recursive);
-        std::filesystem::copy_file(project.path() / "fixtures/main.tsx", project.path() / "main.tsx");
-        std::filesystem::copy_file(project.path() / "fixtures/style.css", project.path() / "style.css");
         std::string            integrity;
         const auto             config = project.path() / "fixtures/provision.json";
         std::ifstream          provisioning(config);
@@ -59,7 +57,13 @@ int main(int argc, char** argv) {
             std::cout << message << std::endl;
             passed.store(success);
         });
-        app.bootstrap("developer", {.environment = "/fixtures/environment.tgz", .integrity = integrity, .registry = "/fixtures/registry/"});
+        if (argc == 4) {
+            if (std::string_view(argv[3]) != "--public")
+                throw std::invalid_argument("Unknown smoke-test mode");
+            app.bootstrap("developer");
+        } else {
+            app.bootstrap("developer", {.environment = "/fixtures/environment.tgz", .integrity = integrity, .registry = "/fixtures/registry/"});
+        }
         auto subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
             if (injected)
                 return;

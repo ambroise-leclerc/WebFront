@@ -115,3 +115,33 @@ SCENARIO("The PI demonstration returns exact decimal strings and rejects excessi
     REQUIRE(demo::pi(1000).size() == 1002);
     REQUIRE_THROWS_AS(demo::pi(1001), std::invalid_argument);
 }
+
+SCENARIO("A downloaded starter never replaces a developer's existing project") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("an existing project directory") {
+        std::filesystem::create_directories(project.path() / "ui");
+        THEN("new-only publication refuses to stage over it") {
+            REQUIRE_THROWS(store.begin("ui", true, false));
+            REQUIRE(std::filesystem::is_directory(project.path() / "ui"));
+        }
+    }
+    GIVEN("a new starter staged before its destination exists") {
+        auto id = store.begin("new-ui", true, false);
+        store.write(id, "main.tsx", 0, bytes("starter"));
+        WHEN("a local directory appears before commit") {
+            std::filesystem::create_directory(project.path() / "new-ui");
+            THEN("commit refuses to replace that directory") {
+                REQUIRE_THROWS(store.commit(id));
+                REQUIRE_FALSE(std::filesystem::exists(project.path() / "new-ui/main.tsx"));
+                store.abort(id);
+            }
+        }
+        WHEN("the destination remains new") {
+            store.commit(id);
+            THEN("the starter is published") {
+                REQUIRE(read(store, "new-ui/main.tsx") == "starter");
+            }
+        }
+    }
+}

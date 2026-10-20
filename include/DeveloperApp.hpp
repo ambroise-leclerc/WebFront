@@ -2,6 +2,7 @@
 #pragma once
 
 #include "system/DeveloperFS.hpp"
+#include "system/DeveloperReleaseData.hpp"
 #include "WebFront.hpp"
 
 namespace webfront {
@@ -23,7 +24,9 @@ public:
     explicit BasicDeveloperApp(std::filesystem::path project = {}, WebFrontConfig config = {})
         : Base(withProject(config, project)), project(project.empty() ? std::filesystem::path{} : std::filesystem::canonical(project)) { }
 
-    void bootstrap(std::string_view mode, DeveloperBootstrapOptions options) {
+    void bootstrap(std::string_view          mode,
+                   DeveloperBootstrapOptions options = {.environment = std::string(developer::release::environment),
+                                                        .integrity   = std::string(developer::release::integrity)}) {
         if (mode != "developer")
             throw std::invalid_argument("Unknown bootstrap mode");
         if (store)
@@ -43,6 +46,9 @@ public:
         });
         this->cppFunction("webfront.developer.begin", [owned = store](std::string destination, bool directory) {
             return owned->begin(std::move(destination), directory);
+        });
+        this->cppFunction("webfront.developer.beginNew", [owned = store](std::string destination, bool directory) {
+            return owned->begin(std::move(destination), directory, false);
         });
         this->cppFunction("webfront.developer.write", [owned = store](std::string id, std::string path, std::uint64_t offset, std::vector<std::uint8_t> bytes) {
             owned->write(std::move(id), std::move(path), offset, std::move(bytes));

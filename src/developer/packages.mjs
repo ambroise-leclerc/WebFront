@@ -3,12 +3,8 @@ import semver from 'semver';
 import {responseBytes} from './bootstrap.mjs';
 import {gunzip, readTar, verifyIntegrity, parseSpec} from '../components/tools/wf.mjs';
 
-export function safePackagePath(path) {
-    if (typeof path !== 'string' || !path || path.includes('\\') || path.includes('\0') ||
-        path.split('/').some(part => !part || part === '.' || part === '..') || /[:*?"<>|]/.test(path))
-        throw new Error(`Unsafe package path: ${path}`);
-    return path;
-}
+import {safePackagePath} from './paths.mjs';
+export {safePackagePath};
 
 const text = new TextDecoder();
 const safeName = name => /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name);

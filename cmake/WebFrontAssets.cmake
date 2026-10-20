@@ -101,7 +101,7 @@ function(webfront_add_embedded_assets)
     if(ENABLE_TESTING)
         find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
         add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
-            --test "${root}/tools/developer/check.mjs")
+            --test "${root}/tools/developer/check.mjs" "${root}/tools/developer/distribution-check.mjs")
         set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
         add_test(NAME EmbeddedGzipContents COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
             "${root}/tools/assets/check.mjs")

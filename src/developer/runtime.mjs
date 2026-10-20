@@ -3,6 +3,7 @@ import {FitAddon} from '../../third_party/xterm/addon-fit.mjs';
 import {LineEditor, tokenize} from '../components/terminal/terminal.mjs';
 import {resolvePackages, validateLock, downloadPackage} from './packages.mjs';
 import {readProject, publish} from './bootstrap.mjs';
+import {createStarter} from './starter.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 
 const encoder = new TextEncoder();
@@ -84,6 +85,10 @@ export async function compile(bridge, entry, signal) {
 
 export async function execute(args, {bridge, config, preview, signal, write = () => {}}) {
     const [command, ...rest] = args;
+    if (command === 'create') {
+        if (rest.length < 1 || rest.length > 2) throw new Error('Usage: wf create <starter> [directory]');
+        return createStarter(bridge, config, rest[0], rest[1] ?? 'ui', signal);
+    }
     if (command === 'install') {
         const lock = await install(bridge, rest, {registry: config.registry, signal, progress: text => write(text + '\r\n')});
         return `Installed ${Object.keys(lock.packages).length} packages. Lock: ${lockPath}`;
@@ -108,7 +113,7 @@ export async function execute(args, {bridge, config, preview, signal, write = ()
         const lock = await readLock(bridge, true);
         return Object.keys(lock.packages).sort().join('\n') || 'No installed packages.';
     }
-    if (command === 'help' || !command) return 'wf install <package>[@version] ...\nwf list\nwf preview <entry.tsx>\nwf embed <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+    if (command === 'help' || !command) return 'wf create <starter> [directory]\nwf install <package>[@version] ...\nwf list\nwf preview <entry.tsx>\nwf embed <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
     throw new Error(`Unknown wf command: ${command}`);
 }
 

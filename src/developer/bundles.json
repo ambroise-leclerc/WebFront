@@ -1,9 +1,22 @@
 {
-  "src/developer/bootstrap.mjs": "92c41081c302099974b785106f711a3264370df51a8e21d73ade164deafd226e",
-  "src/developer/bootstrap-entry.mjs": "2eaa40292d1d848e6f70e626a36ae1a19cbfcc936186142da94093fdf1c22aad",
-  "src/developer/packages.mjs": "b9f99fb277ccd3ab5342caa0b4f0508be140b65015c5747f70ecfc597475e013",
+  "src/developer/bootstrap.mjs": "3c099923786fc8c07126ea1e7a6c903046c503ac6e33150de9dd34d44c906572",
+  "src/developer/bootstrap-entry.mjs": "97f5e00e81ffb545b35c8fbb5c083a9c321ba3e4560064bd249fb8521041860e",
+  "src/developer/packages.mjs": "d52276a973b9904e8ce64b1e52b7cd77bfb86c7c8a108460414505078337d912",
+  "src/developer/starter.mjs": "e7662e274400c1b21cf093c1305a7e3fde22fe18ecb2d7bccf0d6847a66ef2fe",
+  "src/developer/paths.mjs": "0c4bd27c428ff19d30dd5ce5dbf3181e02d8f95ba193738b4ef7f6762da35d0e",
+  "src/developer/runtime.mjs": "69c566580996dcf22a437c6d60471970c697c7337a0e518564030702cd79b307",
+  "src/developer/compiler.mjs": "3f7e187ca9a4c2645ef3823127457cad655919cbea3c7c0f22fb7ae2cc87e0e5",
+  "src/developer/bundler.mjs": "f1313dcd7ff2ca0abe852cfaadc56e4ea5866515e340744bc4a36b72f45e1cba",
+  "src/developer/embed.mjs": "cbb3fee81e3ccb5cab1b426f6e757259019df020a15dfa8316388815599bd8b9",
+  "src/pi/main.tsx": "d3161b35db204ba54f782f711183e8d96aeff7c92d885c33a6ec168cf461e453",
+  "src/pi/style.css": "360e2c7ae6d3699b00e18cbf67efbae7a8d8863d88926b31139e102cf38e5abd",
   "src/components/tools/wf.mjs": "6ee86d85ec96bf548ca25ea3ea3554b7dacbed7d047d6a9cfdc1e0f3f42de05e",
+  "tools/developer/distribution.json": "e6b082f780b32ea3152a1a846250f7b09df42120d0b00c64897be47167432589",
+  "tools/developer/build.mjs": "61b78c3b8f144e2d96ae841d6d5e216f47276c99ed2445a58a17124d8659d770",
+  "tools/developer/site.mjs": "e2df4e71bfad862d7d18125600a6b3170f530046c83894d5a8f8f8d90b66a21d",
+  "tools/developer/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "tools/assets/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
-  "src/developer/bootstrap.bundle.mjs": "36ebcf5346c028ee8a1e5066fdeb17702f8f7ae56d26fb0790ab77636770bc83",
-  "src/developer/packages.bundle.mjs": "c12e190aeed120622aa3d9ce76bbb889405d52e22c8bb6ac1ccd5de0ed892511"
+  "src/developer/bootstrap.bundle.mjs": "83d18e156e78d75b52e7d19a24ae52a0e046a28d71482964ec58317bfdc97071",
+  "src/developer/packages.bundle.mjs": "fd589da853f8472f9ab0b1db5440edd9f7734394e28d0205ca3867cd2fb58cb8",
+  "include/system/DeveloperReleaseData.hpp": "6e7332fdaf476ef7eecbb118604c2804b911ac07fab7f8ce0ed98f99e4eb50d3"
 }

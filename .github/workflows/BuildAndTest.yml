@@ -316,12 +316,18 @@ jobs:
         run: |
           launchctl print gui/$(id -u) >/dev/null
           pgrep -x WindowServer
+      - name: Prepare offline developer environment and starter fixtures
+        run: |
+          npm ci --prefix tools/assets --ignore-scripts
+          node tools/developer/build.mjs build-developer-environment
+          node tools/developer/fixtures.mjs build-developer-environment
       - name: Configure system WebKit frontend
         run: >-
           cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release
           -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
           -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
           -DWEBFRONT_DEMO_FRONTEND=Native
+          -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
       - name: Build
         run: cmake --build build-wkwebview --parallel 2
       - name: Test
@@ -362,11 +368,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
 
+      - name: Prepare offline developer environment and starter fixtures
+        run: |
+          npm ci --prefix tools/assets --ignore-scripts
+          node tools/developer/build.mjs build-developer-environment
+          node tools/developer/fixtures.mjs build-developer-environment
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
 
       - name: Build browser test
-        run: cmake --build ${{github.workspace}}/build-cef --target webtest --parallel 1
+        run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration --parallel 1
 
       - name: Run Jasmine bridge test
         run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error

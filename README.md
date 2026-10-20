@@ -59,7 +59,8 @@ The optional [developer environment](docs/DEVELOPER_ENVIRONMENT.md) downloads it
 JavaScript/WASM build tools on demand. Install browser libraries with `wf install`, preview local
 TSX, then generate compressed C++ resource headers with `wf embed`. The PI example demonstrates
 recompiling an offline native application without installing Node.js or npm on the developer's machine.
-The environment package is ready for provisioning; this checkout does not supply a published public endpoint.
+The version-pinned environment and PI starter have a GitHub Pages distribution pipeline;
+see the guide for deployment status and the complete walkthrough.
 
 ## Connect your interface to C++
 

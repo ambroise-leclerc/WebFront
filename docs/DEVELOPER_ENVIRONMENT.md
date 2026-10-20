@@ -24,22 +24,22 @@ std::string pi(std::uint32_t decimals); // Existing application function.
 int main() {
     webfront::NativeApp app{"."}; // Explicit development project directory.
     app.cppFunction("pi", &pi);
-    app.bootstrap("developer", {
-        .environment = "https://your-registry.example/environment.tgz",
-        .integrity = "sha512-..." // Trusted hash of that exact environment tarball.
-    });
+    app.bootstrap("developer"); // Uses the version and SHA-512 pinned in WebFront.
     app.show();
 }
 ```
 
-The URL and integrity above are placeholders. This checkout provides a reproducible environment
-package and provisioning tools, **not a published npm package or a default public endpoint**.
-An environment distributor can host the tarball over HTTPS with CORS, including on an npm registry;
-users download it with browser `fetch`, without installing the npm command-line program.
-Supply the URL/hash from that distributor. The hash is a trust input, not something the bootstrap
-accepts from the same unverified download. Same-origin HTTP URLs are also supported for tests or
-local provisioning. The archive must contain `package/environment.json` with protocol 1 and an entry
-module, plus all environment files.
+The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
+`https://ambroise-leclerc.github.io/WebFront/developer/0.1.0/environment.tgz`. It pins one version and
+its SHA-512 rather than resolving a mutable `latest` channel. An explicit
+`DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
+HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
+
+The environment archive contains a pinned PI starter descriptor. `wf create pi` downloads and
+verifies that separate archive, creates a new `ui` directory and prints the install/preview/embed
+commands. Existing directories are never replaced. The trusted environment hash protects both
+its own code and the starter descriptor; `provision.json` on the server is not a new trust anchor.
+See [publication instructions](../tools/developer/PUBLISHING.md) for deployment and release checks.
 
 The bootstrap verifies SHA-512 before unpacking or executing the archive, validates its manifest
 and paths, then publishes it under the application's local origin. The cached **archive** is
@@ -50,21 +50,25 @@ environment is not silently substituted.
 ## The PI walkthrough
 
 `src/PiDeveloper.cpp` is the complete developer executable. Its small bounded decimal spigot
-lives in `src/Pi.hpp`. Copy `src/pi/main.tsx` and `src/pi/style.css` into an empty project directory
-as `main.tsx` and `style.css`. Start the executable with that project, the tarball URL and its SRI:
+lives in `src/Pi.hpp`. Start with an empty project directory:
 
 ```sh
-./build-native/src/WebFrontPiDeveloper /path/to/pi-project "$ENVIRONMENT_URL" "$ENVIRONMENT_INTEGRITY"
+./build-native/src/WebFrontPiDeveloper /path/to/pi-project
 ```
 
-In the downloaded terminal:
+The optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default
+for a local test or alternative distributor. In the downloaded terminal:
 
 ```text
+wf create pi
 wf install react@19.3.1 react-dom@19.3.1
-wf list
-wf preview main.tsx
-wf embed main.tsx --output generated/PiUI.hpp
+wf preview ui/main.tsx
+wf embed ui/main.tsx --output generated/PiUI.hpp
 ```
+
+`wf create pi another-directory` selects a different new destination. The starter includes editable
+TSX/CSS and `webfront.project.json` with exact dependency versions. Edit those files in your normal
+editor; no code editor or framework needs to be embedded in the original application.
 
 React DOM pulls scheduler transitively and checks its React peer. The TSX calls
 `await webFront.cppFunction('pi')(digits)`; failures reject the Promise and are displayed.
@@ -133,11 +137,13 @@ node tools/developer/fixtures.mjs build-developer-environment
 ```
 
 `build.mjs` bundles the environment and compiler, includes esbuild.wasm, xterm styles and licenses,
-and writes deterministic `environment.tgz` plus `provision.json` with its SHA-512. Dependencies are
+and writes deterministic `environment.tgz`, `pi-starter.tgz`, `provision.json` and
+`DeveloperReleaseData.hpp`. The version and public base URL are in `tools/developer/distribution.json`. Dependencies are
 pinned in `tools/assets/package-lock.json`. `--refresh-bootstrap` additionally refreshes the two
 checked-in JS bundles, their input checksums and the embedded bootstrap headers. Without that flag,
-it writes only to the output directory. The generated npm manifest uses the provisional name
-`@webfront/developer-environment`; choose an owned package name/version before publishing.
+it writes only to the output directory. The two archives have the package identifiers `@webfront/developer-environment` and
+`@webfront/pi-starter`. They are distributed as static GitHub Pages downloads; no npm publication or
+scope ownership is required. Node/npm is only used by maintainers to build them.
 
 To try the local archive without an HTTPS server, copy `environment.tgz` to the project's
 `.webfront/developer/preview/provision/environment.tgz` and pass
@@ -156,6 +162,7 @@ cmake --build build-native --parallel
 ctest --test-dir build-native -R 'Developer' --output-on-failure
 ```
 
+The GitHub CI prepares these fixtures for both WKWebView and CEF jobs.
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
 `DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, PI preview and
 repeatable generation. Its CTest fixtures then build that **browser-generated** header and run

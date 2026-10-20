@@ -7,8 +7,8 @@ if (typeof document !== 'undefined' && document.getElementById('retry')) {
         retry.hidden = true;
         try {
             await webFront.ready;
-            const config = JSON.parse(await call(webFront, 'config'));
-            const {url} = await bootstrap(webFront, config, fetch, text => { status.textContent = text; });
+            const options = JSON.parse(await call(webFront, 'config'));
+            const {url, config} = await bootstrap(webFront, options, fetch, text => { status.textContent = text; });
             const environment = await import(url);
             await environment.mount({bridge: webFront, config, terminal: document.getElementById('terminal'), preview: document.getElementById('preview')});
             status.textContent = 'Developer environment ready. Type wf help.';

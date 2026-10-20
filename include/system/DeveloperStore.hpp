@@ -60,11 +60,13 @@ public:
         return bytes;
     }
 
-    std::string begin(std::string destination, bool directory) {
+    std::string begin(std::string destination, bool directory, bool replace = true) {
         std::scoped_lock lock(mutex);
         if (transactions.size() >= 8)
             throw std::runtime_error("Too many developer transactions");
         const auto target = projectPath(root, destination);
+        if (!replace && std::filesystem::exists(std::filesystem::symlink_status(target)))
+            throw std::runtime_error("Starter destination already exists");
         if (target == root || destination == ".webfront" || destination == ".webfront/developer" || destination.starts_with(".webfront/developer/staging"))
             throw std::invalid_argument("Invalid publication destination");
         for (const auto& [id, tx] : transactions) {
@@ -80,7 +82,7 @@ public:
             id      = std::to_string(++nextId);
             staging = stagingRoot / id;
         } while (!std::filesystem::create_directory(staging));
-        transactions.emplace(id, Transaction{staging, target, std::move(destination), directory, 0, {}});
+        transactions.emplace(id, Transaction{staging, target, std::move(destination), directory, replace, 0, {}});
         return id;
     }
 
@@ -118,7 +120,9 @@ public:
             throw std::runtime_error("No output was staged");
         std::filesystem::create_directories(tx.target.parent_path());
         const auto backup = tx.staging.parent_path() / (id + "-backup");
-        const bool exists = std::filesystem::exists(tx.target);
+        const bool exists = std::filesystem::exists(std::filesystem::symlink_status(tx.target));
+        if (exists && !tx.replace)
+            throw std::runtime_error("Starter destination already exists");
         if (exists)
             std::filesystem::rename(tx.target, backup);
         try {
@@ -159,6 +163,7 @@ private:
         std::filesystem::path                target;
         std::string                          destination;
         bool                                 directory;
+        bool                                 replace;
         std::uint64_t                        size;
         std::map<std::string, std::uint64_t> files;
     };

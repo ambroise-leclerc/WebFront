@@ -17,8 +17,8 @@ export async function readProject(bridge, path) {
     return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
 
-export async function publish(bridge, destination, files, directory = true, signal) {
-    const id = await call(bridge, 'begin', destination, directory);
+export async function publish(bridge, destination, files, directory = true, signal, replace = true) {
+    const id = await call(bridge, replace ? 'begin' : 'beginNew', destination, directory);
     try {
         for (const [path, bytes] of files) {
             for (let offset = 0; offset < bytes.length || offset === 0; offset += blockSize) {
@@ -94,9 +94,15 @@ export async function bootstrap(bridge, config, fetchImpl = fetch, progress = ()
         bytes = await responseBytes(response);
     }
     const {files, manifest} = await environmentFiles(bytes, config.integrity);
+    const starters = {};
+    for (const [name, starter] of Object.entries(manifest.starters ?? {})) {
+        if (!starter || typeof starter.archive !== 'string' || !safePath(starter.archive) ||
+            typeof starter.integrity !== 'string' || !starter.integrity.startsWith('sha512-'))
+            throw new Error('Invalid pinned starter metadata');
+        starters[name] = {url: new URL(starter.archive, new URL(config.environment, location.href)).href, integrity: starter.integrity};
+    }
     // All files and the trusted archive are published only after validation succeeds.
     await publish(bridge, '.webfront/developer/environment', files);
     await publish(bridge, cached, new Map([['output', bytes]]), false);
-    return {url: `/webfront/developer/environment/${manifest.entry}`, config};
+    return {url: `/webfront/developer/environment/${manifest.entry}`, config: {...config, starters}};
 }
-

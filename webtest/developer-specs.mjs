@@ -12,12 +12,17 @@ try {
     }
     const runtime = await import('/webfront/developer/environment/runtime.mjs');
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
+    const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
+    config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
     const context = {bridge: webFront, config, preview: document.getElementById('preview'), signal: new AbortController().signal,
         write: text => console.log(text)};
-    await runtime.execute(['install', 'react', 'react-dom'], context);
+    await runtime.execute(['create', 'pi'], context);
+    const overwriteRefused = await runtime.execute(['create', 'pi'], context).then(() => false, () => true);
+    assert(overwriteRefused, 'A starter must not replace an existing project');
+    await runtime.execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
     const lock = await runtime.readLock(webFront);
     assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
-    await runtime.execute(['preview', 'main.tsx'], context);
+    await runtime.execute(['preview', 'ui/main.tsx'], context);
     const frame = context.preview;
     for (let attempt = 0; attempt < 300; ++attempt) {
         if (frame.contentDocument?.querySelector('button')) break;
@@ -30,12 +35,12 @@ try {
         if (attempt === 99) throw new Error('React preview did not display C++ PI');
         await delay(50);
     }
-    await runtime.execute(['embed', 'main.tsx', '--output', 'generated/PiUI.hpp'], context);
+    await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
     // Repeat the browser build to prove reproducibility, including licenses and packed gzip bytes.
     const first = await webFront.cppFunction('test.header')();
-    await runtime.execute(['embed', 'main.tsx', '--output', 'generated/PiUI.hpp'], context);
+    await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
     assert(await webFront.cppFunction('test.header')() === first, 'Header generation must be deterministic');
-    const failed = await runtime.execute(['install', 'package-does-not-exist'], context).then(() => false, () => true);
+    const failed = await runtime.execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
     assert(failed, 'Missing packages must reject');
     assert(JSON.stringify(await runtime.readLock(webFront)) === JSON.stringify(lock), 'A failed install must preserve the lock');
     await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + preview + deterministic header passed');
