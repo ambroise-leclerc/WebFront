@@ -27,7 +27,7 @@ function dependencyId(args, name, importerNode, lock) {
     return importerNode.name === name ? packageId(args.importer) : importerNode.dependencies[name];
 }
 
-function resolveBare(args, specifier, importerNode, lock, find) {
+function resolveBare(args, specifier, importerNode, {lock, find}) {
     const parts = specifier.split('/');
     const name = parts.splice(0, specifier.startsWith('@') ? 2 : 1).join('/');
     const id = dependencyId(args, name, importerNode, lock);
@@ -44,5 +44,5 @@ export async function resolveImport(args, lock, find) {
     if (browser.local) return find('npm', browser.local);
     if (browser.specifier.startsWith('.')) return resolveRelative(args, browser.specifier, find);
     if (/^(?:[a-z]+:|\/|#)/i.test(browser.specifier)) throw new Error(`Unsupported browser import: ${browser.specifier}`);
-    return resolveBare(args, browser.specifier, importerNode, lock, find);
+    return resolveBare(args, browser.specifier, importerNode, {lock, find});
 }

@@ -141,7 +141,7 @@ async function embed([entry, flag, output, ...extra], {bridge, signal}) {
     return `Generated ${output}. Use webfront::fs::${className} and recompile the application.`;
 }
 
-async function list({bridge}) {
+async function list(_args, {bridge}) {
     const lock = await readLock(bridge, true);
     return Object.keys(lock.packages).sort().join('\n') || 'No installed packages.';
 }

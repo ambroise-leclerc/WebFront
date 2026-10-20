@@ -235,3 +235,24 @@ SCENARIO("The developer bridge refuses WebSocket clients without an Origin") {
         }
     }
 }
+
+SCENARIO("Startup cleanup never leaves the project through a staging link") {
+    TemporaryDirectory project;
+    TemporaryDirectory outside;
+    GIVEN("a staging directory that is a link to an old file outside the project") {
+        const auto victim = outside.path() / "keep.txt";
+        std::ofstream{victim} << "outside";
+        std::filesystem::last_write_time(victim, std::filesystem::file_time_type::clock::now() - std::chrono::hours{3});
+        std::filesystem::create_directories(project.path() / ".webfront/developer");
+        std::error_code error;
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / ".webfront/developer/staging", error);
+        if (!error) {
+            WHEN("the project is opened") {
+                developer::Store store{project.path()};
+                THEN("the outside file is untouched") {
+                    REQUIRE(std::filesystem::exists(victim));
+                }
+            }
+        }
+    }
+}

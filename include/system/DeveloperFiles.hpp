@@ -96,7 +96,13 @@ inline void replaceTarget(const std::filesystem::path& target, bool replace, con
 
 inline void removeStaleStaging(const std::filesystem::path& root) {
     std::error_code error;
-    const auto      stagingRoot = root / ".webfront" / "developer" / "staging";
+    // The staging directory may be a symbolic link: never clean up outside the project.
+    std::filesystem::path stagingRoot;
+    try {
+        stagingRoot = projectPath(root, ".webfront/developer/staging");
+    } catch (const std::exception&) {
+        return;
+    }
     const auto      now         = std::filesystem::file_time_type::clock::now();
     for (const auto& entry : std::filesystem::directory_iterator(stagingRoot, error))
         if (const auto written = entry.last_write_time(error); !error && now - written >= staleStagingAfter)

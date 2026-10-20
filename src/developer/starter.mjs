@@ -1,14 +1,14 @@
 import {gunzip, readTar, verifyIntegrity} from '../components/tools/wf.mjs';
 import {safePackagePath} from './paths.mjs';
 import {publish, responseBytes} from './bootstrap.mjs';
+import {isPlainObject} from './entry.mjs';
 
 const decoder = new TextDecoder();
 const npmName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 function requireExactDependencies(dependencies) {
-    if (!isObject(dependencies)) throw new Error('Invalid starter project recipe');
+    if (!isPlainObject(dependencies)) throw new Error('Invalid starter project recipe');
     for (const [name, version] of Object.entries(dependencies))
         if (!npmName.test(name) || typeof version !== 'string' || !exactVersion.test(version))
             throw new Error('Starter dependencies must name exact npm versions');

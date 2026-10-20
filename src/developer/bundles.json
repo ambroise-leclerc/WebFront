@@ -1,14 +1,14 @@
 {
   "src/developer/bootstrap.mjs": "1bde50282b4137f158fe952c77ba58741b8c7ee53443b210f287a3b8c2d0cf26",
   "src/developer/bootstrap-entry.mjs": "97f5e00e81ffb545b35c8fbb5c083a9c321ba3e4560064bd249fb8521041860e",
-  "src/developer/packages.mjs": "e753d2be0085837e23b0d98148843f99f5f70c7df6a146cce721088a1dd9e6ba",
-  "src/developer/starter.mjs": "d5a3f949532bfb82c072583e66c2484a467ad92e0de404091677ccb4720760ea",
+  "src/developer/packages.mjs": "f71534d77717434a71e8b7f74ab077e31242beda45da3b7570a0f08d67118113",
+  "src/developer/starter.mjs": "cff5348168788dfda204444722c5506fe0a6ec8b96b651a5161834d9b181e9e4",
   "src/developer/paths.mjs": "d382f5a4ba8313c94d753f03ed374a9068025cbeef408cbd0da3b213eb95de41",
-  "src/developer/runtime.mjs": "9f4aecd1d2ebaa8a24654e3a61c64e57c1171842fb8c5e15a20ecb35966f98a8",
+  "src/developer/runtime.mjs": "b7d6a275bfc5321eb1858331a11634d93b6a8b33c05799094656180a0c5688a6",
   "src/developer/compiler.mjs": "3f7e187ca9a4c2645ef3823127457cad655919cbea3c7c0f22fb7ae2cc87e0e5",
   "src/developer/bundler.mjs": "b0ff79a1b0caa012c25ec7b7f121d7d50af1aa1651231d3dcf2f39470c4ea25c",
   "src/developer/entry.mjs": "489c77b96c3a44e75a3a9470f0a8be5d2d1bed4499f82fc13742e52c71fac728",
-  "src/developer/resolve.mjs": "74ac885a2eaa5075a4a0e2e0dcf226c3660fc506805aa01c410326f5431a4130",
+  "src/developer/resolve.mjs": "8b96b850af215be51f5cb85cc9c69e057afa04dfb8a57e572620c07059c17fa3",
   "src/developer/embed.mjs": "c8fb80998abecdd5fdeba77aa549ff638d849dc9fd7f34c896fb6c0c0bf15f34",
   "src/pi/main.tsx": "d3161b35db204ba54f782f711183e8d96aeff7c92d885c33a6ec168cf461e453",
   "src/pi/style.css": "360e2c7ae6d3699b00e18cbf67efbae7a8d8863d88926b31139e102cf38e5abd",
@@ -21,6 +21,6 @@
   "tools/developer/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "tools/assets/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
   "src/developer/bootstrap.bundle.mjs": "d213a124758a04b709d768218526a2103aa84e817d39369b99d29d88476ef6b4",
-  "src/developer/packages.bundle.mjs": "b77a275a99729bee34d95415147daded50749f8840b6ee728c09fa475d57c35b",
-  "include/system/DeveloperReleaseData.hpp": "9b68d8fb64c19c6646a08f4c0086acfd7ad7f9c346e84e51fadafa4f7ecb8b8c"
+  "src/developer/packages.bundle.mjs": "344dfc5f9b63a61dc070f0d460aee094204c8f688e3c8e43b6bb764046459a7c",
+  "include/system/DeveloperReleaseData.hpp": "0d905c5c1316d3d6de28d4a0a92e55cc0c7303d56714df2603209495dc18023c"
 }

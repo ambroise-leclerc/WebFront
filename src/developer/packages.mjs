@@ -177,8 +177,13 @@ function validateNode(lock, id, node) {
         throw new Error('Dangling locked dependency');
 }
 
+function hasLockShape(lock) {
+    if (lock?.format !== 1) return false;
+    return Boolean(lock.roots) && Boolean(lock.packages);
+}
+
 export function validateLock(lock) {
-    if (lock?.format !== 1 || !lock.roots || !lock.packages) throw new Error('Unsupported package lock');
+    if (!hasLockShape(lock)) throw new Error('Unsupported package lock');
     for (const [id, node] of Object.entries(lock.packages)) validateNode(lock, id, node);
     if (Object.values(lock.roots).some(root => !lock.packages[root.id])) throw new Error('Dangling locked root');
     return lock;

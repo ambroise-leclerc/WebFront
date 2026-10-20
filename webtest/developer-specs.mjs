@@ -22,6 +22,8 @@ try {
     await runtime.execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
     const lock = await runtime.readLock(webFront);
     assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
+    const listed = await runtime.execute(['list'], context);
+    assert(listed.split('\n').length === 3 && listed.includes('react@19.3.1'), 'wf list must name the installed packages');
     const historyLength = history.length;
     await runtime.execute(['preview', 'ui/main.tsx'], context);
     const frame = context.preview;
