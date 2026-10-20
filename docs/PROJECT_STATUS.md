@@ -9,20 +9,27 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   not require Node/npm on application developers' machines.
 - The Game of Life demo (`WebFrontLifeDeveloper`, `wf create life`) uses a compact C++23
   bitset simulation and a spatial React/canvas interface with translucent panels, interactive
-  patterns, playback, single step and tempo. The original PI demo remains available. Both cover local TSX, React/React DOM and scheduler, a same-window preview and an
-  application-owned generated provider. A second executable uses the provider with no developer
-  root or callbacks. Existing React/Babel/terminal providers remain supported.
-- Real WKWebView coverage exercises downloading from a local fixture registry, WASM compilation,
-  PI results, C++ Life generations, playback/reset, deterministic header generation, compiling the headers and running from an empty
-  working directory. Linux CEF/Xvfb and other native engines require their corresponding runs;
-  WKWebView evidence does not qualify them.
+  patterns, playback, single step and tempo. The original PI demo remains available. Both cover
+  local TSX, React/React DOM and scheduler, a same-window preview and an application-owned
+  generated provider. Offline executables use those providers without developer roots/callbacks.
+  Existing React/Babel/terminal providers remain supported.
+- Local validation passes 250 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases and
+  14 JavaScript checks. Browser coverage includes PI results, C++ Life generations, playback/reset,
+  deterministic header generation and compiling/running both embedded applications from empty
+  working directories. Repeated previews replace session history instead of accumulating entries.
+  Linux CEF/Xvfb passes all 14 integration cases with GCC and Clang in
+  [run 39421265580](https://github.com/ambroise-leclerc/WebFront/actions/runs/39421265580);
+  its WKWebView job also passes. Windows CI follow-up remains tracked in #288.
 - Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
-  configuration. `wf create life` and `wf create pi` create fresh editable projects without overwriting existing files.
-  Maintainer preparation requires Node/npm; consumers do not. The original version 0.1.0 remains at
-  `https://ambroise-leclerc.github.io/WebFront/developer/0.1.0/`. The live WKWebView smoke test
-  downloaded the environment/starter from Pages and React dependencies from npm, then passed
-  the PI preview and deterministic header checks. Deployment and CI follow-up are tracked in #288.
+  configuration. `wf create life` and `wf create pi` create fresh editable projects without
+  overwriting existing files. Maintainer preparation requires Node/npm; consumers do not.
+  Version 0.2.0 is served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
+  with the same archives retained in the `developer-v0.2.0` prerelease. Version 0.1.0 is preserved.
+  The live WKWebView smoke test downloaded both starters and the environment from Pages, fetched
+  React dependencies from npm, passed PI/Life previews and deterministic generation, then compiled
+  those public-path headers and ran both applications offline with developer callbacks absent.
+  Pages returned HTTP 200, CORS `*` and byte-identical pinned environment data on 2026-10-20.
 - Browser packages only: no installation scripts, native modules, Node API shims, optional
   dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
   dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.

@@ -31,7 +31,9 @@ int main() {
 
 The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
 Version 0.2.0 adds the Game of Life starter; version 0.1.0 and its PI starter remain available.
-Live download/build checks supplement the offline CTest fixtures.
+On 2026-10-20, the 0.2.0 public download/WASM/React/PI/Life path passed in WKWebView, followed
+by compiling both resulting headers and running both applications from empty working directories.
+Pages returned HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
 `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/environment.tgz`. It pins one version and
@@ -187,7 +189,9 @@ cmake --build build-native --parallel
 ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
 ```
 
-The GitHub CI prepares these fixtures for both WKWebView and CEF jobs.
+The GitHub CI prepares these fixtures for both WKWebView and CEF jobs. The Life version passed
+WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
+[run 39421265580](https://github.com/ambroise-leclerc/WebFront/actions/runs/39421265580).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
 `DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, PI and Life previews, C++ generation/animation and
 repeatable header generation. Its CTest fixtures then build that **browser-generated** header and run
