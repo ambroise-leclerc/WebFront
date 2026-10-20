@@ -2,7 +2,7 @@ import {Terminal} from '../../third_party/xterm/xterm.mjs';
 import {FitAddon} from '../../third_party/xterm/addon-fit.mjs';
 import {LineEditor, tokenize} from '../components/terminal/terminal.mjs';
 import {resolvePackages, validateLock, downloadPackage} from './packages.mjs';
-import {readProject, publish} from './bootstrap.mjs';
+import {readProject, publish} from './io.mjs';
 import {createStarter} from './starter.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 

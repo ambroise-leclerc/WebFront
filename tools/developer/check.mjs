@@ -6,7 +6,8 @@ import {readFile} from 'node:fs/promises';
 import {resolvePackages, downloadPackage, validateLock} from '../../src/developer/packages.bundle.mjs';
 import {packageEntry, normalize, virtualPlugin} from '../../src/developer/bundler.mjs';
 import {generateProvider, compress} from '../../src/developer/embed.mjs';
-import {environmentFiles, bootstrap, publish, responseBytes} from '../../src/developer/bootstrap.mjs';
+import {environmentFiles, bootstrap} from '../../src/developer/bootstrap.mjs';
+import {publish, responseBytes} from '../../src/developer/io.mjs';
 import {tar} from './archive.mjs';
 
 const encoder = new TextEncoder();

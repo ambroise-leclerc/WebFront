@@ -1,4 +1,5 @@
-import {bootstrap, call} from './bootstrap.mjs';
+import {bootstrap} from './bootstrap.mjs';
+import {call} from './io.mjs';
 
 if (typeof document !== 'undefined' && document.getElementById('retry')) {
     const status = document.getElementById('status');
