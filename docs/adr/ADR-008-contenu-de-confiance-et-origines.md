@@ -1,24 +1,23 @@
-# ADR-008 : Limiter les origines du bridge sans promettre un sandbox
+# ADR-008 : Restreindre les origines du pont sans promettre d’isolation
 
 ## Versions
 
-| Version | Date | État | Auteur | Évolution | Commit |
+| Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Création initiale : politique commune des origines du bridge, de la navigation et des popups. | [d59db71](https://github.com/ambroise-leclerc/WebFront/commit/d59db712f1d390abe1457a5046b904bd330b85cc) |
+| 1.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Décision initiale : politique commune des origines du pont, de la navigation et des fenêtres surgissantes. | [d59db71](https://github.com/ambroise-leclerc/WebFront/commit/d59db712f1d390abe1457a5046b904bd330b85cc) |
 
-## Statut et date
+## État et chronologie
 
-**Acceptée.** Création initiale : **2026-10-18** (version 1.0).
-Dernière évolution : **2026-10-18** (version 1.0).
-Le corps de l’ADR décrit la décision dans sa dernière version ; les versions antérieures
-et leurs changements sont identifiés dans le tableau ci-dessus.
+**Acceptée.** Décision initiale : **2026-10-18** (version 1.0).
+Dernière révision : **2026-10-18** (version 1.0).
+Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
 
-Une page locale ayant accès au bridge peut appeler les fonctions C++ enregistrées. Une
-fenêtre embarquée ou un outil installé n’isole pas automatiquement un script hostile.
-La politique commune doit protéger des connexions navigateur étrangères sans être présentée
-comme une authentification des clients natifs.
+Toute page locale admise sur le pont peut appeler les fonctions C++ enregistrées. Ni fenêtre
+intégrée ni outil installé ne confinent, à eux seuls, un script hostile. La politique commune
+doit écarter les connexions de navigateur d’origine étrangère, sans se faire passer pour une
+authentification des clients natifs.
 
 ## Décision
 
@@ -27,17 +26,17 @@ et transmise aux frontends intégrés. Par défaut, le bridge autorise l’origi
 la navigation principale embarquée reste sur cette origine et les popups sont bloqués.
 Des listes d’origines supplémentaires règlent séparément bridge et navigation.
 
-Vérifier l’Origin avant la réponse HTTP 101 et avant création du `WebLink`. Les origines
-malformées, opaques, dupliquées ou interdites produisent 403. Les clients sans Origin sont
+Que l’en-tête `Origin` soit vérifié avant la réponse HTTP 101 et la création du `WebLink`.
+Les origines malformées, opaques, dupliquées ou interdites produisent 403. Les clients sans Origin sont
 acceptés par défaut (`allowMissingOrigin`), ce qui ne prouve aucune identité : un client natif
 peut forger cet en-tête. `Host` ne donne pas une permission de bridge.
 
-Les dérogations de développement sont explicites. DevTools et menus restent activés par
-défaut. Le navigateur système contrôle sa propre navigation ; le serveur y applique quand même
+Que les dérogations de développement demeurent explicites. DevTools et menus restent activés
+par défaut. Le navigateur système contrôle sa propre navigation ; le serveur y applique néanmoins
 le contrôle du bridge. Les capacités des moteurs diffèrent, notamment les popups WKWebView.
 WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
 
-## Alternatives et arbitrage
+## Options écartées et motifs
 
 - Accepter toute origine par défaut : remplacé par le contrôle d’origine commun.
 - Traiter Origin comme un secret ou une identité : incompatible avec les clients natifs.
@@ -46,22 +45,23 @@ WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
 
 ## Conséquences
 
-- **Bénéfice :** refus cohérent des pages navigateur d’autres origines avant établissement du pont.
+- **Bénéfice :** refus des connexions au bridge provenant d’autres origines, avant que le pont
+  ne soit établi.
 - **Coût accepté :** configuration requise pour une interface de développement sur un autre port.
 - **Risque :** confiance excessive dans une allow-list ; un script autorisé partage l’autorité
   de l’application, et les outils installés aussi. Conserver loopback sauf choix explicite.
 
-## Règles d’implémentation et de génération de code
+## Prescriptions d’implémentation et de génération de code
 
-- Valider la configuration avant bind ; conserver les comparaisons d’origines normalisées
-  (schéma, hôte, port), sans assimiler `localhost` et `127.0.0.1`.
-- Ne pas autoriser le bridge parce que la navigation l’est, ni l’inverse.
+- Que la configuration soit validée avant la mise en écoute ; que les origines soient comparées
+  après normalisation du schéma, de l’hôte et du port, sans assimiler `localhost` à `127.0.0.1`.
+- Que l’autorisation de naviguer n’emporte pas celle d’utiliser le pont, ni l’inverse.
 - Ne pas contourner les contrôles pour un nouvel outil ou exemple ; demander une configuration
   explicite si l’origine change.
 - Tester refus avec contrôles positifs dans le vrai navigateur ; vérifier que `ready` rejette.
-- Ne pas annoncer sandbox, isolation des plugins ou accès distant sécurisé.
+- Qu’aucune isolation des extensions ni aucun accès distant sécurisé ne soient annoncés.
 
-## Références et vérification
+## Sources et vérification
 
 - [Politique et capacités détaillées](../CONTENT_POLICY.md),
   [ContentPolicy](../../include/ContentPolicy.hpp).

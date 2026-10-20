@@ -1,37 +1,37 @@
-# ADR-010 : Étendre par des composants optionnels et des outils de développement
+# ADR-010 : Étendre WebFront par des composants et outils facultatifs
 
 ## Versions
 
-| Version | Date | État | Auteur | Évolution | Commit |
+| Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-14 | Acceptée | Ambroise Leclerc | Création initiale : architecture des composants optionnels et premier terminal. | [40f5621](https://github.com/ambroise-leclerc/WebFront/commit/40f5621928fdd188f230bf08ff062f9557619046) |
+| 1.0 | 2026-10-14 | Acceptée | Ambroise Leclerc | Décision initiale : architecture des composants optionnels et premier terminal. | [40f5621](https://github.com/ambroise-leclerc/WebFront/commit/40f5621928fdd188f230bf08ff062f9557619046) |
 | 1.1 | 2026-10-14 | Acceptée | Ambroise Leclerc | Abonnements UI multiples et injection du navigateur appelant dans les callbacks. | [12a846b](https://github.com/ambroise-leclerc/WebFront/commit/12a846b653154862b6c71d4640ba396148653017) |
-| 1.2 | 2026-10-14 | Acceptée | Ambroise Leclerc | Store transactionnel et provider de fichiers des outils wf. | [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) |
+| 1.2 | 2026-10-14 | Acceptée | Ambroise Leclerc | Magasin transactionnel et fournisseur de fichiers des outils wf. | [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) |
 | 1.3 | 2026-10-15 | Acceptée | Ambroise Leclerc | Recherche, installation et ouverture des outils via une extension navigateur. | [18d5bb4](https://github.com/ambroise-leclerc/WebFront/commit/18d5bb4c5db6e4dc5ecf4867378d451887b2c133) |
 | 1.4 | 2026-10-15 | Acceptée | Ambroise Leclerc | Validation des outils avec un registre local factice. | [d53ffcc](https://github.com/ambroise-leclerc/WebFront/commit/d53ffcc40102c7405eb7060d7021aad366d6d7e9) |
-| 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Interruption des commandes navigateur et uploads séquentiels par chunks de 256 KiB. | [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) |
+| 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Interruption des commandes navigateur et transferts séquentiels par blocs de 256 KiB. | [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) |
 
-## Statut et date
+## État et chronologie
 
-**Acceptée.** Création initiale : **2026-10-14** (version 1.0).
-Dernière évolution : **2026-10-16** (version 1.5).
-Le corps de l’ADR décrit la décision dans sa dernière version ; les versions antérieures
-et leurs changements sont identifiés dans le tableau ci-dessus.
+**Acceptée.** Décision initiale : **2026-10-14** (version 1.0).
+Dernière révision : **2026-10-16** (version 1.5).
+Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
 
-Le terminal introduit une interface réutilisable sans transformer le cœur en framework DOM.
-Il révèle le besoin d’abonnements multiples au démarrage UI et d’identification du navigateur
-appelant. Le gestionnaire `wf` prolonge ce composant pour installer des outils web npm.
+Le terminal apporte une interface réutilisable sans muer le cœur en framework DOM. Il fit
+apparaître deux nécessités : plusieurs abonnements au démarrage de l’interface et
+l’identification du navigateur appelant. Le gestionnaire `wf` étend ensuite cette voie aux
+outils web distribués par npm.
 
 ## Décision
 
-Un composant associe une façade C++ sous `include/components/`, un provider embarqué, un
-module ES exportant `mount(element, options)` et les types existants du bridge. Les noms de
+Que chaque composant réunisse une façade C++ sous `include/components/`, un fournisseur de
+ressources embarquées, un module ES exportant `mount(element, options)` et les types du pont. Les noms de
 callbacks utilisent `webfront.<composant>.<fonction>`. Les assets sont optionnels, absents de
 `WebFront` tant que les providers correspondants ne sont pas sélectionnés.
 
-Le code réutilisable utilise `subscribeUIStarted` et conserve le `UISubscription`, sans
+Que le code réutilisable emploie `subscribeUIStarted` et conserve le `UISubscription`, sans
 écraser l’unique handler `onUIStarted` de l’application. Le handle reste sûr après destruction
 de l’application. Un premier paramètre de type `App::UI` dans un callback reçoit le navigateur
 appelant ; il n’est pas décodé depuis les arguments JS.
@@ -47,7 +47,7 @@ emplacement projet que le gestionnaire. L’installation n’exécute pas de scr
 pas les dépendances : un outil doit embarquer ce qu’il utilise. Il partage l’origine et
 l’autorité du bridge de l’application ; c’est une fonction de développement de confiance.
 
-## Alternatives et arbitrage
+## Options écartées et motifs
 
 - Étendre le protocole pour chaque composant : évité, réutiliser les types du bridge.
 - Écraser le handler UI global : remplacé par des abonnements à durée de vie explicite.
@@ -64,19 +64,19 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 - **Risque :** un outil installé peut appeler tous les callbacks ; ce mécanisme ne remplace
   pas un système de plugins isolés. Staging et intégrité protègent l’installation, pas son code.
 
-## Règles d’implémentation et de génération de code
+## Prescriptions d’implémentation et de génération de code
 
-- Conserver les registres/stores par possession partagée dans les callbacks afin que la façade
+- Que registres et magasins soient possédés conjointement par les callbacks afin que la façade
   puisse disparaître avant l’application. Protéger les états utilisés par plusieurs threads.
-- Garder les prefixes réservés et attendre `webFront.ready` avant les appels.
+- Que les préfixes réservés soient conservés et que `webFront.ready` soit attendu avant tout appel.
 - Ne pas donner au composant un codec privé ; plafonner les sorties textuelles sous 65535 octets
   et utiliser les tableaux numériques pour les chunks binaires.
 - Tester `wf` avec registre local factice et répertoire temporaire ; vérifier traversal, rollback,
   intégrité erronée et lockfile invalide, sans toucher aux outils de l’utilisateur.
-- Versionner le lockfile de projet, pas `.webfront/`. Ne pas promettre d’authentification ou
-  d’isolation des outils.
+- Que le fichier de verrouillage du projet soit versionné, mais non `.webfront/` ; qu’aucune
+  authentification ni isolation des outils ne soit promise.
 
-## Références et vérification
+## Sources et vérification
 
 - [Architecture des composants et limites](../UI_COMPONENTS.md),
   [Terminal](../../include/components/Terminal.hpp), [ToolManager](../../include/components/ToolManager.hpp).
