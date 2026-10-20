@@ -6,6 +6,19 @@
 #include <iostream>
 
 namespace {
+std::string readFixtureText(const std::filesystem::path& path) {
+    const auto size = std::filesystem::file_size(path);
+    if (size > 16 * 1024 * 1024)
+        throw std::length_error("Fixture text exceeds its byte limit");
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        throw std::runtime_error("Cannot read fixture text");
+    std::string text(static_cast<std::size_t>(size), '\0');
+    if (!text.empty() && !file.read(text.data(), static_cast<std::streamsize>(text.size())))
+        throw std::runtime_error("Truncated fixture text");
+    return text;
+}
+
 class FixturesFS {
 public:
     explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) { }
@@ -34,8 +47,7 @@ int main(int argc, char** argv) {
         std::filesystem::copy(argv[1], project.path() / "fixtures", std::filesystem::copy_options::recursive);
         std::string            integrity;
         const auto             config = project.path() / "fixtures/provision.json";
-        std::ifstream          provisioning(config);
-        const std::string      json{std::istreambuf_iterator<char>(provisioning), {}};
+        const std::string      json   = readFixtureText(config);
         webfront::json::Reader reader{json};
         reader.object([&](const std::string& key) {
             if (key == "integrity")
@@ -48,8 +60,7 @@ int main(int argc, char** argv) {
         std::atomic<bool> passed{false};
         app.cppFunction("pi", &webfront::demo::pi);
         app.cppFunction("test.header", [&] {
-            std::ifstream     file(project.path() / "generated/PiUI.hpp", std::ios::binary);
-            const std::string header{std::istreambuf_iterator<char>(file), {}};
+            const auto header = readFixtureText(project.path() / "generated/PiUI.hpp");
             // The generated header is larger than a bridge string: return a stable small digest.
             return std::to_string(std::hash<std::string>{}(header));
         });
