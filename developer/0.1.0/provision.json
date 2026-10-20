@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "version": "0.1.0",
+  "environment": "./environment.tgz",
+  "integrity": "sha512-diiDXu7W4X0sa8jJMJe+lwKUh5zpeaALdODcx3+VxM19upHPB2fgOtxndm0cynJYk6oa6sTpRrUActBq/u7AcQ==",
+  "starters": {
+    "pi": {
+      "archive": "pi-starter.tgz",
+      "integrity": "sha512-ecWU426ggadHybOspffF7nH4zl43ZlfylmrkTBS6EBD6gFl8Z4uSbL6azoXLivt52zzYk0C7HjOKvpMrFGUnxw=="
+    }
+  }
+}
