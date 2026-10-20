@@ -48,6 +48,7 @@ export async function environmentFiles(bytes, integrity) {
         if (!safePath(path) || files.has(path)) throw new Error('Invalid or duplicate environment path');
         files.set(path, entry.bytes);
     }
+    if (!files.has('environment.json')) throw new Error('Environment archive has no environment.json');
     const manifest = JSON.parse(decoder.decode(files.get('environment.json')));
     if (manifest.protocol !== 1 || !safePath(manifest.entry) || !files.has(manifest.entry))
         throw new Error('Unsupported WebFront developer environment');

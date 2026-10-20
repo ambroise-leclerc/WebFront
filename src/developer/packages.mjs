@@ -46,9 +46,17 @@ export async function downloadPackage(name, requested, registry, fetchImpl = fet
     return {id: idOf(name, version), key: cacheKey(name, version, integrity), manifest: pkg, integrity, files};
 }
 
+// The installed version satisfying a range, so that a later install never moves or replaces it silently.
+function lockedNode(previous, name, range) {
+    if (!semver.validRange(range)) return null;
+    return Object.values(previous?.packages ?? {}).filter(node => node.name === name && semver.satisfies(node.version, range))
+        .sort((a, b) => semver.rcompare(a.version, b.version))[0] ?? null;
+}
+
 // A distinct node per exact version; edges are retained instead of flattening node_modules.
+// Versions already in options.previous are kept, and their archives must still match the recorded integrity.
 export async function resolvePackages(specifications, options = {}) {
-    const {registry = 'https://registry.npmjs.org/', fetchImpl = fetch, signal, download = downloadPackage} = options;
+    const {registry = 'https://registry.npmjs.org/', fetchImpl = fetch, signal, download = downloadPackage, previous} = options;
     const roots = {};
     const nodes = {};
     const downloads = new Map();
@@ -59,7 +67,10 @@ export async function resolvePackages(specifications, options = {}) {
         const request = `${name}@${range}`;
         let pkg = requests.get(request);
         if (!pkg) {
-            pkg = await download(name, range, registry, fetchImpl, signal);
+            const pinned = lockedNode(previous, name, range);
+            pkg = await download(name, pinned?.version ?? range, registry, fetchImpl, signal);
+            if (pinned && pkg.integrity !== pinned.integrity)
+                throw new Error(`${pkg.id} no longer matches the integrity recorded in the lock`);
             requests.set(request, pkg);
         }
         if (nodes[pkg.id]) return pkg.id; // includes cycles currently being resolved

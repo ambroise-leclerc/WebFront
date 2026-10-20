@@ -32,7 +32,8 @@ int main() {
 
 The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
 Version 0.3.0 provides the packed-bitset Life starter and requires the bridge support from #289.
-Published versions 0.1.0 and 0.2.0 remain immutable; 0.2.0 used string-based Life grids.
+Version 0.3.1 makes `wf install` keep the versions of the installed lock and reject an archive whose integrity differs from it.
+Published versions 0.1.0 to 0.3.0 remain immutable; 0.2.0 used string-based Life grids.
 On 2026-10-20, the 0.3.0 public download/WASM/React/PI/Life path passed in WKWebView, including
 128-byte grid exchange, painting cells across an octet boundary, playback/reset and deterministic
 header generation. Both resulting headers were compiled and the applications passed offline
@@ -40,7 +41,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.3.0/environment.tgz`. It pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.3.1/environment.tgz`. It pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -153,8 +154,10 @@ remain supported.
   isolate downloaded tools or defend against concurrent modifications by another local process.
 - Transfers use sequential 256 KiB chunks. Downloads are bounded to 64 MiB compressed; unpacking,
   dependency source graphs and individual publication transactions to 256 MiB, with 512 packages
-  and eight active publications at most. Browser builds time out after 120 seconds.
-- Installing another package may re-resolve compatible transitive ranges; review the resulting lock
+  and eight active publications at most. A publication untouched for ten minutes (a reloaded or disconnected browser) is
+  abandoned, and staging left by a crashed process is removed after an hour. Browser builds time out after 120 seconds.
+- Installing another package keeps every locked version that still satisfies a requested range and fails if its
+  archive no longer matches the recorded integrity; only new ranges are resolved. Review the resulting lock
   changes. Restoring packages from a lockfile on a fresh machine is not yet a separate command.
 
 ## Environment distribution and offline tests (maintainers)

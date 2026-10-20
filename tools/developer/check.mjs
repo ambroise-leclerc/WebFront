@@ -51,6 +51,30 @@ test('resolves transitive semver edges, cycles, multiple versions and required p
     assert.equal(multiple.lock.packages['b@1.0.0'].dependencies.dep, 'dep@2.0.0');
 });
 
+test('an installed lock pins transitive versions and rejects changed archives', async () => {
+    const available = {'2.1.0': 'sha512-first', '2.2.0': 'sha512-second'};
+    const requests = [];
+    const download = (tampered = false) => async (name, range) => {
+        requests.push(`${name}@${range}`);
+        const manifest = {name, version: '1.0.0', dependencies: name === 'app' ? {dep: '^2.0.0'} : {}};
+        let version = '1.0.0';
+        if (name === 'dep') version = available[range] ? range : '2.2.0';
+        if (name === 'dep') Object.assign(manifest, {version});
+        const integrity = name === 'dep' ? (tampered && version === '2.1.0' ? 'sha512-other' : available[version]) : 'sha512-app';
+        return {id: idOf(name, version), key: `${name}-${version}`, manifest, integrity, files: new Map()};
+    };
+    const first = await resolvePackages(['app'], {download: async (name, range) => download()(name, range === '^2.0.0' ? '2.1.0' : range)});
+    assert.equal(first.lock.packages['app@1.0.0'].dependencies.dep, 'dep@2.1.0');
+    requests.length = 0;
+    const again = await resolvePackages(['app@1.0.0'], {download: download(), previous: first.lock});
+    assert.equal(again.lock.packages['app@1.0.0'].dependencies.dep, 'dep@2.1.0');
+    assert.ok(requests.includes('dep@2.1.0') && !requests.includes('dep@^2.0.0'), requests.join());
+    await assert.rejects(resolvePackages(['app@1.0.0'], {download: download(true), previous: first.lock}),
+        /dep@2\.1\.0 no longer matches the integrity recorded in the lock/);
+    const fresh = await resolvePackages(['app@1.0.0'], {download: download()});
+    assert.equal(fresh.lock.packages['app@1.0.0'].dependencies.dep, 'dep@2.2.0');
+});
+
 test('rejects integrity, archive identity, traversal and installation scripts', async () => {
     for (const [bytes, pattern] of [
         [fixture('wrong', '1.0.0'), /identity mismatch/],
@@ -98,6 +122,8 @@ test('environment integrity and protocol are checked before publication', async 
     await assert.rejects(environmentFiles(archive, integrity(encode('wrong'))), /Integrity check failed/);
     const wrong = compress(tar(new Map([['package/environment.json', encode({protocol: 2, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('')]])));
     await assert.rejects(environmentFiles(wrong, integrity(wrong)), /Unsupported WebFront/);
+    const missing = compress(tar(new Map([['package/runtime.mjs', encode('')]])));
+    await assert.rejects(environmentFiles(missing, integrity(missing)), /no environment\.json/);
 });
 
 test('aborted publications never commit and clean their staging transaction', async () => {

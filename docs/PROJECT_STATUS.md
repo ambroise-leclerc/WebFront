@@ -9,8 +9,8 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   packed least-significant first into byte `i / 8`; exact lengths and zero padding are validated.
   Zero-sized bitsets are supported. JavaScript must know the logical bit count separately.
 - Life registers `nextLife` directly and React exchanges 128 packed bytes per generation.
-  Developer distribution 0.3.0 is published on GitHub Pages and archived as `developer-v0.3.0`.
-  Published 0.1.0 and 0.2.0 distributions remain immutable.
+  Developer distribution 0.3.0 is published on GitHub Pages and archived as `developer-v0.3.0`; the pinned
+  0.3.1 (locked reinstall) awaits its `developer-v0.3.1` publication. Published 0.1.0 to 0.3.0 remain immutable.
 - Local verification: all 252 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases
   and 14 JavaScript checks pass. Repeated 0.3.0 provisioning produces byte-identical archives
   and bootstrap configuration. Browser tests verify packed Life grids, playback/reset,

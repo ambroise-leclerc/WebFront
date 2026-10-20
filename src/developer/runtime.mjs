@@ -28,7 +28,7 @@ export async function install(bridge, specs, {registry, signal, progress = () =>
         requested.set(at < 0 ? spec : spec.slice(0, at), at < 0 ? 'latest' : spec.slice(at + 1));
     }
     const {lock, downloads} = await resolvePackages([...requested].map(([name, version]) => `${name}@${version}`), {
-        registry, signal, fetchImpl,
+        registry, signal, fetchImpl, previous,
         download: async (...args) => { progress(`Resolving ${args[0]}@${args[1]}`); return downloadPackage(...args); },
     });
     for (const [id, files] of downloads) {
@@ -75,7 +75,7 @@ export async function compile(bridge, entry, signal) {
     });
     files.set('index.html', applicationPage(files));
     const notices = [`WebFront browser build; lock format ${lock.format}`];
-    for (const [id, node] of Object.entries(lock.packages).sort()) {
+    for (const [id, node] of Object.entries(lock.packages).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
         notices.push(`${id} ${node.integrity}`);
         for (const [path, bytes] of packages[id])
             if (/(^|\/)(licen[cs]e|copying|notice)(\.|$)/i.test(path)) notices.push(`${id}/${path}\n${decoder.decode(bytes)}`);

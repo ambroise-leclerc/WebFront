@@ -4,6 +4,9 @@
 #include <DeveloperApp.hpp>
 #include <http/MimeType.hpp>
 
+#include <chrono>
+#include <fstream>
+
 using namespace webfront;
 using webfront::test::TemporaryDirectory;
 
@@ -143,5 +146,79 @@ SCENARIO("A downloaded starter never replaces a developer's existing project") {
                 REQUIRE(read(store, "new-ui/main.tsx") == "starter");
             }
         }
+    }
+}
+
+SCENARIO("Transactions abandoned by a disconnected browser never lock the project") {
+    TemporaryDirectory project;
+    const auto         stagingRoot = project.path() / ".webfront/developer/staging";
+    GIVEN("the maximum number of unfinished transactions") {
+        developer::Store         store{project.path()};
+        std::vector<std::string> ids;
+        for (std::size_t index = 0; index < developer::maxTransactions; ++index)
+            ids.push_back(store.begin("generated/" + std::to_string(index), true));
+        THEN("active transactions still bound the number of publications") {
+            REQUIRE_THROWS(store.begin("generated/extra", true));
+        }
+    }
+    GIVEN("unfinished transactions left by a browser that reloaded") {
+        developer::Store         store{project.path(), std::chrono::milliseconds{0}};
+        std::vector<std::string> ids;
+        for (std::size_t index = 0; index < developer::maxTransactions; ++index)
+            ids.push_back(store.begin("generated/" + std::to_string(index), true));
+        WHEN("a new publication begins") {
+            const auto id = store.begin("generated/new", true);
+            THEN("the abandoned ones are discarded with their staging") {
+                REQUIRE_FALSE(std::filesystem::exists(stagingRoot / ids.front()));
+                REQUIRE_THROWS(store.write(ids.front(), "file", 0, bytes("late")));
+                store.write(id, "file", 0, bytes("fresh"));
+                store.commit(id);
+                REQUIRE(read(store, "generated/new/file") == "fresh");
+            }
+        }
+    }
+    GIVEN("staging left by a crashed process") {
+        std::filesystem::create_directories(stagingRoot / "1");
+        std::filesystem::create_directories(stagingRoot / "2");
+        std::filesystem::last_write_time(stagingRoot / "1", std::filesystem::file_time_type::clock::now() - std::chrono::hours{2});
+        WHEN("the project is opened again") {
+            developer::Store store{project.path()};
+            THEN("only the stale staging is removed") {
+                REQUIRE_FALSE(std::filesystem::exists(stagingRoot / "1"));
+                REQUIRE(std::filesystem::exists(stagingRoot / "2"));
+            }
+        }
+    }
+    GIVEN("a backup left by a crashed commit") {
+        developer::Store store{project.path()};
+        auto             first = store.begin("generated/out.hpp", false);
+        store.write(first, "output", 0, bytes("old"));
+        store.commit(first);
+        const auto second = store.begin("generated/out.hpp", false);
+        store.write(second, "output", 0, bytes("new"));
+        std::filesystem::create_directories(stagingRoot / (second + "-backup/inner"));
+        std::ofstream{stagingRoot / (second + "-backup/inner/file")} << "stale";
+        THEN("the replacement still commits") {
+            store.commit(second);
+            REQUIRE(read(store, "generated/out.hpp") == "new");
+        }
+    }
+}
+
+SCENARIO("The staging area is protected however its path is spelled") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a symbolic link to the staging area inside the project") {
+        std::filesystem::create_directories(project.path() / ".webfront/developer/staging");
+        const auto      victim = store.begin("victim", true);
+        std::error_code error;
+        std::filesystem::create_directory_symlink(project.path() / ".webfront/developer/staging", project.path() / "alias", error);
+        if (!error) {
+            THEN("it cannot be used as a publication destination") {
+                REQUIRE_THROWS(store.begin("alias", true));
+                REQUIRE_THROWS(store.begin("alias/" + victim, true));
+            }
+        }
+        store.abort(victim);
     }
 }

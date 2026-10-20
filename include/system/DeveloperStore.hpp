@@ -4,12 +4,18 @@
 #include "ToolStore.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <limits>
 
 namespace webfront::developer {
 
 inline constexpr std::size_t   chunkSize           = 256 * 1024;
 inline constexpr std::uint64_t maxTransactionBytes = 256 * 1024 * 1024;
+inline constexpr std::size_t   maxTransactions     = 8;
+/// A transaction untouched for this long is abandoned: its browser reloaded or disconnected.
+inline constexpr std::chrono::minutes defaultAbandonedAfter{10};
+/// Staging left by a crashed process is removed at startup once it is this old.
+inline constexpr std::chrono::hours staleStagingAfter{1};
 
 // Resolve existing parents too: a symlink must never turn a relative project path into an escape.
 inline std::filesystem::path projectPath(const std::filesystem::path& root, std::string_view relative) {
@@ -25,9 +31,11 @@ inline std::filesystem::path projectPath(const std::filesystem::path& root, std:
 
 class Store {
 public:
-    explicit Store(std::filesystem::path project) : root(std::filesystem::canonical(project)) {
+    explicit Store(std::filesystem::path project, std::chrono::steady_clock::duration abandoned = defaultAbandonedAfter)
+        : root(std::filesystem::canonical(project)), abandonedAfter(abandoned) {
         if (!std::filesystem::is_directory(root))
             throw std::invalid_argument("Developer project must be a directory");
+        removeStaleStaging();
     }
     Store(const Store&)            = delete;
     Store& operator=(const Store&) = delete;
@@ -62,33 +70,37 @@ public:
 
     std::string begin(std::string destination, bool directory, bool replace = true) {
         std::scoped_lock lock(mutex);
-        if (transactions.size() >= 8)
+        expireAbandoned();
+        if (transactions.size() >= maxTransactions)
             throw std::runtime_error("Too many developer transactions");
         const auto target = projectPath(root, destination);
         if (!replace && std::filesystem::exists(std::filesystem::symlink_status(target)))
             throw std::runtime_error("Starter destination already exists");
-        if (target == root || destination == ".webfront" || destination == ".webfront/developer" || destination.starts_with(".webfront/developer/staging"))
+        const auto stagingRoot = projectPath(root, ".webfront/developer/staging");
+        std::filesystem::create_directories(stagingRoot);
+        // Compare resolved paths: a symlink or a differently cased spelling must not reach the staging area.
+        const auto resolved = std::filesystem::weakly_canonical(target);
+        const auto staging  = std::filesystem::weakly_canonical(stagingRoot);
+        if (resolved == root || isParent(resolved, staging) || isParent(staging, resolved))
             throw std::invalid_argument("Invalid publication destination");
         for (const auto& [id, tx] : transactions) {
             (void)id;
-            if (tx.target == target || isParent(tx.target, target) || isParent(target, tx.target))
+            if (tx.resolved == resolved || isParent(tx.resolved, resolved) || isParent(resolved, tx.resolved))
                 throw std::runtime_error("Destination is already being written");
         }
-        const auto stagingRoot = projectPath(root, ".webfront/developer/staging");
-        std::filesystem::create_directories(stagingRoot);
-        std::filesystem::path staging;
+        std::filesystem::path stagingDirectory;
         std::string           id;
         do {
-            id      = std::to_string(++nextId);
-            staging = stagingRoot / id;
-        } while (!std::filesystem::create_directory(staging));
-        transactions.emplace(id, Transaction{staging, target, std::move(destination), directory, replace, 0, {}});
+            id               = std::to_string(++nextId);
+            stagingDirectory = stagingRoot / id;
+        } while (!std::filesystem::create_directory(stagingDirectory));
+        transactions.emplace(id, Transaction{stagingDirectory, target, resolved, std::move(destination), directory, replace, 0, {}, std::chrono::steady_clock::now()});
         return id;
     }
 
     void write(std::string id, std::string path, std::uint64_t offset, std::vector<std::uint8_t> bytes) {
         std::scoped_lock lock(mutex);
-        auto&            tx = transactions.at(id);
+        auto&            tx = transaction(id);
         if (!tx.directory && path != "output")
             throw std::invalid_argument("Expected output file");
         const auto relative = fs::tools::safeRelativePath(path);
@@ -111,7 +123,7 @@ public:
 
     void commit(std::string id) {
         std::scoped_lock lock(mutex);
-        auto&            tx = transactions.at(id);
+        auto&            tx = transaction(id);
         // Revalidate after the browser has finished writing.
         if (projectPath(root, tx.destination) != tx.target)
             throw std::runtime_error("Project path changed");
@@ -120,6 +132,8 @@ public:
             throw std::runtime_error("No output was staged");
         std::filesystem::create_directories(tx.target.parent_path());
         const auto backup = tx.staging.parent_path() / (id + "-backup");
+        // A backup left by a crashed process must not make the rename below fail.
+        std::filesystem::remove_all(backup);
         const bool exists = std::filesystem::exists(std::filesystem::symlink_status(tx.target));
         if (exists && !tx.replace)
             throw std::runtime_error("Starter destination already exists");
@@ -148,6 +162,46 @@ public:
     }
 
 private:
+    struct Transaction {
+        std::filesystem::path                staging;
+        std::filesystem::path                target;
+        std::filesystem::path                resolved;
+        std::string                          destination;
+        bool                                 directory;
+        bool                                 replace;
+        std::uint64_t                        size;
+        std::map<std::string, std::uint64_t> files;
+        std::chrono::steady_clock::time_point lastUse;
+    };
+    Transaction& transaction(const std::string& id) {
+        const auto found = transactions.find(id);
+        if (found == transactions.end())
+            throw std::runtime_error("Unknown or abandoned developer transaction");
+        found->second.lastUse = std::chrono::steady_clock::now();
+        return found->second;
+    }
+
+    void expireAbandoned() {
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = transactions.begin(); it != transactions.end();) {
+            if (now - it->second.lastUse >= abandonedAfter) {
+                std::error_code ignored;
+                std::filesystem::remove_all(it->second.staging, ignored);
+                it = transactions.erase(it);
+            } else
+                ++it;
+        }
+    }
+
+    void removeStaleStaging() const {
+        std::error_code error;
+        const auto      stagingRoot = root / ".webfront" / "developer" / "staging";
+        const auto      now         = std::filesystem::file_time_type::clock::now();
+        for (const auto& entry : std::filesystem::directory_iterator(stagingRoot, error))
+            if (const auto written = entry.last_write_time(error); !error && now - written >= staleStagingAfter)
+                std::filesystem::remove_all(entry.path(), error);
+    }
+
     static bool isParent(const std::filesystem::path& parent, const std::filesystem::path& child) {
         auto part = child.begin();
         for (const auto& component : parent) {
@@ -158,16 +212,8 @@ private:
         return true;
     }
 
-    struct Transaction {
-        std::filesystem::path                staging;
-        std::filesystem::path                target;
-        std::string                          destination;
-        bool                                 directory;
-        bool                                 replace;
-        std::uint64_t                        size;
-        std::map<std::string, std::uint64_t> files;
-    };
     std::filesystem::path                    root;
+    std::chrono::steady_clock::duration      abandonedAfter;
     mutable std::mutex                       mutex;
     std::map<std::string, Transaction>       transactions;
     static inline std::atomic<std::uint64_t> nextId{0};
