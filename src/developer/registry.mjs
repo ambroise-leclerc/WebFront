@@ -19,7 +19,8 @@ async function fetchPackument(name, base, {fetchImpl, signal}) {
 function resolveVersion(packument, spec) {
     const tagged = packument['dist-tags']?.[spec];
     if (tagged) return tagged;
-    return semver.valid(spec) ? spec : semver.maxSatisfying(Object.keys(packument.versions ?? {}), spec);
+    if (semver.valid(spec)) return spec;
+    return semver.maxSatisfying(Object.keys(packument.versions ?? {}), spec);
 }
 
 function selectVersion(packument, name, requested) {
@@ -41,10 +42,13 @@ async function readArchive(bytes) {
     return files;
 }
 
+const hasInstallScript = pkg => installScripts.some(key => pkg.scripts?.[key]);
+const hasNativeFile = files => files.has('binding.gyp') || [...files.keys()].some(path => path.endsWith('.node'));
+
 function needsInstallStep(pkg, files) {
-    const scripts = pkg.scripts ?? {};
-    if (installScripts.some(key => scripts[key]) || pkg.gypfile) return true;
-    return files.has('binding.gyp') || [...files.keys()].some(path => path.endsWith('.node'));
+    if (hasInstallScript(pkg)) return true;
+    if (pkg.gypfile) return true;
+    return hasNativeFile(files);
 }
 
 async function fetchTarball(name, manifest, base, {fetchImpl, signal}) {

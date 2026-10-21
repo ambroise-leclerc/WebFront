@@ -1,22 +1,21 @@
 import {gunzip, readTar, verifyIntegrity} from '../components/tools/wf.mjs';
 import {readProject, publish, responseBytes} from './io.mjs';
+import {isUnsafe} from './paths.mjs';
+
+const safePath = path => !isUnsafe(path);
 
 const decoder = new TextDecoder();
 
-function safePath(path) {
-    if (typeof path !== 'string' || !path) return false;
-    if (path.includes('\\') || path.includes('\0')) return false;
-    return !path.split('/').some(part => !part || part === '.' || part === '..');
+function addEntry(files, entry) {
+    if (!entry.path.startsWith('package/')) throw new Error('Invalid environment archive root');
+    const path = entry.path.slice(8);
+    if (!safePath(path) || files.has(path)) throw new Error('Invalid or duplicate environment path');
+    files.set(path, entry.bytes);
 }
 
 function archiveFiles(tarball) {
     const files = new Map();
-    for (const entry of readTar(tarball)) {
-        if (!entry.path.startsWith('package/')) throw new Error('Invalid environment archive root');
-        const path = entry.path.slice(8);
-        if (!safePath(path) || files.has(path)) throw new Error('Invalid or duplicate environment path');
-        files.set(path, entry.bytes);
-    }
+    for (const entry of readTar(tarball)) addEntry(files, entry);
     return files;
 }
 
@@ -61,12 +60,10 @@ function validStarter(starter) {
 }
 
 function pinnedStarters(manifest, environmentUrl) {
-    const starters = {};
-    for (const [name, starter] of Object.entries(manifest.starters ?? {})) {
+    return Object.fromEntries(Object.entries(manifest.starters ?? {}).map(([name, starter]) => {
         if (!validStarter(starter)) throw new Error('Invalid pinned starter metadata');
-        starters[name] = {url: new URL(starter.archive, environmentUrl).href, integrity: starter.integrity};
-    }
-    return starters;
+        return [name, {url: new URL(starter.archive, environmentUrl).href, integrity: starter.integrity}];
+    }));
 }
 
 export async function bootstrap(bridge, config, fetchImpl = fetch, progress = () => {}) {

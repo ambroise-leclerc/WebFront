@@ -77,9 +77,7 @@ public:
         // Revalidate after the browser has finished writing.
         if (projectPath(root, tx.destination) != tx.target)
             throw std::runtime_error("Project path changed");
-        const auto source = tx.directory ? tx.staging : tx.staging / "output";
-        if (!tx.directory && !std::filesystem::is_regular_file(source))
-            throw std::runtime_error("No output was staged");
+        const auto source = stagedSource(tx);
         const auto backup = tx.staging.parent_path() / (id + "-backup");
         replaceTarget(tx.target, tx.replace, source, backup);
         std::error_code ignored;
@@ -133,17 +131,36 @@ private:
     void requireFreeDestination(const std::filesystem::path& resolved, const std::filesystem::path& staging) const {
         if (resolved == root || related(resolved, staging))
             throw std::invalid_argument("Invalid publication destination");
+        requireNoOverlap(resolved);
+    }
+
+    void requireNoOverlap(const std::filesystem::path& resolved) const {
         for (const auto& entry : transactions)
             if (related(entry.second.resolved, resolved))
                 throw std::runtime_error("Destination is already being written");
+    }
+
+    static std::filesystem::path stagedSource(const Transaction& tx) {
+        if (tx.directory)
+            return tx.staging;
+        auto output = tx.staging / "output";
+        if (!std::filesystem::is_regular_file(output))
+            throw std::runtime_error("No output was staged");
+        return output;
+    }
+
+    static void requireWithinLimits(const Transaction& tx, std::size_t size) {
+        if (size > chunkSize)
+            throw std::length_error("Developer transaction exceeds its byte limit");
+        if (tx.size + size > maxTransactionBytes)
+            throw std::length_error("Developer transaction exceeds its byte limit");
     }
 
     static std::filesystem::path checkedChunk(const Transaction& tx, const std::string& path, std::size_t size) {
         if (!tx.directory && path != "output")
             throw std::invalid_argument("Expected output file");
         auto relative = fs::tools::safeRelativePath(path);
-        if (size > chunkSize || tx.size + size > maxTransactionBytes)
-            throw std::length_error("Developer transaction exceeds its byte limit");
+        requireWithinLimits(tx, size);
         return relative;
     }
 

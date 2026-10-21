@@ -15,7 +15,7 @@ export async function readProject(bridge, path) {
     return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
 
-async function writeChunks(bridge, id, path, bytes, signal) {
+async function writeChunks(bridge, {id, path, bytes}, signal) {
     for (let offset = 0; offset < bytes.length || offset === 0; offset += blockSize) {
         signal?.throwIfAborted();
         await call(bridge, 'write', id, path, offset, bytes.subarray(offset, offset + blockSize));
@@ -25,7 +25,7 @@ async function writeChunks(bridge, id, path, bytes, signal) {
 export async function publish(bridge, destination, files, {directory = true, signal, replace = true} = {}) {
     const id = await call(bridge, replace ? 'begin' : 'beginNew', destination, directory);
     try {
-        for (const [path, bytes] of files) await writeChunks(bridge, id, path, bytes, signal);
+        for (const [path, bytes] of files) await writeChunks(bridge, {id, path, bytes}, signal);
         signal?.throwIfAborted();
         await call(bridge, 'commit', id);
     } catch (error) {
@@ -34,17 +34,21 @@ export async function publish(bridge, destination, files, {directory = true, sig
     }
 }
 
-async function readLimited(reader, limit) {
+async function readAll(reader, limit) {
     const chunks = [];
     let size = 0;
+    for (;;) {
+        const {done, value} = await reader.read();
+        if (done) return chunks;
+        size += value.length;
+        if (size > limit) throw new Error('Compressed download exceeds its byte limit');
+        chunks.push(value);
+    }
+}
+
+async function readLimited(reader, limit) {
     try {
-        for (;;) {
-            const {done, value} = await reader.read();
-            if (done) return chunks;
-            size += value.length;
-            if (size > limit) throw new Error('Compressed download exceeds its byte limit');
-            chunks.push(value);
-        }
+        return await readAll(reader, limit);
     } catch (error) {
         await reader.cancel().catch(() => {});
         throw error;

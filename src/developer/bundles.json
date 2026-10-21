@@ -1,16 +1,16 @@
 {
-  "src/developer/bootstrap.mjs": "da9e36c3defce28ecfd6e8d143c97b92f5f9df8df2fa61b55de986f12a482be6",
+  "src/developer/bootstrap.mjs": "534af4b3d07891338c3390e1d5e06c2fb6dd8df11ca6547735565b17f1b9cd70",
   "src/developer/bootstrap-entry.mjs": "ff8084f23f5acc721f97eb1ed0a454e7bfee1894de17d54f0100fa11f7ef8b77",
-  "src/developer/packages.mjs": "fd6cfc54c78072c385faf0dac4bda4fbfa8542e13c81a5f00cca24a0c9abf8c3",
+  "src/developer/packages.mjs": "33263d29400487773379f90786f0fb616899a3a38876f7e822e384e7510b5f24",
   "src/developer/starter.mjs": "f8cdef1218ae14f8bbe49eae495d931cc29e33f74444f0e37d61aea416b9d750",
-  "src/developer/paths.mjs": "d382f5a4ba8313c94d753f03ed374a9068025cbeef408cbd0da3b213eb95de41",
+  "src/developer/paths.mjs": "6ebb626610756143c58762c87af18980802809d7f0f53d3b588e4b20e8db0161",
   "src/developer/runtime.mjs": "36847f4413928908ebc8a1909e608c783701b13274a289d81e43df0e5125a0e8",
   "src/developer/compiler.mjs": "3f7e187ca9a4c2645ef3823127457cad655919cbea3c7c0f22fb7ae2cc87e0e5",
   "src/developer/bundler.mjs": "b0ff79a1b0caa012c25ec7b7f121d7d50af1aa1651231d3dcf2f39470c4ea25c",
   "src/developer/entry.mjs": "489c77b96c3a44e75a3a9470f0a8be5d2d1bed4499f82fc13742e52c71fac728",
-  "src/developer/io.mjs": "18777813c04b052c7cb0efaa904e119a5c06df950cf351e9661d909ef039b233",
+  "src/developer/io.mjs": "a155719c612e065c30272c0dfdc456df28b5efa90ca26f8cfcb55c9cb46de690",
   "src/developer/recipe.mjs": "809f2091c50ebd13d23f92de9876b584658dc687324f73d48ee9f1271319f1ed",
-  "src/developer/registry.mjs": "c80c4d99081c49467cbc4ac3cc319e774e6bed324f06c95c4c8b0aaa88571044",
+  "src/developer/registry.mjs": "64e87c8e9750b59baac88f5076647712881e42ed842584ad3072fe7ee970d575",
   "src/developer/resolve.mjs": "8b96b850af215be51f5cb85cc9c69e057afa04dfb8a57e572620c07059c17fa3",
   "src/developer/embed.mjs": "c8fb80998abecdd5fdeba77aa549ff638d849dc9fd7f34c896fb6c0c0bf15f34",
   "src/pi/main.tsx": "d3161b35db204ba54f782f711183e8d96aeff7c92d885c33a6ec168cf461e453",
@@ -23,7 +23,7 @@
   "tools/developer/site.mjs": "d4b7112f0aa5f277f291505a3dce84e676fee9d4da386973af7c6df9885d4dd4",
   "tools/developer/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "tools/assets/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
-  "src/developer/bootstrap.bundle.mjs": "378131b0680b1445abb2711ec92977dcfda6abdfef32caf3c76c5ce57267adfb",
-  "src/developer/packages.bundle.mjs": "13b887f6521455a2624c2291129333b12abfc96d4c4cccd61b8fb5d70990ac48",
-  "include/system/DeveloperReleaseData.hpp": "d707844a13b0840ff762bd911a4c84153657714525f2f3ec25db5e963a113e14"
+  "src/developer/bootstrap.bundle.mjs": "792fe7cf564bd12ac47fef419d8c71e2070925764a17706552e7d3f5d6ba2181",
+  "src/developer/packages.bundle.mjs": "447bf7913678effd38bf42c07b6d7c2b6b8f7d93baf9ed447364c6d0f50f7b3d",
+  "include/system/DeveloperReleaseData.hpp": "ab6045ed5d56cd62feab34de680fd858560fffc284808d7abe4e8734aabeaec4"
 }
