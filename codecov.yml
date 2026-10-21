@@ -4,6 +4,9 @@ coverage:
       default:
         target: auto
         threshold: 0.2%
+    patch:
+      default:
+        target: 95%
 ignore:
   - "webtest/**"
   - "src/**"
