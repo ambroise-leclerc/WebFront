@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased — 0.4 presentation
+## Unreleased
+
+## 0.4.0 - 2026-10-21
+
+### Changed
 
 - Move the public examples to `examples/` and retain only Hello World and Game of Life.
   Readable library web resources now live in `assets/`; regression fixtures remain under tests/tools.
@@ -9,6 +13,7 @@
 - Combine per-change CI into three native desktop jobs with caches and cancellation.
   GCC coverage stays in the Linux job on every PR. Extended CEF, sanitizer and fuzz checks run weekly or manually.
 - Run `MddlogIntegration.yml` source/installed integration and sanitizer qualification weekly or manually.
+- Developer distribution 0.4.0 is published (`developer-v0.4.0`) and pinned by `app.bootstrap("developer")`.
 - No new library functionality.
 
 ## 0.3.0 - 2026-10-21
