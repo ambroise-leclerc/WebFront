@@ -12,7 +12,7 @@ Keep application logic in C++ and create reactive interfaces with TypeScript, Re
 
 ## From C++ to a reactive UI
 
-Register your simulation, bootstrap the tools, then build the interface in the application's terminal:
+Register your simulation, bootstrap the tools, then build the interface in the application's terminal. `life-project` is the working directory for the UI sources:
 
 <table>
 <tr><th align="left">C++ application</th><th align="left">Create, install, preview</th></tr>

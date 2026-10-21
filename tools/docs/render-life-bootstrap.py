@@ -10,6 +10,10 @@ from PIL import Image, ImageDraw, ImageFont, ImageSequence
 ROOT = Path(__file__).resolve().parents[2]
 WIDTH, HEIGHT = 800, 765
 BACKGROUND = '#141821'
+# Keep preview pixels inside the window's border and rounded lower corners.
+WINDOW_MASK = Image.new('L', (WIDTH, HEIGHT))
+ImageDraw.Draw(WINDOW_MASK).rounded_rectangle(
+    (1, 1, WIDTH - 2, HEIGHT - 2), radius=11, fill=255)
 FONT_PATHS = ('/System/Library/Fonts/Menlo.ttc', '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')
 font_path = next((path for path in FONT_PATHS if Path(path).exists()), None)
 if not font_path:
@@ -31,12 +35,13 @@ def frame(lines, preview=0, duration=100):
     draw.rounded_rectangle((1, 1, WIDTH - 2, 37), radius=11, fill='#222b36')
     for x, color in ((18, '#ff6259'), (38, '#ffbd2e'), (58, '#28c840')):
         draw.ellipse((x, 13, x + 10, 23), fill=color)
-    draw.text((87, 10), 'WebFront · Game of Life', font=small, fill='#e8edf4')
+    draw.text((87, 10), 'WebFront', font=small, fill='#e8edf4')
     for index, line in enumerate(lines):
         draw.text((18, 52 + index * 24), line, font=font,
                   fill='#a8eacb' if line.startswith('wf>') else '#a0adbc')
     if preview:
-        image.paste(shot.crop((0, 0, WIDTH, preview)), (0, 164))
+        image.paste(shot.crop((0, 0, WIDTH, preview)), (0, 164),
+                    WINDOW_MASK.crop((0, 164, WIDTH, 164 + preview)))
     frames.append(image)
     durations.append(duration)
 
