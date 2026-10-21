@@ -7,7 +7,8 @@
 - Rework the README around a minimal Hello World, an early Life thumbnail and a step-by-step
   bootstrap, dependency-installation, preview and embedded-distribution walkthrough.
 - Combine per-change CI into three native desktop jobs with caches and cancellation.
-  Extended CEF, sanitizer, fuzz, coverage and optional logger checks run weekly or manually.
+  GCC coverage stays in the Linux job on every PR. Extended CEF, sanitizer and fuzz checks run weekly or manually.
+- Run `MddlogIntegration.yml` source/installed integration and sanitizer qualification weekly or manually.
 - No new library functionality.
 
 ## 0.3.0 - 2026-10-21

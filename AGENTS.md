@@ -71,7 +71,7 @@ Important CMake options:
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
 
-If the environment provides a read-only default ccache directory, set `CCACHE_DIR` to a writable temporary directory for local builds. Do not encode machine-specific cache paths in project files.
+If the environment provides a read-only default ccache directory, set `CCACHE_DIR` to a writable temporary directory for local builds. Do not encode machine-specific cache paths in project files. In CI, `ENABLE_CACHE=OFF` disables automatic cache discovery while `CMAKE_CXX_COMPILER_LAUNCHER=sccache` explicitly enables sccache; a PATH/version probe runs on all three platforms. The combined Linux job uses Debug with GCC coverage on every PR; Windows and macOS use Release. The WebKitGTK sandbox opt-out is confined to the Linux test step and trusted fixtures.
 
 ## Architecture and invariants
 
@@ -99,7 +99,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
 
-Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
+Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. These PRs must also dispatch `BuildAndTest.yml` on the PR head branch before merging (`gh workflow run BuildAndTest.yml --ref <pr-branch>`), then wait for both GCC and Clang CEF jobs to pass. Manual dispatch runs the extended CEF/sanitizer checks without repeating the desktop matrix. It is the required per-PR CEF validation for these changes; the weekly run is a backstop, not a substitute. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
 
 ## Git and workspace safety
 

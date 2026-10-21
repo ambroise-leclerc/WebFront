@@ -192,7 +192,7 @@ ctest --test-dir build --output-on-failure
 
 Tests additionally require Node.js for offline JavaScript checks. Browser tests require an enabled engine; Linux CEF tests use Xvfb. See [AGENTS.md](AGENTS.md) for contributor commands and [developer environment testing](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
-CI runs one combined C++ / native-browser job per desktop platform on each code change. Linux Clang, sanitizers, fuzzing, coverage and CEF compatibility run weekly and on demand. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
+CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also uploads GCC coverage on each PR. Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly and on demand. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
 
 ## Contracts and limitations
 

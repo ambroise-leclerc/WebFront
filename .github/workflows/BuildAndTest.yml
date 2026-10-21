@@ -22,6 +22,8 @@ env:
 
 jobs:
   desktop:
+    # PR/push jobs already cover desktops; manual runs add only the extended checks.
+    if: github.event_name != 'workflow_dispatch'
     name: ${{ matrix.name }}
     timeout-minutes: 25
     strategy:
@@ -30,17 +32,20 @@ jobs:
         include:
           - name: Linux GCC / WebKitGTK
             os: ubuntu-24.04
-            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+            build_type: Debug
+            test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
+            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON
           - name: Windows MSVC / WebView2
             os: windows-2025
+            build_type: Release
+            test_env: {}
             options: -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2
           - name: macOS Apple Clang / WKWebView
             os: macos-26
+            build_type: Release
+            test_env: {}
             options: -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
     runs-on: ${{ matrix.os }}
-    env:
-      # Trusted repository fixtures, on hosted Linux runners without user namespaces.
-      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -48,10 +53,10 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: tools/assets/package-lock.json
-      - uses: jwlawson/actions-setup-cmake@v2
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: actions/cache@v4
         with:
           path: .cache/CPM
@@ -59,37 +64,43 @@ jobs:
           restore-keys: cpm-${{ runner.os }}-
       - name: Initialize MSVC environment
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
       - name: Setup GCC
         if: runner.os == 'Linux'
-        uses: egor-tensin/setup-gcc@v1.3
+        uses: egor-tensin/setup-gcc@eaa888eb19115a521fa72b65cd94fe1f25bbcaac # v1.3
         with:
           version: 16
       - name: Install native Linux engine
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb
+          sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb lcov
       - name: Setup Xcode
         if: runner.os == 'macOS'
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest
+      - name: Verify compiler cache launcher
+        shell: bash
+        run: |
+          command -v sccache
+          sccache --version
       - name: Prepare offline developer fixtures
         run: |
           npm ci --prefix tools/assets --ignore-scripts
           node tools/developer/build.mjs build-developer-environment
           node tools/developer/fixtures.mjs build-developer-environment
+      # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       - name: Configure
         run: >-
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
           -DWEBFRONT_DEVELOPER_FIXTURES=${{ github.workspace }}/build-developer-environment
       - name: Build
-        run: cmake --build build --config Release --parallel 2
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel 2
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -118,7 +129,23 @@ jobs:
             Write-Host "WebView2 runtime $version at $($executable.FullName)"
           }
       - name: Test C++ and native browser integration
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+        # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
+        env: ${{ matrix.test_env }}
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error
+      - name: Collect coverage
+        if: runner.os == 'Linux'
+        working-directory: build
+        run: |
+          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
+          lcov --list coverage.info
+      - name: Upload coverage
+        if: runner.os == 'Linux'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
+        with:
+          files: build/coverage.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
       - name: Retain diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
@@ -151,7 +178,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - uses: jwlawson/actions-setup-cmake@v2
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
       - name: Install Clang 23 and sanitizer runtimes
@@ -213,7 +240,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: jwlawson/actions-setup-cmake@v2
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
 
@@ -245,37 +272,3 @@ jobs:
 
       - name: Run Jasmine bridge test
         run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error
-
-  coverage:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    name: Linux GCC coverage
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '4.4.4'
-      - uses: egor-tensin/setup-gcc@v1.3
-        with:
-          version: 16
-      - run: sudo apt-get update && sudo apt-get install -y lcov
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_COVERAGE=ON
-      - run: cmake --build build --parallel 2
-      - run: ctest --test-dir build --output-on-failure --no-tests=error
-      - name: Collect Coverage
-        working-directory: ${{github.workspace}}/build
-        run: |
-          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
-          lcov --list coverage.info
-
-      - name: Upload Coverage
-        uses: codecov/codecov-action@v7
-        with:
-          files: ${{github.workspace}}/build/coverage.info
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
