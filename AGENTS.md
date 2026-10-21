@@ -8,7 +8,7 @@ WebFront is a C++23 header-only library for serving a browser UI from a C++ appl
 - C++ calls browser functions with `ui.jsFunction(name)(arguments...)`, which is fire-and-forget and ignores the result, or with `ui.jsFunction<R>(name)(arguments...)`, which returns a `std::future<R>`. Only the untyped C++ form is fire-and-forget.
 - `webFront.ready` resolves after the WebSocket handshake acknowledgement and rejects if the initial connection fails or closes.
 
-The project is an experimental foundation, not a production-ready UI framework. The newcomer path is `webfront::WebFront app; app.show();` (examples `HelloWorld` and `WebFrontGreeter`); the minimum automated demonstration is the native ES-module example plus the Jasmine browser integration test. General DOM abstractions remain future work. Application coroutines use `webfront::Task` and `app.spawn(task)`/`ui.spawn(task)`; retain a `TaskHandle` to request individual cancellation. WebFront owns and drains these tasks. Spawn is callable from any thread while the application lives; a call rejected during shutdown returns a stopped handle. Destructors wait for outstanding operations; explicit shutdown reports a stalled join. Typed C++ sender calls support local cancellation; futures and JavaScript Promises do not expose cancellation.
+The project is an experimental foundation, not a production-ready UI framework. The newcomer path is `webfront::WebFront app; app.show();` (example `HelloWorld`); the Game of Life walkthrough demonstrates the developer bootstrap and embedded distribution. Native modules and the bridge are covered by the Jasmine browser integration test. General DOM abstractions remain future work. Application coroutines use `webfront::Task` and `app.spawn(task)`/`ui.spawn(task)`; retain a `TaskHandle` to request individual cancellation. WebFront owns and drains these tasks. Spawn is callable from any thread while the application lives; a call rejected during shutdown returns a stopped handle. Destructors wait for outstanding operations; explicit shutdown reports a stalled join. Typed C++ sender calls support local cancellation; futures and JavaScript Promises do not expose cancellation.
 
 ## Repository map
 
@@ -18,7 +18,9 @@ The project is an experimental foundation, not a production-ready UI framework. 
 - `include/system/`: layered virtual filesystems and embedded web resources.
 - `include/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `include/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`, and installed tools by `include/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
-- `src/`: example applications and browser assets: `HelloWorld.cpp` (no assets, embedded fallback page), `Greeter.cpp` with `greeter/` (editable UI), `ModuleDemo.cpp` with `module-demo.html` and `react.html`, `Terminal.cpp` (terminal component demo), and the readable embedded sources `WebFront.js`, `fallback/` and `components/`.
+- `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
+- `assets/`: readable browser bridge, fallback, component and developer-environment sources; production C++ remains header-only in `include/`.
+- `tools/developer/starters/pi/`, `test/fixtures/`, `webtest/fixtures/`: retained package and regression fixtures, not public example applications.
 - `test/`: Catch2 unit tests.
 - `webtest/`: Jasmine real-browser integration test.
 - `cmake/` and `.github/workflows/`: build support and CI.
@@ -35,13 +37,12 @@ The legacy `webfront/`, `tests/`, and `webtest` directories are not interchangea
 Use out-of-source builds. CPM downloads dependencies during first configure, so network access may be required.
 
 ```bash
-# Newcomer quick start: no options, no CEF, no tests; builds HelloWorld, WebFrontGreeter, WebFrontApp
+# Newcomer quick start: no options, no CEF, no tests
 mkdir build
 cd build
 cmake ..
-cmake --build .
-./src/HelloWorld
-./src/WebFrontGreeter
+cmake --build . --parallel 2
+./examples/HelloWorld
 
 # Fast, portable C++ baseline (no CEF download)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
@@ -58,19 +59,14 @@ cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-cef --target webtest --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure
 
-# Manual native-module demo (opens the system browser unless the source selects CEFFrontend)
-./build/src/WebFrontApp
-
-# Optional React example
-./build/src/WebFrontApp react.html
 ```
 
 Important CMake options:
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
-- `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases; `WEBFRONT_DEMO_FRONTEND=WebView2` selects it for the module demo.
-- `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage, and `WEBFRONT_DEMO_FRONTEND=WKWebView` selects it for the module demo.
-- `WEBFRONT_DEMO_FRONTEND=Native` selects `NativeWebViewFrontend` for the module demo: WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux. Enable the corresponding `WEBFRONT_EMBED_WEBVIEW2`, `WEBFRONT_EMBED_WKWEBVIEW` or `WEBFRONT_EMBED_WEBKITGTK` option explicitly. It never changes `webfront::WebFront`'s system-browser default.
+- `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
+- `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage.
+
 - `ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly.
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
@@ -96,7 +92,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 ## Coding and testing conventions
 
 - Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `CONTRIBUTING.md`.
-- Keep production implementation header-only under `include/`; `src/` contains examples only.
+- Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `assets/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
 - Jasmine tests use native modules and must report completion to C++, close themselves, return a meaningful process status, and have a CTest timeout.

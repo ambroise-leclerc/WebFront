@@ -5,13 +5,12 @@ It is optional and never changes `webfront::WebFront`'s system-browser default.
 
 ```bash
 cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON \
-  -DWEBFRONT_DEMO_FRONTEND=WKWebView
-cmake --build build-wkwebview --parallel
-./build-wkwebview/src/WebFrontApp
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON
+cmake --build build-wkwebview --target WebFrontLifeDeveloper --parallel 2
+./build-wkwebview/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 
-For HelloWorld, Greeter or your application, select the adapter in C++:
+For HelloWorld or your application, select the adapter in C++:
 
 ```cpp
 #include <WebFront.hpp>

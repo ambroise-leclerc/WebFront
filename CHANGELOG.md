@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## Unreleased — 0.4 presentation
+
+- Move the public examples to `examples/` and retain only Hello World and Game of Life.
+  Readable library web resources now live in `assets/`; regression fixtures remain under tests/tools.
+- Rework the README around a minimal Hello World, an early Life thumbnail and a step-by-step
+  bootstrap, dependency-installation, preview and embedded-distribution walkthrough.
+- Combine per-change CI into three native desktop jobs with caches and cancellation.
+  Extended CEF, sanitizer, fuzz, coverage and optional logger checks run weekly or manually.
+- No new library functionality.
 
 ## 0.3.0 - 2026-10-21
 

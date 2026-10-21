@@ -1,5 +1,5 @@
-#include "../src/Life.hpp"
-#include "../src/Pi.hpp"
+#include "../examples/life/Life.hpp"
+#include "../test/fixtures/Pi.hpp"
 #include "../test/TemporaryDirectory.hpp"
 #include <WebFront.hpp>
 

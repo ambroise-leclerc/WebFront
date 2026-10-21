@@ -51,14 +51,14 @@
 
 # Embedded headers hold the exact bytes of their text sources. Freshness tests
 # re-read those sources, so Windows checkouts must preserve LF for every asset.
-src/WebFront.js                            text eol=lf
+assets/WebFront.js                            text eol=lf
 include/system/WebFrontJsData.hpp           text eol=lf
-src/fallback/index.html                     text eol=lf
-src/fallback/webfront-fallback.mjs          text eol=lf
+assets/fallback/index.html                     text eol=lf
+assets/fallback/webfront-fallback.mjs          text eol=lf
 include/system/FallbackIndexHtmlData.hpp    text eol=lf
 include/system/FallbackModuleData.hpp       text eol=lf
-src/components/terminal/*                   text eol=lf
-src/components/tools/*                      text eol=lf
+assets/components/terminal/*                   text eol=lf
+assets/components/tools/*                      text eol=lf
 include/system/ToolManagerModuleData.hpp    text eol=lf
 third_party/xterm/*                         text eol=lf
 include/system/TerminalIndexHtmlData.hpp    text eol=lf
@@ -179,10 +179,10 @@ third_party/fflate/*                       text eol=lf
 include/system/*Data.hpp                   text eol=lf
 
 # Browser-powered developer bootstrap sources and generated payloads.
-src/developer/* text eol=lf
+assets/developer/* text eol=lf
 tools/assets/package-lock.json text eol=lf
 
 # Starter archives and every hashed distribution input must be identical on Windows.
-src/pi/* text eol=lf
-src/life/* text eol=lf
+tools/developer/starters/pi/* text eol=lf
+examples/life/ui/* text eol=lf
 tools/developer/* text eol=lf

@@ -22,8 +22,8 @@ const options = {
         build.onResolve({filter: /^\.\/(xterm|addon-fit)\.mjs$/}, args => ({path: resolve(root, 'third_party/xterm', args.path)}));
     }}],
 };
-await build({...options, entryPoints: ['src/developer/runtime.mjs'], outfile: resolve(output, 'runtime.mjs')});
-await build({...options, entryPoints: ['src/developer/compiler.mjs'], outfile: resolve(output, 'compiler.mjs')});
+await build({...options, entryPoints: ['assets/developer/runtime.mjs'], outfile: resolve(output, 'runtime.mjs')});
+await build({...options, entryPoints: ['assets/developer/compiler.mjs'], outfile: resolve(output, 'compiler.mjs')});
 await copyFile(resolve(root, 'tools/assets/node_modules/esbuild-wasm/esbuild.wasm'), resolve(output, 'esbuild.wasm'));
 await copyFile(resolve(root, 'third_party/xterm/xterm.css'), resolve(output, 'xterm.css'));
 const distribution = JSON.parse(await readFile(resolve(root, 'tools/developer/distribution.json')));
@@ -46,7 +46,7 @@ const starters = {};
 for (const [name, provider] of [['pi', 'PiUI'], ['life', 'LifeUI']]) {
     const starterFiles = new Map();
     for (const file of ['main.tsx', 'style.css'])
-        starterFiles.set(`package/${file}`, await readFile(resolve(root, `src/${name}/${file}`)));
+        starterFiles.set(`package/${file}`, await readFile(resolve(root, `${name === 'life' ? 'examples/life/ui' : 'tools/developer/starters/pi'}/${file}`)));
     const recipe = {format: 1, name, provider, entry: 'main.tsx', dependencies: {
         react: dependencies.react, 'react-dom': dependencies['react-dom']}};
     starterFiles.set('package/webfront.project.json', Buffer.from(JSON.stringify(recipe, null, 2) + '\n'));
@@ -72,16 +72,16 @@ await writeFile(resolve(output, 'provision.json'), JSON.stringify({format: 1, ve
 const header = bootstrapHeader(version, publicBase, integrity);
 await writeFile(resolve(output, 'DeveloperReleaseData.hpp'), header);
 if (refresh) {
-    const bootstrap = resolve(root, 'src/developer/bootstrap.bundle.mjs');
-    await build({...options, entryPoints: ['src/developer/bootstrap-entry.mjs'], outfile: bootstrap});
-    await build({...options, entryPoints: ['src/developer/packages.mjs'], outfile: resolve(root, 'src/developer/packages.bundle.mjs')});
-    await copyFile(resolve(root, 'tools/assets/node_modules/semver/LICENSE'), resolve(root, 'src/developer/PACKAGES-LICENSE.txt'));
+    const bootstrap = resolve(root, 'assets/developer/bootstrap.bundle.mjs');
+    await build({...options, entryPoints: ['assets/developer/bootstrap-entry.mjs'], outfile: bootstrap});
+    await build({...options, entryPoints: ['assets/developer/packages.mjs'], outfile: resolve(root, 'assets/developer/packages.bundle.mjs')});
+    await copyFile(resolve(root, 'tools/assets/node_modules/semver/LICENSE'), resolve(root, 'assets/developer/PACKAGES-LICENSE.txt'));
     await writeFile(resolve(root, 'include/system/DeveloperReleaseData.hpp'), header);
     const inputs = {};
-    for (const path of ['src/developer/bootstrap.mjs', 'src/developer/bootstrap-entry.mjs', 'src/developer/packages.mjs', 'src/developer/starter.mjs', 'src/developer/paths.mjs', 'src/developer/runtime.mjs', 'src/developer/compiler.mjs', 'src/developer/bundler.mjs', 'src/developer/entry.mjs', 'src/developer/conditions.mjs', 'src/developer/io.mjs', 'src/developer/recipe.mjs', 'src/developer/registry.mjs', 'src/developer/archive.mjs', 'src/developer/lock.mjs', 'src/developer/pins.mjs', 'src/developer/peers.mjs', 'src/developer/resolve.mjs', 'src/developer/embed.mjs', 'src/pi/main.tsx', 'src/pi/style.css', 'src/life/main.tsx', 'src/life/style.css', 'src/components/tools/wf.mjs', 'tools/developer/distribution.json', 'tools/developer/build.mjs', 'tools/developer/site.mjs', 'tools/developer/archive.mjs', 'tools/assets/package-lock.json', 'src/developer/bootstrap.bundle.mjs', 'src/developer/packages.bundle.mjs', 'include/system/DeveloperReleaseData.hpp'])
+    for (const path of ['assets/developer/bootstrap.mjs', 'assets/developer/bootstrap-entry.mjs', 'assets/developer/packages.mjs', 'assets/developer/starter.mjs', 'assets/developer/paths.mjs', 'assets/developer/runtime.mjs', 'assets/developer/compiler.mjs', 'assets/developer/bundler.mjs', 'assets/developer/entry.mjs', 'assets/developer/conditions.mjs', 'assets/developer/io.mjs', 'assets/developer/recipe.mjs', 'assets/developer/registry.mjs', 'assets/developer/archive.mjs', 'assets/developer/lock.mjs', 'assets/developer/pins.mjs', 'assets/developer/peers.mjs', 'assets/developer/resolve.mjs', 'assets/developer/embed.mjs', 'tools/developer/starters/pi/main.tsx', 'tools/developer/starters/pi/style.css', 'examples/life/ui/main.tsx', 'examples/life/ui/style.css', 'assets/components/tools/wf.mjs', 'tools/developer/distribution.json', 'tools/developer/build.mjs', 'tools/developer/site.mjs', 'tools/developer/archive.mjs', 'tools/assets/package-lock.json', 'assets/developer/bootstrap.bundle.mjs', 'assets/developer/packages.bundle.mjs', 'include/system/DeveloperReleaseData.hpp'])
         inputs[path] = createHash('sha256').update(await readFile(resolve(root, path))).digest('hex');
-    await writeFile(resolve(root, 'src/developer/bundles.json'), JSON.stringify(inputs, null, 2) + '\n');
-    for (const [source, name] of [['src/developer/index.html', 'DeveloperIndexHtmlData'], ['src/developer/bootstrap.bundle.mjs', 'DeveloperBootstrapData']])
+    await writeFile(resolve(root, 'assets/developer/bundles.json'), JSON.stringify(inputs, null, 2) + '\n');
+    for (const [source, name] of [['assets/developer/index.html', 'DeveloperIndexHtmlData'], ['assets/developer/bootstrap.bundle.mjs', 'DeveloperBootstrapData']])
         execFileSync('cmake', [`-DINPUT=${resolve(root, source)}`, `-DOUTPUT=${resolve(root, 'include/system', name + '.hpp')}`, `-DSTRUCT=${name}`, '-P', resolve(root, 'cmake/EmbedTextAsset.cmake')]);
 }
 console.log(`Environment: ${output}/environment.tgz\nIntegrity: ${integrity}\nStarters: ${Object.keys(starters).join(', ')}`);

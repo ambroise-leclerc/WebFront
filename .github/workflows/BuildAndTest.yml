@@ -2,124 +2,95 @@ name: Build and Test
 
 on:
   push:
-    branches: [ '**' ]
+    branches: [develop, master]
   pull_request:
-    branches: [ master, develop ]
+    branches: [master, develop]
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
-  BUILD_TYPE: Release
-  GIST_ID: 317c22bfe80b2b51663187fbebfba533
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
+  SCCACHE_GHA_ENABLED: 'true'
 
 jobs:
-  build:
+  desktop:
+    name: ${{ matrix.name }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - {
-              name: "Windows MSVC",
-              os: windows-2025,
-              compiler: msvc,
-              coverage: false
-            }
-          - {
-              name: "Windows MSVC WebView2",
-              os: windows-2025,
-              compiler: msvc,
-              coverage: false,
-              webview2: true
-            }
-          - {
-              name: "Ubuntu GCC with Coverage",
-              os: ubuntu-24.04,
-              compiler: gcc,
-              coverage: true
-            }
-          - {
-              name: "Ubuntu Clang",
-              os: ubuntu-24.04,
-              compiler: clang,
-              coverage: false
-            }
-          - {
-              name: "macOS (Apple Silicon)",
-              os: macos-26,
-              compiler: appleClang,
-              coverage: false
-            }
-    runs-on: ${{ matrix.config.os }}
-    name: ${{ matrix.config.name }}
-
+        include:
+          - name: Linux GCC / WebKitGTK
+            os: ubuntu-24.04
+            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+          - name: Windows MSVC / WebView2
+            os: windows-2025
+            options: -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2
+          - name: macOS Apple Clang / WKWebView
+            os: macos-26
+            options: -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
+    runs-on: ${{ matrix.os }}
+    env:
+      # Trusted repository fixtures, on hosted Linux runners without user namespaces.
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-
-      - name: Initialize MSVC environment
-        if: matrix.config.compiler == 'msvc'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Setup CMake
-        uses: jwlawson/actions-setup-cmake@v2
+          cache: npm
+          cache-dependency-path: tools/assets/package-lock.json
+      - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'
-
-      - name: Install Clang 23
-        if: matrix.config.compiler == 'clang'
-        run: |
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update
-          sudo apt-get install -y clang-23 lld-23 lldb-23
-          echo "CC=clang-23" >> $GITHUB_ENV
-          echo "CXX=clang++-23" >> $GITHUB_ENV
-
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/CMakeLists.txt') }}
+          restore-keys: cpm-${{ runner.os }}-
+      - name: Initialize MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
       - name: Setup GCC
+        if: runner.os == 'Linux'
         uses: egor-tensin/setup-gcc@v1.3
         with:
           version: 16
-        if: matrix.config.compiler == 'gcc'
-
+      - name: Install native Linux engine
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb
       - name: Setup Xcode
+        if: runner.os == 'macOS'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest
-        if: matrix.config.compiler == 'appleClang'
-
-      - name: Report compiler and sender support
-        shell: bash
+      - name: Prepare offline developer fixtures
         run: |
-          cat > cpp_lib_senders_probe.cpp <<'EOF'
-          #include <version>
-          #ifdef __cpp_lib_senders
-          #pragma message("__cpp_lib_senders is defined")
-          #else
-          #pragma message("__cpp_lib_senders is NOT defined")
-          #endif
-          int main() {}
-          EOF
-          if [ "${{ matrix.config.compiler }}" = "msvc" ]; then
-            cl /nologo /std:c++latest /c cpp_lib_senders_probe.cpp || true
-          else
-            ${CXX:-c++} --version | head -1
-            ${CXX:-c++} -std=c++26 -fsyntax-only cpp_lib_senders_probe.cpp 2>&1 | grep -i "__cpp_lib_senders" || true
-          fi
-          rm -f cpp_lib_senders_probe.cpp
-
-      - name: Install Coverage Tools
-        if: matrix.config.coverage
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lcov
-        
-      - name: Config & Build
-        run: |
-          cmake . -B ${{github.workspace}}/build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON ${{ matrix.config.webview2 && '-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_DEMO_FRONTEND=Native' || '' }} ${{ matrix.config.coverage && '-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON' || '' }}
-          cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --parallel 1
-
+          npm ci --prefix tools/assets --ignore-scripts
+          node tools/developer/build.mjs build-developer-environment
+          node tools/developer/fixtures.mjs build-developer-environment
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+          -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          ${{ matrix.options }}
+          -DWEBFRONT_DEVELOPER_FIXTURES=${{ github.workspace }}/build-developer-environment
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
       - name: Ensure WebView2 Evergreen runtime
-        if: matrix.config.webview2
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           function Get-WebView2Runtime {
@@ -145,99 +116,17 @@ jobs:
             if (-not $version) { throw "WebView2 runtime version is missing: $($executable.FullName)" }
             Write-Host "WebView2 runtime $version at $($executable.FullName)"
           }
-  
-      - name: Test
-        working-directory: ${{github.workspace}}/build
-        run: ctest --verbose --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}} ${{ matrix.config.webview2 && '-LE web-integration' || '' }}
-
-      - name: Test WebView2 browser lifecycle
-        if: matrix.config.webview2
-        working-directory: ${{github.workspace}}/build
-        run: ctest -L web-integration --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}}
-
-      - name: Rerun Failed Tests (if any)
+      - name: Test C++ and native browser integration
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+      - name: Retain diagnostics
         if: failure()
-        working-directory: ${{github.workspace}}/build
-        run: ctest --rerun-failed --output-on-failure --no-tests=error -C ${{env.BUILD_TYPE}}
-
-      - name: Collect Coverage
-        if: matrix.config.coverage
-        working-directory: ${{github.workspace}}/build
-        run: |
-          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' '*/src/*' --output-file coverage.info
-          lcov --list coverage.info
-
-      - name: Upload Coverage
-        if: matrix.config.coverage
-        uses: codecov/codecov-action@v7
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{github.workspace}}/build/coverage.info
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Set Badge Info
-        if: always() && github.ref == 'refs/heads/master'
-        id: badge
-        run: |
-          # Set badge label
-          echo "label=${{ matrix.config.name }}" >> $GITHUB_OUTPUT
-          
-          # Set badge color
-          case "${{ job.status }}" in
-            "success") echo "color=2EA043" >> $GITHUB_OUTPUT ;;
-            "failure") echo "color=E6484F" >> $GITHUB_OUTPUT ;;
-            *) echo "color=DBAB0A" >> $GITHUB_OUTPUT ;;
-          esac
-          
-          # Set filename
-          echo "filename=${{ matrix.config.os }}-${{ matrix.config.compiler }}${{ matrix.config.webview2 && '-webview2' || '' }}.json" >> $GITHUB_OUTPUT
-        shell: bash
-
-      - name: Update Gist
-        if: always() && github.ref == 'refs/heads/master'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GIST_SECRET }}
-          script: |
-            const filename = '${{ steps.badge.outputs.filename }}';
-            const content = {
-              schemaVersion: 1,
-              label: '${{ steps.badge.outputs.label }}',
-              message: '${{ job.status }}',
-              color: '${{ steps.badge.outputs.color }}'
-            };
-            
-            try {
-              await github.rest.gists.update({
-                gist_id: process.env.GIST_ID,
-                files: {
-                  [filename]: {
-                    content: JSON.stringify(content)
-                  }
-                }
-              });
-            } catch (error) {
-              core.error(`Failed to update gist: ${error.message}`);
-              if (error.response) {
-                core.error(`Status: ${error.response.status}`);
-                core.error(`Response: ${JSON.stringify(error.response.data)}`);
-              }
-              throw error;
-            }
-
-      - name: Update Badge
-        if: always() && github.ref == 'refs/heads/master'
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: ${{ env.GIST_ID }}
-          filename: ${{ steps.badge.outputs.filename }}
-          label: ${{ steps.badge.outputs.label }}
-          message: ${{ job.status }}
-          color: ${{ steps.badge.outputs.color }}
+          name: test-log-${{ runner.os }}
+          path: build/Testing/Temporary/LastTest.log
 
   sanitizers:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -253,6 +142,11 @@ jobs:
       TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -272,7 +166,7 @@ jobs:
       - name: Configure hardened sanitizer tests
         run: >-
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
           ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
@@ -297,49 +191,9 @@ jobs:
           path: build-sanitizers/fuzz/artifacts/
           if-no-files-found: ignore
 
-  wkwebview-integration:
-    runs-on: macos-26
-    timeout-minutes: 25
-    name: macOS WKWebView Jasmine and lifecycle
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '4.4.4'
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest
-      - name: Check WindowServer session
-        run: |
-          launchctl print gui/$(id -u) >/dev/null
-          pgrep -x WindowServer
-      - name: Prepare offline developer environment and starter fixtures
-        run: |
-          npm ci --prefix tools/assets --ignore-scripts
-          node tools/developer/build.mjs build-developer-environment
-          node tools/developer/fixtures.mjs build-developer-environment
-      - name: Configure system WebKit frontend
-        run: >-
-          cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release
-          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
-          -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
-          -DWEBFRONT_DEMO_FRONTEND=Native
-          -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
-      - name: Build
-        run: cmake --build build-wkwebview --parallel 2
-      - name: Test
-        run: ctest --test-dir build-wkwebview --output-on-failure --no-tests=error
-      - name: Retain browser test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wkwebview-test-log
-          path: build-wkwebview/Testing/Temporary/LastTest.log
-
   web-integration:
+    timeout-minutes: 30
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -349,9 +203,18 @@ jobs:
     name: Ubuntu CEF Jasmine integration${{ matrix.compiler == 'clang' && ' (Clang)' || '' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.4'
 
       - name: Install Clang 23
         if: matrix.compiler == 'clang'
@@ -360,8 +223,8 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
           sudo apt-get install -y clang-23 lld-23
-          echo "CC=clang-23" >> $GITHUB_ENV
-          echo "CXX=clang++-23" >> $GITHUB_ENV
+          echo "CC=clang-23" >> "$GITHUB_ENV"
+          echo "CXX=clang++-23" >> "$GITHUB_ENV"
 
       - name: Install virtual display
         run: |
@@ -374,18 +237,19 @@ jobs:
           node tools/developer/build.mjs build-developer-environment
           node tools/developer/fixtures.mjs build-developer-environment
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
 
       - name: Build browser test
-        run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration --parallel 1
+        run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration --parallel 2
 
       - name: Run Jasmine bridge test
         run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error
 
-  webkitgtk-integration:
+  coverage:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: Linux GCC coverage
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    name: Ubuntu WebKitGTK Jasmine and lifecycle
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -397,25 +261,20 @@ jobs:
       - uses: egor-tensin/setup-gcc@v1.3
         with:
           version: 16
-      - name: Install WebKitGTK and virtual display
+      - run: sudo apt-get update && sudo apt-get install -y lcov
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_COVERAGE=ON
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure --no-tests=error
+      - name: Collect Coverage
+        working-directory: ${{github.workspace}}/build
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkitgtk-6.0-dev pkg-config xvfb
-          pkg-config --modversion webkitgtk-6.0
-      - name: Configure WebKitGTK
-        run: >-
-          cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release
-          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON
-          -DWEBFRONT_DEMO_FRONTEND=Native -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
-      - name: Build
-        run: cmake --build build-webkitgtk --parallel 2
-      - name: Test
-        env:
-          # Trusted repository fixtures only; restricted runners may lack user namespaces.
-          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
-        run: ctest --test-dir build-webkitgtk -LE web-integration --output-on-failure --no-tests=error
-      - name: Require browser coverage
-        env:
-          # Trusted repository fixtures only; restricted runners may lack user namespaces.
-          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
-        run: ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error
+          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
+          lcov --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
+          lcov --list coverage.info
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v7
+        with:
+          files: ${{github.workspace}}/build/coverage.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}

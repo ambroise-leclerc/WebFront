@@ -14,8 +14,8 @@ A component has four parts.
 
 | Part | Rule | Terminal |
 | --- | --- | --- |
-| Assets | An embedded `fs::Provider` serving under the reserved prefix `webfront/components/<name>/`, so it never collides with a development document root or the application's own pages. Readable sources live in `src/components/<name>/`, third-party code in `third_party/`, and generated headers are checked in and kept fresh by CTest, like `WebFront.js`. | `fs::TerminalFS` (`include/system/TerminalFS.hpp`) |
-| Browser module | A native ES module exporting `mount(element, options)`. It depends only on the global `webFront` bridge and its own assets (relative imports), and waits for `webFront.ready`. | `src/components/terminal/terminal.mjs` |
+| Assets | An embedded `fs::Provider` serving under the reserved prefix `webfront/components/<name>/`, so it never collides with a development document root or the application's own pages. Readable sources live in `assets/components/<name>/`, third-party code in `third_party/`, and generated headers are checked in and kept fresh by CTest, like `WebFront.js`. | `fs::TerminalFS` (`include/system/TerminalFS.hpp`) |
+| Browser module | A native ES module exporting `mount(element, options)`. It depends only on the global `webFront` bridge and its own assets (relative imports), and waits for `webFront.ready`. | `assets/components/terminal/terminal.mjs` |
 | C++ façade | A header under `include/components/` that registers its bridge functions under `webfront.<name>.<function>`. `BasicWF::cppFunction` ignores a second registration of the same name, so the prefix is what keeps components and applications apart. | `webfront::Terminal` (`include/components/Terminal.hpp`) |
 | Wire format | Only the existing bridge types: scalars, strings (at most 65535 bytes), tuples and numeric typed arrays. Lists of words cross as `"\n"`-separated strings. A component never changes `Messages.hpp` or `WebFront.js`. | `run(line) -> output`, `complete(line) -> candidates` |
 
@@ -46,7 +46,7 @@ int main() {
 }
 ```
 
-`src/Terminal.cpp` (target `WebFrontTerminal`) is the complete example.
+The snippet above shows the standalone component API. The [Life walkthrough](../README.md#game-of-life-from-console-to-native-application) demonstrates the downloaded developer terminal.
 
 - **Rendering:** [xterm.js](https://xtermjs.org/) 6.0.0 and its fit addon 0.11.0 (MIT; the terminal used by
   VS Code, Tabby and Hyper), vendored verbatim in `third_party/xterm/` and embedded as reproducible gzip (95,272 bytes including word padding).
@@ -177,7 +177,7 @@ header-only C++ library.
 
 ### Browser side (implemented)
 
-`src/components/tools/wf.mjs` is served by `fs::ToolManagerFS` at
+`assets/components/tools/wf.mjs` is served by `fs::ToolManagerFS` at
 `webfront/components/tools/wf.mjs` and added to the terminal by `ToolManager`. Besides the
 `commands` it exports `search`, `install`, `installed`, `open`, `readTar`, `gunzip`,
 `verifyIntegrity` and `parseSpec`, so other pages can use them.

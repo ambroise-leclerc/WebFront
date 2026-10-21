@@ -34,33 +34,33 @@ function(webfront_add_embedded_assets)
     cmake_path(NORMAL_PATH root)
     add_custom_target(webfront-embedded-assets COMMENT "Regenerating embedded browser bridge and fallback-page assets")
     _webfront_add_embedded_text_asset(
-        "${root}/src/WebFront.js" "${root}/include/system/WebFrontJsData.hpp"
+        "${root}/assets/WebFront.js" "${root}/include/system/WebFrontJsData.hpp"
         WebFrontJsData WebFrontJsAssetsFresh)
     _webfront_add_embedded_text_asset(
-        "${root}/src/fallback/index.html" "${root}/include/system/FallbackIndexHtmlData.hpp"
+        "${root}/assets/fallback/index.html" "${root}/include/system/FallbackIndexHtmlData.hpp"
         FallbackIndexHtmlData FallbackIndexHtmlAssetFresh)
     _webfront_add_embedded_text_asset(
-        "${root}/src/fallback/webfront-fallback.mjs" "${root}/include/system/FallbackModuleData.hpp"
+        "${root}/assets/fallback/webfront-fallback.mjs" "${root}/include/system/FallbackModuleData.hpp"
         FallbackModuleData FallbackModuleAssetFresh)
 
     _webfront_add_embedded_text_asset(
-        "${root}/src/developer/index.html" "${root}/include/system/DeveloperIndexHtmlData.hpp"
+        "${root}/assets/developer/index.html" "${root}/include/system/DeveloperIndexHtmlData.hpp"
         DeveloperIndexHtmlData DeveloperIndexHtmlAssetFresh)
     _webfront_add_embedded_text_asset(
-        "${root}/src/developer/bootstrap.bundle.mjs" "${root}/include/system/DeveloperBootstrapData.hpp"
+        "${root}/assets/developer/bootstrap.bundle.mjs" "${root}/include/system/DeveloperBootstrapData.hpp"
         DeveloperBootstrapData DeveloperBootstrapAssetFresh)
 
     # Terminal component (include/system/TerminalFS.hpp). xterm.js files are vendored verbatim in
     # third_party/xterm (see its VERSION file); refresh them with cmake/UpdateXterm.cmake.
     _webfront_add_embedded_text_asset(
-        "${root}/src/components/terminal/index.html" "${root}/include/system/TerminalIndexHtmlData.hpp"
+        "${root}/assets/components/terminal/index.html" "${root}/include/system/TerminalIndexHtmlData.hpp"
         TerminalIndexHtmlData TerminalIndexHtmlAssetFresh)
     _webfront_add_embedded_text_asset(
-        "${root}/src/components/terminal/terminal.mjs" "${root}/include/system/TerminalModuleData.hpp"
+        "${root}/assets/components/terminal/terminal.mjs" "${root}/include/system/TerminalModuleData.hpp"
         TerminalModuleData TerminalModuleAssetFresh)
     # Browser side of the wf tool manager (include/system/ToolManagerFS.hpp).
     _webfront_add_embedded_text_asset(
-        "${root}/src/components/tools/wf.mjs" "${root}/include/system/ToolManagerModuleData.hpp"
+        "${root}/assets/components/tools/wf.mjs" "${root}/include/system/ToolManagerModuleData.hpp"
         ToolManagerModuleData ToolManagerModuleAssetFresh)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/xterm.mjs" "${root}/include/system/XtermModuleData.hpp"

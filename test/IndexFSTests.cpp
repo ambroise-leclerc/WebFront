@@ -19,7 +19,7 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
             THEN("A correct HTML5 file loading WebFront.js and the fallback module is returned") {
                 REQUIRE(indexFile.has_value());
 
-                // The readable source (src/fallback/index.html) is embedded raw, like WebFront.js,
+                // The readable source (assets/fallback/index.html) is embedded raw, like WebFront.js,
                 // so it is never Brotli-encoded; read it in full rather than assuming it fits a
                 // single fixed-size buffer.
                 REQUIRE_FALSE(indexFile->isEncoded());

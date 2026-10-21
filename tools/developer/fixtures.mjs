@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {tar} from './archive.mjs';
-import {compress} from '../../src/developer/embed.mjs';
+import {compress} from '../../assets/developer/embed.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = resolve(process.argv[2] ?? 'build-developer-environment');
 await mkdir(resolve(output, 'registry'), {recursive: true});
@@ -28,6 +28,6 @@ for (const name of ['react', 'react-dom', 'scheduler']) {
         versions: {[manifest.version]: {...manifest, dist: {tarball: `./${name}.tgz`, integrity}}}}));
 }
 await copyFile(resolve(root, 'webtest/developer-specs.mjs'), resolve(output, 'run.mjs'));
-await copyFile(resolve(root, 'src/pi/main.tsx'), resolve(output, 'main.tsx'));
-await copyFile(resolve(root, 'src/pi/style.css'), resolve(output, 'style.css'));
+await copyFile(resolve(root, 'tools/developer/starters/pi/main.tsx'), resolve(output, 'main.tsx'));
+await copyFile(resolve(root, 'tools/developer/starters/pi/style.css'), resolve(output, 'style.css'));
 console.log(`Offline developer fixtures: ${output}`);

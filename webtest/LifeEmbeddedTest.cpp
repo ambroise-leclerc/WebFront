@@ -1,6 +1,6 @@
 #include <WebFront.hpp>
 #include WEBFRONT_LIFE_ASSETS_HEADER
-#include "../src/Life.hpp"
+#include "../examples/life/Life.hpp"
 #include "../test/TemporaryDirectory.hpp"
 
 #include <atomic>
