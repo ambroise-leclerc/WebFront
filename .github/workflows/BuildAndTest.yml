@@ -138,8 +138,9 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: build
         run: |
-          lcov --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
+          # lcov 2 on Ubuntu 26.04 rejects the benign line/function hit inconsistencies GCC emits for templates.
+          lcov --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
+          lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
           lcov --list coverage.info
       - name: Upload coverage
         if: runner.os == 'Linux'
