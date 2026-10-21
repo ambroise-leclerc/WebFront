@@ -1,14 +1,12 @@
 // npm registry access: resolving a version, downloading and checking one package archive.
 import semver from 'semver';
 import {responseBytes} from './io.mjs';
-import {gunzip, readTar, verifyIntegrity} from '../components/tools/wf.mjs';
-import {safePackagePath} from './paths.mjs';
+import {verifyIntegrity} from '../components/tools/wf.mjs';
+import {readArchive, checkedManifest} from './archive.mjs';
 
-const text = new TextDecoder();
 export const safeName = name => /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name);
 export const idOf = (name, version) => `${name.replace('/', '+')}@${version}`;
 export const cacheKey = (name, version, integrity) => `${idOf(name, version)}-${integrity.slice(7).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')}`;
-const installScripts = ['preinstall', 'install', 'postinstall'];
 
 async function fetchPackument(name, base, {fetchImpl, signal}) {
     const response = await fetchImpl(new URL(name.replace('/', '%2f'), base), {signal});
@@ -31,26 +29,6 @@ function selectVersion(packument, name, requested) {
     return {version, manifest};
 }
 
-async function readArchive(bytes) {
-    const files = new Map();
-    for (const entry of readTar(await gunzip(bytes))) {
-        if (!entry.path.startsWith('package/')) throw new Error('Invalid npm tarball root');
-        const path = safePackagePath(entry.path.slice(8));
-        if (files.has(path)) throw new Error(`Duplicate package path: ${path}`);
-        files.set(path, entry.bytes);
-    }
-    return files;
-}
-
-const hasInstallScript = pkg => installScripts.some(key => pkg.scripts?.[key]);
-const hasNativeFile = files => files.has('binding.gyp') || [...files.keys()].some(path => path.endsWith('.node'));
-
-function needsInstallStep(pkg, files) {
-    if (hasInstallScript(pkg)) return true;
-    if (pkg.gypfile) return true;
-    return hasNativeFile(files);
-}
-
 async function fetchTarball(name, manifest, base, {fetchImpl, signal}) {
     const tarball = new URL(manifest.dist?.tarball, base);
     if (tarball.protocol !== 'https:' && tarball.origin !== base.origin)
@@ -65,14 +43,6 @@ function registryBase(registry) {
     const base = new URL(registry, globalThis.location?.href);
     if (!base.pathname.endsWith('/')) base.pathname += '/';
     return base;
-}
-
-// The package.json inside the archive must be the requested package and need no install step.
-function checkedManifest(files, name, version) {
-    const pkg = JSON.parse(text.decode(files.get('package.json')));
-    if (pkg.name !== name || pkg.version !== version) throw new Error('npm archive identity mismatch');
-    if (needsInstallStep(pkg, files)) throw new Error(`${name} needs an unsupported install script or native module`);
-    return pkg;
 }
 
 export async function downloadPackage(name, requested, {registry, fetchImpl = fetch, signal}) {
