@@ -1,9 +1,8 @@
-#include <http/HTTPServer.hpp>
-#include <networking/NetworkingMock.hpp>
-
-#include <catch2/catch_test_macros.hpp>
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <http/HTTPServer.hpp>
+#include <networking/NetworkingMock.hpp>
 #include <system/DefaultFS.hpp>
 
 #include <algorithm>
@@ -205,8 +204,8 @@ SCENARIO("Request parsing") {
     }
 
     GIVEN("A HTTP HEAD request") {
-        string input{"HEAD /file.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
-                     "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        string  input{"HEAD /file.txt HTTP/1.1\r\nUser-Agent: Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "
+                      "www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-Encoding: br\r\n\r\n"};
         Request request;
         REQUIRE_NOTHROW(request.parseSomeData(input.cbegin(), input.cend()));
         REQUIRE(request.completed());
@@ -233,7 +232,7 @@ SCENARIO("Asynchronous Request parsing") {
     GIVEN("A HTTP HEAD request received asynchronously") {
         string chunk1{"HEAD /file.txt HTTP/1.1\r\nUser-Agent:"};
         string chunk2{" Mozilla / 4.0 (compatible; MSIE5.01; Windows NT)\r\nHost: "};
-        string chunk3{"www.bernardlehacker.com\r\nConnection: Keep-Alive\r\n\r\n"};
+        string  chunk3{"www.bernardlehacker.com\r\nConnection: Keep-Alive\r\nAccept-Encoding: br\r\n\r\n"};
         Request request;
         REQUIRE_NOTHROW(request.parseSomeData(chunk1.cbegin(), chunk1.cend()));
         REQUIRE(!request.completed());
@@ -265,9 +264,9 @@ SCENARIO("RequestHandler on a HTTP GET") {
             RequestHandler<Net, MockFileSystem<ResourceAndFile>> handler{"."};
             auto response = handler.handleRequest(request);
 
-            THEN("It should respond with a 'Variant Also Negotiates' http response") {
+            THEN("It should reject an unavailable custom encoding") {
                 auto buffers = response.toBuffers<Net>();
-                REQUIRE(compare(buffers[0], "HTTP/1.1 506 Variant Also Negotiates"));
+                REQUIRE(compare(buffers[0], "HTTP/1.1 406 Not Acceptable"));
             }
         }
     }

@@ -10,6 +10,7 @@ function(_webfront_add_embedded_text_asset source header struct test_name)
             -DINPUT=${source}
             -DOUTPUT=${header}
             -DSTRUCT=${struct}
+            -DGZIP=${ARGN}
             -P ${_WEBFRONT_ASSETS_DIR}/EmbedTextAsset.cmake
         COMMENT "Regenerating ${header}"
         VERBATIM
@@ -20,6 +21,7 @@ function(_webfront_add_embedded_text_asset source header struct test_name)
                 -DINPUT=${source}
                 -DCHECK=${header}
                 -DSTRUCT=${struct}
+                -DGZIP=${ARGN}
                 -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
                 -P ${_WEBFRONT_ASSETS_DIR}/EmbedTextAsset.cmake
         )
@@ -41,6 +43,13 @@ function(webfront_add_embedded_assets)
         "${root}/src/fallback/webfront-fallback.mjs" "${root}/include/system/FallbackModuleData.hpp"
         FallbackModuleData FallbackModuleAssetFresh)
 
+    _webfront_add_embedded_text_asset(
+        "${root}/src/developer/index.html" "${root}/include/system/DeveloperIndexHtmlData.hpp"
+        DeveloperIndexHtmlData DeveloperIndexHtmlAssetFresh)
+    _webfront_add_embedded_text_asset(
+        "${root}/src/developer/bootstrap.bundle.mjs" "${root}/include/system/DeveloperBootstrapData.hpp"
+        DeveloperBootstrapData DeveloperBootstrapAssetFresh)
+
     # Terminal component (include/system/TerminalFS.hpp). xterm.js files are vendored verbatim in
     # third_party/xterm (see its VERSION file); refresh them with cmake/UpdateXterm.cmake.
     _webfront_add_embedded_text_asset(
@@ -55,11 +64,46 @@ function(webfront_add_embedded_assets)
         ToolManagerModuleData ToolManagerModuleAssetFresh)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/xterm.mjs" "${root}/include/system/XtermModuleData.hpp"
-        XtermModuleData XtermModuleAssetFresh)
+        XtermModuleData XtermModuleAssetFresh ON)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/xterm.css" "${root}/include/system/XtermCssData.hpp"
-        XtermCssData XtermCssAssetFresh)
+        XtermCssData XtermCssAssetFresh ON)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/xterm/addon-fit.mjs" "${root}/include/system/XtermFitAddonData.hpp"
-        XtermFitAddonData XtermFitAddonAssetFresh)
+        XtermFitAddonData XtermFitAddonAssetFresh ON)
+    _webfront_add_embedded_text_asset(
+        "${root}/third_party/react/runtime.mjs" "${root}/include/system/ReactRuntimeData.hpp"
+        ReactRuntimeData ReactRuntimeAssetFresh ON)
+    _webfront_add_embedded_text_asset(
+        "${root}/third_party/babel/babel.min.js" "${root}/include/system/BabelData.hpp"
+        BabelData BabelAssetFresh ON)
+    foreach(asset IN ITEMS jasmine.js jasmine-html.js jasmine.css boot.js jasmine_favicon.png)
+        if(asset STREQUAL "jasmine.js")
+            set(struct JasmineJsData)
+        elseif(asset STREQUAL "jasmine-html.js")
+            set(struct JasmineHtmlData)
+        elseif(asset STREQUAL "jasmine.css")
+            set(struct JasmineCssData)
+        elseif(asset STREQUAL "boot.js")
+            set(struct JasmineBootData)
+        else()
+            set(struct JasmineFaviconData)
+        endif()
+        if(asset STREQUAL "jasmine_favicon.png")
+            set(compress OFF)
+        else()
+            set(compress ON)
+        endif()
+        _webfront_add_embedded_text_asset(
+            "${root}/third_party/jasmine/${asset}" "${root}/include/system/${struct}.hpp"
+            ${struct} ${struct}AssetFresh ${compress})
+    endforeach()
+    if(ENABLE_TESTING)
+        find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+        add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
+            --test "${root}/tools/developer/check.mjs" "${root}/tools/developer/distribution-check.mjs")
+        set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
+        add_test(NAME EmbeddedGzipContents COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
+            "${root}/tools/assets/check.mjs")
+    endif()
 endfunction()

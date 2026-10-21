@@ -15,6 +15,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         if (request.completed()) {
             (void)request.getMethodName();
             (void)request.isUpgradeRequest("websocket");
+            (void)request.acceptsEncoding("gzip");
+            (void)request.acceptsEncoding("identity");
         }
     } catch (const webfront::http::BadRequestException&) {
         // Invalid HTTP is an expected parser result.

@@ -1,6 +1,6 @@
 # WebFront
 
-**[Version 0.2.0](https://github.com/ambroise-leclerc/WebFront/releases/tag/v0.2.0)** adds optional native windows on every desktop platform: WebView2 on Windows, WKWebView on macOS and WebKitGTK on Linux, with the explicit `NativeWebViewFrontend` alias. The system browser remains the default. This release also includes asynchronous bridge results, owned application coroutines, embedded UI components and input-decoding hardening.
+**[Version 0.3.0](https://github.com/ambroise-leclerc/WebFront/releases/tag/v0.3.0)** adds packed `std::bitset<N>` bridge values and an opt-in, browser-powered developer environment (`webfront::NativeApp::bootstrap("developer")`) with a packed Life demonstration. The 0.2.0 native windows (WebView2, WKWebView, WebKitGTK via `NativeWebViewFrontend`) remain opt-in and the system browser remains the default.
 
 **A straightforward way to add a cross-platform GUI to your C++ application.**
 
@@ -36,7 +36,7 @@ That is the complete program (`src/HelloWorld.cpp`). Build it with the classic C
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
 cd WebFront
-git checkout v0.2.0
+git checkout v0.3.0
 mkdir build
 cd build
 cmake ..
@@ -52,6 +52,16 @@ Then launch it from the build directory:
 Your system browser opens the interface below. The page is included in the library, so there are no assets to prepare. **Connected to WebFront** confirms that the interface has connected to your C++ application. Press Enter in the terminal to stop the server.
 
 ![The embedded Hello, WebFront! page showing the connected indicator](docs/images/hello-world.png)
+
+## Browser-powered development (experimental)
+
+The optional [developer environment](docs/DEVELOPER_ENVIRONMENT.md) downloads its terminal and
+JavaScript/WASM build tools on demand. Install browser libraries with `wf install`, preview local
+TSX, then generate compressed C++ resource headers with `wf embed`. The Game of Life example pairs a small C++23 bitset simulation with a spatial React interface,
+then demonstrates
+recompiling an offline native application without installing Node.js or npm on the developer's machine.
+The [version-pinned environment and starters](https://ambroise-leclerc.github.io/WebFront/)
+are hosted on GitHub Pages; see the guide for the complete walkthrough.
 
 ## Connect your interface to C++
 
@@ -247,7 +257,8 @@ When WebFront is not the top-level project it builds neither its examples nor it
 ## Limitations
 
 - WebFront is an experimental foundation. APIs and the wire format may change.
-- Calls are asynchronous. Results cross the bridge as `std::future` (C++ calling JavaScript, `ui.jsFunction<R>(name)`) and Promises (JavaScript calling C++, `webFront.cppFunction(name)`), limited to scalars, strings (up to 65535 bytes each), tuples and numeric typed arrays. Richer objects and a DOM abstraction are out of scope.
+- Gzip fallback to identity runs synchronously on the server thread with a configurable 4 MiB default decoded-byte budget, including HEAD. See the [fallback budget](docs/HTTP_ASSETS.md#fallback-budget); decoded-asset caching and byte-wise reading remain follow-ups.
+- Calls are asynchronous. Results cross the bridge as `std::future` (C++ calling JavaScript, `ui.jsFunction<R>(name)`) and Promises (JavaScript calling C++, `webFront.cppFunction(name)`), limited to scalars, strings (up to 65535 bytes each), tuples, numeric typed arrays and packed `std::bitset<N>` values. Richer objects and a DOM abstraction are out of scope.
 - A configured document root exposes local files for **development only**; it is not a sandbox or a production packaging format.
 - Nothing authenticates the browser: the server binds to loopback by default, but any local process can connect.
 - With WebView2 enabled, `WebFront.hpp` exposes Windows SDK, Shell and WRL global names, including `::byte`. Qualify `std::byte` instead of relying on `using namespace std;`.
@@ -322,6 +333,8 @@ cmake --build build-cef --target webtest --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure
 ```
 
+The asset freshness checks require Node.js 22.18+ (24 in CI); ordinary C++ consumer builds do not require Node.js or npm.
+
 The Jasmine specs are native ES modules. They prove relative module loading, both bridge directions, all supported numeric typed arrays and `webFront.ready`; report the final result to C++; close the embedded window automatically; and fail CTest on an assertion, bridge, startup or timeout error. CTest also checks that the commands and snippets in this README match the built examples.
 
 The shared lifecycle suite checks closure without a bridge, immediate page closure, a rejected
@@ -364,7 +377,7 @@ CI runs the WebView2 browser label separately with `--no-tests=error`, so absent
 
 [Signal Studio](src/react.html) is the application pictured above. Adjust the frequency, amplitude and harmonic mix, then generate a new waveform. An ordinary [C++ function](src/SignalDemo.hpp) calculates 256 samples and returns a numeric typed array; React renders the curve and derives its peak and RMS measurements. The data is synthetic, rather than a live device feed.
 
-React 18, ReactDOM and Babel are served from WebFront's embedded resources. The example needs no npm install, CDN or separate JavaScript build. Babel translates the small JSX interface at run time for this development example.
+React and React DOM 19.3.1 share a locally embedded ES-module runtime; Babel 8.0.7 translates the editable JSX with the automatic transform at run time. The example needs no npm install, CDN or separate JavaScript build. Jasmine 7.0.2 and xterm 6.0.0 / Fit 0.11.0 are also embedded locally. JavaScript/CSS dependency assets use reproducible gzip; see [versions, regeneration and size measurements](docs/EMBEDDED_ASSETS.md).
 
 To open it in a native window on Windows, configure from the repository root (WebView2 Evergreen Runtime required):
 
@@ -392,7 +405,7 @@ Built-in frontends open the configured server address. Page arguments are URI re
 - The two directions differ. JavaScript obtains a registered callback with `webFront.cppFunction('name')` and calls C++; the call always returns a Promise, even for a `void` C++ callback, so await it or handle its rejection (an ignored rejected Promise raises an unhandled rejection).
 - C++ obtains a browser function with `ui.jsFunction("name")` and calls served JavaScript. Only the untyped form is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns a `std::future<R>`.
 - `co_await ui.jsFunctionSender<R>(name)(...)` starts a typed call when awaited and supports receiver stop-token cancellation. Cancellation stops the C++ wait; JavaScript already dispatched continues. The future API remains available. See [structured execution and cancellation](docs/ASYNC_EXECUTION.md).
-- Bridge parameters include scalars, strings, tuples and numeric typed arrays. C++ `std::vector`, `std::array` and `std::span` map to the matching JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups.
+- Bridge parameters include scalars, strings, tuples, numeric typed arrays and `std::bitset<N>`. C++ `std::vector`, `std::array` and `std::span` map to the matching JavaScript typed-array class; ordinary JavaScript arrays remain tuple-like argument groups. Bitsets map to `Uint8Array` with exactly `ceil(N / 8)` bytes: bit `i` is bit `i % 8` of byte `i / 8` (least significant first). Unused high bits must be zero; wrong types, lengths, truncated data and nonzero padding reject the call. `std::bitset<0>` maps to an empty byte array. JavaScript must know `N` from the application contract; it is not sent separately.
 - Missing functions, callback exceptions, malformed returns and disconnected browsers complete a C++ future exceptionally (`get()` throws) and reject a JavaScript Promise.
 - A callback whose first parameter is the application's `UI` type receives the browser that called it, for example to call it back later; JavaScript passes only the other parameters:
   ```cpp
@@ -465,5 +478,7 @@ WebKit. Choose [CEF](#embedded-window-with-cef-opt-in) when identical rendering 
 platforms is required, and embed the same CEF version on every platform.
 
 See [AGENTS.md](AGENTS.md) for architecture, development commands, conventions, test requirements and safety guidance. The current evidence-based status and backlog recommendations are in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ISSUE_AUDIT.md](docs/ISSUE_AUDIT.md).
+
+The [architecture decision records](docs/adr/README.md) explain the design choices, their Git history, tradeoffs and implementation rules for future changes and code generation.
 
 Optional mddlog diagnostics are available through `WEBFRONT_USE_MDDLOG=ON` (default: `OFF`). Consumers keep including `tooling/Logger.hpp`; WebFront links its compiled adapter. See [dependencies, toolchain matrix and verification](docs/mddlog-integration.md).

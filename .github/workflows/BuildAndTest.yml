@@ -52,6 +52,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Initialize MSVC environment
         if: matrix.config.compiler == 'msvc'
@@ -250,6 +253,9 @@ jobs:
       TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'
@@ -278,7 +284,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build-sanitizers/fuzz/artifacts
-          for decoder in messages http websocket; do
+          for decoder in messages http websocket gzip; do
             build-sanitizers/fuzz/fuzz_$decoder build-sanitizers/fuzz/corpus/$decoder \
               -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
               -artifact_prefix=build-sanitizers/fuzz/artifacts/$decoder-
@@ -297,6 +303,9 @@ jobs:
     name: macOS WKWebView Jasmine and lifecycle
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'
@@ -307,12 +316,18 @@ jobs:
         run: |
           launchctl print gui/$(id -u) >/dev/null
           pgrep -x WindowServer
+      - name: Prepare offline developer environment and starter fixtures
+        run: |
+          npm ci --prefix tools/assets --ignore-scripts
+          node tools/developer/build.mjs build-developer-environment
+          node tools/developer/fixtures.mjs build-developer-environment
       - name: Configure system WebKit frontend
         run: >-
           cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release
           -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
           -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
           -DWEBFRONT_DEMO_FRONTEND=Native
+          -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
       - name: Build
         run: cmake --build build-wkwebview --parallel 2
       - name: Test
@@ -334,6 +349,9 @@ jobs:
     name: Ubuntu CEF Jasmine integration${{ matrix.compiler == 'clang' && ' (Clang)' || '' }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
       - name: Install Clang 23
         if: matrix.compiler == 'clang'
@@ -350,11 +368,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb
 
+      - name: Prepare offline developer environment and starter fixtures
+        run: |
+          npm ci --prefix tools/assets --ignore-scripts
+          node tools/developer/build.mjs build-developer-environment
+          node tools/developer/fixtures.mjs build-developer-environment
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
 
       - name: Build browser test
-        run: cmake --build ${{github.workspace}}/build-cef --target webtest --parallel 1
+        run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration --parallel 1
 
       - name: Run Jasmine bridge test
         run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error
@@ -365,6 +388,9 @@ jobs:
     name: Ubuntu WebKitGTK Jasmine and lifecycle
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - uses: jwlawson/actions-setup-cmake@v2
         with:
           cmake-version: '4.4.4'

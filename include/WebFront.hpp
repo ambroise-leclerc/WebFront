@@ -33,7 +33,7 @@
 
 namespace webfront {
 
-inline constexpr std::string_view version = "0.2.0";
+inline constexpr std::string_view version = "0.3.0";
 
 using NetProvider     = networking::TCPStdnet;
 using ConnectionError = std::runtime_error;
@@ -531,3 +531,6 @@ using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Fronten
 using UI       = WebFront::UI;
 
 }  // namespace webfront
+
+// Optional templates instantiate only when the developer/native facade is selected.
+#include "DeveloperApp.hpp"

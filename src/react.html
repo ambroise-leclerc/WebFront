@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Signal Studio · WebFront</title>
 <script src="/WebFront.js"></script>
-<script src="/react@18/umd/react.production.min.js"></script>
-<script src="/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="/babel-standalone@7.22.5/babel.min.js"></script>
+<script type="importmap">
+{"imports":{"react":"/react@19.3.1/runtime.mjs","react-dom/client":"/react@19.3.1/runtime.mjs","react/jsx-runtime":"/react@19.3.1/runtime.mjs"}}
+</script>
+<script src="/babel-standalone@8.0.7/babel.min.js"></script>
 <style>
 :root { color-scheme: light; font-family: "Segoe UI", system-ui, sans-serif; color: #26352e; background: #f5f4ef; }
 * { box-sizing: border-box; }
@@ -72,8 +73,12 @@ footer { display: flex; justify-content: space-between; font-size: 9px; color: #
 </head>
 <body>
 <div id="root"><p role="status">Opening Signal Studio…</p></div>
-<script type="text/babel">
-const { useState, useEffect } = React;
+<script>
+Babel.registerPreset("webfront-react", {presets: [[Babel.availablePresets.react, {runtime: "automatic"}]]});
+</script>
+<script type="text/babel" data-type="module" data-presets="webfront-react">
+import { useState, useEffect } from "react";
+import { createRoot } from "react-dom/client";
 
 function Control({ id, label, value, min, max, step, unit, onChange, disabled }) {
     return <div className="control">
@@ -162,7 +167,7 @@ function App() {
     </div>;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
 </html>

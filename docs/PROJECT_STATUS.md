@@ -1,6 +1,101 @@
 # WebFront project status
 
-Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14.
+Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newcomer-first epic (#205) note: 2026-10-13. UI components note: 2026-10-14. Embedded dependency refresh: 2026-10-19.
+
+## Packed bitsets (#289, 2026-10-20)
+
+- The bridge accepts `std::bitset<N>` callback arguments/results and C++ call arguments plus
+  typed future/sender results, using existing short/regular Uint8Array encodings. Bit `i` is
+  packed least-significant first into byte `i / 8`; exact lengths and zero padding are validated.
+  Zero-sized bitsets are supported. JavaScript must know the logical bit count separately.
+- Life registers `nextLife` directly and React exchanges 128 packed bytes per generation.
+  Developer distribution 0.3.0 is published on GitHub Pages and archived as `developer-v0.3.0`; the pinned
+  0.3.1 (locked reinstall) awaits its `developer-v0.3.1` publication. Published 0.1.0 to 0.3.0 remain immutable.
+- Local verification: all 252 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases
+  and 14 JavaScript checks pass. Repeated 0.3.0 provisioning produces byte-identical archives
+  and bootstrap configuration. Browser tests verify packed Life grids, playback/reset,
+  deterministic providers and offline execution from empty working directories.
+  CI on [b6bae2e](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423)
+  passes WKWebView, all 14 Linux CEF/Xvfb cases with GCC, and the 252-case Linux
+  thread-sanitized suite. The codec matches the implementation merged in PR #290.
+- After reconciling current `develop`, all 253 CEF-off CTest cases and 26 WKWebView
+  integration/lifecycle cases pass locally. New developer/embedded test executables use the
+  same agent bundles as the shared WKWebView suite; user-facing examples stay ordinary apps.
+- The public 0.3.0 environment and both starters passed fresh WKWebView download/build tests.
+  Pages returned HTTP 200, CORS `*` and matching pinned bytes. Both public-path providers then
+  compiled and ran offline from empty working directories with developer callbacks absent.
+- The demo branch uses the codec and browser assertions merged in PR #290, including MSVC's
+  empty-bitset guards and future tests that tolerate arbitrary response order. JS cell access
+  uses small packed-byte helpers; painting across an octet boundary is covered by the browser test.
+- Regression tests cover known bytes, size boundaries, malformed inputs, tuples and both
+  browser call directions, including exceptional future/sender completion. Future calls and
+  their final notification dispatch on the server context; a joined test thread only waits
+  for the results with a ten-second bound. Delayed JavaScript replies arrive out of dispatch
+  order, and failures log explicit diagnostics without blocking the server context.
+- Local validation on the develop-based branch: all 242 CEF-off CTest cases and the
+  WKWebView Jasmine integration test pass. Linux CEF/Xvfb passes with GCC and Clang in
+  [CI run 39466294828](https://github.com/ambroise-leclerc/WebFront/actions/runs/39466294828)
+  on code revision `d9327e7`; the same run also passes both Windows MSVC configurations,
+  the Linux sanitizers, WebKitGTK and macOS/WKWebView checks.
+
+
+## Browser-powered development (2026-10-20)
+
+- `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
+  downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do
+  not require Node/npm on application developers' machines.
+- The Game of Life demo (`WebFrontLifeDeveloper`, `wf create life`) uses a compact C++23
+  bitset simulation and a spatial React/canvas interface with translucent panels, interactive
+  patterns, playback, single step and tempo. The original PI demo remains available. Both cover
+  local TSX, React/React DOM and scheduler, a same-window preview and an application-owned
+  generated provider. Offline executables use those providers without developer roots/callbacks.
+  Existing React/Babel/terminal providers remain supported.
+- Historical snapshot at the 0.2.0 milestone (the current validation is listed above): local validation passed 250 CEF-off CTest cases, 25 WKWebView integration/lifecycle cases and
+  14 JavaScript checks. Browser coverage includes PI results, C++ Life generations, playback/reset,
+  deterministic header generation and compiling/running both embedded applications from empty
+  working directories. Repeated previews replace session history instead of accumulating entries.
+  Linux CEF/Xvfb passes all 14 integration cases with GCC and Clang in
+  [run 39421265580](https://github.com/ambroise-leclerc/WebFront/actions/runs/39421265580);
+  its WKWebView job also passed. The later Windows and sanitizer results are in the validation above.
+- Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
+  immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
+  configuration. `wf create life` and `wf create pi` create fresh editable projects without
+  overwriting existing files. Maintainer preparation requires Node/npm; consumers do not.
+  Version 0.2.0 was served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
+  with the same archives retained in the `developer-v0.2.0` prerelease; 0.1.0 and later versions are preserved.
+  The live WKWebView smoke test downloaded both starters and the environment from Pages, fetched
+  React dependencies from npm, passed PI/Life previews and deterministic generation, then compiled
+  those public-path headers and ran both applications offline with developer callbacks absent.
+  Pages returned HTTP 200, CORS `*` and byte-identical pinned environment data on 2026-10-20.
+- Browser packages only: no installation scripts, native modules, Node API shims, optional
+  dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
+  dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.
+  See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
+
+## Embedded dependency refresh (#284, 2026-10-19)
+
+- React and React DOM 19.3.1, Babel standalone 8.0.7 and Jasmine 7.0.2 replace the older embedded
+  versions; xterm 6.0.0 and Fit 0.11.0 remain current. React now uses a local ESM bundle and the
+  automatic JSX transform; Jasmine uses its new single boot script. Editable examples still need
+  no npm install, CDN or JavaScript build step.
+- Dependency JavaScript/CSS uses deterministic gzip generated with vendored fflate 0.8.3;
+  sources, licenses, pinned maintenance tooling and offline freshness/decode checks are checked in.
+  Node.js is required for tests/asset maintenance only. Identity fallback from #274 also applies to the updated gzip payloads.
+- The CEF-off Release build passes all 239 CTest cases after integrating #274. All 20 WKWebView browser/lifecycle cases
+  pass locally, including the actual React page, C++ callback recovery and xterm/Fit resizing.
+  Linux CEF/Xvfb and Windows WebView2 coverage runs through their existing CI jobs.
+- Embedded dependency array storage falls from 1,077,552 to 827,120 bytes. Minimal HelloWorld and
+  Greeter binaries were byte-for-byte unchanged in that comparison, before integrating #274.
+  See [sources, regeneration and separate gzip /
+  upgrade measurements](EMBEDDED_ASSETS.md).
+
+
+## Release 0.3.0 (#288, 2026-10-21)
+
+`webfront::version` and the CMake project version are 0.3.0. The release adds packed `std::bitset<N>`
+bridge values (#289) and the opt-in developer environment with its packed Life demonstration (#288);
+see `CHANGELOG.md`. The developer distribution 0.3.1 is published and archived as `developer-v0.3.1`;
+published 0.1.0 to 0.3.1 remain immutable. APIs and packaging remain experimental.
 
 ## Release 0.2.0 and native frontend epic (#253, 2026-10-19)
 
@@ -48,11 +143,11 @@ shutdown exceptions directly, rather than masking them with `std::terminate`.
   including `systemBrowser`, because public WebKit does not expose a reliable user-activation flag.
 - The old Jasmine/React/Babel assets now use gzip. WKWebView did not advertise Brotli on local
   HTTP and Jasmine previously stalled after HTTP 506 responses; all decoded payloads were compared
-  with the previous embedded versions and are identical. Tests check encoding and gzip signatures.
-  Their combined payloads grow from 504,404 to 723,457 bytes (+43.43%); this archive workaround
-  does not add a general server fallback for unsupported content encodings.
-- Verified locally on macOS 27 ARM64 with Clang 21.1.8: all 194 CEF-off/default CTest cases and all
-  213 WKWebView-enabled cases pass, including Jasmine, 17 lifecycle cases and two executable/dylib
+  with the previous embedded versions and are identical. Tests check encoding, gzip signatures and HTTP identity fallback (#274).
+  Their combined payloads grow from 504,404 to 723,457 bytes (+43.43%). The server now also
+  provides gzip-to-identity fallback (#274); other content codings remain pass-through only.
+- Earlier validation on macOS 27 ARM64 with Clang 21.1.8 passed the then-current CEF-off/default
+  and WKWebView-enabled suites, including Jasmine, 17 lifecycle cases and two executable/dylib
   runtime-class registration tests. Apple Clang 21 and
   upstream Clang compile the standalone header; an x86_64/macOS 13.3 syntax check also passes.
   A binary linking CEF 154 and WKWebView opens/closes WKWebView successfully. The Jasmine executable
@@ -199,7 +294,16 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - `WEBFRONT_EMBED_CEF=ON` uses CEF 154.0.34 (Chromium 154.0.8037.98, package `ambroise-leclerc/CEF@154.0.34`). An existing CEF 137 build directory must be reconfigured from scratch. On Windows, `libEGL.dll`, `libGLESv2.dll`, `dxcompiler.dll`, `dxil.dll` and `vk_swiftshader_icd.json` are copied only when the distribution ships them (CEF 154 has no ANGLE DLLs, #249). Verified 2026-10-16 on Linux (GCC 16.1, Unix Makefiles): the CEF build with all 138 CTest cases passing, `WebFrontBrowserIntegration` included, and the CEF-off build with all 137; with Clang 22, the CEF build of `webtest` and `WebFrontBrowserIntegration`. **Not verified:** CEF 154 on Windows and macOS (the macOS ARM64 framework requires macOS 13.0+). A parallel build of every example fails intermittently because their post-build steps copy `locales/` into the same `src/` directory at once.
 - The bridge carries all JavaScript numeric typed-array variants in both directions. C++ `std::vector`, `std::array`, and `std::span` values use the matching typed-array encoding, while decoded parameters own their storage.
 - `src/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
-- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `src/fallback/`; `favicon.ico` remains Brotli-encoded. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
+- Encoded HTTP assets (#274): accepted gzip is served unchanged; otherwise the server decodes
+  gzip to identity with the decoded length, no `Content-Encoding` and `Vary: Accept-Encoding`.
+  The default decoded-byte budget is 4 MiB and applications can override it through their buffer
+  policy. Other codings remain pass-through only. Fallback runs synchronously per request,
+  including HEAD; caching and byte-wise decoding remain follow-ups. See [HTTP asset encoding](HTTP_ASSETS.md)
+  for negotiation rules, errors, strict stream validation and budget configuration.
+  Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
+  Verified 2026-10-19 on Linux for #274: the CEF-off build/CTest suite, CEF/Xvfb integration and
+  WebKitGTK integration passed. The macOS results above describe earlier platform validation.
+- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `src/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
 - The fallback page awaits `webFront.ready` to display the initial bridge connection result. This promise resolves after the handshake acknowledgement and rejects if the initial connection fails or closes; it does not track later disconnects. Jasmine exercises failure against a test-owned HTTP server on an OS-assigned loopback port that rejects WebSocket upgrades, including the case where the application never consumes `ready`.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
 - The HTTP server looks files up by the request path without its query string (`/app.js?v=2` serves `app.js`); the path is cut at the first `?` before percent-decoding, so an encoded `%3F` stays part of the file name, and the `..` check applies to the decoded path only. The query is not passed to filesystems.
@@ -286,7 +390,7 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 
 ## Known limitations and next decisions
 
-- Result values are currently limited to the bridge's existing scalar, string, tuple, and numeric typed-array parameter types; richer object/DOM values remain out of scope.
+- Result values are currently limited to the bridge's existing scalar, string, tuple, numeric typed-array and packed bitset parameter types; richer object/DOM values remain out of scope.
 - `webfront::Task`, `app.spawn(task)`/`ui.spawn(task)` and per-task `TaskHandle::requestStop()` provide application-owned coroutine lifetime without exposing an execution context. The compiled `WebFrontAwaitBrowser` example matches the README; `app.shutdown()` stops and joins before returning; spawn is callable from any thread while the application lives and returns a stopped handle if shutdown rejects it. Destruction keeps owners alive and logs/waits if an external operation delays the join, whereas explicit shutdown reports absent context progress.
 - `ui.jsFunctionSender<R>(name)(...)` (default `R = void`) adds lazy, awaitable typed calls, with value/error/stopped completion and local receiver-token cancellation. Futures and JavaScript Promises remain supported without cancellation. JavaScript already dispatched continues; late replies are discarded. See [execution design](ASYNC_EXECUTION.md).
 - Repeated cancellation of JavaScript functions that never respond reserves their 16-bit IDs until disconnection. Enough such calls exhaust IDs and subsequent calls fail with `Too many outstanding WebFront calls`. Calls have no automatic timeout or per-write delivery acknowledgement.

@@ -52,6 +52,12 @@ implementations must remain loaded until process exit. Successive applications c
 in the same process; each stopped application owns its own server lifetime.
 Nested openings and opening inside an already-running AppKit loop are rejected.
 
+A host bundle with `LSUIElement=true` keeps the accessory activation policy while its window
+is open: it can display UI without adding a Dock icon or owning the application menu bar. Ordinary applications use the regular
+activation policy. Both restore the host's previous policy when the session closes.
+The WKWebView browser-test executables are identified agent bundles so repeated CTest runs
+do not add anonymous executable entries to the Dock.
+
 The application delegate always returns `NSTerminateCancel`, so Cmd-Q closes the WebFront session
 and returns control to C++. It does not distinguish a user Quit from logout or system shutdown;
 macOS may report that the application interrupted shutdown. Hosts needing system-termination
@@ -136,13 +142,9 @@ cmake --build build-wkwebview --parallel
 ctest --test-dir build-wkwebview --output-on-failure
 ```
 
-The legacy embedded Jasmine, React and Babel payloads use gzip: WKWebView does not advertise
-Brotli on the local HTTP connection. Their decoded contents are unchanged; the bridge and
-component text assets retain their existing uncompressed representation.
-This is a compatibility choice for these fixed archives, not a general server fallback:
-`HTTPServer` still returns 506 for an unavailable encoding. Their combined compressed payloads
-grow from 504,404 to 723,457 bytes (+219,053 bytes, +43.43%) when all three providers are used.
-Actual executable size also depends on the referenced assets, compiler and linker.
+WKWebView does not advertise Brotli on local HTTP connections. The bundled compressed assets
+use gzip; their decoded contents are unchanged. See [HTTP asset encoding](HTTP_ASSETS.md)
+for the shared server negotiation, fallback errors and configurable decoded-byte budget.
 
 The shared Jasmine suite exercises both bridge directions, errors, readiness and native modules.
 The shared lifecycle cases cover pages without a bridge, early closure, rejected readiness,

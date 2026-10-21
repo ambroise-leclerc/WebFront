@@ -48,8 +48,9 @@ int main() {
 
 `src/Terminal.cpp` (target `WebFrontTerminal`) is the complete example.
 
-- **Rendering:** [xterm.js](https://xtermjs.org/) 6.0.0 and its fit addon (MIT; the terminal used by
-  VS Code, Tabby and Hyper), vendored verbatim in `third_party/xterm/` and embedded (about 350 KB).
+- **Rendering:** [xterm.js](https://xtermjs.org/) 6.0.0 and its fit addon 0.11.0 (MIT; the terminal used by
+  VS Code, Tabby and Hyper), vendored verbatim in `third_party/xterm/` and embedded as reproducible gzip (95,272 bytes including word padding).
+  See [embedded asset maintenance](EMBEDDED_ASSETS.md) for pinned sources, licenses and regeneration commands.
   ghostty-web, Ghostty's emulator compiled to WebAssembly with an xterm-compatible API, was
   considered and set aside for now: it is under heavy development and supports Chrome only.
 - **Line editing happens in the browser.** The editor in `terminal.mjs` handles insertion, left and
@@ -263,3 +264,12 @@ production plugin system.
 - A filesystem provider writing outside the build tree, with tests using temporary directories.
 - Browser tests that use a local fake registry: tests must not need the public network (done:
   `webtest/js/tools-specs.mjs`).
+
+## Browser-powered developer environment
+
+The opt-in `NativeApp` bootstrap extends this architecture with a downloaded environment rather
+than embedding xterm/compiler/framework assets. It installs ordinary npm libraries into a separate
+store, builds TSX in a browser Worker and generates application-owned filesystem providers.
+The existing terminal/ToolManager APIs and their prebundled tool format remain supported.
+See [the developer environment](DEVELOPER_ENVIRONMENT.md) for the API, provisioning, Game of Life walkthrough,
+trust boundary and offline tests. The browser installer is intentionally not the complete npm CLI.

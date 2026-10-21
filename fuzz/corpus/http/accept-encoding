@@ -1,0 +1,4 @@
+GET /asset.js HTTP/1.1
+Accept-Encoding: GZIP;level=1;q=0.5, identity;q=0
+Accept-Encoding: *;q=0, br;q=1.5
+

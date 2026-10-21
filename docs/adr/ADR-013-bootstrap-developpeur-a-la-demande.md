@@ -1,0 +1,67 @@
+# ADR-013 : Amorcer un environnement développeur téléchargé à la demande
+
+## Versions
+
+| Version | Date | État | Auteur | Évolution | Commit |
+| --- | --- | --- | --- | --- | --- |
+| 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation du bootstrap développeur versionné. | À renseigner après intégration. |
+
+## Statut et date
+
+**Proposée le 2026-10-20.** L'implémentation expérimentale est soumise à validation ; la
+distribution publique de l'environnement et la qualification des autres moteurs restent ouvertes.
+La date est celle de la proposition, pas une origine historique reconstituée.
+
+## Contexte
+
+Une petite application C++ doit pouvoir acquérir son environnement de développement web sans
+embarquer terminal, React, Babel ou compilateur JavaScript, et sans demander l'installation de npm.
+Le navigateur possède déjà HTTPS et les primitives nécessaires au téléchargement.
+
+## Décision proposée
+
+`NativeApp` est une façade native explicite accessible depuis `WebFront.hpp`, sans modifier le
+navigateur système par défaut. La création et `show()` ouvrent la fenêtre ; l'application enregistre
+séparément ses callbacks et appelle `bootstrap("developer", options)` avant `show()`.
+Le projet local est désigné explicitement lors de la construction.
+
+Cette proposition introduit une exception de développement explicite à l'ADR-009 : le bootstrap
+peut contacter un dépôt au lancement après activation volontaire. Les applications ordinaires et
+le mode distribution conservent leur lancement local sans dépendance npm ou réseau.
+
+Le petit chargeur embarqué télécharge une archive npm contenant le terminal et les outils. Il
+vérifie une empreinte SHA-512 fournie par l'application, puis le manifeste de protocole 1 et les
+chemins. Il publie les fichiers sous l'origine locale avant d'importer le module d'entrée.
+L'archive mise en cache est revérifiée à chaque bootstrap ; une erreur affiche un diagnostic et
+permet de réessayer. Un hash incompatible interdit le repli silencieux vers un autre environnement.
+
+Le distributeur fournit URL HTTPS/CORS et empreinte par un canal de confiance. Un registre npm
+peut héberger cette archive, sans client npm chez l'utilisateur et sans serveur spécifique WebFront.
+La première distribution vise GitHub Pages, avec des chemins `developer/<version>/` conservés
+et une configuration URL/SHA-512 épinglée dans `DeveloperReleaseData.hpp`. Le workflow refuse de
+remplacer les octets d'une version publiée et archive les versions taguées dans des prereleases
+séparées de la bibliothèque C++. Les archives gardent des identifiants de paquet, sans exiger
+publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi un starter PI distinct ;
+`wf create pi` crée son dossier sans remplacer un projet existant.
+
+## Alternatives et conséquences
+
+- Embarquer l'environnement complet : écarté pour conserver une application initiale légère.
+- Piloter Node/npm installé : écarté pour l'autonomie du développeur utilisateur.
+- Exécuter une page distante avec le bridge : écarté ; l'environnement validé est servi localement.
+- Le premier lancement nécessite l'accès au dépôt ou un provisioning local explicite. Le cache
+  vérifié autorise ensuite un lancement hors ligne.
+- Le code téléchargé possède l'autorité du bridge et du projet autorisé ; ce n'est pas un sandbox.
+  Le mode distribution n'active pas ces callbacks. Aucun accès au shell n'est ajouté.
+
+## Règles et vérification
+
+Conserver le bridge protégé, les Promises d'erreur et les transferts binaires existants. Ne pas
+ajouter terminal/compiler/frameworks à `DefaultFS`. Ne pas activer implicitement une racine projet.
+Tester intégrité incorrecte, cache hors ligne, protocole inconnu, chemins invalides et interruption.
+Le test natif charge l'archive depuis un dépôt local ; aucun test ne dépend du registre public.
+
+## Références
+
+- [Environnement développeur](../DEVELOPER_ENVIRONMENT.md), [ADR-008](ADR-008-contenu-de-confiance-et-origines.md),
+  [ADR-010](ADR-010-composants-et-outils-optionnels.md).

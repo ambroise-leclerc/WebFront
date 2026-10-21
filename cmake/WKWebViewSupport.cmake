@@ -18,7 +18,7 @@ function(webfront_add_wkwebview_tests)
     add_executable(wkwebview_lifecycle "${webtest_source_dir}/WKWebViewLifecycle.cpp"
         "${webtest_source_dir}/WKWebViewHeaderConsumer.cpp")
     target_link_libraries(wkwebview_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
-    foreach(mode repeated-show main-thread native-close quit navigation-diagnostic startup-timeout settings redirect-policy missing-response committed-navigation)
+    foreach(mode repeated-show main-thread native-close quit navigation-diagnostic startup-timeout settings redirect-policy missing-response committed-navigation agent-application)
         add_test(NAME WKWebViewLifecycle-${mode} COMMAND wkwebview_lifecycle ${mode})
         webfront_set_browser_test_properties("WKWebViewLifecycle-${mode}" "${webtest_source_dir}" 90)
     endforeach()
@@ -36,5 +36,13 @@ function(webfront_add_wkwebview_tests)
         add_test(NAME WKWebViewClassImages-${order}
             COMMAND wkwebview_class_images $<TARGET_FILE:wkwebview_class_module> ${order})
         webfront_set_browser_test_properties("WKWebViewClassImages-${order}" "${webtest_source_dir}" 90)
+    endforeach()
+    # Stable agent bundles avoid one anonymous executable tile per test process in the Dock.
+    foreach(target webtest frontend_lifecycle wkwebview_lifecycle wkwebview_class_images)
+        string(REPLACE "_" "-" identifier "${target}")
+        set_target_properties(${target} PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_GUI_IDENTIFIER "org.webfront.tests.${identifier}"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/WKWebViewTestInfo.plist.in")
     endforeach()
 endfunction()

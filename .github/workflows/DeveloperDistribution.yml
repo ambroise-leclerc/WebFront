@@ -1,0 +1,126 @@
+name: Developer packages
+
+on:
+  push:
+    tags: ['developer-v*']
+    branches: ['**']
+    paths:
+      - 'src/developer/**'
+      - 'src/pi/**'
+      - 'src/life/**'
+      - 'tools/developer/**'
+      - 'tools/assets/package*.json'
+      - 'include/system/DeveloperReleaseData.hpp'
+      - '.github/workflows/DeveloperDistribution.yml'
+  pull_request:
+    branches: [develop, master]
+    paths:
+      - 'src/developer/**'
+      - 'src/pi/**'
+      - 'src/life/**'
+      - 'tools/developer/**'
+      - 'tools/assets/package*.json'
+      - 'include/system/DeveloperReleaseData.hpp'
+      - '.github/workflows/DeveloperDistribution.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the pinned version to GitHub Pages
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/assets/package-lock.json
+      - name: Install pinned maintenance dependencies
+        run: npm ci --prefix tools/assets --ignore-scripts
+      - name: Build and verify the environment and starter packages
+        run: |
+          node tools/developer/build.mjs build-distribution
+          node tools/developer/build.mjs build-distribution-repeat
+          cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
+          cmp build-distribution/pi-starter.tgz build-distribution-repeat/pi-starter.tgz
+          cmp build-distribution/life-starter.tgz build-distribution-repeat/life-starter.tgz
+          cmp include/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
+          node --test tools/developer/check.mjs tools/developer/distribution-check.mjs
+      - name: Check the dedicated release tag
+        if: startsWith(github.ref, 'refs/tags/developer-v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node tools/developer/release-check.mjs "$RELEASE_TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: developer-distribution
+          if-no-files-found: error
+          path: |
+            build-distribution/environment.tgz
+            build-distribution/pi-starter.tgz
+            build-distribution/life-starter.tgz
+            build-distribution/provision.json
+            build-distribution/DeveloperReleaseData.hpp
+
+  publish:
+    if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pages: write
+    concurrency:
+      group: developer-pages-publication
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: developer-distribution
+          path: build-distribution
+      - name: Check the configured Pages source before pushing
+        run: node tools/developer/pages.mjs --check
+      - name: Preserve existing versions and publish the static branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          site="$RUNNER_TEMP/developer-pages"
+          git init --initial-branch=gh-pages "$site"
+          git -C "$site" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          result=0
+          git -C "$site" ls-remote --exit-code --heads origin gh-pages > "$RUNNER_TEMP/developer-pages-ref" || result=$?
+          if [ "$result" = 0 ]; then
+            git -C "$site" fetch --depth=1 origin gh-pages
+            git -C "$site" switch --detach FETCH_HEAD
+          elif [ "$result" != 2 ]; then
+            exit "$result"
+          fi
+          node tools/developer/site.mjs build-distribution "$site"
+          git -C "$site" config user.name "$GITHUB_ACTOR"
+          git -C "$site" config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git -C "$site" add .nojekyll index.html developer
+          if ! git -C "$site" diff --cached --quiet; then
+            version=$(node -p "require('./tools/developer/distribution.json').version")
+            git -C "$site" commit -m "Publish developer packages $version [#288]"
+            git -C "$site" push origin HEAD:refs/heads/gh-pages
+          fi
+      - name: Request the configured Pages build
+        run: node tools/developer/pages.mjs
+      - name: Archive tagged packages in a dedicated prerelease
+        if: startsWith(github.ref, 'refs/tags/developer-v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node tools/developer/archive-release.mjs "$RELEASE_TAG" build-distribution

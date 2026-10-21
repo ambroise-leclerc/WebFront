@@ -12,12 +12,12 @@ find_package(Threads)
 include(CTest)
 
 set(TESTS_LIST)
-list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
+list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST JasmineFSTests.cpp FileSystemTests.cpp NativeFSTests.cpp ReactFSTests.cpp BabelFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp TerminalTests.cpp TerminalFSTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp ToolStoreTests.cpp ToolManagerTests.cpp)
-list(APPEND TESTS_LIST StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST SignalDemoTests.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
@@ -40,6 +40,18 @@ add_test(NAME ReleaseVersionRegression
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-version-regression
         -P ${PROJECT_SOURCE_DIR}/cmake/CheckReleaseVersionTests.cmake)
+
+# Windows bash.exe may be the WSL launcher rather than a native Bash runtime.
+if(UNIX)
+    find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
+    find_package(Git QUIET)
+    if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)
+        add_test(NAME NoAiAttributionRegression
+            COMMAND "${WEBFRONT_TEST_BASH_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/.github/scripts/test-no-ai-attribution.sh")
+        set_tests_properties(NoAiAttributionRegression PROPERTIES TIMEOUT 60)
+    endif()
+endif()
 
 if(ENABLE_COVERAGE)
   target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)

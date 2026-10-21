@@ -5,13 +5,43 @@ import { mount, runLine, tokenize } from '/webfront/components/terminal/terminal
 
 describe('WebFront terminal component', () => {
     let mounted;
+    let element;
 
     beforeAll(async () => {
-        const element = document.createElement('div');
+        element = document.createElement('div');
         element.style.width = '640px';
         element.style.height = '240px';
         document.body.appendChild(element);
         mounted = await mount(element);
+    });
+
+    afterAll(() => {
+        mounted.terminal.dispose();
+        element.remove();
+    });
+
+    it('loads the compressed xterm CSS and Fit addon locally and resizes the terminal', async () => {
+        const initialColumns = mounted.terminal.cols;
+        expect(initialColumns).toBeGreaterThan(20);
+        element.style.width = '960px';
+        try {
+            const deadline = Date.now() + 3000;
+            while (mounted.terminal.cols <= initialColumns && Date.now() < deadline)
+                await new Promise(resolve => setTimeout(resolve, 20));
+            expect(mounted.terminal.cols).toBeGreaterThan(initialColumns);
+            const style = getComputedStyle(element.querySelector('.xterm'));
+            expect(style.position).toBe('relative');
+            const resources = performance.getEntriesByType('resource')
+                .filter(entry => entry.name.includes('/webfront/components/terminal/'));
+            for (const name of ['xterm.mjs', 'xterm.css', 'addon-fit.mjs'])
+                expect(resources.some(entry => entry.name.endsWith('/' + name))).toBeTrue();
+            expect(resources.every(entry => new URL(entry.name).origin === location.origin)).toBeTrue();
+        } finally {
+            element.style.width = '640px';
+            const deadline = Date.now() + 3000;
+            while (mounted.terminal.cols !== initialColumns && Date.now() < deadline)
+                await new Promise(resolve => setTimeout(resolve, 20));
+        }
     });
 
     function screen() {
