@@ -289,10 +289,12 @@ SCENARIO("The developer store refuses malformed requests without changing the pr
     GIVEN("a project file and a single-output transaction") {
         std::ofstream(project.path() / "notes.txt") << "text";
         const auto id = store.begin("generated/output.hpp", false);
-        THEN("each malformed request is rejected") {
+        THEN("invalid reads and writes are rejected") {
             REQUIRE_THROWS_AS(store.read("notes.txt", std::numeric_limits<std::uint64_t>::max()), std::invalid_argument);
             REQUIRE_THROWS_AS(store.write(id, "other", 0, bytes("x")), std::invalid_argument);
             REQUIRE_THROWS_AS(store.commit(id), std::runtime_error);
+        }
+        THEN("aborting is idempotent and ends the transaction") {
             REQUIRE_NOTHROW(store.abort("unknown"));
             REQUIRE_NOTHROW(store.abort(id));
             REQUIRE_THROWS_AS(store.commit(id), std::runtime_error);
@@ -318,10 +320,12 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
     GIVEN("a project directory") {
         TemporaryDirectory project;
         App                app(project.path(), WebFrontConfig{.port = "0"});
-        THEN("only a known mode with a pinned environment is accepted, once") {
+        THEN("an unknown mode or an unpinned environment is refused") {
             REQUIRE_THROWS_AS(app.bootstrap("other", trusted), std::invalid_argument);
             REQUIRE_THROWS_AS(app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "md5-abc"}), std::invalid_argument);
             REQUIRE_THROWS_AS(app.bootstrap("developer", {.environment = "", .integrity = "sha512-abc"}), std::invalid_argument);
+        }
+        THEN("a pinned environment is accepted once") {
             REQUIRE_NOTHROW(app.bootstrap("developer", trusted));
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
         }
