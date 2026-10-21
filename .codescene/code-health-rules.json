@@ -50,9 +50,10 @@
     },
     {
       "matching_content_path": "include/system/DeveloperStore.hpp",
-      "matching_content_path_doc": "The store implements the webfront.developer.* bridge callbacks, whose identifiers, project paths and destinations arrive as strings from the browser. Wrapping them in types only to lower the ratio would obscure the bridge contract.",
+      "matching_content_path_doc": "The store implements the webfront.developer.* bridge callbacks, whose identifiers, project paths, offsets and flags arrive as primitives from the browser. Wrapping them in types only to lower the ratio would obscure the bridge contract.",
       "rules": [
-        { "name": "String Heavy Function Arguments", "weight": 0.0 }
+        { "name": "String Heavy Function Arguments", "weight": 0.0 },
+        { "name": "Primitive Obsession", "weight": 0.0 }
       ]
     }
   ]
