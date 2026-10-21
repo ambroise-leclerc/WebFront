@@ -1,5 +1,12 @@
 # WebFront project status
 
+## Release 0.4.0 (#200, 2026-10-21)
+
+`webfront::version` and the CMake project version are 0.4.0. The release presents the repository
+(examples, README, assets layout) and streamlines CI; it adds no library functionality, see
+`CHANGELOG.md`. The developer distribution 0.4.0 is published and archived as `developer-v0.4.0`;
+published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimental.
+
 ## Repository presentation for 0.4 (2026-10-21)
 
 - Public examples now live in `examples/`: Hello World and the three stages of Game of Life.
@@ -10,7 +17,7 @@
 - Per-change CI combines unit tests and native browser coverage into three desktop jobs, with
   npm, CPM and compiler caches. The Linux job uploads GCC coverage on every PR. Sanitizers, fuzzing,
   both CEF compiler variants and optional mddlog qualification run weekly or manually. Superseded runs are cancelled.
-- Developer distribution 0.4.0 is prepared locally for the revised Life text; publication is a separate release step.
+- Developer distribution 0.4.0 is published for the revised Life text (`developer-v0.4.0`).
 - The dated entries below record earlier implementations and their original target names.
 
 
