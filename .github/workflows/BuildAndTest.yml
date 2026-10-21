@@ -67,17 +67,17 @@ jobs:
       - name: Initialize MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-      # The toolchain PPA answers 503 intermittently: retry instead of failing the required check.
+      # The toolchain PPA answers 503 intermittently: bound each attempt and retry instead of hanging or failing the required check.
       - name: Install GCC 16, native Linux engine and coverage tools
         if: runner.os == 'Linux'
         run: |
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-          for attempt in 1 2 3 4 5; do
-            if sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=5 \
+          for attempt in 1 2 3; do
+            if sudo timeout 300 apt-get update && sudo timeout 420 apt-get install -y -o Acquire::Retries=2 \
                 gcc-16 g++-16 libwebkitgtk-6.0-dev pkg-config xvfb lcov; then
               break
             fi
-            [ "$attempt" = 5 ] && exit 1
+            [ "$attempt" = 3 ] && exit 1
             sleep $((attempt * 20))
           done
           echo "CC=gcc-16" >> "$GITHUB_ENV"
