@@ -14,12 +14,14 @@ permissions:
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Never cancel a push to a release branch: its coverage upload must complete.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
   SCCACHE_GHA_ENABLED: 'true'
 
+# Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
   desktop:
     # PR/push jobs already cover desktops; manual runs add only the extended checks.

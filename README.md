@@ -16,20 +16,23 @@ Register your simulation, bootstrap the tools, then build the interface in the a
 
 <table>
 <tr><th align="left">C++ application</th><th align="left">Create, install, preview</th></tr>
-<tr><td valign="top" width="45%">
+<tr><td valign="top" width="40%">
 
 ```cpp
 #include <WebFront.hpp>
 #include <bitset>
 
-using Grid = std::bitset<32 * 32>;
+using namespace std;
+constexpr int N = 32;
+using Grid = bitset<N * N>;
+
 Grid nextLife(const Grid& cells) {
     Grid next;
     auto index = [](int x, int y) {
-        return std::size_t((y + 32) % 32 * 32 + (x + 32) % 32);
+        return size_t((y + N) % N * N + (x + N) % N);
     };
-    for (int y = 0; y < 32; ++y)
-        for (int x = 0; x < 32; ++x) {
+    for (int y = 0; y < N; ++y)
+        for (int x = 0; x < N; ++x) {
             int n = 0;
             for (int dy = -1; dy <= 1; ++dy)
                 for (int dx = -1; dx <= 1; ++dx)
