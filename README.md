@@ -20,18 +20,36 @@ Register your simulation, bootstrap the tools, then build the interface in the a
 
 ```cpp
 #include <WebFront.hpp>
-#include "Life.hpp"
+#include <bitset>
+
+using Grid = std::bitset<32 * 32>;
+Grid nextLife(const Grid& cells) {
+    Grid next;
+    auto index = [](int x, int y) {
+        return std::size_t((y + 32) % 32 * 32 + (x + 32) % 32);
+    };
+    for (int y = 0; y < 32; ++y)
+        for (int x = 0; x < 32; ++x) {
+            int n = 0;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx)
+                    if (dx || dy)
+                        n += cells[index(x + dx, y + dy)];
+            auto i = index(x, y);
+            next[i] = n == 3 || (cells[i] && n == 2);
+        }
+    return next;
+}
 
 int main() {
     webfront::NativeApp app{"life-project"};
-    app.cppFunction("life.step",
-        &webfront::demo::nextLife);
+    app.cppFunction("life.step", &nextLife);
     app.bootstrap("developer");
     app.show();
 }
 ```
 
-</td><td width="55%">
+</td><td valign="top" width="55%">
 <a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="560" alt="Game of Life walkthrough: an empty application, wf create life, dependency installation, then the React interface running below the terminal"></a>
 </td></tr>
 </table>
@@ -67,15 +85,10 @@ On Windows the executable is `build\examples\Release\WebFrontLifeConsole.exe`.
 The essential change in [LifeDeveloper.cpp](examples/life/LifeDeveloper.cpp) is:
 
 ```cpp
-#include <WebFront.hpp>
-#include "Life.hpp"
-
-int main() {
-    webfront::NativeApp app{"life-project"};
-    app.cppFunction("life.step", &webfront::demo::nextLife);
-    app.bootstrap("developer");
-    app.show();
-}
+webfront::NativeApp app{"life-project"};
+app.cppFunction("life.step", &webfront::demo::nextLife);
+app.bootstrap("developer");
+app.show();
 ```
 
 The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned UI tools, checking their SHA-512 integrity. Downloads are cached. Use `wf` commands there to create, install, preview and embed your interface.

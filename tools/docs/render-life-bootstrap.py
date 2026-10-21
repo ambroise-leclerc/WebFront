@@ -5,7 +5,7 @@ This is an editorial animation: terminal output and timing are condensed, and
 preview height is expanded to keep the application legible at README size.
 """
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageSequence
 
 ROOT = Path(__file__).resolve().parents[2]
 WIDTH, HEIGHT = 800, 765
@@ -53,6 +53,17 @@ for command in commands:
 # The preview appears in two steps while the command history stays visible.
 frame(history, preview=125, duration=650)
 frame(history, preview=600, duration=4600)
+# Native captures of the next twenty C++ generations (27–46), cropped and
+# scaled exactly like the still above. Keep all introductory frames unchanged.
+playback_palette = frames[-1].quantize(colors=256)
+with Image.open(ROOT / 'docs/images/life-generations.webp') as playback:
+    for capture in ImageSequence.Iterator(playback):
+        shot = capture.convert('RGB')
+        frame(history, preview=600, duration=150)
+        # A shared palette keeps unchanged UI pixels stable between generations.
+        frames[-1] = frames[-1].quantize(palette=playback_palette,
+                                         dither=Image.Dither.FLOYDSTEINBERG)
+durations[-1] = 1800
 frames[0].save(ROOT / 'docs/images/life-bootstrap.gif', save_all=True,
                append_images=frames[1:], duration=durations, loop=0, optimize=True)
 print(ROOT / 'docs/images/life-bootstrap.gif')
