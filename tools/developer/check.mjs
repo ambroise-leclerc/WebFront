@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {gunzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
-import {resolvePackages, downloadPackage, validateLock} from '../../src/developer/packages.bundle.mjs';
-import {packageEntry, normalize, virtualPlugin} from '../../src/developer/bundler.mjs';
-import {generateProvider, compress} from '../../src/developer/embed.mjs';
-import {environmentFiles, bootstrap} from '../../src/developer/bootstrap.mjs';
-import {publish, responseBytes} from '../../src/developer/io.mjs';
+import {resolvePackages, downloadPackage, validateLock} from '../../assets/developer/packages.bundle.mjs';
+import {packageEntry, normalize, virtualPlugin} from '../../assets/developer/bundler.mjs';
+import {generateProvider, compress} from '../../assets/developer/embed.mjs';
+import {environmentFiles, bootstrap} from '../../assets/developer/bootstrap.mjs';
+import {publish, responseBytes} from '../../assets/developer/io.mjs';
 import {tar} from './archive.mjs';
 
 const encoder = new TextEncoder();
@@ -142,7 +142,7 @@ test('aborted publications never commit and clean their staging transaction', as
 });
 
 test('checked-in browser bundles match their source and pinned dependency inputs', async () => {
-    const manifest = JSON.parse(await readFile(new URL('../../src/developer/bundles.json', import.meta.url)));
+    const manifest = JSON.parse(await readFile(new URL('../../assets/developer/bundles.json', import.meta.url)));
     for (const [path, hash] of Object.entries(manifest)) {
         const actual = createHash('sha256').update(await readFile(new URL('../../' + path, import.meta.url))).digest('hex');
         assert.equal(actual, hash, `${path} changed: run tools/developer/build.mjs --refresh-bootstrap`);

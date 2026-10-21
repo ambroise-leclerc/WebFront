@@ -1,4 +1,4 @@
-#include "../src/Pi.hpp"
+#include "../test/fixtures/Pi.hpp"
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <DeveloperApp.hpp>

@@ -3,11 +3,12 @@ name: Developer packages
 on:
   push:
     tags: ['developer-v*']
-    branches: ['**']
+    branches: [develop, master]
     paths:
-      - 'src/developer/**'
-      - 'src/pi/**'
-      - 'src/life/**'
+      - 'assets/developer/**'
+      - 'assets/components/tools/**'
+      - 'tools/developer/starters/pi/**'
+      - 'examples/life/ui/**'
       - 'tools/developer/**'
       - 'tools/assets/package*.json'
       - 'include/system/DeveloperReleaseData.hpp'
@@ -15,9 +16,10 @@ on:
   pull_request:
     branches: [develop, master]
     paths:
-      - 'src/developer/**'
-      - 'src/pi/**'
-      - 'src/life/**'
+      - 'assets/developer/**'
+      - 'assets/components/tools/**'
+      - 'tools/developer/starters/pi/**'
+      - 'examples/life/ui/**'
       - 'tools/developer/**'
       - 'tools/assets/package*.json'
       - 'include/system/DeveloperReleaseData.hpp'
@@ -31,6 +33,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: developer-packages-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   package:

@@ -1,4 +1,4 @@
-#include "../src/Life.hpp"
+#include "../examples/life/Life.hpp"
 #include <catch2/catch_test_macros.hpp>
 
 using webfront::demo::LifeGrid;

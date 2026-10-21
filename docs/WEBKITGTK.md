@@ -23,7 +23,7 @@ Install development packages before configuring:
 ```bash
 cmake -S . -B build-webkitgtk -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON \
-  -DWEBFRONT_DEMO_FRONTEND=WebKitGTK -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+  -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
 cmake --build build-webkitgtk --parallel 2
 ctest --test-dir build-webkitgtk -L web-integration --output-on-failure --no-tests=error
 ```

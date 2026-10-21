@@ -17,7 +17,7 @@ React 19 removed UMD builds and requires the automatic JSX transform
 ([upstream upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)).
 `tools/assets/update.mjs` bundles React, React DOM and `react/jsx-runtime` together as
 `/react@19.3.1/runtime.mjs`. This keeps hooks, DOM rendering and JSX on one React instance.
-The import map in `src/react.html` maps `react`, `react-dom/client` and `react/jsx-runtime`
+The import map in `webtest/fixtures/react.html` maps `react`, `react-dom/client` and `react/jsx-runtime`
 to that runtime. Babel's custom `webfront-react` preset uses `runtime: "automatic"` and
 emits a native module. The JSX remains editable in the HTML file, without a consumer build step.
 Babel is served at `/babel-standalone@8.0.7/babel.min.js`.
@@ -83,6 +83,8 @@ fflate and esbuild are maintenance tools; fflate is not embedded in C++ applicat
 
 ## Size measurements
 
+The measurements below predate the 0.4 example cleanup; removed target names identify historical binaries. Current build commands use the retained examples.
+
 The measurements below predate the integration of #274 and isolate the asset refresh from
 its HTTP decoder changes. They describe the original #284 implementation, not current binary
 sizes after rebasing onto the identity-fallback work.
@@ -98,7 +100,7 @@ Executable sizes include Mach-O alignment and the existing test hardening option
 cmake -S . -B build-measure -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER=/path/to/clang++ -DWEBFRONT_EMBED_CEF=OFF \
   -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
-cmake --build build-measure --target HelloWorld WebFrontGreeter WebFrontApp WebFrontTerminal WebFrontTools webtest --parallel 4
+cmake --build build-measure --target HelloWorld WebFrontLifeDeveloper webtest --parallel 2
 # On macOS with standalone LLVM, also pass -DCMAKE_OSX_SYSROOT=$(xcrun --show-sdk-path).
 # Compare file sizes, not CEF frameworks or other external engine resources.
 ```

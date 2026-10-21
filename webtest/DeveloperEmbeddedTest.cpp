@@ -1,6 +1,6 @@
 #include <WebFront.hpp>
 #include WEBFRONT_PI_ASSETS_HEADER
-#include "../src/Pi.hpp"
+#include "../test/fixtures/Pi.hpp"
 #include "../test/TemporaryDirectory.hpp"
 
 #include <atomic>

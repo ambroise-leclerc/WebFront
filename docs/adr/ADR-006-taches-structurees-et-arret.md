@@ -76,4 +76,4 @@ prévaut entre résultat, arrêt et déconnexion.
 - [Contrat détaillé](../ASYNC_EXECUTION.md), [TaskScope](../../include/networking/Tasks.hpp).
 - Tests : [StructuredShutdownTests](../../test/StructuredShutdownTests.cpp),
   [ApplicationTaskTests](../../test/ApplicationTaskTests.cpp), [JsFunctionSenderTests](../../test/JsFunctionSenderTests.cpp).
-- Exemple compilé : [AwaitBrowser.cpp](../../src/AwaitBrowser.cpp).
+- Exemple compilé : [AwaitBrowser.cpp (historique 0.3)](https://github.com/ambroise-leclerc/WebFront/blob/30665cab6e1d68636ef160d8c2f34bd29bff601f/src/AwaitBrowser.cpp).

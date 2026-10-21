@@ -6,8 +6,8 @@ import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {tar} from './archive.mjs';
 import {stageSite, bootstrapHeader, versionPath, distributionFiles} from './site.mjs';
-import {compress} from '../../src/developer/embed.mjs';
-import {createStarter} from '../../src/developer/starter.mjs';
+import {compress} from '../../assets/developer/embed.mjs';
+import {createStarter} from '../../assets/developer/starter.mjs';
 const encode = value => new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value));
 const integrity = bytes => 'sha512-' + createHash('sha512').update(bytes).digest('base64');
 

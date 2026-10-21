@@ -10,7 +10,7 @@ SCENARIO("macOS CEF paths match the deployed framework layout") {
 
         WHEN("each target resolves its framework path") {
             THEN("both locate the framework deployed in the parent directory") {
-                REQUIRE(webfront::cef::detail::macOSFrameworkPath(buildRoot / "src" / "WebFrontApp") == deployedFramework);
+                REQUIRE(webfront::cef::detail::macOSFrameworkPath(buildRoot / "examples" / "HelloWorld") == deployedFramework);
                 REQUIRE(webfront::cef::detail::macOSFrameworkPath(buildRoot / "webtest" / "webtest") == deployedFramework);
             }
         }

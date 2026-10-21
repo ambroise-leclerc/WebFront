@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## Unreleased — 0.4 presentation
+
+- Move the public examples to `examples/` and retain only Hello World and Game of Life.
+  Readable library web resources now live in `assets/`; regression fixtures remain under tests/tools.
+- Rework the README around a minimal Hello World, an early Life thumbnail and a step-by-step
+  bootstrap, dependency-installation, preview and embedded-distribution walkthrough.
+- Combine per-change CI into three native desktop jobs with caches and cancellation.
+  GCC coverage stays in the Linux job on every PR. Extended CEF, sanitizer and fuzz checks run weekly or manually.
+- Run `MddlogIntegration.yml` source/installed integration and sanitizer qualification weekly or manually.
+- No new library functionality.
 
 ## 0.3.0 - 2026-10-21
 
@@ -9,7 +18,7 @@
 - `std::bitset<N>` callback arguments and results, C++ call arguments and typed future/sender results cross the bridge as packed `Uint8Array` bytes (bit `i` in byte `i / 8`, least-significant first), with exact-length and zero-padding validation. A packed Life demonstration exchanges 128 bytes per generation.
 - Opt-in browser-powered developer environment: `NativeApp::bootstrap("developer")` downloads a SHA-512-pinned environment (distribution 0.3.1 on GitHub Pages) whose terminal offers `wf create|install|list|preview|embed`. It resolves npm packages in the browser, locks and re-verifies them, compiles with esbuild-WASM, previews in an iframe and generates a gzip-compressed C++ resource header. The bridge callbacks `webfront.developer.*` publish files through staged, bounded, transactional writes confined to the explicit project directory; abandoned transactions expire and stale staging is purged at startup. WebSocket clients without an `Origin` are refused.
 
-- - `webfront::Task`, `app.spawn(task)` and `ui.spawn(task)` launch application-owned coroutines without execution plumbing; a returned `TaskHandle` cancels an individual task. `app.shutdown()` joins owned work explicitly. Spawning during stop/shutdown returns a stopped handle when rejected; destructor joins log and wait for stalled external work instead of propagating drain errors. `jsFunctionSender(name)` defaults to `void`. `WebFrontAwaitBrowser` is a compiled example matching the README.
+- `webfront::Task`, `app.spawn(task)` and `ui.spawn(task)` launch application-owned coroutines without execution plumbing; a returned `TaskHandle` cancels an individual task. `app.shutdown()` joins owned work explicitly. Spawning during stop/shutdown returns a stopped handle when rejected; destructor joins log and wait for stalled external work instead of propagating drain errors. `jsFunctionSender(name)` defaults to `void`. `WebFrontAwaitBrowser` is a compiled example matching the README.
 
 - `ui.jsFunctionSender<R>(name)(...)` returns a lazy sender that can be awaited in a task and cancelled through its receiver's stop token. Cancellation stops the local wait; dispatched JavaScript continues. Existing `std::future` calls remain available.
 
