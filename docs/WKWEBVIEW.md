@@ -3,11 +3,17 @@
 `WKWebViewFrontend` opens a native AppKit window with the WebKit engine supplied by macOS.
 It is optional and never changes `webfront::WebFront`'s system-browser default.
 
+For this unpublished 0.4 branch, first [build the local developer archive](DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers), then run from the repository root:
+
 ```bash
 cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-wkwebview --target WebFrontLifeDeveloper --parallel 2
-./build-wkwebview/examples/WebFrontLifeDeveloper "$PWD/life-project"
+mkdir -p life-project/.webfront/developer/preview/provision
+cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
+integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+./build-wkwebview/examples/WebFrontLifeDeveloper "$PWD/life-project" \
+  /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
 
 For HelloWorld or your application, select the adapter in C++:

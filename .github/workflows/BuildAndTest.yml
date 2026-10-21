@@ -85,6 +85,7 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
           -DWEBFRONT_DEVELOPER_FIXTURES=${{ github.workspace }}/build-developer-environment
       - name: Build

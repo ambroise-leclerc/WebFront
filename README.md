@@ -86,15 +86,29 @@ Enable **one** engine for your platform:
 | macOS 13.3+ | `-DWEBFRONT_EMBED_WKWEBVIEW=ON` | System Cocoa / WebKit |
 | Linux | `-DWEBFRONT_EMBED_WEBKITGTK=ON` | WebKitGTK 6.0; [installation](docs/WEBKITGTK.md) |
 
-For example, on macOS, from the repository root:
+For local review of this unpublished branch, first [build the local archive](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). That preparation requires Node/npm for the maintainer only. Then, on macOS, from the repository root:
 
 ```bash
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-native --target WebFrontLifeDeveloper --parallel 2
-./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
+mkdir -p life-project/.webfront/developer/preview/provision
+cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
+integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
+  /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
 
-Replace the engine option on Windows or Linux. With Visual Studio add `--config Release` when building and run `.\build-native\examples\Release\WebFrontLifeDeveloper.exe "$PWD/life-project"` in PowerShell. The example accepts the project directory as its argument, creates it if necessary, and reports startup failures with a nonzero exit status. Use a fresh project directory for this walkthrough.
+Replace the engine option on Linux or Windows. With Visual Studio, add `--config Release` when building. After preparing the local archive, launch from PowerShell with:
+
+```powershell
+New-Item -ItemType Directory -Force life-project/.webfront/developer/preview/provision | Out-Null
+Copy-Item build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
+$integrity = (Get-Content build-developer-environment/provision.json -Raw | ConvertFrom-Json).integrity
+.\build-native\examples\Release\WebFrontLifeDeveloper.exe "$PWD/life-project" `
+  /webfront/developer/preview/provision/environment.tgz "$integrity"
+```
+
+The example reports startup failures with a nonzero exit status. Use a fresh project directory for this walkthrough. Once developer distribution 0.4.0 is published, the archive URL and integrity arguments can be omitted to use the pinned defaults.
 
 ### 3. Install dependencies in the application's terminal
 

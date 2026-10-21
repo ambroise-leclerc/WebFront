@@ -47,7 +47,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.3.1/environment.tgz`. It pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.4.0/environment.tgz`. This version is prepared but not yet published; use local provisioning for now. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -75,10 +75,14 @@ with cell `i` in bit `i % 8` of byte `i / 8`. The bridge validates the exact uns
 with a plain console application.
 
 `examples/life/LifeDeveloper.cpp` adds the native window and downloaded developer bootstrap. Configure
-`build-native` with the native frontend option above, then start with an empty project directory:
+`build-native` with the native frontend option above, then [prepare the local archive](#environment-distribution-and-offline-tests-maintainers) and start with a fresh project directory:
 
 ```sh
-./build-native/examples/WebFrontLifeDeveloper /path/to/life-project
+mkdir -p life-project/.webfront/developer/preview/provision
+cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
+integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
+  /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
 
 Optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default.
@@ -188,7 +192,7 @@ To try the local archive without an HTTPS server, after building the packages ab
 
 ```sh
 mkdir -p life-project/.webfront/developer/preview/provision
-cp build-developer-environment/environment.tgz life-project/.webfront/developer/preview/provision/
+cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
 integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
   /webfront/developer/preview/provision/environment.tgz "$integrity"
