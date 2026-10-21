@@ -30,8 +30,11 @@ function firstMatch(candidates, wildcard, conditions) {
 }
 
 function byCondition(object, wildcard, conditions) {
-    for (const [key, target] of Object.entries(object))
-        if (conditions.has(key)) return conditional(target, wildcard, conditions);
+    for (const [key, target] of Object.entries(object)) {
+        if (!conditions.has(key)) continue;
+        const result = conditional(target, wildcard, conditions);
+        if (result) return result;
+    }
     return null;
 }
 

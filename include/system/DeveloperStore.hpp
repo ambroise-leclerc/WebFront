@@ -3,6 +3,10 @@
 
 #include "DeveloperFiles.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <set>
+
 namespace webfront::developer {
 
 class Store {
@@ -49,7 +53,7 @@ public:
         const auto resolved = std::filesystem::weakly_canonical(target);
         requireFreeDestination(resolved, std::filesystem::weakly_canonical(stagingRoot));
         const auto [id, staging] = createStaging(stagingRoot);
-        transactions.emplace(id, Transaction{staging, target, resolved, std::move(destination), directory, replace, 0, {}, std::chrono::steady_clock::now()});
+        transactions.emplace(id, Transaction{staging, target, resolved, std::move(destination), directory, replace, 0, {}, {}, std::chrono::steady_clock::now()});
         return id;
     }
 
@@ -57,7 +61,8 @@ public:
         std::scoped_lock lock(mutex);
         auto&            tx       = transaction(id);
         const auto       relative = checkedChunk(tx, path, bytes.size());
-        auto&            size     = tx.files[relative.generic_string()];
+        requireDistinctCase(tx, relative.generic_string());
+        auto& size = tx.files[relative.generic_string()];
         if (offset != size)
             throw std::invalid_argument("Non-sequential developer write");
         const auto target = tx.staging / relative;
@@ -105,6 +110,7 @@ private:
         bool                                 replace;
         std::uint64_t                        size;
         std::map<std::string, std::uint64_t> files;
+        std::set<std::string>                folded;
         std::chrono::steady_clock::time_point lastUse;
     };
     Transaction& transaction(const std::string& id) {
@@ -147,6 +153,16 @@ private:
         if (!std::filesystem::is_regular_file(output))
             throw std::runtime_error("No output was staged");
         return output;
+    }
+
+    // Two paths differing only by case are one file on Windows and macOS: refuse them instead of concatenating.
+    static void requireDistinctCase(Transaction& tx, const std::string& key) {
+        std::string lowered = key;
+        std::ranges::transform(lowered, lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (tx.files.contains(key))
+            return;
+        if (!tx.folded.insert(lowered).second)
+            throw std::invalid_argument("Developer paths differing only by case: " + key);
     }
 
     static void requireWithinLimits(const Transaction& tx, std::size_t size) {

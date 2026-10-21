@@ -256,3 +256,20 @@ SCENARIO("Startup cleanup never leaves the project through a staging link") {
         }
     }
 }
+
+SCENARIO("Paths differing only by case never share a staged file") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a staged directory holding LICENSE") {
+        const auto id = store.begin("package", true);
+        store.write(id, "LICENSE", 0, bytes("first"));
+        WHEN("a second file whose name differs only by case is sent") {
+            THEN("it is refused and the first file keeps its content") {
+                REQUIRE_THROWS_AS(store.write(id, "License", 0, bytes("second")), std::invalid_argument);
+                store.write(id, "LICENSE", 5, bytes("!"));
+                store.commit(id);
+                REQUIRE(read(store, "package/LICENSE") == "first!");
+            }
+        }
+    }
+}

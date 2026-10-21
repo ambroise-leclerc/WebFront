@@ -97,6 +97,7 @@ test('resolves browser conditional exports and rejects private and Node imports'
     assert.equal(packageEntry({exports: {'.': {browser: './browser.js', default: './node.js'}, './*': './src/*.mjs'}}, ''), 'browser.js');
     assert.equal(packageEntry({exports: {'./*': './src/*.mjs'}}, 'sub'), 'src/sub.mjs');
     assert.throws(() => packageEntry({exports: {'.': './index.js'}}, 'private'), /does not export/);
+    assert.equal(packageEntry({exports: {browser: {import: './b.mjs'}, default: './c.js'}}, '', 'require'), 'c.js');
     assert.throws(() => normalize('../outside'), /escapes/);
     assert.equal(packageEntry({exports: {'.': {import: './esm.js', require: './cjs.js'}}}, '', 'require'), 'cjs.js');
     let resolve;
