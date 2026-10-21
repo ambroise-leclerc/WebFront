@@ -26,23 +26,24 @@ jobs:
   desktop:
     # PR/push jobs already cover desktops; manual runs add only the extended checks.
     if: github.event_name != 'workflow_dispatch'
-    name: ${{ matrix.name }}
+    # No `name:` expression: a skipped matrix job would display it unevaluated.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
+        platform: [linux-gcc-webkitgtk, windows-msvc-webview2, macos-clang-wkwebview]
         include:
-          - name: Linux GCC / WebKitGTK
+          - platform: linux-gcc-webkitgtk
             os: ubuntu-26.04
             build_type: Debug
             test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
             options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON
-          - name: Windows MSVC / WebView2
+          - platform: windows-msvc-webview2
             os: windows-2025
             build_type: Release
             test_env: {}
             options: -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2
-          - name: macOS Apple Clang / WKWebView
+          - platform: macos-clang-wkwebview
             os: macos-26
             build_type: Release
             test_env: {}
