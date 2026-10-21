@@ -43,6 +43,13 @@ function(webfront_add_embedded_assets)
         "${root}/src/fallback/webfront-fallback.mjs" "${root}/include/system/FallbackModuleData.hpp"
         FallbackModuleData FallbackModuleAssetFresh)
 
+    _webfront_add_embedded_text_asset(
+        "${root}/src/developer/index.html" "${root}/include/system/DeveloperIndexHtmlData.hpp"
+        DeveloperIndexHtmlData DeveloperIndexHtmlAssetFresh)
+    _webfront_add_embedded_text_asset(
+        "${root}/src/developer/bootstrap.bundle.mjs" "${root}/include/system/DeveloperBootstrapData.hpp"
+        DeveloperBootstrapData DeveloperBootstrapAssetFresh)
+
     # Terminal component (include/system/TerminalFS.hpp). xterm.js files are vendored verbatim in
     # third_party/xterm (see its VERSION file); refresh them with cmake/UpdateXterm.cmake.
     _webfront_add_embedded_text_asset(
@@ -93,6 +100,9 @@ function(webfront_add_embedded_assets)
     endforeach()
     if(ENABLE_TESTING)
         find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+        add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
+            --test "${root}/tools/developer/check.mjs" "${root}/tools/developer/distribution-check.mjs")
+        set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
         add_test(NAME EmbeddedGzipContents COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
             "${root}/tools/assets/check.mjs")
     endif()
