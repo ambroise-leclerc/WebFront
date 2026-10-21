@@ -61,8 +61,14 @@ auto result = co_await ui.jsFunctionSender<double>("Math.sqrt")(81);
 `webfront::Task` is the public coroutine type. `app.spawn(task)` or
 `ui.spawn(task)` starts it on the server context, owns it until completion and
 cancels it during application shutdown. No scheduler, scope or context is
-needed. The complete runnable example is [AwaitBrowser.cpp](../src/AwaitBrowser.cpp),
-compiled as `WebFrontAwaitBrowser` and reproduced in the README.
+needed. For example:
+
+```cpp
+webfront::Task showSquareRoot(webfront::UI ui) {
+    auto result = co_await ui.jsFunctionSender<double>("Math.sqrt")(81);
+    co_await ui.jsFunctionSender("console.log")("sqrt(81) =", result);
+}
+```
 
 ```cpp
 auto handle = app.spawn(showSquareRoot(ui));

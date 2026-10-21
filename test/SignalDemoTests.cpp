@@ -1,4 +1,4 @@
-#include "../src/SignalDemo.hpp"
+#include "../test/fixtures/SignalDemo.hpp"
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 

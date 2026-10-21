@@ -10,6 +10,12 @@ This is an experimental, explicit development facility. The downloaded environme
 the application's bridge authority and may read/write the selected project. It exposes no shell.
 Do not ship developer mode as the distribution configuration.
 
+The 0.4 presentation update prepares developer distribution **0.4.0** with the revised Life text.
+It is not published as part of the repository cleanup. Before releasing this branch, publish the
+prepared archives using [the package release procedure](../tools/developer/PUBLISHING.md).
+For local review, provision the generated archive as described below and pass its URL/integrity
+to `WebFrontLifeDeveloper`. Existing published versions remain unchanged.
+
 ## Minimal C++ application
 
 Enable the platform's native frontend in CMake: `WEBFRONT_EMBED_WKWEBVIEW=ON` on macOS,
@@ -41,7 +47,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.3.1/environment.tgz`. It pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.4.0/environment.tgz`. This version is prepared but not yet published; use local provisioning for now. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -60,19 +66,23 @@ environment is not silently substituted.
 
 ## The Game of Life walkthrough
 
-`src/Life.hpp` is a small C++23 B3/S23 simulation on a `std::bitset<1024>`.
+`examples/life/Life.hpp` is a small C++23 B3/S23 simulation on a `std::bitset<1024>`.
 Each generation reads the old grid and creates a new one; the 32 × 32 world wraps on both axes.
 The core needs no React, server, thread, timer or graphics dependency. `nextLife` is registered directly
 with its `const LifeGrid&` argument and bitset result. React stores and exchanges a 128-byte `Uint8Array`,
 with cell `i` in bit `i % 8` of byte `i / 8`. The bridge validates the exact unsigned-byte type and length.
-`src/LifeConsole.cpp` runs it without WebFront; build and run `WebFrontLifeConsole` to start
+`examples/life/LifeConsole.cpp` runs it without WebFront; build and run `WebFrontLifeConsole` to start
 with a plain console application.
 
-`src/LifeDeveloper.cpp` adds the native window and downloaded developer bootstrap. Configure
-`build-native` with the native frontend option above, then start with an empty project directory:
+`examples/life/LifeDeveloper.cpp` adds the native window and downloaded developer bootstrap. Configure
+`build-native` with the native frontend option above, then [prepare the local archive](#environment-distribution-and-offline-tests-maintainers) and start with a fresh project directory:
 
 ```sh
-./build-native/src/WebFrontLifeDeveloper /path/to/life-project
+mkdir -p life-project/.webfront/developer/preview/provision
+cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
+integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
+  /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
 
 Optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default.
@@ -101,7 +111,7 @@ Canvas rendering has an accessible description; patterns and simulation controls
 keyboard. Individual canvas cells are pointer-editable, without keyboard cell navigation.
 No fonts, images, 3D library or additional UI framework are downloaded.
 
-![The native Game of Life demo at generation 34](images/life-preview.png)
+![The native Game of Life demo at generation 26](images/life-preview.jpg)
 
 `wf embed` builds JS/CSS/resources, creates an HTML entry page, preserves dependency notices and
 writes a header-only `webfront::fs::LifeUI` provider using deterministic gzip. The filename stem
@@ -125,11 +135,9 @@ Reconfigure the native build with
 `WebFrontLifeEmbedded` and run it. Recompilation is explicit. The resulting binary needs neither
 project sources, downloaded cache nor network.
 
-The original PI example remains available: `WebFrontPiDeveloper`, `wf create pi`,
-`wf embed ui/main.tsx --output generated/PiUI.hpp`, and
-`-DWEBFRONT_PI_ASSETS=/absolute/path/to/generated/PiUI.hpp` / `WebFrontPiEmbedded`.
-Use a separate project directory for each starter. Existing embedded React/Babel providers
-remain supported.
+The PI starter remains available through `wf create pi` for existing projects and regression
+coverage. Its sources are maintained under `tools/developer/starters/pi/`; the public C++
+examples are limited to Hello World and Life. Existing embedded React/Babel providers remain supported.
 
 ## Dependencies, storage and limitations
 
@@ -180,10 +188,19 @@ it writes only to the output directory. The archives have the package identifier
 `@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static GitHub Pages downloads; no npm publication or
 scope ownership is required. Node/npm is only used by maintainers to build them.
 
-To try the local archive without an HTTPS server, copy `environment.tgz` to the project's
-`.webfront/developer/preview/provision/environment.tgz` and pass
-`/webfront/developer/preview/provision/environment.tgz` as its URL. The preview command later replaces
-that directory, but the verified archive is already cached independently for subsequent launches.
+To try the local archive without an HTTPS server, after building the packages above:
+
+```sh
+mkdir -p life-project/.webfront/developer/preview/provision
+cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
+integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
+  /webfront/developer/preview/provision/environment.tgz "$integrity"
+```
+
+The preview command later replaces that directory, but the verified archive is already cached
+independently for subsequent launches. These are maintainer provisioning commands; the application's
+terminal still installs and builds browser dependencies without a local Node/npm installation.
 
 Fixture provisioning packs the pinned React, React DOM and scheduler sources from the maintainer's
 npm installation into a fake local registry. No CTest case downloads from the public registry.

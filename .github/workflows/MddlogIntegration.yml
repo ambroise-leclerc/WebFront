@@ -1,10 +1,11 @@
 name: Optional mddlog integration
 on:
-  pull_request:
-    branches: [develop]
-  push:
-    branches: [develop]
+  schedule:
+    - cron: '43 4 * * 1'
   workflow_dispatch:
+concurrency:
+  group: mddlog-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -21,7 +22,7 @@ jobs:
         ref: 5b43265664d83c3b7135d328f611e685792a1b02
         path: dependencies/mddlog
     - name: Setup CMake (4.3.1, within the qualified 4.0-4.3 window)
-      uses: jwlawson/actions-setup-cmake@v2
+      uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
       with:
         cmake-version: '4.3.1'
 
@@ -46,7 +47,7 @@ jobs:
     - name: Configure source integration
       run: >-
         cmake -S . -B build-mddlog-source -G Ninja
-        -DCMAKE_BUILD_TYPE=Release -DENABLE_CACHE=OFF -DENABLE_TESTING=ON
+        -DCMAKE_BUILD_TYPE=Release -DENABLE_CACHE=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
         -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake
         -DWEBFRONT_USE_MDDLOG=ON
         -DWEBFRONT_MDDLOG_SOURCE_DIR=${{ github.workspace }}/dependencies/mddlog
@@ -59,7 +60,7 @@ jobs:
     - name: Configure installed integration
       run: >-
         cmake -S . -B build-mddlog-install -G Ninja
-        -DCMAKE_BUILD_TYPE=Release -DENABLE_CACHE=OFF -DENABLE_TESTING=ON
+        -DCMAKE_BUILD_TYPE=Release -DENABLE_CACHE=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
         -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake
         -DWEBFRONT_USE_MDDLOG=ON
         -DCMAKE_PREFIX_PATH=${{ github.workspace }}/mddlog-install
@@ -96,7 +97,7 @@ jobs:
         ref: 5b43265664d83c3b7135d328f611e685792a1b02
         path: dependencies/mddlog
     - name: Setup CMake (4.3.1, within the qualified 4.0-4.3 window)
-      uses: jwlawson/actions-setup-cmake@v2
+      uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
       with:
         cmake-version: '4.3.1'
 
@@ -123,7 +124,7 @@ jobs:
     - name: Configure instrumented source integration
       run: >-
         cmake -S . -B build-sanitized -G Ninja
-        -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_CACHE=OFF -DENABLE_TESTING=ON
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_CACHE=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
         -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake
         "-DCMAKE_CXX_FLAGS=-stdlib=libc++ ${{ matrix.flags }} -fno-omit-frame-pointer"
         "-DCMAKE_EXE_LINKER_FLAGS=${{ matrix.flags }}"
@@ -133,7 +134,8 @@ jobs:
       run: cmake --build build-sanitized --parallel 2 --target tests
     - name: Run the transport and WebLink scenarios repeatedly
       run: |
-        for run in 1 2 3 4 5; do
+        for iteration in 1 2 3 4 5; do
+          echo "Transport iteration $iteration"
           ./build-sanitized/test/tests "[transport],[weblink]" --order rand
         done
     - name: Run every test once

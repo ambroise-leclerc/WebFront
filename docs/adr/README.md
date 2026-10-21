@@ -106,3 +106,9 @@ Keep previous rows and update the current version in the index.
   may extend an existing ADR’s history without erasing its previous state.
 - A future possibility mentioned here is not an accepted decision: general DOM abstractions,
   tool isolation, response deadlines and a decoding cache require their own decisions.
+
+## Chemins depuis la version 0.4
+
+Les exemples publics résident dans `examples/` et les ressources web lisibles dans `assets/`.
+Les mentions de `src/` dans les décisions précédentes décrivent l’ancienne organisation ; elles ne
+changent pas les contrats. Les démonstrations supprimées restent consultables dans l’historique Git.

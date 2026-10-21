@@ -5,3 +5,5 @@ Version 0.3.0 migrates the Life starter to packed Uint8Array grids: 128 bytes pe
 Download through the version-pinned GitHub Pages URLs in the bootstrap configuration. SHA-512 is verified before executing the environment or creating a starter. React, React DOM and scheduler remain on npm; application developers do not install Node.js or npm. Both starters can generate their own compressed header-only resources for an offline native executable.
 
 The environment includes the terminal, npm resolver, esbuild/WASM compiler, embedding tools and dependency notices. These packages are experimental; browser packages only, without installation scripts, native modules or Node API shims.
+
+Version 0.4.0 updates the Life starter text for a developer audience. The simulation and bridge contract are unchanged.

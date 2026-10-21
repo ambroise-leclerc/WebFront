@@ -31,6 +31,8 @@ arguments et corrompu les messages.
 ## Décision
 
 Que soit préservé le protocole binaire de `weblink/Messages.hpp` et de la source `src/WebFront.js`.
+
+Note de renommage (0.4) : la source JavaScript est désormais `assets/WebFront.js` ; ce déplacement ne modifie pas le protocole décrit ici.
 Les messages d’appel et de retour portent des identifiants de corrélation sur 16 bits.
 Les types pris en charge sont les scalaires, chaînes, tuples, tableaux numériques typés et `std::bitset<N>` ;
 les objets JavaScript arbitraires et objets DOM ne traversent pas automatiquement le pont.
@@ -88,7 +90,7 @@ refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur p
 
 ## Sources et vérification
 
-- [Codec C++](../../include/weblink/Messages.hpp), [codec JS](../../src/WebFront.js),
+- [Codec C++](../../include/weblink/Messages.hpp), [codec JS](../../assets/WebFront.js),
   [politique de buffers](../../include/http/BuffersPolicy.hpp).
 - Tests : [MessagesTests](../../test/MessagesTests.cpp), [WebSocketTests](../../test/WebSocketTests.cpp),
   [spécifications navigateur](../../webtest/js/webfront-specs.mjs).

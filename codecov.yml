@@ -9,4 +9,4 @@ coverage:
         target: 95%
 ignore:
   - "webtest/**"
-  - "src/**"
+  - "examples/**"

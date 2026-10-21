@@ -119,5 +119,5 @@ if(ENABLE_TESTING)
 endif()
 
 if(WEBFRONT_BUILD_EXAMPLES)
-  add_subdirectory(src)
+  add_subdirectory(examples)
 endif()

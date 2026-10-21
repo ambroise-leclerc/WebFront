@@ -105,6 +105,11 @@ set(_consumer_dependency_args -DCPM_stdnet_SOURCE=${stdnet_SOURCE_DIR})
 if(stdexec_POPULATED)
     list(APPEND _consumer_dependency_args -DFETCHCONTENT_SOURCE_DIR_STDEXEC=${stdexec_SOURCE_DIR})
 endif()
+# This is a separate CMake configure: preserve the caller's explicit module-scanning policy.
+# In particular, Ninja/GCC CI disables scanning to avoid GCC's stdexec -fmodules-ts crash.
+if(DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
+    list(APPEND _consumer_dependency_args -DCMAKE_CXX_SCAN_FOR_MODULES:BOOL=${CMAKE_CXX_SCAN_FOR_MODULES})
+endif()
 add_test(NAME AddSubdirectoryConsumer
     COMMAND ${CMAKE_CTEST_COMMAND}
         --build-and-test ${CMAKE_CURRENT_SOURCE_DIR}/consumer ${CMAKE_CURRENT_BINARY_DIR}/consumer-build

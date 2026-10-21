@@ -1,6 +1,6 @@
 # Frontends
 
-[Back to the README](../README.md#choose-how-your-interface-opens)
+[Back to the README](../README.md#use-webfront-in-your-project)
 
 A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS, `WebKitGTKFrontend` on Linux). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/frontend/Frontend.hpp`.
 
@@ -45,7 +45,7 @@ initialization, frontend selection and unavailable-engine diagnostics. These tes
 | Field | Meaning |
 | --- | --- |
 | `OPTION` | Availability option named `WEBFRONT_EMBED_<NAME>`, always defaulting to `OFF`. |
-| `DESCRIPTION` | Plain-text CMake option help, checked against the README after removing Markdown code delimiters. |
+| `DESCRIPTION` | Plain-text CMake option help, checked against the option table below after removing Markdown code delimiters. |
 | `PLATFORMS` | Supported CMake platform names. Enabling the option elsewhere fails before fetching dependencies. |
 | `SUPPORT` | Module loaded when the engine is enabled. Registration checks that its file exists. |
 | `SETUP` | Optional function configuring each application's target, including runtime deployment. |
@@ -89,3 +89,15 @@ their own CTest timeouts.
 
 WKWebView adds native main-thread, Quit/closure, repeated-opening, initial HTTP failure, stalled-loading
 deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEBVIEW.md#unattended-verification).
+
+## Build options
+
+Enabling an engine makes its adapter available; select it explicitly in your application.
+`webfront::NativeApp` chooses the native engine for the current platform.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `WEBFRONT_EMBED_WEBVIEW2` | OFF | Download the pinned WebView2 SDK and link its static loader (Windows only) |
+| `WEBFRONT_EMBED_WKWEBVIEW` | OFF | Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only) |
+| `WEBFRONT_EMBED_WEBKITGTK` | OFF | Enable the system WebKitGTK 6.0 embedded frontend (Linux only) |
+| `WEBFRONT_EMBED_CEF` | OFF | Download and link CEF so CEFFrontend is available (Windows, Linux and macOS only). Other platforms fail at configure time |

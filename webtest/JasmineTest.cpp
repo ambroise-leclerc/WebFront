@@ -14,7 +14,7 @@
 #include <WebFront.hpp>
 
 #include "RejectedWebSocketServer.hpp"
-#include "../src/SignalDemo.hpp"
+#include "../test/fixtures/SignalDemo.hpp"
 
 #include <array>
 #include <atomic>
@@ -95,7 +95,7 @@ private:
 // Serve the actual example page so the React regression exercises the shipped UI.
 class ReactDemoFS {
 public:
-    explicit ReactDemoFS(filesystem::path root) : page(root.parent_path() / "src" / "react.html") {}
+    explicit ReactDemoFS(filesystem::path root) : page(root / "fixtures" / "react.html") {}
 
     optional<fs::File> open(filesystem::path file) const {
         if (file.relative_path().generic_string() != "demos/react.html")

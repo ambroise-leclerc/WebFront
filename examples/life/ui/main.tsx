@@ -97,7 +97,7 @@ async function nextGeneration(session: Session, revision: number) {
 const countBits = (cells: Uint8Array) => cells.reduce((count, byte) => { while (byte) { count += byte & 1; byte >>>= 1; } return count; }, 0);
 
 function Telemetry({generation, population}: {generation: number; population: number}) {
-    return <aside className="glass telemetry" aria-label="Simulation statistics"><span className="eyebrow">OBSERVATION</span>
+    return <aside className="glass telemetry" aria-label="Simulation statistics"><span className="eyebrow">SIMULATION</span>
                 <div><output data-testid="generation">{generation.toString().padStart(4, '0')}</output><span>Generation</span></div>
                 <div><output data-testid="population">{population}</output><span>Living cells</span></div>
                 <span className="boundary">32 × 32 · wrapping edges</span></aside>;
@@ -166,19 +166,19 @@ function Life() {
     usePlayback(playing, run, rate, step);
     const population = countBits(cells);
     return <main className="observatory">
-        <header><a className="identity" href="#"><span className="mark">✳</span> FIELD<span className="edition">/ 01</span></a>
-            <span className="eyebrow">A small universe, computed in C++23</span><span className="engine"><i/> Native engine</span></header>
+        <header><a className="identity" href="#"><span className="mark">✳</span> WEBFRONT<span className="edition">/ LIFE</span></a>
+            <span className="eyebrow">C++23 simulation · React interface</span><span className="engine"><i/> Native engine</span></header>
         <section className="scene">
-            <div className="intro"><span className="eyebrow">CONWAY’S GAME OF LIFE</span><h1>Order.<br/>From almost nothing.</h1>
-                <p>Three simple rules.<br/>An entire world of possibilities.</p></div>
+            <div className="intro"><span className="eyebrow">CONWAY’S GAME OF LIFE</span><h1>Game of Life</h1>
+                <p>32 × 32 grid · wrapping edges.<br/>B3/S23 rules computed in C++.</p></div>
             <div className="world"><div className="halo"/><Board cells={cells} flat={flat} toggle={index => replace(toggleCell(state.current.cells, index), 'Custom')}/></div>
             <Telemetry generation={generation} population={population}/>
-            <div className="coordinates">B3 / S23 <span>CLICK THE FIELD TO PLANT A CELL</span> 32²</div>
+            <div className="coordinates">B3 / S23 <span>CLICK A CELL TO TOGGLE IT</span> 32²</div>
         </section>
         <Controls playing={playing} busy={busy} speed={speed} flat={flat} pattern={pattern}
             onPlay={() => {run.current = !playing; setPlaying(!playing);}} onStep={() => {void step();}} onSpeed={setSpeed}
             onPattern={name => replace(seed(name), name)} onClear={() => replace(empty(), 'Empty')} onView={() => setFlat(!flat)}/>
-        <p className="caption">A bitset in C++. A world in your browser. <span>WebFront · React · no Node.js runtime</span></p>
+        <p className="caption">C++: simulation · React: rendering <span>WebFront · React · no Node.js runtime</span></p>
         <p className="error" role="alert">{error}</p>
     </main>;
 }
