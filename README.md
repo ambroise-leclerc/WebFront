@@ -16,7 +16,7 @@ Register your simulation, bootstrap the tools, then build the interface in the a
 
 <table>
 <tr><th align="left">C++ application</th><th align="left">Create, install, preview</th></tr>
-<tr><td valign="top" width="40%">
+<tr><td valign="top" width="34%">
 
 ```cpp
 #include <WebFront.hpp>
