@@ -5,6 +5,8 @@
 #include "system/DeveloperReleaseData.hpp"
 #include "WebFront.hpp"
 
+#include <functional>
+
 namespace webfront {
 
 struct DeveloperBootstrapOptions {
@@ -61,27 +63,17 @@ public:
 
 private:
     void registerBridge(std::string config) {
+        using Bytes = std::vector<std::uint8_t>;
+        using developer::Store;
         this->cppFunction("webfront.developer.config", [config = std::move(config)] {
             return config;
         });
-        this->cppFunction("webfront.developer.read", [owned = store](std::string path, std::uint64_t offset) {
-            return owned->read(std::move(path), offset);
-        });
-        this->cppFunction("webfront.developer.begin", [owned = store](std::string destination, bool directory) {
-            return owned->begin(std::move(destination), directory);
-        });
-        this->cppFunction("webfront.developer.beginNew", [owned = store](std::string destination, bool directory) {
-            return owned->begin(std::move(destination), directory, false);
-        });
-        this->cppFunction("webfront.developer.write", [owned = store](std::string id, std::string path, std::uint64_t offset, std::vector<std::uint8_t> bytes) {
-            owned->write(std::move(id), std::move(path), offset, std::move(bytes));
-        });
-        this->cppFunction("webfront.developer.commit", [owned = store](std::string id) {
-            owned->commit(std::move(id));
-        });
-        this->cppFunction("webfront.developer.abort", [owned = store](std::string id) {
-            owned->abort(std::move(id));
-        });
+        this->template cppFunction<Bytes, std::string, std::uint64_t>("webfront.developer.read", std::bind_front(&Store::read, store));
+        this->template cppFunction<std::string, std::string, bool>("webfront.developer.begin", std::bind_front(&Store::beginReplacing, store));
+        this->template cppFunction<std::string, std::string, bool>("webfront.developer.beginNew", std::bind_front(&Store::beginNew, store));
+        this->template cppFunction<void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write", std::bind_front(&Store::write, store));
+        this->template cppFunction<void, std::string>("webfront.developer.commit", std::bind_front(&Store::commit, store));
+        this->template cppFunction<void, std::string>("webfront.developer.abort", std::bind_front(&Store::abort, store));
     }
 
     std::filesystem::path             project;
