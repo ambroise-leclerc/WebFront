@@ -57,14 +57,6 @@ public:
         return id;
     }
 
-    /// The two forms of begin() exposed to the browser: replacing an existing destination or refusing to.
-    std::string beginReplacing(std::string destination, bool directory) {
-        return begin(std::move(destination), directory);
-    }
-    std::string beginNew(std::string destination, bool directory) {
-        return begin(std::move(destination), directory, false);
-    }
-
     void write(std::string id, std::string path, std::uint64_t offset, std::vector<std::uint8_t> bytes) {
         std::scoped_lock lock(mutex);
         auto&            tx       = transaction(id);
