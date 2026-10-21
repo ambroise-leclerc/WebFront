@@ -6,11 +6,20 @@
 
 #include <chrono>
 #include <fstream>
+#include <limits>
 
 using namespace webfront;
 using webfront::test::TemporaryDirectory;
 
 namespace {
+struct QuietFrontend {
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+
+    static void initialize() {}
+
+    static void open(std::string_view, std::string_view) {}
+};
+
 std::vector<std::uint8_t> bytes(std::string_view text) {
     return {text.begin(), text.end()};
 }
@@ -270,6 +279,51 @@ SCENARIO("Paths differing only by case never share a staged file") {
                 store.commit(id);
                 REQUIRE(read(store, "package/LICENSE") == "first!");
             }
+        }
+    }
+}
+
+SCENARIO("The developer store refuses malformed requests without changing the project") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a project file and a single-output transaction") {
+        std::ofstream(project.path() / "notes.txt") << "text";
+        const auto id = store.begin("generated/output.hpp", false);
+        THEN("each malformed request is rejected") {
+            REQUIRE_THROWS_AS(store.read("notes.txt", std::numeric_limits<std::uint64_t>::max()), std::invalid_argument);
+            REQUIRE_THROWS_AS(store.write(id, "other", 0, bytes("x")), std::invalid_argument);
+            REQUIRE_THROWS_AS(store.commit(id), std::runtime_error);
+            REQUIRE_NOTHROW(store.abort("unknown"));
+            REQUIRE_NOTHROW(store.abort(id));
+            REQUIRE_THROWS_AS(store.commit(id), std::runtime_error);
+        }
+    }
+    GIVEN("a path that is not a directory") {
+        std::ofstream(project.path() / "file") << "x";
+        THEN("it cannot be a project") {
+            REQUIRE_THROWS_AS(developer::Store{project.path() / "file"}, std::invalid_argument);
+        }
+    }
+}
+
+SCENARIO("The developer application needs an explicit project and a trusted environment") {
+    using App = BasicDeveloperApp<QuietFrontend>;
+    const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
+    GIVEN("no project directory") {
+        App app;
+        THEN("bootstrap is refused") {
+            REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::invalid_argument);
+        }
+    }
+    GIVEN("a project directory") {
+        TemporaryDirectory project;
+        App                app(project.path(), WebFrontConfig{.port = "0"});
+        THEN("only a known mode with a pinned environment is accepted, once") {
+            REQUIRE_THROWS_AS(app.bootstrap("other", trusted), std::invalid_argument);
+            REQUIRE_THROWS_AS(app.bootstrap("developer", {.environment = "https://example.test/env.tgz", .integrity = "md5-abc"}), std::invalid_argument);
+            REQUIRE_THROWS_AS(app.bootstrap("developer", {.environment = "", .integrity = "sha512-abc"}), std::invalid_argument);
+            REQUIRE_NOTHROW(app.bootstrap("developer", trusted));
+            REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
         }
     }
 }
