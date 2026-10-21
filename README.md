@@ -1,51 +1,53 @@
 # WebFront
 
 [![CI](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml/badge.svg?branch=develop)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![Windows · MSVC / WebView2](https://img.shields.io/badge/CI-Windows%20%C2%B7%20MSVC%20%2F%20WebView2-0078D4)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![macOS · Apple Clang / WKWebView](https://img.shields.io/badge/CI-macOS%20%C2%B7%20Apple%20Clang%20%2F%20WKWebView-555555)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
-[![Linux · GCC / WebKitGTK](https://img.shields.io/badge/CI-Linux%20%C2%B7%20GCC%20%2F%20WebKitGTK-E95420)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![Windows · MSVC](https://img.shields.io/badge/CI-Windows%20%C2%B7%20MSVC-0078D4)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![macOS · Apple Clang](https://img.shields.io/badge/CI-macOS%20%C2%B7%20Apple%20Clang-555555)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
+[![Linux · GCC](https://img.shields.io/badge/CI-Linux%20%C2%B7%20GCC-E95420)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C)](CMakeLists.txt)
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
-**A cross-platform GUI for your C++ application, in a header-only C++23 library.**
-Keep your logic in C++, build your interface with HTML/CSS and JavaScript, and connect them with ordinary callbacks. Start in your system browser; use WebView2, WKWebView or WebKitGTK for a native application window. WebFront is experimental; APIs and packaging are still evolving.
+**WebFront is a header-only C++23 library for building rich, modern user interfaces.**
+Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings the UI tools into your application: no Node.js, npm or separate JavaScript development environment to install.
 
-## Hello World
+## From C++ to a reactive UI
+
+Register your simulation, bootstrap the tools, then build the interface in the application's terminal:
+
+<table>
+<tr><th align="left">C++ application</th><th align="left">Create, install, preview</th></tr>
+<tr><td valign="top" width="45%">
 
 ```cpp
 #include <WebFront.hpp>
-
-using App = webfront::WebFront;
+#include "Life.hpp"
 
 int main() {
-    App app;
+    webfront::NativeApp app{"life-project"};
+    app.cppFunction("life.step",
+        &webfront::demo::nextLife);
+    app.bootstrap("developer");
     app.show();
 }
 ```
 
-That is the complete [Hello World](examples/hello-world/HelloWorld.cpp). The library serves its built-in welcome page and opens your browser. No HTML, Node.js or JavaScript build step is needed.
+</td><td width="55%">
+<a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="560" alt="Game of Life walkthrough: an empty application, wf create life, dependency installation, then the React interface running below the terminal"></a>
+</td></tr>
+</table>
 
-<a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-preview.jpg" width="480" alt="Game of Life: native window with an isometric grid, playback controls and generation counters"></a>
+The animation shows the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
 
-*Game of Life: C++ simulation, React interface, native window on Windows, macOS and Linux. [Build it step by step ↓](#game-of-life-from-console-to-native-application)*
+## Game of Life: from console to native application
 
-You need Git, CMake **3.31+** and a compiler with C++23 support. Initial CMake configuration downloads the C++ dependencies.
+The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler. Initial CMake configuration, bootstrap and dependency installation require internet access.
 
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
 cd WebFront
-mkdir build
-cd build
-cmake ..
-cmake --build . --parallel 2
-./examples/HelloWorld
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
 ```
-
-On Windows with Visual Studio, use `cmake --build . --config Release --parallel 2`, then `.\examples\Release\HelloWorld.exe`. Close the server by pressing Enter in the launching terminal.
-
-## Game of Life: from console to native application
-
-The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. Node.js and npm are not required locally. The initial bootstrap and dependency installation require internet access.
 
 The developer package for this 0.4 development branch is prepared but not yet published. For local review, use [local archive provisioning](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
@@ -76,7 +78,7 @@ int main() {
 }
 ```
 
-`NativeApp` selects your platform's native engine. The project directory explicitly grants access to development files. `bootstrap("developer")` loads a small embedded page, downloads the version-pinned developer environment, verifies its SHA-512 integrity and opens its terminal. Downloads are cached and checked again when reused. The terminal runs WebFront commands in the browser; it exposes no system shell.
+The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned UI tools, checking their SHA-512 integrity. Downloads are cached. Use `wf` commands there to create, install, preview and embed your interface.
 
 Enable **one** engine for your platform:
 
