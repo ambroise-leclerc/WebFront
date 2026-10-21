@@ -7,7 +7,8 @@
   "src/developer/runtime.mjs": "36847f4413928908ebc8a1909e608c783701b13274a289d81e43df0e5125a0e8",
   "src/developer/compiler.mjs": "3f7e187ca9a4c2645ef3823127457cad655919cbea3c7c0f22fb7ae2cc87e0e5",
   "src/developer/bundler.mjs": "b0ff79a1b0caa012c25ec7b7f121d7d50af1aa1651231d3dcf2f39470c4ea25c",
-  "src/developer/entry.mjs": "475c52467c1b50f58c2f9e7b5057a40b392ee0cfdcb12b7be16283f36c5e08b8",
+  "src/developer/entry.mjs": "98a687b1e87a7f4ddfd91ce6a05c298644c02514ae67f247ea6b4868d8d8f02d",
+  "src/developer/conditions.mjs": "7f0ecba239480831e38985ccffd4c82309949924f4eb9d938e4ad1b09f5f36ed",
   "src/developer/io.mjs": "a155719c612e065c30272c0dfdc456df28b5efa90ca26f8cfcb55c9cb46de690",
   "src/developer/recipe.mjs": "809f2091c50ebd13d23f92de9876b584658dc687324f73d48ee9f1271319f1ed",
   "src/developer/registry.mjs": "f566f07ea066155ab7209d925cee2cf12a664ac51b07bc0ca3e3fd8fde49a9c8",
@@ -23,11 +24,11 @@
   "src/life/style.css": "9bb55eb0f0a3287e5b7dc78af9d69608b87ff42c4d9c8a653bc83a52fe293c44",
   "src/components/tools/wf.mjs": "6ee86d85ec96bf548ca25ea3ea3554b7dacbed7d047d6a9cfdc1e0f3f42de05e",
   "tools/developer/distribution.json": "87d8d9cbe1cd163b04d5df361af7e184eeb2c34657d07c2303e385200fda7919",
-  "tools/developer/build.mjs": "d8f26289ef4c42f9278f3bc7c6cf1841eef00c9b1cc0440a9088b9b4c01c5b03",
+  "tools/developer/build.mjs": "f63d9b877aaec4f98a85d7e237d416523cb3e8a59c8c2b3a0b5d85975ec4bff3",
   "tools/developer/site.mjs": "d4b7112f0aa5f277f291505a3dce84e676fee9d4da386973af7c6df9885d4dd4",
   "tools/developer/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "tools/assets/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
   "src/developer/bootstrap.bundle.mjs": "792fe7cf564bd12ac47fef419d8c71e2070925764a17706552e7d3f5d6ba2181",
   "src/developer/packages.bundle.mjs": "994c13a8b30a40ecea98414caa72a17927dcea81a1f62d47744b4f55d87005be",
-  "include/system/DeveloperReleaseData.hpp": "2c64779fb31c05975760c1d77f1cbd27c856c5aee30325edb96c8c35a9c2b5dc"
+  "include/system/DeveloperReleaseData.hpp": "86fba424f5fe7cf56e3e9a97115e65adff756cc2262a47087e74307622be2cfc"
 }
