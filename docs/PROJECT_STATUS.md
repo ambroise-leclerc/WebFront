@@ -90,6 +90,13 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   upgrade measurements](EMBEDDED_ASSETS.md).
 
 
+## Release 0.3.0 (#288, 2026-10-21)
+
+`webfront::version` and the CMake project version are 0.3.0. The release adds packed `std::bitset<N>`
+bridge values (#289) and the opt-in developer environment with its packed Life demonstration (#288);
+see `CHANGELOG.md`. The developer distribution 0.3.1 is published and archived as `developer-v0.3.1`;
+published 0.1.0 to 0.3.1 remain immutable. APIs and packaging remain experimental.
+
 ## Release 0.2.0 and native frontend epic (#253, 2026-10-19)
 
 All tasks in #253 are merged, including the opt-in platform alias in PR #277.
