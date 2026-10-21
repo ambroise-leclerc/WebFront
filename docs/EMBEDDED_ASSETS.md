@@ -42,7 +42,7 @@ cmake -DXTERM_VERSION=6.0.0 -DFIT_VERSION=0.11.0 -P cmake/UpdateXterm.cmake
 
 # Offline after C++ dependencies are configured; npm/node_modules is not required here.
 cmake --build build --target webfront-embedded-assets
-ctest --test-dir build -R 'Asset.*Fresh|EmbeddedGzipContents' --output-on-failure
+ctest --test-dir build -R 'Asset.*Fresh|EmbeddedGzipContents|EmbeddedAssetGenerator' --output-on-failure --parallel 4
 ```
 
 `tools/assets/package.json` pins all six library versions and the maintenance tools;
@@ -53,6 +53,13 @@ then review sources, routes, tests, version inventory and size measurements toge
 `third_party/xterm/VERSION`. `tools/assets/update.mjs` records the other versions alongside
 their distribution files in `third_party/`.
 
+`cmake/EmbedTextAsset.cmake` delegates rendering and exact byte comparison to
+`tools/assets/embed.mjs`. It assembles bounded lines of five 64-bit words and joins them
+once, avoiding the growing-string CMake loop. Generation and checking use the same
+renderer, without intermediate files. `EmbeddedAssetGenerator` covers empty/binary inputs,
+word boundaries, padding, line wrapping and nonzero status for stale or missing files;
+all per-asset freshness checks and the independent gzip decoder remain enabled.
+
 Compression uses the vendored **fflate 0.8.3** pure JavaScript `gzipSync` implementation
 (`third_party/fflate/browser.mjs`), with **level 9, mem 8, mtime 0**, no filename and a fixed
 Unix OS header byte. It never uses the host's gzip or zlib compressor. The compressor and
@@ -60,7 +67,7 @@ its license are checked in, so the streams are identical across platforms withou
 The small bridge, fallback page and component modules remain identity encoded.
 `.gitattributes` keeps text sources and headers at LF; PNG files retain their binary bytes.
 
-`cmake/EmbedTextAsset.cmake` packs the compressed bytes into big-endian words, with
+The renderer packs the compressed bytes into big-endian words, with
 `encoding = "gzip"` and `dataSize` excluding trailing word padding. CTest regenerates and compares
 headers offline. `tools/assets/check.mjs` independently decodes the arrays using Node's zlib,
 checks every decoded byte against the distribution file, validates gzip headers/padding, and
