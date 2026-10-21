@@ -61,26 +61,24 @@ public:
 
 private:
     void registerBridge(std::string config) {
+        using Bytes = std::vector<std::uint8_t>;
+        using developer::Store;
         this->cppFunction("webfront.developer.config", [config = std::move(config)] {
             return config;
         });
-        this->cppFunction("webfront.developer.read", [owned = store](std::string path, std::uint64_t offset) {
-            return owned->read(std::move(path), offset);
-        });
-        this->cppFunction("webfront.developer.begin", [owned = store](std::string destination, bool directory) {
-            return owned->begin(std::move(destination), directory);
-        });
-        this->cppFunction("webfront.developer.beginNew", [owned = store](std::string destination, bool directory) {
-            return owned->begin(std::move(destination), directory, false);
-        });
-        this->cppFunction("webfront.developer.write", [owned = store](std::string id, std::string path, std::uint64_t offset, std::vector<std::uint8_t> bytes) {
-            owned->write(std::move(id), std::move(path), offset, std::move(bytes));
-        });
-        this->cppFunction("webfront.developer.commit", [owned = store](std::string id) {
-            owned->commit(std::move(id));
-        });
-        this->cppFunction("webfront.developer.abort", [owned = store](std::string id) {
-            owned->abort(std::move(id));
+        expose<&Store::read, Bytes, std::string, std::uint64_t>("webfront.developer.read");
+        expose<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
+        expose<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
+        expose<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
+        expose<&Store::commit, void, std::string>("webfront.developer.commit");
+        expose<&Store::abort, void, std::string>("webfront.developer.abort");
+    }
+
+    /// Registers a store operation as a bridge callback; the store stays alive as long as the callback.
+    template <auto Member, typename Result, typename... Args>
+    void expose(std::string name) {
+        this->template cppFunction<Result, Args...>(std::move(name), [owned = store](Args... arguments) -> Result {
+            return ((*owned).*Member)(std::move(arguments)...);
         });
     }
 

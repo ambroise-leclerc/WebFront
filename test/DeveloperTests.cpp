@@ -300,6 +300,13 @@ SCENARIO("The developer store refuses malformed requests without changing the pr
             REQUIRE_THROWS_AS(store.commit(id), std::runtime_error);
         }
     }
+    GIVEN("an existing destination") {
+        std::ofstream(project.path() / "taken.txt") << "text";
+        THEN("only the replacing form may publish over it") {
+            REQUIRE_THROWS_AS(store.beginNew("taken.txt", false), std::runtime_error);
+            REQUIRE_NOTHROW(store.abort(store.beginReplacing("taken.txt", false)));
+        }
+    }
     GIVEN("a path that is not a directory") {
         std::ofstream(project.path() / "file") << "x";
         THEN("it cannot be a project") {
