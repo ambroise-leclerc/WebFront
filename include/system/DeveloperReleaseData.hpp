@@ -6,5 +6,5 @@
 namespace webfront::developer::release {
 inline constexpr std::string_view version{"0.3.1"};
 inline constexpr std::string_view environment{"https://ambroise-leclerc.github.io/WebFront/developer/0.3.1/environment.tgz"};
-inline constexpr std::string_view integrity{"sha512-E2YtU+xhiY5onS0+TlJvdxWmj7HcMf+ZU1iWdMSV3bsLMHDaKHU5ExVQgnyIixUtdoJLFWOUhzKQbyVV2wOqWQ=="};
+inline constexpr std::string_view integrity{"sha512-AIWEzVl/YwtG77DJ7ozfLedzXvF8wtX9A5H2YhkeqAxdEr5BvSf8c03eFneDkiqD2zcjL5ykmzy5oYFDEcxYvA=="};
 } // namespace webfront::developer::release

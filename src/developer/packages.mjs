@@ -1,60 +1,12 @@
 // npm library resolution for the browser. Tools continue to use the existing wf installer.
-import semver from 'semver';
 import {parseSpec} from '../components/tools/wf.mjs';
 import {downloadPackage} from './registry.mjs';
+import {pinnedDownloader} from './pins.mjs';
+import {connectPeers} from './peers.mjs';
 import {validateLock} from './lock.mjs';
 
 import {safePackagePath} from './paths.mjs';
 export {safePackagePath, downloadPackage, validateLock};
-
-// The installed version satisfying a range, so that a later install never moves or replaces it silently.
-function lockedNode(previous, name, range) {
-    if (!semver.validRange(range)) return null;
-    const candidates = Object.values(previous?.packages ?? {}).filter(node => node.name === name && semver.satisfies(node.version, range));
-    return candidates.sort((a, b) => semver.rcompare(a.version, b.version))[0] ?? null;
-}
-
-// Downloads each name@range once; versions already in options.previous are kept and their archives must
-// still match the recorded integrity.
-function pinnedDownloader({registry = 'https://registry.npmjs.org/', fetchImpl = fetch, signal, download = downloadPackage, previous}) {
-    const requests = new Map();
-    return async (name, range) => {
-        const request = `${name}@${range}`;
-        if (requests.has(request)) return requests.get(request);
-        const pinned = lockedNode(previous, name, range);
-        const pkg = await download(name, pinned?.version ?? range, {registry, fetchImpl, signal});
-        if (pinned && pkg.integrity !== pinned.integrity)
-            throw new Error(`${pkg.id} no longer matches the integrity recorded in the lock`);
-        requests.set(request, pkg);
-        return pkg;
-    };
-}
-
-// Optional peers may be absent; others must be satisfied by a root or a direct dependency.
-const peerError = (node, name, range) => new Error(`${node.name}@${node.version} requires peer ${name}@${range}; install a compatible root explicitly`);
-
-function optionalPeer(node, name, range) {
-    if (node.manifest.peerDependenciesMeta?.[name]?.optional) return null;
-    throw peerError(node, name, range);
-}
-
-function peerOf(node, [name, range], {nodes, roots}) {
-    const peer = roots[name]?.id ?? node.dependencies[name];
-    if (!peer) return optionalPeer(node, name, range);
-    if (!semver.satisfies(nodes[peer].version, range)) throw peerError(node, name, range);
-    return peer;
-}
-
-function connectNode(node, graph) {
-    for (const requirement of Object.entries(node.manifest.peerDependencies ?? {})) {
-        const peer = peerOf(node, requirement, graph);
-        if (peer) node.dependencies[requirement[0]] = peer;
-    }
-}
-
-function connectPeers(nodes, roots) {
-    for (const node of Object.values(nodes)) connectNode(node, {nodes, roots});
-}
 
 function addNode(state, name, pkg) {
     if (Object.keys(state.nodes).length >= 512) throw new Error('Dependency graph exceeds 512 packages');
