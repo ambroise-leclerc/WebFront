@@ -6,7 +6,7 @@ import {readProject, publish} from './io.mjs';
 import {createStarter} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
-import {loadProject, syncNotice, resolveEntry, lockPath, packageRoot} from './project.mjs';
+import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot} from './project.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 
 const encoder = new TextEncoder();
@@ -121,22 +121,10 @@ async function preview(args, {bridge, signal, preview: frame}) {
     return syncNotice(project) + 'Preview ready.';
 }
 
-// wf embed <provider>, or wf embed <entry> --output <Provider.hpp>
-function embedTarget(manifest, [first, flag, output, ...extra]) {
-    if (first && Object.hasOwn(manifest?.providers ?? {}, first) && flag === undefined) {
-        const provider = manifest.providers[first];
-        return {entry: resolveEntry(manifest, provider.entry), output: provider.output};
-    }
-    if (!first || flag !== '--output' || extra.length || !output?.endsWith('.hpp'))
-        throw new Error('wf embed requires <provider> or <entry.tsx> --output <Provider.hpp>');
-    return {entry: resolveEntry(manifest, first), output};
-}
-
 async function embed(args, {bridge, signal}) {
     const project = await loadProject(bridge);
-    const {entry, output} = embedTarget(project.manifest, args);
+    const {entry, output, className} = embedTarget(project.manifest, args);
     const result = await compile(bridge, entry, signal);
-    const className = output.split('/').pop().slice(0, -4);
     await publish(bridge, output, textFile(generateProvider(result.files, className, result.notices)), {directory: false, signal});
     return `${syncNotice(project)}Generated ${output}. Use webfront::fs::${className} and recompile the application.`;
 }
@@ -147,7 +135,7 @@ async function list(_args, {bridge}) {
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [directory]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
 const commands = {init, create, install: installCommand, restore: restoreCommand, preview, embed, list, help};
 
 export async function execute(args, context) {

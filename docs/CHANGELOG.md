@@ -11,7 +11,9 @@
   the manifest dependencies and reports a desynchronized state. `developer::Store::commitGroup` publishes
   manifest and lock through a synced intent journal with crash recovery and a concurrent-install precondition.
   New bridge callbacks `webfront.developer.state` and `webfront.developer.commitGroup`. Starters ship a manifest;
-  `wf install` now needs `wf init` first.
+  `wf install` now needs `wf init` first, which adopts the roots of an existing lock so a project locked before 0.5.0
+  keeps its locked graph. A committed publication that cannot be completed does not prevent opening the project:
+  it is reported (`developer::IncompletePublication`) and completed by the next command.
 - `wf restore [--offline]` (developer distribution 0.5.0): rebuilds the package cache from the lock alone, at the
   locked versions and integrities, idempotent and interruptible; `--offline` only checks the cache and lists the
   missing or corrupted packages. Cached packages carry a record of their files' digests. The registry is the

@@ -228,9 +228,18 @@ inline void rollForward(const std::filesystem::path& root, const std::filesystem
     std::filesystem::remove_all(owned, ignored);
 }
 
+/// A publication past its commit point that could not be completed yet: its journal is kept, and the next
+/// recovery (the next state() or group publication, or the next opening of the project) completes it.
+struct IncompletePublication : std::runtime_error {
+    explicit IncompletePublication(const std::string& reason)
+        : std::runtime_error("A committed publication of the project is not applied yet (" + reason +
+                             "); fix the cause and run the command again to complete it") {}
+};
+
 /// Completes the journals that reached their commit point and abandons the others. A journal is
 /// committed once it is renamed to "<n>.journal"; everything else is the remains of a publication
-/// interrupted before that point, where no project file was touched.
+/// interrupted before that point, where no project file was touched. A committed journal that cannot be
+/// completed is kept, the others are still processed, and IncompletePublication reports the first failure.
 inline void recoverLocked(const std::filesystem::path& root, const StepHook& hook) {
     std::filesystem::path directory;
     try {
@@ -248,13 +257,17 @@ inline void recoverLocked(const std::filesystem::path& root, const StepHook& hoo
     if (error)
         return;
     std::ranges::sort(found);
-    std::set<std::string> committed;
+    std::set<std::string>      committed;
+    std::optional<std::string> failure;
     for (const auto& path : found) {
         if (path.extension() != ".journal")
             continue;
-        std::ifstream      stream(path, std::ios::binary);
         std::ostringstream content;
-        content << stream.rdbuf();
+        {
+            // Closed before rollForward() removes the journal: Windows cannot remove an open file.
+            std::ifstream stream(path, std::ios::binary);
+            content << stream.rdbuf();
+        }
         const auto entries = parseJournal(content.str());
         if (!entries)
             continue;
@@ -265,13 +278,22 @@ inline void recoverLocked(const std::filesystem::path& root, const StepHook& hoo
             continue;
         }
         committed.insert(path.stem().string());
-        rollForward(root, directory, path.stem().string(), *entries, hook);
+        try {
+            rollForward(root, directory, path.stem().string(), *entries, hook);
+        } catch (const InjectedFault&) {
+            throw;
+        } catch (const std::exception& exception) {
+            if (!failure)
+                failure = exception.what();
+        }
     }
     for (const auto& path : found) {
         const auto name = path.stem().string();
         if (!committed.contains(name))
             std::filesystem::remove_all(path, error);
     }
+    if (failure)
+        throw IncompletePublication{*failure};
 }
 
 /// recoverLocked() for a caller that does not hold the project lock.

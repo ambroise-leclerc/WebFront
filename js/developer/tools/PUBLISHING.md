@@ -31,7 +31,9 @@ changed environment, starter, public URL or provisioning configuration.
 
 `distribution.json` names the version under development; `DeveloperReleaseData.hpp` pins the last version that is
 published. Pull requests and branch pushes therefore require the header to match a fresh build only when both name
-the same version; a publication (a `developer-v*` tag or a dispatch with `publish=true`) always requires it.
+the same version; a publication (a `developer-v*` tag or a dispatch with `publish=true`) always requires it. When the
+sources are ahead, `pin-check.mjs` requires the header to be exactly the one generated for its version and the deployed
+archive at its URL to have its integrity.
 
 1. Merge the changes with the header still on the previous version.
 2. On a release branch, run `build.mjs build-distribution --refresh-bootstrap` and commit the new header.
