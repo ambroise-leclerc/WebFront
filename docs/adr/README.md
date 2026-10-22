@@ -1,7 +1,7 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **15 ADRs**, with unique numbers (12 accepted decisions and 3 proposals).
+when making changes or generating code. It contains **16 ADRs**, with unique numbers (13 accepted decisions and 3 proposals).
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
 the browser-powered development proposals are dated **2026-10-20**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
@@ -48,13 +48,14 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-006](ADR-006-taches-structurees-et-arret.md) | Owning, cancelling and joining every task | Accepted | 2026-10-13 | 2.0 — 2026-10-18 |
 | [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.10 — 2026-10-20 |
 | [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) | Restricting bridge origins without promising a sandbox | Accepted | 2026-10-18 | 1.0 — 2026-10-18 |
-| [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.0 — 2026-10-19 |
-| [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.5 — 2026-10-16 |
+| [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.1 — 2026-10-22 |
+| [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.6 — 2026-10-22 |
 | [ADR-011](ADR-011-diagnostics-optionnels.md) | Confining mddlog behind an optional diagnostics façade | Accepted | 2026-10-01 | 1.2 — 2026-10-02 |
 | [ADR-012](ADR-012-preuves-et-tests.md) | Demonstrating contracts through deterministic tests and browser integration | Accepted | 2020-04-19 | 1.6 — 2026-10-19 |
-| [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Proposée | 2026-10-20 | 0.1 — 2026-10-20 |
-| [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Proposée | 2026-10-20 | 0.1 — 2026-10-20 |
-| [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Proposée | 2026-10-20 | 0.1 — 2026-10-20 |
+| [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Proposée | 2026-10-20 | 0.2 — 2026-10-22 |
+| [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Proposée | 2026-10-20 | 0.2 — 2026-10-22 |
+| [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Proposée | 2026-10-20 | 0.2 — 2026-10-22 |
+| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.0 — 2026-10-22 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -78,7 +79,7 @@ the chronology, which does not follow the numerical order.
 | A new engine or changes to window lifecycle | 006, 007, 008 |
 | Components, the terminal or installed tools | 004, 006, 008, 010 |
 | Diagnostics and log transport | 006, 011 |
-| Downloaded development environment, npm libraries and generated application assets | 008, 009, 010, 013, 014, 015 |
+| Downloaded development environment, npm libraries and generated application assets | 008, 009, 010, 013, 014, 015, 016 |
 
 ADRs explain decisions; [AGENTS.md](../../AGENTS.md) sets out working instructions,
 the [README](../../README.md) provides the user journey, and specialist documents define
@@ -96,7 +97,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-016**. Retain historical numbers and files.
+  is **ADR-017**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

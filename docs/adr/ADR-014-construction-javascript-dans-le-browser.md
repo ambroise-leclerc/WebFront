@@ -5,6 +5,7 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation du résolveur npm et du compilateur navigateur. | À renseigner après intégration. |
+| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | À renseigner après fusion de l'issue #304. |
 
 ## Statut et date
 
@@ -39,6 +40,14 @@ pour découvrir leurs exports ou lancer leurs scripts d'installation.
 `wf preview` publie les résultats puis les affiche dans la même fenêtre. L'aperçu utilise le bridge
 ordinaire, y compris les erreurs et les Promises. Ctrl+C termine un build navigateur ; aucun
 processus C++ de compilation ou shell n'est lancé. La transformation TS n'effectue pas de typecheck.
+
+## Alignement sur l'ADR-016
+
+[ADR-016](ADR-016-bootstrap-comme-socle.md) retient cette proposition comme base de l'architecture.
+Elle reste **Proposée** jusqu'aux preuves de #316 : parcours complet validé sous CEF, WebKitGTK,
+WebView2 et WKWebView, compatibilité d'un échantillon de paquets npm, restauration hors ligne et
+publication vérifiée d'une release. Les providers et composants historiques évoqués ici suivent la
+trajectoire de retrait de l'ADR-016.
 
 ## Alternatives et conséquences
 

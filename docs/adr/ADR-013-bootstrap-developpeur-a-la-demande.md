@@ -5,6 +5,7 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation du bootstrap développeur versionné. | À renseigner après intégration. |
+| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | À renseigner après fusion de l'issue #304. |
 
 ## Statut et date
 
@@ -43,6 +44,14 @@ remplacer les octets d'une version publiée et archive les versions taguées dan
 séparées de la bibliothèque C++. Les archives gardent des identifiants de paquet, sans exiger
 publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi un starter PI distinct ;
 `wf create pi` crée son dossier sans remplacer un projet existant.
+
+## Alignement sur l'ADR-016
+
+[ADR-016](ADR-016-bootstrap-comme-socle.md) retient cette proposition comme base de l'architecture.
+Elle reste **Proposée** jusqu'aux preuves de #316 : parcours complet validé sous CEF, WebKitGTK,
+WebView2 et WKWebView, compatibilité d'un échantillon de paquets npm, restauration hors ligne et
+publication vérifiée d'une release. Les providers et composants historiques évoqués ici suivent la
+trajectoire de retrait de l'ADR-016.
 
 ## Alternatives et conséquences
 
