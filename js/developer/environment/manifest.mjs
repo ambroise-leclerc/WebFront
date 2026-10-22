@@ -4,6 +4,7 @@ import {safePackagePath} from './paths.mjs';
 import {isPlainObject} from './entry.mjs';
 
 export const manifestPath = 'webfront.project.json';
+export const lockPath = 'webfront-packages.lock.json';
 export const manifestFormat = 1;
 
 const npmName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;

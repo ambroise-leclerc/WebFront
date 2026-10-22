@@ -1,3 +1,5 @@
+export const packageRoot = '.webfront/developer/packages';
+
 const forbidden = /[\\\0:*?"<>|]/;
 const hasUnsafePart = path => path.split('/').some(part => !part || part === '.' || part === '..');
 

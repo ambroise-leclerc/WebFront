@@ -23,24 +23,35 @@ function compareVersions(a, b) {
 }
 const newest = versions => versions.toSorted(compareVersions).at(-1);
 
-function synthetic(name, version, fields = {}) {
+function synthetic(name, version, fields = {}, extra = {}) {
     const manifest = {name, version, type: 'module', main: 'index.js', ...fields};
     return {manifest, files: new Map([
         ['package.json', encoder.encode(JSON.stringify(manifest, null, 2) + '\n')],
         ['index.js', encoder.encode(`export default ${JSON.stringify(`${name}@${version}`)};\n`)],
+        ...Object.entries(extra).map(([path, text]) => [path, encoder.encode(text)]),
     ])};
 }
 
+// A WebFront executable entry for wf exec: it writes its arguments and its dependency's identity.
+const toolEntry = `import lib from 'webfront-fixture-lib';
+export default async function (context) {
+    await context.project.write('generated/script/tool.txt', [lib, ...context.args].join(' '));
+}
+`;
+
 /**
  * Edge cases: a dependency range under which a newer version than the locked one exists (a restore must not move
- * to it), and a published archive that no longer matches the integrity of its packument. A package absent from the
- * registry is simply not generated.
+ * to it), a published archive that no longer matches the integrity of its packument, a package with a WebFront
+ * executable entry and one with only an npm "bin". A package absent from the registry is simply not generated.
  */
 export const syntheticPackages = () => [
     synthetic('webfront-fixture-app', '1.0.0', {dependencies: {'webfront-fixture-lib': '^1.0.0'}}),
     synthetic('webfront-fixture-lib', '1.0.0'),
     synthetic('webfront-fixture-lib', '1.1.0'),
     {...synthetic('webfront-fixture-tampered', '1.0.0'), tampered: true},
+    synthetic('webfront-fixture-tool', '1.0.0', {dependencies: {'webfront-fixture-lib': '^1.0.0'},
+        webfront: {bin: {'webfront-fixture-tool': './bin/tool.mjs'}}}, {'bin/tool.mjs': toolEntry}),
+    synthetic('webfront-fixture-nodebin', '1.0.0', {bin: {'webfront-fixture-nodebin': 'cli.js'}}, {'cli.js': 'console.log(1);\n'}),
 ];
 
 function byName(packages) {

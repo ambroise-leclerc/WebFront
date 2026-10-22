@@ -1,11 +1,11 @@
 // The project as the wf commands see it: manifest, lock, whether they agree, and their joint publication.
 import {call, readProject, writeChunks} from './io.mjs';
 import semver from 'semver';
-import {manifestPath, readManifest, dependenciesDigest, identifier} from './manifest.mjs';
+import {manifestPath, readManifest, dependenciesDigest, identifier, lockPath} from './manifest.mjs';
 import {validateLock} from './lock.mjs';
 
-export const lockPath = 'webfront-packages.lock.json';
-export const packageRoot = '.webfront/developer/packages';
+export {lockPath};
+export {packageRoot} from './paths.mjs';
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();

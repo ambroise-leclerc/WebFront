@@ -6,7 +6,8 @@ import {readProject, publish} from './io.mjs';
 import {createStarter} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
-import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot} from './project.mjs';
+import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
+import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 
 const encoder = new TextEncoder();
@@ -129,14 +130,60 @@ async function embed(args, {bridge, signal}) {
     return `${syncNotice(project)}Generated ${output}. Use webfront::fs::${className} and recompile the application.`;
 }
 
+// The compiler reads the package files it resolves, on demand, instead of the whole locked graph.
+async function compileScript(bridge, lock, entry, signal) {
+    const files = await buildInWorker(bridge, {type: 'script', entry, lock}, signal);
+    return decoder.decode(files.get('script.js'));
+}
+
+const scriptWorker = () => new Worker(new URL('./script-worker.mjs', import.meta.url), {type: 'module'});
+
+async function runModule({bridge, signal, write = () => {}, createWorker = scriptWorker}, project, {label, entry, args, deadline}) {
+    const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
+    const permissions = project.manifest.permissions ?? {};
+    const code = await compileScript(bridge, lock, entry, signal);
+    const host = scriptHost({bridge, permissions, lock});
+    const outcome = await runWorker({createWorker, host, signal, timeout: secondsLeft(deadline), write,
+        message: {code, args, permissions, base: location.href}});
+    // A script that ended by itself keeps the writes it did not await; a stopped one does not.
+    await (outcome.reason === 'exit' ? host.finish() : host.stop());
+    return runResult(label, outcome, host.publications);
+}
+
+async function loadManifest(bridge) {
+    const project = await loadProject(bridge);
+    if (!project.manifest) throw new Error(noManifest);
+    return project;
+}
+
+// wf run [--timeout <seconds>] <script> [args...]
+async function run(args, context) {
+    const {timeout, target, args: extra} = parseRunOptions(args, 'wf run [--timeout <seconds>] <script> [args...]');
+    const project = await loadManifest(context.bridge);
+    const depth = context.depth ?? 0;
+    // The limit covers the scripts this one runs through wf commands, whatever their own --timeout.
+    const deadline = runDeadline(timeout, context.deadline);
+    const command = scriptCommand(project.manifest, target, extra, tokenize, depth);
+    if (command.kind === 'wf') return execute(command.argv, {...context, depth: depth + 1, deadline});
+    return syncNotice(project) + await runModule(context, project, {label: `Script ${target}`, entry: command.entry, args: command.args, deadline});
+}
+
+// wf exec [--timeout <seconds>] <package>[:<entry>] [args...]
+async function exec(args, context) {
+    const {timeout, target, args: extra} = parseRunOptions(args, 'wf exec [--timeout <seconds>] <package>[:<entry>] [args...]');
+    const project = await loadManifest(context.bridge);
+    const {id, name, entry} = execTarget(project.lock, target);
+    return syncNotice(project) + await runModule(context, project, {label: `${id}:${name}`, entry, args: extra, deadline: runDeadline(timeout, context.deadline)});
+}
+
 async function list(_args, {bridge}) {
     const project = await loadProject(bridge);
     const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
-const commands = {init, create, install: installCommand, restore: restoreCommand, preview, embed, list, help};
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;

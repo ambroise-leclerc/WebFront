@@ -12,6 +12,7 @@ namespace webfront::developer {
 inline constexpr std::size_t   chunkSize           = 256 * 1024;
 inline constexpr std::uint64_t maxTransactionBytes = 256 * 1024 * 1024;
 inline constexpr std::size_t   maxTransactions     = 8;
+inline constexpr std::size_t   maxListedEntries    = 4096;
 /// A transaction untouched for this long is abandoned: its browser reloaded or disconnected.
 inline constexpr std::chrono::minutes defaultAbandonedAfter{10};
 /// Staging left by a crashed process is removed at startup once it is this old.

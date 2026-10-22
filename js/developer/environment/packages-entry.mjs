@@ -5,3 +5,6 @@ export * from './project.mjs';
 export * from './installer.mjs';
 export * from './restore.mjs';
 export * from './cache.mjs';
+export * from './scripts.mjs';
+export * from './permissions.mjs';
+export {nodeBuiltin, nodeImport, createFinder} from './bundler.mjs';

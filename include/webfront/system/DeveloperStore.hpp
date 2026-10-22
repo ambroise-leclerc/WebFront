@@ -3,9 +3,11 @@
 
 #include "DeveloperFiles.hpp"
 #include "DeveloperJournal.hpp"
+#include "../utils/Json.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <set>
 
 namespace webfront::developer {
@@ -48,6 +50,35 @@ public:
             throw std::runtime_error("Cannot read project file: " + path);
         bytes.resize(static_cast<std::size_t>(file.gcount()));
         return bytes;
+    }
+
+    /// The names in a project directory as a sorted JSON array of strings; a directory's name ends with '/'. An
+    /// empty path lists the project root. An entry that a link would take out of the project, or whose type cannot
+    /// be read, is omitted; only a directory that cannot be read fails the listing.
+    std::vector<std::uint8_t> list(std::string directory) const {
+        std::scoped_lock lock(mutex);
+        const auto       source = directory.empty() ? root : projectPath(root, directory);
+        std::error_code  error;
+        if (!std::filesystem::is_directory(source, error))
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::vector<std::string> names;
+        std::filesystem::directory_iterator entries(source, error);
+        for (; !error && entries != std::filesystem::directory_iterator{}; entries.increment(error)) {
+            const auto name = entries->path().filename().generic_string();
+            if (auto listed = listedName(directory, name)) {
+                if (names.size() == maxListedEntries)
+                    throw std::length_error("Project directory has more than 4096 entries: " + directory);
+                names.push_back(std::move(*listed));
+            }
+        }
+        if (error)
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::ranges::sort(names);
+        std::string text = "[";
+        for (const auto& name : names)
+            text += (text.size() > 1 ? "," : "") + json::quote(name);
+        text += "]";
+        return {text.begin(), text.end()};
     }
 
     std::string begin(std::string destination, bool directory, bool replace = true) {
@@ -193,6 +224,22 @@ public:
     }
 
 private:
+    // The listed form of one entry, or nothing when it leaves the project or its type cannot be read.
+    std::optional<std::string> listedName(const std::string& directory, const std::string& name) const {
+        std::error_code error;
+        try {
+            const auto resolved = projectPath(root, directory.empty() ? name : directory + "/" + name);
+            const bool isDirectory = std::filesystem::is_directory(resolved, error);
+            if (error && error != std::errc::no_such_file_or_directory)
+                return std::nullopt;
+            return isDirectory ? name + "/" : name;
+        } catch (const std::invalid_argument&) {
+            return std::nullopt;
+        } catch (const std::filesystem::filesystem_error&) {
+            return std::nullopt;
+        }
+    }
+
     static std::vector<std::string> lines(const std::string& text) {
         std::vector<std::string> result;
         std::istringstream       stream{text};

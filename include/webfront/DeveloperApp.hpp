@@ -88,6 +88,7 @@ private:
             return config;
         });
         expose<&Store::read, Bytes, std::string, std::uint64_t>("webfront.developer.read");
+        expose<&Store::list, Bytes, std::string>("webfront.developer.list");
         expose<&Store::beginReplacing, std::string, std::string, bool>("webfront.developer.begin");
         expose<&Store::beginNew, std::string, std::string, bool>("webfront.developer.beginNew");
         expose<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
