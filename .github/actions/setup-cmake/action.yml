@@ -1,0 +1,50 @@
+name: Set up CMake
+description: >-
+  Installs an exact CMake release from its Kitware archive, checked against a SHA-256 pinned here. No GitHub API call
+  lists the releases, so the installation cannot fail on an incomplete answer ("Unable to find version matching").
+inputs:
+  version:
+    description: Exact CMake version; its archives must have a pinned SHA-256 below.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install CMake ${{ inputs.version }}
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS" in
+          Linux) platform=linux-x86_64; extension=tar.gz; bin=bin ;;
+          macOS) platform=macos-universal; extension=tar.gz; bin=CMake.app/Contents/bin ;;
+          Windows) platform=windows-x86_64; extension=zip; bin=bin ;;
+          *) echo "::error::No CMake archive for $RUNNER_OS"; exit 1 ;;
+        esac
+        name="cmake-$VERSION-$platform"
+        # From cmake-<version>-SHA-256.txt of each Kitware release.
+        case "$name.$extension" in
+          cmake-4.4.4-linux-x86_64.tar.gz) expected=e5bb807f7728cb60cd8b27ebc97a2edb469b68655f21e844a600c3575b76f5bb ;;
+          cmake-4.4.4-macos-universal.tar.gz) expected=4b7b73704b1db9b374e5c9ab8e17ac6148b817b6396ee75cd94a852cbac9d305 ;;
+          cmake-4.4.4-windows-x86_64.zip) expected=bace36e94b31c68ab6fa295f26dfa11219e0701cf7c94b0284a7d1cb13dac536 ;;
+          cmake-4.3.1-linux-x86_64.tar.gz) expected=208d76804009cbe8ec9aea0aa052c857c6e59bd289b43b9941c99324dc78b1d8 ;;
+          cmake-4.3.1-macos-universal.tar.gz) expected=c21fe4ade82a6a236aae0b9fbd8263c7ac6824a3fb32d03594456e30b06f3b7f ;;
+          cmake-4.3.1-windows-x86_64.zip) expected=03a610be931546474e46a442d171ef10532f4fc847de9cf76b7a8065bbef6a23 ;;
+          *) echo "::error::No pinned SHA-256 for $name.$extension: add it to .github/actions/setup-cmake/action.yml"; exit 1 ;;
+        esac
+        archive="$RUNNER_TEMP/$name.$extension"
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$archive" \
+          "https://github.com/Kitware/CMake/releases/download/v$VERSION/$name.$extension"
+        if command -v sha256sum > /dev/null; then actual=$(sha256sum "$archive" | cut -d' ' -f1)
+        else actual=$(shasum -a 256 "$archive" | cut -d' ' -f1); fi
+        if [ "$actual" != "$expected" ]; then
+          echo "::error::$name.$extension has SHA-256 $actual, expected $expected"; exit 1
+        fi
+        if [ "$extension" = zip ]; then
+          pwsh -NoProfile -Command "Expand-Archive -LiteralPath '$(cygpath -w "$archive")' -DestinationPath '$(cygpath -w "$RUNNER_TEMP")' -Force"
+          cygpath -w "$RUNNER_TEMP/$name/$bin" >> "$GITHUB_PATH"
+        else
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name/$bin" >> "$GITHUB_PATH"
+        fi
+        "$RUNNER_TEMP/$name/$bin/cmake" --version

@@ -91,42 +91,85 @@ function(_cef_copy_directory_to_target target_name source_dir dest_dir comment_t
     )
 endfunction()
 
-# Linux: the CEF targets of one directory share their output directory, and every CEF target shares the CEF binary
-# directory (ICU fix). Copying from each target's POST_BUILD step made parallel builds copy into one directory twice
-# at the same time ("Error copying directory ... locales"). Each destination gets one copy target instead, named
-# after the destination, on which the targets depend.
-function(_cef_shared_copy_target target_name name destination comment)
+# Linux: CEF targets that build into one directory share it, and every CEF target shares the CEF binary directory
+# (ICU fix). Copying from each target's POST_BUILD step made parallel builds copy into one directory twice at the
+# same time ("Error copying directory ... locales"). Each destination gets one copy target instead, named after the
+# destination, on which its targets depend. Its rules produce the copied files from their sources, so a build with
+# nothing to copy copies nothing; a directory is copied with a stamp file standing for its contents.
+function(_cef_shared_copy target_name destination)
+    cmake_parse_arguments(PARSE_ARGV 2 copy "" "NAME;SOURCE_DIR;DIRECTORY" "FILES")
+    string(MD5 key "${destination}")
+    set(name webfront_cef_${copy_NAME}_${key})
     if(NOT TARGET ${name})
-        add_custom_target(${name}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
-            ${ARGN}
-            COMMENT "${comment}"
-            VERBATIM)
+        set(outputs "")
+        foreach(file_name IN LISTS copy_FILES)
+            add_custom_command(OUTPUT "${destination}/${file_name}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${copy_SOURCE_DIR}/${file_name}" "${destination}/${file_name}"
+                DEPENDS "${copy_SOURCE_DIR}/${file_name}"
+                COMMENT "Copying CEF ${file_name} to ${destination}"
+                VERBATIM)
+            list(APPEND outputs "${destination}/${file_name}")
+        endforeach()
+        if(copy_DIRECTORY)
+            file(GLOB_RECURSE contents CONFIGURE_DEPENDS "${copy_SOURCE_DIR}/${copy_DIRECTORY}/*")
+            set(stamp "${destination}/${copy_DIRECTORY}/.webfront-copied")
+            add_custom_command(OUTPUT "${stamp}"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${copy_SOURCE_DIR}/${copy_DIRECTORY}" "${destination}/${copy_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+                DEPENDS ${contents}
+                COMMENT "Copying CEF ${copy_DIRECTORY} to ${destination}"
+                VERBATIM)
+            list(APPEND outputs "${stamp}")
+        endif()
+        add_custom_target(${name} DEPENDS ${outputs})
     endif()
     add_dependencies(${target_name} ${name})
 endfunction()
 
-# The copy commands of a file list, into a directory that exists.
-function(_cef_copy_commands out source_dir dest_dir file_list)
-    set(commands "")
-    foreach(file_name IN LISTS file_list)
-        list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy_if_different "${source_dir}/${file_name}" "${dest_dir}")
-    endforeach()
-    set(${out} ${commands} PARENT_SCOPE)
+# Fails at the end of the directory if the target's output directory changed after the copy was planned for it.
+function(_cef_check_output_directory target_name planned)
+    _cef_output_directory(${target_name} actual)
+    if(NOT actual STREQUAL planned)
+        message(FATAL_ERROR "The CEF files of ${target_name} are copied to ${planned}, but it now builds into ${actual}: "
+            "set its RUNTIME_OUTPUT_DIRECTORY (or CMAKE_RUNTIME_OUTPUT_DIRECTORY) before calling the WebFront frontend setup")
+    endif()
 endfunction()
 
-# The output directory shared by the targets of the current directory that set no output directory of their own,
-# and the key naming its copy targets. A path, not $<TARGET_FILE_DIR>: a copy target referencing one of the targets
-# depending on it would form a cycle.
-function(_cef_output_directory out_dir out_key)
-    get_property(multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-    if(multi)
-        set(${out_dir} "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>" PARENT_SCOPE)
-    else()
-        set(${out_dir} "${CMAKE_CURRENT_BINARY_DIR}" PARENT_SCOPE)
+# The directory a target's executable is built into, as $<TARGET_FILE_DIR> would name it: its RUNTIME_OUTPUT_DIRECTORY
+# (initialized from CMAKE_RUNTIME_OUTPUT_DIRECTORY), else the binary directory of the directory that created it, plus
+# the configuration with a multi-config generator. A path, not $<TARGET_FILE_DIR>: a copy target referencing a target
+# that depends on it would form a cycle. Per-configuration output directories are refused rather than guessed.
+function(_cef_output_directory target_name out_dir)
+    foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
+        string(TOUPPER "${config}" upper)
+        get_target_property(per_config ${target_name} RUNTIME_OUTPUT_DIRECTORY_${upper})
+        if(per_config)
+            message(FATAL_ERROR "${target_name} sets RUNTIME_OUTPUT_DIRECTORY_${upper}, which the CEF file copy does not "
+                "support on Linux: set RUNTIME_OUTPUT_DIRECTORY instead")
+        endif()
+    endforeach()
+    get_target_property(binary_dir ${target_name} BINARY_DIR)
+    get_target_property(directory ${target_name} RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT directory)
+        set(directory "${binary_dir}")
+    elseif(NOT IS_ABSOLUTE "${directory}" AND NOT directory MATCHES "^\\$<")
+        set(directory "${binary_dir}/${directory}")
     endif()
-    string(MD5 key "${CMAKE_CURRENT_BINARY_DIR}")
-    set(${out_key} ${key} PARENT_SCOPE)
+    get_property(multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    # Multi-config generators add the configuration unless the directory is a generator expression.
+    if(multi AND NOT directory MATCHES "\\$<")
+        set(directory "${directory}/$<CONFIG>")
+    endif()
+    set(${out_dir} "${directory}" PARENT_SCOPE)
+endfunction()
+
+# The output directory of a target, checked again once its directory is processed.
+function(_cef_planned_output_directory target_name out_dir)
+    _cef_output_directory(${target_name} directory)
+    cmake_language(EVAL CODE
+        "cmake_language(DEFER CALL _cef_check_output_directory [==[${target_name}]==] [==[${directory}]==])")
+    set(${out_dir} "${directory}" PARENT_SCOPE)
 endfunction()
 
 # Internal function to setup CEF paths and variables
@@ -251,10 +294,8 @@ function(copy_cef_runtime_files target_name cef_build_dir)
             )
         endif()
     elseif(UNIX)
-        _cef_output_directory(output key)
-        _cef_copy_commands(commands "${cef_build_dir}" "${output}" "${CEF_LINUX_RUNTIME_FILES}")
-        _cef_shared_copy_target(${target_name} webfront_cef_runtime_${key} "${output}"
-            "Copying CEF runtime files to ${CMAKE_CURRENT_BINARY_DIR}" ${commands})
+        _cef_planned_output_directory(${target_name} output)
+        _cef_shared_copy(${target_name} "${output}" NAME runtime SOURCE_DIR "${cef_build_dir}" FILES ${CEF_LINUX_RUNTIME_FILES})
     endif()
     
     message(STATUS "CEF runtime files will be copied for ${target_name}")
@@ -306,17 +347,14 @@ function(copy_cef_resource_files target_name)
         # searches for icudtl.dat in its installation directory
         
         # Copy to application directory (standard deployment), once per output directory
-        _cef_output_directory(output key)
-        _cef_copy_commands(commands "${CEF_RESOURCE_SOURCE_DIR}" "${output}" "${CEF_RESOURCE_FILES}")
-        _cef_shared_copy_target(${target_name} webfront_cef_resources_${key} "${output}"
-            "Copying CEF resource files and locales to ${CMAKE_CURRENT_BINARY_DIR}" ${commands}
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CEF_RESOURCE_SOURCE_DIR}/locales" "${output}/locales")
+        _cef_planned_output_directory(${target_name} output)
+        _cef_shared_copy(${target_name} "${output}" NAME resources SOURCE_DIR "${CEF_RESOURCE_SOURCE_DIR}"
+            FILES ${CEF_RESOURCE_FILES} DIRECTORY locales)
 
-        # Copy to CEF binary directory (ICU loading fix), once for all targets
-        _cef_copy_commands(commands "${CEF_RESOURCE_SOURCE_DIR}" "${CEF_BINARY_RELEASE_DIR}" "${CEF_RESOURCE_FILES}")
-        _cef_shared_copy_target(${target_name} webfront_cef_binary_resources "${CEF_BINARY_RELEASE_DIR}"
-            "Copying CEF resource files and locales to the CEF binary directory (ICU fix)" ${commands}
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CEF_RESOURCE_SOURCE_DIR}/locales" "${CEF_BINARY_RELEASE_DIR}/locales")
+        # Copy to CEF binary directory (ICU loading fix), once for all targets. As before, this is the Release
+        # directory in every configuration.
+        _cef_shared_copy(${target_name} "${CEF_BINARY_RELEASE_DIR}" NAME resources SOURCE_DIR "${CEF_RESOURCE_SOURCE_DIR}"
+            FILES ${CEF_RESOURCE_FILES} DIRECTORY locales)
     endif()
     
     message(STATUS "CEF resource files will be copied for ${target_name}")
