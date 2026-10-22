@@ -12,11 +12,12 @@
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Contrôle des fins de ligne LF des sources et en-têtes embarqués. | [520ca23](https://github.com/ambroise-leclerc/WebFront/commit/520ca23fa694519d9f428ed3661e64dcfdf906a2) |
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Négociation gzip/identity, décodage validé et budget de sortie. | [4be7358](https://github.com/ambroise-leclerc/WebFront/commit/4be73581ee6b9f569cb6e50aced73e27562aa38c) |
 | 2.0 | 2026-10-19 | Acceptée | Ambroise Leclerc | Génération gzip reproductible avec compresseur intégré ; distributions actualisées et runtime React ESM local. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
+| 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | À renseigner après fusion de l'issue #304. |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-19** (version 2.0).
+Dernière révision : **2026-10-22** (version 2.1).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -57,6 +58,14 @@ un échec de décodage ou dépassement du budget donne 500.
 - **Risque :** gzip→identity décode synchroniquement sur le thread I/O, à chaque requête, sans
   cache. Le budget borne la sortie, pas le temps ; cache et déplacement du travail restent futurs.
 
+### Révision de l'ADR-016
+
+Les assets embarqués dans `include/webfront/` se limitent à la liste normative de
+[ADR-016](ADR-016-bootstrap-comme-socle.md). `BabelFS`, `ReactFS`, `JasmineFS`, leurs en-têtes
+générés et `third_party/` sont voués au retrait (#312, #319) ; les bibliothèques deviennent des
+paquets npm verrouillés fournis par l'environnement. Jusqu'à ce retrait, les règles de génération
+ci-dessous restent en vigueur et ne doivent pas être étendues à de nouvelles bibliothèques.
+
 ## Prescriptions d’implémentation et de génération de code
 
 - Que les sources soient modifiées avant régénération ; préserver les fins de ligne LF et les
@@ -74,4 +83,4 @@ un échec de décodage ou dépassement du budget donne 500.
   [génération](../../js/core/WebFrontAssets.cmake).
 - Tests : `Asset.*Fresh`, `EmbeddedGzipContents`, [HTTPEncodingTests](../../test/unit/HTTPEncodingTests.cpp),
   [React dans le navigateur](../../test/web/js/react-demo-specs.mjs).
-- Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md).
+- Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md) et [ADR-016](ADR-016-bootstrap-comme-socle.md).
