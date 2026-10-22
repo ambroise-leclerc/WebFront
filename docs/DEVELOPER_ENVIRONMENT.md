@@ -12,7 +12,7 @@ Do not ship developer mode as the distribution configuration.
 
 The 0.4 presentation update prepares developer distribution **0.4.0** with the revised Life text.
 It is not published as part of the repository cleanup. Before releasing this branch, publish the
-prepared archives using [the package release procedure](../tools/developer/PUBLISHING.md).
+prepared archives using [the package release procedure](../js/developer/tools/PUBLISHING.md).
 For local review, provision the generated archive as described below and pass its URL/integrity
 to `WebFrontLifeDeveloper`. Existing published versions remain unchanged.
 
@@ -23,7 +23,7 @@ Enable the platform's native frontend in CMake: `WEBFRONT_EMBED_WKWEBVIEW=ON` on
 The default `webfront::WebFront` still opens the system browser.
 
 ```cpp
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 #include <bitset>
 
 std::bitset<1024> nextLife(const std::bitset<1024>& cells); // Existing C++ simulation.
@@ -46,8 +46,8 @@ header generation. Both resulting headers were compiled and the applications pas
 native tests from empty working directories, with developer callbacks absent. Pages returned
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
-The default configuration is generated in `include/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.4.0/environment.tgz`. This version is prepared but not yet published; use local provisioning for now. The configuration pins one version and
+The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
+`https://ambroise-leclerc.github.io/WebFront/developer/0.4.1/environment.tgz`. This version (generated providers now include `<webfront/system/FileSystem.hpp>`) is prepared but not yet published until its `developer-v0.4.1` tag is pushed; use local provisioning for now. Published 0.4.0 stays immutable but targets the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -56,7 +56,7 @@ The environment archive contains pinned Life and PI starter descriptors. `wf cre
 verifies that separate archive, creates a new `ui` directory and prints the install/preview/embed
 commands. Existing directories are never replaced. The trusted environment hash protects both
 its own code and the starter descriptor; `provision.json` on the server is not a new trust anchor.
-See [publication instructions](../tools/developer/PUBLISHING.md) for deployment and release checks.
+See [publication instructions](../js/developer/tools/PUBLISHING.md) for deployment and release checks.
 
 The bootstrap verifies SHA-512 before unpacking or executing the archive, validates its manifest
 and paths, then publishes it under the application's local origin. The cached **archive** is
@@ -119,7 +119,7 @@ determines the C++ provider name. The header is replaced only after all chunks a
 The distribution form has no project root or developer callbacks:
 
 ```cpp
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 #include "Life.hpp"
 #include "generated/LifeUI.hpp"
 
@@ -136,7 +136,7 @@ Reconfigure the native build with
 project sources, downloaded cache nor network.
 
 The PI starter remains available through `wf create pi` for existing projects and regression
-coverage. Its sources are maintained under `tools/developer/starters/pi/`; the public C++
+coverage. Its sources are maintained under `js/developer/tools/starters/pi/`; the public C++
 examples are limited to Hello World and Life. Existing embedded React/Babel providers remain supported.
 
 ## Dependencies, storage and limitations
@@ -174,15 +174,15 @@ These commands require Node/npm **only for environment maintainers**. They prepa
 application developers can download. No command publishes anything to a registry automatically.
 
 ```sh
-npm ci --prefix tools/assets --ignore-scripts
-node tools/developer/build.mjs build-developer-environment --refresh-bootstrap
-node tools/developer/fixtures.mjs build-developer-environment
+npm ci --prefix js/developer/vendor --ignore-scripts
+node js/developer/tools/build.mjs build-developer-environment --refresh-bootstrap
+node js/developer/tools/fixtures.mjs build-developer-environment
 ```
 
 `build.mjs` bundles the environment and compiler, includes esbuild.wasm, xterm styles and licenses,
 and writes deterministic `environment.tgz`, `life-starter.tgz`, `pi-starter.tgz`, `provision.json` and
-`DeveloperReleaseData.hpp`. The version and public base URL are in `tools/developer/distribution.json`. Dependencies are
-pinned in `tools/assets/package-lock.json`. `--refresh-bootstrap` additionally refreshes the two
+`DeveloperReleaseData.hpp`. The version and public base URL are in `js/developer/tools/distribution.json`. Dependencies are
+pinned in `js/developer/vendor/package-lock.json`. `--refresh-bootstrap` additionally refreshes the two
 checked-in JS bundles, their input checksums and the embedded bootstrap headers. Without that flag,
 it writes only to the output directory. The archives have the package identifiers `@webfront/developer-environment`,
 `@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static GitHub Pages downloads; no npm publication or

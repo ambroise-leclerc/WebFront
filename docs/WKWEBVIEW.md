@@ -19,7 +19,7 @@ integrity=$(node -p "require('./build-developer-environment/provision.json').int
 For HelloWorld or your application, select the adapter in C++:
 
 ```cpp
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 using App = webfront::WebFrontWithFrontend<webfront::frontend::WKWebViewFrontend>;
 
 int main() {
@@ -34,7 +34,7 @@ There is no engine download, SDK package or separate runtime installation.
 
 ## Implementation and lifetime
 
-The adapter stays header-only under `include/frontend/WKWebView.hpp`. It sends public Cocoa/WebKit
+The adapter stays header-only under `include/webfront/frontend/WKWebView.hpp`. It sends public Cocoa/WebKit
 messages through the Objective-C runtime and registers delegate/view classes once. It compiles as
 C++23, without an Objective-C++ `.mm` source or ARC. Clang's Blocks extension (`-fblocks`, inherited
 through `WebFront::WebFront`) supplies WebKit's decision-handler calling convention. CMake links

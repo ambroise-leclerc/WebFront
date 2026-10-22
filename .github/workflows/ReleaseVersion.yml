@@ -29,4 +29,4 @@ jobs:
         shell: bash
         run: |
           version=$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' build/CMakeCache.txt)
-          cmake -DROOT="$GITHUB_WORKSPACE" -DEXPECTED_VERSION="$version" -DRELEASE_TAG="$RELEASE_TAG" -P cmake/CheckReleaseVersion.cmake
+          cmake -DROOT="$GITHUB_WORKSPACE" -DEXPECTED_VERSION="$version" -DRELEASE_TAG="$RELEASE_TAG" -P test/cmake/CheckReleaseVersion.cmake

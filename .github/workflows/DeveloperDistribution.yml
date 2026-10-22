@@ -5,24 +5,24 @@ on:
     tags: ['developer-v*']
     branches: [develop, master]
     paths:
-      - 'assets/developer/**'
-      - 'assets/components/tools/**'
-      - 'tools/developer/starters/pi/**'
+      - 'js/developer/environment/**'
+      - 'js/developer/components/tools/**'
+      - 'js/developer/tools/starters/pi/**'
       - 'examples/life/ui/**'
-      - 'tools/developer/**'
-      - 'tools/assets/package*.json'
-      - 'include/system/DeveloperReleaseData.hpp'
+      - 'js/developer/tools/**'
+      - 'js/developer/vendor/package*.json'
+      - 'include/webfront/system/DeveloperReleaseData.hpp'
       - '.github/workflows/DeveloperDistribution.yml'
   pull_request:
     branches: [develop, master]
     paths:
-      - 'assets/developer/**'
-      - 'assets/components/tools/**'
-      - 'tools/developer/starters/pi/**'
+      - 'js/developer/environment/**'
+      - 'js/developer/components/tools/**'
+      - 'js/developer/tools/starters/pi/**'
       - 'examples/life/ui/**'
-      - 'tools/developer/**'
-      - 'tools/assets/package*.json'
-      - 'include/system/DeveloperReleaseData.hpp'
+      - 'js/developer/tools/**'
+      - 'js/developer/vendor/package*.json'
+      - 'include/webfront/system/DeveloperReleaseData.hpp'
       - '.github/workflows/DeveloperDistribution.yml'
   workflow_dispatch:
     inputs:
@@ -47,23 +47,23 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: tools/assets/package-lock.json
+          cache-dependency-path: js/developer/vendor/package-lock.json
       - name: Install pinned maintenance dependencies
-        run: npm ci --prefix tools/assets --ignore-scripts
+        run: npm ci --prefix js/developer/vendor --ignore-scripts
       - name: Build and verify the environment and starter packages
         run: |
-          node tools/developer/build.mjs build-distribution
-          node tools/developer/build.mjs build-distribution-repeat
+          node js/developer/tools/build.mjs build-distribution
+          node js/developer/tools/build.mjs build-distribution-repeat
           cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
           cmp build-distribution/pi-starter.tgz build-distribution-repeat/pi-starter.tgz
           cmp build-distribution/life-starter.tgz build-distribution-repeat/life-starter.tgz
-          cmp include/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
-          node --test tools/developer/check.mjs tools/developer/distribution-check.mjs
+          cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
+          node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs
       - name: Check the dedicated release tag
         if: startsWith(github.ref, 'refs/tags/developer-v')
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node tools/developer/release-check.mjs "$RELEASE_TAG"
+        run: node js/developer/tools/release-check.mjs "$RELEASE_TAG"
       - uses: actions/upload-artifact@v4
         with:
           name: developer-distribution
@@ -97,7 +97,7 @@ jobs:
           name: developer-distribution
           path: build-distribution
       - name: Check the configured Pages source before pushing
-        run: node tools/developer/pages.mjs --check
+        run: node js/developer/tools/pages.mjs --check
       - name: Preserve existing versions and publish the static branch
         shell: bash
         run: |
@@ -114,19 +114,19 @@ jobs:
           elif [ "$result" != 2 ]; then
             exit "$result"
           fi
-          node tools/developer/site.mjs build-distribution "$site"
+          node js/developer/tools/site.mjs build-distribution "$site"
           git -C "$site" config user.name "$GITHUB_ACTOR"
           git -C "$site" config user.email "$GITHUB_ACTOR@users.noreply.github.com"
           git -C "$site" add .nojekyll index.html developer
           if ! git -C "$site" diff --cached --quiet; then
-            version=$(node -p "require('./tools/developer/distribution.json').version")
+            version=$(node -p "require('./js/developer/tools/distribution.json').version")
             git -C "$site" commit -m "Publish developer packages $version [#288]"
             git -C "$site" push origin HEAD:refs/heads/gh-pages
           fi
       - name: Request the configured Pages build
-        run: node tools/developer/pages.mjs
+        run: node js/developer/tools/pages.mjs
       - name: Archive tagged packages in a dedicated prerelease
         if: startsWith(github.ref, 'refs/tags/developer-v')
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node tools/developer/archive-release.mjs "$RELEASE_TAG" build-distribution
+        run: node js/developer/tools/archive-release.mjs "$RELEASE_TAG" build-distribution

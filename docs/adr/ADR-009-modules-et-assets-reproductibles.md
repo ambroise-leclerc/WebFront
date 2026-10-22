@@ -32,7 +32,7 @@ locaux servent les ressources. React, Babel, Jasmine et xterm sont distribués a
 et licences traçables ; React partage un environnement ESM local pour DOM, hooks et JSX.
 
 Les sources lisibles résident dans `src/` et `third_party/` ; les en-têtes générés sont versionnés.
-La maintenance utilise `tools/assets/`, les versions exactes et le lockfile. Les distributions
+La maintenance utilise `js/developer/vendor/`, les versions exactes et le lockfile. Les distributions
 JS/CSS volumineuses sont compressées avec le fflate vendored, paramètres fixes dont `mtime=0`.
 Les petits scripts du bridge et des composants restent en identity. Les contrôles CTest
 régénèrent et comparent hors ligne après configuration des dépendances.
@@ -71,7 +71,7 @@ un échec de décodage ou dépassement du budget donne 500.
 ## Sources et vérification
 
 - [Maintenance des assets](../EMBEDDED_ASSETS.md), [contrat HTTP](../HTTP_ASSETS.md),
-  [génération](../../cmake/WebFrontAssets.cmake).
-- Tests : `Asset.*Fresh`, `EmbeddedGzipContents`, [HTTPEncodingTests](../../test/HTTPEncodingTests.cpp),
-  [React dans le navigateur](../../webtest/js/react-demo-specs.mjs).
+  [génération](../../js/core/WebFrontAssets.cmake).
+- Tests : `Asset.*Fresh`, `EmbeddedGzipContents`, [HTTPEncodingTests](../../test/unit/HTTPEncodingTests.cpp),
+  [React dans le navigateur](../../test/web/js/react-demo-specs.mjs).
 - Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md).

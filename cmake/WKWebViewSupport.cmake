@@ -14,7 +14,7 @@ target_compile_options(WebFront INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-fblocks>")
 target_link_libraries(WebFront INTERFACE "${WEBFRONT_COCOA_FRAMEWORK}" "${WEBFRONT_WEBKIT_FRAMEWORK}")
 
 function(webfront_add_wkwebview_tests)
-    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../webtest" ABSOLUTE)
+    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/web" ABSOLUTE)
     add_executable(wkwebview_lifecycle "${webtest_source_dir}/WKWebViewLifecycle.cpp"
         "${webtest_source_dir}/WKWebViewHeaderConsumer.cpp")
     target_link_libraries(wkwebview_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
@@ -38,11 +38,13 @@ function(webfront_add_wkwebview_tests)
         webfront_set_browser_test_properties("WKWebViewClassImages-${order}" "${webtest_source_dir}" 90)
     endforeach()
     # Stable agent bundles avoid one anonymous executable tile per test process in the Dock.
+    # The path is normalized: a second spelling of the template would be a duplicate Ninja output.
+    get_filename_component(_wk_plist "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
     foreach(target webtest frontend_lifecycle wkwebview_lifecycle wkwebview_class_images)
         string(REPLACE "_" "-" identifier "${target}")
         set_target_properties(${target} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_GUI_IDENTIFIER "org.webfront.tests.${identifier}"
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/WKWebViewTestInfo.plist.in")
+            MACOSX_BUNDLE_INFO_PLIST "${_wk_plist}")
     endforeach()
 endfunction()

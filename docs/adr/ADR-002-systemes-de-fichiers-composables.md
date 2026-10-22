@@ -121,8 +121,8 @@ un store restent optionnels et demandent un emplacement adapté à la cible.
 
 ## Sources et vérification
 
-- [DefaultFS](../../include/system/DefaultFS.hpp), [FileSystem](../../include/system/FileSystem.hpp),
-  [NativeFS](../../include/system/NativeFS.hpp).
-- Tests : [FileSystemTests](../../test/FileSystemTests.cpp), [DefaultFSTests](../../test/DefaultFSTests.cpp),
-  [ModuleHTTPServerTests](../../test/ModuleHTTPServerTests.cpp).
+- [DefaultFS](../../include/webfront/system/DefaultFS.hpp), [FileSystem](../../include/webfront/system/FileSystem.hpp),
+  [NativeFS](../../include/webfront/system/NativeFS.hpp).
+- Tests : [FileSystemTests](../../test/unit/FileSystemTests.cpp), [DefaultFSTests](../../test/unit/DefaultFSTests.cpp),
+  [ModuleHTTPServerTests](../../test/unit/ModuleHTTPServerTests.cpp).
 - Voir [ADR-009](ADR-009-modules-et-assets-reproductibles.md) et [ADR-010](ADR-010-composants-et-outils-optionnels.md).

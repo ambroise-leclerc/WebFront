@@ -68,14 +68,14 @@ est une exception optionnelle documentée par l’ADR-011.
   de `src/` servent aux exemples. Aucune bibliothèque compilée ne saurait devenir obligatoire.
 - Préférer la façade simple dans un nouvel exemple ; n’exposer `BasicWF` que si une variation
   réelle de provider, filesystem, politique ou frontend le justifie.
-- Respecter C++23, les concepts et conventions de `CONTRIBUTING.md`. Ne pas confondre le
+- Respecter C++23, les concepts et conventions de `.github/CONTRIBUTING.md`. Ne pas confondre le
   vocabulaire sender fourni par stdnet avec une bibliothèque réseau standard déjà disponible.
 - Ne pas imposer avertissements, sanitizers, couverture ou choix de linker au projet parent.
 
 ## Sources et vérification
 
-- [API et composition](../../include/WebFront.hpp), [CMake](../../CMakeLists.txt),
-  [conventions](../../CONTRIBUTING.md), [état du projet](../PROJECT_STATUS.md).
+- [API et composition](../../include/webfront/WebFront.hpp), [CMake](../../CMakeLists.txt),
+  [conventions](../../.github/CONTRIBUTING.md), [état du projet](../PROJECT_STATUS.md).
 - Vérifier `WebFrontTests.cpp`, `DefaultFSTests.cpp`, `AddSubdirectoryConsumer` et
   `NewcomerDocsMatchExamples` dans CTest.
 - Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md),

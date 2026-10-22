@@ -59,7 +59,7 @@ target_link_libraries(WebFront INTERFACE
 
 # Register lifecycle coverage once, alongside the shared Jasmine runner; paths are module-relative.
 function(webfront_add_webview2_tests)
-    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../webtest" ABSOLUTE)
+    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/web" ABSOLUTE)
     add_executable(webview2_lifecycle
         "${webtest_source_dir}/WebView2Lifecycle.cpp"
         "${webtest_source_dir}/WebView2HeaderConsumer.cpp")

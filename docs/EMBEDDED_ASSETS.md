@@ -15,9 +15,9 @@ Normal C++ consumer builds use checked-in headers and need neither Node.js nor n
 
 React 19 removed UMD builds and requires the automatic JSX transform
 ([upstream upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)).
-`tools/assets/update.mjs` bundles React, React DOM and `react/jsx-runtime` together as
+`js/developer/vendor/update.mjs` bundles React, React DOM and `react/jsx-runtime` together as
 `/react@19.3.1/runtime.mjs`. This keeps hooks, DOM rendering and JSX on one React instance.
-The import map in `webtest/fixtures/react.html` maps `react`, `react-dom/client` and `react/jsx-runtime`
+The import map in `test/web/fixtures/react.html` maps `react`, `react-dom/client` and `react/jsx-runtime`
 to that runtime. Babel's custom `webfront-react` preset uses `runtime: "automatic"` and
 emits a native module. The JSX remains editable in the HTML file, without a consumer build step.
 Babel is served at `/babel-standalone@8.0.7/babel.min.js`.
@@ -35,8 +35,8 @@ Run from the repository root:
 
 ```sh
 # Online, maintenance only: exact versions and transitive integrity hashes are in package-lock.json.
-npm ci --prefix tools/assets --ignore-scripts
-node tools/assets/update.mjs
+npm ci --prefix js/developer/vendor --ignore-scripts
+node js/developer/vendor/update.mjs
 # Refresh xterm only through its dedicated script, retaining readable upstream files and licenses.
 cmake -DXTERM_VERSION=6.0.0 -DFIT_VERSION=0.11.0 -P cmake/UpdateXterm.cmake
 
@@ -45,16 +45,16 @@ cmake --build build --target webfront-embedded-assets
 ctest --test-dir build -R 'Asset.*Fresh|EmbeddedGzipContents|EmbeddedAssetGenerator' --output-on-failure --parallel 4
 ```
 
-`tools/assets/package.json` pins all six library versions and the maintenance tools;
+`js/developer/vendor/package.json` pins all six library versions and the maintenance tools;
 `package-lock.json` pins the npm tarball URLs, integrity hashes, scheduler 0.28.0 and esbuild 0.28.2.
 When upgrading, recheck the registry's stable tags, update exact versions and the lockfile,
 then review sources, routes, tests, version inventory and size measurements together.
 `cmake/UpdateXterm.cmake` takes exact versions explicitly and records them in
-`third_party/xterm/VERSION`. `tools/assets/update.mjs` records the other versions alongside
+`third_party/xterm/VERSION`. `js/developer/vendor/update.mjs` records the other versions alongside
 their distribution files in `third_party/`.
 
-`cmake/EmbedTextAsset.cmake` delegates rendering and exact byte comparison to
-`tools/assets/embed.mjs`. It assembles bounded lines of five 64-bit words and joins them
+`js/core/EmbedTextAsset.cmake` delegates rendering and exact byte comparison to
+`js/developer/vendor/embed.mjs`. It assembles bounded lines of five 64-bit words and joins them
 once, avoiding the growing-string CMake loop. Generation and checking use the same
 renderer, without intermediate files. `EmbeddedAssetGenerator` covers empty/binary inputs,
 word boundaries, padding, line wrapping and nonzero status for stale or missing files;
@@ -69,7 +69,7 @@ The small bridge, fallback page and component modules remain identity encoded.
 
 The renderer packs the compressed bytes into big-endian words, with
 `encoding = "gzip"` and `dataSize` excluding trailing word padding. CTest regenerates and compares
-headers offline. `tools/assets/check.mjs` independently decodes the arrays using Node's zlib,
+headers offline. `js/developer/vendor/check.mjs` independently decodes the arrays using Node's zlib,
 checks every decoded byte against the distribution file, validates gzip headers/padding, and
 checks React's named ESM exports. Catch2 exercises provider routes, reads across word boundaries,
 EOF, encoding metadata and HTTP Content-Encoding/Content-Length/MIME/body agreement.
@@ -129,7 +129,7 @@ switch to a raw PNG favicon. The final total is 8,352 bytes above the xterm-only
 and **250,432 bytes below the original**. Major upgrades therefore do not uniformly shrink
 resources: React's combined DOM/JSX runtime and Jasmine grow while Babel shrinks.
 
-Exact served lengths (without padding) are printed by `node tools/assets/check.mjs`:
+Exact served lengths (without padding) are printed by `node js/developer/vendor/check.mjs`:
 xterm module 91,908; CSS 2,547; Fit 807; React runtime 72,925; Babel 563,586;
 Jasmine JS 75,638; HTML reporter 9,547; CSS 7,568; boot 1,073; PNG 1,486 bytes.
 

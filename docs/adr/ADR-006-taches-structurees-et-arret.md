@@ -73,7 +73,7 @@ prévaut entre résultat, arrêt et déconnexion.
 
 ## Sources et vérification
 
-- [Contrat détaillé](../ASYNC_EXECUTION.md), [TaskScope](../../include/networking/Tasks.hpp).
-- Tests : [StructuredShutdownTests](../../test/StructuredShutdownTests.cpp),
-  [ApplicationTaskTests](../../test/ApplicationTaskTests.cpp), [JsFunctionSenderTests](../../test/JsFunctionSenderTests.cpp).
+- [Contrat détaillé](../ASYNC_EXECUTION.md), [TaskScope](../../include/webfront/networking/Tasks.hpp).
+- Tests : [StructuredShutdownTests](../../test/unit/StructuredShutdownTests.cpp),
+  [ApplicationTaskTests](../../test/unit/ApplicationTaskTests.cpp), [JsFunctionSenderTests](../../test/unit/JsFunctionSenderTests.cpp).
 - Exemple compilé : [AwaitBrowser.cpp (historique 0.3)](https://github.com/ambroise-leclerc/WebFront/blob/30665cab6e1d68636ef160d8c2f34bd29bff601f/src/AwaitBrowser.cpp).

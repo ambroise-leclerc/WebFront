@@ -136,7 +136,7 @@ jobs:
       run: |
         for iteration in 1 2 3 4 5; do
           echo "Transport iteration $iteration"
-          ./build-sanitized/test/tests "[transport],[weblink]" --order rand
+          ./build-sanitized/test/unit/tests "[transport],[weblink]" --order rand
         done
     - name: Run every test once
-      run: ./build-sanitized/test/tests --order rand
+      run: ./build-sanitized/test/unit/tests --order rand

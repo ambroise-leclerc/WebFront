@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md#use-webfront-in-your-project)
 
-A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS, `WebKitGTKFrontend` on Linux). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/frontend/Frontend.hpp`.
+A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS, `WebKitGTKFrontend` on Linux). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/webfront/frontend/Frontend.hpp`.
 
 ## The contract
 
@@ -28,17 +28,17 @@ The [shared content policy](CONTENT_POLICY.md) defines bridge-origin authorizati
 
 ## Contract tests
 
-`test/FrontendContractTests.cpp` uses a synchronized mock window and a server loop that stays active
+`test/unit/FrontendContractTests.cpp` uses a synchronized mock window and a server loop that stays active
 until stopped. It verifies blocking until closure, execution on the calling thread, server-loop
 completion before `show()` returns or propagates an exception, and continued service after a
 `keepServerRunning` frontend returns. Standard and non-standard exceptions are covered, including
 startup failures before any window is created. Coordination waits have a 30-second upper bound.
-`test/WebFrontTests.cpp` also checks initialization once per frontend type, retry after failed
+`test/unit/WebFrontTests.cpp` also checks initialization once per frontend type, retry after failed
 initialization, frontend selection and unavailable-engine diagnostics. These tests need no GUI.
 
 ## Adding a frontend
 
-1. Implement the type in `include/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
+1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
 2. Add its support module and one `webfront_register_frontend(...)` entry in `cmake/Frontends.cmake`, using the fields below.
 3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the seven shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
 
@@ -62,7 +62,7 @@ Registry order determines the initial cache default: the first enabled embedded 
 
 ## Lifecycle tests
 
-`webtest/FrontendLifecycle.cpp` runs the same seven cases under the selected embedded engine:
+`test/web/FrontendLifecycle.cpp` runs the same seven cases under the selected embedded engine:
 
 - `no-bridge`: close a page that never connects to the bridge and return from `show()`.
 - `early-close`: close immediately from the page's first script, before any bridge connection.

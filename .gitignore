@@ -53,4 +53,4 @@ Thumbs.db
 .webfront/
 
 # Maintenance-only npm tooling
-/tools/assets/node_modules/
+/js/developer/vendor/node_modules/

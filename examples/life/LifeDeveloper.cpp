@@ -1,5 +1,5 @@
 #include "Life.hpp"
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 
 #include <iostream>
 

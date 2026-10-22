@@ -85,8 +85,8 @@ Un frontend indisponible reste déclaré et échoue avec un diagnostic indiquant
 
 ## Sources et vérification
 
-- [Contrat](../FRONTENDS.md), [concept](../../include/frontend/Frontend.hpp),
+- [Contrat](../FRONTENDS.md), [concept](../../include/webfront/frontend/Frontend.hpp),
   [configuration](../../cmake/Frontends.cmake).
-- Tests : [FrontendContractTests](../../test/FrontendContractTests.cpp),
-  [frontend scenarios](../../test/frontends/CMakeLists.txt), [webtest](../../webtest/CMakeLists.txt).
+- Tests : [FrontendContractTests](../../test/unit/FrontendContractTests.cpp),
+  [frontend scenarios](../../test/cmake/frontends/CMakeLists.txt), [webtest](../../test/web/CMakeLists.txt).
 - Voir [ADR-008](ADR-008-contenu-de-confiance-et-origines.md).
