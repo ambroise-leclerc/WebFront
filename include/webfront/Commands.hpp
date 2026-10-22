@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +33,9 @@ namespace commands {
 
 /// Bridge strings carry a 16-bit length: output is sent in pieces of at most this many bytes.
 inline constexpr std::size_t maxChunkBytes = 60000;
+
+/// Frames that print() lets wait for the network before it suspends the command.
+inline constexpr std::size_t maxPendingOutput = 32;
 
 /// Exit code of a command stopped by Ctrl+C, a disconnection or the application's shutdown.
 inline constexpr int interruptedExitCode = 130;
@@ -136,6 +140,16 @@ public:
         for (const auto piece : detail::chunks(text))
             if (!run->send("webfront.commands.output", piece))
                 return;
+    }
+
+    /// Writes like write(), then suspends the command while more than maxPendingOutput frames wait for a browser that
+    /// reads slower than the command writes. Each wait is a point where Ctrl+C stops the command. Prefer it to write()
+    /// for large or unbounded output.
+    [[nodiscard]] Task print(std::string text) const {
+        const auto command = run;
+        write(text);
+        while (!command->stop.stop_requested() && command->ui.pendingWrites() > maxPendingOutput)
+            co_await command->ui.resumeAfter(std::chrono::milliseconds(5));
     }
 
     /// Sets the exit code reported when the command returns; 0 by default. An exception reports 1.
@@ -300,7 +314,8 @@ private:
         }
         if (auto owner = registry.lock())
             owner->finished(Key{run->ui.id(), run->id}, run);
-        const int code = stopped ? interruptedExitCode : !error.empty() ? 1 : run->exitCode;
+        // A command that returns once asked to stop was interrupted too, whatever it returned.
+        const int code = stopped || run->stop.stop_requested() ? interruptedExitCode : !error.empty() ? 1 : run->exitCode;
         run->send("webfront.commands.exit", code, error.empty() ? std::string_view{} : chunks(error).front());
     }
 };
@@ -313,7 +328,8 @@ private:
 /// The constructor registers the bridge functions webfront.commands.list, .start and .cancel, through which each
 /// connected browser discovers the commands and runs them in its own session. A command is a coroutine,
 /// `webfront::Task(webfront::commands::Context<UI>)`, spawned on the server thread like ui.spawn:
-///   - it streams its output with Context::write, never through one blocking reply;
+///   - it streams its output with Context::write, never through one blocking reply; co_await Context::print also waits
+///     while a slow browser has not read the output;
 ///   - Ctrl+C in the terminal, the browser's disconnection or the application's shutdown requests its stop, which the
 ///     senders it awaits observe (ui.resumeAfter, ui.jsFunctionSender, ...). The terminal does not wait for a stopped
 ///     command: its late output and exit report are ignored, and the next command can start at once;

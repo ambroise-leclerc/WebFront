@@ -1,8 +1,11 @@
 #include "InjectableNetworking.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/Commands.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -47,8 +50,10 @@ struct FakeUI {
     [[nodiscard]] int id() const noexcept {
         return link;
     }
-    TaskHandle spawn(Task task) const;
-    auto       jsFunction(string_view name) const;
+    TaskHandle  spawn(Task task) const;
+    auto        jsFunction(string_view name) const;
+    size_t      pendingWrites() const;
+    auto        resumeAfter(chrono::milliseconds) const;
 };
 
 // Records the bridge functions that Commands registers, like BasicWF::cppFunction, and the browser calls.
@@ -95,12 +100,25 @@ struct FakeApp {
     }
 
     vector<string> registered;
+    size_t         backlog = 0;  // frames waiting for the network; each pause lets the browser read 10
+    int            pauses  = 0;
     // Destroyed first: draining its tasks lets the commands report through the members above.
     RealApp real{WebFrontConfig{.port = "0"}};
 };
 
 TaskHandle FakeUI::spawn(Task task) const {
     return app->real.spawn(std::move(task));
+}
+
+size_t FakeUI::pendingWrites() const {
+    return app->backlog;
+}
+
+auto FakeUI::resumeAfter(chrono::milliseconds) const {
+    return networking::ex::just() | networking::ex::then([app = app] {
+        ++app->pauses;
+        app->backlog -= min<size_t>(app->backlog, 10);
+    });
 }
 
 auto FakeUI::jsFunction(string_view name) const {
@@ -262,6 +280,25 @@ SCENARIO("Command output is split under the bridge string limit on character bou
     }
 }
 
+SCENARIO("Printing waits while the browser has not read the output") {
+    GIVEN("a browser that has 55 frames to read") {
+        FakeApp           app;
+        Commands<FakeApp> commands{app};
+        commands.add("print", "", [](Context context) -> Task {
+            co_await context.print("line\n");
+        });
+        app.backlog = 55;
+        WHEN("a command prints") {
+            app.start(app.ui(1), 1, "print", "[]");
+            THEN("it waits until no more than the allowed frames are pending, then ends") {
+                CHECK(app.pauses == 3);
+                CHECK(app.backlog <= commands::maxPendingOutput);
+                CHECK(app.callsOf(1).back().values == vector<string>{"0", ""});
+            }
+        }
+    }
+}
+
 SCENARIO("Ctrl+C stops a running command and the next one runs at once") {
     GIVEN("a command waiting in a browser") {
         Fixture fixture;
@@ -271,6 +308,17 @@ SCENARIO("Ctrl+C stops a running command and the next one runs at once") {
         REQUIRE_FALSE(*fixture.unwound);
         THEN("its number cannot start another command") {
             CHECK_THROWS_AS(app.start(app.ui(1), 1, "greet", "[]"), invalid_argument);
+        }
+        WHEN("a command that returns once asked to stop is cancelled") {
+            fixture.commands.add("polite", "", [](Context context) -> Task {
+                co_await (testing::ManualSender([](auto) { }) | networking::ex::upon_stopped([] { return size_t{}; }));
+                context.exit(0);
+            });
+            app.start(app.ui(1), 9, "polite", "[]");
+            app.cancel(app.ui(1), 9);
+            THEN("it reports exit code 130, not success") {
+                CHECK(app.callsOf(1).back().values == vector<string>{"130", ""});
+            }
         }
         WHEN("the browser cancels it") {
             app.cancel(app.ui(1), 1);
@@ -368,6 +416,14 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             CHECK(RealApp::UI(app, 5).id() == 5);
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
             CHECK(subscription.active());
+        }
+        THEN("calls to a browser that is gone are dropped, and typed calls fail") {
+            const RealApp::UI gone(app, 42);
+            CHECK(app.connectedBrowsers() == 0);
+            CHECK_NOTHROW(gone.jsFunction("console.log")("dropped"));
+            auto result = gone.jsFunction<int>("Math.abs")(-1);
+            CHECK_THROWS_WITH(result.get(), "Browser connection closed");
+            CHECK_NOTHROW(gone.jsFunctionSender<int>("Math.abs")(-1));
         }
     }
 }

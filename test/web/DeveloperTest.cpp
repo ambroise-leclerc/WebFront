@@ -203,6 +203,9 @@ int main(int argc, char** argv) {
         app.cppFunction("test.command", [states](std::string tag) {
             return states->get(tag);
         });
+        app.cppFunction("test.browsers", [&app] {
+            return static_cast<double>(app.connectedBrowsers());
+        });
         bootstrapApp(app, argc == 4 ? std::string_view(argv[3]) : std::string_view{}, integrity);
         auto subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
             if (!std::exchange(injected, true))

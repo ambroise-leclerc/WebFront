@@ -47,7 +47,8 @@ class BasicUI {
 public:
     BasicUI(WebFront& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
 
-    /// Identifies this browser's connection among those of the application.
+    /// Identifies this browser's connection among those connected. The 16-bit identifier of a released connection
+    /// is only reused after 65,536 later connections.
     [[nodiscard]] WebLinkId id() const noexcept {
         return webLinkId;
     }
@@ -62,6 +63,15 @@ public:
             webFront.getLink(webLinkId).sendCommand(msg::TextCommand(msg::TxtOpcode::injectScript, script));
         } catch (const std::out_of_range&) {
             throw ConnectionError("Connection with client lost");
+        }
+    }
+
+    /// The frames queued for this browser and not yet written to the network; 0 once its connection is gone.
+    [[nodiscard]] std::size_t pendingWrites() const {
+        try {
+            return webFront.getLink(webLinkId).pendingWrites();
+        } catch (const std::out_of_range&) {
+            return 0;
         }
     }
 
@@ -381,14 +391,21 @@ public:
         return uiSubscribers->subscribe(std::move(handler));
     }
 
-    /// Adds a handler called on the server thread when a browser closes its connection, or the connection fails,
-    /// while the returned subscription lives. Its UI no longer reaches the browser. Application shutdown, which
-    /// stops every connection itself, notifies no handler.
+    /// Adds a handler called on the server thread when a browser closes its connection, or the connection fails
+    /// (a failed write included), while the returned subscription lives. Its UI no longer reaches the browser: the
+    /// connection is released after the handlers, then calls to it are dropped and typed calls fail. Application
+    /// shutdown, which stops every connection itself, notifies no handler.
     [[nodiscard]] UISubscription subscribeUIClosed(std::function<void(UI)> handler) {
         return uiClosedSubscribers->subscribe(std::move(handler));
     }
+    /// The link of a connected browser; throws std::out_of_range once its connection closed and was released.
     WebLink<Net>& getLink(WebLinkId id) {
         return webLinks.at(id);
+    }
+
+    /// The browsers connected now, as seen from the server thread: a closed connection is released shortly after.
+    [[nodiscard]] std::size_t connectedBrowsers() const {
+        return webLinks.size();
     }
 
     /**
@@ -505,6 +522,11 @@ private:
             serverThread.join();
     }
 
+    Task releaseLink(WebLinkId id) {
+        webLinks.erase(id);
+        co_return;
+    }
+
     template <typename R, typename Caller, typename... Args>
     void registerWithCaller(std::string functionName, auto&& function) {
         auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));
@@ -538,9 +560,10 @@ private:
                 uiSubscribers->notify(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::closed:
-                // The link stays until the application is destroyed: UI objects of a closed browser keep a
-                // valid, closed link instead of an identifier that a later browser could reuse.
                 uiClosedSubscribers->notify(UI{*this, event.webLinkId});
+                // The link is running this handler: it is released afterwards, by a task on the server context.
+                // During shutdown the task is refused and the link goes with the application.
+                static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
             case WebLinkEvent::Code::cppFunctionCalled:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())

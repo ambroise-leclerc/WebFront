@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <exception>
+#include <future>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 
@@ -33,17 +36,26 @@ public:
         (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
         command.setParametersCount(static_cast<std::uint8_t>(1 + sizeof...(ts)));
 
-        auto&& link = webFront.getLink(webLinkId);
-        if constexpr (std::is_same_v<Result, detail::IgnoreJsResult>)
-            link.sendFrame(std::move(frame));
-        else {
-            auto [callId, result] = link.template expectResult<Result>();
-            command.setCallId(callId);
-            if (callId != 0)
-                link.sendFrame(std::move(frame));
-            // Structured bindings are not implicitly movable on return, so a move-only future would be
-            // copied here. Newer libc++ accepts it; Apple Clang rejects it outright.
-            return std::move(result);
+        // A browser whose connection closed is gone: a call to it is dropped, and a typed call fails.
+        if constexpr (std::is_same_v<Result, detail::IgnoreJsResult>) {
+            try {
+                webFront.getLink(webLinkId).sendFrame(std::move(frame));
+            } catch (const std::out_of_range&) { }
+        } else {
+            try {
+                auto&& link           = webFront.getLink(webLinkId);
+                auto [callId, result] = link.template expectResult<Result>();
+                command.setCallId(callId);
+                if (callId != 0)
+                    link.sendFrame(std::move(frame));
+                // Structured bindings are not implicitly movable on return, so a move-only future would be
+                // copied here. Newer libc++ accepts it; Apple Clang rejects it outright.
+                return std::move(result);
+            } catch (const std::out_of_range&) {
+                std::promise<Result> closed;
+                closed.set_exception(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
+                return closed.get_future();
+            }
         }
     }
 
