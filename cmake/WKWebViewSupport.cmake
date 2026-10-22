@@ -43,6 +43,6 @@ function(webfront_add_wkwebview_tests)
         set_target_properties(${target} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_GUI_IDENTIFIER "org.webfront.tests.${identifier}"
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/WKWebViewTestInfo.plist.in")
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/cmake/WKWebViewTestInfo.plist.in")
     endforeach()
 endfunction()
