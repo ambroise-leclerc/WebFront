@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "version": "0.4.1",
+  "environment": "./environment.tgz",
+  "integrity": "sha512-GFvk1FWIVWBWAXLzJUEmaKo1CIMS82FZdhZyd/q8qE3/FA8CcxFN7G/u4gpQJNMJ9R1PKKLV0UXd2uuk08y0AA==",
+  "starters": {
+    "pi": {
+      "archive": "pi-starter.tgz",
+      "integrity": "sha512-665qMgM800+oKAslztVY51hmtdLy23m3+Np1A0sh1s1QQynmAbZ0SGeaGXLFpoewbXgksG4f+Dejn3jVwbk2Rw=="
+    },
+    "life": {
+      "archive": "life-starter.tgz",
+      "integrity": "sha512-1vEsFry7VBR1XL0OZmRSwHoGDduagzBffn40q3NcNHZyFQOhhmuuDIVwjD2Qtf6kD7A8mGYxWmHDgBQJ9TWHlA=="
+    }
+  }
+}
