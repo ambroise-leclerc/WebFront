@@ -456,6 +456,21 @@ try {
     assert(editor.status === 3 && lastRows(2)[0] === 'Error: Command status exited with code 3 (exit code 3)', `An exit code must be shown: ${lastRows(2)}`);
     await type('fail\r');
     assert(editor.status === 1 && lastRows(2)[0] === 'Error: command failed on purpose', `A C++ exception must be shown as an error: ${lastRows(2)}`);
+    await type('partial\r', 'x');
+    assert(JSON.stringify(lastRows(2)) === JSON.stringify(['partial', '> x']), `Output without a final line break must not hold the prompt: ${lastRows(2)}`);
+    await type('\x03');
+    // Keys typed while a completion is pending are applied after it, Enter included.
+    terminal.input('ec');
+    terminal.input('\t');
+    terminal.input('ho');
+    terminal.input(' typed-ahead\r');
+    for (let attempt = 0; editor.busy || lastRows(2)[0] !== 'ho typed-ahead'; ++attempt) {
+        if (attempt === 200) throw new Error(`Keys typed during a completion must be kept: ${lastRows(3)}`);
+        await editor.whenIdle();
+        await rendered();
+        await delay(10);
+    }
+    assert(lastRows(3)[0] === '> echo ho typed-ahead' && editor.queue.length === 0, `The completed line must run once: ${lastRows(3)}`);
     await type('echo ok\r');
     assert(editor.status === 0, 'A successful command must reset the status');
     // Ctrl+C in the terminal: the prompt comes back at once, and a command typed then runs while the first one ends.

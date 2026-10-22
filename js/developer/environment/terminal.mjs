@@ -180,7 +180,7 @@ const keyActions = new Map([
     ['\x05', editor => editor.moveTo(editor.cells.length)],
     ['\x1b[A', editor => editor.recall(-1)],
     ['\x1b[B', editor => editor.recall(1)],
-    ['\t', editor => editor.track(editor.completeLine())],
+    ['\t', editor => editor.track(editor.completeThenReplay())],
     ['\x03', editor => editor.cancelLine()],
     ['\x0c', editor => editor.clearScreen()],
     ['\x15', editor => editor.killBeforeCursor()],
@@ -201,7 +201,15 @@ export const historyLimit = 500;
  */
 export class LineEditor {
     constructor({write, columns = () => 80, run, complete = async () => ({word: '', candidates: []}), prompt = '> ', history = [], saveHistory = () => {}}) {
-        Object.assign(this, {write, columns, run, complete, saveHistory});
+        Object.assign(this, {columns, run, complete, saveHistory});
+        // Whether the cursor is at the start of a row: output streamed without a final line break is followed by one
+        // before the prompt.
+        this.atLineStart = true;
+        this.write = text => {
+            if (!text) return;
+            this.atLineStart = /\n$|\x1b\[H$/.test(text);
+            write(text);
+        };
         this.setPrompt(prompt);
         this.cells = [];
         this.cursor = 0;
@@ -212,6 +220,8 @@ export class LineEditor {
         this.status = 0;
         this.abort = null;
         this.busy = null;
+        this.running = false;
+        this.completing = null;  // input received while a completion is pending, replayed after it
         this.closed = false;
     }
 
@@ -235,7 +245,8 @@ export class LineEditor {
 
     handle(data) {
         if (this.closed) return;
-        if (this.busy) return this.whileBusy(data);
+        if (this.completing) return void this.completing.push(data);
+        if (this.running) return this.whileBusy(data);
         const action = keyActions.get(data);
         if (action) return action(this);
         if (!data.startsWith('\x1b')) return this.insertText(data);
@@ -373,7 +384,10 @@ export class LineEditor {
         this.cells = [];
         this.cursor = 0;
         this.row = 0;
-        return this.track(this.runLines(line));
+        this.running = true;
+        const done = this.runLines(line).finally(() => { this.running = false; });
+        // A submission replayed after a completion is already tracked by it.
+        return this.busy ? done : this.track(done);
     }
 
     async runLines(line) {
@@ -402,8 +416,7 @@ export class LineEditor {
         try {
             const output = await this.run(line, signal);
             this.status = 0;
-            // The prompt starts on a new line, unless the output already ends one or leaves the cursor at home.
-            if (output) this.write(output.endsWith('\n') || output.endsWith('\x1b[H') ? output : output + '\r\n');
+            this.write(output);
         } catch (error) {
             this.status = error?.exitCode ?? (signal.aborted ? 130 : 1);
             const message = String(error?.message ?? error);
@@ -412,6 +425,22 @@ export class LineEditor {
                 this.write(ansi.red(`Error: ${message}${this.status !== 1 ? ` (exit code ${this.status})` : ''}`).replace(/(?<!\r)\n/g, '\r\n') + '\r\n');
         } finally {
             this.abort = null;
+            // The prompt starts on a new line, unless the output already ends one or leaves the cursor at home.
+            if (!this.atLineStart) this.write('\r\n');
+        }
+    }
+
+    // Keys typed while the completion is pending are kept and applied once it is inserted, in order.
+    async completeThenReplay() {
+        this.completing = [];
+        try { await this.completeLine(); }
+        finally {
+            const typed = this.completing;
+            this.completing = null;
+            for (const data of typed) {
+                const result = this.handle(data);
+                if (this.running) await result;  // a replayed submission: the next keys follow its command
+            }
         }
     }
 

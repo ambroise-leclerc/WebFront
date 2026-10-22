@@ -145,6 +145,10 @@ void registerCommands(webfront::Commands<App>& commands, const std::shared_ptr<C
         context.write(text + "\n");
         co_return;
     });
+    commands.add("partial", "Write without a final line break", [](Context context) -> webfront::Task {
+        context.write("partial");
+        co_return;
+    });
     commands.add("fail", "Throw", [](Context) -> webfront::Task {
         throw std::runtime_error("command failed on purpose");
     });

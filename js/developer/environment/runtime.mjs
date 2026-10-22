@@ -344,7 +344,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit}
     const context = {bridge, config, preview, cppCommands, onExit};
     const editor = new LineEditor({write, columns: () => terminal.cols, prompt: '> ', history: await readHistory(bridge),
         saveHistory: lines => saveHistory(bridge, lines),
-        run: (line, signal) => runLine(line, {...context, editor, signal, write}),
+        run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
         complete: line => complete(line, context)});
     terminal.onResize(() => editor.resized());
     new ResizeObserver(() => fit.fit()).observe(element);
