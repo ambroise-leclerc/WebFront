@@ -48,6 +48,12 @@
 - Developer distribution 0.4.1 (published as `developer-v0.4.1`): generated providers include
   `<webfront/system/FileSystem.hpp>`. Published 0.4.0 remains immutable.
 
+### Fixed
+
+- Linux CEF builds: the runtime files, resources and locales are copied once per destination directory by a shared
+  copy target, instead of by every CEF target's post-build step, which made parallel builds fail intermittently
+  ("Error copying directory ... locales"). CI retries `setup-cmake` once when the GitHub API lists no CMake release.
+
 ## 0.4.0 - 2026-10-21
 
 ### Changed

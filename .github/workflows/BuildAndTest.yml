@@ -61,7 +61,18 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: js/developer/vendor/package-lock.json
-      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+      # The action lists CMake releases through the GitHub API, which sometimes answers without them
+      # ("Unable to find version matching"): one more attempt after a pause.
+      - id: cmake
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+        continue-on-error: true
+        with:
+          cmake-version: '4.4.4'
+      - if: steps.cmake.outcome == 'failure'
+        shell: bash
+        run: sleep 30
+      - if: steps.cmake.outcome == 'failure'
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -185,7 +196,18 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+      # The action lists CMake releases through the GitHub API, which sometimes answers without them
+      # ("Unable to find version matching"): one more attempt after a pause.
+      - id: cmake
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+        continue-on-error: true
+        with:
+          cmake-version: '4.4.4'
+      - if: steps.cmake.outcome == 'failure'
+        shell: bash
+        run: sleep 30
+      - if: steps.cmake.outcome == 'failure'
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
       - name: Install Clang 23 and sanitizer runtimes
@@ -257,7 +279,18 @@ jobs:
         with:
           node-version: 24
 
-      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+      # The action lists CMake releases through the GitHub API, which sometimes answers without them
+      # ("Unable to find version matching"): one more attempt after a pause.
+      - id: cmake
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+        continue-on-error: true
+        with:
+          cmake-version: '4.4.4'
+      - if: steps.cmake.outcome == 'failure'
+        shell: bash
+        run: sleep 30
+      - if: steps.cmake.outcome == 'failure'
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
 
