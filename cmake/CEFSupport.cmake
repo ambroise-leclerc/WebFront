@@ -91,6 +91,87 @@ function(_cef_copy_directory_to_target target_name source_dir dest_dir comment_t
     )
 endfunction()
 
+# Linux: CEF targets that build into one directory share it, and every CEF target shares the CEF binary directory
+# (ICU fix). Copying from each target's POST_BUILD step made parallel builds copy into one directory twice at the
+# same time ("Error copying directory ... locales"). Each destination gets one copy target instead, named after the
+# destination, on which its targets depend. Its rules produce the copied files from their sources, so a build with
+# nothing to copy copies nothing; a directory is copied with a stamp file standing for its contents.
+function(_cef_shared_copy target_name destination)
+    cmake_parse_arguments(PARSE_ARGV 2 copy "" "NAME;SOURCE_DIR;DIRECTORY" "FILES")
+    string(MD5 key "${destination}")
+    set(name webfront_cef_${copy_NAME}_${key})
+    if(NOT TARGET ${name})
+        set(outputs "")
+        foreach(file_name IN LISTS copy_FILES)
+            add_custom_command(OUTPUT "${destination}/${file_name}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${copy_SOURCE_DIR}/${file_name}" "${destination}/${file_name}"
+                DEPENDS "${copy_SOURCE_DIR}/${file_name}"
+                COMMENT "Copying CEF ${file_name} to ${destination}"
+                VERBATIM)
+            list(APPEND outputs "${destination}/${file_name}")
+        endforeach()
+        if(copy_DIRECTORY)
+            file(GLOB_RECURSE contents CONFIGURE_DEPENDS "${copy_SOURCE_DIR}/${copy_DIRECTORY}/*")
+            set(stamp "${destination}/${copy_DIRECTORY}/.webfront-copied")
+            add_custom_command(OUTPUT "${stamp}"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${copy_SOURCE_DIR}/${copy_DIRECTORY}" "${destination}/${copy_DIRECTORY}"
+                COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+                DEPENDS ${contents}
+                COMMENT "Copying CEF ${copy_DIRECTORY} to ${destination}"
+                VERBATIM)
+            list(APPEND outputs "${stamp}")
+        endif()
+        add_custom_target(${name} DEPENDS ${outputs})
+    endif()
+    add_dependencies(${target_name} ${name})
+endfunction()
+
+# Fails at the end of the directory if the target's output directory changed after the copy was planned for it.
+function(_cef_check_output_directory target_name planned)
+    _cef_output_directory(${target_name} actual)
+    if(NOT actual STREQUAL planned)
+        message(FATAL_ERROR "The CEF files of ${target_name} are copied to ${planned}, but it now builds into ${actual}: "
+            "set its RUNTIME_OUTPUT_DIRECTORY (or CMAKE_RUNTIME_OUTPUT_DIRECTORY) before calling the WebFront frontend setup")
+    endif()
+endfunction()
+
+# The directory a target's executable is built into, as $<TARGET_FILE_DIR> would name it: its RUNTIME_OUTPUT_DIRECTORY
+# (initialized from CMAKE_RUNTIME_OUTPUT_DIRECTORY), else the binary directory of the directory that created it, plus
+# the configuration with a multi-config generator. A path, not $<TARGET_FILE_DIR>: a copy target referencing a target
+# that depends on it would form a cycle. Per-configuration output directories are refused rather than guessed.
+function(_cef_output_directory target_name out_dir)
+    foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
+        string(TOUPPER "${config}" upper)
+        get_target_property(per_config ${target_name} RUNTIME_OUTPUT_DIRECTORY_${upper})
+        if(per_config)
+            message(FATAL_ERROR "${target_name} sets RUNTIME_OUTPUT_DIRECTORY_${upper}, which the CEF file copy does not "
+                "support on Linux: set RUNTIME_OUTPUT_DIRECTORY instead")
+        endif()
+    endforeach()
+    get_target_property(binary_dir ${target_name} BINARY_DIR)
+    get_target_property(directory ${target_name} RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT directory)
+        set(directory "${binary_dir}")
+    elseif(NOT IS_ABSOLUTE "${directory}" AND NOT directory MATCHES "^\\$<")
+        set(directory "${binary_dir}/${directory}")
+    endif()
+    get_property(multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    # Multi-config generators add the configuration unless the directory is a generator expression.
+    if(multi AND NOT directory MATCHES "\\$<")
+        set(directory "${directory}/$<CONFIG>")
+    endif()
+    set(${out_dir} "${directory}" PARENT_SCOPE)
+endfunction()
+
+# The output directory of a target, checked again once its directory is processed.
+function(_cef_planned_output_directory target_name out_dir)
+    _cef_output_directory(${target_name} directory)
+    cmake_language(EVAL CODE
+        "cmake_language(DEFER CALL _cef_check_output_directory [==[${target_name}]==] [==[${directory}]==])")
+    set(${out_dir} "${directory}" PARENT_SCOPE)
+endfunction()
+
 # Internal function to setup CEF paths and variables
 function(_cef_setup_paths)
     set(CEF_ROOT "${CMAKE_BINARY_DIR}/_deps/cef_binaries-src" PARENT_SCOPE)
@@ -213,12 +294,8 @@ function(copy_cef_runtime_files target_name cef_build_dir)
             )
         endif()
     elseif(UNIX)
-        _cef_copy_files_to_target(${target_name}
-            "${cef_build_dir}"
-            "${target_dir}"
-            "${CEF_LINUX_RUNTIME_FILES}"
-            "Copying CEF runtime files to output directory"
-        )
+        _cef_planned_output_directory(${target_name} output)
+        _cef_shared_copy(${target_name} "${output}" NAME runtime SOURCE_DIR "${cef_build_dir}" FILES ${CEF_LINUX_RUNTIME_FILES})
     endif()
     
     message(STATUS "CEF runtime files will be copied for ${target_name}")
@@ -269,31 +346,15 @@ function(copy_cef_resource_files target_name)
         # This dual-copy approach fixes the ICU data loading issue where CEF
         # searches for icudtl.dat in its installation directory
         
-        # Copy to application directory (standard deployment)
-        _cef_copy_files_to_target(${target_name}
-            "${CEF_RESOURCE_SOURCE_DIR}"
-            "${target_dir}"
-            "${CEF_RESOURCE_FILES}"
-            "Copying CEF resource files to application directory"
-        )
-        _cef_copy_directory_to_target(${target_name}
-            "${CEF_RESOURCE_SOURCE_DIR}/locales"
-            "${target_dir}/locales"
-            "Copying CEF locales to application directory"
-        )
-        
-        # Copy to CEF binary directory (ICU loading fix)
-        _cef_copy_files_to_target(${target_name}
-            "${CEF_RESOURCE_SOURCE_DIR}"
-            "${CEF_BINARY_RELEASE_DIR}"
-            "${CEF_RESOURCE_FILES}"
-            "Copying CEF resource files to binary directory (ICU fix)"
-        )
-        _cef_copy_directory_to_target(${target_name}
-            "${CEF_RESOURCE_SOURCE_DIR}/locales"
-            "${CEF_BINARY_RELEASE_DIR}/locales"
-            "Copying CEF locales to binary directory (ICU fix)"
-        )
+        # Copy to application directory (standard deployment), once per output directory
+        _cef_planned_output_directory(${target_name} output)
+        _cef_shared_copy(${target_name} "${output}" NAME resources SOURCE_DIR "${CEF_RESOURCE_SOURCE_DIR}"
+            FILES ${CEF_RESOURCE_FILES} DIRECTORY locales)
+
+        # Copy to CEF binary directory (ICU loading fix), once for all targets. As before, this is the Release
+        # directory in every configuration.
+        _cef_shared_copy(${target_name} "${CEF_BINARY_RELEASE_DIR}" NAME resources SOURCE_DIR "${CEF_RESOURCE_SOURCE_DIR}"
+            FILES ${CEF_RESOURCE_FILES} DIRECTORY locales)
     endif()
     
     message(STATUS "CEF resource files will be copied for ${target_name}")

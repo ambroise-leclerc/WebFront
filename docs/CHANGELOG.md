@@ -48,6 +48,18 @@
 - Developer distribution 0.4.1 (published as `developer-v0.4.1`): generated providers include
   `<webfront/system/FileSystem.hpp>`. Published 0.4.0 remains immutable.
 
+### Fixed
+
+- Linux CEF builds: the runtime files, resources and locales are copied once per destination directory by a shared
+  copy target, instead of by every CEF target's post-build step, which made parallel builds fail intermittently
+  ("Error copying directory ... locales"). The destination is the target's output directory
+  (`RUNTIME_OUTPUT_DIRECTORY`, initialized from `CMAKE_RUNTIME_OUTPUT_DIRECTORY`); a per-configuration output
+  directory, or one set after the frontend setup, is an explicit configure error. A build with nothing new copies
+  nothing.
+- CI installs CMake from the Kitware release archive checked against a pinned SHA-256
+  (`.github/actions/setup-cmake`), instead of an action that lists the releases through the GitHub API and failed
+  intermittently ("Unable to find version matching").
+
 ## 0.4.0 - 2026-10-21
 
 ### Changed

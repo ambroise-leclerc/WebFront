@@ -1,0 +1,61 @@
+# Fixture of CheckCEFCopy.cmake: the Linux CEF file copy of cmake/CEFSupport.cmake, with stand-in CEF files and
+# custom targets, so that no compiler, SDK or network is needed. STATE selects the case.
+cmake_minimum_required(VERSION 3.31)
+project(CEFCopyFixture LANGUAGES NONE)
+include("${ROOT}/cmake/CEFSupport.cmake")
+
+if(NOT ROOT OR NOT IS_DIRECTORY "${SOURCE_DIR}")
+    message(FATAL_ERROR "ROOT and SOURCE_DIR (the stand-in CEF files) must be supplied")
+endif()
+set(source "${SOURCE_DIR}")
+get_property(multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+set(config "")
+if(multi)
+    set(config "/$<CONFIG>")
+endif()
+
+function(expect actual expected what)
+    if(NOT actual STREQUAL expected)
+        message(FATAL_ERROR "${what}: ${actual}, expected ${expected}")
+    endif()
+endfunction()
+
+# Copies the stand-in runtime file and locales for a target, as copy_cef_runtime_files and copy_cef_resource_files do.
+function(copy_for target_name)
+    _cef_planned_output_directory(${target_name} output)
+    _cef_shared_copy(${target_name} "${output}" NAME runtime SOURCE_DIR "${source}" FILES libcef.so DIRECTORY locales)
+    set(planned "${output}" PARENT_SCOPE)
+endfunction()
+
+add_custom_target(everything ALL)
+
+if(STATE STREQUAL "plan")
+    # Two targets of this directory without an output directory share it, and one copy target.
+    add_custom_target(first)
+    add_custom_target(second)
+    copy_for(first)
+    expect("${planned}" "${CMAKE_CURRENT_BINARY_DIR}${config}" "default destination")
+    copy_for(second)
+    string(MD5 key "${planned}")
+    get_target_property(dependencies second MANUALLY_ADDED_DEPENDENCIES)
+    expect("${dependencies}" "webfront_cef_runtime_${key}" "second target's copy target")
+    # A relative RUNTIME_OUTPUT_DIRECTORY is under the target's binary directory.
+    add_custom_target(binned)
+    set_target_properties(binned PROPERTIES RUNTIME_OUTPUT_DIRECTORY bin)
+    copy_for(binned)
+    expect("${planned}" "${CMAKE_CURRENT_BINARY_DIR}/bin${config}" "relative output directory")
+    # A target of another directory building into the same absolute directory shares that copy target.
+    add_subdirectory(other)
+    add_dependencies(everything first second binned elsewhere)
+elseif(STATE STREQUAL "per-config")
+    add_custom_target(configured)
+    set_target_properties(configured PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE bin)
+    set(CMAKE_BUILD_TYPE Release)
+    copy_for(configured)
+elseif(STATE STREQUAL "late")
+    add_custom_target(late)
+    copy_for(late)
+    set_target_properties(late PROPERTIES RUNTIME_OUTPUT_DIRECTORY bin)
+else()
+    message(FATAL_ERROR "Unknown STATE ${STATE}")
+endif()

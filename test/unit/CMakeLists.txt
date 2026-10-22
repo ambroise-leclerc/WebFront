@@ -96,6 +96,10 @@ add_test(NAME CEFTestingState
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
         "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckCEFTestingState.cmake)
+# The Linux CEF file copy, with stand-in files: destinations, incremental copies and refusals.
+add_test(NAME CEFCopyDestinations
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckCEFCopy.cmake)
 add_test(NAME WebView2UnsupportedToolchain
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckWebView2Toolchain.cmake)
 add_test(NAME WebView2LoaderArchitecture
