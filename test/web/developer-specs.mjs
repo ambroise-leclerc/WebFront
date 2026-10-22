@@ -399,6 +399,9 @@ try {
     let exitedWith = null;
     const mounted = async () => runtime.mount({bridge: webFront, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }});
     const {terminal, editor} = await mounted();
+    // The terminal fits its element when its ResizeObserver first reports: let that happen before resizing it.
+    const frames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await frames();
     const buffer = () => terminal.buffer.active;
     const rendered = () => new Promise(resolve => terminal.write('', resolve));
     // Like xterm.js, one input per key; text may come as one input.
@@ -435,6 +438,7 @@ try {
     // A line over several rows: wrapping, editing in the middle, a row filled exactly and a wide character at a row end.
     terminal.resize(20, 12);
     await rendered();
+    assert(terminal.cols === 20, `The terminal must keep the width the test gives it: ${terminal.cols}`);
     await type('echo ' + 'a'.repeat(40));
     let top = cursorRow() - 2;
     assert(buffer().cursorX === 7 && JSON.stringify(rows().slice(top, top + 3)) === JSON.stringify(['> echo ' + 'a'.repeat(13), 'a'.repeat(20), 'a'.repeat(7)]),
