@@ -14,6 +14,9 @@ set(expected
 
 set(actual "")
 set(from_git OFF)
+if(NOT GIT_EXECUTABLE)
+    find_program(GIT_EXECUTABLE git)
+endif()
 if(GIT_EXECUTABLE AND EXISTS "${ROOT}/.git")
     execute_process(COMMAND "${GIT_EXECUTABLE}" ls-files
         WORKING_DIRECTORY "${ROOT}" OUTPUT_VARIABLE tracked RESULT_VARIABLE git_result ERROR_QUIET)
@@ -30,7 +33,7 @@ if(NOT from_git)
     # A source archive holds tracked content only, minus its export-ignore entries; a local
     # checkout without Git metadata may also hold build trees, which are not tracked content.
     file(GLOB entries LIST_DIRECTORIES true RELATIVE "${ROOT}" "${ROOT}/*" "${ROOT}/.[!.]*")
-    list(FILTER entries EXCLUDE REGEX "^build")
+    list(FILTER entries EXCLUDE REGEX "^(build|\\.git$)")
     set(actual ${entries})
 endif()
 # .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
