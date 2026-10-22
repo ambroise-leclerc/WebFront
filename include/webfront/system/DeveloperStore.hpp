@@ -2,6 +2,7 @@
 #pragma once
 
 #include "DeveloperFiles.hpp"
+#include "DeveloperJournal.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -11,11 +12,21 @@ namespace webfront::developer {
 
 class Store {
 public:
-    explicit Store(std::filesystem::path project, std::chrono::steady_clock::duration abandoned = defaultAbandonedAfter)
-        : root(std::filesystem::canonical(project)), abandonedAfter(abandoned) {
+    /// Opening a project completes the group publications that reached their commit point before
+    /// the previous process stopped and abandons the others. A publication that cannot be completed
+    /// does not prevent opening the project: state() and commitGroup() retry it and report why it fails,
+    /// and recoveryFailure() describes it meanwhile. The hook is for tests only.
+    explicit Store(std::filesystem::path project, std::chrono::steady_clock::duration abandoned = defaultAbandonedAfter,
+                   StepHook stepHook = {})
+        : root(std::filesystem::canonical(project)), abandonedAfter(abandoned), hook(std::move(stepHook)) {
         if (!std::filesystem::is_directory(root))
             throw std::invalid_argument("Developer project must be a directory");
         removeStaleStaging(root);
+        try {
+            recoverJournals(root, hook);
+        } catch (const IncompletePublication& incomplete) {
+            pendingRecovery = incomplete.what();
+        }
     }
     Store(const Store&)            = delete;
     Store& operator=(const Store&) = delete;
@@ -99,6 +110,79 @@ public:
         transactions.erase(id);
     }
 
+    /// Identifies the current content of project files; see commitGroup(). A committed publication that is
+    /// not applied yet is completed first; while it cannot be, this throws IncompletePublication.
+    std::string state(const std::vector<std::string>& paths) {
+        std::scoped_lock lock(mutex);
+        recover();
+        return fingerprint(root, paths);
+    }
+
+    /// Why a committed publication could not be completed, if it still cannot.
+    std::optional<std::string> recoveryFailure() const {
+        std::scoped_lock lock(mutex);
+        return pendingRecovery;
+    }
+
+    /// Publishes several staged files as one change. The change is applied only if the files named by
+    /// `paths` (which include every destination) still have the content identified by `expected`, as
+    /// read by state() when the operation began; otherwise nothing changes and the caller runs again.
+    ///
+    /// The commit point is the journal, completely written and synchronized after the files are
+    /// staged and before the first replacement. A failure before it returns the files to their
+    /// transactions, which the caller may commit again or abort; a crash before it leaves the previous
+    /// files. After it, the publication happens: if a replacement fails, this throws
+    /// IncompletePublication and the next state(), commitGroup() or opening of the project completes it.
+    void commitGroup(const std::vector<std::string>& ids, const std::vector<std::string>& paths, const std::string& expected) {
+        std::scoped_lock lock(mutex);
+        const auto directory = projectPath(root, journalDirectory);
+        // Before the commit point: the journal directory must itself survive a power cut.
+        createDirectoriesDurably(root, directory);
+        // From here to the end, no other process recovers, checks the precondition or publishes.
+        ProjectLock processLock{directory / lockName};
+        recoverHoldingLock();
+        auto group = checkedGroup(ids, paths);
+        if (fingerprint(root, paths) != expected)
+            throw std::runtime_error("The project changed since it was read; run the command again");
+        const auto number = prepareJournal(directory, group);
+        try {
+            writeJournal(directory, number, group);
+        } catch (const InjectedFault&) {
+            throw;
+        } catch (...) {
+            std::error_code ignored;
+            std::filesystem::remove(directory / (number + ".tmp"), ignored);
+            std::filesystem::remove(directory / (number + ".journal"), ignored);
+            returnStaged(directory / (number + ".d"), group);
+            throw;
+        }
+        std::vector<JournalEntry> entries;
+        for (std::size_t i = 0; i < group.size(); ++i)
+            entries.push_back({group[i]->destination, std::to_string(i)});
+        for (const auto& id : ids) {
+            std::error_code ignored;
+            std::filesystem::remove_all(transactions.at(id).staging, ignored);
+            transactions.erase(id);
+        }
+        try {
+            rollForward(root, directory, number, entries, hook);
+        } catch (const InjectedFault&) {
+            throw;
+        } catch (const std::exception& exception) {
+            IncompletePublication incomplete{exception.what()};
+            pendingRecovery = incomplete.what();
+            throw incomplete;
+        }
+    }
+
+    /// Bridge forms of state() and commitGroup(): one path or identifier per line.
+    std::string stateOfLines(std::string paths) {
+        return state(lines(paths));
+    }
+    void commitGroupLines(std::string ids, std::string paths, std::string expected) {
+        commitGroup(lines(ids), lines(paths), expected);
+    }
+
     void abort(std::string id) {
         std::scoped_lock lock(mutex);
         const auto       found = transactions.find(id);
@@ -109,6 +193,115 @@ public:
     }
 
 private:
+    static std::vector<std::string> lines(const std::string& text) {
+        std::vector<std::string> result;
+        std::istringstream       stream{text};
+        for (std::string line; std::getline(stream, line);)
+            if (!line.empty())
+                result.push_back(std::move(line));
+        return result;
+    }
+
+    struct Transaction;
+    // The transactions of a group: single files, distinct, each destination covered by the precondition.
+    std::vector<Transaction*> checkedGroup(const std::vector<std::string>& ids, const std::vector<std::string>& paths) {
+        if (ids.empty() || ids.size() > maxGroupFiles || paths.empty() || paths.size() > maxGroupFiles * 2)
+            throw std::invalid_argument("Invalid group publication");
+        std::vector<Transaction*> group;
+        for (const auto& id : ids) {
+            auto& tx = transaction(id);
+            if (std::ranges::find(group, &tx) != group.end() || tx.directory)
+                throw std::invalid_argument("A group publishes distinct single files");
+            if (std::ranges::find(paths, tx.destination) == paths.end())
+                throw std::invalid_argument("A group precondition must cover every destination");
+            if (projectPath(root, tx.destination) != tx.target)
+                throw std::runtime_error("Project path changed");
+            if (!tx.replace && std::filesystem::exists(std::filesystem::symlink_status(tx.target)))
+                throw std::runtime_error("Starter destination already exists");
+            stagedSource(tx);
+            group.push_back(&tx);
+        }
+        return group;
+    }
+
+    // Moves the staged files into a directory owned by the journal and makes them durable.
+    std::string prepareJournal(const std::filesystem::path& directory, const std::vector<Transaction*>& group) {
+        for (;;) {
+            const auto number = std::to_string(++stagingCounter);
+            if (std::filesystem::exists(directory / (number + ".journal")) || std::filesystem::exists(directory / (number + ".tmp")))
+                continue;
+            if (!std::filesystem::create_directory(directory / (number + ".d")))
+                continue;
+            try {
+                for (std::size_t i = 0; i < group.size(); ++i) {
+                    const auto owned = directory / (number + ".d") / std::to_string(i);
+                    std::filesystem::rename(stagedSource(*group[i]), owned);
+                    syncFile(owned);
+                }
+                syncDirectory(directory / (number + ".d"));
+            } catch (const InjectedFault&) {
+                throw;
+            } catch (...) {
+                returnStaged(directory / (number + ".d"), group);
+                throw;
+            }
+            return number;
+        }
+    }
+
+    void writeJournal(const std::filesystem::path& directory, const std::string& number, const std::vector<Transaction*>& group) {
+        std::vector<JournalEntry> entries;
+        for (std::size_t i = 0; i < group.size(); ++i)
+            entries.push_back({group[i]->destination, std::to_string(i)});
+        step("before-journal");
+        const auto temporary = directory / (number + ".tmp");
+        {
+            std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+            const auto    text = serializeJournal(entries);
+            file.write(text.data(), static_cast<std::streamsize>(text.size()));
+            file.close();
+            if (!file)
+                throw std::runtime_error("Cannot write the publication journal");
+        }
+        syncFile(temporary);
+        std::filesystem::rename(temporary, directory / (number + ".journal"));
+        syncDirectory(directory);
+        step("after-journal");
+    }
+
+    // Before the commit point: puts the files moved into a journal directory back in their transactions.
+    static void returnStaged(const std::filesystem::path& owned, const std::vector<Transaction*>& group) {
+        std::error_code ignored;
+        for (std::size_t i = 0; i < group.size(); ++i) {
+            const auto moved = owned / std::to_string(i);
+            if (std::filesystem::is_regular_file(moved, ignored))
+                std::filesystem::rename(moved, group[i]->staging / "output", ignored);
+        }
+        std::filesystem::remove_all(owned, ignored);
+    }
+
+    // Completes the committed publications, recording why one cannot be completed.
+    template<typename Recovery> void recordRecovery(Recovery recovery) {
+        try {
+            recovery(root, hook);
+            pendingRecovery.reset();
+        } catch (const IncompletePublication& incomplete) {
+            pendingRecovery = incomplete.what();
+            throw;
+        }
+    }
+    void recover() {
+        recordRecovery(recoverJournals);
+    }
+    void recoverHoldingLock() {
+        recordRecovery(recoverLocked);
+    }
+
+    void step(std::string_view name) const {
+        if (hook)
+            hook(name);
+    }
+
     struct Transaction {
         std::filesystem::path                staging;
         std::filesystem::path                target;
@@ -190,6 +383,8 @@ private:
 
     std::filesystem::path                    root;
     std::chrono::steady_clock::duration      abandonedAfter;
+    StepHook                                 hook;
+    std::optional<std::string>               pendingRecovery;
     mutable std::mutex                       mutex;
     std::map<std::string, Transaction>       transactions;
 };

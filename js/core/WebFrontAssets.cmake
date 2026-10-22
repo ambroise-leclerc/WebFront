@@ -101,7 +101,8 @@ function(webfront_add_embedded_assets)
     if(ENABLE_TESTING)
         find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
         add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
-            --test "${root}/js/developer/tools/check.mjs" "${root}/js/developer/tools/distribution-check.mjs")
+            --test "${root}/js/developer/tools/check.mjs" "${root}/js/developer/tools/distribution-check.mjs"
+            "${root}/js/developer/tools/manifest-check.mjs")
         set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
         add_test(NAME EmbeddedAssetGenerator COMMAND ${CMAKE_COMMAND} -E env
             "WEBFRONT_TEST_CMAKE=${CMAKE_COMMAND}" "${WEBFRONT_NODE_EXECUTABLE}"

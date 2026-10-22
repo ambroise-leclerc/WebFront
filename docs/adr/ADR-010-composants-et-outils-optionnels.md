@@ -10,7 +10,7 @@
 | 1.3 | 2026-10-15 | Acceptée | Ambroise Leclerc | Recherche, installation et ouverture des outils via une extension navigateur. | [18d5bb4](https://github.com/ambroise-leclerc/WebFront/commit/18d5bb4c5db6e4dc5ecf4867378d451887b2c133) |
 | 1.4 | 2026-10-15 | Acceptée | Ambroise Leclerc | Validation des outils avec un registre local factice. | [d53ffcc](https://github.com/ambroise-leclerc/WebFront/commit/d53ffcc40102c7405eb7060d7021aad366d6d7e9) |
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Interruption des commandes navigateur et transferts séquentiels par blocs de 256 KiB. | [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) |
-| 1.6 | 2026-10-22 | Acceptée | Ambroise Leclerc | Trajectoire de retrait de Terminal.hpp, ToolManager.hpp, ToolStore et PackageFS au profit de l'environnement bootstrap (ADR-016). | À renseigner après fusion de l'issue #304. |
+| 1.6 | 2026-10-22 | Acceptée | Ambroise Leclerc | Trajectoire de retrait de Terminal.hpp, ToolManager.hpp, ToolStore et PackageFS au profit de l'environnement bootstrap (ADR-016). | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 
 ## État et chronologie
 

@@ -1,12 +1,15 @@
 #include "../fixtures/Pi.hpp"
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/http/MimeType.hpp>
 
 #include <chrono>
+#include <future>
 #include <fstream>
 #include <limits>
+#include <utility>
 
 using namespace webfront;
 using webfront::test::TemporaryDirectory;
@@ -335,6 +338,379 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
         THEN("a pinned environment is accepted once") {
             REQUIRE_NOTHROW(app.bootstrap("developer", trusted));
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
+        }
+    }
+}
+
+namespace {
+constexpr auto manifestPath = "webfront.project.json";
+constexpr auto lockPath     = "webfront-packages.lock.json";
+const std::vector<std::string> pair{manifestPath, lockPath};
+
+void publishFile(developer::Store& store, const std::string& path, std::string_view text) {
+    const auto id = store.begin(path, false);
+    store.write(id, "output", 0, bytes(text));
+    store.commit(id);
+}
+
+// Stages new contents for the manifest and the lock, then publishes them together.
+void publishPair(developer::Store& store, std::string_view manifest, std::string_view lock, const std::string& expected) {
+    const auto first  = store.begin(manifestPath, false);
+    const auto second = store.begin(lockPath, false);
+    store.write(first, "output", 0, bytes(manifest));
+    store.write(second, "output", 0, bytes(lock));
+    store.commitGroup({first, second}, pair, expected);
+}
+
+// The lock file stays in the journal directory; anything else is a journal or its remains.
+[[nodiscard]] bool journalsRemain(const std::filesystem::path& directory) {
+    return std::ranges::any_of(std::filesystem::directory_iterator(directory),
+                               [](const auto& entry) { return entry.path().filename() != developer::lockName; });
+}
+
+[[nodiscard]] std::string projectState(developer::Store& store) {
+    return read(store, manifestPath) + "|" + read(store, lockPath);
+}
+
+// Stops the process at one step of a group publication, then reopens the project.
+[[nodiscard]] std::string crashAt(const std::string& step, const std::filesystem::path& project) {
+    {
+        developer::Store store{project, developer::defaultAbandonedAfter, [&step](std::string_view name) {
+                                   if (name == step)
+                                       throw developer::InjectedFault{"crash at " + step};
+                               }};
+        const auto       expected = store.state(pair);
+        REQUIRE_THROWS_AS(publishPair(store, "manifest-2", "lock-2", expected), developer::InjectedFault);
+    }
+    developer::Store reopened{project};
+    return projectState(reopened);
+}
+}  // namespace
+
+SCENARIO("A manifest and its lock are published together or not at all") {
+    TemporaryDirectory project;
+    {
+        developer::Store store{project.path()};
+        publishFile(store, manifestPath, "manifest-1");
+        publishFile(store, lockPath, "lock-1");
+    }
+    GIVEN("an installed manifest and lock") {
+        developer::Store store{project.path()};
+        WHEN("both files are published after an uninterrupted install") {
+            publishPair(store, "manifest-2", "lock-2", store.state(pair));
+            THEN("both are replaced and no journal remains") {
+                REQUIRE(projectState(store) == "manifest-2|lock-2");
+                REQUIRE_FALSE(journalsRemain(project.path() / ".webfront/developer/journal"));
+            }
+        }
+        WHEN("the process stops before the journal is committed") {
+            store.state(pair);
+            THEN("the previous state is intact after restart") {
+                REQUIRE(crashAt("before-journal", project.path()) == "manifest-1|lock-1");
+            }
+        }
+        WHEN("the process stops right after the journal is committed") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("after-journal", project.path()) == "manifest-2|lock-2");
+            }
+        }
+        WHEN("the process stops between the two replacements") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("replacement-1", project.path()) == "manifest-2|lock-2");
+            }
+        }
+        WHEN("the process stops once the replacements are durable but the journal is still there") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("replacements-synced", project.path()) == "manifest-2|lock-2");
+            }
+        }
+        WHEN("the journal is removed") {
+            std::vector<std::string> steps;
+            std::vector<bool>        journalPresent;
+            {
+                developer::Store observed{project.path(), developer::defaultAbandonedAfter, [&](std::string_view name) {
+                                              steps.emplace_back(name);
+                                              if (name == "replacements-synced")
+                                                  journalPresent.push_back(journalsRemain(project.path() / ".webfront/developer/journal"));
+                                          }};
+                publishPair(observed, "manifest-2", "lock-2", observed.state(pair));
+            }
+            THEN("it is only after both replacements, and the journal was still present until then") {
+                REQUIRE(steps == std::vector<std::string>{"before-journal", "after-journal", "replacement-1", "replacement-2", "replacements-synced"});
+                REQUIRE(journalPresent == std::vector<bool>{true});
+            }
+        }
+        WHEN("the process stops after the second replacement") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("replacement-2", project.path()) == "manifest-2|lock-2");
+            }
+        }
+    }
+    GIVEN("a publication committed but interrupted between its replacements") {
+        {
+            developer::Store store{project.path(), developer::defaultAbandonedAfter, [](std::string_view name) {
+                                       if (name == "replacement-1")
+                                           throw developer::InjectedFault{"crash"};
+                                   }};
+            REQUIRE_THROWS_AS(publishPair(store, "manifest-2", "lock-2", store.state(pair)), developer::InjectedFault);
+        }
+        WHEN("the recovery itself is interrupted, once at each of its steps") {
+            for (const char* step : {"replacement-1", "replacement-2"}) {
+                REQUIRE_THROWS_AS(developer::Store(project.path(), developer::defaultAbandonedAfter,
+                                                   [step](std::string_view name) {
+                                                       if (name == step)
+                                                           throw developer::InjectedFault{"crash"};
+                                                   }),
+                                  developer::InjectedFault);
+            }
+            THEN("a later restart still reaches the new state") {
+                developer::Store store{project.path()};
+                REQUIRE(projectState(store) == "manifest-2|lock-2");
+                REQUIRE_FALSE(journalsRemain(project.path() / ".webfront/developer/journal"));
+            }
+        }
+    }
+    GIVEN("leftovers of a publication that never reached its commit point") {
+        const auto journal = project.path() / ".webfront/developer/journal";
+        std::filesystem::create_directories(journal / "7.d");
+        std::ofstream{journal / "7.d" / "0"} << "orphan";
+        std::ofstream{journal / "7.tmp"} << "webfront-journal 1\nwebfront.project.json\n0\n";
+        std::ofstream{journal / "8.journal"} << "webfront-journal 1\nwebfront.project.json\n0\n";
+        WHEN("the project is opened") {
+            developer::Store store{project.path()};
+            THEN("they are abandoned and the project keeps its files") {
+                REQUIRE_FALSE(journalsRemain(journal));
+                REQUIRE(projectState(store) == "manifest-1|lock-1");
+            }
+        }
+    }
+}
+
+SCENARIO("A committed publication that cannot be completed does not prevent opening the project") {
+    TemporaryDirectory project;
+    const auto         journal = project.path() / ".webfront/developer/journal";
+    {
+        developer::Store store{project.path()};
+        publishFile(store, manifestPath, "manifest-1");
+        publishFile(store, lockPath, "lock-1");
+    }
+    GIVEN("a publication committed before a crash whose manifest replacement is now blocked") {
+        REQUIRE(crashAt("after-journal", project.path()) == "manifest-2|lock-2");
+        {
+            // Commit a second publication, then obstruct its first target.
+            developer::Store store{project.path(), developer::defaultAbandonedAfter, [](std::string_view name) {
+                                       if (name == "after-journal")
+                                           throw developer::InjectedFault{"crash"};
+                                   }};
+            REQUIRE_THROWS_AS(publishPair(store, "manifest-3", "lock-3", store.state(pair)), developer::InjectedFault);
+        }
+        std::filesystem::remove(project.path() / manifestPath);
+        std::filesystem::create_directories(project.path() / manifestPath / "obstacle");
+        WHEN("the project is opened") {
+            developer::Store store{project.path()};
+            THEN("it opens, reports the failure, refuses to read a state and keeps the journal") {
+                REQUIRE(store.recoveryFailure().has_value());
+                REQUIRE_THROWS_AS(store.state(pair), developer::IncompletePublication);
+                REQUIRE(journalsRemain(journal));
+                REQUIRE(read(store, lockPath) == "lock-2");
+            }
+            AND_WHEN("the obstacle is removed") {
+                std::filesystem::remove_all(project.path() / manifestPath);
+                THEN("the next state completes the publication") {
+                    store.state(pair);
+                    REQUIRE_FALSE(store.recoveryFailure().has_value());
+                    REQUIRE(projectState(store) == "manifest-3|lock-3");
+                    REQUIRE_FALSE(journalsRemain(journal));
+                }
+            }
+        }
+    }
+    GIVEN("a replacement failing during the publication") {
+        bool             failOnce = true;
+        developer::Store store{project.path(), developer::defaultAbandonedAfter, [&failOnce](std::string_view name) {
+                                   if (name == "replacement-1" && std::exchange(failOnce, false))
+                                       throw std::runtime_error("target locked");
+                               }};
+        WHEN("the group is published") {
+            THEN("the caller learns that the change is committed but not applied, and the next state applies it") {
+                REQUIRE_THROWS_AS(publishPair(store, "manifest-2", "lock-2", store.state(pair)), developer::IncompletePublication);
+                REQUIRE(store.recoveryFailure().has_value());
+                store.state(pair);
+                REQUIRE(projectState(store) == "manifest-2|lock-2");
+                REQUIRE_FALSE(journalsRemain(journal));
+            }
+        }
+    }
+    GIVEN("a failure before the commit point") {
+        developer::Store store{project.path(), developer::defaultAbandonedAfter, [](std::string_view name) {
+                                   if (name == "before-journal")
+                                       throw std::runtime_error("disk full");
+                               }};
+        const auto       first  = store.begin(manifestPath, false);
+        const auto       second = store.begin(lockPath, false);
+        store.write(first, "output", 0, bytes("manifest-2"));
+        store.write(second, "output", 0, bytes("lock-2"));
+        REQUIRE_THROWS_WITH(store.commitGroup({first, second}, pair, store.state(pair)), "disk full");
+        THEN("the staged files are returned to their transactions, which still publish") {
+            REQUIRE(projectState(store) == "manifest-1|lock-1");
+            REQUIRE_FALSE(journalsRemain(journal));
+            store.commit(first);
+            store.commit(second);
+            REQUIRE(projectState(store) == "manifest-2|lock-2");
+        }
+    }
+}
+
+SCENARIO("A publication prepared from stale state is refused") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    publishFile(store, manifestPath, "manifest-1");
+    publishFile(store, lockPath, "lock-1");
+    GIVEN("two browsers reading the same state") {
+        const auto firstBrowser  = store.state(pair);
+        const auto secondBrowser = store.state(pair);
+        REQUIRE(firstBrowser == secondBrowser);
+        WHEN("the first publishes, then the second does with what it read") {
+            publishPair(store, "manifest-a", "lock-a", firstBrowser);
+            THEN("the second is refused and nothing is lost") {
+                REQUIRE_THROWS_WITH(publishPair(store, "manifest-b", "lock-b", secondBrowser), Catch::Matchers::ContainsSubstring("changed since it was read"));
+                REQUIRE(projectState(store) == "manifest-a|lock-a");
+            }
+            AND_THEN("it succeeds after reading the new state again") {
+                publishPair(store, "manifest-ab", "lock-ab", store.state(pair));
+                REQUIRE(projectState(store) == "manifest-ab|lock-ab");
+            }
+        }
+        WHEN("a file changes outside the store") {
+            publishFile(store, lockPath, "lock-c");
+            THEN("the state differs and the group is refused") {
+                REQUIRE(store.state(pair) != firstBrowser);
+                REQUIRE_THROWS(publishPair(store, "manifest-b", "lock-b", firstBrowser));
+            }
+        }
+    }
+    GIVEN("a missing lock") {
+        std::filesystem::remove(project.path() / lockPath);
+        THEN("its absence is part of the state") {
+            const auto absent = store.state(pair);
+            publishFile(store, lockPath, "");
+            REQUIRE(store.state(pair) != absent);
+        }
+    }
+    GIVEN("malformed groups") {
+        const auto first = store.begin(manifestPath, false);
+        store.write(first, "output", 0, bytes("x"));
+        THEN("they are refused without changing the project") {
+            REQUIRE_THROWS(store.commitGroup({}, pair, store.state(pair)));
+            REQUIRE_THROWS(store.commitGroup({first, first}, pair, store.state(pair)));
+            REQUIRE_THROWS(store.commitGroup({first}, {lockPath}, store.state({lockPath})));
+            REQUIRE(projectState(store) == "manifest-1|lock-1");
+            store.abort(first);
+        }
+    }
+}
+
+SCENARIO("New directories are durable once their parents are synchronized") {
+    TemporaryDirectory project;
+    const auto         root = std::filesystem::canonical(project.path());
+    GIVEN("a project without the journal directory") {
+        std::vector<std::filesystem::path> synced;
+        WHEN("the directories are created") {
+            developer::createDirectoriesDurably(root, root / ".webfront/developer/journal",
+                                                [&](const std::filesystem::path& directory) {
+                                                    // The directory just created must exist when its parent is synchronized.
+                                                    REQUIRE(std::filesystem::exists(directory / (synced.empty() ? ".webfront" : synced.size() == 1 ? "developer" : "journal")));
+                                                    synced.push_back(directory);
+                                                });
+            THEN("each created directory has its parent synchronized, outermost first") {
+                REQUIRE(synced == std::vector<std::filesystem::path>{root, root / ".webfront", root / ".webfront/developer"});
+            }
+        }
+        WHEN("some of them already exist") {
+            std::filesystem::create_directories(root / ".webfront/developer");
+            developer::createDirectoriesDurably(root, root / ".webfront/developer/journal",
+                                                [&](const std::filesystem::path& directory) { synced.push_back(directory); });
+            THEN("only the missing one is created and synchronized") {
+                REQUIRE(synced == std::vector<std::filesystem::path>{root / ".webfront/developer"});
+            }
+        }
+    }
+}
+
+namespace {
+// Holds a thread at a step until opened. Opening is idempotent and also happens on destruction, so a failed
+// assertion never leaves a thread blocked behind a future that waits for it.
+class Gate {
+public:
+    void open() {
+        std::call_once(once, [this] { opened.set_value(); });
+    }
+    void wait() const {
+        future.wait();
+    }
+
+private:
+    std::once_flag      once;
+    std::promise<void>  opened;
+    std::shared_future<void> future{opened.get_future().share()};
+};
+struct OpenOnExit {
+    Gate& gate;
+    ~OpenOnExit() {
+        gate.open();
+    }
+};
+}  // namespace
+
+SCENARIO("A second opener of the project waits for a publication in progress instead of abandoning it") {
+    TemporaryDirectory project;
+    {
+        developer::Store store{project.path()};
+        publishFile(store, manifestPath, "manifest-1");
+        publishFile(store, lockPath, "lock-1");
+    }
+    GIVEN("a publication stopped between staging its files and writing its journal") {
+        Gate               reached;
+        Gate               release;
+        developer::Store   publisher{project.path(), developer::defaultAbandonedAfter, [&](std::string_view name) {
+                                         if (name == "before-journal") {
+                                             reached.open();
+                                             release.wait();
+                                         }
+                                     }};
+        const auto         before      = publisher.state(pair);
+        auto               publication = std::async(std::launch::async, [&] {
+            try {
+                publishPair(publisher, "manifest-2", "lock-2", before);
+            } catch (...) {
+                reached.open();  // do not leave the test waiting for a step that is never reached
+                throw;
+            }
+        });
+        const OpenOnExit   unblock{release};
+        reached.wait();
+        WHEN("another store, as another process would, opens the project meanwhile") {
+            auto       opening = std::async(std::launch::async, [&] { developer::Store other{project.path()}; return projectState(other); });
+            const auto waiting = opening.wait_for(std::chrono::milliseconds(300));
+            release.open();
+            publication.get();
+            THEN("it waited, then sees the completed publication") {
+                CHECK(waiting == std::future_status::timeout);
+                REQUIRE(opening.get() == "manifest-2|lock-2");
+            }
+        }
+        WHEN("another store tries to publish from the state read before the first publication") {
+            auto competing = std::async(std::launch::async, [&] {
+                developer::Store other{project.path()};
+                publishPair(other, "manifest-3", "lock-3", before);
+            });
+            const auto waiting = competing.wait_for(std::chrono::milliseconds(300));
+            release.open();
+            publication.get();
+            THEN("its precondition is checked after the first publication, which wins") {
+                CHECK(waiting == std::future_status::timeout);
+                REQUIRE_THROWS_WITH(competing.get(), Catch::Matchers::ContainsSubstring("changed since it was read"));
+            }
         }
     }
 }

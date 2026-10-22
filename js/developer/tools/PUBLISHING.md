@@ -11,18 +11,34 @@ The package names in their manifests are identifiers, not a requirement to own o
 npm ci --prefix js/developer/vendor --ignore-scripts
 node js/developer/tools/build.mjs build-distribution --refresh-bootstrap
 node js/developer/tools/fixtures.mjs build-distribution
-node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs
+node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs js/developer/tools/manifest-check.mjs
 node js/developer/tools/site.mjs build-distribution build-developer-site
 ```
 
-Review and commit the updated checked-in bootstrap bundles, checksums and
-`include/webfront/system/DeveloperReleaseData.hpp`. The header pins the exact environment archive and URL.
+Review and commit the updated checked-in bootstrap bundles and checksums. Regenerating
+`include/webfront/system/DeveloperReleaseData.hpp` is part of the release procedure ("Pinning a new version"): the header
+is committed on a release branch before the tag, because the publication workflow requires it to match the build, and it
+reaches the default branch only after the deployed files are verified, so that the default bootstrap never names an
+archive that is unavailable. The header pins the exact environment archive and URL.
 The environment pins the starter archive in turn. `provision.json` is informational; applications
 do not discover a replacement trust hash from that remote file or follow `latest` at startup.
 
 The static branch preserves every version. Republishing identical bytes is allowed; replacing a
 published version with different bytes fails. Increment `distribution.json` before publishing any
 changed environment, starter, public URL or provisioning configuration.
+
+## Pinning a new version
+
+`distribution.json` names the version under development; `DeveloperReleaseData.hpp` pins the last version that is
+published. Pull requests and branch pushes therefore require the header to match a fresh build only when both name
+the same version; a publication (a `developer-v*` tag or a dispatch with `publish=true`) always requires it. When the
+sources are ahead, `pin-check.mjs` requires the header to be exactly the one generated for its version and the deployed
+archive at its URL to have its integrity.
+
+1. Merge the changes with the header still on the previous version.
+2. On a release branch, run `build.mjs build-distribution --refresh-bootstrap` and commit the new header.
+3. Tag `developer-v<version>` on that commit; the workflow publishes the site.
+4. Verify the deployed files (below), then merge the release branch so the default bootstrap points to the new version.
 
 ## One-time Pages configuration
 

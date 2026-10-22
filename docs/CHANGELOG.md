@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Project manifest `webfront.project.json` (format 1: `name`, `version`, `dependencies`, `registry`, `scripts`,
+  `entries`, `providers`, `test`, `permissions`), strictly validated; `wf init`, `wf install [--update]` and
+  manifest-driven `wf preview`/`wf embed` in developer distribution 0.5.0 (not published yet; the pin in
+  `DeveloperReleaseData.hpp` stays on 0.4.1 until 0.5.0 is published and verified). The lock records the digest of
+  the manifest dependencies and reports a desynchronized state. `developer::Store::commitGroup` publishes
+  manifest and lock through a synced intent journal with crash recovery and a concurrent-install precondition.
+  New bridge callbacks `webfront.developer.state` and `webfront.developer.commitGroup`. Starters ship a manifest;
+  `wf install` now needs `wf init` first, which adopts the roots of an existing lock so a project locked before 0.5.0
+  keeps its locked graph. A committed publication that cannot be completed does not prevent opening the project:
+  it is reported (`developer::IncompletePublication`) and completed by the next command.
+
 ### Changed
 
 - **Breaking:** library headers moved to `include/webfront/`; include them as `<webfront/WebFront.hpp>`,

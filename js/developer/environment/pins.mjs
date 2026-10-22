@@ -3,7 +3,10 @@ import semver from 'semver';
 import {downloadPackage} from './registry.mjs';
 
 // The installed version satisfying a range, so that a later install never moves or replaces it silently.
+// A root requested by a dist-tag (a@beta) keeps the version the tag had when it was resolved.
 function lockedNode(previous, name, range) {
+    const root = previous?.roots?.[name];
+    if (root?.requested === range && previous.packages[root.id]) return previous.packages[root.id];
     if (!semver.validRange(range)) return null;
     const candidates = Object.values(previous?.packages ?? {}).filter(node => node.name === name && semver.satisfies(node.version, range));
     return candidates.sort((a, b) => semver.rcompare(a.version, b.version))[0] ?? null;

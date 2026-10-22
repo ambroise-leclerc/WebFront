@@ -1,15 +1,16 @@
 import {Terminal} from '../../../third_party/xterm/xterm.mjs';
 import {FitAddon} from '../../../third_party/xterm/addon-fit.mjs';
 import {LineEditor, tokenize} from '../components/terminal/terminal.mjs';
-import {resolvePackages, validateLock, downloadPackage} from './packages.mjs';
+import {validateLock} from './packages.mjs';
 import {readProject, publish} from './io.mjs';
 import {createStarter} from './starter.mjs';
+import {install, initProject} from './installer.mjs';
+import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot} from './project.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const lockPath = 'webfront-packages.lock.json';
-const packageRoot = '.webfront/developer/packages';
+export {lockPath, packageRoot};
 export async function readLock(bridge, optional = false) {
     try { return validateLock(JSON.parse(decoder.decode(await readProject(bridge, lockPath)))); }
     catch (error) {
@@ -19,35 +20,8 @@ export async function readLock(bridge, optional = false) {
     }
 }
 
-const splitSpec = spec => {
-    const at = spec.indexOf('@', spec.startsWith('@') ? 1 : 0);
-    return at < 0 ? [spec, 'latest'] : [spec.slice(0, at), spec.slice(at + 1)];
-};
-
-// The installed roots keep their exact versions unless a requested spec replaces them.
-function requestedRoots(previous, specs) {
-    const requested = new Map(Object.entries(previous.roots).map(([name, root]) => [name, previous.packages[root.id].version]));
-    for (const spec of specs) requested.set(...splitSpec(spec));
-    return [...requested].map(([name, version]) => `${name}@${version}`);
-}
-
 const textFile = text => new Map([['output', encoder.encode(text)]]);
-
-export async function install(bridge, specs, {registry, signal, progress = () => {}, fetchImpl = fetch}) {
-    if (!specs.length) throw new Error('Usage: wf install <package>[@version] ...');
-    const previous = await readLock(bridge, true);
-    const {lock, downloads} = await resolvePackages(requestedRoots(previous, specs), {
-        registry, signal, fetchImpl, previous,
-        download: async (...args) => { progress(`Resolving ${args[0]}@${args[1]}`); return downloadPackage(...args); },
-    });
-    for (const [id, files] of downloads) {
-        progress(`Storing ${id}`);
-        await publish(bridge, `${packageRoot}/${lock.packages[id].key}`, files, {signal});
-    }
-    // The lock file is the installation commit point. A failed install may leave unused cache files.
-    await publish(bridge, lockPath, textFile(JSON.stringify(lock, null, 2) + '\n'), {directory: false, signal});
-    return lock;
-}
+export {install};
 
 async function readPackages(bridge, lock, signal) {
     const packages = {};
@@ -117,37 +91,42 @@ async function create([starter, directory, ...extra], {bridge, config, signal}) 
     return createStarter(bridge, config, [starter, directory ?? 'ui'], {signal});
 }
 
-async function installCommand(specs, {bridge, config, signal, write = () => {}}) {
-    const lock = await install(bridge, specs, {registry: config.registry, signal, progress: text => write(text + '\r\n')});
-    return `Installed ${Object.keys(lock.packages).length} packages. Lock: ${lockPath}`;
+const init = (args, {bridge, signal}) => initProject(bridge, args, {signal});
+
+async function installCommand(args, {bridge, config, signal, write = () => {}}) {
+    const {lock, restored} = await install(bridge, args, {registry: config.registry, signal, progress: text => write(text + '\r\n')});
+    const count = Object.keys(lock.packages).length;
+    return restored || !args.length ? `Installed ${count} packages (${restored} restored). Lock: ${lockPath}` : `Installed ${count} packages. Lock: ${lockPath}`;
 }
 
-async function preview([entry], {bridge, signal, preview: frame}) {
-    if (!entry) throw new Error('Usage: wf preview <entry.tsx>');
+async function preview(args, {bridge, signal, preview: frame}) {
+    if (args.length > 1) throw new Error('Usage: wf preview [entry.tsx|name]');
+    const project = await loadProject(bridge);
+    const entry = resolveEntry(project.manifest, args[0], 'wf preview <entry.tsx>');
     const result = await compile(bridge, entry, signal);
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
     frame.hidden = false;
     // Replace transient builds without accumulating browser session history.
     frame.contentWindow.location.replace(`/webfront/developer/preview/index.html?build=${Date.now()}`);
-    return 'Preview ready.';
+    return syncNotice(project) + 'Preview ready.';
 }
 
-async function embed([entry, flag, output, ...extra], {bridge, signal}) {
-    if (!entry) throw new Error('Usage: wf embed <entry.tsx> --output <Provider.hpp>');
-    if (flag !== '--output' || extra.length || !output?.endsWith('.hpp')) throw new Error('wf embed requires --output <Provider.hpp>');
+async function embed(args, {bridge, signal}) {
+    const project = await loadProject(bridge);
+    const {entry, output, className} = embedTarget(project.manifest, args);
     const result = await compile(bridge, entry, signal);
-    const className = output.split('/').pop().slice(0, -4);
     await publish(bridge, output, textFile(generateProvider(result.files, className, result.notices)), {directory: false, signal});
-    return `Generated ${output}. Use webfront::fs::${className} and recompile the application.`;
+    return `${syncNotice(project)}Generated ${output}. Use webfront::fs::${className} and recompile the application.`;
 }
 
 async function list(_args, {bridge}) {
-    const lock = await readLock(bridge, true);
-    return Object.keys(lock.packages).sort().join('\n') || 'No installed packages.';
+    const project = await loadProject(bridge);
+    const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
+    return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf create <starter> [directory]\nwf install <package>[@version] ...\nwf list\nwf preview <entry.tsx>\nwf embed <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
-const commands = {create, install: installCommand, preview, embed, list, help};
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;

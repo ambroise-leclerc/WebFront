@@ -9,7 +9,8 @@ removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live
 (bridge, fallback, bootstrap loader and embedding modules) and `js/developer/` (environment, terminal
 components, build tools, vendoring tools); tests live in `test/{unit,web,fuzz,fixtures,cmake}`. The CTest
 case `RepositoryLayout` enforces the root. The generated-provider include changed, so the developer
-distribution is bumped to 0.4.1, published and archived as `developer-v0.4.1`.
+distribution is bumped to 0.4.1, published and archived as `developer-v0.4.1`. Version 0.5.0 (project manifest, #305) is
+built from the sources but not pinned: `DeveloperReleaseData.hpp` moves to it only after `developer-v0.5.0` is published and verified.
 
 ## CI test duration (#298, 2026-10-21)
 

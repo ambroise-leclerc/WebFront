@@ -51,14 +51,25 @@ jobs:
       - name: Install pinned maintenance dependencies
         run: npm ci --prefix js/developer/vendor --ignore-scripts
       - name: Build and verify the environment and starter packages
+        env:
+          PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
         run: |
           node js/developer/tools/build.mjs build-distribution
           node js/developer/tools/build.mjs build-distribution-repeat
           cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
           cmp build-distribution/pi-starter.tgz build-distribution-repeat/pi-starter.tgz
           cmp build-distribution/life-starter.tgz build-distribution-repeat/life-starter.tgz
-          cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
-          node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs
+          # The pin names the last published version. Sources at that version must rebuild it; sources ahead of it
+          # leave the header pinning the published archive, which is checked against the deployed file.
+          pinned=$(sed -n 's/.*version{"\([^"]*\)"}.*/\1/p' include/webfront/system/DeveloperReleaseData.hpp)
+          building=$(node -p "require('./js/developer/tools/distribution.json').version")
+          if [ "$pinned" = "$building" ] || [ "$PUBLISHING" = true ]; then
+            cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
+          else
+            echo "::notice::Sources build $building; DeveloperReleaseData.hpp still pins the published $pinned."
+            node js/developer/tools/pin-check.mjs
+          fi
+          node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs js/developer/tools/manifest-check.mjs
       - name: Check the dedicated release tag
         if: startsWith(github.ref, 'refs/tags/developer-v')
         env:
