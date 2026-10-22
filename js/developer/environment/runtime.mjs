@@ -5,6 +5,7 @@ import {validateLock} from './packages.mjs';
 import {readProject, publish} from './io.mjs';
 import {createStarter} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
+import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, lockPath, packageRoot} from './project.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 
@@ -93,10 +94,19 @@ async function create([starter, directory, ...extra], {bridge, config, signal}) 
 
 const init = (args, {bridge, signal}) => initProject(bridge, args, {signal});
 
+const registryOptions = (config, signal, write) =>
+    ({registry: config.registry, registryExplicit: config.registryExplicit === true, signal, progress: text => write(text + '\r\n')});
+
 async function installCommand(args, {bridge, config, signal, write = () => {}}) {
-    const {lock, restored} = await install(bridge, args, {registry: config.registry, signal, progress: text => write(text + '\r\n')});
+    const {lock, restored, registry} = await install(bridge, args, registryOptions(config, signal, write));
     const count = Object.keys(lock.packages).length;
-    return restored || !args.length ? `Installed ${count} packages (${restored} restored). Lock: ${lockPath}` : `Installed ${count} packages. Lock: ${lockPath}`;
+    const summary = restored || !args.length ? `Installed ${count} packages (${restored} restored).` : `Installed ${count} packages.`;
+    return `${summary} ${describeRegistry(registry)}. Lock: ${lockPath}`;
+}
+
+async function restoreCommand(args, {bridge, config, signal, write = () => {}}) {
+    const result = await restore(bridge, args, registryOptions(config, signal, write));
+    return result.registry ? `${result.text}\r\n${describeRegistry(result.registry)}` : result.text;
 }
 
 async function preview(args, {bridge, signal, preview: frame}) {
@@ -137,8 +147,8 @@ async function list(_args, {bridge}) {
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [directory]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
-const commands = {init, create, install: installCommand, preview, embed, list, help};
+const help = () => 'wf init [directory]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, restore: restoreCommand, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;

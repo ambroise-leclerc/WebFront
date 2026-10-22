@@ -187,7 +187,42 @@ the fingerprint of both files as read when the command began: if another browser
 them meanwhile, it is refused with "The project changed since it was read; run the command again" and
 nothing is lost. Recovery and group publications also hold an advisory lock on `.webfront/developer/journal/.lock`, so
 several processes sharing a project (or several stores of one process) are serialized rather than abandoning one
-another's publication; other project files stay unprotected against concurrent local modification. `wf restore` (#306) will fill the cache from a consistent lock without ever writing them.
+another's publication; other project files stay unprotected against concurrent local modification. `wf restore` fills the cache from the lock without ever writing them.
+
+## Restoring the cache and choosing the registry (`wf restore`)
+
+The cache under `.webfront/developer/packages/` is not committed. On a new machine, after a clone, or
+when it is damaged, `wf restore` rebuilds it from the lock alone:
+
+- each locked package is downloaded at its exact locked version (no range is resolved again) and checked
+  against the lock's SHA-512 integrity; packages already valid in the cache are not downloaded again, so the
+  command is idempotent;
+- every package is published on its own: Ctrl+C or an error (changed archive, package absent from the
+  registry) keeps the packages already restored and never writes the manifest or the lock; run the command again;
+- `wf restore --offline` contacts no registry at all: it checks the cache against the lock and fails with the
+  list of missing or corrupted packages, without downloading anything.
+
+Each cached package directory `<key>/` is followed by a record `<key>.json` naming the archive's integrity and the
+SHA-256 of every file; the record is written last, so an interrupted copy is *missing*, and a file that differs
+from its record is *corrupted*. `wf install` with a consistent lock performs the same restoration.
+
+The registry used by `wf install` and `wf restore` is, in order of precedence:
+
+1. the application's `DeveloperBootstrapOptions::registry` (the distributor's trusted channel; a test driver
+   uses it to impose its local registry),
+2. the manifest's `registry`,
+3. `https://registry.npmjs.org/`.
+
+Both commands print the registry in use and where it comes from, for example
+`Registry: /mirror/ (application option)`. A registry must use HTTPS or be a path on the application's own
+origin, like the environment archive; tarballs must use HTTPS or the registry's origin. The lock's `registry`
+field records where the graph was resolved and is not used to restore it, so a mirror can serve a lock resolved
+from the public registry.
+
+Offline provisioning, extending ADR-013's explicit local provisioning: serve a directory of packuments (`<name>`)
+and tarballs from the application (`fs::NativeDebugFS` or an application provider) and pass its path as
+`registry`, then run `wf restore`; or copy `.webfront/developer/packages/` from another machine and check it with
+`wf restore --offline`. The environment archive is provisioned the same way (see below).
 
 ## Dependencies, storage and limitations
 
@@ -203,8 +238,9 @@ another's publication; other project files stay unprotected against concurrent l
 - `webfront-packages.lock.json` records exact package versions, dependency edges, source integrities,
   requested roots and the digest of the manifest dependencies it resolved. Commit it and the source TSX/CSS; the generated provider can also be committed.
   Preview/embed consume the locked local files without resolving versions again.
-- Unpacked packages are cached by name, version and integrity under `.webfront/developer/packages/`.
-  A failed install can leave unused cached packages, but the lock file remains unchanged. The tools
+- Unpacked packages are cached by name, version and integrity under `.webfront/developer/packages/`,
+  each with a record of its files' digests. A failed install can leave unused cached packages, but the lock
+  file remains unchanged. A lock naming more than 512 packages is refused. The tools
   installed by the existing `ToolManager` keep their separate store and `webfront-tools.lock.json`.
 - Published environment/preview resources are served under `/webfront/developer/`. The protected
   `/WebFront.js` remains the library's version. Sources, staging and cached archives are not HTTP
@@ -216,7 +252,7 @@ another's publication; other project files stay unprotected against concurrent l
   abandoned, and staging left by a crashed process is removed after an hour. Browser builds time out after 120 seconds.
 - Installing another package keeps every locked version that still satisfies a requested range and fails if its
   archive no longer matches the recorded integrity; only new ranges are resolved. Review the resulting lock
-  changes. Restoring packages from a lockfile on a fresh machine is not yet a separate command.
+  changes. `wf restore` rebuilds the cache of a lock on a fresh machine (see above).
 
 ## Environment distribution and offline tests (maintainers)
 
@@ -252,8 +288,14 @@ The preview command later replaces that directory, but the verified archive is a
 independently for subsequent launches. These are maintainer provisioning commands; the application's
 terminal still installs and builds browser dependencies without a local Node/npm installation.
 
-Fixture provisioning packs the pinned React, React DOM and scheduler sources from the maintainer's
-npm installation into a fake local registry. No CTest case downloads from the public registry.
+Fixture provisioning writes the tests' local npm registry (`js/developer/tools/registry-fixture.mjs`):
+packuments and tarballs packed reproducibly from the pinned `jasmine-core`, React, React DOM and scheduler of the
+maintainer's npm installation, plus synthetic packages for the edge cases (a newer version under a locked range,
+an archive that no longer matches its integrity). The test application serves it from its own origin and imposes
+it through the `registry` option. The CEF-off `DeveloperJavaScript` case generates the synthetic part in memory to
+test `wf restore`. No CTest case downloads from the public registry. Generating the fixture and the packages'
+logic use only browser APIs; reading `node_modules` and writing files (`registry-fixture-node.mjs`) are the
+Node-only part, so that `wf` can take the fixture over (#318).
 
 ```sh
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release \

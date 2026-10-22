@@ -6,6 +6,7 @@ import {validateManifest, parseManifest, serializeManifest, manifestName, depend
 import {install, initProject, loadProject, syncNotice, resolveEntry, lockPath, manifestPath} from '../environment/packages.bundle.mjs';
 import {compress} from '../environment/embed.mjs';
 import {tar} from './archive.mjs';
+import {memoryBridge} from './memory-bridge.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -70,46 +71,6 @@ test('entries are named in the manifest or given as paths', () => {
     assert.equal(resolveEntry(manifest, 'free/path.tsx', 'wf preview'), 'free/path.tsx');
     assert.throws(() => resolveEntry(validateManifest(minimal), undefined, 'wf preview'), /entries.main/);
 });
-
-// An in-memory project behind the webfront.developer.* callbacks, with the store's group publication and precondition.
-function memoryBridge(storage = new Map()) {
-    const transactions = new Map();
-    let next = 0;
-    const stateOf = paths => paths.map(path => storage.has(path) ? createHash('sha256').update(storage.get(path)).digest('hex') : '-').join(',');
-    const operations = {
-        read: (path, offset) => {
-            if (!storage.has(path)) throw new Error('Cannot read project file: ' + path);
-            return storage.get(path).subarray(offset, offset + 256 * 1024);
-        },
-        begin: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: true}); return String(next); },
-        beginNew: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: false}); return String(next); },
-        write: (id, path, offset, bytes) => {
-            const files = transactions.get(id).files;
-            const previous = files.get(path) ?? new Uint8Array();
-            assert.equal(previous.length, offset);
-            files.set(path, new Uint8Array([...previous, ...bytes]));
-        },
-        commit: id => {
-            const {destination, directory, files, replace} = transactions.get(id);
-            if (!replace && (storage.has(destination) || [...storage.keys()].some(key => key.startsWith(destination + '/'))))
-                throw new Error('Starter destination already exists');
-            for (const [path, bytes] of files) storage.set(directory ? `${destination}/${path}` : destination, bytes);
-            transactions.delete(id);
-        },
-        abort: id => { transactions.delete(id); },
-        state: paths => stateOf(paths.split('\n')),
-        commitGroup: (ids, paths, expected) => {
-            if (stateOf(paths.split('\n')) !== expected) throw new Error('The project changed since it was read; run the command again');
-            for (const id of ids.split('\n')) {
-                const {destination, files} = transactions.get(id);
-                storage.set(destination, files.get('output'));
-                transactions.delete(id);
-            }
-        },
-    };
-    const bridge = {cppFunction: name => async (...args) => operations[name.replace('webfront.developer.', '')](...args)};
-    return {bridge, storage, pending: () => transactions.size};
-}
 
 const tagged = (packages, tags) => async url => {
     const response = await packages(url);

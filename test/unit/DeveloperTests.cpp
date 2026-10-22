@@ -338,6 +338,30 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
             REQUIRE_NOTHROW(app.bootstrap("developer", trusted));
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
         }
+        THEN("a registry that is neither HTTPS nor same-origin is refused") {
+            for (const auto* registry : {"http://registry.test/", "//registry.test/", "registry/", ""}) {
+                auto options     = trusted;
+                options.registry = registry;
+                REQUIRE_THROWS_AS(app.bootstrap("developer", options), std::invalid_argument);
+            }
+        }
+    }
+}
+
+SCENARIO("The environment learns whether the application chose the npm registry") {
+    const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
+    GIVEN("no registry option") {
+        THEN("the default registry is passed and marked as not chosen, so the manifest's applies") {
+            REQUIRE(developer::bootstrapConfig(trusted)
+                    == R"({"environment":"https://example.test/env.tgz","integrity":"sha512-abc","registry":"https://registry.npmjs.org/","registryExplicit":false})");
+        }
+    }
+    GIVEN("a same-origin mirror chosen by the application") {
+        auto options     = trusted;
+        options.registry = "/mirror/";
+        THEN("it is passed as the application's choice") {
+            REQUIRE_THAT(developer::bootstrapConfig(options), Catch::Matchers::EndsWith(R"("registry":"/mirror/","registryExplicit":true})"));
+        }
     }
 }
 

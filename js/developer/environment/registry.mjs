@@ -39,8 +39,11 @@ async function fetchTarball(name, manifest, base, {fetchImpl, signal}) {
     return {bytes, integrity: await verifyIntegrity(bytes, manifest.dist.integrity)};
 }
 
-function registryBase(registry) {
+// Like the environment archive: HTTPS, or the application's own origin for a local mirror.
+export function registryBase(registry) {
     const base = new URL(registry, globalThis.location?.href);
+    if (base.protocol !== 'https:' && base.origin !== globalThis.location?.origin)
+        throw new Error(`The npm registry must use HTTPS or the application origin: ${registry}`);
     if (!base.pathname.endsWith('/')) base.pathname += '/';
     return base;
 }

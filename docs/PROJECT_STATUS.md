@@ -126,7 +126,8 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   Pages returned HTTP 200, CORS `*` and byte-identical pinned environment data on 2026-10-20.
 - Browser packages only: no installation scripts, native modules, Node API shims, optional
   dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
-  dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.
+  dependencies. Automatic rebuild/watch is future work. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
+  the cache from the lock, from the application's registry option, else the manifest's, else npmjs.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
 
 ## Embedded dependency refresh (#284, 2026-10-19)

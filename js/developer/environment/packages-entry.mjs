@@ -3,3 +3,5 @@ export * from './packages.mjs';
 export * from './manifest.mjs';
 export * from './project.mjs';
 export * from './installer.mjs';
+export * from './restore.mjs';
+export * from './cache.mjs';
