@@ -13,6 +13,7 @@
   until #319). `assets/` and `tools/` become `js/core` and `js/developer`; `webtest/` becomes `test/web`,
   `fuzz/` becomes `test/fuzz`, unit tests move to `test/unit`; `CHANGELOG.md`, `Doxyfile.in` move to `docs/`,
   `CONTRIBUTING.md` and `codecov.yml` to `.github/`, `Dockerfile` to `.devcontainer/`. Moves keep Git history.
+- Remove the CodeScene configuration and the Codecov upload (`.github/codecov.yml`, `CODECOV_TOKEN`); the Linux job still prints an lcov summary.
 - Developer distribution 0.4.1 (pending `developer-v0.4.1` publication): generated providers include
   `<webfront/system/FileSystem.hpp>`. Published 0.4.0 remains immutable.
 

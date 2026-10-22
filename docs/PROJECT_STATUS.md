@@ -50,7 +50,7 @@ published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimenta
 - The README starts with Hello World and a linked Life thumbnail, then walks through the native
   bootstrap, dependency installation, preview and offline embedding. No library feature is added.
 - Per-change CI combines unit tests and native browser coverage into three desktop jobs, with
-  npm, CPM and compiler caches. The Linux job uploads GCC coverage on every PR. Sanitizers, fuzzing,
+  npm, CPM and compiler caches. The Linux job prints GCC line coverage on every PR (no external upload). Sanitizers, fuzzing,
   both CEF compiler variants and optional mddlog qualification run weekly or manually. Superseded runs are cancelled.
 - Developer distribution 0.4.0 is published for the revised Life text (`developer-v0.4.0`).
 - The dated entries below record earlier implementations and their original target names.

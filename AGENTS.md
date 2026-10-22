@@ -22,7 +22,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment, terminal/`wf` components, build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
 - `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
 - `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
-- `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`, `.github/codecov.yml`.
+- `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
 - `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
@@ -30,7 +30,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
 - `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
 
-The historical `webfront/` prototype and the former top-level `test/web/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
+The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
 
 ## Build and test commands
 

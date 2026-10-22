@@ -213,7 +213,7 @@ Tests and the `webfront-embedded-assets` regeneration target require Node.js, in
 CTest runs up to four tasks at a time; browser ports remain locked and embedded builds run serially.
 See [test timings and parallelism](docs/TEST_PERFORMANCE.md) for measurements and constraints.
 
-CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also uploads GCC coverage on each PR. Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly and on demand. Manual dispatch with `repeat_desktop_tests=true` also repeats each desktop CTest case three times for stability checks. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
+CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also collects and prints GCC line coverage (no external upload). Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly and on demand. Manual dispatch with `repeat_desktop_tests=true` also repeats each desktop CTest case three times for stability checks. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
 
 ## Contracts and limitations
 
