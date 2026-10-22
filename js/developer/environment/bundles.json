@@ -5,7 +5,7 @@
   "js/developer/environment/restore.mjs": "cdd22eebd55d68bd705685cd5ee3059e228a35053eaad116ab99c4c05b908098",
   "js/developer/environment/cache.mjs": "6fd0e3b760dfc1070a28e2e2eb3c86621c970c775045e7a9ae665da4f6845922",
   "js/developer/environment/scripts.mjs": "83ae28e822db986d9b3ae547f005f1a7c94868c36f232d68ddeb6126fb0a5021",
-  "js/developer/environment/script-worker.mjs": "febc5835369e61e606e6f49c1307f23b1705a38571b0fa9af07622f7794d44d7",
+  "js/developer/environment/script-worker.mjs": "b50ddfddf696720ab0b1958c0bd327ac3a9004f37cc0aa439a9ad536fd11ac92",
   "js/developer/environment/permissions.mjs": "4efa523d3c90b17a2b15c116da008d439f4f8a6fc181b8a4fd59d28359965cd8",
   "js/developer/environment/packages-entry.mjs": "e0b4acd4330b8b51eb0e695384c8df2b103a4be4f598ac83277838022f747e30",
   "js/developer/environment/bootstrap.mjs": "534af4b3d07891338c3390e1d5e06c2fb6dd8df11ca6547735565b17f1b9cd70",

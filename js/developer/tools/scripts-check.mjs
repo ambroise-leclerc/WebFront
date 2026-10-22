@@ -365,3 +365,13 @@ test('context.fetch rejects outside its permissions, accepts a Request and does 
         globalThis.fetch = realFetch;
     }
 });
+
+test("an error keeps its message when the engine's stack holds only the frames, as in WebKit", async () => {
+    const {messages} = await scriptWorker(`export default async () => {
+        const error = new Error('Permission denied: writing ui/main.tsx');
+        error.stack = 'write@blob:script:1:1';
+        throw error;
+    };`);
+    const failure = messages.find(message => message.type === 'error');
+    assert.match(failure.error, /^Error: Permission denied: writing ui\/main.tsx\nwrite@blob:script:1:1$/);
+});

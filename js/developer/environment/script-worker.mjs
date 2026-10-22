@@ -23,7 +23,8 @@ function call(operation, ...args) {
 
 function format(value) {
     if (typeof value === 'string') return value;
-    if (value instanceof Error) return value.stack ?? String(value);
+    // Chromium's stack starts with "Name: message"; WebKit's and Firefox's hold only the frames.
+    if (value instanceof Error) return value.stack?.includes(value.message) ? value.stack : [String(value), value.stack].filter(Boolean).join('\n');
     try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
 }
 
