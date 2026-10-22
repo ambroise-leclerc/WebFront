@@ -1,12 +1,10 @@
 // wf restore: rebuilds the package cache from the lock alone, from one registry or, with --offline, from nothing.
 import {downloadPackage, registryBase} from './registry.mjs';
-import {cacheState, storePackage} from './cache.mjs';
+import {inspectCache, storePackage} from './cache.mjs';
 import {loadProject, syncNotice, lockPath, noManifest} from './project.mjs';
 import {manifestPath} from './manifest.mjs';
 
 export const defaultRegistry = 'https://registry.npmjs.org/';
-const unpackedLimit = 256 * 1024 * 1024;
-
 /**
  * The registry the commands use, and where it comes from: the application's explicit option (the distributor's
  * channel, which also lets a test impose its local registry), then the manifest's "registry", then the default.
@@ -26,32 +24,43 @@ export function usableRegistry(options, manifest) {
 
 export const describeRegistry = ({url, source}) => `Registry: ${url} (${source})`;
 
+export const unpackedLimit = 256 * 1024 * 1024;
 const unpackedSize = files => [...files.values()].reduce((total, bytes) => total + bytes.length, 0);
+const tooLarge = limit => new Error(`The locked packages exceed ${limit / (1024 * 1024)} MiB unpacked`);
 
-async function restorePackage(bridge, [id, node], {registry, fetchImpl, signal}) {
-    const pkg = await downloadPackage(node.name, node.version, {registry, fetchImpl, signal});
-    if (pkg.integrity !== node.integrity) throw new Error(`${id} no longer matches the integrity recorded in the lock`);
-    await storePackage(bridge, node, pkg.files, {signal});
-    return unpackedSize(pkg.files);
+// Every package's cache state; the valid ones count towards the bound of the graph.
+async function inspectAll(bridge, lock, {signal, limit}) {
+    const states = [];
+    let size = 0;
+    for (const [id, node] of Object.entries(lock.packages)) {
+        signal?.throwIfAborted();
+        const inspected = await inspectCache(bridge, node, {signal, limit: limit - size});
+        size += inspected.size;
+        states.push({id, node, state: inspected.state});
+    }
+    return {states, size};
 }
 
 /**
  * Brings the cache to the exact locked graph: each package is checked against its record and, when missing or
  * corrupted, downloaded at its locked version (no range is resolved again) and checked against the lock's SHA-512.
- * Each package is published on its own, so an interruption or an error keeps every package already restored, and
- * the lock is never written. Offline, nothing is downloaded: the packages that would be are listed in an error.
+ * The unpacked graph, cached packages included, is bounded by `limit`, checked before each publication, so a
+ * restore that is resumed keeps the bound. Each package is published on its own: an interruption or an error keeps
+ * every package already restored, and the lock is never written. Offline, nothing is downloaded: the packages that
+ * would be are listed in an error.
  */
-export async function restorePackages(bridge, lock, {registry, offline = false, signal, progress = () => {}, fetchImpl = fetch}) {
-    const result = {verified: 0, restored: 0, problems: []};
-    let unpacked = 0;
-    for (const entry of Object.entries(lock.packages)) {
-        signal?.throwIfAborted();
-        const state = await cacheState(bridge, entry[1], {signal});
-        if (state === 'valid') { result.verified++; continue; }
-        if (offline) { result.problems.push(`${entry[0]} (${state})`); continue; }
-        progress(`Restoring ${entry[0]}${state === 'corrupted' ? ' (corrupted in the cache)' : ''}`);
-        unpacked += await restorePackage(bridge, entry, {registry, fetchImpl, signal});
-        if (unpacked > unpackedLimit) throw new Error('Restored packages exceed 256 MiB');
+export async function restorePackages(bridge, lock, {registry, offline = false, signal, progress = () => {}, fetchImpl = fetch, limit = unpackedLimit}) {
+    const {states, size: cached} = await inspectAll(bridge, lock, {signal, limit});
+    let size = cached;
+    const result = {verified: states.filter(({state}) => state === 'valid').length, restored: 0, problems: []};
+    for (const {id, node, state} of states.filter(({state}) => state !== 'valid')) {
+        if (offline) { result.problems.push(`${id} (${state})`); continue; }
+        progress(`Restoring ${id}${state === 'corrupted' ? ' (corrupted in the cache)' : ''}`);
+        const pkg = await downloadPackage(node.name, node.version, {registry, fetchImpl, signal});
+        if (pkg.integrity !== node.integrity) throw new Error(`${id} no longer matches the integrity recorded in the lock`);
+        size += unpackedSize(pkg.files);
+        if (size > limit) throw tooLarge(limit);
+        await storePackage(bridge, node, pkg.files, {signal});
         result.restored++;
     }
     if (result.problems.length)

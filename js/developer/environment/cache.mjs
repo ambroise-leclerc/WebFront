@@ -1,6 +1,6 @@
 // The package cache: one directory per locked archive, then a record of its files' digests. The record is written
 // last, so a package without one (an interrupted store) is missing, and files differing from it are corrupted.
-import {publish, readProject} from './io.mjs';
+import {call, blockSize, publish, readProject} from './io.mjs';
 import {isPlainObject} from './entry.mjs';
 import {packageRoot} from './project.mjs';
 
@@ -32,22 +32,42 @@ async function readRecord(bridge, node) {
 
 const sameFiles = (record, node) => Object.keys(record.files).sort().join('\n') === [...node.files].sort().join('\n');
 
-async function fileMatches(bridge, node, path, digest) {
-    try { return await sha256(await readProject(bridge, `${packageDirectory(node)}/${path}`)) === digest; }
-    catch (error) {
-        if (unreadable(error)) return false;
-        throw error;
+// A cached file, or null when it is missing or larger than `limit`: reading stops as soon as the limit is passed,
+// so an oversized file is a corruption to repair, not a read error.
+async function readCached(bridge, path, limit) {
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+        let chunk;
+        try { chunk = await call(bridge, 'read', path, size); }
+        catch (error) {
+            if (unreadable(error)) return null;
+            throw error;
+        }
+        size += chunk.length;
+        if (size > limit) return null;
+        chunks.push(chunk);
+        if (chunk.length < blockSize) return new Uint8Array(await new Blob(chunks).arrayBuffer());
     }
 }
 
-/** 'valid', 'missing' or 'corrupted': the cached files of a locked package, checked against its record. */
-export async function cacheState(bridge, node, {signal} = {}) {
+/**
+ * The cached files of a locked package, checked against its record: {state: 'valid' | 'missing' | 'corrupted', size}.
+ * `size` is the unpacked size of a valid package; a package larger than `limit` bytes is corrupted.
+ */
+export async function inspectCache(bridge, node, {signal, limit = Infinity} = {}) {
     const record = await readRecord(bridge, node);
-    if (!record) return 'missing';
-    if (record.integrity !== node.integrity || !isPlainObject(record.files) || !sameFiles(record, node)) return 'corrupted';
+    if (!record) return {state: 'missing', size: 0};
+    if (record.integrity !== node.integrity || !isPlainObject(record.files) || !sameFiles(record, node)) return {state: 'corrupted', size: 0};
+    let size = 0;
     for (const path of node.files) {
         signal?.throwIfAborted();
-        if (!await fileMatches(bridge, node, path, record.files[path])) return 'corrupted';
+        const bytes = await readCached(bridge, `${packageDirectory(node)}/${path}`, limit - size);
+        if (!bytes || await sha256(bytes) !== record.files[path]) return {state: 'corrupted', size: 0};
+        size += bytes.length;
     }
-    return 'valid';
+    return {state: 'valid', size};
 }
+
+/** 'valid', 'missing' or 'corrupted': see inspectCache(). */
+export const cacheState = async (bridge, node, options) => (await inspectCache(bridge, node, options)).state;

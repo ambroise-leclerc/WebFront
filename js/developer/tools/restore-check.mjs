@@ -2,7 +2,7 @@
 // node:assert, they use only browser APIs, so that they can move to wf test.
 import {test, before} from 'node:test';
 import assert from 'node:assert/strict';
-import {install, initProject, restore, effectiveRegistry, cacheState, validateLock, lockPath, manifestPath, packageRoot} from '../environment/packages.bundle.mjs';
+import {install, initProject, restore, restorePackages, effectiveRegistry, cacheState, validateLock, lockPath, manifestPath, packageRoot} from '../environment/packages.bundle.mjs';
 import {syntheticPackages, registryFiles} from './registry-fixture.mjs';
 import {memoryBridge} from './memory-bridge.mjs';
 
@@ -149,6 +149,43 @@ test('an interrupted restore keeps the packages already restored and resumes wit
     const resumed = await restore(bridge, [], explicit(source));
     assert.equal(resumed.restored, 1);
     assert.equal(resumed.verified, 1);
+});
+
+// Unpacked sizes of the cached packages of a project, from the files the lock lists.
+const sizeOf = (storage, node) => node.files.reduce((total, path) => total + storage.get(`${packageRoot}/${node.key}/${path}`).length, 0);
+
+test('the bound of the unpacked graph counts the cached packages and is checked before publishing', async () => {
+    const {bridge, storage} = await lockedProject();
+    const lock = json(storage, lockPath);
+    const [app, lib] = ['webfront-fixture-app@1.0.0', 'webfront-fixture-lib@1.0.0'].map(id => lock.packages[id]);
+    const limit = sizeOf(storage, app) + sizeOf(storage, lib) - 1;
+    cacheKeys(storage).filter(key => key.includes('fixture-lib')).forEach(key => storage.delete(key));
+    const before = snapshot(storage);
+    const source = served(registries.local);
+    for (let attempt = 0; attempt < 2; attempt++) {
+        await assert.rejects(restorePackages(bridge, lock, {...explicit(source), limit}), /exceed .* MiB unpacked/);
+        assert.deepEqual(storage, before, 'nothing is published past the bound, and a second attempt keeps it');
+    }
+    const restored = await restorePackages(bridge, lock, {...explicit(source), limit: limit + 1});
+    assert.equal(restored.restored, 1);
+});
+
+test('a cached file larger than the bound is a corruption, listed offline and repaired online', async () => {
+    const {bridge, storage} = await lockedProject();
+    const lock = json(storage, lockPath);
+    const lib = lock.packages['webfront-fixture-lib@1.0.0'];
+    const limit = 64 * 1024;
+    storage.set(`${packageRoot}/${lib.key}/index.js`, new Uint8Array(3 * 256 * 1024));
+    const reads = [];
+    const counting = {cppFunction: name => async (...args) => {
+        if (name.endsWith('.read')) reads.push(args[0]);
+        return bridge.cppFunction(name)(...args);
+    }};
+    await assert.rejects(restorePackages(counting, lock, {offline: true, limit}), /webfront-fixture-lib@1\.0\.0 \(corrupted\)/);
+    assert.equal(reads.filter(path => path.endsWith(`${lib.key}/index.js`)).length, 1, 'reading stops at the bound');
+    const restored = await restorePackages(bridge, lock, {...explicit(served(registries.local)), limit});
+    assert.equal(restored.restored, 1);
+    assert.equal(await cacheState(bridge, lib), 'valid');
 });
 
 test('an invalid or absent lock is refused before any request or write', async () => {

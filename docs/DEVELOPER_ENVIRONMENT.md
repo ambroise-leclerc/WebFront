@@ -217,7 +217,9 @@ when it is damaged, `wf restore` rebuilds it from the lock alone:
 
 Each cached package directory `<key>/` is followed by a record `<key>.json` naming the archive's integrity and the
 SHA-256 of every file; the record is written last, so an interrupted copy is *missing*, and a file that differs
-from its record is *corrupted*. `wf install` with a consistent lock performs the same restoration.
+from its record, or exceeds the bound below, is *corrupted*. The 256 MiB bound applies to the whole unpacked graph,
+packages already in the cache included, and is checked before each package is published, so resuming a restore
+cannot exceed it. `wf install` with a consistent lock performs the same restoration.
 
 The registry used by `wf install` and `wf restore` is, in order of precedence:
 
