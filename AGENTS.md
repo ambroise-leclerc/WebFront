@@ -22,15 +22,15 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment, terminal/`wf` components, build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
 - `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
 - `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
-- `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `CONTRIBUTING.md`, `codecov.yml`.
-- `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `CHANGELOG.md`, `Doxyfile.in`.
+- `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`, `.github/codecov.yml`.
+- `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
 - `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
 - `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
 
-The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
+The historical `webfront/` prototype and the former top-level `test/web/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
 
 ## Build and test commands
 
@@ -48,7 +48,7 @@ cmake --build . --parallel 2
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure --parallel 4
 
 # Run one Catch2 scenario directly
 ./build/test/unit/tests "Scenario: JsFunction"
@@ -57,11 +57,15 @@ ctest --test-dir build --output-on-failure
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
 cmake --build build-cef --target webtest --parallel
-ctest --test-dir build-cef -L web-integration --output-on-failure
+ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
 
 ```
 
 Important CMake options:
+
+Tests and the `webfront-embedded-assets` regeneration target require Node.js for all
+assets, including uncompressed ones. Normal C++ builds consume versioned headers
+and do not require Node.js.
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
@@ -99,7 +103,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
 
-Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. These PRs must also dispatch `BuildAndTest.yml` on the PR head branch before merging (`gh workflow run BuildAndTest.yml --ref <pr-branch>`), then wait for both GCC and Clang CEF jobs to pass. Manual dispatch runs the extended CEF/sanitizer checks without repeating the desktop matrix. It is the required per-PR CEF validation for these changes; the weekly run is a backstop, not a substitute. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
+Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. These PRs must also dispatch `BuildAndTest.yml` on the PR head branch before merging (`gh workflow run BuildAndTest.yml --ref <pr-branch>`), then wait for both GCC and Clang CEF jobs to pass. Manual dispatch runs the extended CEF/sanitizer checks without repeating the desktop matrix by default. To also repeat every desktop CTest case three times for stability validation, dispatch with `-f repeat_desktop_tests=true`. It is the required per-PR CEF validation for these changes; the weekly run is a backstop, not a substitute. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
 
 ## Git and workspace safety
 

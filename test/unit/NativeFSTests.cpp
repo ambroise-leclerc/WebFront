@@ -1,4 +1,5 @@
 #include <sstream>
+#include "TemporaryDirectory.hpp"
 #include <webfront/system/NativeFS.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -20,14 +21,7 @@ using DebugFS = fs::NativeDebugFS;
 // Helper function to create a temporary test directory structure
 class TemporaryTestEnvironment {
 public:
-    TemporaryTestEnvironment() {
-        // Create a unique test directory
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_int_distribution<> distrib(1000, 9999);
-        string uniqueSuffix = to_string(distrib(gen));
-        testDir = filesystem::temp_directory_path() / ("nativefs_test_" + uniqueSuffix);
-        filesystem::create_directories(testDir);
+    TemporaryTestEnvironment() : testDir(root.path()) {
         
         // Create subdirectory
         subDir = testDir / "subdir";
@@ -81,6 +75,7 @@ public:
     }
     
 private:
+    webfront::test::TemporaryDirectory root;
     filesystem::path testDir;
     filesystem::path subDir;
     map<string, vector<uint8_t>> binaryData;

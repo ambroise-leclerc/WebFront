@@ -63,8 +63,11 @@ if(WEBFRONT_DEVELOPER_FIXTURES
     webfront_setup_frontends_for_target(developer_embedded)
     add_test(NAME DeveloperEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
         --config $<CONFIG> --target developer_embedded --parallel 2)
+    # A nested build can regenerate CMake or relink shared outputs. Exclude every
+    # running test in this tree, not only the other nested build (Windows locks executables).
     set_tests_properties(DeveloperEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
-        FIXTURES_SETUP DeveloperEmbedded LABELS "web-integration" TIMEOUT 180 RUN_SERIAL TRUE)
+        FIXTURES_SETUP DeveloperEmbedded LABELS "web-integration" TIMEOUT 180
+        RUN_SERIAL TRUE PROCESSORS 2)
     set(_embedded_command "$<TARGET_FILE:developer_embedded>")
     if(_developer_xvfb)
         set(_embedded_command "${_developer_xvfb}" -a ${_embedded_command})
@@ -79,8 +82,10 @@ if(WEBFRONT_DEVELOPER_FIXTURES
     webfront_setup_frontends_for_target(life_embedded)
     add_test(NAME LifeEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
         --config $<CONFIG> --target life_embedded --parallel 2)
+    # Keep the same whole-tree exclusion as DeveloperEmbeddedBuild.
     set_tests_properties(LifeEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
-        FIXTURES_SETUP LifeEmbedded LABELS "web-integration" TIMEOUT 180 RUN_SERIAL TRUE)
+        FIXTURES_SETUP LifeEmbedded LABELS "web-integration" TIMEOUT 180
+        RUN_SERIAL TRUE PROCESSORS 2)
     set(_life_command "$<TARGET_FILE:life_embedded>")
     if(_developer_xvfb)
         set(_life_command "${_developer_xvfb}" -a ${_life_command})

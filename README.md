@@ -205,12 +205,15 @@ As a subproject, examples and tests are off by default and compiler settings do 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
 cmake --build build --parallel 2
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure --parallel 4
 ```
 
-Tests additionally require Node.js for offline JavaScript checks. Browser tests require an enabled engine; Linux CEF tests use Xvfb. See [AGENTS.md](AGENTS.md) for contributor commands and [developer environment testing](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
+Tests and the `webfront-embedded-assets` regeneration target require Node.js, including assets without gzip. Normal C++ builds use versioned headers and do not require Node.js. Browser tests require an enabled engine; Linux CEF tests use Xvfb. See [AGENTS.md](AGENTS.md) for contributor commands and [developer environment testing](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
-CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also uploads GCC coverage on each PR. Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly and on demand. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
+CTest runs up to four tasks at a time; browser ports remain locked and embedded builds run serially.
+See [test timings and parallelism](docs/TEST_PERFORMANCE.md) for measurements and constraints.
+
+CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also uploads GCC coverage on each PR. Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly and on demand. Manual dispatch with `repeat_desktop_tests=true` also repeats each desktop CTest case three times for stability checks. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
 
 ## Contracts and limitations
 

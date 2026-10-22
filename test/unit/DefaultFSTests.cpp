@@ -1,3 +1,4 @@
+#include "TemporaryDirectory.hpp"
 #include <webfront/system/DefaultFS.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -5,7 +6,6 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
-#include <random>
 #include <string>
 
 using namespace std;
@@ -13,30 +13,18 @@ using namespace webfront;
 
 namespace {
 
-// Minimal temp-directory fixture, following the convention used in test/unit/NativeFSTests.cpp.
+// Each fixture atomically claims its own temporary directory across CTest processes.
 class TemporaryRoot {
 public:
-    TemporaryRoot() {
-        random_device rd;
-        mt19937 gen(rd());
-        uniform_int_distribution<> distrib(1000, 9999);
-        dir = filesystem::temp_directory_path() / ("defaultfs_test_" + to_string(distrib(gen)));
-        filesystem::create_directories(dir);
-    }
-    ~TemporaryRoot() {
-        error_code ec;
-        filesystem::remove_all(dir, ec);
-    }
-
     void write(const string& relativePath, const string& content) const {
-        ofstream file(dir / relativePath, ios::binary);
+        ofstream file(root.path() / relativePath, ios::binary);
         file << content;
     }
 
-    filesystem::path path() const { return dir; }
+    filesystem::path path() const { return root.path(); }
 
 private:
-    filesystem::path dir;
+    webfront::test::TemporaryDirectory root;
 };
 
 string readAll(fs::File& file) {

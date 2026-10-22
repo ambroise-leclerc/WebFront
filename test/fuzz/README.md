@@ -14,11 +14,11 @@ The binary corpus files use the existing wire formats. Seeds derive from
 Empty strings, integer overflow and malformed HTTP versions retain hardening
 regressions. Message seeds use native little endian, as on the CI hosts.
 
-CMake copies these files to `build-test/fuzz/fuzz/corpus/<decoder>` at configuration.
+CMake copies these files to `build-test/test/fuzz/corpus/<decoder>` at configuration.
 Run against that copy, since libFuzzer adds and minimizes inputs in its corpus:
 
 ```sh
-./build-test/fuzz/fuzz/fuzz_messages build-test/fuzz/fuzz/corpus/messages \
+./build-test/test/fuzz/fuzz_messages build-test/test/fuzz/corpus/messages \
   -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024
 ```
 

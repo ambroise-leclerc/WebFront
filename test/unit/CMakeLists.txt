@@ -49,7 +49,9 @@ if(UNIX)
         add_test(NAME NoAiAttributionRegression
             COMMAND "${WEBFRONT_TEST_BASH_EXECUTABLE}"
                 "${PROJECT_SOURCE_DIR}/.github/scripts/test-no-ai-attribution.sh")
-        set_tests_properties(NoAiAttributionRegression PROPERTIES TIMEOUT 60)
+        # The many short Git/grep subprocesses exceeded 60 seconds on hosted macOS
+        # with four CTest workers. Allow contention while keeping the test bounded.
+        set_tests_properties(NoAiAttributionRegression PROPERTIES TIMEOUT 180)
     endif()
 endif()
 
@@ -73,7 +75,8 @@ add_test(NAME RepositoryLayout
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 add_test(NAME FrontendSelection
-    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendSelection.cmake)
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendSelection.cmake)
 # Exercise configuration-dependent CTest discovery and generator switches on single-config CI hosts.
 # The fixture configures no compiler and builds nothing; Ninja is optional for contributor builds.
 find_program(WEBFRONT_TEST_NINJA_EXECUTABLE ninja)
@@ -91,6 +94,7 @@ endif()
 # equivalent module path here so the offline fixture still exercises the same CPM as this build.
 add_test(NAME CEFTestingState
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckCEFTestingState.cmake)
 add_test(NAME WebView2UnsupportedToolchain
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckWebView2Toolchain.cmake)
@@ -113,11 +117,14 @@ endif()
 if(DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
     list(APPEND _consumer_dependency_args -DCMAKE_CXX_SCAN_FOR_MODULES:BOOL=${CMAKE_CXX_SCAN_FOR_MODULES})
 endif()
+# Read the actual target's launcher at generation time, including an explicitly
+# configured or auto-discovered cache. Do not depend on Cache.cmake's local variable.
 add_test(NAME AddSubdirectoryConsumer
     COMMAND ${CMAKE_CTEST_COMMAND}
         --build-and-test ${PROJECT_SOURCE_DIR}/test/cmake/consumer ${CMAKE_CURRENT_BINARY_DIR}/consumer-build
         --build-generator ${CMAKE_GENERATOR}
         --build-config $<CONFIG>
         --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${_consumer_dependency_args}
+            -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
             -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)
