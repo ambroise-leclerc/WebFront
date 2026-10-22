@@ -43,8 +43,9 @@
   `webfront::Commands` (`<webfront/Commands.hpp>`) adds an application's C++ commands to it: coroutines spawned per
   browser session through the bridge functions `webfront.commands.list`, `.start` and `.cancel`, streaming their
   output, stopped by Ctrl+C, the browser's disconnection or shutdown; the terminal does not wait for a stopped
-  command. New `app.resumeAfter(duration)`/`ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`,
-  `UI::id()` and `json::Reader::array`.
+  command; `co_await context.print(text)` waits for a slow browser. New `app.resumeAfter(duration)`/
+  `ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`, `app.connectedBrowsers()`, `UI::id()`,
+  `UI::pendingWrites()` and `json::Reader::array`.
 
 ### Changed
 
@@ -67,9 +68,12 @@
 
 ### Fixed
 
-- A browser's disconnection is now reported: `WebLink` emits its `closed` event once when the browser closes the
-  connection or it fails. The event was never emitted before, so nothing observed disconnections and `BasicWF`'s
-  removal of the link was unreachable; the link is now kept until the application is destroyed.
+- A browser's disconnection is now reported and its connection released: `WebLink` emits its `closed` event once when
+  the browser closes the connection or it fails. The event was never emitted before, so nothing observed
+  disconnections and every closed connection (socket, buffers) stayed until the application was destroyed. `BasicWF`
+  now releases it by a task on the server context; afterwards untyped `jsFunction` calls to that browser are
+  dropped, typed ones fail and `jsFunctionSender` reports an error when started, instead of throwing
+  `std::out_of_range`.
 - Linux CEF builds: the runtime files, resources and locales are copied once per destination directory by a shared
   copy target, instead of by every CEF target's post-build step, which made parallel builds fail intermittently
   ("Error copying directory ... locales"). The destination is the target's output directory

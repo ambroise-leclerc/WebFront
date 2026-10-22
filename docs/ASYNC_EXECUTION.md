@@ -81,10 +81,14 @@ completes on the server context once the duration has elapsed. Awaited in a task
 it observes the task's stop token: `TaskHandle::requestStop()` or shutdown
 completes it stopped at once, so a waiting coroutine never delays shutdown.
 `app.subscribeUIClosed(handler)` calls the handler on the server thread when a
-browser closes its connection or the connection fails, for as long as the
-returned `UISubscription` lives; shutdown, which stops every connection itself,
-notifies no handler. The UI of a closed browser keeps its link object until the
-application is destroyed, and its calls no longer reach the browser.
+browser closes its connection or the connection fails (a failed write included),
+for as long as the returned `UISubscription` lives; shutdown, which stops every
+connection itself, notifies no handler. The connection is then released by a task
+on the server context. Afterwards, an untyped `jsFunction` call to that UI is
+dropped, a typed call returns a future that throws `Browser connection closed`,
+a `jsFunctionSender` completes with an error when started, and `addScript` throws
+`ConnectionError`. The 16-bit identifier of a released connection is reused only
+after 65,536 later connections.
 
 `app.spawn(task)` and `ui.spawn(task)` may be called from any thread while the
 application object remains alive, including concurrently with stop/shutdown.

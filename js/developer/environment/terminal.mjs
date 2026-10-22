@@ -154,6 +154,35 @@ export function tokenize(line) {
 /** A word as typed on a line: whitespace, quotes and backslashes escaped. */
 export const escapeWord = word => word.replace(/[\s'"\\]/g, '\\$&');
 
+/**
+ * The word being typed at the end of a line, read like tokenize(): where it starts, its value and the quote it leaves
+ * open ("'", '"' or null). Null after a backslash that escapes nothing yet.
+ */
+export function wordAtEnd(line) {
+    let start = 0, quote = null, escaped = false;
+    for (let index = 0; index < line.length; ++index) {
+        const char = line[index];
+        if (escaped) escaped = false;
+        else if (quote) {
+            if (char === quote) quote = null;
+            else if (char === '\\' && quote === '"') escaped = true;
+        }
+        else if (char === '\\') escaped = true;
+        else if (char === "'" || char === '"') quote = char;
+        else if (char === ' ' || char === '\t') start = index + 1;
+    }
+    if (escaped) return null;
+    const typed = line.slice(start);
+    return {start, quote, value: typed ? tokenize(typed + (quote ?? ''))[0] : ''};
+}
+
+/** Text added to a word, escaped for the quote left open in it; null when it cannot be written there. */
+export function escapeFor(text, quote) {
+    if (quote === "'") return text.includes("'") ? null : text;
+    if (quote === '"') return text.replace(/["\\]/g, '\\$&');
+    return escapeWord(text);
+}
+
 function commonPrefix(words) {
     return words.reduce((prefix, word) => {
         let length = 0;
@@ -194,14 +223,14 @@ export const historyLimit = 500;
  *   write(text): displays text; columns(): the terminal's width;
  *   run(line, signal): a Promise of the command's output; it rejects with an Error whose exitCode (1 by default, 130
  *     once Ctrl+C aborted `signal`) becomes the status;
- *   complete(line): a Promise of {word, candidates}, the word being completed at the end of the line and the full words
- *     that can replace it;
- *   saveHistory(lines): persists the history after each command.
+ *   complete(line): a Promise of {candidates}, the full words that can replace the word at the end of the line (its
+ *     value as wordAtEnd reads it);
+ *   remember(line): persists a line added to the history.
  * Commands run one at a time; lines pasted together run one after the other.
  */
 export class LineEditor {
-    constructor({write, columns = () => 80, run, complete = async () => ({word: '', candidates: []}), prompt = '> ', history = [], saveHistory = () => {}}) {
-        Object.assign(this, {columns, run, complete, saveHistory});
+    constructor({write, columns = () => 80, run, complete = async () => ({candidates: []}), prompt = '> ', history = [], remember = () => {}}) {
+        Object.assign(this, {columns, run, complete, persist: remember});
         // Whether the cursor is at the start of a row: output streamed without a final line break is followed by one
         // before the prompt.
         this.atLineStart = true;
@@ -244,7 +273,7 @@ export class LineEditor {
     }
 
     handle(data) {
-        if (this.closed) return;
+        if (this.closed) return data === '\r' ? this.reopen() : undefined;
         if (this.completing) return void this.completing.push(data);
         if (this.running) return this.whileBusy(data);
         const action = keyActions.get(data);
@@ -373,7 +402,7 @@ export class LineEditor {
         if (line.trim() === '' || this.history.at(-1) === line) return;
         this.history.push(line);
         if (this.history.length > historyLimit) this.history.splice(0, this.history.length - historyLimit);
-        try { this.saveHistory(this.history.slice()); } catch { /* the history is a convenience */ }
+        try { this.persist(line); } catch { /* the history is a convenience */ }
     }
 
     // Moves below the line, runs it, then the pasted lines queued after it.
@@ -446,27 +475,40 @@ export class LineEditor {
 
     // Completes the word before the cursor, at the end of the line: one candidate is inserted whole, several by their
     // common prefix, or listed when they share nothing more.
+    // The completion is escaped like the word it extends; a complete word also closes the quote it opened.
     async completeLine() {
         if (this.cursor !== this.cells.length) return;
         const line = this.line;
-        let word, candidates;
-        try { ({word, candidates} = await this.complete(line)); }
+        const word = wordAtEnd(line);
+        if (!word) return;
+        let candidates;
+        try { ({candidates} = await this.complete(line)); }
         catch { return; }
         if (!candidates?.length || this.line !== line) return;
+        const extend = (text, end = '') => {
+            const escaped = escapeFor(text.slice(word.value.length), word.quote);
+            if (escaped !== null && (escaped || end)) this.insert(escaped + end);
+        };
         if (candidates.length === 1) {
             const [candidate] = candidates;
-            return this.insert(escapeWord(candidate.slice(word.length)) + (candidate.endsWith('/') ? '' : ' '));
+            return extend(candidate, candidate.endsWith('/') ? '' : (word.quote ?? '') + ' ');
         }
         const prefix = commonPrefix(candidates);
-        if (prefix.length > word.length) return this.insert(escapeWord(prefix.slice(word.length)));
+        if (prefix.length > word.value.length) return extend(prefix);
         this.moveTo(this.cells.length);
         this.write('\r\n' + candidates.join('  ') + '\r\n');
         this.showPrompt();
     }
 
-    /** Ends the session: the editor no longer reads input. */
+    /** Ends the session: the editor reads no more input until Enter starts a new session. */
     close() {
         this.closed = true;
         this.queue = [];
+    }
+
+    reopen() {
+        this.closed = false;
+        this.status = 0;
+        this.showPrompt();
     }
 }

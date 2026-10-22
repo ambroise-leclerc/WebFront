@@ -389,19 +389,22 @@ try {
     await firstWait;
     await waitState('here', 'cancelled');
     assert(await commandState('second') === 'running', 'Ctrl+C in one browser must not stop the command of another');
+    const browsers = await webFront.cppFunction('test.browsers')();
     sessionFrame.remove();
     await waitState('second', 'cancelled');
+    for (let attempt = 0; await webFront.cppFunction('test.browsers')() !== browsers - 1; ++attempt)
+        if (attempt === 200) throw new Error('The connection of a closed browser must be released');
+        else await delay(25);
     void secondWait;
     // The terminal itself, mounted in this page with a real xterm.js.
     const host = document.createElement('div');
     host.style.cssText = 'width:640px;height:240px';
     document.body.append(host);
     let exitedWith = null;
-    const mounted = async () => runtime.mount({bridge: webFront, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }});
+    // The test sets the terminal's size itself: an observer following the element would race with it.
+    const mounted = async () => runtime.mount({bridge: webFront, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }, fitToElement: false});
     const {terminal, editor} = await mounted();
-    // The terminal fits its element when its ResizeObserver first reports: let that happen before resizing it.
-    const frames = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    await frames();
+    terminal.resize(80, 12);
     const buffer = () => terminal.buffer.active;
     const rendered = () => new Promise(resolve => terminal.write('', resolve));
     // Like xterm.js, one input per key; text may come as one input.
@@ -504,6 +507,14 @@ try {
     await completed('echo too', 'echo tools/');
     await completed('echo tools/js', 'echo tools/jsx.tsx ');
     await completed('hi', 'history ');
+    // Paths with spaces and quotes: the completion reads the escaped or quoted word and extends it the same way.
+    await writeFile("my dir/file one's.txt", 'x');
+    await completed('echo my\\ d', 'echo my\\ dir/');
+    await completed('echo my\\ dir/f', "echo my\\ dir/file\\ one\\'s.txt ");
+    await completed('echo "my d', 'echo "my dir/');
+    await completed('echo "my dir/f', `echo "my dir/file one's.txt" `);
+    // A single quote cannot be written between single quotes: nothing is inserted.
+    await completed("echo 'my dir/f", "echo 'my dir/f");
     await type('h', '\t');
     assert(editor.line === 'h' && lastRows(2)[0].includes('help') && lastRows(2)[0].includes('history'), `Several candidates must be listed: ${lastRows(2)}`);
     await type('\x03');
@@ -514,9 +525,12 @@ try {
     const saved = JSON.parse(new TextDecoder().decode(await readFile(runtime.historyPath)));
     assert(saved.at(-1) === 'clear' && saved.includes('echo three'), `The history must be saved in the project: ${saved.slice(-3)}`);
     await type('exit 4\r');
-    assert(exitedWith === 4 && editor.closed && lastRows(2)[0] === 'Session ended.', `exit must end the session with its code: ${exitedWith}`);
-    terminal.input('echo ignored\r');
-    assert(!editor.busy, 'A closed session must ignore input');
+    assert(exitedWith === 4 && editor.closed && lastRows(2)[0] === 'Session ended. Press Enter to start a new session.', `exit must end the session with its code: ${exitedWith}`);
+    await type('echo ignored');
+    assert(!editor.busy && editor.line === '', 'A closed session must ignore input');
+    // The window stays open when the browser refuses to close it: Enter starts a new session.
+    await type('\r');
+    assert(!editor.closed && editor.status === 0 && lastRows(1)[0] === '> ', `Enter must start a new session after exit: ${lastRows(2)}`);
     await runtime.historySaved();
     terminal.dispose();
     host.replaceChildren();
@@ -524,6 +538,22 @@ try {
     again.terminal.input('\x1b[A');
     await new Promise(resolve => again.terminal.write('', resolve));
     assert(again.editor.line === 'exit 4', `A new terminal must recall the project's history: ${again.editor.line}`);
+    again.terminal.input('\x03');
+    // Two terminals on the same project: each one adds its lines to the history, neither erases the other's.
+    const otherHost = document.createElement('div');
+    otherHost.style.cssText = 'width:640px;height:240px';
+    document.body.append(otherHost);
+    const other = await runtime.mount({bridge: webFront, config, terminal: otherHost, preview: context.preview, onExit: () => {}});
+    for (const [session, line] of [[again, 'echo from-first'], [other, 'echo from-second'], [again, 'echo first-again']]) {
+        session.terminal.input(line + '\r');
+        await session.editor.whenIdle();
+    }
+    await runtime.historySaved();
+    const shared = JSON.parse(new TextDecoder().decode(await readFile(runtime.historyPath)));
+    assert(JSON.stringify(shared.slice(-3)) === JSON.stringify(['echo from-first', 'echo from-second', 'echo first-again']),
+        `Terminals must not erase each other's history: ${shared.slice(-4)}`);
+    other.terminal.dispose();
+    otherHost.remove();
     again.terminal.dispose();
     host.remove();
     // The application stops while this command runs: its shutdown must drain it (checked in C++).

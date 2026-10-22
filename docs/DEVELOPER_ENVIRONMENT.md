@@ -337,18 +337,21 @@ wf check
 The terminal of the environment (developer distribution 0.5.0, #308) is the only WebFront terminal; it is served
 from the environment archive with xterm.js, never from a C++ header. It runs `wf` commands, the application's C++
 commands and its own: `help`, `clear` (screen and scrollback), `history` (`history -c` clears it) and
-`exit [code]`, which ends the session and closes the window. No system shell is exposed.
+`exit [code]`, which ends the session and closes the window; when the browser keeps a window that a script did not
+open, Enter starts a new session. No system shell is exposed.
 
 - **Editing:** left/right, Home/End (Ctrl+A/Ctrl+E), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the
   history. A line wider than the terminal wraps over several rows and is redrawn in place. The editor moves over
   grapheme clusters: CJK characters and emoji (ZWJ sequences, flags, skin tones, presentation selector) take two
   cells, combining marks none. The same widths are registered in xterm.js, so both always agree.
-- **History:** kept per project in `.webfront/developer/history.json` (500 lines), restored by the next terminal.
+- **History:** kept per project in `.webfront/developer/history.json` (500 lines), restored by the next terminal. Each
+  line is added to the file as it is, so terminals of several pages on the same project keep each other's lines.
 - **Paste:** a multi-line paste runs its lines one after the other; a last line without a line break waits on the
   prompt. Ctrl+C drops the lines still waiting.
 - **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, its entries and
-  providers after `wf preview` and `wf embed`, and project paths. Several candidates are completed to their common
-  prefix, or listed.
+  providers after `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
+  quoted (`"my dir/`); the completion is written the same way and closes the quote. Several candidates are completed
+  to their common prefix, or listed.
 - **Exit codes:** a failed command prints `Error: <message>`, with `(exit code N)` when N is not 1. Ctrl+C gives 130.
 - **Output streams** while a command runs, for `wf` and C++ commands alike, without a size limit: C++ output is
   sent in pieces below the 65,535-byte limit of bridge strings.
@@ -364,7 +367,7 @@ webfront::Commands commands{app};
 commands.add("count", "Count to N, once a second", [](webfront::Commands<webfront::NativeApp>::Context context) -> webfront::Task {
     using namespace std::chrono_literals;
     for (int i = 1; i <= std::stoi(context.args().at(0)); ++i) {
-        context.write(std::to_string(i) + "\n");
+        co_await context.print(std::to_string(i) + "\n");
         co_await context.ui().resumeAfter(1s);
     }
 });
@@ -375,8 +378,10 @@ app.show();
 The terminal discovers the commands through the bridge (`webfront.commands.list`) and runs each one in the session
 of its browser with `webfront.commands.start`. In C++, the command is spawned like `ui.spawn` on the server thread:
 
-- `context.write(text)` streams output with fire-and-forget calls; `context.args()` holds the words after the
-  command name, split like a shell line; `context.exit(code)` sets the exit code.
+- `context.write(text)` streams output with fire-and-forget calls; `co_await context.print(text)` also suspends the
+  command while more than 32 frames wait for a browser that reads slower, and is a point where Ctrl+C stops it.
+  `context.args()` holds the words after the command name, split like a shell line; `context.exit(code)` sets the
+  exit code. A command that returns once asked to stop reports 130, whatever it returned.
 - Ctrl+C sends `webfront.commands.cancel`: the command's stop token is requested, which the senders it awaits
   observe (`ui.resumeAfter`, `ui.jsFunctionSender`, ...); loops check `context.stopRequested()`. The terminal does
   not wait for the command to end: the prompt returns at once and the next command runs, while the first one
@@ -387,8 +392,9 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
 - A command must not block the server thread, which serves every browser: a handler that does not return
   `webfront::Task` does not compile. Long computations belong on another thread.
 
-The names `wf`, `clear`, `exit`, `help` and `history` are reserved. C++ output has no flow control yet: a command
-writing faster than the browser reads grows the connection's write queue.
+The names `wf`, `clear`, `exit`, `help` and `history` are reserved. `context.write` has no flow control: a command
+writing large output with it, faster than the browser reads, grows the connection's write queue; use
+`context.print` for such output.
 
 ## Dependencies, storage and limitations
 

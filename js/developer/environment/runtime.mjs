@@ -1,6 +1,7 @@
 import {Terminal} from '../../../third_party/xterm/xterm.mjs';
 import {FitAddon} from '../../../third_party/xterm/addon-fit.mjs';
-import {LineEditor, tokenize, unicodeProvider, clearScreen} from './terminal.mjs';
+import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
+import {manifestPath} from './manifest.mjs';
 import {discoverCommands, runCommand} from './commands.mjs';
 export {discoverCommands};
 import {validateLock} from './packages.mjs';
@@ -222,12 +223,17 @@ async function readHistory(bridge) {
     } catch { return []; }
 }
 
-// The history is written after each command, one write at a time; a failed write keeps the terminal usable.
+// The history is written after each command, one write at a time; a failed write keeps the terminal usable. Each line
+// is added to the file as it is now, so the terminals of other pages on the project keep theirs.
 let historyWrites = Promise.resolve();
-function saveHistory(bridge, lines) {
-    historyWrites = historyWrites.then(() => publish(bridge, historyPath, textFile(JSON.stringify(lines)), {directory: false})).catch(() => {});
+function writeHistory(bridge, change) {
+    historyWrites = historyWrites.then(async () => {
+        const lines = change(await readHistory(bridge)).slice(-historyLimit);
+        await publish(bridge, historyPath, textFile(JSON.stringify(lines)), {directory: false});
+    }).catch(() => {});
     return historyWrites;
 }
+const rememberLine = (bridge, line) => writeHistory(bridge, lines => lines.at(-1) === line ? lines : [...lines, line]);
 /** Resolves once the history written so far is in the project. */
 export const historySaved = () => historyWrites;
 
@@ -243,11 +249,11 @@ const builtins = {
             'Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
     },
     clear: () => clearScreen,
-    history: (args, {editor}) => {
+    history: async (args, {editor, bridge}) => {
         if (args.length === 1 && args[0] === '-c') {
             editor.history.length = 0;
             editor.historyIndex = 0;
-            editor.saveHistory([]);
+            await writeHistory(bridge, () => []);
             return '';
         }
         if (args.length) throw new Error('Usage: history [-c]');
@@ -258,7 +264,8 @@ const builtins = {
         const code = args.length ? Number(args[0]) : editor?.status ?? 0;
         editor?.close();
         onExit(code);
-        return 'Session ended.';
+        // A window that a script did not open stays open: the terminal then waits for a new session.
+        return 'Session ended. Press Enter to start a new session.';
     },
 };
 
@@ -288,38 +295,53 @@ async function projectPaths(bridge, word) {
     } catch { return []; }
 }
 
+// The manifest as last read, kept while the project's state token for it does not change.
+let manifestCache = {token: null, manifest: null};
+async function cachedManifest(bridge) {
+    const token = await call(bridge, 'state', manifestPath);
+    if (token !== manifestCache.token) {
+        let manifest = null;
+        try { manifest = JSON.parse(decoder.decode(await readProject(bridge, manifestPath))); }
+        catch { /* no manifest, or one that wf commands report */ }
+        manifestCache = {token, manifest};
+    }
+    return manifestCache.manifest;
+}
+
 // The names that the manifest declares for the first argument of a wf command.
 async function manifestNames(bridge, command) {
     const section = {run: 'scripts', preview: 'entries', embed: 'providers'}[command];
     if (!section) return [];
-    try { return Object.keys((await loadProject(bridge)).manifest?.[section] ?? {}); }
+    try { return Object.keys((await cachedManifest(bridge))?.[section] ?? {}); }
     catch { return []; }
 }
 
 /**
- * Completes the word at the end of a line: command names first, then wf subcommands, the manifest's scripts after
- * wf run, its entries and providers after wf preview and wf embed, and project paths. Resolves with {word, candidates}.
+ * Completes the word at the end of a line, escaped or quoted: command names first, then wf subcommands, the manifest's
+ * scripts after wf run, its entries and providers after wf preview and wf embed, and project paths. Resolves with
+ * {word, candidates}, the word's value and the full words that can replace it.
  */
 export async function complete(line, {bridge, cppCommands = new Map()}) {
-    const start = Math.max(line.lastIndexOf(' '), line.lastIndexOf('\t')) + 1;
-    const word = line.slice(start);
+    const typed = wordAtEnd(line);
+    const word = typed?.value ?? '';
     const matching = names => ({word, candidates: [...new Set(names)].filter(name => name.startsWith(word)).sort()});
+    if (!typed) return matching([]);
     let before;
-    try { before = tokenize(line.slice(0, start)); }
+    try { before = tokenize(line.slice(0, typed.start)); }
     catch { return matching([]); }
-    if (/['"\\]/.test(word)) return matching([]);
     if (!before.length) return matching(['wf', ...Object.keys(builtins), ...cppCommands.keys()]);
     if (before[0] === 'wf' && before.length === 1) return matching(Object.keys(commands));
     if (before[0] === 'wf' && before.length === 2 && before[1] === 'run') return matching(await manifestNames(bridge, 'run'));
-    if (before[0] === 'wf' && before.length === 2) return matching([...await manifestNames(bridge, before[1]), ...await projectPaths(bridge, word)]);
+    if (before[0] === 'wf' && before.length === 2) return matching((await Promise.all([manifestNames(bridge, before[1]), projectPaths(bridge, word)])).flat());
     return matching(await projectPaths(bridge, word));
 }
 
 /**
  * Mounts the terminal in `element`. Each page has its own session: its history comes from the project, its C++
  * commands run in this browser's session. `onExit(code)` ends the session after exit (by default, closes the window).
+ * `fitToElement: false` keeps the terminal's size as set by terminal.resize() instead of following the element's.
  */
-export async function mount({bridge, config, terminal: element, preview, onExit}) {
+export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true}) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = new URL('./xterm.css', import.meta.url).href;
@@ -343,11 +365,11 @@ export async function mount({bridge, config, terminal: element, preview, onExit}
     });
     const context = {bridge, config, preview, cppCommands, onExit};
     const editor = new LineEditor({write, columns: () => terminal.cols, prompt: '> ', history: await readHistory(bridge),
-        saveHistory: lines => saveHistory(bridge, lines),
+        remember: line => rememberLine(bridge, line),
         run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
         complete: line => complete(line, context)});
     terminal.onResize(() => editor.resized());
-    new ResizeObserver(() => fit.fit()).observe(element);
+    if (fitToElement) new ResizeObserver(() => fit.fit()).observe(element);
     terminal.onData(data => editor.handle(data));
     editor.showPrompt();
     terminal.focus();
