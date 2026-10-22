@@ -214,3 +214,49 @@ test('a reply that arrives after the end of the run is not sent to the terminate
     await new Promise(resolve => setTimeout(resolve, 5));
     assert.equal(worker.received.filter(message => message.type === 'reply').length, 0);
 });
+
+test('a refused commit is aborted too, so no transaction or staging is left behind', async () => {
+    const memory = project();
+    const bridge = {cppFunction: name => name.endsWith('.commit')
+        ? async () => { throw new Error('Cannot replace the destination'); }
+        : memory.bridge.cppFunction(name)};
+    const host = scriptHost({bridge, permissions, lock: null});
+    await assert.rejects(host.handle({operation: 'write', args: ['generated/old.txt', encoder.encode('new')]}), /Cannot replace/);
+    await host.stop();
+    assert.equal(memory.pending(), 0);
+    assert.deepEqual(host.publications.map(({state}) => state), ['failed']);
+    assert.equal(decoder.decode(memory.storage.get('generated/old.txt')), 'old');
+});
+
+// Loads a fresh instance of the real script Worker module, with `self` and module URLs standing in for the browser's.
+async function scriptWorker(code) {
+    const messages = [];
+    const create = URL.createObjectURL;
+    globalThis.self = {postMessage: message => messages.push(message)};
+    URL.createObjectURL = () => 'data:text/javascript,' + encodeURIComponent(code);
+    URL.revokeObjectURL = () => {};
+    try {
+        await import(`../environment/script-worker.mjs?instance=${Math.random()}`);
+        const worker = globalThis.self;
+        worker.onmessage({data: {type: 'run', code, args: [], permissions: {}, base: 'http://localhost/'}});
+        await new Promise(resolve => setTimeout(resolve, 30));
+        return {messages, worker};
+    } finally {
+        URL.createObjectURL = create;
+        delete globalThis.self;
+    }
+}
+
+test('context.exit stops the script at once, even when it is not awaited', async () => {
+    const {messages} = await scriptWorker(`export default async context => {
+        context.exit(3);
+        context.console.log('ran after exit');
+    };`);
+    assert.deepEqual(messages, [{type: 'exit', code: 3}]);
+    const caught = await scriptWorker(`export default async context => {
+        try { context.exit(4); } catch {}
+        context.console.log('after a caught exit');
+        await context.project.write('generated/x', 'x').catch(error => context.console.log(error.message));
+    };`);
+    assert.deepEqual(caught.messages, [{type: 'exit', code: 4}], 'nothing reaches the page after the first exit');
+});

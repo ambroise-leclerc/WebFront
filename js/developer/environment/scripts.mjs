@@ -106,11 +106,9 @@ export function scriptHost({bridge, permissions, lock}) {
             await call(bridge, 'commit', id);
             publication.state = 'applied';
         } catch (error) {
-            if (publication.state === 'committing') publication.state = 'failed';
-            else {
-                publication.state = 'abandoned';
-                await call(bridge, 'abort', id).catch(() => {});
-            }
+            // A refused commit keeps its transaction in the store: it is aborted too, so its staging is removed.
+            publication.state = publication.state === 'committing' ? 'failed' : 'abandoned';
+            await call(bridge, 'abort', id).catch(() => {});
             throw error;
         }
     }

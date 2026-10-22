@@ -2,8 +2,7 @@
 // a script asks WebFront to do; they do not restrict the Worker's own capabilities (global fetch, importScripts,
 // WebSocket...) and are not a sandbox.
 import {safePackagePath} from './paths.mjs';
-import {manifestPath} from './manifest.mjs';
-import {lockPath} from './project.mjs';
+import {manifestPath, lockPath} from './manifest.mjs';
 
 // wf keeps these consistent itself: a script never writes them, whatever the manifest grants.
 const reserved = [manifestPath, lockPath, '.webfront'];

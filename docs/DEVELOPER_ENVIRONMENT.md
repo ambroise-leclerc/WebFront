@@ -271,7 +271,7 @@ The module is bundled by esbuild-wasm with its locked dependencies and runs in a
 | `project.write(path, data)` | Publishes a string or `Uint8Array` with `developer::Store`, under `permissions.publish`. |
 | `packages.resolve(name)` | `{name, version, integrity}` of a locked package, or `null`. |
 | `fetch(url, init)` | `fetch` to an origin listed in `permissions.fetch`. |
-| `exit(code)` | Ends the run with an exit code from 0 to 255. |
+| `exit(code)` | Ends the run with an exit code from 0 to 255; it throws, so the statements after it do not run, and nothing the script does afterwards reaches the page. |
 
 A `context` operation outside the permissions rejects with an explicit error. The manifest, the lock and
 `.webfront/` are never written by a script, whatever the permissions. **The permissions frame only the `context`

@@ -1,12 +1,12 @@
 {
-  "js/developer/environment/manifest.mjs": "126f0f0e5d64ebb85191c70ff7b42c3c8f9abd5133b4e3e96acc29f089419e6c",
-  "js/developer/environment/project.mjs": "525bc1545f6ff9a70c744c536e46c2404bdc20daa83b25b29419222161003c3b",
+  "js/developer/environment/manifest.mjs": "b534d152e6fb008b23d4cad00d8d72913091a9acd12603356995cbd8ed08f76c",
+  "js/developer/environment/project.mjs": "ad55658bb468c1baf0401329c3b74180d6d56965081b45b83ca4e5b43f44e7b1",
   "js/developer/environment/installer.mjs": "f3e919535847c93f62498ee0ad3fec49ff5f7531fb657feaca80e2ccb6da1c0c",
   "js/developer/environment/restore.mjs": "cdd22eebd55d68bd705685cd5ee3059e228a35053eaad116ab99c4c05b908098",
   "js/developer/environment/cache.mjs": "6fd0e3b760dfc1070a28e2e2eb3c86621c970c775045e7a9ae665da4f6845922",
-  "js/developer/environment/scripts.mjs": "7d17897948ebb5a919ee615580a479ac073db2a921899b187d8e4fdce6b49bbb",
-  "js/developer/environment/script-worker.mjs": "1ff39713b0fb862afbdb4eefb2c331bdeac1176636bf23cba5ef7a8013c8ce08",
-  "js/developer/environment/permissions.mjs": "7de99b6f67bc5d84609058073f9350ff9ebb129f8923b25ab8a2d4a7448da660",
+  "js/developer/environment/scripts.mjs": "a74cc2454b453fc415ce32cf24aa76cc6123bbc2141a27d9de6712f1eaae24e2",
+  "js/developer/environment/script-worker.mjs": "1423fd7a433485bc04514287aa9d650c4e1758c0238a705d4a3cb768bbefaa6f",
+  "js/developer/environment/permissions.mjs": "324188605b7543f026e21aafeb04ecc876a2c5cbfd83e6e4926416bdadf0b2bc",
   "js/developer/environment/packages-entry.mjs": "c348e2e69f102b218034135bfb63913295f6084eb5815d426dcf365308213025",
   "js/developer/environment/bootstrap.mjs": "534af4b3d07891338c3390e1d5e06c2fb6dd8df11ca6547735565b17f1b9cd70",
   "js/developer/environment/bootstrap-entry.mjs": "ff8084f23f5acc721f97eb1ed0a454e7bfee1894de17d54f0100fa11f7ef8b77",
@@ -38,6 +38,6 @@
   "js/developer/tools/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "js/developer/vendor/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
   "js/core/bootstrap/bootstrap.bundle.mjs": "792fe7cf564bd12ac47fef419d8c71e2070925764a17706552e7d3f5d6ba2181",
-  "js/developer/environment/packages.bundle.mjs": "321d5a05108a4e4a4e469c5fe09cde7d2894506a95a6d638e876943631464aad",
+  "js/developer/environment/packages.bundle.mjs": "2d478b98c4ab7422fb6f0e94401d3095d56044064f779706d32eadf72b1b33b9",
   "include/webfront/system/DeveloperReleaseData.hpp": "c97a8c3b21df3306c179f7b46d945159b5854f9d2810f135a4ab224c768c75d7"
 }

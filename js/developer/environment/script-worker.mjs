@@ -5,8 +5,15 @@ import {checkFetch} from './permissions.mjs';
 const pending = new Map();
 let nextId = 0;
 const controller = new AbortController();
+// Set by the first exit: nothing the script does afterwards reaches the page.
+let exited = false;
+
+function post(message) {
+    if (!exited) self.postMessage(message);
+}
 
 function call(operation, ...args) {
+    if (exited) return Promise.reject(new Error('The script has exited'));
     return new Promise((resolve, reject) => {
         const id = ++nextId;
         pending.set(id, {resolve, reject});
@@ -20,14 +27,21 @@ function format(value) {
     try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
 }
 
-const print = stream => (...values) => self.postMessage({type: 'console', stream, text: values.map(format).join(' ')});
+const print = stream => (...values) => post({type: 'console', stream, text: values.map(format).join(' ')});
 const scriptConsole = {log: print('out'), info: print('out'), debug: print('out'), warn: print('err'), error: print('err')};
 
-// Ends the run with a code; the page terminates the Worker, so nothing after exit() runs.
+// Thrown by exit() to unwind the script at once; the page also terminates the Worker on the exit message.
+class Exit {
+    constructor(code) { this.code = code; }
+}
+
+// Ends the run with a code. The statements after exit() do not run, unless the script catches everything it throws;
+// even then, nothing more reaches the page: no output, no context operation.
 function exit(code = 0) {
     if (!Number.isInteger(code) || code < 0 || code > 255) throw new RangeError('context.exit expects an integer from 0 to 255');
-    self.postMessage({type: 'exit', code});
-    return new Promise(() => {});
+    post({type: 'exit', code});
+    exited = true;
+    throw new Exit(code);
 }
 
 const decoder = new TextDecoder();
@@ -44,7 +58,8 @@ function createContext({args, permissions, base}) {
             list: (path = '') => call('list', path),
         }),
         packages: Object.freeze({resolve: name => call('resolve', name)}),
-        fetch: (url, init = {}) => fetch(checkFetch(permissions, url, base), {...init, signal: init.signal ?? controller.signal}),
+        fetch: (url, init = {}) => exited ? Promise.reject(new Error('The script has exited'))
+            : fetch(checkFetch(permissions, url, base), {...init, signal: init.signal ?? controller.signal}),
         exit,
     });
 }
@@ -56,7 +71,7 @@ async function run(message) {
     finally { URL.revokeObjectURL(url); }
     if (typeof module.default !== 'function') throw new Error('A WebFront script must export default async function (context)');
     await module.default(createContext(message));
-    self.postMessage({type: 'exit', code: 0});
+    post({type: 'exit', code: 0});
 }
 
 function answer({id, error, value}) {
@@ -73,5 +88,7 @@ self.onmessage = ({data}) => {
     if (data.type !== 'run') return;
     // Libraries that log through the global console reach the terminal too.
     Object.assign(globalThis.console, scriptConsole);
-    run(data).catch(error => self.postMessage({type: 'error', error: format(error), interrupted: controller.signal.aborted}));
+    run(data).catch(error => {
+        if (!(error instanceof Exit)) post({type: 'error', error: format(error), interrupted: controller.signal.aborted});
+    });
 };

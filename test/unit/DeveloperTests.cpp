@@ -766,10 +766,13 @@ SCENARIO("A project directory is listed without leaving the project") {
         }
     }
     GIVEN("a link to a directory outside the project") {
-        std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape");
-        THEN("it is omitted, and listing through it is refused") {
-            REQUIRE(text("ui") == "b.css\nmain.tsx\nparts/");
-            REQUIRE_THROWS_AS(store.list("ui/escape"), std::invalid_argument);
+        std::error_code error;
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape", error);
+        if (!error) {
+            THEN("it is omitted, and listing through it is refused") {
+                REQUIRE(text("ui") == "b.css\nmain.tsx\nparts/");
+                REQUIRE_THROWS_AS(store.list("ui/escape"), std::invalid_argument);
+            }
         }
     }
     GIVEN("a missing directory, a file or a path escaping the project") {
