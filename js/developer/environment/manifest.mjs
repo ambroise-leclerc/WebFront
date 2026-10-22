@@ -47,9 +47,12 @@ function checkDependencies(value) {
     return dependencies;
 }
 
+// A path that stays on the application's origin: browsers read "//host" and "/\\host" as another host.
+export const sameOriginPath = value => value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
+
 function checkRegistry(value) {
     if (typeof value !== 'string') fail('registry must be a URL');
-    if (value.startsWith('/') && !value.startsWith('//')) return value;
+    if (sameOriginPath(value)) return value;
     let url;
     try { url = new URL(value); } catch { return fail('registry must be an https URL or an absolute path'); }
     if (url.protocol !== 'https:') fail('registry must use https');

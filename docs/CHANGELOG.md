@@ -14,8 +14,18 @@
   `wf install` now needs `wf init` first, which adopts the roots of an existing lock so a project locked before 0.5.0
   keeps its locked graph. A committed publication that cannot be completed does not prevent opening the project:
   it is reported (`developer::IncompletePublication`) and completed by the next command.
+- `wf restore [--offline]` (developer distribution 0.5.0): rebuilds the package cache from the lock alone, at the
+  locked versions and integrities, idempotent and interruptible; `--offline` only checks the cache and lists the
+  missing or corrupted packages. Cached packages carry a record of their files' digests. The registry is the
+  application's option, else the manifest's `registry`, else registry.npmjs.org; `wf install` and `wf restore`
+  print it with its origin. A reproducible local npm registry fixture (`js/developer/tools/registry-fixture.mjs`)
+  serves the tests.
 
 ### Changed
+
+- `DeveloperBootstrapOptions::registry` is now `std::optional<std::string>`: unset, the manifest's registry
+  applies; set, it must be HTTPS or a same-origin path and takes precedence over the manifest. The environment
+  configuration gains `registryExplicit`; earlier environments keep reading `registry`.
 
 - **Breaking:** library headers moved to `include/webfront/`; include them as `<webfront/WebFront.hpp>`,
   `<webfront/http/...>`, `<webfront/system/...>` and so on. The former spellings (`<WebFront.hpp>`,

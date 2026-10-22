@@ -2,9 +2,11 @@
 import semver from 'semver';
 import {resolvePackages, downloadPackage} from './packages.mjs';
 import {parseSpec} from '../components/tools/wf.mjs';
-import {publish, readProject} from './io.mjs';
+import {publish} from './io.mjs';
 import {manifestPath, newManifest, manifestName, serializeManifest, validateManifest, dependenciesDigest} from './manifest.mjs';
-import {loadProject, publishTogether, lockPath, packageRoot, noManifest, desynchronized, textBytes} from './project.mjs';
+import {loadProject, publishTogether, lockPath, noManifest, desynchronized, textBytes} from './project.mjs';
+import {storePackage} from './cache.mjs';
+import {restorePackages, usableRegistry, describeRegistry} from './restore.mjs';
 
 // The spec syntax resolvePackages() reads: a missing version is undefined, resolved as latest.
 const splitSpec = spec => {
@@ -78,29 +80,8 @@ async function resolveLock(dependencies, previous, options) {
 async function storePackages(bridge, lock, downloads, {signal, progress}) {
     for (const [id, files] of downloads) {
         progress(`Storing ${id}`);
-        await publish(bridge, `${packageRoot}/${lock.packages[id].key}`, files, {signal});
+        await storePackage(bridge, lock.packages[id], files, {signal});
     }
-}
-
-async function isCached(bridge, node) {
-    try { await readProject(bridge, `${packageRoot}/${node.key}/package.json`); return true; }
-    catch { return false; }
-}
-
-// npm ci: exactly the locked graph, every archive checked against the recorded integrity. Nothing is resolved or written
-// besides the cache.
-async function restoreLocked(bridge, lock, {signal, progress, fetchImpl}) {
-    let restored = 0;
-    for (const [id, node] of Object.entries(lock.packages)) {
-        signal?.throwIfAborted();
-        if (await isCached(bridge, node)) continue;
-        progress(`Restoring ${id}`);
-        const pkg = await downloadPackage(node.name, node.version, {registry: lock.registry, fetchImpl, signal});
-        if (pkg.integrity !== node.integrity) throw new Error(`${id} no longer matches the integrity recorded in the lock`);
-        await publish(bridge, `${packageRoot}/${node.key}`, pkg.files, {signal});
-        restored++;
-    }
-    return restored;
 }
 
 function parseOptions(args) {
@@ -123,22 +104,25 @@ const withDigest = async (lock, dependencies) => ({format: lock.format, manifest
  * wf install: the locked graph exactly when the lock agrees with the manifest; resolves it when there is no lock.
  * wf install --update: resolves the manifest again, keeping nothing from the lock.
  */
-export async function install(bridge, args, {registry, signal, progress = () => {}, fetchImpl = fetch}) {
+export async function install(bridge, args, {registry, registryExplicit, signal, progress = () => {}, fetchImpl = fetch}) {
     const {update, specs} = parseOptions(args);
     const project = await loadProject(bridge);
     if (!project.manifest) throw new Error(noManifest);
-    const options = {registry: project.manifest.registry ?? registry, signal, fetchImpl, progress};
+    const effective = usableRegistry({registry, registryExplicit}, project.manifest);
+    const options = {registry: effective.url, signal, fetchImpl, progress};
     if (specs.length && update) throw new Error('Usage: wf install --update does not take packages');
     if (specs.length && project.status === 'desynchronized') throw new Error(desynchronized);
     if (!specs.length && !update && project.status === 'desynchronized') throw new Error(desynchronized);
+    progress(describeRegistry(effective));
+    // npm ci: exactly the locked graph, every archive checked against the recorded integrity.
     const locked = project.status === 'consistent' || project.status === 'legacy';
     if (!specs.length && !update && locked) {
-        const restored = await restoreLocked(bridge, project.lock, {signal, progress, fetchImpl: options.fetchImpl});
-        if (project.status === 'consistent') return {lock: project.lock, restored};
+        const {restored} = await restorePackages(bridge, project.lock, options);
+        if (project.status === 'consistent') return {lock: project.lock, restored, registry: effective};
         // A lock written before the manifest: the same graph, now recording the dependencies it was resolved from.
         const lock = await withDigest(project.lock, project.manifest.dependencies);
         await publishResolution(bridge, project, {manifest: null, lock}, {signal});
-        return {lock, restored};
+        return {lock, restored, registry: effective};
     }
     const request = requestedDependencies(project, specs);
     // --update ignores the locked versions; installing a package keeps the others where they are.
@@ -150,5 +134,5 @@ export async function install(bridge, args, {registry, signal, progress = () => 
     const lock = await withDigest(resolved.lock, dependencies);
     const manifest = specs.length ? updatedManifest(project, dependencies) : null;
     await publishResolution(bridge, project, {manifest, lock}, {signal});
-    return {lock, restored: 0};
+    return {lock, restored: 0, registry: effective};
 }

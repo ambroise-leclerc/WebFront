@@ -153,6 +153,38 @@ try {
     delete manifest.dependencies.scheduler;
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
     assert(/Installed 3 packages/.test(await runtime.execute(['install'], context)), 'A consistent lock must install its exact graph');
+    // wf restore rebuilds an emptied cache from the lock alone, from the application's local registry although the
+    // manifest names another one; --offline only checks the cache, without any request.
+    const requests = [];
+    const pageFetch = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+        requests.push(new URL(input instanceof Request ? input.url : input, location.href).href);
+        return pageFetch(input, init);
+    };
+    try {
+        const emptied = await call('begin', '.webfront/developer/packages', true);
+        await call('commit', emptied);
+        const missing = await runtime.execute(['restore', '--offline'], context).then(() => '', error => error.message);
+        assert(/react@19\.3\.1 \(missing\)/.test(missing) && requests.length === 0, 'An offline check must list missing packages without any request');
+        await writeFile('webfront.project.json', JSON.stringify({...manifest, registry: 'https://registry.invalid/'}, null, 2));
+        const restored = await runtime.execute(['restore'], context);
+        assert(/Restored 3 of 3 packages/.test(restored) && restored.includes('Registry: /fixtures/registry/ (application option)'), `wf restore must use and name the application registry: ${restored}`);
+        assert(requests.length > 0 && requests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), 'wf restore must contact the application registry only');
+        requests.length = 0;
+        assert(/Cache verified offline: 3 packages/.test(await runtime.execute(['restore', '--offline'], context)) && requests.length === 0, 'A complete cache must verify offline');
+    } finally {
+        globalThis.fetch = pageFetch;
+    }
+    await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
+    const previous = frame.contentWindow.location.href;
+    await runtime.execute(['preview'], context);
+    const piMounted = () => frame.contentDocument?.querySelector('output') && !frame.contentDocument.querySelector('[data-testid]');
+    for (let attempt = 0; frame.contentWindow.location.href === previous || !piMounted(); ++attempt) {
+        if (attempt === 300) throw new Error('The preview did not build from the restored cache');
+        await delay(50);
+    }
+    const absent = await runtime.execute(['install', 'webfront-fixture-absent'], context).then(() => '', error => error.message);
+    assert(/HTTP 404/.test(absent), 'A package absent from the registry must reject');
     const failed = await runtime.execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
     assert(failed, 'Missing packages must reject');
     assert(JSON.stringify(await runtime.readLock(webFront)) === JSON.stringify(lock), 'A failed install must preserve the lock');

@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation du bootstrap développeur versionné. | À renseigner après intégration. |
 | 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 0.3 | 2026-10-22 | Proposée | Ambroise Leclerc | Provisioning local des paquets (#306) : `wf restore [--offline]`, priorité du registre de l'application sur celui du manifeste. | À renseigner après intégration. |
 
 ## Statut et date
 
@@ -60,6 +61,10 @@ trajectoire de retrait de l'ADR-016.
 - Exécuter une page distante avec le bridge : écarté ; l'environnement validé est servi localement.
 - Le premier lancement nécessite l'accès au dépôt ou un provisioning local explicite. Le cache
   vérifié autorise ensuite un lancement hors ligne.
+- Les paquets suivent la même règle : `wf restore` reconstruit leur cache depuis le lock, depuis le
+  registre fixé par l'application (canal de confiance du distributeur), sinon celui du manifeste, sinon
+  registry.npmjs.org, toujours en HTTPS ou sur l'origine de l'application. Un registre servi par
+  l'application est leur provisioning local explicite ; `wf restore --offline` vérifie le cache sans réseau.
 - Le code téléchargé possède l'autorité du bridge et du projet autorisé ; ce n'est pas un sandbox.
   Le mode distribution n'active pas ces callbacks. Aucun accès au shell n'est ajouté.
 

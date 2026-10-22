@@ -6,6 +6,7 @@ import {validateManifest, parseManifest, serializeManifest, manifestName, depend
 import {install, initProject, loadProject, syncNotice, resolveEntry, embedTarget, lockPath, manifestPath} from '../environment/packages.bundle.mjs';
 import {compress} from '../environment/embed.mjs';
 import {tar} from './archive.mjs';
+import {memoryBridge} from './memory-bridge.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -39,6 +40,7 @@ test('invalid manifests are explicit errors, never silent fallbacks', () => {
         [{...minimal, dependencies: {'../x': '1.0.0'}}, /invalid npm package name/],
         [{...minimal, dependencies: {react: 'file:../react'}}, /invalid version range/],
         [{...minimal, registry: 'http://insecure.test/'}, /registry must use https/],
+        [{...minimal, registry: '/\\registry.test/'}, /registry must be an https URL or an absolute path/],
         [{...minimal, entries: {main: '../outside.tsx'}}, /safe project-relative path/],
         [{...minimal, entries: {main: '/etc/passwd'}}, /safe project-relative path/],
         [{...minimal, providers: {'not valid': {entry: 'a.tsx', output: 'a.hpp'}}}, /invalid provider name/],
@@ -78,46 +80,6 @@ test('wf embed names the generated class after the provider, and refuses a file 
     assert.throws(() => embedTarget(manifest, ['ui/main.tsx', '--output', 'generated/life-ui.hpp']), /not a C\+\+ class name/);
     assert.throws(() => embedTarget(manifest, ['ui/main.tsx']), /--output/);
 });
-
-// An in-memory project behind the webfront.developer.* callbacks, with the store's group publication and precondition.
-function memoryBridge(storage = new Map()) {
-    const transactions = new Map();
-    let next = 0;
-    const stateOf = paths => paths.map(path => storage.has(path) ? createHash('sha256').update(storage.get(path)).digest('hex') : '-').join(',');
-    const operations = {
-        read: (path, offset) => {
-            if (!storage.has(path)) throw new Error('Cannot read project file: ' + path);
-            return storage.get(path).subarray(offset, offset + 256 * 1024);
-        },
-        begin: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: true}); return String(next); },
-        beginNew: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: false}); return String(next); },
-        write: (id, path, offset, bytes) => {
-            const files = transactions.get(id).files;
-            const previous = files.get(path) ?? new Uint8Array();
-            assert.equal(previous.length, offset);
-            files.set(path, new Uint8Array([...previous, ...bytes]));
-        },
-        commit: id => {
-            const {destination, directory, files, replace} = transactions.get(id);
-            if (!replace && (storage.has(destination) || [...storage.keys()].some(key => key.startsWith(destination + '/'))))
-                throw new Error('Starter destination already exists');
-            for (const [path, bytes] of files) storage.set(directory ? `${destination}/${path}` : destination, bytes);
-            transactions.delete(id);
-        },
-        abort: id => { transactions.delete(id); },
-        state: paths => stateOf(paths.split('\n')),
-        commitGroup: (ids, paths, expected) => {
-            if (stateOf(paths.split('\n')) !== expected) throw new Error('The project changed since it was read; run the command again');
-            for (const id of ids.split('\n')) {
-                const {destination, files} = transactions.get(id);
-                storage.set(destination, files.get('output'));
-                transactions.delete(id);
-            }
-        },
-    };
-    const bridge = {cppFunction: name => async (...args) => operations[name.replace('webfront.developer.', '')](...args)};
-    return {bridge, storage, pending: () => transactions.size};
-}
 
 const tagged = (packages, tags) => async url => {
     const response = await packages(url);

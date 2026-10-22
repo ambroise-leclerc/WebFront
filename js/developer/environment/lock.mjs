@@ -28,6 +28,7 @@ function hasLockShape(lock) {
 
 export function validateLock(lock) {
     if (!hasLockShape(lock)) throw new Error('Unsupported package lock');
+    if (Object.keys(lock.packages).length > 512) throw new Error('The package lock exceeds 512 packages');
     for (const [id, node] of Object.entries(lock.packages)) validateNode(lock, id, node);
     if (Object.values(lock.roots).some(root => !lock.packages[root.id])) throw new Error('Dangling locked root');
     return lock;

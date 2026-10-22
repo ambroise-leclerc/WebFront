@@ -339,6 +339,30 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
             REQUIRE_NOTHROW(app.bootstrap("developer", trusted));
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
         }
+        THEN("a registry that is neither HTTPS nor same-origin is refused") {
+            for (const auto* registry : {"http://registry.test/", "//registry.test/", "/\\registry.test/", "/mirror\\..\\x/", "registry/", ""}) {
+                auto options     = trusted;
+                options.registry = registry;
+                REQUIRE_THROWS_AS(app.bootstrap("developer", options), std::invalid_argument);
+            }
+        }
+    }
+}
+
+SCENARIO("The environment learns whether the application chose the npm registry") {
+    const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
+    GIVEN("no registry option") {
+        THEN("the default registry is passed and marked as not chosen, so the manifest's applies") {
+            REQUIRE(developer::bootstrapConfig(trusted)
+                    == R"({"environment":"https://example.test/env.tgz","integrity":"sha512-abc","registry":"https://registry.npmjs.org/","registryExplicit":false})");
+        }
+    }
+    GIVEN("a same-origin mirror chosen by the application") {
+        auto options     = trusted;
+        options.registry = "/mirror/";
+        THEN("it is passed as the application's choice") {
+            REQUIRE_THAT(developer::bootstrapConfig(options), Catch::Matchers::EndsWith(R"("registry":"/mirror/","registryExplicit":true})"));
+        }
     }
 }
 
@@ -700,16 +724,24 @@ SCENARIO("A second opener of the project waits for a publication in progress ins
             }
         }
         WHEN("another store tries to publish from the state read before the first publication") {
-            auto competing = std::async(std::launch::async, [&] {
-                developer::Store other{project.path()};
-                publishPair(other, "manifest-3", "lock-3", before);
+            // The refusal is read in its own thread: an exception object shared across threads by a future is
+            // reported as a race by ThreadSanitizer, whose runtime does not see libc++abi's reference counting.
+            auto competing = std::async(std::launch::async, [&]() -> std::string {
+                try {
+                    developer::Store other{project.path()};
+                    publishPair(other, "manifest-3", "lock-3", before);
+                    return "published";
+                } catch (const std::exception& error) {
+                    return error.what();
+                }
             });
             const auto waiting = competing.wait_for(std::chrono::milliseconds(300));
             release.open();
             publication.get();
             THEN("its precondition is checked after the first publication, which wins") {
                 CHECK(waiting == std::future_status::timeout);
-                REQUIRE_THROWS_WITH(competing.get(), Catch::Matchers::ContainsSubstring("changed since it was read"));
+                REQUIRE_THAT(competing.get(), Catch::Matchers::ContainsSubstring("changed since it was read"));
+                REQUIRE(projectState(publisher) == "manifest-2|lock-2");
             }
         }
     }

@@ -5,6 +5,8 @@
 #include "system/DeveloperReleaseData.hpp"
 #include "WebFront.hpp"
 
+#include <optional>
+
 namespace webfront {
 
 struct DeveloperBootstrapOptions {
@@ -12,7 +14,10 @@ struct DeveloperBootstrapOptions {
     std::string environment;
     /// Trusted SHA-512 SRI of that exact tarball, supplied independently of its download.
     std::string integrity;
-    std::string registry{"https://registry.npmjs.org/"};
+    /// npm registry chosen by the application: HTTPS, or a same-origin path such as "/registry/" for a
+    /// local mirror. It takes precedence over the project manifest's "registry"; unset, the manifest's
+    /// registry applies, else registry.npmjs.org.
+    std::optional<std::string> registry{};
 };
 
 namespace developer {
@@ -24,6 +29,11 @@ inline WebFrontConfig projectConfig(WebFrontConfig config, const std::filesystem
     return config;
 }
 
+/// A path that stays on the application's origin: browsers read "//host" and "/\\host" as another host.
+inline bool sameOriginPath(std::string_view path) {
+    return path.starts_with('/') && !path.starts_with("//") && !path.contains('\\');
+}
+
 inline void validateBootstrap(std::string_view mode, const std::filesystem::path& project, const DeveloperBootstrapOptions& options) {
     if (mode != "developer")
         throw std::invalid_argument("Unknown bootstrap mode");
@@ -31,6 +41,18 @@ inline void validateBootstrap(std::string_view mode, const std::filesystem::path
         throw std::invalid_argument("Developer bootstrap requires an explicit project directory");
     if (options.environment.empty() || !options.integrity.starts_with("sha512-"))
         throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
+    if (options.registry && !options.registry->starts_with("https://") && !developer::sameOriginPath(*options.registry))
+        throw std::invalid_argument("The developer registry must be an HTTPS URL or a same-origin path");
+}
+
+inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"};
+
+/// The configuration the environment reads. "registry" always names a usable registry, for environments
+/// that predate "registryExplicit"; the latter tells whether the application chose it.
+inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
+    return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
+         + ",\"registry\":" + json::quote(options.registry.value_or(std::string(defaultRegistry)))
+         + ",\"registryExplicit\":" + (options.registry ? "true" : "false") + "}";
 }
 }  // namespace developer
 
@@ -51,8 +73,7 @@ public:
             throw std::logic_error("Developer bootstrap is already configured");
         developer::validateBootstrap(mode, project, options);
         store = std::make_shared<developer::Store>(project);
-        registerBridge("{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
-                       + ",\"registry\":" + json::quote(options.registry) + "}");
+        registerBridge(developer::bootstrapConfig(options));
     }
 
     void show(std::string_view page = {}) {
