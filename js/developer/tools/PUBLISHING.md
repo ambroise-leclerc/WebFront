@@ -11,13 +11,15 @@ The package names in their manifests are identifiers, not a requirement to own o
 npm ci --prefix js/developer/vendor --ignore-scripts
 node js/developer/tools/build.mjs build-distribution --refresh-bootstrap
 node js/developer/tools/fixtures.mjs build-distribution
-node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs
+node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs js/developer/tools/manifest-check.mjs
 node js/developer/tools/site.mjs build-distribution build-developer-site
 ```
 
-Review and commit the updated checked-in bootstrap bundles and checksums.
-`include/webfront/system/DeveloperReleaseData.hpp` is committed only for a version that is already published
-and verified (see "Pinning a new version"), so that the default bootstrap never names an archive that is unavailable. The header pins the exact environment archive and URL.
+Review and commit the updated checked-in bootstrap bundles and checksums. Regenerating
+`include/webfront/system/DeveloperReleaseData.hpp` is part of the release procedure ("Pinning a new version"): the header
+is committed on a release branch before the tag, because the publication workflow requires it to match the build, and it
+reaches the default branch only after the deployed files are verified, so that the default bootstrap never names an
+archive that is unavailable. The header pins the exact environment archive and URL.
 The environment pins the starter archive in turn. `provision.json` is informational; applications
 do not discover a replacement trust hash from that remote file or follow `latest` at startup.
 

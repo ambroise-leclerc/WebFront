@@ -561,6 +561,31 @@ SCENARIO("New directories are durable once their parents are synchronized") {
     }
 }
 
+namespace {
+// Holds a thread at a step until opened. Opening is idempotent and also happens on destruction, so a failed
+// assertion never leaves a thread blocked behind a future that waits for it.
+class Gate {
+public:
+    void open() {
+        std::call_once(once, [this] { opened.set_value(); });
+    }
+    void wait() const {
+        future.wait();
+    }
+
+private:
+    std::once_flag      once;
+    std::promise<void>  opened;
+    std::shared_future<void> future{opened.get_future().share()};
+};
+struct OpenOnExit {
+    Gate& gate;
+    ~OpenOnExit() {
+        gate.open();
+    }
+};
+}  // namespace
+
 SCENARIO("A second opener of the project waits for a publication in progress instead of abandoning it") {
     TemporaryDirectory project;
     {
@@ -569,36 +594,46 @@ SCENARIO("A second opener of the project waits for a publication in progress ins
         publishFile(store, lockPath, "lock-1");
     }
     GIVEN("a publication stopped between staging its files and writing its journal") {
-        std::promise<void> reached;
-        std::promise<void> release;
-        auto               released = release.get_future().share();
+        Gate               reached;
+        Gate               release;
         developer::Store   publisher{project.path(), developer::defaultAbandonedAfter, [&](std::string_view name) {
                                          if (name == "before-journal") {
-                                             reached.set_value();
-                                             released.wait();
+                                             reached.open();
+                                             release.wait();
                                          }
                                      }};
-        auto               publication = std::async(std::launch::async, [&] { publishPair(publisher, "manifest-2", "lock-2", publisher.state(pair)); });
-        reached.get_future().wait();
+        const auto         before      = publisher.state(pair);
+        auto               publication = std::async(std::launch::async, [&] {
+            try {
+                publishPair(publisher, "manifest-2", "lock-2", before);
+            } catch (...) {
+                reached.open();  // do not leave the test waiting for a step that is never reached
+                throw;
+            }
+        });
+        const OpenOnExit   unblock{release};
+        reached.wait();
         WHEN("another store, as another process would, opens the project meanwhile") {
-            auto opening = std::async(std::launch::async, [&] { developer::Store other{project.path()}; return projectState(other); });
-            THEN("it waits, then sees the completed publication") {
-                REQUIRE(opening.wait_for(std::chrono::milliseconds(300)) == std::future_status::timeout);
-                release.set_value();
-                publication.get();
+            auto       opening = std::async(std::launch::async, [&] { developer::Store other{project.path()}; return projectState(other); });
+            const auto waiting = opening.wait_for(std::chrono::milliseconds(300));
+            release.open();
+            publication.get();
+            THEN("it waited, then sees the completed publication") {
+                CHECK(waiting == std::future_status::timeout);
                 REQUIRE(opening.get() == "manifest-2|lock-2");
             }
         }
-        WHEN("another store tries to publish from the same state") {
+        WHEN("another store tries to publish from the state read before the first publication") {
             auto competing = std::async(std::launch::async, [&] {
                 developer::Store other{project.path()};
-                publishPair(other, "manifest-3", "lock-3", other.state(pair));
+                publishPair(other, "manifest-3", "lock-3", before);
             });
+            const auto waiting = competing.wait_for(std::chrono::milliseconds(300));
+            release.open();
+            publication.get();
             THEN("its precondition is checked after the first publication, which wins") {
-                REQUIRE(competing.wait_for(std::chrono::milliseconds(300)) == std::future_status::timeout);
-                release.set_value();
-                publication.get();
-                REQUIRE_NOTHROW(competing.get());
+                CHECK(waiting == std::future_status::timeout);
+                REQUIRE_THROWS_WITH(competing.get(), Catch::Matchers::ContainsSubstring("changed since it was read"));
             }
         }
     }
