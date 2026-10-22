@@ -102,6 +102,8 @@ struct FakeApp {
     vector<string> registered;
     size_t         backlog = 0;  // frames waiting for the network; each pause lets the browser read 10
     int            pauses  = 0;
+    bool           queueing = false;  // each browser call adds a frame to the backlog
+    vector<string> paced;             // "send" and "pause", in order
     // Destroyed first: draining its tasks lets the commands report through the members above.
     RealApp real{WebFrontConfig{.port = "0"}};
 };
@@ -117,6 +119,7 @@ size_t FakeUI::pendingWrites() const {
 auto FakeUI::resumeAfter(chrono::milliseconds) const {
     return networking::ex::just() | networking::ex::then([app = app] {
         ++app->pauses;
+        app->paced.push_back("pause");
         app->backlog -= min<size_t>(app->backlog, 10);
     });
 }
@@ -126,6 +129,10 @@ auto FakeUI::jsFunction(string_view name) const {
         if (app->gone.contains(link))
             throw out_of_range("Connection closed");
         app->calls.push_back(BrowserCall{link, function, id, {text(values)...}});
+        if (app->queueing) {
+            ++app->backlog;
+            app->paced.push_back("send");
+        }
     };
 }
 
@@ -294,6 +301,24 @@ SCENARIO("Printing waits while the browser has not read the output") {
                 CHECK(app.pauses == 3);
                 CHECK(app.backlog <= commands::maxPendingOutput);
                 CHECK(app.callsOf(1).back().values == vector<string>{"0", ""});
+            }
+        }
+    }
+}
+
+SCENARIO("Printing a long text waits between its pieces") {
+    GIVEN("a browser with as many frames to read as allowed") {
+        FakeApp           app;
+        Commands<FakeApp> commands{app};
+        commands.add("print", "", [](Context context) -> Task {
+            co_await context.print(string(2 * commands::maxChunkBytes + 1, 'x'));
+        });
+        app.backlog  = commands::maxPendingOutput;
+        app.queueing = true;
+        WHEN("a command prints a text of three pieces") {
+            app.start(app.ui(1), 1, "print", "[]");
+            THEN("it waits after the piece that overfills the queue, before sending the next") {
+                CHECK(app.paced == vector<string>{"send", "pause", "send", "send", "send"});
             }
         }
     }

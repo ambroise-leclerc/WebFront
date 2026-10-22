@@ -142,14 +142,17 @@ public:
                 return;
     }
 
-    /// Writes like write(), then suspends the command while more than maxPendingOutput frames wait for a browser that
-    /// reads slower than the command writes. Each wait is a point where Ctrl+C stops the command. Prefer it to write()
-    /// for large or unbounded output.
+    /// Writes like write(), one piece at a time: after each piece, the command is suspended while more than
+    /// maxPendingOutput frames wait for a browser that reads slower than the command writes. Each wait is a point where
+    /// Ctrl+C stops the command. Prefer it to write() for large or unbounded output.
     [[nodiscard]] Task print(std::string text) const {
         const auto command = run;
-        write(text);
-        while (!command->stop.stop_requested() && command->ui.pendingWrites() > maxPendingOutput)
-            co_await command->ui.resumeAfter(std::chrono::milliseconds(5));
+        for (const auto piece : detail::chunks(text)) {
+            if (command->stop.stop_requested() || !command->send("webfront.commands.output", piece))
+                co_return;
+            while (!command->stop.stop_requested() && command->ui.pendingWrites() > maxPendingOutput)
+                co_await command->ui.resumeAfter(std::chrono::milliseconds(5));
+        }
     }
 
     /// Sets the exit code reported when the command returns; 0 by default. An exception reports 1.

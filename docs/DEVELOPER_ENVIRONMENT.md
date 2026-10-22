@@ -378,8 +378,9 @@ app.show();
 The terminal discovers the commands through the bridge (`webfront.commands.list`) and runs each one in the session
 of its browser with `webfront.commands.start`. In C++, the command is spawned like `ui.spawn` on the server thread:
 
-- `context.write(text)` streams output with fire-and-forget calls; `co_await context.print(text)` also suspends the
-  command while more than 32 frames wait for a browser that reads slower, and is a point where Ctrl+C stops it.
+- `context.write(text)` streams output with fire-and-forget calls; `co_await context.print(text)` sends it piece by
+  piece and, after each piece, suspends the command while more than 32 frames wait for a browser that reads slower;
+  each wait is a point where Ctrl+C stops it.
   `context.args()` holds the words after the command name, split like a shell line; `context.exit(code)` sets the
   exit code. A command that returns once asked to stop reports 130, whatever it returned.
 - Ctrl+C sends `webfront.commands.cancel`: the command's stop token is requested, which the senders it awaits
