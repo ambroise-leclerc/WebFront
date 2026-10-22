@@ -11,10 +11,13 @@ import {createStarter} from '../environment/starter.mjs';
 const encode = value => new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value));
 const integrity = bytes => 'sha512-' + createHash('sha512').update(bytes).digest('base64');
 
+const recipe = (fields = {}) => ({format: 1, name: 'pi-starter', version: '0.1.0', dependencies: {react: '19.3.1'},
+    entries: {main: 'main.tsx'}, ...fields});
+
 function starter(overrides = {}) {
     return compress(tar(new Map(Object.entries({
         'package/main.tsx': encode('export default function Pi() {}'),
-        'package/webfront.project.json': encode({format: 1, entry: 'main.tsx', dependencies: {react: '19.3.1'}}),
+        'package/webfront.project.json': encode(recipe()),
         ...overrides,
     }))));
 }
@@ -27,14 +30,14 @@ test('starter integrity, recipes and archive paths are checked before any projec
     const config = {starters: {pi: {url: 'https://pages.test/developer/0.1.0/pi-starter.tgz', integrity: integrity(bytes)}}};
     const fetchImpl = async () => new Response(bytes);
     const help = await createStarter(bridge, config, ['pi', 'ui'], {fetchImpl});
-    assert.match(help, /wf install react@19.3.1/);
+    assert.match(help, /wf init\nwf install react@19.3.1/);
     assert.match(help, /wf preview ui\/main.tsx/);
     assert.equal(calls[0][0], 'webfront.developer.beginNew');
     assert.equal(calls.at(-1)[0], 'webfront.developer.commit');
     calls.length = 0;
     await assert.rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: integrity(encode('bad'))}}}, ['pi', 'ui'], {fetchImpl}), /Integrity check/);
     assert.equal(calls.length, 0);
-    for (const bytes of [starter({'package/../escape': encode('bad')}), starter({'package/webfront.project.json': encode({format: 1, entry: 'main.tsx', dependencies: {react: 'latest'}})})]) {
+    for (const bytes of [starter({'package/../escape': encode('bad')}), starter({'package/webfront.project.json': encode(recipe({dependencies: {react: 'latest'}}))})]) {
         await assert.rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: integrity(bytes)}}}, ['pi', 'ui'], {fetchImpl: async () => new Response(bytes)}));
         assert.equal(calls.length, 0);
     }
@@ -107,8 +110,8 @@ test('bootstrap configuration is pinned and rejects unsafe version/base inputs',
 test('Life recipes select their generated provider and reject invalid provider names', async () => {
     globalThis.location = new URL('http://localhost:9002/');
     try {
-        for (const provider of ['LifeUI', '../escape', ['LifeUI']]) {
-            const bytes = starter({'package/webfront.project.json': encode({format: 1, provider, entry: 'main.tsx', dependencies: {react: '19.3.1'}})});
+        for (const provider of ['LifeUI', '../escape']) {
+            const bytes = starter({'package/webfront.project.json': encode(recipe({providers: {[provider]: {entry: 'main', output: `generated/${provider}.hpp`}}}))});
             let writes = 0;
             const bridge = {cppFunction: () => async () => { writes++; return 'transaction'; }};
             const config = {starters: {life: {url: '/life-starter.tgz', integrity: integrity(bytes)}}};

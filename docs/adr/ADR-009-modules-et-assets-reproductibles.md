@@ -12,7 +12,7 @@
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Contrôle des fins de ligne LF des sources et en-têtes embarqués. | [520ca23](https://github.com/ambroise-leclerc/WebFront/commit/520ca23fa694519d9f428ed3661e64dcfdf906a2) |
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Négociation gzip/identity, décodage validé et budget de sortie. | [4be7358](https://github.com/ambroise-leclerc/WebFront/commit/4be73581ee6b9f569cb6e50aced73e27562aa38c) |
 | 2.0 | 2026-10-19 | Acceptée | Ambroise Leclerc | Génération gzip reproductible avec compresseur intégré ; distributions actualisées et runtime React ESM local. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
-| 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | À renseigner après fusion de l'issue #304. |
+| 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 
 ## État et chronologie
 

@@ -72,6 +72,8 @@ private:
         expose<&Store::write, void, std::string, std::string, std::uint64_t, Bytes>("webfront.developer.write");
         expose<&Store::commit, void, std::string>("webfront.developer.commit");
         expose<&Store::abort, void, std::string>("webfront.developer.abort");
+        expose<&Store::stateOfLines, std::string, std::string>("webfront.developer.state");
+        expose<&Store::commitGroupLines, void, std::string, std::string, std::string>("webfront.developer.commitGroup");
     }
 
     /// Registers a store operation as a bridge callback; the store stays alive as long as the callback.

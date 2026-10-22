@@ -15,7 +15,7 @@ export async function readProject(bridge, path) {
     return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }
 
-async function writeChunks(bridge, {id, path, bytes}, signal) {
+export async function writeChunks(bridge, {id, path, bytes}, signal) {
     for (let offset = 0; offset < bytes.length || offset === 0; offset += blockSize) {
         signal?.throwIfAborted();
         await call(bridge, 'write', id, path, offset, bytes.subarray(offset, offset + blockSize));

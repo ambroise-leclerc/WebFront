@@ -1,6 +1,7 @@
 #include "../fixtures/Pi.hpp"
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/DeveloperApp.hpp>
 #include <webfront/http/MimeType.hpp>
 
@@ -335,6 +336,172 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
         THEN("a pinned environment is accepted once") {
             REQUIRE_NOTHROW(app.bootstrap("developer", trusted));
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
+        }
+    }
+}
+
+namespace {
+constexpr auto manifestPath = "webfront.project.json";
+constexpr auto lockPath     = "webfront-packages.lock.json";
+const std::vector<std::string> pair{manifestPath, lockPath};
+
+void publishFile(developer::Store& store, const std::string& path, std::string_view text) {
+    const auto id = store.begin(path, false);
+    store.write(id, "output", 0, bytes(text));
+    store.commit(id);
+}
+
+// Stages new contents for the manifest and the lock, then publishes them together.
+void publishPair(developer::Store& store, std::string_view manifest, std::string_view lock, const std::string& expected) {
+    const auto first  = store.begin(manifestPath, false);
+    const auto second = store.begin(lockPath, false);
+    store.write(first, "output", 0, bytes(manifest));
+    store.write(second, "output", 0, bytes(lock));
+    store.commitGroup({first, second}, pair, expected);
+}
+
+[[nodiscard]] std::string projectState(developer::Store& store) {
+    return read(store, manifestPath) + "|" + read(store, lockPath);
+}
+
+// Stops the process at one step of a group publication, then reopens the project.
+[[nodiscard]] std::string crashAt(const std::string& step, const std::filesystem::path& project) {
+    {
+        developer::Store store{project, developer::defaultAbandonedAfter, [&step](std::string_view name) {
+                                   if (name == step)
+                                       throw developer::InjectedFault{"crash at " + step};
+                               }};
+        const auto       expected = store.state(pair);
+        REQUIRE_THROWS_AS(publishPair(store, "manifest-2", "lock-2", expected), developer::InjectedFault);
+    }
+    developer::Store reopened{project};
+    return projectState(reopened);
+}
+}  // namespace
+
+SCENARIO("A manifest and its lock are published together or not at all") {
+    TemporaryDirectory project;
+    {
+        developer::Store store{project.path()};
+        publishFile(store, manifestPath, "manifest-1");
+        publishFile(store, lockPath, "lock-1");
+    }
+    GIVEN("an installed manifest and lock") {
+        developer::Store store{project.path()};
+        WHEN("both files are published after an uninterrupted install") {
+            publishPair(store, "manifest-2", "lock-2", store.state(pair));
+            THEN("both are replaced and no journal remains") {
+                REQUIRE(projectState(store) == "manifest-2|lock-2");
+                REQUIRE(std::filesystem::is_empty(project.path() / ".webfront/developer/journal"));
+            }
+        }
+        WHEN("the process stops before the journal is committed") {
+            store.state(pair);
+            THEN("the previous state is intact after restart") {
+                REQUIRE(crashAt("before-journal", project.path()) == "manifest-1|lock-1");
+            }
+        }
+        WHEN("the process stops right after the journal is committed") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("after-journal", project.path()) == "manifest-2|lock-2");
+            }
+        }
+        WHEN("the process stops between the two replacements") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("replacement-1", project.path()) == "manifest-2|lock-2");
+            }
+        }
+        WHEN("the process stops after the second replacement") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("replacement-2", project.path()) == "manifest-2|lock-2");
+            }
+        }
+    }
+    GIVEN("a publication committed but interrupted between its replacements") {
+        {
+            developer::Store store{project.path(), developer::defaultAbandonedAfter, [](std::string_view name) {
+                                       if (name == "replacement-1")
+                                           throw developer::InjectedFault{"crash"};
+                                   }};
+            REQUIRE_THROWS_AS(publishPair(store, "manifest-2", "lock-2", store.state(pair)), developer::InjectedFault);
+        }
+        WHEN("the recovery itself is interrupted, once at each of its steps") {
+            for (const char* step : {"replacement-1", "replacement-2"}) {
+                REQUIRE_THROWS_AS(developer::Store(project.path(), developer::defaultAbandonedAfter,
+                                                   [step](std::string_view name) {
+                                                       if (name == step)
+                                                           throw developer::InjectedFault{"crash"};
+                                                   }),
+                                  developer::InjectedFault);
+            }
+            THEN("a later restart still reaches the new state") {
+                developer::Store store{project.path()};
+                REQUIRE(projectState(store) == "manifest-2|lock-2");
+                REQUIRE(std::filesystem::is_empty(project.path() / ".webfront/developer/journal"));
+            }
+        }
+    }
+    GIVEN("leftovers of a publication that never reached its commit point") {
+        const auto journal = project.path() / ".webfront/developer/journal";
+        std::filesystem::create_directories(journal / "7.d");
+        std::ofstream{journal / "7.d" / "0"} << "orphan";
+        std::ofstream{journal / "7.tmp"} << "webfront-journal 1\nwebfront.project.json\n0\n";
+        std::ofstream{journal / "8.journal"} << "webfront-journal 1\nwebfront.project.json\n0\n";
+        WHEN("the project is opened") {
+            developer::Store store{project.path()};
+            THEN("they are abandoned and the project keeps its files") {
+                REQUIRE(std::filesystem::is_empty(journal));
+                REQUIRE(projectState(store) == "manifest-1|lock-1");
+            }
+        }
+    }
+}
+
+SCENARIO("A publication prepared from stale state is refused") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    publishFile(store, manifestPath, "manifest-1");
+    publishFile(store, lockPath, "lock-1");
+    GIVEN("two browsers reading the same state") {
+        const auto firstBrowser  = store.state(pair);
+        const auto secondBrowser = store.state(pair);
+        REQUIRE(firstBrowser == secondBrowser);
+        WHEN("the first publishes, then the second does with what it read") {
+            publishPair(store, "manifest-a", "lock-a", firstBrowser);
+            THEN("the second is refused and nothing is lost") {
+                REQUIRE_THROWS_WITH(publishPair(store, "manifest-b", "lock-b", secondBrowser), Catch::Matchers::ContainsSubstring("changed since it was read"));
+                REQUIRE(projectState(store) == "manifest-a|lock-a");
+            }
+            AND_THEN("it succeeds after reading the new state again") {
+                publishPair(store, "manifest-ab", "lock-ab", store.state(pair));
+                REQUIRE(projectState(store) == "manifest-ab|lock-ab");
+            }
+        }
+        WHEN("a file changes outside the store") {
+            publishFile(store, lockPath, "lock-c");
+            THEN("the state differs and the group is refused") {
+                REQUIRE(store.state(pair) != firstBrowser);
+                REQUIRE_THROWS(publishPair(store, "manifest-b", "lock-b", firstBrowser));
+            }
+        }
+    }
+    GIVEN("a missing lock") {
+        std::filesystem::remove(project.path() / lockPath);
+        THEN("its absence is part of the state") {
+            const auto absent = store.state(pair);
+            publishFile(store, lockPath, "");
+            REQUIRE(store.state(pair) != absent);
+        }
+    }
+    GIVEN("malformed groups") {
+        const auto first = store.begin(manifestPath, false);
+        store.write(first, "output", 0, bytes("x"));
+        THEN("they are refused without changing the project") {
+            REQUIRE_THROWS(store.commitGroup({}, pair, store.state(pair)));
+            REQUIRE_THROWS(store.commitGroup({first, first}, pair, store.state(pair)));
+            REQUIRE_THROWS(store.commitGroup({first}, {lockPath}, store.state({lockPath})));
+            REQUIRE(projectState(store) == "manifest-1|lock-1");
+            store.abort(first);
         }
     }
 }

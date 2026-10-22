@@ -139,6 +139,54 @@ The PI starter remains available through `wf create pi` for existing projects an
 coverage. Its sources are maintained under `js/developer/tools/starters/pi/`; the public C++
 examples are limited to Hello World and Life. Existing embedded React/Babel providers remain supported.
 
+## Project manifest (`webfront.project.json`)
+
+Available in the next developer distribution after 0.4.1; the pinned 0.4.1 environment predates it.
+A project has one manifest, the equivalent of `package.json`, which every `wf` command reads:
+
+```json
+{
+  "format": 1,
+  "name": "life",
+  "version": "0.1.0",
+  "dependencies": {"react": "^19.3.1", "react-dom": "^19.3.1"},
+  "registry": "https://registry.npmjs.org/",
+  "scripts": {},
+  "entries": {"main": "ui/main.tsx"},
+  "providers": {"LifeUI": {"entry": "main", "output": "generated/LifeUI.hpp"}},
+  "test": {"specs": []},
+  "permissions": {}
+}
+```
+
+Only `format`, `name` and `version` are required. Validation is strict: an unknown key, a format
+newer than the environment reads, a path leaving the project, a non-HTTPS registry or origin and an
+unknown permission are errors printed in the terminal, never silently ignored. `scripts`, `test` and
+`permissions` are validated here and used by the later commands (#307, #310); permissions will only
+frame the operations of the `context` API of authorized scripts, they are not a sandbox.
+
+- `wf init [directory]` writes a minimal manifest; it never replaces an existing one.
+- `wf install <package>[@range]` resolves, downloads and verifies into the cache, then publishes the
+  manifest (the requested range, or `^version` when none was given) and the lock in a single transaction.
+- `wf install` without argument installs exactly the locked graph (like `npm ci`) when the lock agrees
+  with the manifest, resolves the manifest and creates the lock when there is none, and fails when they
+  disagree. `wf install --update` resolves the manifest again.
+- `wf preview [entry]` and `wf embed <provider>` use `entries` and `providers`; an explicit path still works.
+
+The manifest holds the intent (roots and ranges), the lock the exact resolution. The lock records a
+digest of the manifest's `dependencies` (`manifestDigest`). The project is **consistent** when they
+match, **unlocked** without a lock (no installed graph) and **desynchronized** when the dependencies
+changed since the lock was written; every command reports that state and none resolves implicitly.
+
+Both files are published by one all-or-nothing transaction (`developer::Store::commitGroup`): the
+staged files are moved under `.webfront/developer/journal/`, a journal naming them is written and
+synchronized to disk (the commit point), then each file replaces its target. Opening the project
+completes a journal that reached its commit point and abandons the others, so a crash never leaves
+a manifest and a lock that belong to different installations. The publication carries a precondition,
+the fingerprint of both files as read when the command began: if another browser or command changed
+them meanwhile, it is refused with "The project changed since it was read; run the command again" and
+nothing is lost. `wf restore` (#306) will fill the cache from a consistent lock without ever writing them.
+
 ## Dependencies, storage and limitations
 
 - `wf install` accepts exact versions, registry tags and semver ranges, resolves ordinary
@@ -150,8 +198,8 @@ examples are limited to Hello World and Life. Existing embedded React/Babel prov
 - Browser/production exports, ESM, CommonJS, TS/TSX, JSX, CSS and imported resource files are supported.
   Private package exports, network imports and unavailable Node built-ins fail. Package-specific
   build pipelines and automatic polyfills are not supplied.
-- `webfront-packages.lock.json` records exact package versions, dependency edges, source integrities
-  and requested roots. Commit it and the source TSX/CSS; the generated provider can also be committed.
+- `webfront-packages.lock.json` records exact package versions, dependency edges, source integrities,
+  requested roots and the digest of the manifest dependencies it resolved. Commit it and the source TSX/CSS; the generated provider can also be committed.
   Preview/embed consume the locked local files without resolving versions again.
 - Unpacked packages are cached by name, version and integrity under `.webfront/developer/packages/`.
   A failed install can leave unused cached packages, but the lock file remains unchanged. The tools

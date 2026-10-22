@@ -5,7 +5,7 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation de wf embed et du parcours hors ligne. | À renseigner après intégration. |
-| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | À renseigner après fusion de l'issue #304. |
+| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 
 ## Statut et date
 

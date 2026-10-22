@@ -38,5 +38,6 @@ export async function createStarter(bridge, config, [name, destination = 'ui'], 
     // A starter must never overwrite an existing directory, including a symlink or partial project.
     await publish(bridge, destination, files, {signal, replace: false});
     const install = Object.entries(recipe.dependencies).map(([pkg, version]) => `${pkg}@${version}`).join(' ');
-    return `Created ${destination}.\nwf install ${install}\nwf preview ${destination}/${recipe.entry}\nwf embed ${destination}/${recipe.entry} --output generated/${recipe.provider ?? 'PiUI'}.hpp`;
+    const output = recipe.output ?? `generated/${recipe.provider ?? 'PiUI'}.hpp`;
+    return `Created ${destination}.\nwf init\nwf install ${install}\nwf preview ${destination}/${recipe.entry}\nwf embed ${destination}/${recipe.entry} --output ${output}`;
 }

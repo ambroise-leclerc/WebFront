@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-22 | Acceptée | Ambroise Leclerc | Décision initiale : environnement bootstrap comme architecture de base, liste normative du cœur, scripts autorisés, indépendance vis-à-vis de Node.js. | À renseigner après fusion de l'issue #304. |
+| 1.0 | 2026-10-22 | Acceptée | Ambroise Leclerc | Décision initiale : environnement bootstrap comme architecture de base, liste normative du cœur, scripts autorisés, indépendance vis-à-vis de Node.js. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 
 ## Statut et date
 

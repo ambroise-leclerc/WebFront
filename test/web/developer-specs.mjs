@@ -1,6 +1,21 @@
 // Autonomous real-engine test: compiled WASM, npm graph, PI bridge, preview, cache and embedding.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const call = (name, ...args) => webFront.cppFunction(`webfront.developer.${name}`)(...args);
+async function readFile(path) {
+    const chunks = [];
+    for (let offset = 0;;) {
+        const chunk = await call('read', path, offset);
+        chunks.push(chunk);
+        offset += chunk.length;
+        if (chunk.length < 256 * 1024) return new Uint8Array(await new Blob(chunks).arrayBuffer());
+    }
+}
+async function writeFile(path, text) {
+    const id = await call('begin', path, false);
+    await call('write', id, 'output', 0, new TextEncoder().encode(text));
+    await call('commit', id);
+}
 try {
     await webFront.ready;
     for (let attempt = 0; attempt < 300; ++attempt) {
@@ -19,13 +34,26 @@ try {
     await runtime.execute(['create', 'pi'], context);
     const overwriteRefused = await runtime.execute(['create', 'pi'], context).then(() => false, () => true);
     assert(overwriteRefused, 'A starter must not replace an existing project');
+    const noManifest = await runtime.execute(['install', 'react@19.3.1'], context).then(() => false, error => /run wf init/.test(error.message));
+    assert(noManifest, 'wf install must ask for a manifest first');
+    await runtime.execute(['init'], context);
+    const initRefused = await runtime.execute(['init'], context).then(() => false, () => true);
+    assert(initRefused, 'wf init must not replace an existing manifest');
     await runtime.execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
     const lock = await runtime.readLock(webFront);
+    assert(lock.manifestDigest?.length === 64, 'The lock must record the digest of the manifest dependencies');
+    const manifest = JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
+    assert(manifest.dependencies.react === '19.3.1' && manifest.dependencies['react-dom'] === '19.3.1', 'The manifest must record the requested ranges');
+    // Entries and providers declared in the manifest drive wf preview and wf embed.
+    manifest.entries = {main: 'ui/main.tsx'};
+    manifest.providers = {PiUI: {entry: 'main', output: 'generated/PiUI.hpp'}};
+    await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
+    assert(!(await runtime.execute(['list'], context)).includes('Warning'), 'Editing entries must not desynchronize the lock');
     assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
     const listed = await runtime.execute(['list'], context);
     assert(listed.split('\n').length === 3 && listed.includes('react@19.3.1'), 'wf list must name the installed packages');
     const historyLength = history.length;
-    await runtime.execute(['preview', 'ui/main.tsx'], context);
+    await runtime.execute(['preview'], context);
     const frame = context.preview;
     for (let attempt = 0; attempt < 300; ++attempt) {
         if (frame.contentDocument?.querySelector('button')) break;
@@ -38,7 +66,7 @@ try {
         if (attempt === 99) throw new Error('React preview did not display C++ PI');
         await delay(50);
     }
-    await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
+    await runtime.execute(['embed', 'PiUI'], context);
     // Repeat the browser build to prove reproducibility, including licenses and packed gzip bytes.
     const first = await webFront.cppFunction('test.header')('PiUI');
     await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
@@ -116,6 +144,15 @@ try {
     const lifeHeader = await webFront.cppFunction('test.header')('LifeUI');
     await runtime.execute(['embed', 'life-ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
     assert(await webFront.cppFunction('test.header')('LifeUI') === lifeHeader, 'Life header must be deterministic');
+    // A dependency added by hand desynchronizes the lock: commands say so and nothing is resolved implicitly.
+    manifest.dependencies.scheduler = '*';
+    await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
+    assert((await runtime.execute(['list'], context)).startsWith('Warning'), 'A desynchronized lock must be reported');
+    const refused = await runtime.execute(['install'], context).then(() => false, error => /wf install --update/.test(error.message));
+    assert(refused, 'wf install must not resolve a desynchronized manifest');
+    delete manifest.dependencies.scheduler;
+    await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
+    assert(/Installed 3 packages/.test(await runtime.execute(['install'], context)), 'A consistent lock must install its exact graph');
     const failed = await runtime.execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
     assert(failed, 'Missing packages must reject');
     assert(JSON.stringify(await runtime.readLock(webFront)) === JSON.stringify(lock), 'A failed install must preserve the lock');
