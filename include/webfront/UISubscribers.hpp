@@ -1,4 +1,4 @@
-/// @brief Subscriptions to connected browsers (BasicWF::subscribeUIStarted).
+/// @brief Subscriptions to connecting and disconnecting browsers (BasicWF::subscribeUIStarted, subscribeUIClosed).
 #pragma once
 
 #include <algorithm>
@@ -11,7 +11,7 @@
 
 namespace webfront {
 
-/// Keeps a BasicWF::subscribeUIStarted handler registered while it lives. Destroying or resetting it
+/// Keeps a BasicWF::subscribeUIStarted or subscribeUIClosed handler registered while it lives. Destroying or resetting it
 /// unsubscribes; this is safe after the application itself was destroyed. Move-only.
 class UISubscription {
 public:
@@ -31,7 +31,7 @@ public:
         reset();
     }
 
-    /// Unsubscribes now. Takes effect for browsers that connect afterwards.
+    /// Unsubscribes now. Takes effect for browsers that connect (or disconnect) afterwards.
     void reset() {
         if (auto unsubscribe = std::exchange(cancel, {}))
             unsubscribe();
@@ -47,10 +47,10 @@ private:
 
 namespace detail {
 
-/// Handlers notified, in subscription order, of each connected browser. Thread-safe: browsers
-/// connect on the server thread while handlers may be added or removed from any thread.
+/// Handlers notified, in subscription order, of each connected (or disconnected) browser. Thread-safe:
+/// browsers connect on the server thread while handlers may be added or removed from any thread.
 template <typename UI>
-class UIStartedSubscribers : public std::enable_shared_from_this<UIStartedSubscribers<UI>> {
+class UISubscribers : public std::enable_shared_from_this<UISubscribers<UI>> {
 public:
     using Handler = std::function<void(UI)>;
 

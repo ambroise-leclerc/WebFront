@@ -138,6 +138,8 @@ public:
                 detachTransport(false);
                 auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
                 rejectPending(std::make_exception_ptr(std::runtime_error(message)));
+                // The WebSocket reports its closure once, and never when it is stopped by the server or the link.
+                eventsHandler({WebLinkEvent::Code::closed, id});
             });
         });
 

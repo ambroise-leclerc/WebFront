@@ -16,6 +16,7 @@
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -45,6 +46,11 @@ class BasicUI {
 
 public:
     BasicUI(WebFront& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
+
+    /// Identifies this browser's connection among those of the application.
+    [[nodiscard]] WebLinkId id() const noexcept {
+        return webLinkId;
+    }
 
     /**
      * @brief Injects a Javascript script in the client
@@ -77,6 +83,12 @@ public:
     /** @brief Starts a coroutine owned by the application; the returned handle can cancel it. */
     TaskHandle spawn(Task task) const {
         return webFront.spawn(std::move(task));
+    }
+
+    /// A sender completing on the server context after the duration; see BasicWF::resumeAfter.
+    template <typename Rep, typename Period>
+    [[nodiscard]] auto resumeAfter(std::chrono::duration<Rep, Period> duration) const {
+        return webFront.resumeAfter(duration);
     }
 
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
@@ -338,6 +350,14 @@ public:
         return httpServer.startTask(std::move(task));
     }
 
+    /** @brief A sender completing on the server context once the duration has elapsed. co_await propagates the
+     * task's stop token: a stop request (TaskHandle::requestStop, shutdown) completes it stopped at once.
+     */
+    template <typename Rep, typename Period>
+    [[nodiscard]] auto resumeAfter(std::chrono::duration<Rep, Period> duration) {
+        return httpServer.resumeAfter(duration);
+    }
+
     void run() {
         httpServer.run();
     }
@@ -359,6 +379,13 @@ public:
     /// lives; components use this so they never replace the application's handler.
     [[nodiscard]] UISubscription subscribeUIStarted(std::function<void(UI)> handler) {
         return uiSubscribers->subscribe(std::move(handler));
+    }
+
+    /// Adds a handler called on the server thread when a browser closes its connection, or the connection fails,
+    /// while the returned subscription lives. Its UI no longer reaches the browser. Application shutdown, which
+    /// stops every connection itself, notifies no handler.
+    [[nodiscard]] UISubscription subscribeUIClosed(std::function<void(UI)> handler) {
+        return uiClosedSubscribers->subscribe(std::move(handler));
     }
     WebLink<Net>& getLink(WebLinkId id) {
         return webLinks.at(id);
@@ -497,7 +524,8 @@ private:
     std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
-    std::shared_ptr<detail::UIStartedSubscribers<UI>>                        uiSubscribers = std::make_shared<detail::UIStartedSubscribers<UI>>();
+    std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
+    std::shared_ptr<detail::UISubscribers<UI>>                               uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>> cppFunctions;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
@@ -510,7 +538,9 @@ private:
                 uiSubscribers->notify(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::closed:
-                webLinks.erase(event.webLinkId);
+                // The link stays until the application is destroyed: UI objects of a closed browser keep a
+                // valid, closed link instead of an identifier that a later browser could reuse.
+                uiClosedSubscribers->notify(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::cppFunctionCalled:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())

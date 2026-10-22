@@ -209,6 +209,22 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
             REQUIRE(callId == 0);
             REQUIRE(futureError(result) == "Browser connection closed");
         }
+        THEN("the link reports the disconnection once") {
+            REQUIRE(events == vector{WebLinkEvent::Code::closed});
+        }
+    }
+}
+
+SCENARIO("WebLink reports a browser's close frame as its disconnection") {
+    InjectableSocket::reset();
+    vector<WebLinkEvent::Code>    events;
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 10, [&](WebLinkEvent event) { events.push_back(event.code); }, scope};
+    WHEN("the browser sends a close frame") {
+        InjectableSocket::receive(std::array{byte{0x88}, byte{0x80}, byte{1}, byte{2}, byte{3}, byte{4}});
+        THEN("the link reports one disconnection, and none when it is destroyed") {
+            REQUIRE(events == vector{WebLinkEvent::Code::closed});
+        }
     }
 }
 
