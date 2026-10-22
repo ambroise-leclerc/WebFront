@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: tools/assets/package-lock.json
+          cache-dependency-path: js/developer/vendor/package-lock.json
       - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
         with:
           cmake-version: '4.4.4'
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .cache/CPM
-          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/CMakeLists.txt') }}
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/unit/CMakeLists.txt') }}
           restore-keys: cpm-${{ runner.os }}-
       - name: Initialize MSVC environment
         if: runner.os == 'Windows'
@@ -90,9 +90,9 @@ jobs:
           sccache --version
       - name: Prepare offline developer fixtures
         run: |
-          npm ci --prefix tools/assets --ignore-scripts
-          node tools/developer/build.mjs build-developer-environment
-          node tools/developer/fixtures.mjs build-developer-environment
+          npm ci --prefix js/developer/vendor --ignore-scripts
+          node js/developer/tools/build.mjs build-developer-environment
+          node js/developer/tools/fixtures.mjs build-developer-environment
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       - name: Configure
         run: >-
@@ -208,18 +208,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build-sanitizers/fuzz/artifacts
+          mkdir -p build-sanitizers/test/fuzz/artifacts
           for decoder in messages http websocket gzip; do
-            build-sanitizers/fuzz/fuzz_$decoder build-sanitizers/fuzz/corpus/$decoder \
+            build-sanitizers/test/fuzz/fuzz_$decoder build-sanitizers/test/fuzz/corpus/$decoder \
               -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
-              -artifact_prefix=build-sanitizers/fuzz/artifacts/$decoder-
+              -artifact_prefix=build-sanitizers/test/fuzz/artifacts/$decoder-
           done
       - name: Upload fuzz findings
         if: failure() && matrix.sanitizer == 'address-undefined'
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-findings
-          path: build-sanitizers/fuzz/artifacts/
+          path: build-sanitizers/test/fuzz/artifacts/
           if-no-files-found: ignore
 
   web-integration:
@@ -258,9 +258,9 @@ jobs:
 
       - name: Prepare offline developer environment and starter fixtures
         run: |
-          npm ci --prefix tools/assets --ignore-scripts
-          node tools/developer/build.mjs build-developer-environment
-          node tools/developer/fixtures.mjs build-developer-environment
+          npm ci --prefix js/developer/vendor --ignore-scripts
+          node js/developer/tools/build.mjs build-developer-environment
+          node js/developer/tools/fixtures.mjs build-developer-environment
       - name: Configure CEF integration build
         run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
 

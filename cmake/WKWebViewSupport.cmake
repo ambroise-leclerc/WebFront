@@ -14,7 +14,7 @@ target_compile_options(WebFront INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-fblocks>")
 target_link_libraries(WebFront INTERFACE "${WEBFRONT_COCOA_FRAMEWORK}" "${WEBFRONT_WEBKIT_FRAMEWORK}")
 
 function(webfront_add_wkwebview_tests)
-    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../webtest" ABSOLUTE)
+    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/web" ABSOLUTE)
     add_executable(wkwebview_lifecycle "${webtest_source_dir}/WKWebViewLifecycle.cpp"
         "${webtest_source_dir}/WKWebViewHeaderConsumer.cpp")
     target_link_libraries(wkwebview_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)

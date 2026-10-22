@@ -25,7 +25,7 @@ sans que ses contraintes de modules C++ gagnent les applications clientes.
 Que `WEBFRONT_USE_MDDLOG=OFF` demeure le réglage par défaut. `tooling/Logger.hpp` est l’entrée
 commune ; l’option activée sélectionne la façade et lie l’adaptateur statique `WebFront_mddlog`
 (`WebFront::mddlog`).
-`logging/Logger.cpp` est la seule unité consommatrice des modules. Les consommateurs incluent
+`cmake/mddlog/Logger.cpp` est la seule unité consommatrice des modules. Les consommateurs incluent
 des en-têtes et n’importent pas les modules mddlog.
 
 L’option et les contraintes de toolchain sont cohérentes dans toutes les unités de traduction.
@@ -67,7 +67,7 @@ sans promesse de persistance d’audit ou de livraison garantie.
 ## Sources et vérification
 
 - [Contrat et matrice mddlog](../mddlog-integration.md),
-  [façade](../../include/tooling/Logger.hpp), [adaptateur](../../logging/Logger.cpp).
-- Tests : [LoggerTests](../../test/LoggerTests.cpp), [MddlogLoggerTests](../../test/MddlogLoggerTests.cpp),
-  [MddlogTransportTests](../../test/MddlogTransportTests.cpp).
+  [façade](../../include/webfront/tooling/Logger.hpp), [adaptateur](../../cmake/mddlog/Logger.cpp).
+- Tests : [LoggerTests](../../test/unit/LoggerTests.cpp), [MddlogLoggerTests](../../test/unit/MddlogLoggerTests.cpp),
+  [MddlogTransportTests](../../test/unit/MddlogTransportTests.cpp).
 - Voir [ADR-001](ADR-001-coeur-cpp23-header-only.md) et [ADR-006](ADR-006-taches-structurees-et-arret.md).

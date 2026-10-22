@@ -51,25 +51,26 @@
 
 # Embedded headers hold the exact bytes of their text sources. Freshness tests
 # re-read those sources, so Windows checkouts must preserve LF for every asset.
-assets/WebFront.js                          text eol=lf
-include/system/WebFrontJsData.hpp           text eol=lf
-assets/fallback/index.html                  text eol=lf
-assets/fallback/webfront-fallback.mjs       text eol=lf
-include/system/FallbackIndexHtmlData.hpp    text eol=lf
-include/system/FallbackModuleData.hpp       text eol=lf
-assets/components/terminal/*                text eol=lf
-assets/components/tools/*                   text eol=lf
-include/system/ToolManagerModuleData.hpp    text eol=lf
+js/core/WebFront.js                          text eol=lf
+js/core/bootstrap/*                          text eol=lf
+include/webfront/system/WebFrontJsData.hpp           text eol=lf
+js/core/fallback/index.html                  text eol=lf
+js/core/fallback/webfront-fallback.mjs       text eol=lf
+include/webfront/system/FallbackIndexHtmlData.hpp    text eol=lf
+include/webfront/system/FallbackModuleData.hpp       text eol=lf
+js/developer/components/terminal/*                text eol=lf
+js/developer/components/tools/*                   text eol=lf
+include/webfront/system/ToolManagerModuleData.hpp    text eol=lf
 third_party/xterm/*                         text eol=lf
-include/system/TerminalIndexHtmlData.hpp    text eol=lf
-include/system/TerminalModuleData.hpp       text eol=lf
-include/system/XtermModuleData.hpp          text eol=lf
-include/system/XtermCssData.hpp             text eol=lf
-include/system/XtermFitAddonData.hpp        text eol=lf
+include/webfront/system/TerminalIndexHtmlData.hpp    text eol=lf
+include/webfront/system/TerminalModuleData.hpp       text eol=lf
+include/webfront/system/XtermModuleData.hpp          text eol=lf
+include/webfront/system/XtermCssData.hpp             text eol=lf
+include/webfront/system/XtermFitAddonData.hpp        text eol=lf
 
 # The fake npm registry of the browser integration test: its packuments are served byte for byte.
-webtest/registry/*                          text eol=lf
-webtest/registry/tarballs/*                 binary
+test/web/registry/*                          text eol=lf
+test/web/registry/tarballs/*                 binary
 
 # Serialisation
 *.json     text
@@ -168,7 +169,7 @@ webtest/registry/tarballs/*                 binary
 
 
 # Fuzzer seeds retain exact protocol bytes, including HTTP CRLF.
-fuzz/corpus/** binary
+test/fuzz/corpus/** binary
 
 # Pinned third-party sources and generated dependency data keep exact bytes on Windows.
 third_party/react/*                        text eol=lf
@@ -176,13 +177,13 @@ third_party/babel/*                        text eol=lf
 third_party/jasmine/*                      text eol=lf
 third_party/jasmine/*.png                  binary
 third_party/fflate/*                       text eol=lf
-include/system/*Data.hpp                   text eol=lf
+include/webfront/system/*Data.hpp                   text eol=lf
 
 # Browser-powered developer bootstrap sources and generated payloads.
-assets/developer/*                          text eol=lf
-tools/assets/package-lock.json              text eol=lf
+js/developer/environment/*                          text eol=lf
+js/developer/vendor/package-lock.json              text eol=lf
 
 # Starter archives and every hashed distribution input must be identical on Windows.
-tools/developer/starters/pi/*               text eol=lf
+js/developer/tools/starters/pi/*               text eol=lf
 examples/life/ui/*                          text eol=lf
-tools/developer/*                           text eol=lf
+js/developer/tools/*                           text eol=lf

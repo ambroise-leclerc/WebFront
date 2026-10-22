@@ -4,7 +4,7 @@ WebKitGTKFrontend is an optional GTK 4 embedded window using the distribution's
 WebKitGTK 6.0 runtime. It never changes the system-browser default.
 
 ```cpp
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 using App = webfront::WebFrontWithFrontend<webfront::frontend::WebKitGTKFrontend>;
 int main() {
     App app;

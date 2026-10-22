@@ -19,7 +19,7 @@ Register your simulation, bootstrap the tools, then build the interface in the a
 <tr><td valign="top" width="34%">
 
 ```cpp
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 #include <bitset>
 
 using namespace std;
@@ -220,4 +220,4 @@ CI runs one combined C++ / native-browser job per desktop platform on each code 
 - Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority. Package scripts, native Node add-ons and Node APIs are unsupported. TypeScript is transformed without type checking.
 - Packaging, accessibility and native-engine deployment still need application-specific work. General DOM abstractions remain future work. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
-[Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [UI components](docs/UI_COMPONENTS.md) · [architecture decisions](docs/adr/README.md) · [contributing](CONTRIBUTING.md)
+[Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [UI components](docs/UI_COMPONENTS.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)

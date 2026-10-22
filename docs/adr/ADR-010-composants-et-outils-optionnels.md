@@ -26,7 +26,7 @@ outils web distribués par npm.
 
 ## Décision
 
-Que chaque composant réunisse une façade C++ sous `include/components/`, un fournisseur de
+Que chaque composant réunisse une façade C++ sous `include/webfront/components/`, un fournisseur de
 ressources embarquées, un module ES exportant `mount(element, options)` et les types du pont. Les noms de
 callbacks utilisent `webfront.<composant>.<fonction>`. Les assets sont optionnels, absents de
 `WebFront` tant que les providers correspondants ne sont pas sélectionnés.
@@ -79,7 +79,7 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 ## Sources et vérification
 
 - [Architecture des composants et limites](../UI_COMPONENTS.md),
-  [Terminal](../../include/components/Terminal.hpp), [ToolManager](../../include/components/ToolManager.hpp).
-- Tests : [UISubscribersTests](../../test/UISubscribersTests.cpp),
-  [ToolStoreTests](../../test/ToolStoreTests.cpp), [tools-specs](../../webtest/js/tools-specs.mjs).
+  [Terminal](../../include/webfront/components/Terminal.hpp), [ToolManager](../../include/webfront/components/ToolManager.hpp).
+- Tests : [UISubscribersTests](../../test/unit/UISubscribersTests.cpp),
+  [ToolStoreTests](../../test/unit/ToolStoreTests.cpp), [tools-specs](../../test/web/js/tools-specs.mjs).
 - Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md) et [ADR-008](ADR-008-contenu-de-confiance-et-origines.md).

@@ -1,4 +1,4 @@
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 #include WEBFRONT_LIFE_ASSETS_HEADER
 #include "Life.hpp"
 

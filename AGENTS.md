@@ -12,25 +12,25 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 
 ## Repository map
 
-- `include/`: public header-only library. `WebFront.hpp` is the main orchestration API.
-- `include/http/`: HTTP and WebSocket protocol implementation.
-- `include/weblink/`: bridge message encoding and routing.
-- `include/system/`: layered virtual filesystems and embedded web resources.
-- `include/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
-- `include/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`, and installed tools by `include/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
+- `include/webfront/`: public header-only library, included as `<webfront/...>`. `WebFront.hpp` is the main orchestration API.
+- `include/webfront/http/`: HTTP and WebSocket protocol implementation.
+- `include/webfront/weblink/`: bridge message encoding and routing.
+- `include/webfront/system/`: layered virtual filesystems and embedded web resources.
+- `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
+- `include/webfront/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/webfront/system/TerminalFS.hpp`, and installed tools by `include/webfront/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
-- `assets/`: readable browser bridge, fallback, component and developer-environment sources; production C++ remains header-only in `include/`.
-- `tools/developer/starters/pi/`, `test/fixtures/`, `webtest/fixtures/`: retained package and regression fixtures, not public example applications.
-- `test/`: Catch2 unit tests.
-- `webtest/`: Jasmine real-browser integration test.
-- `cmake/` and `.github/workflows/`: build support and CI.
+- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment, terminal/`wf` components, build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
+- `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
+- `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
+- `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `CONTRIBUTING.md`, `codecov.yml`.
+- `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `CHANGELOG.md`, `Doxyfile.in`.
 - `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
 - `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
 - `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
 
-The legacy `webfront/`, `tests/`, and `webtest` directories are not interchangeable: use `test/` for current C++ tests and `webtest/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
+The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
 
 ## Build and test commands
 
@@ -51,7 +51,7 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
 # Run one Catch2 scenario directly
-./build/test/tests "Scenario: JsFunction"
+./build/test/unit/tests "Scenario: JsFunction"
 
 # Linux real-browser integration test
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
@@ -91,8 +91,8 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 
 ## Coding and testing conventions
 
-- Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `CONTRIBUTING.md`.
-- Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `assets/`.
+- Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `.github/CONTRIBUTING.md`.
+- Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
 - Jasmine tests use native modules and must report completion to C++, close themselves, return a meaningful process status, and have a CTest timeout.

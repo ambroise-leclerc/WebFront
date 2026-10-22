@@ -1,16 +1,27 @@
 # WebFront project status
 
+## Repository layout (#320, epic #303)
+
+The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js`, `test` and `third_party`
+(removed by #319), plus tool configuration files. Headers moved to `include/webfront/` and are included
+as `<webfront/WebFront.hpp>`; the former `<WebFront.hpp>`, `<http/...>` or `<system/...>` spellings are
+removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live in `js/core/`
+(bridge, fallback, bootstrap loader and embedding modules) and `js/developer/` (environment, terminal
+components, build tools, vendoring tools); tests live in `test/{unit,web,fuzz,fixtures,cmake}`. The CTest
+case `RepositoryLayout` enforces the root. The generated-provider include changed, so the developer
+distribution is bumped to 0.4.1 and awaits its `developer-v0.4.1` publication.
+
 ## Release 0.4.0 (#200, 2026-10-21)
 
 `webfront::version` and the CMake project version are 0.4.0. The release presents the repository
 (examples, README, assets layout) and streamlines CI; it adds no library functionality, see
-`CHANGELOG.md`. The developer distribution 0.4.0 is published and archived as `developer-v0.4.0`;
+`docs/CHANGELOG.md`. The developer distribution 0.4.0 is published and archived as `developer-v0.4.0`;
 published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimental.
 
 ## Repository presentation for 0.4 (2026-10-21)
 
 - Public examples now live in `examples/`: Hello World and the three stages of Game of Life.
-  Browser bridge/component/bootstrap sources live in `assets/`; the library remains header-only.
+  Browser bridge/component/bootstrap sources live in `js/`; the library remains header-only.
   PI and Signal Studio resources required by regression tests remain fixtures, without public demo targets.
 - The README starts with Hello World and a linked Life thumbnail, then walks through the native
   bootstrap, dependency installation, preview and offline embedding. No library feature is added.
@@ -115,7 +126,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 
 `webfront::version` and the CMake project version are 0.3.0. The release adds packed `std::bitset<N>`
 bridge values (#289) and the opt-in developer environment with its packed Life demonstration (#288);
-see `CHANGELOG.md`. The developer distribution 0.3.1 is published and archived as `developer-v0.3.1`;
+see `docs/CHANGELOG.md`. The developer distribution 0.3.1 is published and archived as `developer-v0.3.1`;
 published 0.1.0 to 0.3.1 remain immutable. APIs and packaging remain experimental.
 
 ## Release 0.2.0 and native frontend epic (#253, 2026-10-19)
@@ -125,7 +136,7 @@ Compile-time alias checks, CMake selector fixtures and the Windows WebView2,
 macOS WKWebView and Linux WebKitGTK browser/lifecycle CI lanes cover the delivered
 scope. Existing runtime and packaging limitations remain documented below.
 
-`webfront::version` in `include/WebFront.hpp` is the version source for CMake.
+`webfront::version` in `include/webfront/WebFront.hpp` is the version source for CMake.
 The C++ version scenario compares the compiled constant with `PROJECT_VERSION`;
 `ReleaseVersionConsistency` also checks version tags at HEAD without network access.
 The release-version workflow checks the actual tag on tag pushes and published
@@ -215,7 +226,7 @@ See [WebKitGTK notes](WEBKITGTK.md).
   stalled on that existing regression. Each C++ scenario has a 60-second timeout.
   UBSan diagnostics fail the process. The ASan lane also runs each of three libFuzzer targets for 30 seconds.
 - `ENABLE_FUZZING=ON` builds bridge-message, HTTP-request and WebSocket-frame fuzzers
-  with ASan+UBSan. Seed corpora derive from existing unit examples and live in `fuzz/`;
+  with ASan+UBSan. Seed corpora derive from existing unit examples and live in `test/fuzz/`;
   writable copies stay in the build tree and CI uploads reproducer artifacts on failure.
   HTTP and WebSocket harnesses exercise partial receives; WebSocket decoding rejects
   oversized advertised lengths before allocating their payloads.
@@ -277,12 +288,12 @@ See [WebKitGTK notes](WEBKITGTK.md).
 
 ## UI components: the terminal and the tool manager
 
-- First opt-in UI component (#230), designed in [UI_COMPONENTS.md](UI_COMPONENTS.md): `webfront::Terminal` (`include/components/Terminal.hpp`) registers C++ commands behind an embedded xterm.js 6.0.0 terminal (`fs::TerminalFS`, served under `webfront/components/terminal/`; composed with `fs::DefaultFSWith<>`). The standalone terminal target was removed in 0.4; see the component API example in [UI_COMPONENTS.md](UI_COMPONENTS.md). The bridge protocol is unchanged.
+- First opt-in UI component (#230), designed in [UI_COMPONENTS.md](UI_COMPONENTS.md): `webfront::Terminal` (`include/webfront/components/Terminal.hpp`) registers C++ commands behind an embedded xterm.js 6.0.0 terminal (`fs::TerminalFS`, served under `webfront/components/terminal/`; composed with `fs::DefaultFSWith<>`). The standalone terminal target was removed in 0.4; see the component API example in [UI_COMPONENTS.md](UI_COMPONENTS.md). The bridge protocol is unchanged.
 - Line editing, history and Tab completion run in the browser; C++ receives whole lines and returns the output as the Promise result. A command exception rejects the Promise and is printed as an error. Output is capped at 60000 bytes because bridge strings carry a 16-bit length.
-- Covered by Catch2 (`TerminalTests.cpp`, `TerminalFSTests.cpp`), five asset freshness CTest cases and Jasmine specs (`webtest/js/terminal-specs.mjs`) in the browser integration test.
+- Covered by Catch2 (`TerminalTests.cpp`, `TerminalFSTests.cpp`), five asset freshness CTest cases and Jasmine specs (`test/web/js/terminal-specs.mjs`) in the browser integration test.
 - Verified 2026-10-14 on Linux (GCC 16.1, Unix Makefiles generator): CEF-off build with all 100 CTest cases passing; the example driven in headless Chromium (commands, errors, quoting, completion, history, `help`, `clear`); and the Jasmine suite, terminal specs included, run in headless Chromium through a scratch copy of the runner that replaces `CEFFrontend`. A deliberately broken terminal spec made that run fail. **Not verified:** the CEF/Xvfb CTest itself, Windows, macOS and Clang.
 - Limitations: no output streaming, no cancellation, no per-browser sessions, and single-row line redraw (see the design note).
-- The `wf` tool manager (#234, npm-hosted web tools installed during debugging): `webfront::ToolManager` (`include/components/ToolManager.hpp`) stores tools with `fs::ToolStore` under `.webfront/tools/`, records them in `webfront-tools.lock.json`, serves them with `fs::PackageFS` under `webfront/tools/` and runs `wf list`, `wf remove` and `wf help` in C++. `wf search`, `wf install` and `wf open` run in the page, in `wf.mjs` (`assets/components/tools/`, served by `fs::ToolManagerFS`), a terminal extension module loaded through the new `Terminal::extension()`: it fetches the packument and tarball, checks the SHA-512 `dist.integrity` with `crypto.subtle`, gunzips with `DecompressionStream`, reads the ustar archive (pax and prefixed paths included) and sends the files in 256 KiB chunks through `webfront.pkg.*`, after refusing archives unpacking to more than 256 MiB. Ctrl+C interrupts it through the `signal` the terminal passes to browser commands. The registry is set by `ToolManagerOptions::registry`. The standalone tools target was removed in 0.4; the component remains documented in [UI_COMPONENTS.md](UI_COMPONENTS.md). Covered by `ToolStoreTests.cpp`, `ToolManagerTests.cpp`, `TerminalTests.cpp` and the Jasmine specs `webtest/js/tools-specs.mjs`, which install a fixture package from a fake registry served by the test (`webtest/registry/`, regenerated by `make_fixture.py`) into a temporary directory.
+- The `wf` tool manager (#234, npm-hosted web tools installed during debugging): `webfront::ToolManager` (`include/webfront/components/ToolManager.hpp`) stores tools with `fs::ToolStore` under `.webfront/tools/`, records them in `webfront-tools.lock.json`, serves them with `fs::PackageFS` under `webfront/tools/` and runs `wf list`, `wf remove` and `wf help` in C++. `wf search`, `wf install` and `wf open` run in the page, in `wf.mjs` (`js/developer/components/tools/`, served by `fs::ToolManagerFS`), a terminal extension module loaded through the new `Terminal::extension()`: it fetches the packument and tarball, checks the SHA-512 `dist.integrity` with `crypto.subtle`, gunzips with `DecompressionStream`, reads the ustar archive (pax and prefixed paths included) and sends the files in 256 KiB chunks through `webfront.pkg.*`, after refusing archives unpacking to more than 256 MiB. Ctrl+C interrupts it through the `signal` the terminal passes to browser commands. The registry is set by `ToolManagerOptions::registry`. The standalone tools target was removed in 0.4; the component remains documented in [UI_COMPONENTS.md](UI_COMPONENTS.md). Covered by `ToolStoreTests.cpp`, `ToolManagerTests.cpp`, `TerminalTests.cpp` and the Jasmine specs `test/web/js/tools-specs.mjs`, which install a fixture package from a fake registry served by the test (`test/web/registry/`, regenerated by `make_fixture.py`) into a temporary directory.
 - Verified 2026-10-15 on macOS (Apple clang, CEF off): all CTest cases pass except `AddSubdirectoryConsumer`, which fails locally because of the outdated libc++ headers of the Command Line Tools; the Jasmine suite, tools specs included, run in Chromium through a scratch copy of the runner that replaces `CEFFrontend` (one terminal spec, "reports an application without terminal functions", fails there as it does on develop, because that browser gave its unsized terminal a two-column width); `WebFrontTools` driven against registry.npmjs.org (`wf help`, `wf search`, `wf list`, `wf install left-pad` downloaded, verified and refused as not a tool). **Not verified locally:** the CEF/Xvfb CTest (Linux only; the macOS CEF build of `webtest` fails inside stdexec), Windows.
 - Limitations of the tool manager: no semver ranges (an exact version or a dist-tag), no dependencies (a tool must bundle what it uses), no progress bar beyond step messages, sequential chunk uploads, and the trust model of `npm install`.
 - Found while building it: the C++ encoder wrapped the 16-bit length of strings over 65535 bytes (#231, fixed: such strings now fail explicitly, see "Implemented baseline"); `MimeType::toString()` mapped `csv` to `text/css` (#232, fixed: a `static_assert` now ties the name table to the enum); with GCC 16.1 and the Ninja generator, CMake's module dependency scanning (`-fmodules-ts`) crashes the compiler inside stdexec, while Unix Makefiles builds work.
@@ -314,7 +325,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - The browser integration is a timeout-bounded CTest test for CEF-enabled Linux builds and runs under Xvfb in a focused CI job, built with GCC and with Clang. CEF's `NO_UNIQUE_ADDRESS`, `ALWAYS_INLINE` and `NOINLINE` macros break stdexec headers included after CEF's headers, which only Clang 19+ (and, by stdexec's configuration, MSVC) reveals (#243): `frontend/CEF.hpp` includes `networking/SenderHeaders.hpp`, which lists every stdnet and stdexec header WebFront uses, first, and the Catch2 case `CEFMacrosTests.cpp` compiles `WebFront.hpp` after those macros. Verified 2026-10-16 on Linux with Clang 22: the CEF build of `webtest` failed before the fix and `WebFrontBrowserIntegration` passes after it. Not verified: CEF with MSVC or Apple clang.
 - `WEBFRONT_EMBED_CEF=ON` uses CEF 154.0.34 (Chromium 154.0.8037.98, package `ambroise-leclerc/CEF@154.0.34`). An existing CEF 137 build directory must be reconfigured from scratch. On Windows, `libEGL.dll`, `libGLESv2.dll`, `dxcompiler.dll`, `dxil.dll` and `vk_swiftshader_icd.json` are copied only when the distribution ships them (CEF 154 has no ANGLE DLLs, #249). Verified 2026-10-16 on Linux (GCC 16.1, Unix Makefiles): the CEF build with all 138 CTest cases passing, `WebFrontBrowserIntegration` included, and the CEF-off build with all 137; with Clang 22, the CEF build of `webtest` and `WebFrontBrowserIntegration`. **Not verified:** CEF 154 on Windows and macOS (the macOS ARM64 framework requires macOS 13.0+). The earlier multi-example build intermittently raced while copying CEF `locales/` to its shared output directory. The retained examples now use `<build>/examples`.
 - The bridge carries all JavaScript numeric typed-array variants in both directions. C++ `std::vector`, `std::array`, and `std::span` values use the matching typed-array encoding, while decoded parameters own their storage.
-- `assets/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
+- `js/core/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/webfront/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
 - Encoded HTTP assets (#274): accepted gzip is served unchanged; otherwise the server decodes
   gzip to identity with the decoded length, no `Content-Encoding` and `Vary: Accept-Encoding`.
   The default decoded-byte budget is 4 MiB and applications can override it through their buffer
@@ -324,7 +335,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
   Verified 2026-10-19 on Linux for #274: the CEF-off build/CTest suite, CEF/Xvfb integration and
   WebKitGTK integration passed. The macOS results above describe earlier platform validation.
-- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `assets/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
+- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `js/core/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
 - The fallback page awaits `webFront.ready` to display the initial bridge connection result. This promise resolves after the handshake acknowledgement and rejects if the initial connection fails or closes; it does not track later disconnects. Jasmine exercises failure against a test-owned HTTP server on an OS-assigned loopback port that rejects WebSocket upgrades, including the case where the application never consumes `ready`.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
 - The HTTP server looks files up by the request path without its query string (`/app.js?v=2` serves `app.js`); the path is cut at the first `?` before percent-decoding, so an encoded `%3F` stays part of the file name, and the `..` check applies to the decoded path only. The query is not passed to filesystems.
@@ -359,7 +370,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   The Windows CI matrix runs the shared Jasmine bridge suite and timed lifecycle tests under WebView2; CEF/Xvfb remains the Linux lane.
   The WebView2 browser label runs separately with `--no-tests=error`. CI's Evergreen bootstrapper URL is mutable;
   a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.
-- Embedded frontend lifecycle coverage is shared through `webtest/FrontendLifecycle.cpp` (#256),
+- Embedded frontend lifecycle coverage is shared through `test/web/FrontendLifecycle.cpp` (#256),
   selected with `WEBFRONT_TEST_FRONTEND` alongside Jasmine. Each registered test platform inherits
   seven timeout-bounded `web-integration` cases: no bridge, immediate page closure, rejected ready,
   failed initial navigation, encoded paths, blocked navigation/popups and an explicit navigation

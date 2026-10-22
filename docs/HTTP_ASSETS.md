@@ -46,7 +46,7 @@ All bundled assets fit under the 4 MiB default; custom applications can override
 their existing buffer policy:
 
 ```cpp
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 #include <cstddef>
 
 struct AppBuffers : webfront::http::DefaultBuffersPolicy {
