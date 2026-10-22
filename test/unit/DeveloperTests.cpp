@@ -526,3 +526,30 @@ SCENARIO("A publication prepared from stale state is refused") {
         }
     }
 }
+
+SCENARIO("New directories are durable once their parents are synchronized") {
+    TemporaryDirectory project;
+    const auto         root = std::filesystem::canonical(project.path());
+    GIVEN("a project without the journal directory") {
+        std::vector<std::filesystem::path> synced;
+        WHEN("the directories are created") {
+            developer::createDirectoriesDurably(root, root / ".webfront/developer/journal",
+                                                [&](const std::filesystem::path& directory) {
+                                                    // The directory just created must exist when its parent is synchronized.
+                                                    REQUIRE(std::filesystem::exists(directory / (synced.empty() ? ".webfront" : synced.size() == 1 ? "developer" : "journal")));
+                                                    synced.push_back(directory);
+                                                });
+            THEN("each created directory has its parent synchronized, outermost first") {
+                REQUIRE(synced == std::vector<std::filesystem::path>{root, root / ".webfront", root / ".webfront/developer"});
+            }
+        }
+        WHEN("some of them already exist") {
+            std::filesystem::create_directories(root / ".webfront/developer");
+            developer::createDirectoriesDurably(root, root / ".webfront/developer/journal",
+                                                [&](const std::filesystem::path& directory) { synced.push_back(directory); });
+            THEN("only the missing one is created and synchronized") {
+                REQUIRE(synced == std::vector<std::filesystem::path>{root / ".webfront/developer"});
+            }
+        }
+    }
+}

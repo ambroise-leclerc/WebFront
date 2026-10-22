@@ -124,7 +124,8 @@ public:
         if (fingerprint(root, paths) != expected)
             throw std::runtime_error("The project changed since it was read; run the command again");
         const auto directory = projectPath(root, journalDirectory);
-        std::filesystem::create_directories(directory);
+        // Before the commit point: the journal directory must itself survive a power cut.
+        createDirectoriesDurably(root, directory);
         const auto number = prepareJournal(directory, group);
         try {
             writeJournal(directory, number, group);

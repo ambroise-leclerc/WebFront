@@ -66,6 +66,22 @@ inline void syncDirectory(const std::filesystem::path& directory) {
 #endif
 }
 
+/// Creates the missing directories between the project root and `directory`, synchronizing the parent
+/// of each one it creates: the entry of a new directory is only durable once its parent is.
+inline void createDirectoriesDurably(const std::filesystem::path& root, const std::filesystem::path& directory,
+                                     const std::function<void(const std::filesystem::path&)>& sync = syncDirectory) {
+    auto current = root;
+    for (const auto& part : directory.lexically_relative(root)) {
+        if (part == ".")
+            continue;
+        current /= part;
+        if (!std::filesystem::exists(current)) {
+            std::filesystem::create_directory(current);
+            sync(current.parent_path());
+        }
+    }
+}
+
 /// What a group publication changes: the project file it replaces and the journal-owned file replacing it.
 struct JournalEntry {
     std::string target;
@@ -140,7 +156,7 @@ inline void rollForward(const std::filesystem::path& root, const std::filesystem
         const auto staged      = owned / source;
         const auto destination = projectPath(root, target);
         if (std::filesystem::is_regular_file(staged)) {
-            std::filesystem::create_directories(destination.parent_path());
+            createDirectoriesDurably(root, destination.parent_path());
             std::filesystem::rename(staged, destination);
         }
         directories.insert(destination.parent_path());

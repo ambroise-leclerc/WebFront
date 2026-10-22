@@ -111,6 +111,12 @@ function memoryBridge(storage = new Map()) {
     return {bridge, storage, pending: () => transactions.size};
 }
 
+const tagged = (packages, tags) => async url => {
+    const response = await packages(url);
+    const body = response.headers.get('content-type')?.includes('json') ? await response.json() : null;
+    if (!body) return response;
+    return Response.json({...body, 'dist-tags': {...body['dist-tags'], ...tags}});
+};
 const pkg = (name, version, fields = {}) => compress(tar(new Map([['package/package.json', encode({name, version, ...fields})]])));
 function registry(packages) {
     const requests = [];
@@ -260,4 +266,16 @@ test('wf install --update takes the newest version within the ranges while insta
     assert.deepEqual(Object.keys(json(storage, lockPath).packages).sort(), ['a@1.3.0', 'b@2.0.0']);
     assert.deepEqual(json(storage, manifestPath).dependencies, {a: '^1.2.0', b: '^2.0.0'});
     assert.equal((await loadProject(bridge)).status, 'consistent');
+});
+
+test('a package installed by dist-tag keeps its version when another package is installed', async () => {
+    const {bridge, storage} = await project();
+    const old = {...source(), a: {version: '1.2.0', bytes: pkg('a', '1.2.0'), older: {'1.3.0': pkg('a', '1.3.0')}}};
+    const beta = tags => options(tagged(registry(old).fetchImpl, tags));
+    await install(bridge, ['a@beta'], beta({beta: '1.2.0'}));
+    assert.deepEqual(json(storage, manifestPath).dependencies, {a: 'beta'});
+    await install(bridge, ['b'], beta({beta: '1.3.0'}));
+    assert.deepEqual(Object.keys(json(storage, lockPath).packages).sort(), ['a@1.2.0', 'b@2.0.0'], 'the tag moved but the lock did not');
+    await install(bridge, ['--update'], beta({beta: '1.3.0'}));
+    assert.deepEqual(Object.keys(json(storage, lockPath).packages).sort(), ['a@1.3.0', 'b@2.0.0']);
 });
