@@ -27,11 +27,16 @@ if(GIT_EXECUTABLE AND EXISTS "${ROOT}/.git")
     endif()
 endif()
 if(NOT from_git)
-    # A source archive holds only tracked content.
+    # A source archive holds tracked content only, minus its export-ignore entries; a local
+    # checkout without Git metadata may also hold build trees, which are not tracked content.
     file(GLOB entries LIST_DIRECTORIES true RELATIVE "${ROOT}" "${ROOT}/*" "${ROOT}/.[!.]*")
+    list(FILTER entries EXCLUDE REGEX "^build")
     set(actual ${entries})
 endif()
-list(REMOVE_ITEM actual "")
+# .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
+set(archive_optional .gitattributes .gitignore)
+list(REMOVE_ITEM actual "" ${archive_optional})
+list(REMOVE_ITEM expected ${archive_optional})
 list(REMOVE_DUPLICATES actual)
 list(SORT actual)
 list(SORT expected)

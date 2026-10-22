@@ -68,8 +68,8 @@ Check the canonical Pages URL, its `Access-Control-Allow-Origin` response and th
 Then run the optional live smoke test (the ordinary CTest suite remains entirely offline):
 
 ```sh
-./build-native/webtest/developer_integration \
-  "$PWD/build-distribution" "$PWD/build-native/webtest/public-generated" --public
+./build-native/test/web/developer_integration \
+  "$PWD/build-distribution" "$PWD/build-native/test/web/public-generated" --public
 ```
 
 This mode downloads the pinned environment and both starters from Pages, fetches exact React/React DOM
