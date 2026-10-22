@@ -28,6 +28,13 @@
   imports are refused while loading. Ctrl+C or the time limit aborts `context.signal`, then terminates the Worker
   after a 2 s grace period; staged writes are aborted, committed ones complete. Exit codes reach the terminal.
   New bridge callback `webfront.developer.list` (`developer::Store::list`).
+- `wf check [--timeout <s>]` (developer distribution 0.5.0): a TypeScript type check in a dedicated Worker with the
+  `typescript` of the lock (5.x and 6.x; older versions and the native TypeScript 7 are refused). It loads an
+  in-memory snapshot (lib files, declarations of the locked graph, project files covered by `tsconfig.json` or the
+  manifest entries; at most 10,000 files and 64 MiB), then compiles synchronously over it with TypeScript's own type
+  resolution limited to the locked graph. Diagnostics print as `file(line,column): error TScode: message`; errors
+  end with code 1. Nothing is written (`noEmit`). Ctrl+C and the time limit terminate a running compilation after
+  the 2 s grace period. The local registry fixture serves typescript 5.9.3 and 6.0.3, typed and `@types` packages.
 
 ### Changed
 

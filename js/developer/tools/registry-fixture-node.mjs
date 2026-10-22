@@ -1,6 +1,6 @@
 // Node-only part of the registry fixture: packages read from an npm ci installation, files written to a directory.
 import {readFile, writeFile, mkdir, readdir} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {resolve, dirname} from 'node:path';
 import {registryFiles} from './registry-fixture.mjs';
 
 async function collect(directory, files, path = '') {
@@ -23,6 +23,9 @@ export async function installedPackage(nodeModules, name) {
 export async function writeRegistry(directory, packages) {
     const {files, integrities} = await registryFiles(packages);
     await mkdir(directory, {recursive: true});
-    for (const [name, bytes] of files) await writeFile(resolve(directory, name), bytes);
+    for (const [name, bytes] of files) {
+        await mkdir(dirname(resolve(directory, name)), {recursive: true});
+        await writeFile(resolve(directory, name), bytes);
+    }
     return integrities;
 }

@@ -220,7 +220,7 @@ CI runs one combined C++ / native-browser job per desktop platform on each code 
 - WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there; avoid blocking it. Native windows must be created and shown on the main thread. Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
 - JavaScript calls to C++ always return Promises. C++ `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns `std::future<R>`. Missing functions, exceptions, malformed replies and disconnects fail the typed call.
 - The binary bridge supports scalars, strings, tuples, numeric typed arrays and packed bitsets. Arbitrary objects do not cross it. Strings have a 16-bit encoded length limit.
-- Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority. Package scripts, native Node add-ons and Node APIs are unsupported. TypeScript is transformed without type checking.
+- Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority. Package scripts, native Node add-ons and Node APIs are unsupported. Previews transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - Packaging, accessibility and native-engine deployment still need application-specific work. General DOM abstractions remain future work. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
 [Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [UI components](docs/UI_COMPONENTS.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)

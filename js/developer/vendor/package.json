@@ -12,6 +12,8 @@
     "jasmine-core": "7.0.2",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "semver": "7.7.3"
+    "semver": "7.7.3",
+    "typescript": "6.0.3",
+    "typescript5": "npm:typescript@5.9.3"
   }
 }

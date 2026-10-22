@@ -9,6 +9,7 @@ import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
+import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -176,14 +177,29 @@ async function exec(args, context) {
     return syncNotice(project) + await runModule(context, project, {label: `${id}:${name}`, entry, args: extra, deadline: runDeadline(timeout, context.deadline)});
 }
 
+const checkWorker = () => new Worker(new URL('./typecheck-worker.mjs', import.meta.url), {type: 'module'});
+
+// wf check [--timeout <seconds>]: a TypeScript type check with the locked typescript, in a Worker that writes nothing.
+// snapshotBounds lowers the snapshot's bounds for the integration test.
+async function check(args, {bridge, signal, write = () => {}, createWorker = checkWorker, deadline, snapshotBounds}) {
+    const {timeout} = parseCheckOptions(args);
+    const project = await loadManifest(bridge);
+    const [typescript] = typescriptPackage(project.lock);
+    const host = checkHost(bridge);
+    const outcome = await runWorker({createWorker, host, signal, timeout: secondsLeft(runDeadline(timeout, deadline)), write,
+        message: {lock: project.lock, typescript, entries: Object.values(project.manifest.entries ?? {}), bounds: snapshotBounds}});
+    await host.stop();
+    return syncNotice(project) + runResult('Type check', outcome, host.publications);
+}
+
 async function list(_args, {bridge}) {
     const project = await loadProject(bridge);
     const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
-const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, preview, embed, list, help};
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;

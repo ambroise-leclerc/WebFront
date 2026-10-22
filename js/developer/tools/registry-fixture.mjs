@@ -6,8 +6,11 @@
 import {tar} from './archive.mjs';
 import {compress} from '../environment/embed.mjs';
 
-/** Pinned packages copied from js/developer/vendor/node_modules, at the versions of its package-lock.json. */
-export const pinnedPackages = ['jasmine-core', 'react', 'react-dom', 'scheduler'];
+/**
+ * Pinned packages copied from js/developer/vendor/node_modules, at the versions of its package-lock.json; typescript5
+ * is the npm alias of the typescript 5.x that wf check is also tested with.
+ */
+export const pinnedPackages = ['jasmine-core', 'react', 'react-dom', 'scheduler', 'typescript', 'typescript5'];
 
 const encoder = new TextEncoder();
 async function integrity(bytes) {
@@ -39,6 +42,21 @@ export default async function (context) {
 }
 `;
 
+// Packages typed for wf check: declarations from the "types" condition of "exports" (where esbuild would take the
+// browser build) importing a dependency that is not a root, from "typings", and from @types only; and a typescript
+// older than the versions wf check supports.
+const typedPackages = () => [
+    synthetic('webfront-fixture-typed', '1.0.0', {exports: {'.': {types: './index.d.ts', browser: './browser.js', import: './index.js'}},
+        dependencies: {'webfront-fixture-shape': '^1.0.0'}}, {
+        'index.d.ts': "import type {Shape} from 'webfront-fixture-shape';\nexport declare const answer: number;\nexport declare function area(shape: Shape): number;\n",
+        'browser.js': 'export const answer = 42;\nexport const area = shape => shape.width * shape.height;\n'}),
+    synthetic('webfront-fixture-shape', '1.0.0', {types: 'shape.d.ts'}, {'shape.d.ts': 'export interface Shape { width: number; height: number }\n'}),
+    synthetic('webfront-fixture-legacy', '1.0.0', {typings: 'types/legacy.d.ts'}, {'types/legacy.d.ts': "export declare const legacy: 'yes';\n"}),
+    synthetic('webfront-fixture-untyped', '1.0.0'),
+    synthetic('@types/webfront-fixture-untyped', '1.0.0', {types: 'index.d.ts'}, {'index.d.ts': 'export declare function greet(name: string): string;\n'}),
+    synthetic('typescript', '4.9.5', {main: 'lib/typescript.js'}, {'lib/typescript.js': 'module.exports = {version: "4.9.5"};\n'}),
+];
+
 /**
  * Edge cases: a dependency range under which a newer version than the locked one exists (a restore must not move
  * to it), a published archive that no longer matches the integrity of its packument, a package with a WebFront
@@ -52,25 +70,26 @@ export const syntheticPackages = () => [
     synthetic('webfront-fixture-tool', '1.0.0', {dependencies: {'webfront-fixture-lib': '^1.0.0'},
         webfront: {bin: {'webfront-fixture-tool': './bin/tool.mjs'}}}, {'bin/tool.mjs': toolEntry}),
     synthetic('webfront-fixture-nodebin', '1.0.0', {bin: {'webfront-fixture-nodebin': 'cli.js'}}, {'cli.js': 'console.log(1);\n'}),
+    ...typedPackages(),
 ];
 
 function byName(packages) {
     const names = new Map();
-    for (const pkg of packages) {
-        if (pkg.manifest.name.includes('/')) throw new Error('Scoped packages are not supported by the registry fixture');
-        names.set(pkg.manifest.name, [...names.get(pkg.manifest.name) ?? [], pkg]);
-    }
+    for (const pkg of packages) names.set(pkg.manifest.name, [...names.get(pkg.manifest.name) ?? [], pkg]);
     return names;
 }
 
-/** The registry's files: `<name>` packuments and `<name>-<version>.tgz` archives, and each package's integrity. */
+/**
+ * The registry's files: `<name>` packuments (`@scope/<name>` in a scope directory, which the client requests as
+ * `@scope%2f<name>`) and `<name>-<version>.tgz` archives (`scope-<name>-<version>.tgz`), and each package's integrity.
+ */
 export async function registryFiles(packages) {
     const files = new Map();
     const integrities = {};
     for (const [name, versions] of byName(packages)) {
         const described = {};
         for (const {manifest, files: contents, tampered} of versions) {
-            const file = `${name}-${manifest.version}.tgz`;
+            const file = `${name.replace(/^@/, '').replace('/', '-')}-${manifest.version}.tgz`;
             const bytes = archive(contents);
             files.set(file, tampered ? archive(new Map([...contents, ['TAMPERED', encoder.encode('changed')]])) : bytes);
             integrities[`${name}@${manifest.version}`] = await integrity(bytes);
