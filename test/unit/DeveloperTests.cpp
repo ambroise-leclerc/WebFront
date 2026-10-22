@@ -759,9 +759,9 @@ SCENARIO("A project directory is listed without leaving the project") {
         return std::string(bytes.begin(), bytes.end());
     };
     GIVEN("files and a subdirectory") {
-        THEN("names are sorted, one per line, and directories end with a slash") {
-            REQUIRE(text("ui") == "b.css\nmain.tsx\nparts/");
-            REQUIRE(text("ui/parts") == "a.ts");
+        THEN("names are a sorted JSON array, and directories end with a slash") {
+            REQUIRE(text("ui") == R"(["b.css","main.tsx","parts/"])");
+            REQUIRE(text("ui/parts") == R"(["a.ts"])");
             REQUIRE_THAT(text(""), Catch::Matchers::ContainsSubstring("ui/"));
         }
     }
@@ -770,11 +770,28 @@ SCENARIO("A project directory is listed without leaving the project") {
         std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape", error);
         if (!error) {
             THEN("it is omitted, and listing through it is refused") {
-                REQUIRE(text("ui") == "b.css\nmain.tsx\nparts/");
+                REQUIRE(text("ui") == R"(["b.css","main.tsx","parts/"])");
                 REQUIRE_THROWS_AS(store.list("ui/escape"), std::invalid_argument);
             }
         }
     }
+    GIVEN("a link whose target cannot be resolved, because it points to itself") {
+        std::error_code error;
+        std::filesystem::create_symlink(project.path() / "ui" / "loop", project.path() / "ui" / "loop", error);
+        if (!error) {
+            THEN("only that entry is omitted") {
+                REQUIRE(text("ui") == R"(["b.css","main.tsx","parts/"])");
+            }
+        }
+    }
+#ifndef _WIN32
+    GIVEN("a file whose name contains a line break") {
+        std::ofstream(project.path() / "ui" / "a\nb").put('x');
+        THEN("it is one escaped entry, not two") {
+            REQUIRE(text("ui") == R"(["a\u000ab","b.css","main.tsx","parts/"])");
+        }
+    }
+#endif
     GIVEN("a missing directory, a file or a path escaping the project") {
         THEN("listing fails") {
             REQUIRE_THROWS_WITH(store.list("missing"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));

@@ -1,7 +1,7 @@
 // wf run and wf exec: WebFront scripts run in a dedicated Worker; the page answers their context calls under the
 // manifest permissions, publishes with developer::Store and stops the Worker on Ctrl+C or at the time limit.
 import {call, readProject, writeChunks} from './io.mjs';
-import {checkRead, checkWrite} from './permissions.mjs';
+import {checkRead, checkWrite, listable} from './permissions.mjs';
 import {manifestPath} from './manifest.mjs';
 import {safePackagePath} from './paths.mjs';
 
@@ -17,6 +17,10 @@ export class ScriptExit extends Error {
         this.exitCode = exitCode;
     }
 }
+
+/** The deadline of a run: its own limit, never later than the deadline of the wf script that started it. */
+export const runDeadline = (timeout, inherited = Infinity, now = Date.now()) => Math.min(now + timeout * 1000, inherited);
+export const secondsLeft = (deadline, now = Date.now()) => Math.max(0, (deadline - now) / 1000);
 
 // [--timeout <seconds>] before the script or package; everything after it belongs to the script.
 export function parseRunOptions(args, usage) {
@@ -50,13 +54,15 @@ export function scriptCommand(manifest, name, args, tokenize, depth = 0) {
     return {kind: 'module', entry: {namespace: 'project', path: safePackagePath(first)}, args: [...words, ...args]};
 }
 
-function lockedPackage(lock, name) {
-    const root = lock?.roots?.[name];
-    if (root) return [root.id, lock.packages[root.id]];
+/** The locked package a name designates, as [id, node]: the root of that name, else its only version; null if absent. */
+export function lockedPackage(lock, name) {
+    if (lock?.roots && Object.hasOwn(lock.roots, name)) {
+        const {id} = lock.roots[name];
+        return [id, lock.packages[id]];
+    }
     const found = Object.entries(lock?.packages ?? {}).filter(([, node]) => node.name === name);
-    if (found.length === 1) return found[0];
     if (found.length > 1) throw new Error(`${name} is locked at several versions; install it as a root to choose one`);
-    throw new Error(`${name} is not installed: run wf install ${name}`);
+    return found[0] ?? null;
 }
 
 function binEntries(id, manifest) {
@@ -71,7 +77,9 @@ function binEntries(id, manifest) {
 export function execTarget(lock, spec) {
     const colon = spec.indexOf(':', spec.startsWith('@') ? spec.indexOf('/') : 0);
     const [name, entryName] = colon < 0 ? [spec, undefined] : [spec.slice(0, colon), spec.slice(colon + 1)];
-    const [id, node] = lockedPackage(lock, name);
+    const locked = lockedPackage(lock, name);
+    if (!locked) throw new Error(`${name} is not installed: run wf install ${name}`);
+    const [id, node] = locked;
     const entries = binEntries(id, node.manifest);
     const names = Object.keys(entries);
     const chosen = entryName ?? (names.length === 1 ? names[0] : undefined);
@@ -85,8 +93,9 @@ export function execTarget(lock, spec) {
 const decoder = new TextDecoder();
 
 /**
- * The page side of a run: answers the Worker's context calls. Each write is a transaction of its own; after stop(),
- * a transaction still staging is aborted, and one whose commit was sent completes or fails atomically in C++.
+ * The page side of a run: answers the Worker's context calls. Each write is a transaction of its own. When the
+ * script ends by itself, finish() lets the writes it did not await complete; after stop() (Ctrl+C, time limit), a
+ * transaction still staging is aborted, and one whose commit was sent completes or fails atomically in C++.
  */
 export function scriptHost({bridge, permissions, lock}) {
     const controller = new AbortController();
@@ -98,8 +107,9 @@ export function scriptHost({bridge, permissions, lock}) {
         if (!(bytes instanceof Uint8Array)) throw new TypeError('context.project.write expects a string or a Uint8Array');
         const publication = {path: target, state: 'staging'};
         publications.push(publication);
-        const id = await call(bridge, 'begin', target, false);
+        let id = null;
         try {
+            id = await call(bridge, 'begin', target, false);
             await writeChunks(bridge, {id, path: 'output', bytes}, controller.signal);
             controller.signal.throwIfAborted();
             publication.state = 'committing';
@@ -107,21 +117,24 @@ export function scriptHost({bridge, permissions, lock}) {
             publication.state = 'applied';
         } catch (error) {
             // A refused commit keeps its transaction in the store: it is aborted too, so its staging is removed.
-            publication.state = publication.state === 'committing' ? 'failed' : 'abandoned';
-            await call(bridge, 'abort', id).catch(() => {});
+            // Abandoned: staged when the run was stopped; failed: refused by the store, or never staged.
+            const stopped = controller.signal.aborted && publication.state !== 'committing';
+            publication.state = stopped ? 'abandoned' : 'failed';
+            if (id !== null) await call(bridge, 'abort', id).catch(() => {});
             throw error;
         }
     }
 
     const operations = {
         read: path => readProject(bridge, checkRead(permissions, path)),
-        list: async path => {
-            const text = decoder.decode(await call(bridge, 'list', checkRead(permissions, path)));
-            return text ? text.split('\n') : [];
+        list: async (directory = '') => {
+            const {path, keep} = listable(permissions, directory);
+            return JSON.parse(decoder.decode(await call(bridge, 'list', path))).filter(keep);
         },
         write,
+        // The package wf exec and the bundle would use: the root of that name, else its only locked version.
         resolve: name => {
-            const node = Object.values(lock?.packages ?? {}).find(candidate => candidate.name === name);
+            const node = lockedPackage(lock, name)?.[1];
             return node ? {name: node.name, version: node.version, integrity: node.integrity} : null;
         },
     };
@@ -134,6 +147,14 @@ export function scriptHost({bridge, permissions, lock}) {
             const promise = operations[operation](...args);
             inflight.add(promise);
             try { return await promise; } finally { inflight.delete(promise); }
+        },
+        // After a normal end: the writes the script did not await complete, then the host stops answering. Those
+        // writes are marked, since the script never learnt whether they failed.
+        async finish() {
+            for (const publication of publications)
+                if (publication.state === 'staging' || publication.state === 'committing') publication.unawaited = true;
+            while (inflight.size) await Promise.allSettled([...inflight]);
+            await this.stop();
         },
         // Stops answering, aborts the transactions still staging and waits for those already committing.
         async stop() {
@@ -195,21 +216,27 @@ export function runWorker({createWorker, host, message, signal, timeout = defaul
     });
 }
 
-function publicationReport(publications) {
+// After a stop, every write is reported; after a normal end, only the failures of the writes the script did not await.
+function publicationReport(all, stopped) {
+    const publications = stopped ? all : all.filter(publication => publication.unawaited);
     const by = state => publications.filter(publication => publication.state === state).map(({path}) => path);
     const lines = [];
-    if (by('applied').length) lines.push(`Applied before the stop: ${by('applied').join(', ')}`);
+    if (stopped && by('applied').length) lines.push(`Applied before the stop: ${by('applied').join(', ')}`);
     if (by('abandoned').length) lines.push(`Abandoned, unchanged: ${by('abandoned').join(', ')}`);
     if (by('failed').length) lines.push(`Failed, unchanged: ${by('failed').join(', ')}`);
     return lines;
 }
 
-/** The terminal's result of a run: a summary for code 0, a ScriptExit otherwise. */
+/**
+ * The terminal's result of a run: a summary when the script ended with code 0 and every write was applied, a
+ * ScriptExit otherwise. A write that was not applied, even one the script did not await, is never silent.
+ */
 export function runResult(label, outcome, publications) {
-    if (outcome.code === 0 && outcome.reason === 'exit') return `${label} completed.`;
     const stopped = {interrupted: 'stopped by Ctrl+C', timeout: 'stopped at its time limit'}[outcome.reason];
+    const report = publicationReport(publications, stopped !== undefined);
+    if (outcome.code === 0 && !stopped && !report.length) return `${label} completed.`;
     const forced = outcome.forced ? ` (terminated after the ${outcome.forced / 1000} s grace period)` : '';
-    const how = stopped ? `${stopped}${forced}` : `exited with code ${outcome.code}`;
-    const lines = [outcome.error, `${label} ${how}`, ...(stopped ? publicationReport(publications) : [])].filter(Boolean);
-    throw new ScriptExit(lines.join('\r\n'), outcome.code);
+    const code = outcome.code === 0 && !stopped ? 1 : outcome.code;
+    const how = stopped ? `${stopped}${forced}` : outcome.code === 0 ? 'ended without applying all its writes' : `exited with code ${outcome.code}`;
+    throw new ScriptExit([outcome.error, `${label} ${how}`, ...report].filter(Boolean).join('\r\n'), code);
 }

@@ -3,8 +3,9 @@
 // APIs, so that they can move to wf test.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {checkRead, checkWrite, checkFetch, scriptCommand, parseRunOptions, execTarget, scriptHost, runWorker, runResult,
-    ScriptExit, nodeBuiltin, validateManifest} from '../environment/packages.bundle.mjs';
+import {checkRead, checkWrite, checkFetch, listable, scriptCommand, parseRunOptions, execTarget, lockedPackage, scriptHost,
+    runWorker, runResult, runDeadline, secondsLeft, ScriptExit, nodeBuiltin, nodeImport, createFinder, validateManifest}
+    from '../environment/packages.bundle.mjs';
 import {memoryBridge} from './memory-bridge.mjs';
 
 const encoder = new TextEncoder();
@@ -229,7 +230,7 @@ test('a refused commit is aborted too, so no transaction or staging is left behi
 });
 
 // Loads a fresh instance of the real script Worker module, with `self` and module URLs standing in for the browser's.
-async function scriptWorker(code) {
+async function scriptWorker(code, granted = {}) {
     const messages = [];
     const create = URL.createObjectURL;
     globalThis.self = {postMessage: message => messages.push(message)};
@@ -238,7 +239,7 @@ async function scriptWorker(code) {
     try {
         await import(`../environment/script-worker.mjs?instance=${Math.random()}`);
         const worker = globalThis.self;
-        worker.onmessage({data: {type: 'run', code, args: [], permissions: {}, base: 'http://localhost/'}});
+        worker.onmessage({data: {type: 'run', code, args: [], permissions: granted, base: 'http://localhost/'}});
         await new Promise(resolve => setTimeout(resolve, 30));
         return {messages, worker};
     } finally {
@@ -259,4 +260,108 @@ test('context.exit stops the script at once, even when it is not awaited', async
         await context.project.write('generated/x', 'x').catch(error => context.console.log(error.message));
     };`);
     assert.deepEqual(caught.messages, [{type: 'exit', code: 4}], 'nothing reaches the page after the first exit');
+});
+
+test('a write the script did not await completes after a normal end, and its failure is reported', async () => {
+    const memory = project();
+    const host = scriptHost({bridge: memory.bridge, permissions, lock: null});
+    const unawaited = host.handle({operation: 'write', args: ['generated/later.txt', encoder.encode('later')]});
+    await host.finish();
+    await unawaited;
+    assert.equal(decoder.decode(memory.storage.get('generated/later.txt')), 'later');
+    assert.equal(runResult('Script gen', {reason: 'exit', code: 0}, host.publications), 'Script gen completed.');
+    const failing = scriptHost({bridge: {cppFunction: name => name.endsWith('.commit')
+        ? async () => { throw new Error('Disk full'); } : memory.bridge.cppFunction(name)}, permissions, lock: null});
+    const lost = failing.handle({operation: 'write', args: ['generated/lost.txt', encoder.encode('x')]}).catch(() => {});
+    await failing.finish();
+    await lost;
+    assert.throws(() => runResult('Script gen', {reason: 'exit', code: 0}, failing.publications),
+        error => error.exitCode === 1 && /ended without applying all its writes/.test(error.message) && /Failed, unchanged: generated\/lost.txt/.test(error.message));
+    // A failure the script awaited is its own to handle: the run still completes.
+    const handled = scriptHost({bridge: {cppFunction: name => name.endsWith('.commit')
+        ? async () => { throw new Error('Disk full'); } : memory.bridge.cppFunction(name)}, permissions, lock: null});
+    await assert.rejects(handled.handle({operation: 'write', args: ['generated/x.txt', encoder.encode('x')]}), /Disk full/);
+    await handled.finish();
+    assert.equal(runResult('Script gen', {reason: 'exit', code: 0}, handled.publications), 'Script gen completed.');
+    assert.equal(memory.pending(), 0);
+});
+
+test('the project root and the directories leading to granted paths are listable, filtered', async () => {
+    const granted = {files: ['ui/parts'], publish: ['generated']};
+    assert.equal(listable(granted, 'ui/parts').keep('anything'), true);
+    const root = listable(granted, '');
+    assert.deepEqual(['ui/', 'generated/', 'secret/', 'README.md'].filter(root.keep), ['ui/', 'generated/']);
+    assert.deepEqual(['parts/', 'main.tsx'].filter(listable(granted, 'ui').keep), ['parts/']);
+    assert.equal(listable(granted, '.').path, '');
+    assert.throws(() => listable(granted, 'secret'), /Permission denied: listing secret/);
+    assert.throws(() => listable({}, ''), /Permission denied: listing the project root/);
+    const memory = project();
+    const host = scriptHost({bridge: memory.bridge, permissions: granted, lock: null});
+    assert.deepEqual(await host.handle({operation: 'list', args: ['']}), ['generated/', 'ui/']);
+    assert.deepEqual(await host.handle({operation: 'list', args: []}), ['generated/', 'ui/'], 'list() lists the root');
+    assert.deepEqual(await host.handle({operation: 'list', args: ['ui']}), ['parts/']);
+});
+
+test('a time limit also bounds the scripts run through wf commands', () => {
+    const outer = runDeadline(5, undefined, 1000);
+    assert.equal(outer, 6000);
+    assert.equal(runDeadline(600, outer, 2000), 6000, 'a nested run keeps the earlier deadline');
+    assert.equal(runDeadline(1, outer, 2000), 3000, 'and may set an earlier one');
+    assert.equal(secondsLeft(6000, 2000), 4);
+    assert.equal(secondsLeft(6000, 7000), 0);
+});
+
+test('a locked name is looked up as an own key, and resolve() designates the package wf exec uses', async () => {
+    const lock = lockOf(node('tool', '2.0.0', {webfront: {bin: 'bin/tool.mjs'}}));
+    lock.packages['tool@1.0.0'] = node('tool', '1.0.0', {});
+    assert.throws(() => execTarget(lock, 'constructor'), /constructor is not installed/);
+    assert.equal(lockedPackage(lock, 'toString'), null);
+    assert.equal(lockedPackage(lock, 'tool')[0], 'tool@2.0.0');
+    const host = scriptHost({bridge: project().bridge, permissions, lock});
+    assert.equal((await host.handle({operation: 'resolve', args: ['tool']})).version, '2.0.0', 'the root, not a transitive version');
+    assert.equal(await host.handle({operation: 'resolve', args: ['hasOwnProperty']}), null);
+});
+
+test('the Node.js import filter reaches the built-in modules whose names contain digits', () => {
+    for (const specifier of ['http2', 'v8', 'node:v8', 'fs/promises', 'worker_threads']) assert.ok(nodeImport.test(specifier), specifier);
+    assert.equal(nodeBuiltin('http2'), 'http2');
+    assert.equal(nodeBuiltin('v8'), 'v8');
+});
+
+test('the script compiler reads package files on demand, only those it resolves', async () => {
+    const lock = lockOf(node('big', '1.0.0', {}, ['package.json', 'index.js', ...Array.from({length: 200}, (_, i) => `lib/${i}.js`)]));
+    lock.packages['big@1.0.0'].key = 'big@1.0.0-key';
+    const reads = [];
+    const readProject = async path => { reads.push(path); return encoder.encode('x'); };
+    const {find} = createFinder(null, readProject, new Map(), lock);
+    assert.deepEqual(await find('npm', 'big@1.0.0/index'), {path: 'big@1.0.0/index.js', namespace: 'npm'});
+    assert.deepEqual(reads, ['.webfront/developer/packages/big@1.0.0-key/index.js'], 'only the resolved file is read');
+});
+
+test('context.fetch rejects outside its permissions, accepts a Request and does not follow redirects', async () => {
+    const requests = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async request => {
+        requests.push(request.url);
+        return request.url.endsWith('/moved') ? new Response('', {status: 302, headers: {location: 'https://elsewhere.test/'}}) : new Response('ok');
+    };
+    try {
+        const {messages} = await scriptWorker(`export default async context => {
+            const outcome = [];
+            const refused = context.fetch('https://other.test/');
+            outcome.push(refused instanceof Promise);
+            await refused.catch(error => outcome.push(error.message));
+            outcome.push(await (await context.fetch(new Request('https://api.test/data'))).text());
+            await context.fetch('https://api.test/moved').catch(error => outcome.push(error.message));
+            context.console.log(JSON.stringify(outcome));
+        };`, {fetch: ['https://api.test']});
+        const outcome = JSON.parse(messages.find(message => message.type === 'console').text);
+        assert.equal(outcome[0], true, 'a refusal is a rejected promise, not a synchronous exception');
+        assert.match(outcome[1], /Permission denied: fetching https:\/\/other.test/);
+        assert.equal(outcome[2], 'ok');
+        assert.match(outcome[3], /does not follow redirects/);
+        assert.deepEqual(requests, ['https://api.test/data', 'https://api.test/moved'], 'the refused origin is never requested');
+    } finally {
+        globalThis.fetch = realFetch;
+    }
 });

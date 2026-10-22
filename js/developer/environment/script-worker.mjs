@@ -45,6 +45,19 @@ function exit(code = 0) {
 }
 
 const decoder = new TextDecoder();
+const redirected = response => response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400 && response.headers.has('location'));
+
+// fetch to an origin of permissions.fetch. A URL or a Request is accepted; a refusal rejects like the other context
+// operations. Redirects are not followed, since their target could be any origin: the caller requests the final URL.
+async function contextFetch(permissions, base, input, init = {}) {
+    if (exited) throw new Error('The script has exited');
+    const target = checkFetch(permissions, input instanceof Request ? input.url : input, base);
+    const request = new Request(input instanceof Request ? input : target, {...init, redirect: 'manual', signal: init.signal ?? controller.signal});
+    const response = await fetch(request);
+    if (redirected(response))
+        throw new Error(`context.fetch does not follow redirects: ${target.href} redirects; request the final URL, whose origin permissions.fetch must list`);
+    return response;
+}
 
 function createContext({args, permissions, base}) {
     return Object.freeze({
@@ -58,8 +71,7 @@ function createContext({args, permissions, base}) {
             list: (path = '') => call('list', path),
         }),
         packages: Object.freeze({resolve: name => call('resolve', name)}),
-        fetch: (url, init = {}) => exited ? Promise.reject(new Error('The script has exited'))
-            : fetch(checkFetch(permissions, url, base), {...init, signal: init.signal ?? controller.signal}),
+        fetch: (input, init) => contextFetch(permissions, base, input, init),
         exit,
     });
 }

@@ -258,7 +258,8 @@ WebFront scripts replace npm scripts and `npx` for producing a project's resourc
   package: the field `webfront.bin` of its `package.json`, a path or an object naming paths. npm's `bin` is never run:
   a package with only a `bin` (a Node.js program) is refused, as is a browser package without `webfront.bin`.
 
-The module is bundled by esbuild-wasm with its locked dependencies and runs in a dedicated Worker. It exports
+The module is bundled by esbuild-wasm with its locked dependencies (JSX with the automatic runtime, as for previews)
+and runs in a dedicated Worker; only the package files it imports are read from the cache. It exports
 `default async function (context)`, where `context` offers:
 
 | Member | Behavior |
@@ -267,10 +268,10 @@ The module is bundled by esbuild-wasm with its locked dependencies and runs in a
 | `signal` | An `AbortSignal` aborted by Ctrl+C and by the time limit. |
 | `console` | `log`/`info`/`debug` and `warn`/`error`, streamed to the terminal; the Worker's global `console` too. |
 | `project.read(path)`, `readText(path)` | A project file as bytes or text, under `permissions.files` or `publish`. |
-| `project.list(path)` | The names in a project directory (directories end with `/`), under the same permissions. |
+| `project.list(path = '')` | The names in a project directory (directories end with `/`). A readable directory is listed whole; the root and the directories leading to granted paths list only the entries leading to them. |
 | `project.write(path, data)` | Publishes a string or `Uint8Array` with `developer::Store`, under `permissions.publish`. |
 | `packages.resolve(name)` | `{name, version, integrity}` of a locked package, or `null`. |
-| `fetch(url, init)` | `fetch` to an origin listed in `permissions.fetch`. |
+| `fetch(input, init)` | `fetch` of a URL or a `Request` to an origin listed in `permissions.fetch`; a refusal rejects. Redirects are not followed, since their target could be any origin: the promise rejects and the script requests the final URL. |
 | `exit(code)` | Ends the run with an exit code from 0 to 255; it throws, so the statements after it do not run, and nothing the script does afterwards reaches the page. |
 
 A `context` operation outside the permissions rejects with an explicit error. The manifest, the lock and
@@ -282,9 +283,11 @@ provided.
 
 Ctrl+C first aborts `context.signal`; a script still running two seconds later (the grace period) is terminated with
 `worker.terminate()`, which also stops a loop that never returns to the event loop. The time limit (`--timeout`,
-600 seconds by default, from 1 to 3600) applies the same sequence. The terminal stays usable. Each write is a
-transaction of its own: at a stop, one still staging is aborted and leaves the file unchanged, and one whose commit
-was already sent completes atomically; the terminal lists the publications applied and abandoned. A script that
+600 seconds by default, from 1 to 3600) applies the same sequence; it also bounds the scripts that the script runs
+through `wf` commands, whatever their own limit. The terminal stays usable. Each write is a transaction of its own:
+at a stop, one still staging is aborted and leaves the file unchanged, and one whose commit was already sent
+completes atomically; the terminal lists the publications applied and abandoned. When a script ends by itself, the
+writes it did not await complete first; if one of them fails, the run ends with code 1 and names it. A script that
 returns ends with code 0, a thrown error with 1, `exit(code)` with that code, Ctrl+C with 130 and the time limit with
 124; a non-zero code is an error carrying `exitCode`.
 

@@ -5,7 +5,7 @@ import {manifestPath, readManifest, dependenciesDigest, identifier, lockPath} fr
 import {validateLock} from './lock.mjs';
 
 export {lockPath};
-export const packageRoot = '.webfront/developer/packages';
+export {packageRoot} from './paths.mjs';
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();

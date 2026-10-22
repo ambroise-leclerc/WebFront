@@ -7,7 +7,7 @@ import {createStarter} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
-import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult} from './scripts.mjs';
+import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 
 const encoder = new TextEncoder();
@@ -130,22 +130,23 @@ async function embed(args, {bridge, signal}) {
     return `${syncNotice(project)}Generated ${output}. Use webfront::fs::${className} and recompile the application.`;
 }
 
+// The compiler reads the package files it resolves, on demand, instead of the whole locked graph.
 async function compileScript(bridge, lock, entry, signal) {
-    const packages = await readPackages(bridge, lock, signal);
-    const files = await buildInWorker(bridge, {type: 'script', entry, lock, packages}, signal);
+    const files = await buildInWorker(bridge, {type: 'script', entry, lock}, signal);
     return decoder.decode(files.get('script.js'));
 }
 
 const scriptWorker = () => new Worker(new URL('./script-worker.mjs', import.meta.url), {type: 'module'});
 
-async function runModule({bridge, signal, write = () => {}, createWorker = scriptWorker}, project, {label, entry, args, timeout}) {
+async function runModule({bridge, signal, write = () => {}, createWorker = scriptWorker}, project, {label, entry, args, deadline}) {
     const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
     const permissions = project.manifest.permissions ?? {};
     const code = await compileScript(bridge, lock, entry, signal);
     const host = scriptHost({bridge, permissions, lock});
-    const outcome = await runWorker({createWorker, host, signal, timeout, write,
+    const outcome = await runWorker({createWorker, host, signal, timeout: secondsLeft(deadline), write,
         message: {code, args, permissions, base: location.href}});
-    await host.stop();
+    // A script that ended by itself keeps the writes it did not await; a stopped one does not.
+    await (outcome.reason === 'exit' ? host.finish() : host.stop());
     return runResult(label, outcome, host.publications);
 }
 
@@ -160,9 +161,11 @@ async function run(args, context) {
     const {timeout, target, args: extra} = parseRunOptions(args, 'wf run [--timeout <seconds>] <script> [args...]');
     const project = await loadManifest(context.bridge);
     const depth = context.depth ?? 0;
+    // The limit covers the scripts this one runs through wf commands, whatever their own --timeout.
+    const deadline = runDeadline(timeout, context.deadline);
     const command = scriptCommand(project.manifest, target, extra, tokenize, depth);
-    if (command.kind === 'wf') return execute(command.argv, {...context, depth: depth + 1});
-    return syncNotice(project) + await runModule(context, project, {label: `Script ${target}`, entry: command.entry, args: command.args, timeout});
+    if (command.kind === 'wf') return execute(command.argv, {...context, depth: depth + 1, deadline});
+    return syncNotice(project) + await runModule(context, project, {label: `Script ${target}`, entry: command.entry, args: command.args, deadline});
 }
 
 // wf exec [--timeout <seconds>] <package>[:<entry>] [args...]
@@ -170,7 +173,7 @@ async function exec(args, context) {
     const {timeout, target, args: extra} = parseRunOptions(args, 'wf exec [--timeout <seconds>] <package>[:<entry>] [args...]');
     const project = await loadManifest(context.bridge);
     const {id, name, entry} = execTarget(project.lock, target);
-    return syncNotice(project) + await runModule(context, project, {label: `${id}:${name}`, entry, args: extra, timeout});
+    return syncNotice(project) + await runModule(context, project, {label: `${id}:${name}`, entry, args: extra, deadline: runDeadline(timeout, context.deadline)});
 }
 
 async function list(_args, {bridge}) {

@@ -25,6 +25,19 @@ export function checkRead(permissions, path) {
     return checked;
 }
 
+/**
+ * How the context may list a directory ("" is the project root): fully when it is readable, or, when it only leads to
+ * readable paths, with a filter keeping the entries that are readable or lead to one. Otherwise it is refused.
+ */
+export function listable(permissions, directory) {
+    const path = directory === '' || directory === '.' ? '' : projectPath(directory);
+    const granted = [...permissions?.files ?? [], ...permissions?.publish ?? []];
+    if (path && granted.some(root => within(path, root))) return {path, keep: () => true};
+    const leads = child => granted.some(root => within(child, root) || root.startsWith(child + '/'));
+    if (!granted.some(root => path === '' || root.startsWith(path + '/'))) throw denied('listing', path || 'the project root', 'files');
+    return {path, keep: name => leads(path ? `${path}/${name.replace(/\/$/, '')}` : name.replace(/\/$/, ''))};
+}
+
 /** A path the context may publish: under permissions.publish, never the manifest, the lock or .webfront/. */
 export function checkWrite(permissions, path) {
     const checked = projectPath(path);

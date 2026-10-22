@@ -206,11 +206,14 @@ try {
         'tools/coop.mjs': "export default context => new Promise((resolve, reject) => {\n    context.signal.addEventListener('abort', () => reject(context.signal.reason));\n    context.console.log('waiting');\n});\n",
         'tools/loop.mjs': "export default async context => { context.console.log('looping'); for (;;) {} };\n",
         'tools/big.mjs': "export default async context => { context.console.log('writing'); await context.project.write('generated/script/big.bin', new Uint8Array(4 * 1024 * 1024).fill(1)); };\n",
+        'tools/unawaited.mjs': "export default async context => { context.project.write('generated/script/unawaited.txt', 'done'); };\n",
+        'tools/root.mjs': "export default async context => context.console.log('root', JSON.stringify(await context.project.list()));\n",
+        'tools/jsx.tsx': "export default async (context: any) => { const element = <b>x</b>; context.console.log('jsx', element.type); };\n",
     };
     for (const [path, text] of Object.entries(scripts)) await writeFile(path, text);
     const mainBefore = await readFile('ui/main.tsx');
     const scriptManifest = {...manifest, permissions: {files: ['tools'], publish: ['generated/script']},
-        scripts: Object.fromEntries([...Object.keys(scripts).map(path => [path.split('/')[1].split('.')[0], path]), ['listing', 'wf list']])};
+        scripts: Object.fromEntries([...Object.keys(scripts).map(path => [path.split('/')[1].split('.')[0], path]), ['listing', 'wf list'], ['nested', 'wf run loop']])};
     await writeFile('webfront.project.json', JSON.stringify(scriptManifest, null, 2));
     assert(/Script gen completed/.test(await runtime.execute(['run', 'gen', 'a', 'b'], runContext())), 'A TypeScript script must run');
     assert(new TextDecoder().decode(await readFile('generated/script/out.txt')) === 'a+b' && scriptOutput.includes('wrote a+b\r\n'), 'The script must write an allowed file and stream its console');
@@ -237,7 +240,15 @@ try {
     assert(killed?.exitCode === 130 && /terminated after the 2 s grace period/.test(killed.message) && performance.now() - started < 15000, `A busy script must be terminated after Ctrl+C: ${killed}`);
     const timedOut = await failure(runtime.execute(['run', '--timeout', '1', 'loop'], runContext()));
     assert(timedOut?.exitCode === 124 && /stopped at its time limit/.test(timedOut.message), `The time limit must stop a busy script: ${timedOut}`);
+    const nested = await failure(runtime.execute(['run', '--timeout', '1', 'nested'], runContext()));
+    assert(nested?.exitCode === 124, `The time limit must cover a script run through a wf command: ${nested}`);
     assert(/react@19\.3\.1/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a termination');
+    assert(/completed/.test(await runtime.execute(['run', 'unawaited'], runContext())), 'A script that does not await its write must complete');
+    assert(new TextDecoder().decode(await readFile('generated/script/unawaited.txt')) === 'done', 'A write the script did not await must be applied');
+    await runtime.execute(['run', 'root'], runContext());
+    assert(scriptOutput.includes('root ["generated/","tools/"]\r\n'), `The root must list the entries leading to granted paths: ${scriptOutput.filter(line => line.startsWith('root'))}`);
+    await runtime.execute(['run', 'jsx'], runContext());
+    assert(scriptOutput.includes('jsx b\r\n'), 'A TSX script must compile its JSX with the automatic runtime');
     // A stop during a large write: the file is either untouched or complete, and no staging is left.
     const writing = new AbortController();
     const big = failure(runtime.execute(['run', 'big'], runContext(writing.signal)));
@@ -246,7 +257,8 @@ try {
     await big;
     const written = await readFile('generated/script/big.bin').then(bytes => bytes.length, () => 0);
     assert(written === 0 || written === 4 * 1024 * 1024, `A stopped write must leave no partial file: ${written} bytes`);
-    assert((await call('list', '.webfront/developer/staging')).length === 0, 'A stopped write must leave no staged files');
+    const staged = JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/staging')));
+    assert(staged.length === 0, `A stopped write must leave no staged files: ${staged}`);
     // wf exec runs the webfront.bin entry of an installed package, never an npm bin.
     await runtime.execute(['install', 'webfront-fixture-tool', 'webfront-fixture-nodebin'], context);
     assert(/completed/.test(await runtime.execute(['exec', 'webfront-fixture-tool', 'hello'], runContext())), 'wf exec must run a WebFront entry');

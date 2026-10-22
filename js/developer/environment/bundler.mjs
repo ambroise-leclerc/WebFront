@@ -1,6 +1,7 @@
 // Virtual project/npm filesystem for esbuild's browser API. No Node.js shims or network imports.
 import {normalize, packageEntry} from './entry.mjs';
 import {resolveImport} from './resolve.mjs';
+import {packageRoot} from './paths.mjs';
 export {normalize, packageEntry};
 
 const decoder = new TextDecoder();
@@ -17,11 +18,20 @@ async function probe(read, namespace, candidate) {
     }
 }
 
-function createFinder(packages, readProject, loaded) {
+// Package files come from `packages` (id -> path -> bytes) or, without it, are read from the cache when resolved.
+export function createFinder(packages, readProject, loaded, lock) {
+    const files = new Map();
+    const cached = (id, path) => {
+        const node = lock?.packages?.[id];
+        if (!node) return undefined;
+        if (!files.has(id)) files.set(id, new Set(node.files));
+        return files.get(id).has(path) ? readProject(`${packageRoot}/${node.key}/${path}`) : undefined;
+    };
     const read = async (namespace, path) => {
         if (namespace === 'project') return readProject(path);
         const slash = path.indexOf('/');
-        return packages[path.slice(0, slash)]?.get(path.slice(slash + 1));
+        const [id, file] = [path.slice(0, slash), path.slice(slash + 1)];
+        return packages ? packages[id]?.get(file) : cached(id, file);
     };
     const find = async (namespace, path) => {
         for (const suffix of extensions) {
@@ -40,7 +50,7 @@ export function virtualPlugin(lock, packages, readProject) {
 }
 
 function virtualPluginWith(lock, packages, readProject, loaded) {
-    const {read, find} = createFinder(packages, readProject, loaded);
+    const {read, find} = createFinder(packages, readProject, loaded, lock);
     const load = namespace => async args => {
         const bytes = loaded.get(`${namespace}:${args.path}`) ?? await read(namespace, args.path);
         const loader = loaders.get(args.path.split('.').pop());
@@ -69,6 +79,9 @@ const nodeBuiltins = new Set(['assert', 'async_hooks', 'buffer', 'child_process'
     'os', 'path', 'perf_hooks', 'process', 'punycode', 'querystring', 'readline', 'repl', 'stream', 'string_decoder', 'sys',
     'timers', 'tls', 'trace_events', 'tty', 'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib']);
 
+// Every specifier that may name a built-in module, digits included (http2, v8).
+export const nodeImport = /^(?:node:|[a-z_][a-z0-9_]*(?:\/|$))/;
+
 export function nodeBuiltin(specifier) {
     if (specifier.startsWith('node:')) return specifier.slice(5).split('/')[0];
     const name = specifier.split('/')[0];
@@ -81,7 +94,7 @@ const nodeError = name => `"${name}" is a Node.js API, which WebFront scripts do
 function scriptPlugin(entry, lock, find) {
     return {name: 'webfront-script', setup(build) {
         build.onResolve({filter: /^webfront-script-entry$/}, () => find(entry.namespace, entry.path));
-        build.onResolve({filter: /^(?:node:|[a-z_]+(?:\/|$))/}, async args => {
+        build.onResolve({filter: nodeImport}, async args => {
             const name = nodeBuiltin(args.path);
             if (!name) return undefined;
             if (args.path.startsWith('node:')) return {errors: [{text: nodeError(name)}]};
@@ -94,9 +107,9 @@ function scriptPlugin(entry, lock, find) {
 /** One ES module for a script Worker: TS/JS of the project or of a locked package, with the locked dependencies. */
 export async function bundleScript(esbuild, {entry, lock, packages, readProject}) {
     const loaded = new Map();
-    const {find} = createFinder(packages, readProject, loaded);
+    const {find} = createFinder(packages, readProject, loaded, lock);
     const result = await esbuild.build({entryPoints: ['webfront-script-entry'], bundle: true, write: false,
-        outfile: '/output/script.js', format: 'esm', platform: 'browser', target: 'es2022', legalComments: 'inline',
+        outfile: '/output/script.js', format: 'esm', platform: 'browser', target: 'es2022', jsx: 'automatic', legalComments: 'inline',
         define: {'process.env.NODE_ENV': '"production"'},
         plugins: [scriptPlugin(entry, lock, find), virtualPluginWith(lock, packages, readProject, loaded)]});
     return new Map(result.outputFiles.map(file => [file.path.replace(/^\/output\//, ''), file.contents]));

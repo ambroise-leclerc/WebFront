@@ -7,4 +7,4 @@ export * from './restore.mjs';
 export * from './cache.mjs';
 export * from './scripts.mjs';
 export * from './permissions.mjs';
-export {nodeBuiltin} from './bundler.mjs';
+export {nodeBuiltin, nodeImport, createFinder} from './bundler.mjs';
