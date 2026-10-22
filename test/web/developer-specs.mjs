@@ -265,7 +265,67 @@ try {
     assert(/^webfront-fixture-lib@1\.\d+\.\d+ hello$/.test(new TextDecoder().decode(await readFile('generated/script/tool.txt'))), 'The entry must bundle its locked dependency');
     assert(/only declares an npm "bin"/.test((await failure(runtime.execute(['exec', 'webfront-fixture-nodebin'], runContext())))?.message), 'A package with only an npm bin must be refused');
     assert(/no WebFront executable entry/.test((await failure(runtime.execute(['exec', 'webfront-fixture-lib'], runContext())))?.message), 'A browser package without an entry must be refused');
-    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers + scripts passed');
+    // wf check: a real TypeScript type check in a Worker, with the typescript and the declarations of the lock, all
+    // served by the local registry.
+    const checkRequests = [];
+    globalThis.fetch = (input, init) => {
+        checkRequests.push(new URL(input instanceof Request ? input.url : input, location.href).href);
+        return pageFetch(input, init);
+    };
+    const checkFiles = {
+        'tsconfig.json': JSON.stringify({compilerOptions: {strict: true, target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', lib: ['ES2022']}, include: ['check']}),
+        'check/main.ts': "import {answer, area} from 'webfront-fixture-typed';\nimport {legacy} from 'webfront-fixture-legacy';\nimport {greet} from 'webfront-fixture-untyped';\nimport {twice} from './util';\n" +
+            "export const total: number = twice(answer) + area({width: 2, height: 3});\nexport const word: string = greet(legacy);\n",
+        'check/util.ts': 'export const twice = (value: number): number => 2 * value;\n',
+    };
+    for (const [path, text] of Object.entries(checkFiles)) await writeFile(path, text);
+    const checked = async (args = [], extra = {}) => {
+        scriptOutput.length = 0;
+        const result = await runtime.execute(['check', ...args], {...runContext(), ...extra}).then(text => ({text}), error => ({error}));
+        return {...result, output: scriptOutput.join('')};
+    };
+    try {
+        assert(/needs the typescript package: run wf install typescript@6/.test((await checked()).error?.message), 'wf check must ask for typescript');
+        await runtime.execute(['install', 'typescript@4.9.5'], context);
+        const old = await checked();
+        assert(/supports typescript 5\.x and 6\.x .* not typescript@4\.9\.5/.test(old.error?.message), `An unsupported typescript must be refused: ${old.error}`);
+        await runtime.execute(['install', 'typescript@5.9.3', 'webfront-fixture-typed', 'webfront-fixture-legacy', 'webfront-fixture-untyped', '@types/webfront-fixture-untyped'], context);
+        const five = await checked();
+        assert(five.text && five.output.includes('No type errors in 2 project files (TypeScript 5.9.3).'), `TypeScript 5.9 must accept the project: ${five.error}\n${five.output}`);
+        await runtime.execute(['install', 'typescript@6.0.3'], context);
+        const six = await checked();
+        assert(/Type check completed/.test(six.text) && six.output.includes('No type errors in 2 project files (TypeScript 6.0.3).'), `TypeScript 6.0 must accept the project: ${six.error}\n${six.output}`);
+        assert(checkRequests.length > 0 && checkRequests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), `typescript must come from the local registry: ${checkRequests}`);
+    } finally {
+        globalThis.fetch = pageFetch;
+    }
+    await writeFile('check/util.ts', 'export const twice = (value: number): number => `${value}`;\n');
+    const typeError = await checked();
+    assert(typeError.error?.exitCode === 1 && typeError.output.includes("check/util.ts(1,49): error TS2322: Type 'string' is not assignable to type 'number'.") &&
+        typeError.output.includes('Found 1 error in 1 file.'), `A type error must be reported with its file, line, column and code: ${typeError.error}\n${typeError.output}`);
+    await writeFile('check/util.ts', checkFiles['check/util.ts']);
+    const bounded = await checked([], {snapshotBounds: {files: 20, bytes: 64 * 1024 * 1024, entries: 1000}});
+    assert(bounded.error?.exitCode === 1 && /the snapshot reached its bounds \(20 files, 64 MiB\): \d+ files were not loaded and are treated as missing/.test(bounded.output),
+        `A snapshot past its bounds must be reported: ${bounded.error}\n${bounded.output}`);
+    // A long check is synchronous in its Worker: Ctrl+C terminates it after the grace period, and nothing is written.
+    const slow = ['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
+    for (let n = 400; n < 1000; ++n) slow.push(`export const v${n}: Build<${n}>['length'] = ${n};`);
+    await writeFile('check/slow.ts', slow.join('\n') + '\n');
+    const listing = async path => new TextDecoder().decode(await call('list', path));
+    const before = [await listing(''), await listing('check')];
+    const stopCheck = new AbortController();
+    scriptOutput.length = 0;
+    const checkStarted = performance.now();
+    const longCheck = failure(runtime.execute(['check'], runContext(stopCheck.signal)));
+    await printed('Checking 3 root files');
+    stopCheck.abort(new Error('Interrupted'));
+    const checkStopped = await longCheck;
+    assert(checkStopped?.exitCode === 130 && /Type check stopped by Ctrl\+C \(terminated after the 2 s grace period\)/.test(checkStopped.message) &&
+        performance.now() - checkStarted < 30000, `Ctrl+C must terminate a long check after the grace period: ${checkStopped}`);
+    assert(JSON.stringify([await listing(''), await listing('check')]) === JSON.stringify(before), 'A check must not write any project file');
+    assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
+    assert(/typescript@6\.0\.3/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a stopped check');
+    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers + scripts + type check passed');
 } catch (error) {
     console.error(error);
     await webFront.cppFunction('test.report')(false, String(error.stack ?? error));

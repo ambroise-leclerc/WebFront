@@ -4,7 +4,8 @@ The developer environment downloads its terminal, npm resolver and WebAssembly c
 runtime. The application's C++ executable initially contains the bridge and a small bootstrap;
 it does not embed React, Babel, xterm or esbuild. Node.js and npm are **not required on the
 application developer's machine**. A C++ compiler, CMake and the selected native webview remain
-necessary. TypeScript/JSX is transformed in the browser; type checking is not performed.
+necessary. TypeScript/JSX is transformed in the browser without type checking; `wf check` type-checks the project
+with the TypeScript compiler it locks.
 
 This is an experimental, explicit development facility. The downloaded environment runs with
 the application's bridge authority and may read/write the selected project. It exposes no shell.
@@ -290,6 +291,44 @@ completes atomically; the terminal lists the publications applied and abandoned.
 writes it did not await complete first; if one of them fails, the run ends with code 1 and names it. A script that
 returns ends with code 0, a thrown error with 1, `exit(code)` with that code, Ctrl+C with 130 and the time limit with
 124; a non-zero code is an error carrying `exitCode`.
+
+## Type checking (`wf check`)
+
+Previews and providers are built by esbuild-wasm, which removes the types without checking them. `wf check
+[--timeout <seconds>]` runs the TypeScript compiler of the project's lock on the project, in the browser:
+
+```sh
+wf install typescript@6
+wf check
+```
+
+- **Supported versions**: `typescript` 5.x and 6.x (`>=5.0.0 <7.0.0`), whose `lib/typescript.js` provides the
+  compiler API; 5.9.3 and 6.0.3 are tested. An older version, or TypeScript 7 (a native program without that API), is
+  refused with an explicit message. The version is the one the lock records, never a copy shipped by WebFront.
+- **Options**: the project's `tsconfig.json` if it exists (comments, `extends` of project or package files,
+  `include`/`exclude`/`files`, `compilerOptions`). Otherwise the TS/TSX entries of `webfront.project.json` are the root
+  files, with `target` ES2022, `module` ESNext, `moduleResolution` Bundler, `jsx` react-jsx, `lib` ES2022/DOM/
+  DOM.Iterable, `strict`, `isolatedModules` and `skipLibCheck`. `noEmit` is always added: nothing is written, not even
+  build information. Project references are not followed.
+- **Two phases**: the check runs in a dedicated Worker. It first loads, asynchronously, an in-memory snapshot: the
+  `lib.*.d.ts` of the locked `typescript`, the declaration files and `package.json` of every locked package, then the
+  `.ts`/`.tsx`/`.mts`/`.cts` files (with `.js` family files under `allowJs`, `.json` under `resolveJsonModule`) and
+  `package.json` files of the directories that `tsconfig.json` includes, or of the entries' directories, recursively.
+  `node_modules`, `.webfront` and `.git` are never listed. TypeScript then compiles synchronously over that snapshot:
+  a file absent from it does not exist, including a project file imported from outside those directories.
+- **Type resolution** follows TypeScript, not esbuild: `types`/`typings`, the `types` condition of `exports`,
+  `@types/*` and the `moduleResolution` of `tsconfig.json`. Only the locked graph is visible, without flattening: the
+  project sees its roots, and each package its own dependencies.
+- **Diagnostics** print as `file(line,column): error TScode: message`, with project-relative paths, or
+  `<package>@<version>/<path>` inside a package, then a summary. Any error ends the check with code 1.
+- **Bounds**: the snapshot holds at most 10,000 files and 64 MiB, and listing stops at 50,000 directory entries. A
+  snapshot that reaches its bounds still compiles but reports the files it left out and fails; a listing past its
+  bound fails at once. TypeScript itself (about 9 MiB) is read from the cache and is not counted. The Worker's memory
+  is the browser's; it is not limited further.
+- **Time**: `--timeout` (600 seconds by default, from 1 to 3600) and Ctrl+C stop the check like `wf run`: a check
+  still loading its snapshot stops at its next read, and one compiling, which never returns to its event loop, is
+  terminated with `worker.terminate()` after the two-second grace period. The exit code is 130 (Ctrl+C) or 124 (time
+  limit), and the terminal stays usable.
 
 ## Dependencies, storage and limitations
 
