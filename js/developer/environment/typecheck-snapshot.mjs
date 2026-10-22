@@ -17,8 +17,9 @@ export const defaultCompilerOptions = Object.freeze({
     target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx',
     lib: ['ES2022', 'DOM', 'DOM.Iterable'], strict: true, isolatedModules: true, skipLibCheck: true,
 });
-// Nothing is written: no emitted file, declaration or build information.
-const noEmit = {noEmit: true, emitDeclarationOnly: false, composite: false, incremental: false};
+// Nothing is emitted; the other options keep their meaning (composite still implies declaration), and the host
+// writes nothing, not even build information. emitDeclarationOnly cannot be combined with noEmit.
+const noEmit = {noEmit: true, emitDeclarationOnly: false};
 
 const decoder = new TextDecoder();
 const declaration = /\.d\.[cm]?ts$/;
@@ -293,6 +294,7 @@ export async function loadSnapshot(ts, {read, list, lock, typescript, entries = 
         const wanted = new Set([...listed.filter(projectSource(parsed.options)),
             ...parsed.fileNames.map(projectRelative).filter(path => path !== null)]);
         for (const path of wanted) await loadProjectFile(path);
+        await loadPackageScopes(wanted);
         parsed = parseConfig(ts, snapshot, configSource);
         ({options, fileNames: rootNames, errors} = parsed);
     } else {
@@ -305,16 +307,30 @@ export async function loadSnapshot(ts, {read, list, lock, typescript, entries = 
         // The directories of the entries, recursively: the files they import are found there.
         const directories = [...new Set(sources.map(entry => entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')) : ''))];
         const listed = await listProject(snapshot, list, directories.map(directory => [directory, true]), bounds, signal);
-        for (const path of new Set([...sources, ...listed.filter(projectSource(options))]))
-            await loadProjectFile(path);
+        const wanted = new Set([...sources, ...listed.filter(projectSource(options))]);
+        for (const path of wanted) await loadProjectFile(path);
+        await loadPackageScopes(wanted);
         rootNames = sources.map(entry => `${projectRoot}/${entry}`);
     }
     snapshot.misses.clear();
     return {snapshot, rootNames, options, errors};
 
+    // The package.json files of the directories above the loaded files, up to the project root: they give the module
+    // format of those files, even outside the listed directories.
+    async function loadPackageScopes(paths) {
+        const scopes = new Set();
+        for (const path of paths)
+            for (let directory = parentOf(`/${path}`); ; directory = parentOf(directory)) {
+                scopes.add(`${directory.slice(1)}/package.json`.replace(/^\//, ''));
+                if (!directory) break;
+            }
+        for (const path of scopes) if (!attempted.has(`${projectRoot}/${path}`)) await loadProjectFile(path);
+    }
+
     async function loadProjectFile(path) {
         signal?.throwIfAborted();
         const real = `${projectRoot}/${path}`;
+        if (attempted.has(real)) return;
         attempted.add(real);
         if (snapshot.truncated) return snapshot.skip();
         const bytes = await readOptional(read, path);

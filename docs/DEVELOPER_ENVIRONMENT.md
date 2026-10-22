@@ -308,12 +308,14 @@ wf check
 - **Options**: the project's `tsconfig.json` if it exists (comments, `extends` of project or package files,
   `include`/`exclude`/`files`, `compilerOptions`). Otherwise the TS/TSX entries of `webfront.project.json` are the root
   files, with `target` ES2022, `module` ESNext, `moduleResolution` Bundler, `jsx` react-jsx, `lib` ES2022/DOM/
-  DOM.Iterable, `strict`, `isolatedModules` and `skipLibCheck`. `noEmit` is always added: nothing is written, not even
-  build information. Project references are not followed.
+  DOM.Iterable, `strict`, `isolatedModules` and `skipLibCheck`. `noEmit` is always added (and `emitDeclarationOnly`
+  removed), the other options keep their meaning; nothing is written, not even build information. Project references
+  are not followed.
 - **Two phases**: the check runs in a dedicated Worker. It first loads, asynchronously, an in-memory snapshot: the
   `lib.*.d.ts` of the locked `typescript`, the declaration files and `package.json` of every locked package, then the
   `.ts`/`.tsx`/`.mts`/`.cts` files (with `.js` family files under `allowJs`, `.json` under `resolveJsonModule`) and
-  `package.json` files of the directories that `tsconfig.json` includes, or of the entries' directories, recursively.
+  `package.json` files of the directories that `tsconfig.json` includes, or of the entries' directories, recursively,
+  and the `package.json` files above them up to the project root, which give their module format.
   `node_modules`, `.webfront` and `.git` are never listed. TypeScript then compiles synchronously over that snapshot:
   a file absent from it does not exist, including a project file imported from outside those directories.
 - **Type resolution** follows TypeScript, not esbuild: `types`/`typings`, the `types` condition of `exports`,

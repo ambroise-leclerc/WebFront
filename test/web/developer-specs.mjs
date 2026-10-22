@@ -307,6 +307,16 @@ try {
     const bounded = await checked([], {snapshotBounds: {files: 20, bytes: 64 * 1024 * 1024, entries: 1000}});
     assert(bounded.error?.exitCode === 1 && /the snapshot reached its bounds \(20 files, 64 MiB\): \d+ files were not loaded and are treated as missing/.test(bounded.output),
         `A snapshot past its bounds must be reported: ${bounded.error}\n${bounded.output}`);
+    // NodeNext takes the module format from a package.json above the included directory, and composite keeps implying
+    // declaration under noEmit.
+    await writeFile('esm-check/package.json', JSON.stringify({type: 'module'}));
+    await writeFile('esm-check/src/main.ts', 'export const value: number = await Promise.resolve(1);\n');
+    await writeFile('tsconfig.json', JSON.stringify({compilerOptions: {strict: true, target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext',
+        lib: ['ES2022'], composite: true, declarationMap: true, incremental: true}, include: ['esm-check/src']}));
+    const esm = await checked();
+    assert(esm.text && esm.output.includes('No type errors in 1 project file (TypeScript 6.0.3).'), `A valid NodeNext composite project must pass: ${esm.error}\n${esm.output}`);
+    assert(await readFile('tsconfig.tsbuildinfo').then(() => false, () => true), 'An incremental check must not write build information');
+    await writeFile('tsconfig.json', checkFiles['tsconfig.json']);
     // A long check is synchronous in its Worker: Ctrl+C terminates it after the grace period, and nothing is written.
     const slow = ['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
     for (let n = 400; n < 1000; ++n) slow.push(`export const v${n}: Build<${n}>['length'] = ${n};`);
