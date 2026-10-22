@@ -36,6 +36,16 @@
   end with code 1. Nothing is written (`noEmit`). Ctrl+C and the time limit terminate a running compilation after
   the 2 s grace period. The local registry fixture serves typescript 5.9.3 and 6.0.3, typed and `@types` packages.
 
+- The environment's terminal (developer distribution 0.5.0, #308) becomes WebFront's complete terminal: built-in
+  `help`, `clear`, `history` and `exit`, streamed output, Ctrl+C for every command, per-project persistent history,
+  multi-line paste run line by line, multi-row redraw, CJK and emoji widths shared with xterm.js, exit codes and
+  completion of commands, `wf` subcommands, manifest scripts, entries, providers and project paths.
+  `webfront::Commands` (`<webfront/Commands.hpp>`) adds an application's C++ commands to it: coroutines spawned per
+  browser session through the bridge functions `webfront.commands.list`, `.start` and `.cancel`, streaming their
+  output, stopped by Ctrl+C, the browser's disconnection or shutdown; the terminal does not wait for a stopped
+  command. New `app.resumeAfter(duration)`/`ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`,
+  `UI::id()` and `json::Reader::array`.
+
 ### Changed
 
 - `DeveloperBootstrapOptions::registry` is now `std::optional<std::string>`: unset, the manifest's registry
@@ -57,6 +67,9 @@
 
 ### Fixed
 
+- A browser's disconnection is now reported: `WebLink` emits its `closed` event once when the browser closes the
+  connection or it fails. The event was never emitted before, so nothing observed disconnections and `BasicWF`'s
+  removal of the link was unreachable; the link is now kept until the application is destroyed.
 - Linux CEF builds: the runtime files, resources and locales are copied once per destination directory by a shared
   copy target, instead of by every CEF target's post-build step, which made parallel builds fail intermittently
   ("Error copying directory ... locales"). The destination is the target's output directory

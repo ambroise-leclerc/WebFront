@@ -128,7 +128,9 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   dependencies. `wf check` (#322) type-checks with the locked `typescript` 5.x/6.x in a Worker, over a bounded
   in-memory snapshot. `wf run`/`wf exec` (#307) run WebFront scripts in a Worker under the
   manifest permissions, which frame the `context` API only and are not a sandbox. Peers require explicit compatible roots/direct
-  dependencies. Automatic rebuild/watch is future work. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
+  dependencies. The environment's terminal (#308) runs `wf`, built-in and C++ commands (`webfront::Commands`:
+  per-browser coroutine sessions, streamed output, Ctrl+C cancellation without waiting, drained at shutdown) with
+  multi-row editing, CJK/emoji widths, persistent history and completion. Automatic rebuild/watch is future work. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
   the cache from the lock, from the application's registry option, else the manifest's, else npmjs.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
 
@@ -453,6 +455,7 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 - Result values are currently limited to the bridge's existing scalar, string, tuple, numeric typed-array and packed bitset parameter types; richer object/DOM values remain out of scope.
 - `webfront::Task`, `app.spawn(task)`/`ui.spawn(task)` and per-task `TaskHandle::requestStop()` provide application-owned coroutine lifetime without exposing an execution context. The compiled `WebFrontAwaitBrowser` example matches the README; `app.shutdown()` stops and joins before returning; spawn is callable from any thread while the application lives and returns a stopped handle if shutdown rejects it. Destruction keeps owners alive and logs/waits if an external operation delays the join, whereas explicit shutdown reports absent context progress.
 - `ui.jsFunctionSender<R>(name)(...)` (default `R = void`) adds lazy, awaitable typed calls, with value/error/stopped completion and local receiver-token cancellation. Futures and JavaScript Promises remain supported without cancellation. JavaScript already dispatched continues; late replies are discarded. See [execution design](ASYNC_EXECUTION.md).
+- Terminal commands (`webfront::Commands`) stream output with fire-and-forget calls and no flow control: a command writing faster than its browser reads grows the connection's write queue.
 - Repeated cancellation of JavaScript functions that never respond reserves their 16-bit IDs until disconnection. Enough such calls exhaust IDs and subsequent calls fail with `Too many outstanding WebFront calls`. Calls have no automatic timeout or per-write delivery acknowledgement.
 - Server-owned counting scopes track HTTP, WebSocket and application operations through destruction. Shutdown drains until scope join completes, independently of unrelated context work. Regression tests cover pending reads, connection lifetime, sender errors, cancellation and result/stop races; the shared Jasmine suite exercises sender value/void/error and late-result cancellation.
 - Ordinary JavaScript arrays encode as tuple-like parameters; only numeric typed arrays use the homogeneous array wire representation.

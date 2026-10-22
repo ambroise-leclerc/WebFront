@@ -76,6 +76,11 @@ The snippet above shows the standalone component API. The [Life walkthrough](../
 
 ### Limitations of the first version
 
+The developer environment's terminal (#308, [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md#the-terminal-and-the-applications-commands))
+lifts all of them and replaces this component: streaming output, Ctrl+C for C++ commands (coroutines registered with
+`webfront::Commands`), one session per browser, multi-row redraw with CJK and emoji widths, `exit`, persistent
+history and multi-line paste. This component keeps them until its removal (#313):
+
 - Output appears when a command finishes. There is no streaming. A long command keeps the prompt
   locked; Ctrl+C interrupts a browser command (below) but not a C++ one.
 - Every connected browser shares the same commands. The terminal does not know which browser sent

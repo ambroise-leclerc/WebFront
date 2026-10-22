@@ -12,7 +12,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 
 ## Repository map
 
-- `include/webfront/`: public header-only library, included as `<webfront/...>`. `WebFront.hpp` is the main orchestration API.
+- `include/webfront/`: public header-only library, included as `<webfront/...>`. `WebFront.hpp` is the main orchestration API; `Commands.hpp` adds an application's C++ commands to the developer environment's terminal.
 - `include/webfront/http/`: HTTP and WebSocket protocol implementation.
 - `include/webfront/weblink/`: bridge message encoding and routing.
 - `include/webfront/system/`: layered virtual filesystems and embedded web resources.

@@ -76,6 +76,16 @@ auto handle = app.spawn(showSquareRoot(ui));
 handle.requestStop();
 ```
 
+`app.resumeAfter(duration)` and `ui.resumeAfter(duration)` return a sender that
+completes on the server context once the duration has elapsed. Awaited in a task,
+it observes the task's stop token: `TaskHandle::requestStop()` or shutdown
+completes it stopped at once, so a waiting coroutine never delays shutdown.
+`app.subscribeUIClosed(handler)` calls the handler on the server thread when a
+browser closes its connection or the connection fails, for as long as the
+returned `UISubscription` lives; shutdown, which stops every connection itself,
+notifies no handler. The UI of a closed browser keeps its link object until the
+application is destroyed, and its calls no longer reach the browser.
+
 `app.spawn(task)` and `ui.spawn(task)` may be called from any thread while the
 application object remains alive, including concurrently with stop/shutdown.
 Coroutine bodies and their resumptions execute on the server context. Synchronize
@@ -120,7 +130,7 @@ context. Neither sender calls nor future calls have a delivery acknowledgement
 for the write queue or an automatic response deadline. An unsuccessful write
 that does not report closure can leave a call pending until disconnection;
 sender waits can also be ended by task cancellation or application shutdown.
-Timeout composition remains future work.
+Timeout composition with `resumeAfter` remains future work.
 
 Cancellation before start sends no frame. Cancellation after dispatch stops
 waiting locally; JavaScript already running continues, and its late response

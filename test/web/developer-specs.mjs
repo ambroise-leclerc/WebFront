@@ -335,7 +335,182 @@ try {
     assert(JSON.stringify([await listing(''), await listing('check')]) === JSON.stringify(before), 'A check must not write any project file');
     assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
     assert(/typescript@6\.0\.3/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a stopped check');
-    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers + scripts + type check passed');
+    // The terminal: the application's C++ commands, run in this browser's session.
+    const cppCommands = await runtime.discoverCommands(webFront);
+    assert(['echo', 'fail', 'linger', 'status', 'stream', 'wait'].every(name => cppCommands.has(name)) && cppCommands.get('echo') === 'Write its arguments',
+        `The C++ commands must be discovered with their help: ${[...cppCommands.keys()]}`);
+    const commandState = tag => webFront.cppFunction('test.command')(tag);
+    const waitState = async (tag, state) => {
+        for (let attempt = 0; (await commandState(tag)) !== state; ++attempt) {
+            if (attempt === 200) throw new Error(`Command ${tag} did not reach ${state}: ${await commandState(tag)}`);
+            await delay(25);
+        }
+    };
+    const lineContext = (signal = new AbortController().signal, chunks = []) => ({...context, cppCommands, signal, write: text => chunks.push(text)});
+    const streamed = [];
+    assert(await runtime.runLine('stream', lineContext(undefined, streamed)) === '', 'A C++ command resolves once it returns');
+    assert(streamed.length >= 3 && streamed.join('') === 'é'.repeat(75000) + '\r\n', `Long C++ output must stream in pieces under the bridge limit: ${streamed.length}`);
+    const thrown = await failure(runtime.runLine('fail', lineContext()));
+    assert(thrown?.message === 'command failed on purpose' && thrown.exitCode === 1, `A C++ exception must reject the command: ${thrown}`);
+    const exitCode = await failure(runtime.runLine('status 3', lineContext()));
+    assert(exitCode?.exitCode === 3 && /exited with code 3/.test(exitCode.message), `A C++ exit code must be reported: ${exitCode}`);
+    assert(/Unknown command: absent/.test((await failure(runtime.runLine('absent', lineContext())))?.message), 'An unknown command must be refused');
+    // Ctrl+C: the terminal stops waiting at once, the next command answers while the first is still ending in C++.
+    const interruptLinger = new AbortController();
+    const lingering = failure(runtime.runLine('linger first', lineContext(interruptLinger.signal)));
+    await waitState('first', 'running');
+    interruptLinger.abort(new Error('Interrupted'));
+    assert((await lingering)?.exitCode === 130, 'An interrupted C++ command must end with exit code 130');
+    const echoed = [];
+    await runtime.runLine('echo "after Ctrl+C"', lineContext(undefined, echoed));
+    assert(echoed.join('') === 'after Ctrl+C\r\n', `The next command must run normally: ${echoed}`);
+    assert(['running', 'stopping'].includes(await commandState('first')), 'The second command must answer before the first one ends');
+    await waitState('first', 'stopping');
+    await waitState('first', 'cancelled');
+    // Sessions: a second browser has its own commands; a long command there does not delay this one, Ctrl+C here does
+    // not stop it, and its disconnection does.
+    const sessionFrame = document.createElement('iframe');
+    sessionFrame.src = '/fixtures/session.html';
+    document.body.append(sessionFrame);
+    for (let attempt = 0; !sessionFrame.contentWindow?.session; ++attempt) {
+        if (attempt === 200) throw new Error('The second session did not load');
+        await delay(25);
+    }
+    const second = await sessionFrame.contentWindow.session;
+    const secondWait = failure(second.runtime.runLine('wait second', {bridge: second.bridge, cppCommands: second.cppCommands, signal: new AbortController().signal}));
+    await waitState('second', 'running');
+    const interruptFirst = new AbortController();
+    const firstWait = failure(runtime.runLine('wait here', lineContext(interruptFirst.signal)));
+    await waitState('here', 'running');
+    const echoStarted = performance.now();
+    await runtime.runLine('echo isolated', lineContext());
+    assert(performance.now() - echoStarted < 2000, 'A command in another session must not delay this one');
+    interruptFirst.abort(new Error('Interrupted'));
+    await firstWait;
+    await waitState('here', 'cancelled');
+    assert(await commandState('second') === 'running', 'Ctrl+C in one browser must not stop the command of another');
+    sessionFrame.remove();
+    await waitState('second', 'cancelled');
+    void secondWait;
+    // The terminal itself, mounted in this page with a real xterm.js.
+    const host = document.createElement('div');
+    host.style.cssText = 'width:640px;height:240px';
+    document.body.append(host);
+    let exitedWith = null;
+    const mounted = async () => runtime.mount({bridge: webFront, config, terminal: host, preview: context.preview, onExit: code => { exitedWith = code; }});
+    const {terminal, editor} = await mounted();
+    const buffer = () => terminal.buffer.active;
+    const rendered = () => new Promise(resolve => terminal.write('', resolve));
+    // Like xterm.js, one input per key; text may come as one input.
+    const type = async (...inputs) => {
+        for (const data of inputs) {
+            terminal.input(data);
+            await editor.whenIdle();
+        }
+        await rendered();
+    };
+    const rows = () => {
+        const lines = [];
+        for (let y = 0; y < buffer().length; ++y) lines.push(buffer().getLine(y).translateToString(true));
+        return lines;
+    };
+    const cursorRow = () => buffer().baseY + buffer().cursorY;
+    const lastRows = count => rows().slice(cursorRow() - count + 1, cursorRow() + 1);
+    await type('echo hello\r');
+    assert(JSON.stringify(lastRows(3)) === JSON.stringify(['> echo hello', 'hello', '> ']), `A C++ command must run from the terminal: ${lastRows(3)}`);
+    // Cell widths: CJK, emoji, a flag, a ZWJ sequence and a combining mark.
+    await type('漢字😀🇫🇷👨‍👩‍👧éx');
+    assert(buffer().cursorX === 2 + 2 + 2 + 2 + 2 + 2 + 1 + 1, `Wide characters must take two cells: ${buffer().cursorX}`);
+    // xterm.js draws each cluster where the editor placed it.
+    const drawn = buffer().getLine(cursorRow());
+    const cellsDrawn = [[2, '漢', 2], [4, '字', 2], [6, '😀', 2], [8, '🇫🇷', 2], [10, '👨‍👩‍👧', 2], [12, 'e\u0301', 1], [13, 'x', 1]]
+        .map(([column, chars, width]) => [drawn.getCell(column).getChars() === chars, drawn.getCell(column).getWidth() === width]).flat();
+    assert(cellsDrawn.every(Boolean), `xterm.js must draw the clusters with the editor's widths: ${cellsDrawn}`);
+    await type('\x7f', '\x7f');
+    assert(buffer().cursorX === 12 && editor.line === '漢字😀🇫🇷👨‍👩‍👧', `Backspace must erase whole clusters: ${buffer().cursorX} ${editor.line}`);
+    await type('\x1b[D', '\x1b[D');
+    assert(buffer().cursorX === 8, `The cursor must move over whole clusters: ${buffer().cursorX}`);
+    await type('\x03');
+    assert(lastRows(2)[0].endsWith('^C') && lastRows(1)[0] === '> ' && editor.line === '', 'Ctrl+C must drop the line');
+    // A line over several rows: wrapping, editing in the middle, a row filled exactly and a wide character at a row end.
+    terminal.resize(20, 12);
+    await rendered();
+    await type('echo ' + 'a'.repeat(40));
+    let top = cursorRow() - 2;
+    assert(buffer().cursorX === 7 && JSON.stringify(rows().slice(top, top + 3)) === JSON.stringify(['> echo ' + 'a'.repeat(13), 'a'.repeat(20), 'a'.repeat(7)]),
+        `A long line must wrap: ${rows().slice(top, top + 3)}`);
+    await type('\x01', 'X');
+    assert(cursorRow() === top && buffer().cursorX === 3 && JSON.stringify(rows().slice(top, top + 3)) === JSON.stringify(['> Xecho ' + 'a'.repeat(12), 'a'.repeat(20), 'a'.repeat(8)]),
+        `Editing the start of a long line must redraw its rows: ${rows().slice(top, top + 3)}`);
+    await type('\x05', 'b'.repeat(12));
+    assert(cursorRow() === top + 3 && buffer().cursorX === 0, `A line filling its last row exactly must leave the cursor on the next row: ${cursorRow() - top} ${buffer().cursorX}`);
+    await type('\x7f', '漢');
+    assert(cursorRow() === top + 3 && buffer().cursorX === 2 && rows()[top + 2] === 'a'.repeat(8) + 'b'.repeat(11) && rows()[top + 3] === '漢',
+        `A wide character must not split at a row end: ${buffer().cursorX} ${rows().slice(top + 2, top + 4)}`);
+    await type('\x15');
+    assert(cursorRow() === top && buffer().cursorX === 2 && rows()[top + 1] === '', 'Erasing a long line must clear its rows');
+    terminal.resize(80, 12);
+    await rendered();
+    // Exit codes, errors and clear.
+    await type('status 3\r');
+    assert(editor.status === 3 && lastRows(2)[0] === 'Error: Command status exited with code 3 (exit code 3)', `An exit code must be shown: ${lastRows(2)}`);
+    await type('fail\r');
+    assert(editor.status === 1 && lastRows(2)[0] === 'Error: command failed on purpose', `A C++ exception must be shown as an error: ${lastRows(2)}`);
+    await type('echo ok\r');
+    assert(editor.status === 0, 'A successful command must reset the status');
+    // Ctrl+C in the terminal: the prompt comes back at once, and a command typed then runs while the first one ends.
+    terminal.input('linger terminal\r');
+    await waitState('terminal', 'running');
+    await type('\x03');
+    await type('echo next\r');
+    const lingerState = await commandState('terminal');
+    assert(editor.status === 0 && lastRows(2)[0] === 'next' && ['running', 'stopping'].includes(lingerState), `Ctrl+C must interrupt a C++ command: ${lastRows(3)} ${editor.status} ${lingerState}`);
+    await waitState('terminal', 'stopping');
+    // Pasted lines run one after the other; the last one, without a line break, waits on the prompt.
+    terminal.paste('echo one\necho two\necho three');
+    await editor.whenIdle();
+    await rendered();
+    assert(JSON.stringify(lastRows(5)) === JSON.stringify(['> echo one', 'one', '> echo two', 'two', '> echo three']), `A multi-line paste must run line by line: ${lastRows(5)}`);
+    await type('\r');
+    assert(lastRows(2)[0] === 'three', 'The pasted last line must run once submitted');
+    // Completion of command names, wf subcommands, manifest scripts and project paths.
+    const completed = async (text, expected) => {
+        await type(text, '\t');
+        assert(editor.line === expected, `${JSON.stringify(text)} must complete to ${JSON.stringify(expected)}: ${JSON.stringify(editor.line)}`);
+        await type('\x03');
+    };
+    await completed('ec', 'echo ');
+    await completed('wf ru', 'wf run ');
+    await completed('wf run ge', 'wf run gen ');
+    await completed('echo too', 'echo tools/');
+    await completed('echo tools/js', 'echo tools/jsx.tsx ');
+    await completed('hi', 'history ');
+    await type('h', '\t');
+    assert(editor.line === 'h' && lastRows(2)[0].includes('help') && lastRows(2)[0].includes('history'), `Several candidates must be listed: ${lastRows(2)}`);
+    await type('\x03');
+    await type('clear\r');
+    assert(buffer().length === terminal.rows && rows()[0] === '> ', `clear must empty the screen and the scrollback: ${rows()[0]}`);
+    // The history is kept per project: a new terminal recalls it.
+    await runtime.historySaved();
+    const saved = JSON.parse(new TextDecoder().decode(await readFile(runtime.historyPath)));
+    assert(saved.at(-1) === 'clear' && saved.includes('echo three'), `The history must be saved in the project: ${saved.slice(-3)}`);
+    await type('exit 4\r');
+    assert(exitedWith === 4 && editor.closed && lastRows(2)[0] === 'Session ended.', `exit must end the session with its code: ${exitedWith}`);
+    terminal.input('echo ignored\r');
+    assert(!editor.busy, 'A closed session must ignore input');
+    await runtime.historySaved();
+    terminal.dispose();
+    host.replaceChildren();
+    const again = await mounted();
+    again.terminal.input('\x1b[A');
+    await new Promise(resolve => again.terminal.write('', resolve));
+    assert(again.editor.line === 'exit 4', `A new terminal must recall the project's history: ${again.editor.line}`);
+    again.terminal.dispose();
+    host.remove();
+    // The application stops while this command runs: its shutdown must drain it (checked in C++).
+    void failure(runtime.runLine('wait final', lineContext()));
+    await waitState('final', 'running');
+    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers + scripts + type check + terminal passed');
 } catch (error) {
     console.error(error);
     await webFront.cppFunction('test.report')(false, String(error.stack ?? error));
