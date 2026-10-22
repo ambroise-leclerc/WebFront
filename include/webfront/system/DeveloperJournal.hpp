@@ -135,16 +135,24 @@ inline void rollForward(const std::filesystem::path& root, const std::filesystem
                         const std::vector<JournalEntry>& entries, const StepHook& hook) {
     const auto owned = directory / (number + ".d");
     int        done  = 0;
+    std::set<std::filesystem::path> directories{owned};
     for (const auto& [target, source] : entries) {
-        const auto staged = owned / source;
+        const auto staged      = owned / source;
+        const auto destination = projectPath(root, target);
         if (std::filesystem::is_regular_file(staged)) {
-            const auto destination = projectPath(root, target);
             std::filesystem::create_directories(destination.parent_path());
             std::filesystem::rename(staged, destination);
         }
+        directories.insert(destination.parent_path());
         if (hook)
             hook("replacement-" + std::to_string(++done));
     }
+    // The journal is the only record of what remains to be done: it must outlive every replacement, so
+    // make the renames durable (the directories holding the targets and the emptied source) first.
+    for (const auto& changed : directories)
+        syncDirectory(changed);
+    if (hook)
+        hook("replacements-synced");
     std::filesystem::remove(directory / (number + ".journal"));
     syncDirectory(directory);
     std::error_code ignored;

@@ -411,6 +411,27 @@ SCENARIO("A manifest and its lock are published together or not at all") {
                 REQUIRE(crashAt("replacement-1", project.path()) == "manifest-2|lock-2");
             }
         }
+        WHEN("the process stops once the replacements are durable but the journal is still there") {
+            THEN("restart completes the publication") {
+                REQUIRE(crashAt("replacements-synced", project.path()) == "manifest-2|lock-2");
+            }
+        }
+        WHEN("the journal is removed") {
+            std::vector<std::string> steps;
+            std::vector<bool>        journalPresent;
+            {
+                developer::Store observed{project.path(), developer::defaultAbandonedAfter, [&](std::string_view name) {
+                                              steps.emplace_back(name);
+                                              if (name == "replacements-synced")
+                                                  journalPresent.push_back(!std::filesystem::is_empty(project.path() / ".webfront/developer/journal"));
+                                          }};
+                publishPair(observed, "manifest-2", "lock-2", observed.state(pair));
+            }
+            THEN("it is only after both replacements, and the journal was still present until then") {
+                REQUIRE(steps == std::vector<std::string>{"before-journal", "after-journal", "replacement-1", "replacement-2", "replacements-synced"});
+                REQUIRE(journalPresent == std::vector<bool>{true});
+            }
+        }
         WHEN("the process stops after the second replacement") {
             THEN("restart completes the publication") {
                 REQUIRE(crashAt("replacement-2", project.path()) == "manifest-2|lock-2");

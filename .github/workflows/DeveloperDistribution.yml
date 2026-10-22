@@ -58,7 +58,7 @@ jobs:
           cmp build-distribution/pi-starter.tgz build-distribution-repeat/pi-starter.tgz
           cmp build-distribution/life-starter.tgz build-distribution-repeat/life-starter.tgz
           cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
-          node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs
+          node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs js/developer/tools/manifest-check.mjs
       - name: Check the dedicated release tag
         if: startsWith(github.ref, 'refs/tags/developer-v')
         env:

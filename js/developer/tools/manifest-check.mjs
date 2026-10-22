@@ -117,11 +117,17 @@ function registry(packages) {
     const fetchImpl = async url => {
         requests.push(String(url));
         const path = new URL(url).pathname.slice(1);
-        if (path.endsWith('.tgz')) return new Response(packages[path.slice(0, -4)].bytes);
+        if (path.endsWith('.tgz')) {
+            const [name, version] = path.slice(0, -4).split('@');
+            const entry = packages[name];
+            return new Response(entry.older?.[version] ?? entry.bytes);
+        }
         const entry = packages[path];
         if (!entry) return new Response('', {status: 404});
-        const manifest = {dist: {tarball: `https://registry.test/${path}.tgz`, integrity: integrity(entry.bytes)}};
-        return Response.json({'dist-tags': {latest: entry.version}, versions: {[entry.version]: manifest}});
+        const versions = {[entry.version]: entry.bytes, ...entry.older};
+        const described = Object.fromEntries(Object.entries(versions).map(([version, bytes]) =>
+            [version, {dist: {tarball: `https://registry.test/${path}@${version}.tgz`, integrity: integrity(bytes)}}]));
+        return Response.json({'dist-tags': {latest: entry.version}, versions: described});
     };
     return {fetchImpl, requests};
 }
@@ -241,4 +247,17 @@ test('an invalid manifest or a lock without its digest is reported before anythi
     await assert.rejects(loadProject(bridge), /format 3 is not supported/);
     storage.set(manifestPath, encode({...minimal, permissions: {network: true}}));
     await assert.rejects(install(bridge, [], options(registry(source()).fetchImpl)), /unknown permission/);
+});
+
+test('wf install --update takes the newest version within the ranges while installing a package keeps the others', async () => {
+    const {bridge, storage} = await project('a');
+    assert.equal(json(storage, lockPath).packages['a@1.2.0'].version, '1.2.0');
+    const newer = {...source(), a: {version: '1.3.0', bytes: pkg('a', '1.3.0'), older: {'1.2.0': pkg('a', '1.2.0')}}};
+    await install(bridge, ['b'], options(registry(newer).fetchImpl));
+    assert.ok(json(storage, lockPath).packages['a@1.2.0'], 'installing another package leaves a at its locked version');
+    assert.equal(json(storage, lockPath).packages['a@1.3.0'], undefined);
+    await install(bridge, ['--update'], options(registry(newer).fetchImpl));
+    assert.deepEqual(Object.keys(json(storage, lockPath).packages).sort(), ['a@1.3.0', 'b@2.0.0']);
+    assert.deepEqual(json(storage, manifestPath).dependencies, {a: '^1.2.0', b: '^2.0.0'});
+    assert.equal((await loadProject(bridge)).status, 'consistent');
 });

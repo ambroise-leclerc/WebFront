@@ -7,3 +7,5 @@ Download through the version-pinned GitHub Pages URLs in the bootstrap configura
 The environment includes the terminal, npm resolver, esbuild/WASM compiler, embedding tools and dependency notices. These packages are experimental; browser packages only, without installation scripts, native modules or Node API shims.
 
 Version 0.4.0 updates the Life starter text for a developer audience. The simulation and bridge contract are unchanged.
+
+Version 0.5.0 introduces the project manifest `webfront.project.json`: `wf init`, manifest-driven `wf install` (with `--update`), `wf preview` and `wf embed`, and a lock that records the digest of the manifest dependencies. `wf install` now requires a manifest. The starters ship their own manifest.

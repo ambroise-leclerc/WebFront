@@ -110,7 +110,8 @@ export async function install(bridge, args, {registry, signal, progress = () => 
     if (!specs.length && !update && project.status === 'consistent')
         return {lock: project.lock, restored: await restoreLocked(bridge, project.lock, {signal, progress, fetchImpl: options.fetchImpl})};
     const request = requestedDependencies(project.manifest, specs);
-    const previous = project.status === 'consistent' ? project.lock : undefined;
+    // --update ignores the locked versions; installing a package keeps the others where they are.
+    const previous = project.status === 'consistent' && !update ? project.lock : undefined;
     const resolved = await resolveLock(request.dependencies, previous, options);
     const dependencies = recordedDependencies(request, resolved.lock, specs);
     await storePackages(bridge, resolved.lock, resolved.downloads, {signal, progress});
