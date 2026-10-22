@@ -119,13 +119,15 @@ public:
     /// after it is completed when the project is next opened.
     void commitGroup(const std::vector<std::string>& ids, const std::vector<std::string>& paths, const std::string& expected) {
         std::scoped_lock lock(mutex);
-        recoverJournals(root, hook);
-        auto group = checkedGroup(ids, paths);
-        if (fingerprint(root, paths) != expected)
-            throw std::runtime_error("The project changed since it was read; run the command again");
         const auto directory = projectPath(root, journalDirectory);
         // Before the commit point: the journal directory must itself survive a power cut.
         createDirectoriesDurably(root, directory);
+        // From here to the end, no other process recovers, checks the precondition or publishes.
+        ProjectLock processLock{directory / lockName};
+        recoverLocked(root, hook);
+        auto group = checkedGroup(ids, paths);
+        if (fingerprint(root, paths) != expected)
+            throw std::runtime_error("The project changed since it was read; run the command again");
         const auto number = prepareJournal(directory, group);
         try {
             writeJournal(directory, number, group);

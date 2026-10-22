@@ -13,6 +13,7 @@
 
 #if !defined(_WIN32)
 #include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
 
@@ -82,6 +83,56 @@ inline void createDirectoriesDurably(const std::filesystem::path& root, const st
     }
 }
 
+/// Serializes the publications and the recoveries of every process sharing a project: an advisory lock on a
+/// file of the journal directory, released when the object dies, whatever the way out. The mutex of a Store
+/// only protects that store; without this a second process could take a publication still being prepared
+/// for the remains of an interrupted one.
+class ProjectLock {
+public:
+    explicit ProjectLock(const std::filesystem::path& file) {
+#if defined(_WIN32)
+        handle = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                             FILE_ATTRIBUTE_NORMAL, nullptr);
+        OVERLAPPED region{};
+        if (handle == INVALID_HANDLE_VALUE || !LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &region)) {
+            release();
+            throw std::runtime_error("Cannot lock the project journal");
+        }
+#else
+        descriptor = ::open(file.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (descriptor < 0 || ::flock(descriptor, LOCK_EX) != 0) {
+            release();
+            throw std::runtime_error("Cannot lock the project journal");
+        }
+#endif
+    }
+    ProjectLock(const ProjectLock&)            = delete;
+    ProjectLock& operator=(const ProjectLock&) = delete;
+    ~ProjectLock() {
+        release();
+    }
+
+private:
+    void release() noexcept {
+#if defined(_WIN32)
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+        handle = INVALID_HANDLE_VALUE;
+#else
+        if (descriptor >= 0)
+            ::close(descriptor);
+        descriptor = -1;
+#endif
+    }
+#if defined(_WIN32)
+    HANDLE handle = INVALID_HANDLE_VALUE;
+#else
+    int descriptor = -1;
+#endif
+};
+
+inline constexpr std::string_view lockName = ".lock";
+
 /// What a group publication changes: the project file it replaces and the journal-owned file replacing it.
 struct JournalEntry {
     std::string target;
@@ -146,7 +197,9 @@ inline std::string fingerprint(const std::filesystem::path& root, const std::vec
 }
 
 /// Completes a committed journal: every source still present replaces its target. Safe to repeat
-/// after an interruption, including one of this very function.
+/// after an interruption, including one of this very function. A source that is gone was already
+/// renamed: sources are only removed after the journal, and a publication that never reached its
+/// journal is never rolled forward.
 inline void rollForward(const std::filesystem::path& root, const std::filesystem::path& directory, const std::string& number,
                         const std::vector<JournalEntry>& entries, const StepHook& hook) {
     const auto owned = directory / (number + ".d");
@@ -178,7 +231,7 @@ inline void rollForward(const std::filesystem::path& root, const std::filesystem
 /// Completes the journals that reached their commit point and abandons the others. A journal is
 /// committed once it is renamed to "<n>.journal"; everything else is the remains of a publication
 /// interrupted before that point, where no project file was touched.
-inline void recoverJournals(const std::filesystem::path& root, const StepHook& hook = {}) {
+inline void recoverLocked(const std::filesystem::path& root, const StepHook& hook) {
     std::filesystem::path directory;
     try {
         directory = projectPath(root, journalDirectory);
@@ -186,9 +239,12 @@ inline void recoverJournals(const std::filesystem::path& root, const StepHook& h
         return;
     }
     std::error_code error;
+    if (!std::filesystem::is_directory(directory, error))
+        return;
     std::vector<std::filesystem::path> found;
     for (const auto& entry : std::filesystem::directory_iterator(directory, error))
-        found.push_back(entry.path());
+        if (entry.path().filename() != lockName)
+            found.push_back(entry.path());
     if (error)
         return;
     std::ranges::sort(found);
@@ -216,6 +272,21 @@ inline void recoverJournals(const std::filesystem::path& root, const StepHook& h
         if (!committed.contains(name))
             std::filesystem::remove_all(path, error);
     }
+}
+
+/// recoverLocked() for a caller that does not hold the project lock.
+inline void recoverJournals(const std::filesystem::path& root, const StepHook& hook = {}) {
+    std::filesystem::path directory;
+    try {
+        directory = projectPath(root, journalDirectory);
+    } catch (const std::exception&) {
+        return;
+    }
+    std::error_code error;
+    if (!std::filesystem::is_directory(directory, error))
+        return;
+    ProjectLock lock{directory / lockName};
+    recoverLocked(root, hook);
 }
 
 }  // namespace webfront::developer

@@ -185,7 +185,9 @@ completes a journal that reached its commit point and abandons the others, so a 
 a manifest and a lock that belong to different installations. The publication carries a precondition,
 the fingerprint of both files as read when the command began: if another browser or command changed
 them meanwhile, it is refused with "The project changed since it was read; run the command again" and
-nothing is lost. `wf restore` (#306) will fill the cache from a consistent lock without ever writing them.
+nothing is lost. Recovery and group publications also hold an advisory lock on `.webfront/developer/journal/.lock`, so
+several processes sharing a project (or several stores of one process) are serialized rather than abandoning one
+another's publication; other project files stay unprotected against concurrent local modification. `wf restore` (#306) will fill the cache from a consistent lock without ever writing them.
 
 ## Dependencies, storage and limitations
 
