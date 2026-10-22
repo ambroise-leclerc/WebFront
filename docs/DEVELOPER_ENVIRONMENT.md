@@ -165,24 +165,37 @@ unknown permission are errors printed in the terminal, never silently ignored. `
 `permissions` are validated here and used by the later commands (#307, #310); permissions will only
 frame the operations of the `context` API of authorized scripts, they are not a sandbox.
 
-- `wf init [directory]` writes a minimal manifest; it never replaces an existing one.
+- `wf init [name]` writes `webfront.project.json` at the project root, the manifest every `wf` command
+  reads; it never replaces an existing one. When a lock already exists (a project installed before
+  0.5.0), the manifest takes its roots as dependencies (`^version`, or the range they were installed with).
 - `wf install <package>[@range]` resolves, downloads and verifies into the cache, then publishes the
   manifest (the requested range, or `^version` when none was given) and the lock in a single transaction.
 - `wf install` without argument installs exactly the locked graph (like `npm ci`) when the lock agrees
   with the manifest, resolves the manifest and creates the lock when there is none, and fails when they
   disagree. `wf install --update` resolves the manifest again.
 - `wf preview [entry]` and `wf embed <provider>` use `entries` and `providers`; an explicit path still works.
+  `wf embed <provider>` generates the C++ class `webfront::fs::<provider>`; with `--output <Provider.hpp>`,
+  the file name must be a C++ class name.
+- A requested range is checked like the manifest that records it, before anything is resolved: a range or
+  tag the manifest cannot hold is refused instead of written. The manifest is rewritten with the keys it had,
+  plus the new dependencies.
 
 The manifest holds the intent (roots and ranges), the lock the exact resolution. The lock records a
 digest of the manifest's `dependencies` (`manifestDigest`). The project is **consistent** when they
 match, **unlocked** without a lock (no installed graph) and **desynchronized** when the dependencies
 changed since the lock was written; every command reports that state and none resolves implicitly.
+A lock written before 0.5.0 has no digest: it is used as consistent when its roots satisfy the
+dependencies (after `wf init`, they do), and `wf install` records the digest without resolving anything.
 
 Both files are published by one all-or-nothing transaction (`developer::Store::commitGroup`): the
 staged files are moved under `.webfront/developer/journal/`, a journal naming them is written and
 synchronized to disk (the commit point), then each file replaces its target. Opening the project
 completes a journal that reached its commit point and abandons the others, so a crash never leaves
-a manifest and a lock that belong to different installations. The publication carries a precondition,
+a manifest and a lock that belong to different installations. A failure before the commit point returns
+the staged files to their transactions. A committed publication whose replacement fails (a target turned
+into a directory, a file locked by another program) is reported as committed but not applied yet; its
+journal is kept, the project still opens, and every later command first completes it, failing with the
+cause until it can. The publication carries a precondition,
 the fingerprint of both files as read when the command began: if another browser or command changed
 them meanwhile, it is refused with "The project changed since it was read; run the command again" and
 nothing is lost. Recovery and group publications also hold an advisory lock on `.webfront/developer/journal/.lock`, so

@@ -143,10 +143,15 @@ export function validateManifest(manifest) {
     };
 }
 
+/** The manifest as written (`source`, to update without adding the defaults) and validated (`manifest`). */
+export function readManifest(bytes) {
+    let source;
+    try { source = JSON.parse(new TextDecoder().decode(bytes)); } catch { return fail('not valid JSON'); }
+    return {source, manifest: validateManifest(source)};
+}
+
 export function parseManifest(bytes) {
-    let value;
-    try { value = JSON.parse(new TextDecoder().decode(bytes)); } catch { return fail('not valid JSON'); }
-    return validateManifest(value);
+    return readManifest(bytes).manifest;
 }
 
 /** The text written to disk: the schema's keys in a stable order. */

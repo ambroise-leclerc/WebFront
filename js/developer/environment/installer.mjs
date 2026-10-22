@@ -1,35 +1,59 @@
 // wf init and wf install: the manifest states the intent, the lock the exact resolution; both are published together.
+import semver from 'semver';
 import {resolvePackages, downloadPackage} from './packages.mjs';
+import {parseSpec} from '../components/tools/wf.mjs';
 import {publish, readProject} from './io.mjs';
-import {safePackagePath} from './paths.mjs';
-import {manifestPath, newManifest, manifestName, serializeManifest, dependenciesDigest} from './manifest.mjs';
+import {manifestPath, newManifest, manifestName, serializeManifest, validateManifest, dependenciesDigest} from './manifest.mjs';
 import {loadProject, publishTogether, lockPath, packageRoot, noManifest, desynchronized, textBytes} from './project.mjs';
 
+// The spec syntax resolvePackages() reads: a missing version is undefined, resolved as latest.
 const splitSpec = spec => {
-    const at = spec.indexOf('@', spec.startsWith('@') ? 1 : 0);
-    return at < 0 ? [spec, undefined] : [spec.slice(0, at), spec.slice(at + 1) || undefined];
+    const {name, version} = parseSpec(spec);
+    return [name, version || undefined];
 };
 
-/** Creates a minimal manifest without replacing an existing one. */
-export async function initProject(bridge, [directory = '.', ...extra], {signal} = {}) {
-    if (extra.length) throw new Error('Usage: wf init [directory]');
-    const folder = directory === '.' ? '' : safePackagePath(directory.replace(/\/+$/, ''));
-    const path = folder ? `${folder}/${manifestPath}` : manifestPath;
-    const files = new Map([['output', textBytes(serializeManifest(newManifest(manifestName(folder))))]]);
-    await publish(bridge, path, files, {directory: false, replace: false, signal});
-    return `Created ${path}. Add libraries with wf install <package>.`;
+// The range a manifest records for a root of a lock written before the manifest: the range it was installed with,
+// or ^version for an exact version or a dist-tag, like npm.
+function legacyRange(lock, root) {
+    const {version} = lock.packages[root.id];
+    const exact = semver.valid(root.requested) !== null;
+    return !exact && root.requested !== 'latest' && semver.validRange(root.requested) !== null ? root.requested : `^${version}`;
 }
 
-// The ranges to resolve: the manifest's, with the requested packages added or replaced.
-function requestedDependencies(manifest, specs) {
-    const dependencies = {...manifest.dependencies};
+/**
+ * Creates webfront.project.json at the project root, without replacing an existing one. Every wf command reads that
+ * manifest. An existing lock gives the dependencies, so a project installed before the manifest keeps its locked graph.
+ */
+export async function initProject(bridge, [name, ...extra], {signal} = {}) {
+    if (extra.length) throw new Error('Usage: wf init [name]');
+    const {lock} = await loadProject(bridge);
+    const manifest = newManifest(name ?? manifestName(''));
+    if (lock) manifest.dependencies = Object.fromEntries(Object.entries(lock.roots).map(([root, entry]) => [root, legacyRange(lock, entry)]));
+    validateManifest(manifest);
+    await publish(bridge, manifestPath, new Map([['output', textBytes(serializeManifest(manifest))]]), {directory: false, replace: false, signal});
+    const adopted = lock ? ` with the ${Object.keys(manifest.dependencies).length} dependencies of ${lockPath}` : '';
+    return `Created ${manifestPath}${adopted}. Add libraries with wf install <package>.`;
+}
+
+// The ranges to resolve: the manifest's, with the requested packages added or replaced. They are checked like the manifest
+// that will record them before anything is resolved, so a range the manifest cannot hold is refused instead of written.
+function requestedDependencies(project, specs) {
+    const dependencies = {...project.manifest.dependencies};
     const explicit = new Set();
     for (const spec of specs) {
         const [name, range] = splitSpec(spec);
         dependencies[name] = range ?? 'latest';
         if (range && range !== 'latest') explicit.add(name);
     }
+    validateManifest({...project.source, dependencies});
     return {dependencies, explicit};
+}
+
+// The manifest as written with new dependencies: the defaults added by validation are not written back.
+function updatedManifest(project, dependencies) {
+    const manifest = {...project.source, dependencies};
+    validateManifest(manifest);
+    return manifest;
 }
 
 // A package installed without a range is recorded as ^version, like npm; an explicit range is kept as typed.
@@ -107,17 +131,24 @@ export async function install(bridge, args, {registry, signal, progress = () => 
     if (specs.length && update) throw new Error('Usage: wf install --update does not take packages');
     if (specs.length && project.status === 'desynchronized') throw new Error(desynchronized);
     if (!specs.length && !update && project.status === 'desynchronized') throw new Error(desynchronized);
-    if (!specs.length && !update && project.status === 'consistent')
-        return {lock: project.lock, restored: await restoreLocked(bridge, project.lock, {signal, progress, fetchImpl: options.fetchImpl})};
-    const request = requestedDependencies(project.manifest, specs);
+    const locked = project.status === 'consistent' || project.status === 'legacy';
+    if (!specs.length && !update && locked) {
+        const restored = await restoreLocked(bridge, project.lock, {signal, progress, fetchImpl: options.fetchImpl});
+        if (project.status === 'consistent') return {lock: project.lock, restored};
+        // A lock written before the manifest: the same graph, now recording the dependencies it was resolved from.
+        const lock = await withDigest(project.lock, project.manifest.dependencies);
+        await publishResolution(bridge, project, {manifest: null, lock}, {signal});
+        return {lock, restored};
+    }
+    const request = requestedDependencies(project, specs);
     // --update ignores the locked versions; installing a package keeps the others where they are.
-    const previous = project.status === 'consistent' && !update ? project.lock : undefined;
+    const previous = locked && !update ? project.lock : undefined;
     const resolved = await resolveLock(request.dependencies, previous, options);
     const dependencies = recordedDependencies(request, resolved.lock, specs);
     await storePackages(bridge, resolved.lock, resolved.downloads, {signal, progress});
     // The journal of the joint publication is the installation commit point. A failed install may leave unused cache files.
     const lock = await withDigest(resolved.lock, dependencies);
-    const manifest = specs.length ? {...project.manifest, dependencies} : null;
+    const manifest = specs.length ? updatedManifest(project, dependencies) : null;
     await publishResolution(bridge, project, {manifest, lock}, {signal});
     return {lock, restored: 0};
 }

@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {validateManifest, parseManifest, serializeManifest, manifestName, dependenciesDigest} from '../environment/manifest.mjs';
-import {install, initProject, loadProject, syncNotice, resolveEntry, lockPath, manifestPath} from '../environment/packages.bundle.mjs';
+import {install, initProject, loadProject, syncNotice, resolveEntry, embedTarget, lockPath, manifestPath} from '../environment/packages.bundle.mjs';
 import {compress} from '../environment/embed.mjs';
 import {tar} from './archive.mjs';
 
@@ -69,6 +69,14 @@ test('entries are named in the manifest or given as paths', () => {
     assert.equal(resolveEntry(manifest, 'other', 'wf preview'), 'ui/other.tsx');
     assert.equal(resolveEntry(manifest, 'free/path.tsx', 'wf preview'), 'free/path.tsx');
     assert.throws(() => resolveEntry(validateManifest(minimal), undefined, 'wf preview'), /entries.main/);
+});
+
+test('wf embed names the generated class after the provider, and refuses a file name that is not a C++ name', () => {
+    const manifest = validateManifest({...minimal, entries: {main: 'ui/main.tsx'}, providers: {PiUI: {entry: 'main', output: 'generated/pi-ui.hpp'}}});
+    assert.deepEqual(embedTarget(manifest, ['PiUI']), {entry: 'ui/main.tsx', output: 'generated/pi-ui.hpp', className: 'PiUI'});
+    assert.equal(embedTarget(manifest, ['ui/main.tsx', '--output', 'generated/LifeUI.hpp']).className, 'LifeUI');
+    assert.throws(() => embedTarget(manifest, ['ui/main.tsx', '--output', 'generated/life-ui.hpp']), /not a C\+\+ class name/);
+    assert.throws(() => embedTarget(manifest, ['ui/main.tsx']), /--output/);
 });
 
 // An in-memory project behind the webfront.developer.* callbacks, with the store's group publication and precondition.
@@ -152,15 +160,65 @@ async function project(...files) {
     return memory;
 }
 
-test('wf init creates a minimal manifest and never replaces an existing one', async () => {
+test('wf init creates the root manifest every command reads, and never replaces it', async () => {
     const {bridge, storage} = memoryBridge();
     assert.match(await initProject(bridge, [], {}), /Created webfront.project.json/);
     assert.deepEqual(json(storage, manifestPath), {format: 1, name: 'webfront-app', version: '0.1.0', dependencies: {}});
+    assert.equal((await loadProject(bridge)).status, 'unlocked');
     await assert.rejects(initProject(bridge, [], {}), /already exists/);
-    await initProject(bridge, ['apps/Ui'], {});
-    assert.equal(json(storage, 'apps/Ui/webfront.project.json').name, 'ui');
-    await assert.rejects(initProject(bridge, ['../escape'], {}), /Unsafe package path/);
     await assert.rejects(initProject(bridge, ['a', 'b'], {}), /Usage/);
+    const named = memoryBridge();
+    await initProject(named.bridge, ['my-app'], {});
+    assert.equal(json(named.storage, manifestPath).name, 'my-app');
+    await assert.rejects(initProject(memoryBridge().bridge, ['Bad Name'], {}), /name must be/);
+});
+
+test('a project locked before the manifest keeps its locked graph through wf init and wf install', async () => {
+    const {bridge, storage, pending} = await project('a', 'b@2.0.0', 'c@^3');
+    const lock = json(storage, lockPath);
+    delete lock.manifestDigest;
+    storage.set(lockPath, encode(lock));
+    storage.delete(manifestPath);
+    assert.match(await initProject(bridge, [], {}), /with the 3 dependencies of webfront-packages.lock.json/);
+    assert.deepEqual(json(storage, manifestPath).dependencies, {a: '^1.2.0', b: '^2.0.0', c: '^3'});
+    assert.equal((await loadProject(bridge)).status, 'legacy');
+    assert.equal(syncNotice(await loadProject(bridge)), '');
+    // A newer a is published: wf install keeps the locked version and only records the digest.
+    const newer = {...source(), a: {version: '1.3.0', bytes: pkg('a', '1.3.0'), older: {'1.2.0': pkg('a', '1.2.0')}}};
+    await install(bridge, [], options(registry(newer).fetchImpl));
+    const adopted = json(storage, lockPath);
+    assert.deepEqual(Object.keys(adopted.packages).sort(), ['a@1.2.0', 'b@2.0.0', 'c@3.1.0']);
+    assert.equal(adopted.manifestDigest, await dependenciesDigest({a: '^1.2.0', b: '^2.0.0', c: '^3'}));
+    assert.equal((await loadProject(bridge)).status, 'consistent');
+    assert.equal(pending(), 0);
+});
+
+test('a legacy lock also stays usable for wf install <pkg>, and one that does not match is desynchronized', async () => {
+    const {bridge, storage} = await project('a');
+    const lock = json(storage, lockPath);
+    delete lock.manifestDigest;
+    storage.set(lockPath, encode(lock));
+    const newer = {...source(), a: {version: '1.3.0', bytes: pkg('a', '1.3.0'), older: {'1.2.0': pkg('a', '1.2.0')}}};
+    await install(bridge, ['b'], options(registry(newer).fetchImpl));
+    assert.deepEqual(Object.keys(json(storage, lockPath).packages).sort(), ['a@1.2.0', 'b@2.0.0']);
+    assert.equal((await loadProject(bridge)).status, 'consistent');
+    const stale = json(storage, lockPath);
+    delete stale.manifestDigest;
+    storage.set(lockPath, encode(stale));
+    storage.set(manifestPath, encode({...minimal, dependencies: {a: '^2.0.0', b: '^2.0.0'}}));
+    assert.equal((await loadProject(bridge)).status, 'desynchronized');
+});
+
+test('wf install refuses a range the manifest cannot hold before resolving, and writes only what the user wrote', async () => {
+    const {bridge, storage} = await project();
+    const {fetchImpl, requests} = registry(source());
+    const before = storage.get(manifestPath);
+    for (const spec of ['a@next_v2', `a@${'1'.repeat(129)}`]) await assert.rejects(install(bridge, [spec], options(fetchImpl)), /invalid version range/);
+    assert.equal(requests.length, 0);
+    assert.equal(storage.get(manifestPath), before);
+    await install(bridge, ['a@'], options(fetchImpl));
+    assert.deepEqual(json(storage, manifestPath), {format: 1, name: 'webfront-app', version: '0.1.0', dependencies: {a: '^1.2.0'}});
+    assert.deepEqual((await loadProject(bridge)).manifest.entries, {}, 'the defaults are still applied when reading');
 });
 
 test('wf install needs a manifest, then publishes manifest and lock together', async () => {
@@ -243,12 +301,8 @@ test('two installations that read the same state cannot overwrite each other', a
     assert.equal((await loadProject(bridge)).status, 'consistent');
 });
 
-test('an invalid manifest or a lock without its digest is reported before anything is resolved', async () => {
+test('an invalid manifest is reported before anything is resolved', async () => {
     const {bridge, storage} = await project('a');
-    const lock = json(storage, lockPath);
-    delete lock.manifestDigest;
-    storage.set(lockPath, encode(lock));
-    assert.equal((await loadProject(bridge)).status, 'desynchronized');
     storage.set(manifestPath, encode({...minimal, format: 3}));
     await assert.rejects(loadProject(bridge), /format 3 is not supported/);
     storage.set(manifestPath, encode({...minimal, permissions: {network: true}}));
