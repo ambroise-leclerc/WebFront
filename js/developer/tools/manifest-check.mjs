@@ -40,6 +40,7 @@ test('invalid manifests are explicit errors, never silent fallbacks', () => {
         [{...minimal, dependencies: {'../x': '1.0.0'}}, /invalid npm package name/],
         [{...minimal, dependencies: {react: 'file:../react'}}, /invalid version range/],
         [{...minimal, registry: 'http://insecure.test/'}, /registry must use https/],
+        [{...minimal, registry: '/\\registry.test/'}, /registry must be an https URL or an absolute path/],
         [{...minimal, entries: {main: '../outside.tsx'}}, /safe project-relative path/],
         [{...minimal, entries: {main: '/etc/passwd'}}, /safe project-relative path/],
         [{...minimal, providers: {'not valid': {entry: 'a.tsx', output: 'a.hpp'}}}, /invalid provider name/],

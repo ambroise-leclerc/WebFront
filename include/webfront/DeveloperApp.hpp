@@ -29,6 +29,11 @@ inline WebFrontConfig projectConfig(WebFrontConfig config, const std::filesystem
     return config;
 }
 
+/// A path that stays on the application's origin: browsers read "//host" and "/\\host" as another host.
+inline bool sameOriginPath(std::string_view path) {
+    return path.starts_with('/') && !path.starts_with("//") && !path.contains('\\');
+}
+
 inline void validateBootstrap(std::string_view mode, const std::filesystem::path& project, const DeveloperBootstrapOptions& options) {
     if (mode != "developer")
         throw std::invalid_argument("Unknown bootstrap mode");
@@ -36,8 +41,7 @@ inline void validateBootstrap(std::string_view mode, const std::filesystem::path
         throw std::invalid_argument("Developer bootstrap requires an explicit project directory");
     if (options.environment.empty() || !options.integrity.starts_with("sha512-"))
         throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
-    if (options.registry && !options.registry->starts_with("https://")
-        && !(options.registry->starts_with('/') && !options.registry->starts_with("//")))
+    if (options.registry && !options.registry->starts_with("https://") && !developer::sameOriginPath(*options.registry))
         throw std::invalid_argument("The developer registry must be an HTTPS URL or a same-origin path");
 }
 

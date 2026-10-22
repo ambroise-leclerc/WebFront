@@ -3,6 +3,7 @@ import semver from 'semver';
 import {responseBytes} from './io.mjs';
 import {verifyIntegrity} from '../components/tools/wf.mjs';
 import {readArchive, checkedManifest} from './archive.mjs';
+import {sameOriginPath} from './manifest.mjs';
 
 export const safeName = name => /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name);
 export const idOf = (name, version) => `${name.replace('/', '+')}@${version}`;
@@ -40,9 +41,11 @@ async function fetchTarball(name, manifest, base, {fetchImpl, signal}) {
 }
 
 // Like the environment archive: HTTPS, or the application's own origin for a local mirror.
+// A path must also resolve on that origin, whatever the parser makes of it.
 export function registryBase(registry) {
     const base = new URL(registry, globalThis.location?.href);
-    if (base.protocol !== 'https:' && base.origin !== globalThis.location?.origin)
+    const local = base.origin === globalThis.location?.origin;
+    if (registry.startsWith('/') ? !sameOriginPath(registry) || !local : base.protocol !== 'https:' && !local)
         throw new Error(`The npm registry must use HTTPS or the application origin: ${registry}`);
     if (!base.pathname.endsWith('/')) base.pathname += '/';
     return base;

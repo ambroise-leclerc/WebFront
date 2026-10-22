@@ -26,8 +26,14 @@ export async function storePackage(bridge, node, files, {signal} = {}) {
 }
 
 async function readRecord(bridge, node) {
-    try { return JSON.parse(decoder.decode(await readProject(bridge, recordPath(node)))); }
-    catch (error) { return unreadable(error) ? null : {}; }
+    let bytes;
+    try { bytes = await readProject(bridge, recordPath(node)); }
+    catch (error) {
+        if (unreadable(error)) return null;
+        throw error;
+    }
+    // Only a malformed record is a corruption; a bridge failure is reported as such.
+    try { return JSON.parse(decoder.decode(bytes)); } catch { return {}; }
 }
 
 const sameFiles = (record, node) => Object.keys(record.files).sort().join('\n') === [...node.files].sort().join('\n');

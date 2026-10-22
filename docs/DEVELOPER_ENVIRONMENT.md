@@ -230,7 +230,8 @@ The registry used by `wf install` and `wf restore` is, in order of precedence:
 
 Both commands print the registry in use and where it comes from, for example
 `Registry: /mirror/ (application option)`. A registry must use HTTPS or be a path on the application's own
-origin, like the environment archive; tarballs must use HTTPS or the registry's origin. The lock's `registry`
+origin, like the environment archive (a path starting with `//` or containing a backslash, which browsers read as
+another host, is refused); tarballs must use HTTPS or the registry's origin. The lock's `registry`
 field records where the graph was resolved and is not used to restore it, so a mirror can serve a lock resolved
 from the public registry.
 

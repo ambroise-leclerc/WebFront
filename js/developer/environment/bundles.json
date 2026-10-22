@@ -1,9 +1,9 @@
 {
-  "js/developer/environment/manifest.mjs": "1cb0c70c87ca31ec81ad0591c0c1d1cb2637ecc491caef9c3d3ec8f1670ea900",
+  "js/developer/environment/manifest.mjs": "126f0f0e5d64ebb85191c70ff7b42c3c8f9abd5133b4e3e96acc29f089419e6c",
   "js/developer/environment/project.mjs": "525bc1545f6ff9a70c744c536e46c2404bdc20daa83b25b29419222161003c3b",
   "js/developer/environment/installer.mjs": "f3e919535847c93f62498ee0ad3fec49ff5f7531fb657feaca80e2ccb6da1c0c",
   "js/developer/environment/restore.mjs": "cdd22eebd55d68bd705685cd5ee3059e228a35053eaad116ab99c4c05b908098",
-  "js/developer/environment/cache.mjs": "e25a4c633794a7ba49fb1cddf182084571570988eb6e8a716d9dac31a3dd7346",
+  "js/developer/environment/cache.mjs": "6fd0e3b760dfc1070a28e2e2eb3c86621c970c775045e7a9ae665da4f6845922",
   "js/developer/environment/packages-entry.mjs": "edf47d25099428ea8d33f9fe4552f239035715b98fd2bff6be0f9143ab0cfe8a",
   "js/developer/environment/bootstrap.mjs": "534af4b3d07891338c3390e1d5e06c2fb6dd8df11ca6547735565b17f1b9cd70",
   "js/developer/environment/bootstrap-entry.mjs": "ff8084f23f5acc721f97eb1ed0a454e7bfee1894de17d54f0100fa11f7ef8b77",
@@ -17,7 +17,7 @@
   "js/developer/environment/conditions.mjs": "7f0ecba239480831e38985ccffd4c82309949924f4eb9d938e4ad1b09f5f36ed",
   "js/developer/environment/io.mjs": "21af39f07c7eb863908c1df768e3c31de1c6eb8ff757c2a287c4a47c76855db6",
   "js/developer/environment/recipe.mjs": "5e7b80cb9090dce63fafafbb852879fce9f6ed2399ac364bbe5af1cf6f4c1758",
-  "js/developer/environment/registry.mjs": "31ce38b38ba3e48a31d5ef87dda7f169fd272a11eafff45d5277ae8ed59569fe",
+  "js/developer/environment/registry.mjs": "717b928b47d1eb8d1635cbfda60473f4a8e0918c1345d5364b6b7d2ffe199195",
   "js/developer/environment/archive.mjs": "1fb8b9c3c27219858597801104639bba1104c7a7d33973609cd556b5e5f81d2d",
   "js/developer/environment/lock.mjs": "d69a3a877b92da52b21dcc78877345015ac31b7dec1c484ee1ff1f97f154d51f",
   "js/developer/environment/pins.mjs": "df07f6f01edaf86a1052d0e76f6c6745cb6e7a3309bbd256ac720ee8adc85297",
@@ -35,6 +35,6 @@
   "js/developer/tools/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "js/developer/vendor/package-lock.json": "eb545112b672f9dbf520125df1f44a878d62cc8e611f0e33baee36470ded4dec",
   "js/core/bootstrap/bootstrap.bundle.mjs": "792fe7cf564bd12ac47fef419d8c71e2070925764a17706552e7d3f5d6ba2181",
-  "js/developer/environment/packages.bundle.mjs": "10d0b5863ef9941bf6915c0cb28b5b4053ff044527c301bd4fe917bba23d32d6",
+  "js/developer/environment/packages.bundle.mjs": "81b575e77911e7a21fb477df84d955aac0c0017969d93c717e0c9622d4eed913",
   "include/webfront/system/DeveloperReleaseData.hpp": "c97a8c3b21df3306c179f7b46d945159b5854f9d2810f135a4ab224c768c75d7"
 }

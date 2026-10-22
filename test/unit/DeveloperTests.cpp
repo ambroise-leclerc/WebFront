@@ -340,7 +340,7 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::logic_error);
         }
         THEN("a registry that is neither HTTPS nor same-origin is refused") {
-            for (const auto* registry : {"http://registry.test/", "//registry.test/", "registry/", ""}) {
+            for (const auto* registry : {"http://registry.test/", "//registry.test/", "/\\registry.test/", "/mirror\\..\\x/", "registry/", ""}) {
                 auto options     = trusted;
                 options.registry = registry;
                 REQUIRE_THROWS_AS(app.bootstrap("developer", options), std::invalid_argument);

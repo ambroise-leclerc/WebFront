@@ -2,7 +2,7 @@
 // node:assert, they use only browser APIs, so that they can move to wf test.
 import {test, before} from 'node:test';
 import assert from 'node:assert/strict';
-import {install, initProject, restore, restorePackages, effectiveRegistry, cacheState, validateLock, lockPath, manifestPath, packageRoot} from '../environment/packages.bundle.mjs';
+import {install, initProject, restore, restorePackages, effectiveRegistry, usableRegistry, cacheState, validateLock, lockPath, manifestPath, packageRoot} from '../environment/packages.bundle.mjs';
 import {syntheticPackages, registryFiles} from './registry-fixture.mjs';
 import {memoryBridge} from './memory-bridge.mjs';
 
@@ -114,6 +114,29 @@ test('the application registry takes precedence over the manifest one, which tak
     assert.deepEqual(effectiveRegistry({}, {}), {url: 'https://registry.npmjs.org/', source: 'default'});
     assert.deepEqual(effectiveRegistry({registry: '/mirror/'}, {}), {url: '/mirror/', source: 'default'});
     await assert.rejects(restore(bridge, [], {registry: 'http://plain.test/', registryExplicit: true, fetchImpl: mirror.fetchImpl}), /HTTPS or the application origin/);
+});
+
+test('a registry path never leaves the application origin, however a URL parser reads it', () => {
+    // On an HTTPS page, "/\\host" resolves to https://host/, which an HTTPS check alone would accept.
+    globalThis.location = new URL('https://app.test/webfront-bootstrap.html');
+    try {
+        assert.equal(usableRegistry({registry: '/mirror/', registryExplicit: true}).url, '/mirror/');
+        for (const registry of ['//registry.test/', '/\\registry.test/', '/\\\\registry.test/', 'http://registry.test/'])
+            assert.throws(() => usableRegistry({registry, registryExplicit: true}), /HTTPS or the application origin/, registry);
+        assert.equal(usableRegistry({registry: 'https://registry.test/', registryExplicit: true}).url, 'https://registry.test/');
+    } finally { delete globalThis.location; }
+});
+
+test('a bridge failure while reading a record is reported, not taken for a corrupted cache', async () => {
+    const {bridge} = await lockedProject();
+    const failing = {cppFunction: name => async (...args) => {
+        if (name.endsWith('.read') && args[0].endsWith('.json') && args[0].includes('.webfront/')) throw new Error('Bridge disconnected');
+        return bridge.cppFunction(name)(...args);
+    }};
+    const source = served(registries.local);
+    await assert.rejects(restore(failing, ['--offline'], {}), /Bridge disconnected/);
+    await assert.rejects(restore(failing, [], explicit(source)), /Bridge disconnected/);
+    assert.equal(source.requests.length, 0, 'a valid package is not downloaded again');
 });
 
 test('a changed archive or a package missing from the registry fails and keeps lock and valid cache intact', async () => {
