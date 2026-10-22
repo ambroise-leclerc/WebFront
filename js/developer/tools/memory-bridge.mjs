@@ -12,6 +12,14 @@ export function memoryBridge(storage = new Map()) {
             if (!storage.has(path)) throw new Error('Cannot read project file: ' + path);
             return storage.get(path).subarray(offset, offset + 256 * 1024);
         },
+        // Like Store::list: the sorted names of a directory, one per line, directories ending with '/'.
+        list: directory => {
+            const prefix = directory ? directory + '/' : '';
+            const names = new Set([...storage.keys()].filter(key => key.startsWith(prefix))
+                .map(key => key.slice(prefix.length)).map(rest => rest.includes('/') ? rest.split('/')[0] + '/' : rest));
+            if (!names.size) throw new Error('Cannot list project directory: ' + directory);
+            return new TextEncoder().encode([...names].sort().join('\n'));
+        },
         begin: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: true}); return String(next); },
         beginNew: (destination, directory) => { transactions.set(String(++next), {destination, directory, files: new Map(), replace: false}); return String(next); },
         write: (id, path, offset, bytes) => {

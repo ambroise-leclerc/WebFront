@@ -746,3 +746,37 @@ SCENARIO("A second opener of the project waits for a publication in progress ins
         }
     }
 }
+
+SCENARIO("A project directory is listed without leaving the project") {
+    TemporaryDirectory project;
+    TemporaryDirectory outside;
+    developer::Store   store{project.path()};
+    publishFile(store, "ui/main.tsx", "main");
+    publishFile(store, "ui/parts/a.ts", "a");
+    publishFile(store, "ui/b.css", "b");
+    const auto text = [&](std::string path) {
+        const auto bytes = store.list(std::move(path));
+        return std::string(bytes.begin(), bytes.end());
+    };
+    GIVEN("files and a subdirectory") {
+        THEN("names are sorted, one per line, and directories end with a slash") {
+            REQUIRE(text("ui") == "b.css\nmain.tsx\nparts/");
+            REQUIRE(text("ui/parts") == "a.ts");
+            REQUIRE_THAT(text(""), Catch::Matchers::ContainsSubstring("ui/"));
+        }
+    }
+    GIVEN("a link to a directory outside the project") {
+        std::filesystem::create_directory_symlink(outside.path(), project.path() / "ui" / "escape");
+        THEN("it is omitted, and listing through it is refused") {
+            REQUIRE(text("ui") == "b.css\nmain.tsx\nparts/");
+            REQUIRE_THROWS_AS(store.list("ui/escape"), std::invalid_argument);
+        }
+    }
+    GIVEN("a missing directory, a file or a path escaping the project") {
+        THEN("listing fails") {
+            REQUIRE_THROWS_WITH(store.list("missing"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
+            REQUIRE_THROWS_WITH(store.list("ui/main.tsx"), Catch::Matchers::ContainsSubstring("Cannot list project directory"));
+            REQUIRE_THROWS_AS(store.list("../outside"), std::invalid_argument);
+        }
+    }
+}

@@ -125,7 +125,8 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   those public-path headers and ran both applications offline with developer callbacks absent.
   Pages returned HTTP 200, CORS `*` and byte-identical pinned environment data on 2026-10-20.
 - Browser packages only: no installation scripts, native modules, Node API shims, optional
-  dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
+  dependencies or TypeScript type checking. `wf run`/`wf exec` (#307) run WebFront scripts in a Worker under the
+  manifest permissions, which frame the `context` API only and are not a sandbox. Peers require explicit compatible roots/direct
   dependencies. Automatic rebuild/watch is future work. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
   the cache from the lock, from the application's registry option, else the manifest's, else npmjs.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.

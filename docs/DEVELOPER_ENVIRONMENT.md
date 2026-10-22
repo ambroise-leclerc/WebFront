@@ -161,9 +161,9 @@ A project has one manifest, the equivalent of `package.json`, which every `wf` c
 
 Only `format`, `name` and `version` are required. Validation is strict: an unknown key, a format
 newer than the environment reads, a path leaving the project, a non-HTTPS registry or origin and an
-unknown permission are errors printed in the terminal, never silently ignored. `scripts`, `test` and
-`permissions` are validated here and used by the later commands (#307, #310); permissions will only
-frame the operations of the `context` API of authorized scripts, they are not a sandbox.
+unknown permission are errors printed in the terminal, never silently ignored. `scripts` and `permissions` are
+used by `wf run` and `wf exec` (below); `test` is validated here and used by `wf test` (#310). Permissions only frame
+the operations of the `context` API of scripts; they are not a sandbox.
 
 - `wf init [name]` writes `webfront.project.json` at the project root, the manifest every `wf` command
   reads; it never replaces an existing one. When a lock already exists (a project installed before
@@ -239,6 +239,54 @@ Offline provisioning, extending ADR-013's explicit local provisioning: serve a d
 and tarballs from the application (`fs::NativeDebugFS` or an application provider) and pass its path as
 `registry`, then run `wf restore`; or copy `.webfront/developer/packages/` from another machine and check it with
 `wf restore --offline`. The environment archive is provisioned the same way (see below).
+
+## Scripts (`wf run`, `wf exec`)
+
+WebFront scripts replace npm scripts and `npx` for producing a project's resources, without Node.js:
+
+```json
+{
+  "scripts": {"icons": "tools/icons.ts --size 64", "build": "wf embed LifeUI"},
+  "permissions": {"files": ["assets"], "publish": ["generated"], "fetch": ["https://api.example.org"]}
+}
+```
+
+- `wf run [--timeout <seconds>] <script> [args...]` runs a script of the manifest. A script whose first word is `wf`
+  runs that wf command (up to four nested levels); otherwise its first word is the project path of a JS or TS module
+  and the other words, then the command's arguments, are its `context.args`. No shell is involved.
+- `wf exec [--timeout <seconds>] <package>[:<entry>] [args...]` runs an executable WebFront entry of an installed
+  package: the field `webfront.bin` of its `package.json`, a path or an object naming paths. npm's `bin` is never run:
+  a package with only a `bin` (a Node.js program) is refused, as is a browser package without `webfront.bin`.
+
+The module is bundled by esbuild-wasm with its locked dependencies and runs in a dedicated Worker. It exports
+`default async function (context)`, where `context` offers:
+
+| Member | Behavior |
+| --- | --- |
+| `args` | The arguments, as an array of strings. |
+| `signal` | An `AbortSignal` aborted by Ctrl+C and by the time limit. |
+| `console` | `log`/`info`/`debug` and `warn`/`error`, streamed to the terminal; the Worker's global `console` too. |
+| `project.read(path)`, `readText(path)` | A project file as bytes or text, under `permissions.files` or `publish`. |
+| `project.list(path)` | The names in a project directory (directories end with `/`), under the same permissions. |
+| `project.write(path, data)` | Publishes a string or `Uint8Array` with `developer::Store`, under `permissions.publish`. |
+| `packages.resolve(name)` | `{name, version, integrity}` of a locked package, or `null`. |
+| `fetch(url, init)` | `fetch` to an origin listed in `permissions.fetch`. |
+| `exit(code)` | Ends the run with an exit code from 0 to 255. |
+
+A `context` operation outside the permissions rejects with an explicit error. The manifest, the lock and
+`.webfront/` are never written by a script, whatever the permissions. **The permissions frame only the `context`
+API**: the Worker keeps its own capabilities (global `fetch`, `importScripts`, WebSocket...), and nothing here is a
+security boundary. Node.js modules (`fs`, `child_process`, `node:*`...) are refused while the script is loaded,
+unless a locked package of that name is a dependency of the importer; `process` does not exist and no polyfill is
+provided.
+
+Ctrl+C first aborts `context.signal`; a script still running two seconds later (the grace period) is terminated with
+`worker.terminate()`, which also stops a loop that never returns to the event loop. The time limit (`--timeout`,
+600 seconds by default, from 1 to 3600) applies the same sequence. The terminal stays usable. Each write is a
+transaction of its own: at a stop, one still staging is aborted and leaves the file unchanged, and one whose commit
+was already sent completes atomically; the terminal lists the publications applied and abandoned. A script that
+returns ends with code 0, a thrown error with 1, `exit(code)` with that code, Ctrl+C with 130 and the time limit with
+124; a non-zero code is an error carrying `exitCode`.
 
 ## Dependencies, storage and limitations
 

@@ -50,6 +50,37 @@ public:
         return bytes;
     }
 
+    /// The names in a project directory, one per line and sorted; a directory's name ends with '/'. An empty path
+    /// lists the project root. Entries that a link would take out of the project are omitted.
+    std::vector<std::uint8_t> list(std::string directory) const {
+        std::scoped_lock lock(mutex);
+        const auto       source = directory.empty() ? root : projectPath(root, directory);
+        std::error_code  error;
+        if (!std::filesystem::is_directory(source, error))
+            throw std::runtime_error("Cannot list project directory: " + directory);
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::directory_iterator(source)) {
+            const auto name = entry.path().filename().generic_string();
+            std::filesystem::path resolved;
+            try {
+                resolved = projectPath(root, directory.empty() ? name : directory + "/" + name);
+            } catch (const std::invalid_argument&) {
+                continue;
+            }
+            if (names.size() == maxListedEntries)
+                throw std::length_error("Project directory has more than 4096 entries: " + directory);
+            names.push_back(std::filesystem::is_directory(resolved, error) ? name + "/" : name);
+        }
+        std::ranges::sort(names);
+        std::vector<std::uint8_t> text;
+        for (const auto& name : names) {
+            if (!text.empty())
+                text.push_back('\n');
+            text.insert(text.end(), name.begin(), name.end());
+        }
+        return text;
+    }
+
     std::string begin(std::string destination, bool directory, bool replace = true) {
         std::scoped_lock lock(mutex);
         expireAbandoned();

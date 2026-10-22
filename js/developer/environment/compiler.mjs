@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild-wasm';
-import {bundle} from './bundler.mjs';
+import {bundle, bundleScript} from './bundler.mjs';
 
 const pending = new Map();
 let nextId = 0;
@@ -18,10 +18,10 @@ self.onmessage = async ({data}) => {
         else request.resolve(data.bytes);
         return;
     }
-    if (data.type !== 'build') return;
+    if (data.type !== 'build' && data.type !== 'script') return;
     try {
         await initialized;
-        const files = await bundle(esbuild, {...data, readProject});
+        const files = await (data.type === 'script' ? bundleScript : bundle)(esbuild, {...data, readProject});
         self.postMessage({type: 'result', files});
     } catch (error) {
         self.postMessage({type: 'error', error: error.message});

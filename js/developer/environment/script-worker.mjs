@@ -1,0 +1,77 @@
+// The Worker of a WebFront script: loads the compiled module and calls its default export with the context API.
+// Project files go through the page, which applies the manifest permissions and publishes with developer::Store.
+import {checkFetch} from './permissions.mjs';
+
+const pending = new Map();
+let nextId = 0;
+const controller = new AbortController();
+
+function call(operation, ...args) {
+    return new Promise((resolve, reject) => {
+        const id = ++nextId;
+        pending.set(id, {resolve, reject});
+        self.postMessage({type: 'call', id, operation, args});
+    });
+}
+
+function format(value) {
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) return value.stack ?? String(value);
+    try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+}
+
+const print = stream => (...values) => self.postMessage({type: 'console', stream, text: values.map(format).join(' ')});
+const scriptConsole = {log: print('out'), info: print('out'), debug: print('out'), warn: print('err'), error: print('err')};
+
+// Ends the run with a code; the page terminates the Worker, so nothing after exit() runs.
+function exit(code = 0) {
+    if (!Number.isInteger(code) || code < 0 || code > 255) throw new RangeError('context.exit expects an integer from 0 to 255');
+    self.postMessage({type: 'exit', code});
+    return new Promise(() => {});
+}
+
+const decoder = new TextDecoder();
+
+function createContext({args, permissions, base}) {
+    return Object.freeze({
+        args: Object.freeze([...args]),
+        signal: controller.signal,
+        console: scriptConsole,
+        project: Object.freeze({
+            read: path => call('read', path),
+            readText: async path => decoder.decode(await call('read', path)),
+            write: (path, data) => call('write', path, typeof data === 'string' ? new TextEncoder().encode(data) : data),
+            list: (path = '') => call('list', path),
+        }),
+        packages: Object.freeze({resolve: name => call('resolve', name)}),
+        fetch: (url, init = {}) => fetch(checkFetch(permissions, url, base), {...init, signal: init.signal ?? controller.signal}),
+        exit,
+    });
+}
+
+async function run(message) {
+    const url = URL.createObjectURL(new Blob([message.code], {type: 'text/javascript'}));
+    let module;
+    try { module = await import(url); }
+    finally { URL.revokeObjectURL(url); }
+    if (typeof module.default !== 'function') throw new Error('A WebFront script must export default async function (context)');
+    await module.default(createContext(message));
+    self.postMessage({type: 'exit', code: 0});
+}
+
+function answer({id, error, value}) {
+    const request = pending.get(id);
+    if (!request) return;
+    pending.delete(id);
+    if (error === undefined) request.resolve(value);
+    else request.reject(new Error(error));
+}
+
+self.onmessage = ({data}) => {
+    if (data.type === 'reply') return answer(data);
+    if (data.type === 'abort') return controller.abort(new Error('Interrupted'));
+    if (data.type !== 'run') return;
+    // Libraries that log through the global console reach the terminal too.
+    Object.assign(globalThis.console, scriptConsole);
+    run(data).catch(error => self.postMessage({type: 'error', error: format(error), interrupted: controller.signal.aborted}));
+};

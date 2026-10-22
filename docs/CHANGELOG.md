@@ -21,6 +21,14 @@
   print it with its origin. A reproducible local npm registry fixture (`js/developer/tools/registry-fixture.mjs`)
   serves the tests.
 
+- `wf run [--timeout <s>] <script>` and `wf exec <package>[:<entry>]` (developer distribution 0.5.0): WebFront
+  scripts (JS/TS bundled by esbuild-wasm, `default async function (context)`) run in a dedicated Worker with the
+  `context` API (`args`, `signal`, `console`, `project.read/readText/list/write`, `packages.resolve`, `fetch`,
+  `exit`) under the manifest `permissions`. `wf exec` runs only `webfront.bin` entries, never npm's `bin`. Node.js
+  imports are refused while loading. Ctrl+C or the time limit aborts `context.signal`, then terminates the Worker
+  after a 2 s grace period; staged writes are aborted, committed ones complete. Exit codes reach the terminal.
+  New bridge callback `webfront.developer.list` (`developer::Store::list`).
+
 ### Changed
 
 - `DeveloperBootstrapOptions::registry` is now `std::optional<std::string>`: unset, the manifest's registry
