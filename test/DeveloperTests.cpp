@@ -319,7 +319,7 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
     using App = BasicDeveloperApp<QuietFrontend>;
     const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
     GIVEN("no project directory") {
-        App app;
+        App app({}, WebFrontConfig{.port = "0"});
         THEN("bootstrap is refused") {
             REQUIRE_THROWS_AS(app.bootstrap("developer", trusted), std::invalid_argument);
         }

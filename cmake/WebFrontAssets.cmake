@@ -103,6 +103,10 @@ function(webfront_add_embedded_assets)
         add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
             --test "${root}/tools/developer/check.mjs" "${root}/tools/developer/distribution-check.mjs")
         set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
+        add_test(NAME EmbeddedAssetGenerator COMMAND ${CMAKE_COMMAND} -E env
+            "WEBFRONT_TEST_CMAKE=${CMAKE_COMMAND}" "${WEBFRONT_NODE_EXECUTABLE}"
+            --test "${root}/tools/assets/embed.test.mjs")
+        set_tests_properties(EmbeddedAssetGenerator PROPERTIES TIMEOUT 30)
         add_test(NAME EmbeddedGzipContents COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
             "${root}/tools/assets/check.mjs")
     endif()

@@ -154,6 +154,15 @@ endif()
 
 include("${ROOT}/cmake/FrontendTestHelpers.cmake")
 
+# Reuse the outer build's generator instead of repeatedly probing the host default
+# (Visual Studio on Windows). The focused multi-config test still switches generators.
+# These fixtures enable no language and compile nothing, so -A/-T are intentionally
+# omitted: architecture/toolset selection belongs to the real consumer build.
+set(generator_args "")
+if(TEST_GENERATOR)
+    list(APPEND generator_args -G "${TEST_GENERATOR}")
+endif()
+
 set(failures "")
 function(run_case name expect_success expected_text)
     execute_process(
@@ -351,6 +360,7 @@ foreach(case webkitgtk-linux cef-linux cef-macos cef-windows cef-disabled missin
     file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/${case}")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -S "${ROOT}/test/frontends" -B "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/${case}"
+            ${generator_args}
             -DROOT=${ROOT} -DCASE=${case}
         RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
     if(NOT result EQUAL 0)
@@ -439,8 +449,10 @@ run_case("WebKitGTK selector" TRUE "TYPE=webfront::frontend::WebKitGTKFrontend")
 set(CASE_WEBKITGTK OFF)
 run_case("WebKitGTK tests require support" FALSE "requires WEBFRONT_EMBED_WEBKITGTK=ON")
 
+file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/webkitgtk-missing-sdk")
 execute_process(COMMAND "${CMAKE_COMMAND}" -S "${ROOT}/test/frontends"
-    -B "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/webkitgtk-missing-sdk" -DROOT=${ROOT} -DCASE=webkitgtk-missing-sdk
+    -B "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/webkitgtk-missing-sdk" ${generator_args}
+    -DROOT=${ROOT} -DCASE=webkitgtk-missing-sdk
     RESULT_VARIABLE missing_sdk OUTPUT_VARIABLE sdk_output ERROR_VARIABLE sdk_error)
 if(missing_sdk EQUAL 0 OR NOT "${sdk_output}${sdk_error}" MATCHES "WEBFRONT_EMBED_WEBKITGTK=ON requires")
     list(APPEND failures "Missing WebKitGTK SDK did not report its enabling option: ${sdk_output}${sdk_error}")

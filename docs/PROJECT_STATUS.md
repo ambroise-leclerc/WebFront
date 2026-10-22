@@ -1,5 +1,29 @@
 # WebFront project status
 
+## CI test duration (#298, 2026-10-21)
+
+The maintenance asset renderer generates and compares headers in Node, preserving
+all versioned bytes and pinned gzip parameters. Local Babel freshness drops from
+14.75 s to 0.30 s. Tests and asset regeneration require Node; ordinary C++ builds do
+not. CI uses up to four CTest workers, retains timing reports, locks browser ports
+and serializes nested embedded builds against every running test in the same tree.
+Frontend fixtures reuse the parent generator, and the consumer inherits the actual
+test target's compiler cache launcher at generation time.
+
+The first PR CI run passes Linux coverage/native-browser tests in 47.63 s versus
+130.94 s previously. macOS exposes a default-port collision in a developer unit
+test, now corrected to use port 0 and reproduced locally with 9002 occupied.
+Filesystem fixtures also atomically claim their temporary directories. The corrected
+261-test CEF-off suite passes locally with four workers (18.02 s), and all
+14 CEF/Xvfb cases pass with serialized nested builds (63.18 s).
+Repeating each of the 261 CEF-off cases three times passes locally (54.16 s).
+Manual dispatch with `repeat_desktop_tests=true` additionally repeats each desktop
+case three times; successful Windows/macOS qualification and stability results must
+be checked on the corrected head before merging. See the
+[audit, measurements and remaining costs](TEST_PERFORMANCE.md).
+
+
+
 ## Release 0.4.0 (#200, 2026-10-21)
 
 `webfront::version` and the CMake project version are 0.4.0. The release presents the repository
