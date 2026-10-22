@@ -35,8 +35,9 @@ runs:
         archive="$RUNNER_TEMP/$name.$extension"
         curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o "$archive" \
           "https://github.com/Kitware/CMake/releases/download/v$VERSION/$name.$extension"
-        if command -v sha256sum > /dev/null; then actual=$(sha256sum "$archive" | cut -d' ' -f1)
-        else actual=$(shasum -a 256 "$archive" | cut -d' ' -f1); fi
+        # From standard input: with a file name, sha256sum escapes a Windows path and prefixes the hash with "\".
+        if command -v sha256sum > /dev/null; then actual=$(sha256sum < "$archive" | cut -d' ' -f1)
+        else actual=$(shasum -a 256 < "$archive" | cut -d' ' -f1); fi
         if [ "$actual" != "$expected" ]; then
           echo "::error::$name.$extension has SHA-256 $actual, expected $expected"; exit 1
         fi
