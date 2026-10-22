@@ -247,6 +247,15 @@ SCENARIO("Command output is split under the bridge string limit on character bou
             }
         }
     }
+    GIVEN("bytes that are not UTF-8: continuation bytes only") {
+        const string bytes(10, '\x80');
+        WHEN("they are split") {
+            const auto pieces = commands::detail::chunks(bytes, 4);
+            THEN("the split still ends, in pieces of the limit") {
+                CHECK(pieces == vector<string_view>{string_view(bytes).substr(0, 4), string_view(bytes).substr(4, 4), string_view(bytes).substr(8)});
+            }
+        }
+    }
     GIVEN("short and empty texts") {
         CHECK(commands::detail::chunks("").empty());
         CHECK(commands::detail::chunks("abc") == vector<string_view>{"abc"});

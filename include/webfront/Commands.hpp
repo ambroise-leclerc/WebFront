@@ -43,13 +43,16 @@ namespace detail {
 
 namespace ex = networking::ex;
 
-/// Splits text into pieces of at most maxBytes (at least 4), never inside a UTF-8 character.
+/// Splits text into pieces of at most maxBytes (at least 4), never inside a UTF-8 character. Bytes that are not
+/// UTF-8, with no character start in a piece, are cut at maxBytes.
 inline std::vector<std::string_view> chunks(std::string_view text, std::size_t maxBytes = maxChunkBytes) {
     std::vector<std::string_view> pieces;
     while (text.size() > maxBytes) {
         std::size_t cut = maxBytes;
         while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
             --cut;
+        if (cut == 0)
+            cut = maxBytes;
         pieces.push_back(text.substr(0, cut));
         text.remove_prefix(cut);
     }
