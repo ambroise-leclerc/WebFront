@@ -724,16 +724,24 @@ SCENARIO("A second opener of the project waits for a publication in progress ins
             }
         }
         WHEN("another store tries to publish from the state read before the first publication") {
-            auto competing = std::async(std::launch::async, [&] {
-                developer::Store other{project.path()};
-                publishPair(other, "manifest-3", "lock-3", before);
+            // The refusal is read in its own thread: an exception object shared across threads by a future is
+            // reported as a race by ThreadSanitizer, whose runtime does not see libc++abi's reference counting.
+            auto competing = std::async(std::launch::async, [&]() -> std::string {
+                try {
+                    developer::Store other{project.path()};
+                    publishPair(other, "manifest-3", "lock-3", before);
+                    return "published";
+                } catch (const std::exception& error) {
+                    return error.what();
+                }
             });
             const auto waiting = competing.wait_for(std::chrono::milliseconds(300));
             release.open();
             publication.get();
             THEN("its precondition is checked after the first publication, which wins") {
                 CHECK(waiting == std::future_status::timeout);
-                REQUIRE_THROWS_WITH(competing.get(), Catch::Matchers::ContainsSubstring("changed since it was read"));
+                REQUIRE_THAT(competing.get(), Catch::Matchers::ContainsSubstring("changed since it was read"));
+                REQUIRE(projectState(publisher) == "manifest-2|lock-2");
             }
         }
     }
