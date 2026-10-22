@@ -8,7 +8,7 @@ if(NOT ROOT)
 endif()
 
 set(expected
-    .clang-format .clang-tidy .codescene .devcontainer .gitattributes .github .gitignore
+    .clang-format .clang-tidy .devcontainer .gitattributes .github .gitignore
     AGENTS.md CMakeLists.txt README.md
     cmake docs examples include js test third_party)
 
