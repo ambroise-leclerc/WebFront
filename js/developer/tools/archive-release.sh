@@ -13,9 +13,18 @@ if [ "$tag" != "developer-v$version" ] || ! [[ "${GITHUB_REPOSITORY:-}" =~ ^[A-Z
     exit 1
 fi
 
-# The published files: the environment, each starter, the provisioning data and the pinned header.
-mapfile -t files < <(jq -r '["environment.tgz"] + [.starters[].archive] + ["provision.json", "DeveloperReleaseData.hpp"] | .[]' \
-    "$distribution/provision.json")
+# The published files: the environment, each starter, the provisioning data and the pinned header. jq must succeed before
+# anything is sent to GitHub: a status inside a process substitution would be lost.
+if ! listed=$(jq -er '["environment.tgz"] + [.starters[].archive] + ["provision.json", "DeveloperReleaseData.hpp"] | .[]' \
+        "$distribution/provision.json"); then
+    echo "Cannot read the starters of $distribution/provision.json" >&2
+    exit 1
+fi
+mapfile -t files <<< "$listed"
+[ "${#files[@]}" -ge 4 ] || { echo "The distribution lists too few files" >&2; exit 1; }
+for name in "${files[@]}"; do
+    [ -f "$distribution/$name" ] || { echo "Missing distribution file $name" >&2; exit 1; }
+done
 
 errors=$(mktemp)
 directory=$(mktemp -d)

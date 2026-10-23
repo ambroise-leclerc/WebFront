@@ -17,6 +17,16 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     add_dependencies(webtest frontend_lifecycle)
 endif()
 
+# The publication script that archives the files in a release refuses a missing or invalid manifest (needs bash and jq).
+find_program(WEBFRONT_BASH bash)
+find_program(WEBFRONT_JQ jq)
+if(WEBFRONT_BASH AND WEBFRONT_JQ AND NOT WIN32)
+    add_test(NAME ArchiveReleaseRejectsInvalidManifest COMMAND ${CMAKE_COMMAND}
+        -DSCRIPT=${PROJECT_SOURCE_DIR}/js/developer/tools/archive-release.sh -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/archive-release
+        -DBASH=${WEBFRONT_BASH} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckArchiveRelease.cmake)
+    set_tests_properties(ArchiveReleaseRejectsInvalidManifest PROPERTIES TIMEOUT 30)
+endif()
+
 # Optional offline fixtures (the local npm registry, the environment built from the sources) are provisioned by
 # maintainers, never downloaded by CTest.
 set(WEBFRONT_DEVELOPER_FIXTURES "" CACHE PATH "Prepared browser developer environment/registry fixtures")

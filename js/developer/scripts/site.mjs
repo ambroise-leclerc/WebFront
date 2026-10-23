@@ -21,9 +21,12 @@ async function readDistribution(project, distribution) {
 
 const entries = async (project, directory) => (await project.list(directory)).map(name => name.replace(/\/$/, ''));
 
-// A version is published when its directory is listed under the site's developer directory (a missing directory
-// cannot be listed, so each level is looked up in its parent).
+// A version is published when its directory is listed under the site's developer directory. A missing directory cannot be
+// listed, so each level is looked up in its parent (the site itself, in the project root or in its parent directory).
 async function published(project, site, version) {
+    const slash = site.lastIndexOf('/');
+    const [parent, name] = slash < 0 ? ['', site] : [site.slice(0, slash), site.slice(slash + 1)];
+    if (!(await entries(project, parent)).includes(name)) return false;
     if (!(await entries(project, site)).includes('developer')) return false;
     return (await entries(project, `${site}/developer`)).includes(version);
 }
