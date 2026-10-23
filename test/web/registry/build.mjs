@@ -13,8 +13,7 @@ export default async function (context) {
     const archives = (await project.list('registry-archives')).filter(name => name.endsWith('.tgz'));
     if (!archives.length) throw new Error('registry-archives holds no archive');
     const packages = [];
-    for (const name of archives)
-        packages.push(realPackage(await project.read(`registry-archives/${name}`), await project.read(`registry-archives/${name}.package.json`)));
+    for (const name of archives) packages.push(await realPackage(await project.read(`registry-archives/${name}`)));
     const {files, integrities} = await registryFiles([...packages, ...syntheticPackages()]);
     for (const [name, bytes] of files) await project.write(`build-registry/${name}`, bytes);
     await project.write('build-registry/integrities.json', JSON.stringify(integrities, null, 2) + '\n');
