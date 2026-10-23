@@ -2,11 +2,11 @@
 #
 # It is distinct from include/webfront/system/DeveloperReleaseData.hpp (the environment applications start from) and is
 # updated by an explicit pull request, once a published environment can build and test itself without interaction.
-# 0.5.0 is the last published environment: it has no non-interactive mode yet, so the driver tests run the environment built
-# from the current sources (the "environment under test") until the first environment that can bootstrap itself is pinned.
-set(WEBFRONT_BOOTSTRAP_VERSION "0.5.0")
-set(WEBFRONT_BOOTSTRAP_URL "https://ambroise-leclerc.github.io/WebFront/developer/0.5.0/environment.tgz")
-set(WEBFRONT_BOOTSTRAP_INTEGRITY "sha512-TV6S61kUhnCJc99/Ow890Pro47mfZ0fBqki17lx0xnpCNmcfcqZPpO1SG09Su50WIEtRDopMxt3yvanFwbLEdQ==")
+# 0.6.0 is the first published environment that runs a wf command without interaction (runNonInteractive). The driver tests also
+# run the environment built from the current sources (the "environment under test"), which may be ahead of this pin.
+set(WEBFRONT_BOOTSTRAP_VERSION "0.6.0")
+set(WEBFRONT_BOOTSTRAP_URL "https://ambroise-leclerc.github.io/WebFront/developer/0.6.0/environment.tgz")
+set(WEBFRONT_BOOTSTRAP_INTEGRITY "sha512-xidz8ggQFo/UUTttIii+3FRJmGpQPoHhbmk9Fv/wxRA4EKEhD5WeiAcstsuY8H/wXc/jo/bljIYkzyyyrJ1oEg==")
 
 # A directory holding environment.tgz (the pinned archive) replaces the download on a machine without network access.
 set(WEBFRONT_BOOTSTRAP_DIR "" CACHE PATH "Directory with the pinned bootstrap environment.tgz, instead of downloading it")

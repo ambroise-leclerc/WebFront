@@ -48,7 +48,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.5.0/environment.tgz`. This version (project manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.5.0`. Published 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.6.0/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.0`. Published 0.5.0, 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -435,8 +435,7 @@ the Worker, cancels polling and aborts staged publication; a publication already
 the preview before stopping.
 The last successful preview stays available. Browser disconnection also stops the loop.
 
-`wf build`, `wf dev` and `wf test` are in the 0.6.0 environment sources (not published); the release pin stays on published 0.5.0. To try
-them before the next release, provision an archive rebuilt from these sources as described below.
+`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0, which `DeveloperReleaseData.hpp` pins (published as `developer-v0.6.0`).
 
 ## Tests (`wf test`)
 
@@ -526,11 +525,10 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 `Incompatible WebFront developer environment: api version 2, this application supports 1`; it never falls back. A change
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
-The pin is 0.5.0, the last published environment, which has no non-interactive mode: the driver reports it as a bootstrap
-failure (70). Until an environment that can run `wf test` is published and pinned (the milestone of #321, a maintainer
-step), the CTest cases `WfDriver*` run the environment built from the current sources (`WEBFRONT_DEVELOPER_FIXTURES`):
-`wf install` and `wf test` on a fixture project (pass, fail, report file), an unknown command, the time limit, a wrong
-integrity, a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
+The pin is 0.6.0, the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive). The other `WfDriver*` cases run the environment built from the current sources
+(`WEBFRONT_DEVELOPER_FIXTURES`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
+report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
+a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
 configure-time provisioning (verified download, reuse, local directory, wrong digest, malformed value). The Linux CEF CI job
 blocks the public network after the configure step.
 

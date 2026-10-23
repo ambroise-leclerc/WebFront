@@ -91,9 +91,9 @@ if(WEBFRONT_DEVELOPER_FIXTURES
 
         # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
         #     [OUTPUT <regex>] [REPORT <regex>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
-        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [REQUIRES <fixture>] [PROVIDES <fixture>])
+        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [PINNED] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
-            cmake_parse_arguments(ARG "" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
+            cmake_parse_arguments(ARG "PINNED" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
             set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}")
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
@@ -105,6 +105,10 @@ if(WEBFRONT_DEVELOPER_FIXTURES
                     list(APPEND options "-D${option}=${ARG_${option}}")
                 endif()
             endforeach()
+            if(ARG_PINNED)
+                # No environment passed: the driver runs the pinned bootstrap environment provisioned at configure time.
+                list(APPEND options -DENVIRONMENT= -DINTEGRITY= -DREGISTRY=)
+            endif()
             if(ARG_DRIVER_TIMEOUT)
                 list(APPEND options -DTIMEOUT=${ARG_DRIVER_TIMEOUT})
             endif()
@@ -126,6 +130,8 @@ if(WEBFRONT_DEVELOPER_FIXTURES
             FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-starter")
         # The entry module is the one environment.json declares, not a fixed name.
         webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
+        # The pinned bootstrap environment, downloaded and verified at configure time, runs a command by itself.
+        webfront_add_driver_test(WfDriverPinned 0 "init" PINNED OUTPUT "Created webfront.project.json" FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-pinned")
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
         webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
