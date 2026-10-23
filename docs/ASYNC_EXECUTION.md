@@ -84,7 +84,8 @@ completes it stopped at once, so a waiting coroutine never delays shutdown.
 browser closes its connection or the connection fails (a failed write included),
 for as long as the returned `UISubscription` lives; shutdown, which stops every
 connection itself, notifies no handler. The connection is then released by a task
-on the server context. Afterwards, an untyped `jsFunction` call to that UI is
+on the server context; a call made meanwhile on another thread keeps the link alive
+until it returns (`findLink` shares it). Afterwards, an untyped `jsFunction` call to that UI is
 dropped, a typed call returns a future that throws `Browser connection closed`,
 a `jsFunctionSender` completes with an error when started, and `addScript` throws
 `ConnectionError`. The 16-bit identifier of a released connection is reused only

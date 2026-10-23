@@ -86,8 +86,8 @@ struct WebLinkMock {
 struct WebFrontMock {
     using Net          = networking::NetworkingMock;
     using BufferPolicy = http::DefaultBuffersPolicy;
-    WebLinkMock<WebFrontMock> getLink(WebLinkId id) {
-        return WebLinkMock<WebFrontMock>{id, *this};
+    std::shared_ptr<WebLinkMock<WebFrontMock>> findLink(WebLinkId id) {
+        return std::make_shared<WebLinkMock<WebFrontMock>>(id, *this);
     }
 };
 

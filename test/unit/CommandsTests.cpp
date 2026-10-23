@@ -68,7 +68,9 @@ struct FakeApp {
     set<int>                                   gone;  // links whose browser calls throw, like a closed connection
 
     template <typename R, typename... Args>
-    void cppFunction(string name, auto&& function) {
+    bool cppFunction(string name, auto&& function) {
+        if (std::ranges::find(registered, name) != registered.end())
+            return false;
         if constexpr (sizeof...(Args) == 0)
             list = std::forward<decltype(function)>(function);
         else if constexpr (sizeof...(Args) == 2)
@@ -76,6 +78,7 @@ struct FakeApp {
         else
             start = std::forward<decltype(function)>(function);
         registered.push_back(std::move(name));
+        return true;
     }
 
     UISubscription subscribeUIClosed(function<void(FakeUI)> handler) {
@@ -189,6 +192,9 @@ SCENARIO("Commands register their bridge functions and list the commands") {
             CHECK(fixture.app.list()
                   == R"([{"name":"code","help":"Exit with 3"},)"
                      R"({"name":"fail","help":"Throw"},{"name":"greet","help":"Greet someone"},{"name":"wait","help":"Wait until stopped"}])");
+        }
+        THEN("a second Commands object on the application is refused") {
+            CHECK_THROWS_AS(Commands<FakeApp>{fixture.app}, logic_error);
         }
         THEN("invalid, reserved and duplicate names are refused") {
             for (const auto* name : {"", "two words", "quo'te", "back\\slash", "tab\t", "wf", "clear", "exit", "help", "history", "greet"})
@@ -420,6 +426,23 @@ SCENARIO("Shutdown drains running commands") {
     }
 }
 
+SCENARIO("A command may take its context by reference") {
+    GIVEN("a command whose coroutine keeps a reference to its context across a suspension") {
+        FakeApp           app;
+        Commands<FakeApp> commands{app};
+        commands.add("late", "", [](const Context& context) -> Task {
+            co_await context.ui().resumeAfter(chrono::milliseconds(1));
+            context.write("after the pause\n");
+        });
+        WHEN("it runs") {
+            app.start(app.ui(1), 1, "late", "[]");
+            THEN("its context is still valid after the suspension") {
+                CHECK(app.callsOf(1).front().values == vector<string>{"after the pause\n"});
+            }
+        }
+    }
+}
+
 SCENARIO("Commands may outlive their registering object") {
     GIVEN("commands whose Commands object is gone") {
         FakeApp app;
@@ -441,6 +464,12 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             CHECK(RealApp::UI(app, 5).id() == 5);
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
             CHECK(subscription.active());
+        }
+        THEN("a second Commands object is refused, and cppFunction tells a taken name") {
+            Commands<RealApp> commands{app};
+            CHECK_THROWS_AS(Commands<RealApp>{app}, logic_error);
+            CHECK_FALSE(app.cppFunction("webfront.commands.list", [] { return 0; }));
+            CHECK(app.cppFunction("another", [] { return 0; }));
         }
         THEN("calls to a browser that is gone are dropped, and typed calls fail") {
             const RealApp::UI gone(app, 42);

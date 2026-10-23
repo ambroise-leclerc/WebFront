@@ -128,7 +128,7 @@ public:
     }
 
     /// Reads an array, calling onElement() for each element; onElement must consume the value.
-    void array(const std::function<void()>& onElement) {
+    void array(auto&& onElement) {
         expect('[');
         if (consumeIf(']'))
             return;

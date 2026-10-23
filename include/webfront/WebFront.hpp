@@ -59,20 +59,16 @@ public:
      * @param script
      */
     void addScript(std::string_view script) const {
-        try {
-            webFront.getLink(webLinkId).sendCommand(msg::TextCommand(msg::TxtOpcode::injectScript, script));
-        } catch (const std::out_of_range&) {
+        const auto link = webFront.findLink(webLinkId);
+        if (!link)
             throw ConnectionError("Connection with client lost");
-        }
+        link->sendCommand(msg::TextCommand(msg::TxtOpcode::injectScript, script));
     }
 
     /// The frames queued for this browser and not yet written to the network; 0 once its connection is gone.
     [[nodiscard]] std::size_t pendingWrites() const {
-        try {
-            return webFront.getLink(webLinkId).pendingWrites();
-        } catch (const std::out_of_range&) {
-            return 0;
-        }
+        const auto link = webFront.findLink(webLinkId);
+        return link ? link->pendingWrites() : 0;
     }
 
     /**
@@ -238,8 +234,8 @@ struct ApplyArgs;
 template <typename R, typename... Args>
 struct ApplyArgs<R, std::tuple<Args...>> {
     template <typename Self, typename Function>
-    static void invoke(Self& self, std::string functionName, Function&& function) {
-        self.template cppFunction<R, Args...>(std::move(functionName), std::forward<Function>(function));
+    static bool invoke(Self& self, std::string functionName, Function&& function) {
+        return self.template cppFunction<R, Args...>(std::move(functionName), std::forward<Function>(function));
     }
 };
 
@@ -316,16 +312,20 @@ public:
           httpDocRoot(config.documentRoot),
           contentPolicy(std::move(config.contentPolicy)),
           idsCounter(0) {
+        // Links are created on the server thread, outside the lock: identifiers are only assigned here.
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
-            for (bool inserted = false; !inserted; ++idsCounter)
-                std::tie(std::ignore, inserted) = webLinks.try_emplace(
-                    idsCounter,
-                    std::move(socket),
-                    idsCounter,
-                    [this](WebLinkEvent event) {
-                        onEvent(event);
-                    },
-                    httpServer.taskScope());
+            WebLinkId id{};
+            {
+                std::scoped_lock lock{linksMutex};
+                while (webLinks.contains(idsCounter))
+                    ++idsCounter;
+                id = idsCounter++;
+            }
+            auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
+                onEvent(event);
+            }, httpServer.taskScope());
+            std::scoped_lock lock{linksMutex};
+            webLinks.emplace(id, std::move(link));
         });
     }
 
@@ -338,7 +338,7 @@ public:
         stopAndJoinServer();
         // Coroutine cleanup may use its UI, so links stay alive through the join.
         httpServer.drainUntilJoined();
-        webLinks.clear();
+        releaseLinks();
     }
 
     /** @brief Stops and joins owned work before returning. Call outside server callbacks,
@@ -348,7 +348,7 @@ public:
         stopAndJoinServer();
         // Application coroutine cleanup may still use its UI: retain links until join.
         httpServer.drain();
-        webLinks.clear();
+        releaseLinks();
     }
 
     /** @brief Thread-safe while the application lives. Starts on the server thread.
@@ -398,13 +398,25 @@ public:
     [[nodiscard]] UISubscription subscribeUIClosed(std::function<void(UI)> handler) {
         return uiClosedSubscribers->subscribe(std::move(handler));
     }
-    /// The link of a connected browser; throws std::out_of_range once its connection closed and was released.
-    WebLink<Net>& getLink(WebLinkId id) {
-        return webLinks.at(id);
+    /// The link of a connected browser, shared with the caller so that it stays valid while used, from any thread;
+    /// null once its connection closed and was released.
+    [[nodiscard]] std::shared_ptr<WebLink<Net, Policy>> findLink(WebLinkId id) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        return found == webLinks.end() ? nullptr : found->second;
     }
 
-    /// The browsers connected now, as seen from the server thread: a closed connection is released shortly after.
+    /// The link of a connected browser; throws std::out_of_range once its connection closed and was released. The
+    /// reference is only safe on the server thread, which releases links: elsewhere, use findLink().
+    WebLink<Net, Policy>& getLink(WebLinkId id) {
+        if (auto link = findLink(id))
+            return *link;
+        throw std::out_of_range("Browser connection closed");
+    }
+
+    /// The browsers connected now: a closed connection is released shortly after its closure.
     [[nodiscard]] std::size_t connectedBrowsers() const {
+        std::scoped_lock lock{linksMutex};
         return webLinks.size();
     }
 
@@ -418,18 +430,21 @@ public:
      * @tparam Args parameters of the CppFunction
      * @param functionName
      * @param function
+     * @return false when a function of that name was already registered, which stays registered
      */
     template <typename R, typename... Args>
-    void cppFunction(std::string functionName, auto&& function) {
+    bool cppFunction(std::string functionName, auto&& function) {
         if constexpr (detail::takes_caller<UI, Args...>::value)
-            registerWithCaller<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+            return registerWithCaller<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
         else {
             auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
             auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
-            cppFunctions.try_emplace(std::move(functionName),
-                                     [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI) mutable {
-                                         responder(data, link, callId);
-                                     });
+            return cppFunctions
+                .try_emplace(std::move(functionName),
+                             [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI) mutable {
+                                 responder(data, link, callId);
+                             })
+                .second;
         }
     }
 
@@ -444,9 +459,10 @@ public:
      *
      * @param functionName
      * @param function
+     * @return false when a function of that name was already registered, which stays registered
      */
     template <typename Function>
-    void cppFunction(std::string functionName, Function&& function) {
+    bool cppFunction(std::string functionName, Function&& function) {
         using Callable = std::remove_cvref_t<Function>;
         static_assert(detail::has_callable_traits<Callable>,
                       "webfront::BasicWF::cppFunction: could not deduce this callable's signature. Generic "
@@ -454,7 +470,7 @@ public:
                       "cppFunction<ReturnType, ArgTypes...>(name, callable).");
         using Traits = detail::callable_traits<Callable>;
         using Args   = typename detail::caller_aware_args<UI, typename Traits::RawArgs, typename Traits::DecayedArgs>::type;
-        detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
+        return detail::ApplyArgs<typename Traits::Return, Args>::invoke(*this, std::move(functionName), std::forward<Function>(function));
     }
 
     enum class WindowAction { none, closeWindow };
@@ -522,20 +538,36 @@ private:
             serverThread.join();
     }
 
+    // A released link is destroyed outside the lock, by its last owner: a call on another thread may still use it.
     Task releaseLink(WebLinkId id) {
-        webLinks.erase(id);
+        std::shared_ptr<WebLink<Net, Policy>> released;
+        {
+            std::scoped_lock lock{linksMutex};
+            if (auto found = webLinks.find(id); found != webLinks.end()) {
+                released = std::move(found->second);
+                webLinks.erase(found);
+            }
+        }
         co_return;
     }
 
+    void releaseLinks() {
+        std::map<WebLinkId, std::shared_ptr<WebLink<Net, Policy>>> released;
+        std::scoped_lock                                          lock{linksMutex};
+        released.swap(webLinks);
+    }
+
     template <typename R, typename Caller, typename... Args>
-    void registerWithCaller(std::string functionName, auto&& function) {
+    bool registerWithCaller(std::string functionName, auto&& function) {
         auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));
         auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::move(adapted));
         auto responder = detail::makeCppFunctionResponder<Net, Policy, R>(std::move(callable));
-        cppFunctions.try_emplace(std::move(functionName),
-                                 [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
-                                     responder(data, link, callId, caller);
-                                 });
+        return cppFunctions
+            .try_emplace(std::move(functionName),
+                         [responder](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                             responder(data, link, callId, caller);
+                         })
+            .second;
     }
 
     http::Server<Net, Filesystem, Policy>                                    httpServer;
@@ -543,7 +575,8 @@ private:
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     ContentPolicy                                                            contentPolicy;
-    std::map<WebLinkId, WebLink<Net, Policy>>                                webLinks;
+    mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
+    std::map<WebLinkId, std::shared_ptr<WebLink<Net, Policy>>>               webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
     std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
@@ -565,12 +598,15 @@ private:
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
-            case WebLinkEvent::Code::cppFunctionCalled:
+            case WebLinkEvent::Code::cppFunctionCalled: {
+                // The calling link is running this handler: it is registered and cannot be released meanwhile.
+                const auto link = findLink(event.webLinkId);
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
-                    function->second(event.data, getLink(event.webLinkId), event.callId, UI{*this, event.webLinkId});
+                    function->second(event.data, *link, event.callId, UI{*this, event.webLinkId});
                 else
-                    getLink(event.webLinkId).sendError(event.callId, "C++ function '" + event.text + "' was not found");
+                    link->sendError(event.callId, "C++ function '" + event.text + "' was not found");
                 break;
+            }
         }
     }
 };

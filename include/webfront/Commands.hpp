@@ -338,22 +338,24 @@ private:
 ///     command: its late output and exit report are ignored, and the next command can start at once;
 ///   - an exception it throws is shown as an error in the terminal, with exit code 1.
 /// A command must not block the server thread, which serves every browser: synchronous handlers are refused at
-/// compile time, and long computations belong on another thread. Create one Commands object per application; the
-/// registered bridge functions own the commands, so the object may be destroyed before the application.
+/// compile time, and long computations belong on another thread. Create one Commands object per application (a second
+/// one throws); the registered bridge functions own the commands, so the object may be destroyed before the application.
 template <typename App>
 class Commands {
 public:
     using UI      = typename App::UI;
     using Context = commands::Context<UI>;
 
+    /// Throws std::logic_error if the application already has a Commands object: its bridge functions are taken.
     explicit Commands(App& app) : registry(std::make_shared<commands::detail::Registry<UI>>()) {
+        if (!app.template cppFunction<std::string>("webfront.commands.list", [owner = registry] {
+                return owner->list();
+            }))
+            throw std::logic_error("This application already has webfront::Commands: create one per application");
         registry->keep(app.subscribeUIClosed([weak = std::weak_ptr(registry)](UI ui) {
             if (auto owner = weak.lock())
                 owner->closed(ui);
         }));
-        app.template cppFunction<std::string>("webfront.commands.list", [owner = registry] {
-            return owner->list();
-        });
         app.template cppFunction<void, UI, std::uint32_t, std::string, std::string>(
             "webfront.commands.start", [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
                 owner->start(std::move(ui), id, name, arguments);
@@ -371,8 +373,9 @@ public:
                       "webfront::Commands::add: a command is a coroutine returning webfront::Task and taking a "
                       "webfront::commands::Context; a synchronous handler would block the server thread.");
         auto callable = std::make_shared<std::decay_t<Function>>(std::forward<Function>(handler));
+        // A coroutine, so that the context outlives the handler's task: a handler may take it by reference.
         registry->add(std::move(name), std::move(help), [callable](Context context) -> Task {
-            return std::invoke(*callable, std::move(context));
+            co_await std::invoke(*callable, context);
         });
         return *this;
     }

@@ -18,8 +18,8 @@ struct SenderApp {
     using Net          = InjectableNetworking;
     using BufferPolicy = http::DefaultBuffersPolicy;
     WebLink<Net>& link;
-    auto&         getLink(WebLinkId) {
-        return link;
+    auto          findLink(WebLinkId) {
+        return std::shared_ptr<WebLink<Net>>(std::shared_ptr<WebLink<Net>>{}, &link);  // not owned
     }
 };
 struct Observed {

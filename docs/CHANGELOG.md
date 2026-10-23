@@ -45,7 +45,8 @@
   output, stopped by Ctrl+C, the browser's disconnection or shutdown; the terminal does not wait for a stopped
   command; `co_await context.print(text)` waits for a slow browser. New `app.resumeAfter(duration)`/
   `ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`, `app.connectedBrowsers()`, `UI::id()`,
-  `UI::pendingWrites()` and `json::Reader::array`.
+  `UI::pendingWrites()`, `app.findLink(id)` and `json::Reader::array`. `cppFunction` returns false when the name was
+  already registered.
 
 ### Changed
 
