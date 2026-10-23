@@ -1,7 +1,7 @@
 # Runs webfront-wf and checks its exit status and output.
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
 #   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
-#   -DWORK=<dir>] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
+#   -DWORK=<dir>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
 # FORGE replaces ENVIRONMENT with an archive whose environment.json declares the given protocol and API versions.
 if(FORGE)
     include("${ROOT}/cmake/WebFrontBootstrap.cmake")
@@ -21,6 +21,11 @@ if(FORGE)
     webfront_file_sri("${ENVIRONMENT}" INTEGRITY)
 endif()
 
+if(FRESH_PROJECT)
+    set(PROJECT "${FRESH_PROJECT}")
+    file(REMOVE_RECURSE "${PROJECT}")
+    file(MAKE_DIRECTORY "${PROJECT}")
+endif()
 set(arguments --project "${PROJECT}")
 if(ENVIRONMENT)
     list(APPEND arguments --environment "${ENVIRONMENT}" --integrity "${INTEGRITY}")

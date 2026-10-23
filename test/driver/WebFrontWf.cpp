@@ -122,6 +122,13 @@ public:
         const auto relative = path.relative_path().generic_string();
         if (relative == "driver/environment.tgz")
             return read(sources().archive);
+        // The starters the environment pins sit next to its archive: plain file names only.
+        constexpr std::string_view driverPrefix = "driver/";
+        if (relative.starts_with(driverPrefix)) {
+            const std::filesystem::path name = relative.substr(driverPrefix.size());
+            if (name.extension() == ".tgz" && name == name.filename() && name.string().find("..") == std::string::npos)
+                return read(sources().archive.parent_path() / name);
+        }
         constexpr std::string_view prefix = "driver/registry/";
         if (sources().registry && relative.starts_with(prefix)) {
             try {
@@ -310,8 +317,11 @@ int run(const Options& options) {
         outcome.timedOut();
         {
             std::scoped_lock ui{uiMutex};
-            if (browser)
-                browser->addScript("window.close()");
+            if (browser) {
+                try {
+                    browser->addScript("window.close()");
+                } catch (const std::exception&) {}  // the bridge is gone: the forced exit below still applies
+            }
         }
         if (!stop.stop_requested()
             && !wake.wait_for(lock,
