@@ -453,26 +453,30 @@ and integrity. Nothing else is needed: no Node.js, no npm and no public network 
 
 - `test.specs` lists project paths, run in that order (JS, JSX, TS and TSX are built by esbuild-wasm in the Worker of
   `wf build`, with the locked dependencies). Specs use the Jasmine globals (`describe`, `it`, `expect`, `jasmine`);
-  they do not import `jasmine-core`. Without specs, or without `jasmine-core` in the lock, the command says what to
+  they do not import `jasmine-core`. A spec may import a stylesheet, which the runner page loads. Both the Jasmine 7 and the earlier `jasmine.js`, which only exposes `jasmineRequire`, are started. Without specs, or without `jasmine-core` in the lock, the command says what to
   declare or install.
 - The specs run in a hidden frame of the environment's page (1024 × 768, same origin, with the bridge loaded, so a
-  spec can call `webFront.cppFunction`). The runner page is published to `.webfront/developer/test/` and served by
-  the developer HTTP provider; each run replaces it, and the frame is removed at the end, on a time limit and on Ctrl+C.
+  spec can call `webFront.cppFunction`). The runner page, Jasmine and everything the specs built (JS, CSS imported by a spec, assets) are published to a
+  directory of the run's own, `.webfront/developer/test/<run id>/`, and served by the developer HTTP provider; two
+  sessions on a project never run each other's specs. The files are removed when the run ends (an empty directory
+  remains) and the frame is removed at the end, on a time limit and on Ctrl+C.
 - `pattern` keeps the specs whose full name (suites and spec names) contains it; the others count as filtered out.
   The order is fixed: no random shuffling.
 - The terminal shows `.`, `F` and `*` (passed, failed, pending) as specs end, then a summary line (`PASSED: 3 specs,
   0 failures, 1 pending (12 ms, jasmine-core 7.0.2)`), each failure with its message and first stack frames, failures
-  outside any spec (an `afterAll`, a load error) and the pending specs with their reason.
+  outside any spec (a load error) and those of a suite (an `afterAll` that throws, shown as `FAIL <suite> (suite)`) and the pending specs with their reason.
 - Exit codes: 0 when every executed spec passed; 1 for a failed spec, a failure outside the specs, an unhandled
   asynchronous exception or rejection (Jasmine reports both as failures), a spec file that does not build or load,
   `fit`/`fdescribe`, and a run that executed nothing (no specs, or a pattern matching none); 124 at the time limit
-  (`--timeout`, default 60 s, 1 to 3600); 130 on Ctrl+C. Jasmine's own per-spec timeout (5 s by default) still ends a
+  (`--timeout`, default 60 s, 1 to 3600, covering the build and the publication as well as the run); 130 on Ctrl+C. Jasmine's own per-spec timeout (5 s by default) still ends a
   spec that never completes, which fails.
 - A synchronous infinite loop in a spec blocks the page that hosts the frame, as it would in any same-origin frame:
   the time limit cannot fire. Use asynchronous waits, which the time limit and Ctrl+C do stop.
 
+The result sent to C++ is cut to 60,000 bytes when it is larger (a bridge string holds 65,535): the output first, then stack frames, messages and the lists, never the counts or the status; `truncated` is then `true`.
+
 The report is structured: `{status, exitCode, total, passed, failed, pending, excluded, durationMs, jasmine, failures:
-[{name, messages: [{message, stack}]}], pendingSpecs, global, incomplete}`, bounded (100 failures, 8 messages of 16 KiB
+[{name, messages: [{message, stack}]}], pendingSpecs, suites, global, incomplete}`, bounded (100 failures, 8 messages of 16 KiB
 each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs did not load), `timeout` or `interrupted`.
 
 ### Without a terminal

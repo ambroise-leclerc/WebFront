@@ -142,7 +142,7 @@ export async function bundleTests(esbuild, {specs, lock, packages, readProject})
         build.onResolve({filter: /^webfront-spec:/}, args => find('project', normalize(args.path.slice('webfront-spec:'.length))));
     }};
     const result = await esbuild.build({entryPoints: ['webfront-test-entry'], bundle: true, write: false,
-        outfile: '/output/specs.js', format: 'esm', platform: 'browser', target: 'es2022', jsx: 'automatic',
+        outdir: '/output', entryNames: 'specs', assetNames: 'assets/[name]-[hash]', format: 'esm', platform: 'browser', target: 'es2022', jsx: 'automatic',
         define: {'process.env.NODE_ENV': '"test"'}, legalComments: 'inline',
         plugins: [entry, virtualPluginWith(lock, packages, readProject, loaded)]});
     return new Map(result.outputFiles.map(file => [file.path.replace(/^\/output\//, ''), file.contents]));

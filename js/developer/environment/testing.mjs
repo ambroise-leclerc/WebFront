@@ -3,6 +3,7 @@
 import {ScriptExit, lockedPackage} from './scripts.mjs';
 import {manifestPath} from './manifest.mjs';
 
+/** Each run publishes its own directory under this one: two sessions on a project never run each other's specs. */
 export const testDirectory = '.webfront/developer/test';
 export const testTimeout = {default: 60, bounds: [1, 3600]};
 export const reportLimits = {failures: 100, messages: 8, text: 16 * 1024, pending: 100};
@@ -49,8 +50,18 @@ const pattern = new URLSearchParams(location.search).get('pattern') ?? '';
 const clip = (value, limit = ${reportLimits.text}) => String(value ?? '').slice(0, limit);
 const problems = list => (list ?? []).slice(0, ${reportLimits.messages}).map(({message, stack}) => ({message: clip(message), stack: clip(stack)}));
 const specs = [];
+const suites = [];
+// jasmine.js of version 7 installs the globals itself; earlier versions leave that to their boot file, done here.
+function boot() {
+    if (globalThis.jasmine) return;
+    const jasmine = jasmineRequire.core(jasmineRequire);
+    const members = jasmineRequire.interface(jasmine, jasmine.getEnv());
+    globalThis.jasmine = jasmine;
+    for (const name in members) globalThis[name] = members[name];
+}
 try {
     try { await webFront.ready; } catch { /* the specs that need the bridge fail on their own */ }
+    boot();
     const env = jasmine.getEnv();
     env.configure({random: false, specFilter: spec => spec.getFullName().includes(pattern)});
     env.addReporter({
@@ -59,8 +70,12 @@ try {
                 failures: problems(result.failedExpectations)});
             post({type: 'spec', status: result.status});
         },
+        suiteDone(result) {
+            // An afterAll that throws is reported here, not by any spec.
+            if (result.failedExpectations?.length) suites.push({name: clip(result.fullName, 1024), failures: problems(result.failedExpectations)});
+        },
         jasmineDone(info) {
-            post({type: 'done', version: jasmine.version, specs, overall: info.overallStatus, durationMs: info.totalTime,
+            post({type: 'done', version: jasmine.version, specs, suites, overall: info.overallStatus, durationMs: info.totalTime,
                 incomplete: clip(info.incompleteReason, 1024), global: problems(info.failedExpectations)});
         },
     });
@@ -72,17 +87,17 @@ try {
 }
 `;
 
-/** The files of a runner: the page, the module that runs the specs, the locked Jasmine and the compiled specs. */
-export function runnerFiles(specs, jasmine) {
-    const page = '<!doctype html>\n<html lang="en"><meta charset="utf-8"><title>WebFront tests</title>' +
+/** The files of a runner: the page, the module that runs the specs, the locked Jasmine and everything the specs built (JS, CSS, assets). */
+export function runnerFiles(compiled, jasmine) {
+    const stylesheet = compiled.has('specs.css') ? '<link rel="stylesheet" href="./specs.css">' : '';
+    const page = `<!doctype html>\n<html lang="en"><meta charset="utf-8"><title>WebFront tests</title>${stylesheet}` +
         '<script src="/WebFront.js"></script><script src="./jasmine.js"></script>' +
         '<script type="module" src="./runner.js"></script></html>\n';
-    return new Map([['index.html', encoder.encode(page)], ['runner.js', encoder.encode(runnerSource)],
-        ['jasmine.js', jasmine], ['specs.js', specs]]);
+    return new Map([...compiled, ['index.html', encoder.encode(page)], ['runner.js', encoder.encode(runnerSource)], ['jasmine.js', jasmine]]);
 }
 
 const emptyReport = (status, exitCode, extra = {}) => ({status, exitCode, jasmine: '', pattern: '', incomplete: '', total: 0, passed: 0,
-    failed: 0, pending: 0, excluded: 0, durationMs: 0, failures: [], pendingSpecs: [], global: [], ...extra});
+    failed: 0, pending: 0, excluded: 0, durationMs: 0, failures: [], pendingSpecs: [], suites: [], global: [], ...extra});
 const finite = value => Number.isFinite(value) && value >= 0 ? Math.round(value) : 0;
 const text = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
 const problems = list => Array.isArray(list) ? list.slice(0, reportLimits.messages).map(item =>
@@ -101,16 +116,17 @@ export function buildReport(data, {pattern = ''} = {}) {
     const failedSpecs = specs.filter(spec => spec.status === 'failed');
     const executed = specs.filter(spec => spec.status !== 'excluded').length;
     const global = problems(data.global);
+    const suites = Array.isArray(data.suites) ? data.suites.slice(0, reportLimits.failures).map(({name, failures}) => ({name: text(name, 1024), messages: problems(failures)})) : [];
     let status = ['passed', 'failed', 'incomplete'].includes(data.overall) ? data.overall : 'failed';
     let incomplete = text(data.incomplete, 1024);
-    if (status === 'passed' && (failedSpecs.length || global.length)) status = 'failed';
+    if (status === 'passed' && (failedSpecs.length || global.length || suites.length)) status = 'failed';
     if (status === 'passed' && !executed) { status = 'incomplete'; incomplete = pattern ? `No spec matches "${pattern}"` : 'No specs found'; }
     return {status, exitCode: status === 'passed' ? 0 : 1, jasmine: text(data.version, 32), pattern, incomplete,
         total: executed, passed: count('passed'), failed: failedSpecs.length, pending: count('pending'), excluded: count('excluded'),
         durationMs: finite(data.durationMs),
         failures: failedSpecs.slice(0, reportLimits.failures).map(({name, failures}) => ({name: text(name, 1024), messages: problems(failures)})),
         pendingSpecs: specs.filter(spec => spec.status === 'pending').slice(0, reportLimits.pending).map(({name, reason}) => ({name: text(name, 1024), reason: text(reason, 1024)})),
-        global};
+        suites, global};
 }
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -125,13 +141,14 @@ export function formatReport(report) {
     const lines = [`${report.status === 'passed' ? 'PASSED' : 'FAILED'}: ${summary.join(', ')} (${report.durationMs} ms, jasmine-core ${report.jasmine})`];
     if (report.incomplete) lines.push(report.incomplete);
     for (const {name, messages} of report.failures) lines.push(`FAIL ${name}`, ...messages.flatMap(problemLines));
+    for (const {name, messages} of report.suites) lines.push(`FAIL ${name} (suite)`, ...messages.flatMap(problemLines));
     if (report.global.length) lines.push('Failures outside the specs:', ...report.global.flatMap(problemLines));
     for (const {name, reason} of report.pendingSpecs) lines.push(`PENDING ${name}${reason ? `: ${reason}` : ''}`);
     return lines.join('\n');
 }
 
 const progress = {passed: '.', failed: 'F', pending: '*'};
-const stopped = (reason, pattern) => {
+export const stoppedRun = (reason, pattern) => {
     const [message, exitCode] = reason === 'timeout' ? ['Tests stopped at their time limit', 124] : ['Tests stopped by Ctrl+C', 130];
     return Object.assign(new ScriptExit(message, exitCode), {report: emptyReport(reason, exitCode, {pattern, error: message})});
 };
@@ -150,7 +167,7 @@ function defaultFrame() {
  * `signal` aborts (130) or after `timeout` seconds (124); the frame is removed in every case. `createFrame` makes the
  * frame element.
  */
-export function runInFrame({pattern, timeout, signal, write = () => {}, createFrame = defaultFrame}) {
+export function runInFrame({pattern, timeout, runId, signal, write = () => {}, createFrame = defaultFrame}) {
     return new Promise((resolve, reject) => {
         const frame = createFrame();
         let timer;
@@ -167,12 +184,12 @@ export function runInFrame({pattern, timeout, signal, write = () => {}, createFr
             if (message?.type === 'spec') write(progress[message.status] ?? '');
             else if (message?.type === 'done' || message?.type === 'error') finish(null, buildReport(message, {pattern}));
         };
-        const interrupt = () => finish(stopped('interrupted', pattern));
+        const interrupt = () => finish(stoppedRun('interrupted', pattern));
         addEventListener('message', receive);
         signal?.addEventListener('abort', interrupt, {once: true});
-        timer = setTimeout(() => finish(stopped('timeout', pattern)), timeout * 1000);
+        timer = setTimeout(() => finish(stoppedRun('timeout', pattern)), timeout * 1000);
         if (signal?.aborted) return interrupt();
-        frame.src = `/webfront/developer/test/index.html?pattern=${encodeURIComponent(pattern)}&run=${Date.now()}`;
+        frame.src = `/webfront/developer/test/${runId}/index.html?pattern=${encodeURIComponent(pattern)}&run=${Date.now()}`;
         document.body.append(frame);
     });
 }
@@ -182,4 +199,36 @@ export function reportResult(report) {
     const output = formatReport(report);
     if (report.exitCode === 0) return output;
     throw Object.assign(new ScriptExit(output, report.exitCode), {report});
+}
+
+// A bridge string carries a 16-bit length, in UTF-8 bytes: the result must fit in one, with a margin.
+export const resultLimit = 60000;
+const byteLength = value => encoder.encode(JSON.stringify(value)).length;
+const clipText = (text, length) => text.length > length ? `${text.slice(0, length)}…` : text;
+
+/**
+ * The result cut to `limit` bytes of JSON, so that it can cross the bridge: the output first, then the stack frames,
+ * then the messages, then the lists of failures; the counts and statuses are never changed. A result that was cut says
+ * so in `truncated`.
+ */
+export function fitResult(result, limit = resultLimit) {
+    if (byteLength(result) <= limit) return result;
+    const fitted = structuredClone(result);
+    fitted.truncated = true;
+    const problems = report => [...report.failures, ...report.suites ?? []].flatMap(({messages}) => messages).concat(report.global ?? []);
+    const steps = [
+        ...[4096, 1024, 256].map(length => () => { fitted.output = clipText(fitted.output, length); }),
+        () => { for (const problem of problems(fitted.report)) problem.stack = ''; },
+        ...[2048, 512, 128].map(length => () => { for (const problem of problems(fitted.report)) problem.message = clipText(problem.message, length); }),
+        ...[10, 3, 0].map(count => () => {
+            for (const key of ['failures', 'suites', 'pendingSpecs']) if (fitted.report[key]) fitted.report[key].length = Math.min(fitted.report[key].length, count);
+            fitted.report.global.length = Math.min(fitted.report.global.length, count);
+        }),
+        () => { fitted.output = ''; },
+    ];
+    for (const step of fitted.report ? steps : steps.slice(0, 3).concat(steps.at(-1))) {
+        step();
+        if (byteLength(fitted) <= limit) break;
+    }
+    return fitted;
 }

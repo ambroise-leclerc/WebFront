@@ -19,7 +19,7 @@ async function load(entry) {
         return await import(pathToFileURL(path));
     } finally { await rm(temporary, {recursive: true, force: true}); }
 }
-const {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles} = await load('js/developer/environment/testing.mjs');
+const {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult} = await load('js/developer/environment/testing.mjs');
 const {bundleTests} = await load('js/developer/environment/bundler.mjs');
 const encode = text => new TextEncoder().encode(text);
 const decode = bytes => new TextDecoder().decode(bytes);
@@ -69,6 +69,35 @@ test('a report counts exactly, names the failures and fails for anything but a p
     assert.deepEqual([broken.status, broken.exitCode, broken.error], ['error', 1, 'Error: boom']);
 });
 
+test('failures of a suite (an afterAll) are collected, counted and shown', () => {
+    const report = buildReport({type: 'done', version: '7.0.2', overall: 'passed', durationMs: 1, global: [], specs: [spec('cleanup passes', 'passed')],
+        suites: [{name: 'cleanup', failures: [failure('afterAll boom')]}]});
+    assert.deepEqual([report.status, report.exitCode, report.failed, report.suites.map(suite => suite.name)], ['failed', 1, 0, ['cleanup']]);
+    assert.match(formatReport(report), /FAIL cleanup \(suite\)\n  afterAll boom/);
+    assert.deepEqual(buildReport({type: 'done', overall: 'passed', global: [], specs: [spec('a', 'passed')]}).suites, []);
+});
+
+test('a result is cut to fit a bridge string, keeping the counts and the status', () => {
+    const encoded = value => new TextEncoder().encode(JSON.stringify(value)).length;
+    const huge = 'é'.repeat(10000);
+    const report = buildReport({type: 'done', version: '7.0.2', overall: 'failed', durationMs: 1, global: [failure(huge)], specs:
+        Array.from({length: 4}, (_, index) => spec(`big ${index}`, 'failed', {failures: [failure(huge, `Error: ${huge}\n    at f (http://127.0.0.1/specs.js:1:1)`)]}))});
+    const result = {exitCode: 1, output: formatReport(report), report};
+    assert.ok(encoded(result) > 65535, 'the result of four 10,000-character failures does not fit a bridge string');
+    const fitted = fitResult(result);
+    assert.ok(encoded(fitted) <= 60000, `fitted to ${encoded(fitted)} bytes`);
+    assert.deepEqual([fitted.truncated, fitted.exitCode, fitted.report.status, fitted.report.failed, fitted.report.total], [true, 1, 'failed', 4, 4]);
+    assert.deepEqual(fitted.report.failures.map(failure => failure.name), ['big 0', 'big 1', 'big 2', 'big 3']);
+    // What fits is left alone, and the original is never changed.
+    const small = {exitCode: 0, output: 'ok', report: null};
+    assert.equal(fitResult(small), small);
+    assert.ok(encoded(result) > 65535 && result.report.failures[0].messages[0].message.length === 10000);
+    // A tiny limit still ends with a result that has its counts.
+    const tiny = fitResult(result, 2000);
+    assert.ok(encoded(tiny) <= 2000 && tiny.report.failed === 4 && tiny.exitCode === 1);
+    assert.ok(encoded(fitResult({exitCode: 1, output: 'x'.repeat(100000), report: null})) <= 60000);
+});
+
 test('a report is bounded: what the specs post is cut, not trusted', () => {
     const many = Array.from({length: 300}, (_, index) => spec(`s${index}`, 'failed', {failures: Array.from({length: 20}, () => failure('m'.repeat(50000)))}));
     const report = buildReport({type: 'done', overall: 'failed', specs: many, global: [], durationMs: Infinity, version: 'v'.repeat(100)});
@@ -102,8 +131,15 @@ test('a result is the text on success and an error with the exit code and the re
 });
 
 test('the runner page loads the locked jasmine before the specs and the specs as a module', () => {
-    const files = runnerFiles(encode('specs'), encode('jasmine'));
+    const files = runnerFiles(new Map([['specs.js', encode('specs')]]), encode('jasmine'));
     assert.deepEqual([...files.keys()].sort(), ['index.html', 'jasmine.js', 'runner.js', 'specs.js']);
+    assert.ok(!decode(files.get('index.html')).includes('stylesheet'));
+    // What the specs built is published whole, and the stylesheet is loaded before the specs run.
+    const styled = runnerFiles(new Map([['specs.js', encode('s')], ['specs.css', encode('c')], ['assets/logo-1.png', encode('p')]]), encode('jasmine'));
+    assert.deepEqual([...styled.keys()].sort(), ['assets/logo-1.png', 'index.html', 'jasmine.js', 'runner.js', 'specs.css', 'specs.js']);
+    assert.match(decode(styled.get('index.html')), /<link rel="stylesheet" href="\.\/specs\.css">/);
+    // jasmine.js of versions before 7 only exposes jasmineRequire: the runner boots it as boot0.js does.
+    assert.match(decode(files.get('runner.js')), /globalThis\.jasmine\) return;[\s\S]*jasmineRequire\.core\(jasmineRequire\)[\s\S]*jasmineRequire\.interface/);
     const page = decode(files.get('index.html'));
     assert.ok(page.indexOf('./jasmine.js') > page.indexOf('/WebFront.js') && page.indexOf('./jasmine.js') < page.indexOf('./runner.js'));
     assert.match(decode(files.get('runner.js')), /specFilter: spec => spec\.getFullName\(\)\.includes\(pattern\)/);
@@ -119,8 +155,11 @@ test('specs bundle in the manifest order with their imports, TypeScript and lock
         if (!bytes) throw new Error(`Cannot read project file: ${path}`);
         return encode(bytes);
     };
+    files.set('b.css', '.probe { width: 37px }');
+    files.set('b.spec.js', `import './b.css';\n${files.get('b.spec.js')}`);
     const output = await bundleTests(esbuild, {specs: ['a.spec.ts', 'b.spec.js'], lock, readProject});
-    assert.deepEqual([...output.keys()], ['specs.js']);
+    assert.deepEqual([...output.keys()].sort(), ['specs.css', 'specs.js']);
+    assert.match(decode(output.get('specs.css')), /width: 37px/);
     const code = decode(output.get('specs.js'));
     const evaluated = new Function('globalThis', code.replace(/^export .*$/gm, ''));
     const sandbox = {};

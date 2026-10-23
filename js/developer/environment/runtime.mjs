@@ -13,7 +13,7 @@ import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {build, dev} from './development.mjs';
-import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, testDirectory} from './testing.mjs';
+import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 
@@ -202,21 +202,39 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
 // context.onReport receives the structured report, also when the run fails.
 async function test(args, {bridge, signal, write = () => {}, createFrame, onReport}) {
     const {timeout, pattern} = parseTestOptions(args);
-    const project = await loadManifest(bridge);
-    const specs = specFiles(project.manifest);
-    const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
-    const jasmine = jasmineCore(lock);
-    const files = await buildInWorker(bridge, {type: 'tests', specs, lock}, signal);
-    const jasmineBytes = await readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`);
-    await publish(bridge, testDirectory, runnerFiles(files.get('specs.js'), jasmineBytes), {signal});
-    write(syncNotice(project));
-    let report;
-    try { report = await runInFrame({pattern, timeout, signal, write, createFrame}); }
-    catch (error) { if (error.report) onReport?.({...error.report, jasmine: jasmine.node.version}); throw error; }
-    report.jasmine = jasmine.node.version;
-    onReport?.(report);
-    write('\n');
-    return reportResult(report);
+    // --timeout covers the whole command: the build, the publication and the run share one deadline.
+    const deadline = Date.now() + timeout * 1000;
+    const limit = new AbortController();
+    const timer = setTimeout(() => limit.abort(), timeout * 1000);
+    const preparing = signal ? AbortSignal.any([signal, limit.signal]) : limit.signal;
+    const runId = crypto.randomUUID();
+    const directory = `${testDirectory}/${runId}`;
+    let jasmineVersion = '';
+    let reported = false;
+    const finished = report => { reported = true; report.jasmine = jasmineVersion; onReport?.(report); return report; };
+    try {
+        const project = await loadManifest(bridge);
+        const specs = specFiles(project.manifest);
+        const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
+        const jasmine = jasmineCore(lock);
+        jasmineVersion = jasmine.node.version;
+        const files = await buildInWorker(bridge, {type: 'tests', specs, lock}, preparing);
+        const jasmineBytes = await readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`);
+        await publish(bridge, directory, runnerFiles(files, jasmineBytes), {signal: preparing});
+        write(syncNotice(project));
+        const report = finished(await runInFrame({pattern, timeout: Math.max(0.001, (deadline - Date.now()) / 1000), runId, signal, write, createFrame}));
+        write('\n');
+        return reportResult(report);
+    } catch (error) {
+        // The limit's own abort ends the preparation like the limit ends the run: with exit code 124 and its report.
+        if (limit.signal.aborted && !signal?.aborted && !error.report) error = stoppedRun('timeout', pattern);
+        if (error.report && !reported) finished(error.report);
+        throw error;
+    } finally {
+        clearTimeout(timer);
+        // The files of the run are not needed any more; an empty directory replaces them (best effort).
+        await publish(bridge, directory, new Map()).catch(() => {});
+    }
 }
 
 async function list(_args, {bridge}) {
@@ -238,7 +256,7 @@ export async function execute(args, context) {
  * Runs one wf command without a terminal, for a page that the application drives: the command's output goes to
  * `write`, and the result {exitCode, output, report} is sent to C++ as JSON through `reporter` (for example
  * json => bridge.cppFunction('app.report')(json)) before `onExit(exitCode)` ends the session (by default, closes the
- * window). `report` is the structured report of wf test, null for other commands. A command that fails, or a result
+ * window). `report` is the structured report of wf test, null for other commands; the result is cut to fit a bridge string (see fitResult). A command that fails, or a result
  * that cannot be sent, ends with a non-zero code; it never stays open. Resolves with the result.
  */
 export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
@@ -250,7 +268,7 @@ export async function runNonInteractive(argv, {reporter, onExit = code => global
         output += error?.message ?? String(error);
     }
     const result = {exitCode, output, report};
-    try { await reporter?.(JSON.stringify(result)); }
+    try { await reporter?.(JSON.stringify(fitResult(result))); }
     catch (error) {
         result.exitCode = exitCode || 1;
         result.output += `\nThe result could not be sent to the application: ${error?.message ?? error}`;
