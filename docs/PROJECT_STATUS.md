@@ -10,8 +10,8 @@ removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live
 components, build tools, vendoring tools); tests live in `test/{unit,web,fuzz,fixtures,cmake}`. The CTest
 case `RepositoryLayout` enforces the root. The generated-provider include changed, so the developer
 distribution is bumped to 0.4.1, published and archived as `developer-v0.4.1`. Version 0.5.0 (project manifest, `wf restore`,
-`wf run`/`wf exec`, `wf check`, the complete terminal) is pinned by `DeveloperReleaseData.hpp`, published and archived as `developer-v0.5.0`. On 2026-10-23 Pages returned HTTP 200,
-CORS `*` and archives byte-identical to a reproducible local build; the live `--public` test (CEF, Linux) downloaded them,
+`wf run`/`wf exec`, `wf check`, the complete terminal) was published as `developer-v0.5.0`; 0.6.0 (`wf build`, `wf dev`, `wf test`, the non-interactive entry) is pinned by `DeveloperReleaseData.hpp`, published and archived as `developer-v0.6.0`. On 2026-10-23 Pages returned HTTP 200 for 0.6.0,
+CORS `*` and archives byte-identical to a reproducible local build; the live `--public` test (WebKitGTK, Linux) downloaded them,
 fetched React from npm, ran the PI and Life previews and generated both providers.
 
 ## CI test duration (#298, 2026-10-21)
@@ -132,7 +132,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   manifest permissions, which frame the `context` API only and are not a sandbox. Peers require explicit compatible roots/direct
   dependencies. The environment's terminal (#308) runs `wf`, built-in and C++ commands (`webfront::Commands`:
   per-browser coroutine sessions, streamed output, Ctrl+C cancellation without waiting, drained at shutdown) with
-  multi-row editing, CJK/emoji widths, persistent history and completion. `wf build` / `wf dev` (#309, environment sources) publish manifest entries and rebuild the preview automatically with a reused esbuild context, bounded input polling, error overlays and Ctrl+C cancellation; `wf test` (#310, environment sources) runs the manifest's specs under the project's locked `jasmine-core` in a hidden frame, with a structured report, exit codes 0/1/124/130 and a non-interactive entry that reports to C++; the release pin is unchanged. `webfront-wf` (#321) runs one `wf` command without interaction and returns its status; the bootstrap environment is pinned and verified at configure time (0.5.0 for now: the first environment able to run `wf test` still has to be published and pinned), and `environment.json` declares the `protocol` and `api` versions that the loader checks. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
+  multi-row editing, CJK/emoji widths, persistent history and completion. `wf build` / `wf dev` (#309, environment sources) publish manifest entries and rebuild the preview automatically with a reused esbuild context, bounded input polling, error overlays and Ctrl+C cancellation; `wf test` (#310, environment sources) runs the manifest's specs under the project's locked `jasmine-core` in a hidden frame, with a structured report, exit codes 0/1/124/130 and a non-interactive entry that reports to C++; the release pin is 0.6.0. `webfront-wf` (#321) runs one `wf` command without interaction and returns its status; the bootstrap environment is pinned and verified at configure time (0.6.0, which also contains `wf build`, `wf dev` and `wf test`), and `environment.json` declares the `protocol` and `api` versions that the loader checks. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
   the cache from the lock, from the application's registry option, else the manifest's, else npmjs.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
 

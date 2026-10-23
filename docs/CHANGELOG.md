@@ -4,9 +4,9 @@
 
 ### Added
 
-- `webfront-wf` test driver and bootstrap provisioning (#321): runs one `wf` command without interaction on a project
+- `webfront-wf` test driver and bootstrap provisioning (#321, developer distribution 0.6.0 published as `developer-v0.6.0`, pinned by `DeveloperReleaseData.hpp` and by the bootstrap): runs one `wf` command without interaction on a project
   and exits with its status (64 usage, 70 bootstrap failure, 71 time limit, 72 no result), with an optional JSON report.
-  `cmake/WebFrontBootstrap.cmake` pins the bootstrap environment (0.5.0 for now) and, with `ENABLE_TESTING=ON`, downloads
+  `cmake/WebFrontBootstrap.cmake` pins the bootstrap environment (0.6.0) and, with `ENABLE_TESTING=ON`, downloads
   and verifies it at configure time, or takes it from `WEBFRONT_BOOTSTRAP_DIR`. `environment.json` declares `protocol` and
   `api`; `webfront.developer.config` exposes the supported versions and the loader refuses an incompatible archive with an
   explicit diagnostic. The Linux CEF job blocks the public network after configure.
