@@ -2,7 +2,15 @@
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
 #   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
 #   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
+# PROFILE is a directory for the browser's own persistent state (WebKitGTK profile), emptied first: a browser reuses the
+# modules it loaded by URL, and the first page that loads another environment through the same profile fails with
+# "Importing a module script failed". Every case then starts from nothing.
 # FORGE replaces ENVIRONMENT with an archive whose environment.json declares the given protocol and API versions.
+if(PROFILE)
+    file(REMOVE_RECURSE "${PROFILE}")
+    set(ENV{XDG_DATA_HOME} "${PROFILE}/data")
+    set(ENV{XDG_CACHE_HOME} "${PROFILE}/cache")
+endif()
 if(FORGE)
     include("${ROOT}/cmake/WebFrontBootstrap.cmake")
     string(REPLACE ":" ";" versions "${FORGE}")
