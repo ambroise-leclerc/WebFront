@@ -214,7 +214,19 @@ export async function execute(args, context) {
 // --- Terminal ----------------------------------------------------------------------------------------------------
 
 export const historyPath = '.webfront/developer/history.json';
-const toTerminalText = text => String(text).replace(/(?<!\r)\n/g, '\r\n');
+// Converts the "\n" line endings of a stream of output pieces to "\r\n", also when a "\r\n" is split between two pieces.
+function terminalText() {
+    let carriage = false;
+    return text => {
+        let converted = '';
+        for (const char of String(text)) {
+            if (char === '\n' && !carriage) converted += '\r';
+            converted += char;
+            carriage = char === '\r';
+        }
+        return converted;
+    };
+}
 
 // The history's lines; none when the project has no history yet. A history that cannot be read or is not a JSON array
 // of lines throws: it is shown as empty, but never replaced.
@@ -302,6 +314,7 @@ const builtins = {
 export async function runLine(line, context) {
     const [command, ...args] = tokenize(line);
     if (command === undefined) return '';
+    const toTerminalText = terminalText();  // one per command: its streamed pieces, then its result
     const write = text => context.write?.(toTerminalText(text));
     if (command === 'wf') return toTerminalText(await execute(args, {...context, write}));
     if (Object.hasOwn(builtins, command)) return toTerminalText(await builtins[command](args, context));
@@ -311,6 +324,7 @@ export async function runLine(line, context) {
 
 // The entries of the project directory a partial path names, as completions of that path.
 async function projectPaths(bridge, word) {
+    if (word.startsWith('/')) return [];  // project paths are relative
     const directory = word.slice(0, word.lastIndexOf('/') + 1);
     if (directory && isUnsafe(directory.slice(0, -1))) return [];
     try {

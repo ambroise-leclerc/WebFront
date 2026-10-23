@@ -148,6 +148,11 @@ void registerCommands(webfront::Commands<App>& commands, const std::shared_ptr<C
     commands.add("sleep", "Wait some milliseconds", [](Context context) -> webfront::Task {
         co_await context.ui().resumeAfter(std::chrono::milliseconds(std::stoi(context.args().at(0))));
     });
+    commands.add("crlf", "Split a CRLF between two writes", [](Context context) -> webfront::Task {
+        context.write("one\r");
+        context.write("\ntwo\n");
+        co_return;
+    });
     commands.add("partial", "Write without a final line break", [](Context context) -> webfront::Task {
         context.write("partial");
         co_return;

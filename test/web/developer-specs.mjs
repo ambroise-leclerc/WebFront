@@ -350,6 +350,9 @@ try {
     const streamed = [];
     assert(await runtime.runLine('stream', lineContext(undefined, streamed)) === '', 'A C++ command resolves once it returns');
     assert(streamed.length >= 3 && streamed.join('') === 'é'.repeat(75000) + '\r\n', `Long C++ output must stream in pieces under the bridge limit: ${streamed.length}`);
+    const crlf = [];
+    await runtime.runLine('crlf', lineContext(undefined, crlf));
+    assert(crlf.join('') === 'one\r\ntwo\r\n', `A CRLF split between two writes must stay one line break: ${JSON.stringify(crlf.join(''))}`);
     const thrown = await failure(runtime.runLine('fail', lineContext()));
     assert(thrown?.message === 'command failed on purpose' && thrown.exitCode === 1, `A C++ exception must reject the command: ${thrown}`);
     const exitCode = await failure(runtime.runLine('status 3', lineContext()));
@@ -513,6 +516,7 @@ try {
     await completed('echo too', 'echo tools/');
     await completed('echo tools/js', 'echo tools/jsx.tsx ');
     await completed('hi', 'history ');
+    await completed('echo /to', 'echo /to');  // project paths are relative: an absolute one is not completed
     // Paths with spaces and quotes: the completion reads the escaped or quoted word and extends it the same way.
     await writeFile("my dir/file one's.txt", 'x');
     await completed('echo my\\ d', 'echo my\\ dir/');
