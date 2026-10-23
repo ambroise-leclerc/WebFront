@@ -79,8 +79,10 @@ if(WEBFRONT_DEVELOPER_FIXTURES
             -DPROJECT=${_wf_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work
             -DENVIRONMENT=${WEBFRONT_DEVELOPER_FIXTURES}/environment.tgz -DINTEGRITY=${_environment_integrity}
             -DREGISTRY=${WEBFRONT_DEVELOPER_FIXTURES}/registry)
+        set(_developer_xvfb_prefix "")
         if(_developer_xvfb)
-            set(_wf_run "${_developer_xvfb}" -a ${_wf_run})
+            set(_developer_xvfb_prefix "${_developer_xvfb}" -a)
+            set(_wf_run ${_developer_xvfb_prefix} ${_wf_run})
         endif()
         add_test(NAME WfDriverProject
             COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR}/test/fixtures/wf-project -DPROJECT=${_wf_project}
@@ -127,7 +129,7 @@ if(WEBFRONT_DEVELOPER_FIXTURES
             ENVIRONMENT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work/absent.tgz")
         webfront_add_driver_test(WfDriverIncompatibleApi 70 "list" OUTPUT "api version 2, this application supports 1" FORGE "1:2")
         webfront_add_driver_test(WfDriverIncompatibleProtocol 70 "list" OUTPUT "protocol version 2, this application supports 1" FORGE "2:1")
-        add_test(NAME WfDriverUsage COMMAND webfront-wf --project "${_wf_project}")
+        add_test(NAME WfDriverUsage COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}")
         set_tests_properties(WfDriverUsage PROPERTIES PASS_REGULAR_EXPRESSION "A wf command is required" LABELS "web-integration" TIMEOUT 30)
     endif()
     # Build the actual browser-generated header only after the setup test has produced it.
