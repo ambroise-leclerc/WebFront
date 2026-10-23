@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -338,6 +339,29 @@ SCENARIO("Printing a long text waits between its pieces") {
             app.start(app.ui(1), 1, "print", "[]");
             THEN("it waits after the piece that overfills the queue, before sending the next") {
                 CHECK(app.paced == vector<string>{"send", "pause", "send", "send", "send"});
+            }
+        }
+    }
+}
+
+SCENARIO("A print task may be awaited after its context is gone") {
+    GIVEN("a command that creates a print task from a context, then reuses its storage for another") {
+        FakeApp           app;
+        Commands<FakeApp> commands{app};
+        commands.add("print", "", [&app](Context context) -> Task {
+            optional<Context> temporary{context};
+            auto              printing = temporary->print("mine\n");
+            temporary.reset();
+            temporary.emplace(make_shared<commands::detail::Run<FakeUI>>(app.ui(1), 99, vector<string>{}));
+            co_await std::move(printing);
+        });
+        WHEN("it awaits the task") {
+            app.start(app.ui(1), 1, "print", "[]");
+            THEN("the text is printed by the command that created the task") {
+                const auto calls = app.callsOf(1);
+                REQUIRE(calls.size() == 2);
+                CHECK(calls[0].id == 1);
+                CHECK(calls[0].values == vector<string>{"mine\n"});
             }
         }
     }

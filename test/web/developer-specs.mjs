@@ -336,6 +336,8 @@ try {
     assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
     assert(/typescript@6\.0\.3/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a stopped check');
     // The terminal: the application's C++ commands, run in this browser's session.
+    assert(JSON.stringify([...runtime.builtinNames].sort()) === JSON.stringify([...runtime.reservedNames].sort()),
+        `The terminal's own commands must be the names reserved to it: ${runtime.builtinNames}`);
     const cppCommands = await runtime.discoverCommands(webFront);
     assert(['echo', 'fail', 'linger', 'status', 'stream', 'wait'].every(name => cppCommands.has(name)) && cppCommands.get('echo') === 'Write its arguments',
         `The C++ commands must be discovered with their help: ${[...cppCommands.keys()]}`);

@@ -1,6 +1,9 @@
 // The application's C++ commands (webfront::Commands): discovered through the bridge and run in this browser's session.
 // Their output streams in through fire-and-forget calls; Ctrl+C cancels them in C++ without waiting for them to end.
 
+/** Names the terminal itself handles; webfront::commands::reservedNames refuses them to C++ commands. */
+export const reservedNames = ['wf', 'clear', 'exit', 'help', 'history'];
+
 const running = new Map();  // command number -> {write, exit}
 let lastId = 0;
 

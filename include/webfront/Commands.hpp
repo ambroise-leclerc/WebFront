@@ -140,14 +140,10 @@ public:
 
     /// Writes like write(), one piece at a time: after each piece, the command is suspended while more than
     /// maxPendingOutput frames wait for a browser that reads slower than the command writes. Each wait is a point where
-    /// Ctrl+C stops the command. Prefer it to write() for large or unbounded output.
+    /// Ctrl+C stops the command. Prefer it to write() for large or unbounded output. The returned task does not need
+    /// this Context: it may be awaited after it is gone.
     [[nodiscard]] Task print(std::string text) const {
-        const auto command = run;
-        for (const auto piece : detail::chunks(text)) {
-            if (command->stop.stop_requested() || !command->send("webfront.commands.output", piece))
-                co_return;
-            co_await command->ui.writesAtMost(maxPendingOutput);  // at once if the queue is short, else woken as it drains
-        }
+        return printPieces(run, std::move(text));
     }
 
     /// Sets the exit code reported when the command returns; 0 by default. An exception reports 1.
@@ -168,6 +164,16 @@ public:
 
 private:
     std::shared_ptr<detail::Run<UI>> run;
+
+    // A static coroutine: a task starts when awaited, so it takes the command by value at the call instead of reading
+    // it through `this` once started.
+    static Task printPieces(std::shared_ptr<detail::Run<UI>> command, std::string text) {
+        for (const auto piece : detail::chunks(text)) {
+            if (command->stop.stop_requested() || !command->send("webfront.commands.output", piece))
+                co_return;
+            co_await command->ui.writesAtMost(maxPendingOutput);  // at once if the queue is short, else woken as it drains
+        }
+    }
 };
 
 namespace detail {

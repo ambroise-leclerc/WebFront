@@ -2,8 +2,8 @@ import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
 import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
 import {manifestPath} from './manifest.mjs';
-import {discoverCommands, runCommand} from './commands.mjs';
-export {discoverCommands};
+import {discoverCommands, runCommand, reservedNames} from './commands.mjs';
+export {discoverCommands, reservedNames};
 import {validateLock} from './packages.mjs';
 import {call, readProject, publish, writeChunks} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
@@ -305,6 +305,9 @@ const builtins = {
         return 'Session ended. Press Enter to start a new session.';
     },
 };
+
+/** The commands the terminal handles before the application's: wf and the built-ins, which must be reservedNames. */
+export const builtinNames = ['wf', ...Object.keys(builtins)];
 
 /**
  * Runs a terminal line: a built-in command, a wf command or one of the application's C++ commands (context.cppCommands,

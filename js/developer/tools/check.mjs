@@ -220,3 +220,10 @@ test('npm tarballs: package specs, integrity, bounded gunzip and tar entries', a
     assert.throws(() => readTar(corrupt), /Corrupt tar header/);
 });
 
+test('the terminal and webfront::Commands reserve the same command names', async () => {
+    const {reservedNames} = await import('../environment/commands.mjs');
+    const header = await readFile(new URL('../../../include/webfront/Commands.hpp', import.meta.url), 'utf8');
+    const declared = header.match(/reservedNames\{([^}]*)\}/);
+    assert.ok(declared, 'Commands.hpp must declare commands::reservedNames');
+    assert.deepEqual([...declared[1].matchAll(/"([^"]*)"/g)].map(match => match[1]).sort(), [...reservedNames].sort());
+});
