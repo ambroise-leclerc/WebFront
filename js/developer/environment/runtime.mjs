@@ -1,5 +1,5 @@
-import {Terminal} from '../../../third_party/xterm/xterm.mjs';
-import {FitAddon} from '../../../third_party/xterm/addon-fit.mjs';
+import {Terminal} from '@xterm/xterm';
+import {FitAddon} from '@xterm/addon-fit';
 import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
 import {manifestPath} from './manifest.mjs';
 import {discoverCommands, runCommand} from './commands.mjs';

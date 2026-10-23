@@ -6,6 +6,14 @@
 #include "DeveloperStore.hpp"
 #include "IndexFS.hpp"
 
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+
 namespace webfront::fs {
 
 class DeveloperFS {

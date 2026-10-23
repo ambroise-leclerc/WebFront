@@ -4,12 +4,24 @@
 #include "WindowsCompat.hpp"
 #include "DeveloperPaths.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <exception>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <optional>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <fcntl.h>

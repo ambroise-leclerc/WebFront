@@ -1,13 +1,17 @@
 /// @brief Path containment helpers of the developer store.
 #pragma once
 
-#include "ToolStore.hpp"
+#include "SafePath.hpp"
+
+#include <filesystem>
+#include <stdexcept>
+#include <string_view>
 
 namespace webfront::developer {
 
 // Resolve existing parents too: a symlink must never turn a relative project path into an escape.
 inline std::filesystem::path projectPath(const std::filesystem::path& root, std::string_view relative) {
-    const auto path     = root / fs::tools::safeRelativePath(relative);
+    const auto path     = root / fs::safeRelativePath(relative);
     const auto resolved = std::filesystem::weakly_canonical(path);
     auto       base     = root.begin();
     auto       part     = resolved.begin();

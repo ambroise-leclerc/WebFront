@@ -9,6 +9,7 @@ import {generateProvider, compress} from '../environment/embed.mjs';
 import {environmentFiles, bootstrap} from '../environment/bootstrap.mjs';
 import {publish, responseBytes} from '../environment/io.mjs';
 import {tar} from './archive.mjs';
+import {parseSpec, verifyIntegrity, gunzip, readTar} from '../environment/tarball.mjs';
 
 const encoder = new TextEncoder();
 const encode = value => encoder.encode(typeof value === 'string' ? value : JSON.stringify(value));
@@ -199,3 +200,23 @@ test('a pinned cached environment bootstraps offline and failed refreshes preser
 test('compressed downloads stop at their byte limit', async () => {
     await assert.rejects(responseBytes(new Response(new Uint8Array(9)), 8), /byte limit/);
 });
+
+test('npm tarballs: package specs, integrity, bounded gunzip and tar entries', async () => {
+    assert.deepEqual(parseSpec('plot'), {name: 'plot', version: ''});
+    assert.deepEqual(parseSpec('plot@1.2.0'), {name: 'plot', version: '1.2.0'});
+    assert.deepEqual(parseSpec('@acme/plot'), {name: '@acme/plot', version: ''});
+    assert.deepEqual(parseSpec('@acme/plot@next'), {name: '@acme/plot', version: 'next'});
+    const files = new Map([['package/package.json', encode({name: 'plot'})], ['package/dist/index.js', encode('x')]]);
+    const archive = compress(tar(files));
+    assert.equal(await verifyIntegrity(archive, `sha1-ignored ${integrity(archive)}`), integrity(archive));
+    await assert.rejects(verifyIntegrity(archive, integrity(encode('other'))), /Integrity check failed/);
+    await assert.rejects(verifyIntegrity(archive, 'sha1-only'), /no SHA-512 integrity/);
+    const unpacked = await gunzip(archive);
+    assert.deepEqual(readTar(unpacked).map(entry => entry.path).sort(), [...files.keys()].sort());
+    await assert.rejects(gunzip(archive, unpacked.length - 1), /unpacks to more than/);
+    assert.deepEqual(readTar(new Uint8Array(1024)), []);
+    const corrupt = unpacked.slice();
+    corrupt[148] ^= 1;
+    assert.throws(() => readTar(corrupt), /Corrupt tar header/);
+});
+

@@ -7,8 +7,23 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 namespace webfront::developer {
 
@@ -423,7 +438,7 @@ private:
     static std::filesystem::path checkedChunk(const Transaction& tx, const std::string& path, std::size_t size) {
         if (!tx.directory && path != "output")
             throw std::invalid_argument("Expected output file");
-        auto relative = fs::tools::safeRelativePath(path);
+        auto relative = fs::safeRelativePath(path);
         requireWithinLimits(tx, size);
         return relative;
     }

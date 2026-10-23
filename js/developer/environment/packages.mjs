@@ -1,5 +1,5 @@
 // npm library resolution for the browser. Tools continue to use the existing wf installer.
-import {parseSpec} from '../components/tools/wf.mjs';
+import {parseSpec} from './tarball.mjs';
 import {downloadPackage} from './registry.mjs';
 import {pinnedDownloader} from './pins.mjs';
 import {connectPeers} from './peers.mjs';
