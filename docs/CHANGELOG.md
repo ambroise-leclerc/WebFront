@@ -8,7 +8,7 @@
   verifies against their SHA-512, the pinned bootstrap environment and the real packages of the tests' npm registry
   (`test/web/registry-packages.json`; `-DWEBFRONT_REGISTRY_DIR` for a machine without network access); `wf run test-registry`
   builds the registry, the environment is built from the current sources and the fixtures are assembled by CTest itself, so
-  `WEBFRONT_DEVELOPER_FIXTURES` and `WEBFRONT_REQUIRE_NODE` are gone. The 86 JavaScript tests became 82 Jasmine specs
+  `WEBFRONT_DEVELOPER_FIXTURES` and `WEBFRONT_REQUIRE_NODE` are gone. The 86 JavaScript tests became 84 Jasmine specs
   (`test/developer/specs/`) run by the repository's own `wf test`, plus CMake tests for the bundle checksums and the reserved
   command names. The headers of the core are rendered and checked by `js/core/EmbedAsset.cmake` in pure CMake (ADR-016
   v1.3), with a Catch2 scenario that decodes each of them. `NoNodeDependency` audits every file and

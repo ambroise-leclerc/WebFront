@@ -50,8 +50,8 @@ building the environment, publishing it, and the CI.
   from it, builds the environment from the current sources (`SelfBuild*`) and assembles the fixtures of the browser tests
   (`DeveloperFixtures`). The environment it builds is byte for byte the published 0.6.1.
 - **Tests.** The pure JavaScript tests of the former runner became Jasmine specs in `test/developer/specs/`, run by the
-  repository's own `wf test` (`DeveloperSpecs`: 2.5 s of specs, and the `wf-package` job on the real checkout and lock); 86 tests became 82
-  specs: two moved to CMake and two that compiled with esbuild (a minute on a slow machine, and covered by `DeveloperBrowserIntegration` with the real WASM compiler) were dropped: the checksums of the bundle inputs (`BundleInputsFresh`, `BundleInputsRejectsChange`) and
+  repository's own `wf test` (`DeveloperSpecs`, and the `wf-package` job on the real checkout and lock); 86 tests became 84
+  specs because two moved to CMake: the checksums of the bundle inputs (`BundleInputsFresh`, `BundleInputsRejectsChange`) and
   the command names reserved by the terminal and by `webfront::Commands` (`CommandNamesAgree`). The tests of the asset
   generator became `EmbeddedAssetGenerator` (CMake, exit status and format), a Catch2 scenario that decodes every core
   header and compares it with its source, and the per-asset `*AssetFresh` cases. The mapping is in `docs/NODE_TOOLS_MIGRATION.md`.

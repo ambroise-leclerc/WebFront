@@ -32,8 +32,8 @@ tracked file; this note and the files of the guard are among its listed exceptio
 | `manifest-check.mjs` (16) | `manifest-specs.mjs` |
 | `restore-check.mjs` (12) | `restore-specs.mjs` |
 | `scripts-check.mjs` (21) | `scripts-specs.mjs`; the Worker module is evaluated afresh for each spec from the project's own source |
-| `development-check.mjs` (7) | `development-specs.mjs` (6; the esbuild context test is covered by `DeveloperBrowserIntegration`, real WASM compiler); the module is imported directly |
-| `testing-check.mjs` (11) | `testing-specs.mjs` (10; the bundling of specs is covered by `DeveloperBrowserIntegration`) |
+| `development-check.mjs` (7) | `development-specs.mjs`; the module is imported directly instead of bundled by a native compiler |
+| `testing-check.mjs` (11) | `testing-specs.mjs`, compiling with the locked esbuild-wasm |
 | `distribution-check.mjs` (5) | `distribution-specs.mjs` |
 | `embed.test.mjs` (5) | `EmbeddedAssetGenerator` (`CheckEmbedAsset.cmake`: format, padding, exit status, path with spaces, symbolic link), the Catch2 scenario on the embedded assets of the core, the per-asset `*AssetFresh` cases. The gzip cases went with the gzip rendering of the core, which had no user left |
 
