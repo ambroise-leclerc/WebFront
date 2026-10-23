@@ -124,7 +124,9 @@ class WebLink {
     std::shared_ptr<detail::PendingCalls<Policy>>      pending{std::make_shared<detail::PendingCalls<Policy>>()};
 
 public:
-    WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler, networking::TaskScope& scope)
+    /// Starts reading at once, unless `startNow` is false: start() then begins, once the owner can dispatch its events.
+    WebLink(typename Net::Socket&& socket, WebLinkId webLinkId, std::function<void(WebLinkEvent)> eventHandler, networking::TaskScope& scope,
+            bool startNow = true)
         : ws(websocket::WebSocket<Net, Policy>::create(std::move(socket), scope)), id(webLinkId), eventsHandler(eventHandler) {
         log::debug("New WebLink created with id:{}", id);
 
@@ -142,11 +144,16 @@ public:
                 rejectPending(std::make_exception_ptr(std::runtime_error(message)));
                 // The WebSocket reports its closure once, and never when it is stopped by the server or the link.
                 eventsHandler({WebLinkEvent::Code::closed, id});
+                wakeAllWriters();  // after the closure is known: nothing will be written any more
             });
         });
 
-        ws->start();
+        if (startNow)
+            ws->start();
     }
+
+    /// Starts reading, for a link constructed with `startNow` false.
+    void start() { ws->start(); }
     WebLink(const WebLink&) = delete;
     WebLink(WebLink&&) = delete;
     WebLink& operator=(const WebLink&) = delete;
@@ -164,6 +171,7 @@ public:
         const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");
         rejectPending(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
+        wakeAllWriters();
     }
 
     /// Diagnostic frames are refused once this many frames of any kind await the network.
@@ -172,8 +180,8 @@ public:
     [[nodiscard]] std::size_t pendingWrites() const { return ws->pendingWrites(); }
 
     /// Returns 0 when at most `limit` frames await the network. Otherwise registers `ready`, called once they do, on
-    /// the thread that writes the frame bringing them down, and returns its identifier for cancelWrites(). A waiter
-    /// left when the link is destroyed is never called.
+    /// the thread that writes the frame bringing them down, and returns its identifier for cancelWrites(). The waiters
+    /// are also called when the connection closes or the link is destroyed: nothing is left to wait for.
     std::uint64_t whenWritesAtMost(std::size_t limit, std::function<void()> ready) {
         std::lock_guard lock(writersMutex);
         if (ws->pendingWrites() <= limit)
@@ -332,6 +340,16 @@ private:
             call();
     }
 
+    void wakeAllWriters() {
+        std::map<std::uint64_t, Writer> ready;
+        {
+            std::lock_guard lock(writersMutex);
+            ready.swap(writers);
+        }
+        for (auto& [waiter, writer] : ready)
+            writer.ready();
+    }
+
     /// Context for link-level logs outside any call; operationId stays empty.
     [[nodiscard]] log::Context linkContext() const {
         return {.component = "weblink", .webLinkId = idText.view(), .direction = log::CallDirection::None, .callId = {}};
@@ -396,11 +414,25 @@ public:
     template <typename Receiver>
     class Operation {
         using StopToken = networking::ex::stop_token_of_t<networking::ex::env_of_t<Receiver>>;
-        // Shared with the link's waiter, which may run on another thread after a stop completed the operation.
+        enum class Completion { none, value, stopped };
+        // Shared with the link's waiter and the stop callback, which may run on other threads, also during start().
+        // The first of them to finish the operation completes it, unless start() is still running: it then records
+        // the completion, which start() delivers once it no longer touches the operation.
         struct State {
             std::atomic<bool>          done{false};
             std::atomic<std::uint64_t> waiter{0};
+            std::mutex                 mutex;
+            bool                       starting   = true;
+            Completion                 completion = Completion::none;
             Operation*                 operation;
+
+            // True when start() will deliver the completion itself.
+            bool record(Completion finished) {
+                std::lock_guard lock(mutex);
+                if (starting)
+                    completion = finished;
+                return starting;
+            }
         };
         struct OnStop {
             Operation* operation;
@@ -418,6 +450,8 @@ public:
                 return;
             if (auto waited = link.lock())
                 waited->cancelWrites(state->waiter);
+            if (state->record(Completion::stopped))
+                return;
             networking::ex::set_stopped(std::move(receiver));  // may destroy this operation
         }
 
@@ -439,23 +473,38 @@ public:
                 state->done = true;
                 return networking::ex::set_value(std::move(receiver));
             }
-            stopCallback.emplace(std::move(token), OnStop{this});
-            const auto shared = state;  // the operation may be gone once the waiter or a stop completed it
+            const auto shared = state;
+            stopCallback.emplace(std::move(token), OnStop{this});  // a stop requested meanwhile is recorded at once
             std::uint64_t waiter = 0;
-            try {
-                waiter = waited->whenWritesAtMost(limit, [shared] {
-                    if (shared->done.exchange(true))
-                        return;  // stopped first
-                    auto* operation = shared->operation;
-                    operation->stopCallback.reset();  // waits for a stop callback running on another thread
-                    networking::ex::set_value(std::move(operation->receiver));
-                });
-            } catch (...) { }  // registering failed: there is nothing to wait for
-            shared->waiter = waiter;
-            if (waiter == 0 && !shared->done.exchange(true)) {
-                stopCallback.reset();
-                networking::ex::set_value(std::move(receiver));
+            if (!shared->done) {
+                try {
+                    waiter = waited->whenWritesAtMost(limit, [shared] {
+                        if (shared->done.exchange(true) || shared->record(Completion::value))
+                            return;  // stopped first, or start() delivers it
+                        auto* operation = shared->operation;
+                        operation->stopCallback.reset();  // waits for a stop callback running on another thread
+                        networking::ex::set_value(std::move(operation->receiver));
+                    });
+                } catch (...) { }  // registering failed: there is nothing to wait for
             }
+            shared->waiter = waiter;
+            Completion completion;
+            {
+                std::lock_guard lock(shared->mutex);
+                shared->starting = false;
+                completion       = shared->completion;
+            }
+            if (completion == Completion::none && waiter == 0 && !shared->done.exchange(true))
+                completion = Completion::value;  // already at most `limit` frames queued
+            if (completion == Completion::none)
+                return;  // the waiter or the stop callback completes it
+            if (waiter != 0)
+                waited->cancelWrites(waiter);
+            stopCallback.reset();
+            if (completion == Completion::value)
+                networking::ex::set_value(std::move(receiver));
+            else
+                networking::ex::set_stopped(std::move(receiver));
         }
     };
 

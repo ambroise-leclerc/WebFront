@@ -330,9 +330,12 @@ public:
             }
             auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
                 onEvent(event);
-            }, httpServer.taskScope());
-            std::scoped_lock lock{linksMutex};
-            webLinks.emplace(id, std::move(link));
+            }, httpServer.taskScope(), false);
+            {
+                std::scoped_lock lock{linksMutex};
+                webLinks.emplace(id, link);
+            }
+            link->start();  // registered first: every event it dispatches finds it
         });
     }
 
@@ -417,6 +420,11 @@ public:
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
         return webLinks.size();
+    }
+
+    /// Whether a C++ function of that name is registered.
+    [[nodiscard]] bool hasCppFunction(std::string_view functionName) const {
+        return cppFunctions.contains(functionName);
     }
 
     /**
@@ -580,7 +588,7 @@ private:
     std::function<void(UI)>                                                uiStartedHandler;
     std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::shared_ptr<detail::UISubscribers<UI>>                               uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
-    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>> cppFunctions;
+    std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>, std::less<>> cppFunctions;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
 private:
@@ -601,7 +609,7 @@ private:
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
             case WebLinkEvent::Code::cppFunctionCalled: {
-                // The calling link is normally registered: the server thread registers it before it can read anything.
+                // Links are registered before they read, and released after their closure: the caller is registered.
                 const auto link = findLink(event.webLinkId);
                 if (!link)
                     break;

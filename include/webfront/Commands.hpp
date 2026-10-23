@@ -92,7 +92,9 @@ struct Run {
     std::uint32_t            id;
     std::vector<std::string> arguments;
     int                      exitCode = 0;
-    ex::inplace_stop_token   stop{};
+    // The command's own stop source, requested with its task's: a copy of the Context that outlives the task still
+    // reads a valid source.
+    ex::inplace_stop_source  stop;
     std::atomic<bool>        disconnected{false};
 
     Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) { }
@@ -144,8 +146,7 @@ public:
         for (const auto piece : detail::chunks(text)) {
             if (command->stop.stop_requested() || !command->send("webfront.commands.output", piece))
                 co_return;
-            if (command->ui.pendingWrites() > maxPendingOutput)
-                co_await command->ui.writesAtMost(maxPendingOutput);  // woken by the write that drains the queue
+            co_await command->ui.writesAtMost(maxPendingOutput);  // at once if the queue is short, else woken as it drains
         }
     }
 
@@ -160,8 +161,9 @@ public:
         return run->stop.stop_requested();
     }
 
+    /// Valid as long as a copy of this Context lives.
     [[nodiscard]] networking::ex::inplace_stop_token stopToken() const noexcept {
-        return run->stop;
+        return run->stop.get_token();
     }
 
 private:
@@ -298,12 +300,21 @@ private:
 
     // Runs the command, then reports its exit code and error message to the browser, which ignores the report of a
     // command it stopped waiting for. A stopped command still reports: its coroutine was unwound, not this one.
+    struct ForwardStop {
+        Run<UI>* run;
+        void     operator()() noexcept { run->stop.request_stop(); }
+    };
+
     static Task execute(std::weak_ptr<Registry> registry, std::shared_ptr<Handler> handler, std::shared_ptr<Run<UI>> run) {
-        run->stop    = co_await ex::read_env(ex::get_stop_token);
+        const auto taskStop = co_await ex::read_env(ex::get_stop_token);
+        // Forwards the task's stop request (Ctrl+C, disconnection, shutdown) to the command's source while it runs.
+        const ex::stop_callback_for_t<std::remove_cvref_t<decltype(taskStop)>, ForwardStop> forward{taskStop, ForwardStop{run.get()}};
         bool stopped = false;
         std::string error;
         try {
-            co_await ex::let_stopped((*handler)(Context<UI>{run}), [&stopped]() noexcept {
+            // The command observes its own source: requested before the senders it awaits are stopped.
+            co_await ex::let_stopped(ex::write_env((*handler)(Context<UI>{run}), ex::prop{ex::get_stop_token, run->stop.get_token()}),
+                                     [&stopped]() noexcept {
                 stopped = true;
                 return ex::just();
             });
@@ -345,8 +356,12 @@ public:
     using UI      = typename App::UI;
     using Context = commands::Context<UI>;
 
-    /// Throws std::logic_error if one of its bridge functions is already registered, as by another Commands object.
+    /// Throws std::logic_error, registering nothing, if one of its bridge functions is already registered, as by
+    /// another Commands object.
     explicit Commands(App& app) : registry(std::make_shared<commands::detail::Registry<UI>>()) {
+        for (const auto* name : {"webfront.commands.list", "webfront.commands.start", "webfront.commands.cancel"})
+            if (app.hasCppFunction(name))
+                throw std::logic_error(std::string(name) + " is taken: create one webfront::Commands per application");
         const auto registered = [](bool added) {
             if (!added)
                 throw std::logic_error("The webfront.commands bridge functions are taken: create one webfront::Commands per application");

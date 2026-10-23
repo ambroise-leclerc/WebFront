@@ -353,6 +353,13 @@ networking::Task waitWrites(Writes writes, bool& woken) {
     co_await std::move(writes);
     woken = true;
 }
+
+// Records the events the link had reported when the writer resumed.
+template <typename Writes>
+networking::Task waitWritesSeeing(Writes writes, const vector<WebLinkEvent::Code>& events, vector<WebLinkEvent::Code>& seen) {
+    co_await std::move(writes);
+    seen = events;
+}
 }  // namespace
 
 SCENARIO("A link wakes a writer once its write queue drains") {
@@ -385,6 +392,13 @@ SCENARIO("A link wakes a writer once its write queue drains") {
             CHECK(link->pendingWrites() == 0);
         }
     }
+    GIVEN("a link destroyed while a task waits") {
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{link, 0}, woken));
+        link.reset();
+        THEN("the task resumes: nothing is left to wait for") {
+            CHECK(woken);
+        }
+    }
     GIVEN("a link that is gone") {
         std::weak_ptr<WebLink<InjectableNetworking>> gone;
         networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{gone, 0}, woken));
@@ -394,4 +408,25 @@ SCENARIO("A link wakes a writer once its write queue drains") {
     }
     InjectableSocket::deferWrites(false);
     while (InjectableSocket::completeDeferredWrites() > 0) { }
+}
+
+SCENARIO("A writer resumes after a failed write reported the closure") {
+    InjectableSocket::reset();
+    InlineTaskScope            scope;
+    vector<WebLinkEvent::Code> events;
+    auto link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{13}, [&events](WebLinkEvent event) { events.push_back(event.code); }, scope);
+    InjectableSocket::deferWrites();
+    for (msg::CallId call = 1; call <= 3; ++call)
+        link->sendError(call, "queued");
+    vector<WebLinkEvent::Code> seen{WebLinkEvent::Code::linked};  // replaced when the writer resumes
+    networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWritesSeeing(webfront::detail::WritesAtMost<WebLink<InjectableNetworking>>{link, 0}, events, seen));
+    WHEN("the write fails") {
+        InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+        InjectableSocket::deferWrites(false);
+        InjectableSocket::completeDeferredWrites();
+        THEN("the writer resumes once the closure was reported") {
+            CHECK(seen == vector{WebLinkEvent::Code::closed});
+        }
+    }
+    InjectableSocket::reset();
 }

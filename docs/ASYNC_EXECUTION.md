@@ -78,8 +78,9 @@ handle.requestStop();
 
 `ui.writesAtMost(limit)` returns a sender completing once at most `limit` frames
 wait for the network on that browser's connection, woken by the write that brings
-them down (no polling), or at once when the browser is gone; it observes the
-task's stop token. It paces output to a browser that reads slower than written.
+them down (no polling), or at once when the browser is gone. A closing connection
+or a released link also completes it, after the closure was reported; it observes
+the task's stop token. It paces output to a browser that reads slower than written.
 
 `app.resumeAfter(duration)` and `ui.resumeAfter(duration)` return a sender that
 completes on the server context once the duration has elapsed. Awaited in a task,

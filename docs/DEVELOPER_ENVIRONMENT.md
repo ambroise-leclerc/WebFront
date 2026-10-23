@@ -395,7 +395,9 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
 - A command must not block the server thread, which serves every browser: a handler that does not return
   `webfront::Task` does not compile. Long computations belong on another thread.
 
-A second `webfront::Commands` on the same application throws `std::logic_error`. The names `wf`, `clear`, `exit`,
+A second `webfront::Commands` on the same application throws `std::logic_error` and registers nothing. A copy of a
+`Context` may outlive its command (a detached task): its stop token stays valid and its writes are dropped once the
+browser is gone. The names `wf`, `clear`, `exit`,
 `help` and `history` are reserved. `context.write` has no flow control: a command
 writing large output with it, faster than the browser reads, grows the connection's write queue; use
 `context.print` for such output.

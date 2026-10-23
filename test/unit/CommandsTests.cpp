@@ -52,7 +52,6 @@ struct FakeUI {
     }
     TaskHandle  spawn(Task task) const;
     auto        jsFunction(string_view name) const;
-    size_t      pendingWrites() const;
     auto        writesAtMost(size_t limit) const;
     auto        resumeAfter(chrono::milliseconds) const;
 };
@@ -66,6 +65,10 @@ struct FakeApp {
     function<void(FakeUI, uint32_t)>           cancel;
     shared_ptr<detail::UISubscribers<FakeUI>>  closed = make_shared<detail::UISubscribers<FakeUI>>();
     vector<BrowserCall>                        calls;
+
+    [[nodiscard]] bool hasCppFunction(string_view name) const {
+        return std::ranges::find(registered, name) != registered.end();
+    }
 
     template <typename R, typename... Args>
     bool cppFunction(string name, auto&& function) {
@@ -115,13 +118,11 @@ TaskHandle FakeUI::spawn(Task task) const {
     return app->real.spawn(std::move(task));
 }
 
-size_t FakeUI::pendingWrites() const {
-    return app->backlog;
-}
-
-// The browser reads until the queue is down to half the limit.
+// Completes at once when the queue is short enough; else the browser reads until it is down to half the limit.
 auto FakeUI::writesAtMost(size_t limit) const {
     return networking::ex::just() | networking::ex::then([app = app, limit] {
+        if (app->backlog <= limit)
+            return;
         ++app->pauses;
         app->paced.push_back("pause");
         app->backlog = min(app->backlog, limit / 2);
@@ -199,9 +200,18 @@ SCENARIO("Commands register their bridge functions and list the commands") {
         THEN("a second Commands object on the application is refused") {
             CHECK_THROWS_AS(Commands<FakeApp>{fixture.app}, logic_error);
         }
+
         THEN("invalid, reserved and duplicate names are refused") {
             for (const auto* name : {"", "two words", "quo'te", "back\\slash", "tab\t", "wf", "clear", "exit", "help", "history", "greet"})
                 CHECK_THROWS_AS(fixture.commands.add(name, "", greet), invalid_argument);
+        }
+    }
+    GIVEN("an application where only webfront.commands.cancel is taken") {
+        FakeApp app;
+        app.cppFunction<void, FakeUI, uint32_t>("webfront.commands.cancel", [](FakeUI, uint32_t) { });
+        THEN("Commands is refused and registers nothing") {
+            CHECK_THROWS_AS(Commands<FakeApp>{app}, logic_error);
+            CHECK(app.registered == vector<string>{"webfront.commands.cancel"});
         }
     }
 }
@@ -472,6 +482,29 @@ SCENARIO("A command may take its context by reference") {
             app.start(app.ui(1), 1, "late", "[]");
             THEN("its context is still valid after the suspension") {
                 CHECK(app.callsOf(1).front().values == vector<string>{"after the pause\n"});
+            }
+        }
+    }
+}
+
+SCENARIO("A copy of a context may outlive its command") {
+    GIVEN("a command that keeps a copy of its context") {
+        FakeApp                  app;
+        Commands<FakeApp>        commands{app};
+        auto                     kept = make_shared<optional<Context>>();
+        commands.add("keep", "", [kept](Context context) -> Task {
+            kept->emplace(context);
+            co_return;
+        });
+        app.start(app.ui(1), 1, "keep", "[]");
+        WHEN("the command has ended") {
+            THEN("the copy still reads its stop state, and writes nothing") {
+                REQUIRE(kept->has_value());
+                CHECK_FALSE((*kept)->stopRequested());
+                CHECK_FALSE((*kept)->stopToken().stop_requested());
+                const auto calls = app.callsOf(1).size();
+                (*kept)->write("late\n");
+                CHECK(app.callsOf(1).size() == calls + 1);
             }
         }
     }

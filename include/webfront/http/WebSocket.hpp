@@ -546,8 +546,8 @@ private:
                 std::lock_guard lock(writeMutex);
                 writeQueue.clear();
             }
+            onWriteFailed(error.code());  // reports the closure before the waiters for the queue resume
             if (writtenHandler) writtenHandler();
-            onWriteFailed(error.code());
         }
     }
 

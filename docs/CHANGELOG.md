@@ -47,7 +47,7 @@
   `ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`, `app.connectedBrowsers()`, `UI::id()`,
   `UI::pendingWrites()`, `UI::writesAtMost(limit)` (woken by the write that drains the queue), `app.findLink(id)` and
   `json::Reader::array`. `cppFunction` returns false when the name was
-  already registered.
+  already registered, and `hasCppFunction(name)` tells whether it is.
 
 ### Changed
 
