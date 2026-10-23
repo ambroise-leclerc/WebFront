@@ -20,7 +20,7 @@ The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.pro
 `react-dom`, `test.specs`). `webtest` is the `webfront-wf` driver (`test/driver/WfDriver.hpp`) plus the C++ callbacks the
 specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
 local registry of `WEBFRONT_DEVELOPER_FIXTURES` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
-pinned 0.6.0 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
+pinned 0.6.1 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
 composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone; the Signal Studio page is a
 JSX module built by esbuild-wasm with the locked React and rendered in the runner frame by the specs. The specs now run
 in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
@@ -31,7 +31,7 @@ case is registered only with `WEBFRONT_DEVELOPER_FIXTURES`; the registry fixture
 ## Self-hosted developer environment (#315, epic #303)
 
 The repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json` at the root, the only files added
-to the closed root list). The pinned 0.6.0 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
+to the closed root list). The pinned 0.6.1 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
 the locked esbuild-wasm bundles the environment in the script's Worker, and `environment.tgz`, the starters,
 `provision.json`, the pinned header and (with `--refresh-bootstrap`) the bootstrap bundles, their checksums and the core
 headers come out byte for byte as from the Node.js build, twice in a row. `site.mjs` stages the Pages site and refuses to
@@ -40,7 +40,7 @@ CMake target `webfront-embedded-assets`); `pages.sh` and `archive-release.sh` do
 absent from `PATH`: configure and build of the driver with `-DWEBFRONT_REQUIRE_NODE=OFF`, `wf restore` of the lock from the
 public registry, two builds with the same bytes as the Node.js build, the refresh, the staging of the site and the pin
 check; CTest `SelfBuild*` (15 cases) covers the same offline, and the whole suite passes locally (299 cases, WebKitGTK). The sources build 0.6.1, which fixes `runNonInteractive`
-dropping what a command wrote; it is not published, and `DeveloperReleaseData.hpp` pins 0.6.0.
+dropping what a command wrote; it is published as 0.6.1, which `DeveloperReleaseData.hpp` and the bootstrap of the tests pin.
 
 Not done here, by design: publishing 0.6.1 (a maintainer operation with the `developer-v0.6.1` tag), deleting the Node.js
 tools and the comparison job (#318, after the proof from an empty cache with the pinned environment), the registry of real
