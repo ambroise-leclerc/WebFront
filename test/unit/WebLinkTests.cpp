@@ -358,7 +358,7 @@ networking::Task waitWrites(Writes writes, bool& woken) {
 SCENARIO("A link wakes a writer once its write queue drains") {
     InjectableSocket::reset();
     InlineTaskScope scope;
-    auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, 12, [](WebLinkEvent) { }, scope);
+    auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{12}, [](WebLinkEvent) { }, scope);
     InjectableSocket::deferWrites();
     for (msg::CallId call = 1; call <= 3; ++call)
         link->sendError(call, "queued");
