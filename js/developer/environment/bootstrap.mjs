@@ -19,27 +19,41 @@ function archiveFiles(tarball) {
     return files;
 }
 
-function supported(manifest, files) {
-    if (manifest.protocol !== 1) return false;
-    if (!safePath(manifest.entry)) return false;
-    return files.has(manifest.entry);
+// What the current C++ accepts when it does not say (a test, a config written before the contract): the first release.
+const defaultSupported = {protocol: [1], api: [1]};
+
+// An archive is refused with the reason, never used with a fallback. An environment that predates "api" was built for the
+// first webfront.developer.* API, so a missing "api" reads as 1; any other declared version must be one the C++ supports.
+function checkCompatible(manifest, supported) {
+    const versions = {protocol: manifest.protocol, api: manifest.api ?? 1};
+    for (const [name, version] of Object.entries(versions)) {
+        const accepted = supported?.[name] ?? defaultSupported[name];
+        if (!accepted.includes(version))
+            throw new Error(`Incompatible WebFront developer environment: ${name} version ${version}, this application supports ${accepted.join(', ')}`);
+    }
 }
 
-export async function environmentFiles(bytes, integrity) {
+function checkEntry(manifest, files) {
+    if (typeof manifest.entry !== 'string' || !safePath(manifest.entry) || !files.has(manifest.entry))
+        throw new Error('Unsupported WebFront developer environment: invalid entry');
+}
+
+export async function environmentFiles(bytes, integrity, supported = defaultSupported) {
     await verifyIntegrity(bytes, integrity);
     const files = archiveFiles(await gunzip(bytes));
     if (!files.has('environment.json')) throw new Error('Environment archive has no environment.json');
     const manifest = JSON.parse(decoder.decode(files.get('environment.json')));
-    if (!supported(manifest, files)) throw new Error('Unsupported WebFront developer environment');
+    checkCompatible(manifest, supported);
+    checkEntry(manifest, files);
     return {files, manifest};
 }
 
 const cachedPath = '.webfront/developer/environment.tgz';
 
-async function verifiedCache(bridge, integrity) {
+async function verifiedCache(bridge, integrity, supported) {
     try {
         const candidate = await readProject(bridge, cachedPath);
-        await environmentFiles(candidate, integrity);
+        await environmentFiles(candidate, integrity, supported);
         return candidate;
     } catch { return null; }
 }
@@ -67,13 +81,13 @@ function pinnedStarters(manifest, environmentUrl) {
 }
 
 export async function bootstrap(bridge, config, fetchImpl = fetch, progress = () => {}) {
-    let bytes = await verifiedCache(bridge, config.integrity);
+    let bytes = await verifiedCache(bridge, config.integrity, config.supported);
     if (bytes) progress('Using verified cached developer environment');
     else {
         progress('Downloading developer environment');
         bytes = await downloadEnvironment(config, fetchImpl);
     }
-    const {files, manifest} = await environmentFiles(bytes, config.integrity);
+    const {files, manifest} = await environmentFiles(bytes, config.integrity, config.supported);
     const starters = pinnedStarters(manifest, new URL(config.environment, location.href));
     // All files and the trusted archive are published only after validation succeeds.
     await publish(bridge, '.webfront/developer/environment', files);

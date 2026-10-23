@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "name": "wf-driver-fixture",
+  "version": "0.1.0",
+  "dependencies": {},
+  "scripts": {"sleep": "tools/sleep.mjs"},
+  "test": {"specs": ["tests/arithmetic.spec.js"]}
+}

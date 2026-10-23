@@ -128,7 +128,15 @@ test('environment integrity and protocol are checked before publication', async 
     assert.equal(environment.manifest.entry, 'runtime.mjs');
     await assert.rejects(environmentFiles(archive, integrity(encode('wrong'))), /Integrity check failed/);
     const wrong = compress(tar(new Map([['package/environment.json', encode({protocol: 2, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('')]])));
-    await assert.rejects(environmentFiles(wrong, integrity(wrong)), /Unsupported WebFront/);
+    await assert.rejects(environmentFiles(wrong, integrity(wrong)), /Incompatible WebFront developer environment: protocol version 2, this application supports 1/);
+    // The API an environment expects must be one the C++ declares; an environment from before "api" reads as API 1.
+    const withApi = api => compress(tar(new Map([['package/environment.json', encode({protocol: 1, api, entry: 'runtime.mjs'})], ['package/runtime.mjs', encode('')]])));
+    const newer = withApi(2);
+    await assert.rejects(environmentFiles(newer, integrity(newer)), /api version 2, this application supports 1/);
+    assert.equal((await environmentFiles(newer, integrity(newer), {protocol: [1], api: [1, 2]})).manifest.api, 2);
+    await assert.rejects(environmentFiles(archive, integrity(archive), {protocol: [1], api: [2]}), /api version 1, this application supports 2/);
+    const current = withApi(1);
+    assert.equal((await environmentFiles(current, integrity(current))).manifest.api, 1);
     const missing = compress(tar(new Map([['package/runtime.mjs', encode('')]])));
     await assert.rejects(environmentFiles(missing, integrity(missing)), /no environment\.json/);
 });
