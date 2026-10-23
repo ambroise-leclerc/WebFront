@@ -496,9 +496,11 @@ export class LineEditor {
         } catch (error) {
             this.status = error?.exitCode ?? (signal.aborted ? 130 : 1);
             const message = String(error?.message ?? error);
-            // Ctrl+C already shows ^C: a bare interruption adds nothing.
+            // Ctrl+C already shows ^C: a bare interruption adds nothing. A code other than 1 is shown, unless the
+            // message already gives it ("exited with code 3").
+            const stated = this.status === 1 || new RegExp(`\\bcode ${this.status}\\b`).test(message);
             if (!(signal.aborted && message === 'Interrupted'))
-                this.write(ansi.red(`Error: ${message}${this.status !== 1 ? ` (exit code ${this.status})` : ''}`).replace(/(?<!\r)\n/g, '\r\n') + '\r\n');
+                this.write(ansi.red(`Error: ${message}${stated ? '' : ` (exit code ${this.status})`}`).replace(/(?<!\r)\n/g, '\r\n') + '\r\n');
         } finally {
             this.abort = null;
             // The prompt starts on a new line, unless the output already ends one or leaves the cursor at home.

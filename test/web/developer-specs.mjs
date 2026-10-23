@@ -460,7 +460,7 @@ try {
     await rendered();
     // Exit codes, errors and clear.
     await type('status 3\r');
-    assert(editor.status === 3 && lastRows(2)[0] === 'Error: Command status exited with code 3 (exit code 3)', `An exit code must be shown: ${lastRows(2)}`);
+    assert(editor.status === 3 && lastRows(2)[0] === 'Error: Command status exited with code 3', `An exit code must be shown: ${lastRows(2)}`);
     await type('fail\r');
     assert(editor.status === 1 && lastRows(2)[0] === 'Error: command failed on purpose', `A C++ exception must be shown as an error: ${lastRows(2)}`);
     await type('partial\r', 'x');

@@ -384,12 +384,18 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     fit.fit();
     const write = text => terminal.write(text);
     write('WebFront browser-powered developer environment. Type help.\r\n');
-    const cppCommands = await discoverCommands(bridge).catch(error => {
-        write(`\x1b[31mThe application's commands are unavailable: ${error?.message ?? error}\x1b[0m\r\n`);
-        return new Map();
-    });
+    // Keys typed while the commands and the history load are applied once the editor is ready.
+    const early = [];
+    const earlyInput = terminal.onData(data => early.push(data));
+    const [cppCommands, history] = await Promise.all([
+        discoverCommands(bridge).catch(error => {
+            write(`\x1b[31mThe application's commands are unavailable: ${error?.message ?? error}\x1b[0m\r\n`);
+            return new Map();
+        }),
+        readHistory(bridge).catch(() => [])]);
+    earlyInput.dispose();
     const context = {bridge, config, preview, cppCommands, onExit};
-    const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history: await readHistory(bridge).catch(() => []),
+    const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history,
         remember: line => rememberLine(bridge, line),
         run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
         complete: line => complete(line, context)});
@@ -397,6 +403,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     if (fitToElement) new ResizeObserver(() => fit.fit()).observe(element);
     terminal.onData(data => editor.handle(data));
     editor.showPrompt();
+    for (const data of early) editor.handle(data);
     terminal.focus();
     return {terminal, editor};
 }
