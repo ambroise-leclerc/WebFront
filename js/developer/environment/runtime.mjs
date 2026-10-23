@@ -12,6 +12,7 @@ import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
+import {build, dev} from './development.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 
@@ -202,8 +203,8 @@ async function list(_args, {bridge}) {
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
-const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, preview, embed, list, help};
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, build, dev, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;
@@ -352,7 +353,7 @@ async function cachedManifest(bridge) {
 
 // The names that the manifest declares for the first argument of a wf command.
 async function manifestNames(bridge, command) {
-    const section = {run: 'scripts', preview: 'entries', embed: 'providers'}[command];
+    const section = {run: 'scripts', build: 'entries', dev: 'entries', preview: 'entries', embed: 'providers'}[command];
     if (!section) return [];
     try { return Object.keys((await cachedManifest(bridge))?.[section] ?? {}); }
     catch { return []; }

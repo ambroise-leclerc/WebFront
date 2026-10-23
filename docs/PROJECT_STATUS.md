@@ -132,7 +132,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   manifest permissions, which frame the `context` API only and are not a sandbox. Peers require explicit compatible roots/direct
   dependencies. The environment's terminal (#308) runs `wf`, built-in and C++ commands (`webfront::Commands`:
   per-browser coroutine sessions, streamed output, Ctrl+C cancellation without waiting, drained at shutdown) with
-  multi-row editing, CJK/emoji widths, persistent history and completion. Automatic rebuild/watch is future work. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
+  multi-row editing, CJK/emoji widths, persistent history and completion. `wf build` / `wf dev` (#309, environment sources) publish manifest entries and rebuild the preview automatically with a reused esbuild context, bounded input polling, error overlays and Ctrl+C cancellation; the release pin is unchanged. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
   the cache from the lock, from the application's registry option, else the manifest's, else npmjs.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
 

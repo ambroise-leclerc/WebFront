@@ -99,7 +99,7 @@ wf embed ui/main.tsx --output generated/LifeUI.hpp
 The starter contains editable TSX/CSS and an exact-version `webfront.project.json` recipe.
 `wf create life another-directory` selects a different new destination; existing directories
 are never replaced. React DOM pulls scheduler transitively and checks its React peer.
-Edit the local files in your normal editor, then run `wf preview` again. Ctrl+C interrupts
+Edit the local files in your normal editor and use `wf dev` for automatic rebuilds, or run `wf preview` again. Ctrl+C interrupts
 commands, including downloads and builds.
 
 The interface draws an isometric field with raised living cells, soft lighting and translucent
@@ -351,7 +351,7 @@ open, Enter starts a new session. No system shell is exposed.
 - **Typing ahead and paste:** keys typed or pasted while a command runs are applied after it, line by line; a last
   line without a line break waits on the prompt. Ctrl+C drops the keys still waiting.
 - **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, its entries and
-  providers after `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
+  entries/providers after `wf build`, `wf dev`, `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
   quoted (`"my dir/`); the completion is written the same way and closes the quote. Several candidates are completed
   to their common prefix, or listed.
 - **Exit codes:** a failed command prints `Error: <message>`, with `(exit code N)` when N is not 1. Ctrl+C gives 130.
@@ -403,6 +403,40 @@ browser is gone. The names `wf`, `clear`, `exit`,
 `help` and `history` are reserved. `context.write` has no flow control: a command
 writing large output with it, faster than the browser reads, grows the connection's write queue; use
 `context.print` for such output.
+
+## Build and continuous development
+
+`wf build [entry.tsx|name]` compiles without opening or navigating the preview and publishes the whole
+result to `.webfront/developer/build/`. With no argument it builds every manifest entry: a single entry
+uses that directory directly; multiple entries each get a named subdirectory with their own `index.html`,
+`app.js`, optional CSS and assets. Directory names percent-escape punctuation and Windows device names. An explicit path or manifest entry name selects one entry at the root.
+Publication replaces the directory only after every entry succeeds. Build output is available as local
+files; the developer HTTP provider serves only the environment and preview directories.
+
+`wf dev [entry.tsx|name]` selects `entries.main` or the sole entry when omitted, builds, opens the preview
+and keeps running until Ctrl+C. It reuses one compiler Worker and esbuild context across rebuilds.
+Changing the selected entry or locked graph recreates the context. It uses the installed lock, without
+resolving packages or downloading dependencies; `wf install`/`wf restore` remain explicit actions.
+
+Detection uses portable, sequential polling rather than a platform-specific C++ filesystem watcher.
+After each build it waits 750 ms, then compares SHA-256 digests of the inputs actually read during that
+build, including missing resolution candidates, the manifest, the lock and used cached package files.
+Creating a missing import, deleting an input, editing CSS, or changing entries/the lock triggers a rebuild.
+Unrelated files and generated outputs are not scanned. A pass is limited to 1,024 paths and 32 MiB of
+input, read in 256 KiB chunks; each compilation has a 120 s deadline. Polling never overlaps a build or
+another poll. Large projects can hit these explicit limits. An edit made during a build is detected by
+the next poll; polling can miss a change that is reverted completely between reads.
+
+Only a successful build and publication reload the preview, replacing its session history entry. A build
+error leaves its last successful files and running document intact. Diagnostics (`file:line:column`, with
+one-based line and column numbers) stream to the terminal and appear as a text overlay in the preview.
+Fixing the source resumes rebuilding and clears the overlay. Ctrl+C ends with exit code 130, terminates
+the Worker, cancels polling and aborts staged publication; a publication already committed finishes and reloads
+the preview before stopping.
+The last successful preview stays available. Browser disconnection also stops the loop.
+
+These commands are in the 0.6.0 environment sources (not published); the release pin stays on published 0.5.0. To try
+them before the next release, provision an archive rebuilt from these sources as described below.
 
 ## Dependencies, storage and limitations
 
@@ -491,7 +525,7 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, PI and Life previews, C++ generation/animation and
+`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, build without navigation, incremental dev reload/error/recovery/Ctrl+C, PI and Life previews, C++ generation/animation and
 repeatable header generation. Its CTest fixtures then build that **browser-generated** header and run
 `DeveloperEmbeddedIntegration` and `LifeEmbeddedIntegration` from empty working directories
 with no developer callbacks.
