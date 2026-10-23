@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -455,6 +456,12 @@ public:
         if (!networking::Spawn(tasks, Net::Scheduler(acceptor), detail::ownedTask(std::move(task), std::move(registration))))
             handle.requestStop();
         return handle;
+    }
+
+    /** @brief A sender completing on the server context after the duration, or stopped first by its stop token. */
+    template <typename Rep, typename Period>
+    auto resumeAfter(std::chrono::duration<Rep, Period> duration) {
+        return Net::ResumeAfter(acceptor, duration);
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.

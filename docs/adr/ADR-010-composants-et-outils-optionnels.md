@@ -11,11 +11,13 @@
 | 1.4 | 2026-10-15 | Acceptée | Ambroise Leclerc | Validation des outils avec un registre local factice. | [d53ffcc](https://github.com/ambroise-leclerc/WebFront/commit/d53ffcc40102c7405eb7060d7021aad366d6d7e9) |
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Interruption des commandes navigateur et transferts séquentiels par blocs de 256 KiB. | [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) |
 | 1.6 | 2026-10-22 | Acceptée | Ambroise Leclerc | Trajectoire de retrait de Terminal.hpp, ToolManager.hpp, ToolStore et PackageFS au profit de l'environnement bootstrap (ADR-016). | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 1.7 | 2026-10-23 | Acceptée | Ambroise Leclerc | Retrait effectué (#313) : le terminal de l'environnement et `webfront::Commands` remplacent le composant terminal et le gestionnaire d'outils. | [PR #331](https://github.com/ambroise-leclerc/WebFront/pull/331) |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2026-10-14** (version 1.0).
-Dernière révision : **2026-10-22** (version 1.6).
+Dernière révision : **2026-10-23** (version 1.7) : le terminal et les outils relèvent désormais
+d'[ADR-016](ADR-016-bootstrap-comme-socle.md).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -68,9 +70,9 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 ### Révision de l'ADR-016
 
 `Terminal.hpp`, `ToolManager.hpp`, `ToolStore`, `PackageFS`, `TerminalFS`, `ToolManagerFS` et xterm
-embarqué sont voués au retrait (#313) : le terminal et le `wf` de l'environnement téléchargé
-([ADR-016](ADR-016-bootstrap-comme-socle.md)) les remplacent. Ils restent fonctionnels et testés
-tant que l'équivalent n'est pas couvert ; aucune nouvelle fonctionnalité ne leur est ajoutée.
+embarqué sont retirés (#313, version 1.7) : le terminal et le `wf` de l'environnement téléchargé
+([ADR-016](ADR-016-bootstrap-comme-socle.md)) les remplacent, et `webfront::Commands` remplace
+`terminal::Shell` pour les commandes C++ de l'application.
 Les abonnements UI multiples et l'injection du navigateur appelant demeurent des contrats du cœur.
 
 ## Prescriptions d’implémentation et de génération de code
@@ -87,8 +89,8 @@ Les abonnements UI multiples et l'injection du navigateur appelant demeurent des
 
 ## Sources et vérification
 
-- [Architecture des composants et limites](../UI_COMPONENTS.md),
-  [Terminal](../../include/webfront/components/Terminal.hpp), [ToolManager](../../include/webfront/components/ToolManager.hpp).
+- [Retrait et migration](../UI_COMPONENTS.md), [Commands](../../include/webfront/Commands.hpp) ; le composant
+  retiré reste lisible dans l'historique Git.
 - Tests : [UISubscribersTests](../../test/unit/UISubscribersTests.cpp),
-  [ToolStoreTests](../../test/unit/ToolStoreTests.cpp), [tools-specs](../../test/web/js/tools-specs.mjs).
+  [CommandsTests](../../test/unit/CommandsTests.cpp), [developer-specs](../../test/web/developer-specs.mjs).
 - Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md), [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) et [ADR-016](ADR-016-bootstrap-comme-socle.md).

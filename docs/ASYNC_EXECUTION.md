@@ -76,6 +76,27 @@ auto handle = app.spawn(showSquareRoot(ui));
 handle.requestStop();
 ```
 
+`ui.writesAtMost(limit)` returns a sender completing once at most `limit` frames
+wait for the network on that browser's connection, woken by the write that brings
+them down (no polling), or at once when the browser is gone. A closing connection
+or a released link also completes it, after the closure was reported; it observes
+the task's stop token. It paces output to a browser that reads slower than written.
+
+`app.resumeAfter(duration)` and `ui.resumeAfter(duration)` return a sender that
+completes on the server context once the duration has elapsed. Awaited in a task,
+it observes the task's stop token: `TaskHandle::requestStop()` or shutdown
+completes it stopped at once, so a waiting coroutine never delays shutdown.
+`app.subscribeUIClosed(handler)` calls the handler on the server thread when a
+browser closes its connection or the connection fails (a failed write included),
+for as long as the returned `UISubscription` lives; shutdown, which stops every
+connection itself, notifies no handler. The connection is then released by a task
+on the server context; a call made meanwhile on another thread keeps the link alive
+until it returns (`findLink` shares it). Afterwards, an untyped `jsFunction` call to that UI is
+dropped, a typed call returns a future that throws `Browser connection closed`,
+a `jsFunctionSender` completes with an error when started, and `addScript` throws
+`ConnectionError`. The 16-bit identifier of a released connection is reused only
+after 65,536 later connections.
+
 `app.spawn(task)` and `ui.spawn(task)` may be called from any thread while the
 application object remains alive, including concurrently with stop/shutdown.
 Coroutine bodies and their resumptions execute on the server context. Synchronize
@@ -120,7 +141,7 @@ context. Neither sender calls nor future calls have a delivery acknowledgement
 for the write queue or an automatic response deadline. An unsuccessful write
 that does not report closure can leave a call pending until disconnection;
 sender waits can also be ended by task cancellation or application shutdown.
-Timeout composition remains future work.
+Timeout composition with `resumeAfter` remains future work.
 
 Cancellation before start sends no frame. Cancellation after dispatch stops
 waiting locally; JavaScript already running continues, and its late response

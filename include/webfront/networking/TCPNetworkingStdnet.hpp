@@ -8,6 +8,7 @@
 #include "BasicNetworking.hpp"
 #include "SenderHeaders.hpp"
 
+#include <chrono>
 #include <string>
 #include <string_view>
 
@@ -33,6 +34,11 @@ public:
     static auto Receive(Socket& socket, MutableBuffer buffer) { return ::stdnet::async_receive(socket, buffer); }
     static auto Send(Socket& socket, const auto& buffers) { return ::stdnet::async_write(socket, buffers); }
     static auto Accept(Acceptor& acceptor) { return ::stdnet::async_accept(acceptor); }
+    /// Completes on the context of a socket or an acceptor once the duration has elapsed, or stops first on a stop request.
+    template <typename Rep, typename Period>
+    static auto ResumeAfter(auto& ioObject, std::chrono::duration<Rep, Period> duration) {
+        return ::stdnet::async_resume_after(Scheduler(ioObject), duration);
+    }
 };
 
 }  // namespace webfront::networking

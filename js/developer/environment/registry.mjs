@@ -1,7 +1,7 @@
 // npm registry access: resolving a version, downloading and checking one package archive.
 import semver from 'semver';
 import {responseBytes} from './io.mjs';
-import {verifyIntegrity} from '../components/tools/wf.mjs';
+import {verifyIntegrity} from './tarball.mjs';
 import {readArchive, checkedManifest} from './archive.mjs';
 import {sameOriginPath} from './manifest.mjs';
 

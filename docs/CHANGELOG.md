@@ -36,8 +36,32 @@
   end with code 1. Nothing is written (`noEmit`). Ctrl+C and the time limit terminate a running compilation after
   the 2 s grace period. The local registry fixture serves typescript 5.9.3 and 6.0.3, typed and `@types` packages.
 
+- The environment's terminal (developer distribution 0.5.0, #308) becomes WebFront's complete terminal: built-in
+  `help`, `clear`, `history` and `exit`, streamed output, Ctrl+C for every command, per-project persistent history,
+  multi-line paste run line by line, multi-row redraw, CJK and emoji widths shared with xterm.js, exit codes and
+  completion of commands, `wf` subcommands, manifest scripts, entries, providers and project paths.
+  `webfront::Commands` (`<webfront/Commands.hpp>`) adds an application's C++ commands to it: coroutines spawned per
+  browser session through the bridge functions `webfront.commands.list`, `.start` and `.cancel`, streaming their
+  output, stopped by Ctrl+C, the browser's disconnection or shutdown; the terminal does not wait for a stopped
+  command; `co_await context.print(text)` waits for a slow browser. New `app.resumeAfter(duration)`/
+  `ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`, `app.connectedBrowsers()`, `UI::id()`,
+  `UI::pendingWrites()`, `UI::writesAtMost(limit)` (woken by the write that drains the queue), `app.findLink(id)` and
+  `json::Reader::array`. `cppFunction` returns false when the name was
+  already registered, and `hasCppFunction(name)` tells whether it is.
+
+### Removed
+
+- **Breaking:** the terminal component and the `wf` tool manager (#313): `webfront::Terminal`, `terminal::Shell`,
+  `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`, `fs::ToolStore`, `fs::PackageFS`, their embedded
+  modules, the embedded xterm.js copy, `third_party/xterm` and `cmake/UpdateXterm.cmake`. The developer environment's
+  terminal and `webfront::Commands` replace them; `docs/UI_COMPONENTS.md` describes the migration. xterm.js is a
+  locked dependency of the environment archive. `fs::tools::safeRelativePath` becomes `fs::safeRelativePath`
+  (`<webfront/system/SafePath.hpp>`).
+
 ### Changed
 
+- **Breaking:** `BasicWF::getLink(id)`, whose reference could outlive a released connection, is replaced by
+  `findLink(id)`, which shares the link with the caller (null once the browser is gone).
 - `DeveloperBootstrapOptions::registry` is now `std::optional<std::string>`: unset, the manifest's registry
   applies; set, it must be HTTPS or a same-origin path and takes precedence over the manifest. The environment
   configuration gains `registryExplicit`; earlier environments keep reading `registry`.
@@ -57,6 +81,12 @@
 
 ### Fixed
 
+- A browser's disconnection is now reported and its connection released: `WebLink` emits its `closed` event once when
+  the browser closes the connection or it fails. The event was never emitted before, so nothing observed
+  disconnections and every closed connection (socket, buffers) stayed until the application was destroyed. `BasicWF`
+  now releases it by a task on the server context; afterwards untyped `jsFunction` calls to that browser are
+  dropped, typed ones fail and `jsFunctionSender` reports an error when started, instead of throwing
+  `std::out_of_range`.
 - Linux CEF builds: the runtime files, resources and locales are copied once per destination directory by a shared
   copy target, instead of by every CEF target's post-build step, which made parallel builds fail intermittently
   ("Error copying directory ... locales"). The destination is the target's output directory

@@ -4,9 +4,6 @@ import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 const root = new URL('../../../', import.meta.url);
 const assets = [
-    ['XtermModuleData', 'xterm/xterm.mjs'],
-    ['XtermCssData', 'xterm/xterm.css'],
-    ['XtermFitAddonData', 'xterm/addon-fit.mjs'],
     ['ReactRuntimeData', 'react/runtime.mjs'],
     ['BabelData', 'babel/babel.min.js'],
     ['JasmineJsData', 'jasmine/jasmine.js'],

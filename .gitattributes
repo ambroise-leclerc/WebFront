@@ -58,19 +58,8 @@ js/core/fallback/index.html                  text eol=lf
 js/core/fallback/webfront-fallback.mjs       text eol=lf
 include/webfront/system/FallbackIndexHtmlData.hpp    text eol=lf
 include/webfront/system/FallbackModuleData.hpp       text eol=lf
-js/developer/components/terminal/*                text eol=lf
-js/developer/components/tools/*                   text eol=lf
-include/webfront/system/ToolManagerModuleData.hpp    text eol=lf
-third_party/xterm/*                         text eol=lf
-include/webfront/system/TerminalIndexHtmlData.hpp    text eol=lf
-include/webfront/system/TerminalModuleData.hpp       text eol=lf
-include/webfront/system/XtermModuleData.hpp          text eol=lf
-include/webfront/system/XtermCssData.hpp             text eol=lf
-include/webfront/system/XtermFitAddonData.hpp        text eol=lf
 
 # The fake npm registry of the browser integration test: its packuments are served byte for byte.
-test/web/registry/*                          text eol=lf
-test/web/registry/tarballs/*                 binary
 
 # Serialisation
 *.json     text

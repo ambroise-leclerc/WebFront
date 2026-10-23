@@ -1,5 +1,5 @@
 // Reading an npm package archive: its files and the checks on its package.json.
-import {gunzip, readTar} from '../components/tools/wf.mjs';
+import {gunzip, readTar} from './tarball.mjs';
 import {safePackagePath} from './paths.mjs';
 
 const text = new TextDecoder();

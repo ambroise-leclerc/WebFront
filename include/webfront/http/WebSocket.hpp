@@ -338,6 +338,8 @@ public:
     /// Called on every failed write, before its diagnostic and even after stop(): frames queued
     /// before stopping still fail, and their producer must be detached rather than fed the error.
     void onWriteError(std::function<void(std::error_code)>&& handler) { writeErrorHandler = std::move(handler); }
+    /// Called, outside the write lock, each time the queue shrinks: a frame was written, or a failure dropped them all.
+    void onWritten(std::function<void()>&& handler) { writtenHandler = std::move(handler); }
     void write(std::string_view text) { writeData(Frame<Net>(text)); }
     void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
     void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
@@ -360,6 +362,7 @@ private:
     std::function<void(std::span<const std::byte>)> binaryHandler;
     std::function<void(CloseEvent)> closeHandler;
     std::function<void(std::error_code)> writeErrorHandler;
+    std::function<void()> writtenHandler;
     mutable std::mutex writeMutex;
     std::deque<std::shared_ptr<Frame<Net>>> writeQueue;  // the first frame is the one being written
     networking::TaskScope&                               taskScope;
@@ -531,9 +534,11 @@ private:
     // Writes the queued frames in order and ends when the queue is empty.
     networking::Task writeFrames(std::shared_ptr<WebSocket>) {
         try {
-            for (auto frame = nextFrame(false); frame; frame = nextFrame(true)) {
+            for (auto frame = nextFrame(false); frame;) {
                 // A stopped WebSocket cancels the write: it fails like a write on a closed connection.
                 co_await networking::ex::stopped_as_error(Net::Send(socket, frame->toBuffers()), std::make_error_code(std::errc::operation_canceled));
+                frame = nextFrame(true);
+                if (writtenHandler) writtenHandler();
             }
         }
         catch (const std::system_error& error) {
@@ -541,7 +546,8 @@ private:
                 std::lock_guard lock(writeMutex);
                 writeQueue.clear();
             }
-            onWriteFailed(error.code());
+            onWriteFailed(error.code());  // reports the closure before the waiters for the queue resume
+            if (writtenHandler) writtenHandler();
         }
     }
 

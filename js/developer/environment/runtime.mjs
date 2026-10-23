@@ -1,8 +1,12 @@
-import {Terminal} from '../../../third_party/xterm/xterm.mjs';
-import {FitAddon} from '../../../third_party/xterm/addon-fit.mjs';
-import {LineEditor, tokenize} from '../components/terminal/terminal.mjs';
+import {Terminal} from '@xterm/xterm';
+import {FitAddon} from '@xterm/addon-fit';
+import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
+import {manifestPath} from './manifest.mjs';
+import {discoverCommands, runCommand, reservedNames} from './commands.mjs';
+export {discoverCommands, reservedNames};
 import {validateLock} from './packages.mjs';
-import {readProject, publish} from './io.mjs';
+import {call, readProject, publish, writeChunks} from './io.mjs';
+import {isUnsafe} from './paths.mjs';
 import {createStarter} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
@@ -198,7 +202,7 @@ async function list(_args, {bridge}) {
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a browser command. No system shell is exposed.';
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, preview, embed, list, help};
 
 export async function execute(args, context) {
@@ -207,7 +211,179 @@ export async function execute(args, context) {
     return commands[command](rest, context);
 }
 
-export async function mount({bridge, config, terminal: element, preview}) {
+// --- Terminal ----------------------------------------------------------------------------------------------------
+
+export const historyPath = '.webfront/developer/history.json';
+// Converts the "\n" line endings of a stream of output pieces to "\r\n", also when a "\r\n" is split between two pieces.
+function terminalText() {
+    let carriage = false;
+    return text => {
+        let converted = '';
+        for (const char of String(text)) {
+            if (char === '\n' && !carriage) converted += '\r';
+            converted += char;
+            carriage = char === '\r';
+        }
+        return converted;
+    };
+}
+
+// The history's lines; none when the project has no history yet. A history that cannot be read or is not a JSON array
+// of lines throws: it is shown as empty, but never replaced.
+async function readHistory(bridge) {
+    let bytes;
+    try { bytes = await readProject(bridge, historyPath); }
+    catch (error) {
+        if (error?.message?.includes('Cannot read project file:')) return [];
+        throw error;
+    }
+    let lines;
+    try { lines = JSON.parse(decoder.decode(bytes)); } catch { lines = null; }
+    if (!Array.isArray(lines)) throw new Error(`${historyPath} is not a JSON array of lines; it is left unchanged`);
+    return lines.filter(line => typeof line === 'string' && !/[\r\n]/.test(line));
+}
+
+// The history is written after each command, one write at a time; a failed write keeps the terminal usable. Each change
+// applies to the file as it is now, and is committed only if the file did not change since it was read: the terminals
+// of other pages on the project, or of other applications, keep their lines.
+let historyWrites = Promise.resolve();
+// Another page writing the history, or having changed it since it was read: the change is tried again, shortly after.
+const historyConflict = /changed since it was read|already being written/;
+async function changeHistory(bridge, change) {
+    for (let attempt = 1; ; ++attempt) {
+        let id = null;
+        try {
+            const token = await call(bridge, 'state', historyPath);
+            const lines = change(await readHistory(bridge)).slice(-historyLimit);
+            id = await call(bridge, 'begin', historyPath, false);
+            await writeChunks(bridge, {id, path: 'output', bytes: encoder.encode(JSON.stringify(lines))});
+            await call(bridge, 'commitGroup', id, historyPath, token);
+            return;
+        } catch (error) {
+            if (id !== null) await call(bridge, 'abort', id).catch(() => {});
+            if (attempt === 20 || !historyConflict.test(error?.message)) throw error;
+            await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 40));
+        }
+    }
+}
+function writeHistory(bridge, change) {
+    historyWrites = historyWrites.then(() => changeHistory(bridge, change)).catch(() => {});
+    return historyWrites;
+}
+const rememberLine = (bridge, line) => writeHistory(bridge, lines => lines.at(-1) === line ? lines : [...lines, line]);
+/** Resolves once the history written so far is in the project. */
+export const historySaved = () => historyWrites;
+
+// Commands of the terminal itself; the application's C++ commands cannot take their names.
+const builtins = {
+    help: (_args, {cppCommands = new Map()}) => {
+        const width = Math.max(7, ...[...cppCommands.keys()].map(name => name.length));
+        const line = (name, text) => `${name.padEnd(width)}  ${text}`;
+        return [line('wf', 'Project commands: wf help lists them'), line('clear', 'Clear the screen and its scrollback'),
+            line('history', 'List the commands typed in this project; history -c clears them'),
+            line('exit', 'End the session [with an exit code]'), line('help', 'List the commands'),
+            ...[...cppCommands].map(([name, text]) => line(name, text)),
+            'Ctrl+C interrupts a command. No system shell is exposed.'].join('\n');
+    },
+    clear: () => clearScreen,
+    history: async (args, {editor, bridge}) => {
+        if (args.length === 1 && args[0] === '-c') {
+            editor.history.length = 0;
+            editor.historyIndex = 0;
+            await writeHistory(bridge, () => []);
+            return '';
+        }
+        if (args.length) throw new Error('Usage: history [-c]');
+        return editor.history.map((line, index) => `${String(index + 1).padStart(5)}  ${line}`).join('\n');
+    },
+    exit: (args, {editor, onExit = () => globalThis.close()}) => {
+        if (args.length > 1 || (args.length && !/^\d{1,3}$/.test(args[0]))) throw new Error('Usage: exit [code]');
+        const code = args.length ? Number(args[0]) : editor?.status ?? 0;
+        editor?.close();
+        onExit(code);
+        // A window that a script did not open stays open: the terminal then waits for a new session.
+        return 'Session ended. Press Enter to start a new session.';
+    },
+};
+
+/** The commands the terminal handles before the application's: wf and the built-ins, which must be reservedNames. */
+export const builtinNames = ['wf', ...Object.keys(builtins)];
+
+/**
+ * Runs a terminal line: a built-in command, a wf command or one of the application's C++ commands (context.cppCommands,
+ * from discoverCommands). Resolves with the output for the terminal, "\r\n"-terminated lines; context.write receives
+ * the output a command streams before that.
+ */
+export async function runLine(line, context) {
+    const [command, ...args] = tokenize(line);
+    if (command === undefined) return '';
+    const toTerminalText = terminalText();  // one per command: its streamed pieces, then its result
+    const write = text => context.write?.(toTerminalText(text));
+    if (command === 'wf') return toTerminalText(await execute(args, {...context, write}));
+    if (Object.hasOwn(builtins, command)) return toTerminalText(await builtins[command](args, context));
+    if (context.cppCommands?.has(command)) return runCommand(context.bridge, command, args, {signal: context.signal, write});
+    throw new Error(`Unknown command: ${command}. Type help to list the commands.`);
+}
+
+// The entries of the project directory a partial path names, as completions of that path.
+async function projectPaths(bridge, word) {
+    if (word.startsWith('/')) return [];  // project paths are relative
+    const directory = word.slice(0, word.lastIndexOf('/') + 1);
+    if (directory && isUnsafe(directory.slice(0, -1))) return [];
+    try {
+        const names = JSON.parse(decoder.decode(await call(bridge, 'list', directory.slice(0, -1))));
+        const hidden = !word.slice(directory.length).startsWith('.');
+        return names.filter(name => !(hidden && name.startsWith('.'))).map(name => directory + name);
+    } catch { return []; }
+}
+
+// The manifest as last read, kept while the project's state token for it does not change.
+let manifestCache = {token: null, manifest: null};
+async function cachedManifest(bridge) {
+    const token = await call(bridge, 'state', manifestPath);
+    if (token !== manifestCache.token) {
+        let manifest = null;
+        try { manifest = JSON.parse(decoder.decode(await readProject(bridge, manifestPath))); }
+        catch { /* no manifest, or one that wf commands report */ }
+        manifestCache = {token, manifest};
+    }
+    return manifestCache.manifest;
+}
+
+// The names that the manifest declares for the first argument of a wf command.
+async function manifestNames(bridge, command) {
+    const section = {run: 'scripts', preview: 'entries', embed: 'providers'}[command];
+    if (!section) return [];
+    try { return Object.keys((await cachedManifest(bridge))?.[section] ?? {}); }
+    catch { return []; }
+}
+
+/**
+ * Completes the word at the end of a line, escaped or quoted: command names first, then wf subcommands, the manifest's
+ * scripts after wf run, its entries and providers after wf preview and wf embed, and project paths. Resolves with
+ * {word, candidates}, the word's value and the full words that can replace it.
+ */
+export async function complete(line, {bridge, cppCommands = new Map()}) {
+    const typed = wordAtEnd(line);
+    const word = typed?.value ?? '';
+    const matching = names => ({word, candidates: [...new Set(names)].filter(name => name.startsWith(word)).sort()});
+    if (!typed) return matching([]);
+    let before;
+    try { before = tokenize(line.slice(0, typed.start)); }
+    catch { return matching([]); }
+    if (!before.length) return matching(['wf', ...Object.keys(builtins), ...cppCommands.keys()]);
+    if (before[0] === 'wf' && before.length === 1) return matching(Object.keys(commands));
+    if (before[0] === 'wf' && before.length === 2 && before[1] === 'run') return matching(await manifestNames(bridge, 'run'));
+    if (before[0] === 'wf' && before.length === 2) return matching((await Promise.all([manifestNames(bridge, before[1]), projectPaths(bridge, word)])).flat());
+    return matching(await projectPaths(bridge, word));
+}
+
+/**
+ * Mounts the terminal in `element`. Each page has its own session: its history comes from the project, its C++
+ * commands run in this browser's session. `onExit(code)` ends the session after exit (by default, closes the window).
+ * `fitToElement: false` keeps the terminal's size as set by terminal.resize() instead of following the element's.
+ */
+export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true}) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = new URL('./xterm.css', import.meta.url).href;
@@ -216,21 +392,35 @@ export async function mount({bridge, config, terminal: element, preview}) {
         link.onerror = () => reject(new Error('Cannot load terminal styles'));
         document.head.append(link);
     });
-    const terminal = new Terminal({cursorBlink: true, theme: {background: '#141821'}});
+    const terminal = new Terminal({cursorBlink: true, allowProposedApi: true, theme: {background: '#141821'}});
+    terminal.unicode.register(unicodeProvider);
+    terminal.unicode.activeVersion = unicodeProvider.version;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(element);
     fit.fit();
-    new ResizeObserver(() => fit.fit()).observe(element);
     const write = text => terminal.write(text);
-    const editor = new LineEditor({write, prompt: 'wf> ', complete: async () => 'wf', run: async (line, signal) => {
-        const args = tokenize(line);
-        if (args.shift() !== 'wf') throw new Error('Use wf help to list commands');
-        return execute(args, {bridge, config, preview, signal, write});
-    }});
+    write('WebFront browser-powered developer environment. Type help.\r\n');
+    // Keys typed while the commands and the history load are applied once the editor is ready.
+    const early = [];
+    const earlyInput = terminal.onData(data => early.push(data));
+    const [cppCommands, history] = await Promise.all([
+        discoverCommands(bridge).catch(error => {
+            write(`\x1b[31mThe application's commands are unavailable: ${error?.message ?? error}\x1b[0m\r\n`);
+            return new Map();
+        }),
+        readHistory(bridge).catch(() => [])]);
+    earlyInput.dispose();
+    const context = {bridge, config, preview, cppCommands, onExit};
+    const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history,
+        remember: line => rememberLine(bridge, line),
+        run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
+        complete: line => complete(line, context)});
+    terminal.onResize(() => editor.resized());
+    if (fitToElement) new ResizeObserver(() => fit.fit()).observe(element);
     terminal.onData(data => editor.handle(data));
-    write('WebFront browser-powered developer environment\r\n');
     editor.showPrompt();
+    for (const data of early) editor.handle(data);
     terminal.focus();
     return {terminal, editor};
 }

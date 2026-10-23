@@ -18,16 +18,13 @@ const options = {
     absWorkingDir: root, bundle: true, format: 'esm', platform: 'browser', target: 'es2020',
     minify: true, legalComments: 'inline',
     nodePaths: [resolve(root, 'js/developer/vendor/node_modules')],
-    plugins: [{name: 'terminal-assets', setup(build) {
-        build.onResolve({filter: /^\.\/(xterm|addon-fit)\.mjs$/}, args => ({path: resolve(root, 'third_party/xterm', args.path)}));
-    }}],
 };
 await build({...options, entryPoints: ['js/developer/environment/runtime.mjs'], outfile: resolve(output, 'runtime.mjs')});
 await build({...options, entryPoints: ['js/developer/environment/compiler.mjs'], outfile: resolve(output, 'compiler.mjs')});
 await build({...options, entryPoints: ['js/developer/environment/script-worker.mjs'], outfile: resolve(output, 'script-worker.mjs')});
 await build({...options, entryPoints: ['js/developer/environment/typecheck-worker.mjs'], outfile: resolve(output, 'typecheck-worker.mjs')});
 await copyFile(resolve(root, 'js/developer/vendor/node_modules/esbuild-wasm/esbuild.wasm'), resolve(output, 'esbuild.wasm'));
-await copyFile(resolve(root, 'third_party/xterm/xterm.css'), resolve(output, 'xterm.css'));
+await copyFile(resolve(root, 'js/developer/vendor/node_modules/@xterm/xterm/css/xterm.css'), resolve(output, 'xterm.css'));
 const distribution = JSON.parse(await readFile(resolve(root, 'js/developer/tools/distribution.json')));
 const version = distribution.version;
 const publicBase = baseUrl(distribution.baseUrl);
@@ -36,8 +33,8 @@ const dependencies = JSON.parse(await readFile(resolve(root, 'js/developer/vendo
 const licenses = [
     ['esbuild-wasm', 'js/developer/vendor/node_modules/esbuild-wasm/LICENSE.md'],
     ['semver', 'js/developer/vendor/node_modules/semver/LICENSE'],
-    ['xterm', 'third_party/xterm/LICENSE'],
-    ['xterm Fit addon', 'third_party/xterm/addon-fit-LICENSE'],
+    ['xterm', 'js/developer/vendor/node_modules/@xterm/xterm/LICENSE'],
+    ['xterm Fit addon', 'js/developer/vendor/node_modules/@xterm/addon-fit/LICENSE'],
     ['fflate', 'third_party/fflate/LICENSE'],
 ];
 const notices = [];
@@ -81,7 +78,7 @@ if (refresh) {
     await copyFile(resolve(root, 'js/developer/vendor/node_modules/semver/LICENSE'), resolve(root, 'js/developer/environment/PACKAGES-LICENSE.txt'));
     await writeFile(resolve(root, 'include/webfront/system/DeveloperReleaseData.hpp'), header);
     const inputs = {};
-    for (const path of ['js/developer/environment/manifest.mjs', 'js/developer/environment/project.mjs', 'js/developer/environment/installer.mjs', 'js/developer/environment/restore.mjs', 'js/developer/environment/cache.mjs', 'js/developer/environment/scripts.mjs', 'js/developer/environment/script-worker.mjs', 'js/developer/environment/permissions.mjs', 'js/developer/environment/typecheck.mjs', 'js/developer/environment/typecheck-snapshot.mjs', 'js/developer/environment/typecheck-worker.mjs', 'js/developer/environment/packages-entry.mjs', 'js/developer/environment/bootstrap.mjs', 'js/developer/environment/bootstrap-entry.mjs', 'js/developer/environment/packages.mjs', 'js/developer/environment/starter.mjs', 'js/developer/environment/paths.mjs', 'js/developer/environment/runtime.mjs', 'js/developer/environment/compiler.mjs', 'js/developer/environment/bundler.mjs', 'js/developer/environment/entry.mjs', 'js/developer/environment/conditions.mjs', 'js/developer/environment/io.mjs', 'js/developer/environment/recipe.mjs', 'js/developer/environment/registry.mjs', 'js/developer/environment/archive.mjs', 'js/developer/environment/lock.mjs', 'js/developer/environment/pins.mjs', 'js/developer/environment/peers.mjs', 'js/developer/environment/resolve.mjs', 'js/developer/environment/embed.mjs', 'js/developer/tools/starters/pi/main.tsx', 'js/developer/tools/starters/pi/style.css', 'examples/life/ui/main.tsx', 'examples/life/ui/style.css', 'js/developer/components/tools/wf.mjs', 'js/developer/tools/distribution.json', 'js/developer/tools/build.mjs', 'js/developer/tools/site.mjs', 'js/developer/tools/archive.mjs', 'js/developer/vendor/package-lock.json', 'js/core/bootstrap/bootstrap.bundle.mjs', 'js/developer/environment/packages.bundle.mjs', 'include/webfront/system/DeveloperReleaseData.hpp'])
+    for (const path of ['js/developer/environment/manifest.mjs', 'js/developer/environment/project.mjs', 'js/developer/environment/installer.mjs', 'js/developer/environment/restore.mjs', 'js/developer/environment/cache.mjs', 'js/developer/environment/scripts.mjs', 'js/developer/environment/script-worker.mjs', 'js/developer/environment/permissions.mjs', 'js/developer/environment/typecheck.mjs', 'js/developer/environment/typecheck-snapshot.mjs', 'js/developer/environment/typecheck-worker.mjs', 'js/developer/environment/packages-entry.mjs', 'js/developer/environment/bootstrap.mjs', 'js/developer/environment/bootstrap-entry.mjs', 'js/developer/environment/packages.mjs', 'js/developer/environment/starter.mjs', 'js/developer/environment/paths.mjs', 'js/developer/environment/runtime.mjs', 'js/developer/environment/terminal.mjs', 'js/developer/environment/tarball.mjs', 'js/developer/environment/commands.mjs', 'js/developer/environment/compiler.mjs', 'js/developer/environment/bundler.mjs', 'js/developer/environment/entry.mjs', 'js/developer/environment/conditions.mjs', 'js/developer/environment/io.mjs', 'js/developer/environment/recipe.mjs', 'js/developer/environment/registry.mjs', 'js/developer/environment/archive.mjs', 'js/developer/environment/lock.mjs', 'js/developer/environment/pins.mjs', 'js/developer/environment/peers.mjs', 'js/developer/environment/resolve.mjs', 'js/developer/environment/embed.mjs', 'js/developer/tools/starters/pi/main.tsx', 'js/developer/tools/starters/pi/style.css', 'examples/life/ui/main.tsx', 'examples/life/ui/style.css', 'js/developer/tools/distribution.json', 'js/developer/tools/build.mjs', 'js/developer/tools/site.mjs', 'js/developer/tools/archive.mjs', 'js/developer/vendor/package-lock.json', 'js/core/bootstrap/bootstrap.bundle.mjs', 'js/developer/environment/packages.bundle.mjs', 'include/webfront/system/DeveloperReleaseData.hpp'])
         inputs[path] = createHash('sha256').update(await readFile(resolve(root, path))).digest('hex');
     await writeFile(resolve(root, 'js/developer/environment/bundles.json'), JSON.stringify(inputs, null, 2) + '\n');
     for (const [source, name] of [['js/core/bootstrap/index.html', 'DeveloperIndexHtmlData'], ['js/core/bootstrap/bootstrap.bundle.mjs', 'DeveloperBootstrapData']])

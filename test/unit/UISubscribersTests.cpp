@@ -15,7 +15,7 @@ struct FakeUI {
     int id;
 };
 
-using Subscribers = detail::UIStartedSubscribers<FakeUI>;
+using Subscribers = detail::UISubscribers<FakeUI>;
 
 }  // namespace
 

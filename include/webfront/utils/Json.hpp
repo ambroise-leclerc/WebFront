@@ -127,6 +127,17 @@ public:
         expect('}');
     }
 
+    /// Reads an array, calling onElement() for each element; onElement must consume the value.
+    void array(auto&& onElement) {
+        expect('[');
+        if (consumeIf(']'))
+            return;
+        do
+            onElement();
+        while (consumeIf(','));
+        expect(']');
+    }
+
     std::string string() {
         expect('"');
         std::string value;
@@ -195,13 +206,9 @@ private:
     }
 
     void skipArray() {
-        expect('[');
-        if (consumeIf(']'))
-            return;
-        do
+        array([this] {
             skipValue();
-        while (consumeIf(','));
-        expect(']');
+        });
     }
 
     void skipToken() {

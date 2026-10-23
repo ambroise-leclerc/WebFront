@@ -237,10 +237,12 @@ class JsFunctionSender {
     std::weak_ptr<websocket::WebSocket<Net, Policy>> socket;
 
 public:
+    /// The connection of a browser that is gone leaves the references empty: started calls report an error.
     JsFunctionSender(std::string_view functionName, WebFront& wf, WebLinkId id) : name(functionName) {
-        auto& link = wf.getLink(id);
-        pending    = link.pendingResults();
-        socket     = link.socket();
+        if (const auto link = wf.findLink(id)) {
+            pending = link->pendingResults();
+            socket  = link->socket();
+        }
     }
 
     auto operator()(auto&&... arguments) const {

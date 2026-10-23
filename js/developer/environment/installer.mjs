@@ -1,7 +1,7 @@
 // wf init and wf install: the manifest states the intent, the lock the exact resolution; both are published together.
 import semver from 'semver';
 import {resolvePackages, downloadPackage} from './packages.mjs';
-import {parseSpec} from '../components/tools/wf.mjs';
+import {parseSpec} from './tarball.mjs';
 import {publish} from './io.mjs';
 import {manifestPath, newManifest, manifestName, serializeManifest, validateManifest, dependenciesDigest} from './manifest.mjs';
 import {loadProject, publishTogether, lockPath, noManifest, desynchronized, textBytes} from './project.mjs';

@@ -1,4 +1,4 @@
-import {gunzip, readTar, verifyIntegrity} from '../components/tools/wf.mjs';
+import {gunzip, readTar, verifyIntegrity} from './tarball.mjs';
 import {readProject, publish, responseBytes} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
 

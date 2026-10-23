@@ -209,6 +209,22 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
             REQUIRE(callId == 0);
             REQUIRE(futureError(result) == "Browser connection closed");
         }
+        THEN("the link reports the disconnection once") {
+            REQUIRE(events == vector{WebLinkEvent::Code::closed});
+        }
+    }
+}
+
+SCENARIO("WebLink reports a browser's close frame as its disconnection") {
+    InjectableSocket::reset();
+    vector<WebLinkEvent::Code>    events;
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 10, [&](WebLinkEvent event) { events.push_back(event.code); }, scope};
+    WHEN("the browser sends a close frame") {
+        InjectableSocket::receive(std::array{byte{0x88}, byte{0x80}, byte{1}, byte{2}, byte{3}, byte{4}});
+        THEN("the link reports one disconnection, and none when it is destroyed") {
+            REQUIRE(events == vector{WebLinkEvent::Code::closed});
+        }
     }
 }
 
@@ -329,4 +345,88 @@ SCENARIO("A browser that stops reading bounds the diagnostic frames queued for i
     REQUIRE(InjectableSocket::completeDeferredWrites() == 1);
     CHECK(link.pendingWrites() == 0);
     log::setLogLevel(log::Disabled);
+}
+
+namespace {
+template <typename Writes>
+networking::Task waitWrites(Writes writes, bool& woken) {
+    co_await std::move(writes);
+    woken = true;
+}
+
+// Records the events the link had reported when the writer resumed.
+template <typename Writes>
+networking::Task waitWritesSeeing(Writes writes, const vector<WebLinkEvent::Code>& events, vector<WebLinkEvent::Code>& seen) {
+    co_await std::move(writes);
+    seen = events;
+}
+}  // namespace
+
+SCENARIO("A link wakes a writer once its write queue drains") {
+    InjectableSocket::reset();
+    InlineTaskScope scope;
+    auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{12}, [](WebLinkEvent) { }, scope);
+    InjectableSocket::deferWrites();
+    for (msg::CallId call = 1; call <= 3; ++call)
+        link->sendError(call, "queued");
+    REQUIRE(link->pendingWrites() == 3);
+    using Writes = webfront::detail::WritesAtMost<WebLink<InjectableNetworking>>;
+    bool woken = false;
+    GIVEN("a task waiting for at most one queued frame") {
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{link, 1}, woken));
+        THEN("it wakes when the second write ends, not before") {
+            CHECK_FALSE(woken);
+            InjectableSocket::completeDeferredWrites();
+            CHECK_FALSE(woken);
+            InjectableSocket::completeDeferredWrites();
+            CHECK(woken);
+        }
+    }
+    GIVEN("a waiting task that is stopped") {
+        networking::ex::inplace_stop_source stop;
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, stop.get_token(), waitWrites(Writes{link, 0}, woken));
+        stop.request_stop();
+        THEN("it unwinds, and the drained queue does not call it") {
+            while (InjectableSocket::completeDeferredWrites() > 0) { }
+            CHECK_FALSE(woken);
+            CHECK(link->pendingWrites() == 0);
+        }
+    }
+    GIVEN("a link destroyed while a task waits") {
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{link, 0}, woken));
+        link.reset();
+        THEN("the task resumes: nothing is left to wait for") {
+            CHECK(woken);
+        }
+    }
+    GIVEN("a link that is gone") {
+        std::weak_ptr<WebLink<InjectableNetworking>> gone;
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{gone, 0}, woken));
+        THEN("the task does not wait") {
+            CHECK(woken);
+        }
+    }
+    InjectableSocket::deferWrites(false);
+    while (InjectableSocket::completeDeferredWrites() > 0) { }
+}
+
+SCENARIO("A writer resumes after a failed write reported the closure") {
+    InjectableSocket::reset();
+    InlineTaskScope            scope;
+    vector<WebLinkEvent::Code> events;
+    auto link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{13}, [&events](WebLinkEvent event) { events.push_back(event.code); }, scope);
+    InjectableSocket::deferWrites();
+    for (msg::CallId call = 1; call <= 3; ++call)
+        link->sendError(call, "queued");
+    vector<WebLinkEvent::Code> seen{WebLinkEvent::Code::linked};  // replaced when the writer resumes
+    networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWritesSeeing(webfront::detail::WritesAtMost<WebLink<InjectableNetworking>>{link, 0}, events, seen));
+    WHEN("the write fails") {
+        InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+        InjectableSocket::deferWrites(false);
+        InjectableSocket::completeDeferredWrites();
+        THEN("the writer resumes once the closure was reported") {
+            CHECK(seen == vector{WebLinkEvent::Code::closed});
+        }
+    }
+    InjectableSocket::reset();
 }
