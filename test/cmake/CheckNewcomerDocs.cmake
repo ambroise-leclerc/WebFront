@@ -30,7 +30,7 @@ _read(developer_release include/webfront/system/DeveloperReleaseData.hpp)
 # The local-review instructions must not silently use an unpublished default archive.
 foreach(text readme wkwebview_guide)
     _require("${${text}}" "/webfront/developer/preview/provision/environment.tgz \"$integrity\"" "${text} local bootstrap arguments")
-    _require("${${text}}" "require('./build-developer-environment/provision.json').integrity" "${text} trusted local integrity")
+    _require("${${text}}" "sed -n 's/^  \"integrity\": \"\\(.*\\)\",$/\\1/p' build-developer-environment/provision.json" "${text} trusted local integrity")
 endforeach()
 string(REGEX MATCH "https://[^\"]+/environment\\.tgz" developer_url "${developer_release}")
 if(NOT developer_url)

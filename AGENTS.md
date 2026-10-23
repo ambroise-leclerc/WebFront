@@ -18,7 +18,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `include/webfront/system/`: layered virtual filesystems and the embedded web resources, a closed list guarded by the `MinimalCoreAssets` CTest case (normative list and 150 KiB decoded budget in ADR-016; changing it means amending the ADR and `test/cmake/CheckMinimalCoreAssets.cmake` together).
 - `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
-- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and vendoring tools. The repository is itself a `wf` project (`webfront.project.json` and its lock at the root): the environment builds itself, and `docs/NODE_TOOLS_MIGRATION.md` lists the remaining Node.js tools and their destination. Production C++ remains header-only in `include/webfront/`.
+- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and vendoring tools. The repository is itself a `wf` project (`webfront.project.json` and its lock at the root): the environment builds itself, and its pure JavaScript specs (`test/developer/`) run with `wf test`. `docs/NODE_TOOLS_MIGRATION.md` records where each former Node.js tool went. Production C++ remains header-only in `include/webfront/`.
 - `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
 - `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
@@ -51,18 +51,17 @@ ctest --test-dir build --output-on-failure --parallel 4
 # Run one Catch2 scenario directly
 ./build/test/unit/tests "Scenario: JsFunction"
 
-# Linux real-browser integration test (the Jasmine suite needs the offline registry of the fixtures)
-node js/developer/tools/build.mjs build-developer-environment
-node js/developer/tools/fixtures.mjs build-developer-environment
+# Linux real-browser integration test: configure downloads and verifies the pinned bootstrap environment and the packages
+# of the local npm registry; the tests build the rest with wf
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=$PWD/build-developer-environment
+  -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
 cmake --build build-cef --target webtest webfront-wf --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
 
 ```
 
-Build the developer environment with wf (no Node.js; the driver comes from any build with `ENABLE_TESTING=ON`, here with
-`-DWEBFRONT_REQUIRE_NODE=OFF`), as `js/developer/tools/PUBLISHING.md` describes:
+Build the developer environment with wf (the driver comes from any build with `ENABLE_TESTING=ON`), as
+`js/developer/tools/PUBLISHING.md` describes:
 
 ```bash
 wf() { build/test/web/webfront-wf --project "$PWD" -- "$@"; }
@@ -71,16 +70,17 @@ wf restore && wf run build build-distribution
 
 Important CMake options:
 
-Tests and the `webfront-embedded-assets` regeneration target require Node.js for all
-assets, including uncompressed ones. Normal C++ builds consume versioned headers
-and do not require Node.js.
+The headers of the embedded assets are generated, and checked by CTest, in pure CMake (`js/core/EmbedAsset.cmake`; the
+`webfront-embedded-assets` target regenerates them). Normal C++ builds consume the versioned headers. Configuring with
+`ENABLE_TESTING=ON` downloads the pinned bootstrap environment and the packages of the test registry, each verified
+against its SHA-512; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine
+without network access.
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
 - `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage.
 
 - `ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly.
-- `WEBFRONT_REQUIRE_NODE=ON` (default): `ENABLE_TESTING=ON` requires Node.js for the maintenance tests that still use it (until #318). `OFF` configures without it and does not register those tests; only the job that proves a build without Node.js sets it.
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
 - `ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
 
@@ -108,7 +108,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 - Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
-- Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. Without `WEBFRONT_DEVELOPER_FIXTURES` the Jasmine case is not registered.
+- Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. The registry the suite installs from is built by `wf run test-registry` (the `TestRegistry` case), from the packages that configure downloaded.
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
 

@@ -8,7 +8,7 @@
 [![Header-only](https://img.shields.io/badge/library-header--only-2EA043)](include/)
 
 **WebFront is a header-only C++23 library for building rich, modern user interfaces.**
-Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings the UI tools into your application: no Node.js, npm or separate JavaScript development environment to install.
+Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings the UI tools into your application: there is no separate JavaScript development environment to install.
 
 ## From C++ to a reactive UI
 
@@ -104,14 +104,14 @@ Enable **one** engine for your platform:
 | macOS 13.3+ | `-DWEBFRONT_EMBED_WKWEBVIEW=ON` | System Cocoa / WebKit |
 | Linux | `-DWEBFRONT_EMBED_WEBKITGTK=ON` | WebKitGTK 6.0; [installation](docs/WEBKITGTK.md) |
 
-For local review of this unpublished branch, first [build the local archive](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). That preparation requires Node/npm for the maintainer only. Then, on macOS, from the repository root:
+For local review of this unpublished branch, first [build the local archive](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). That preparation is a maintainer task done with `wf` itself. Then, on macOS, from the repository root:
 
 ```bash
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-native --target WebFrontLifeDeveloper --parallel 2
 mkdir -p life-project/.webfront/developer/preview/provision
 cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
   /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
@@ -138,7 +138,7 @@ wf install react@19.3.1 react-dom@19.3.1
 wf preview ui/main.tsx
 ```
 
-`wf create life` writes the editable [TSX and CSS starter](examples/life/ui), without overwriting an existing project. `wf install` fetches the browser packages and their dependencies, verifies their integrity and records exact versions in `webfront-packages.lock.json`. It does not run npm installation scripts. `wf preview` compiles TSX with WebAssembly and opens the interface inside the application.
+`wf create life` writes the editable [TSX and CSS starter](examples/life/ui), without overwriting an existing project. `wf install` fetches the browser packages and their dependencies, verifies their integrity and records exact versions in `webfront-packages.lock.json`. It does not run the installation scripts of packages. `wf preview` compiles TSX with WebAssembly and opens the interface inside the application.
 
 Edit `life-project/ui/main.tsx` and `style.css` with your usual editor, then run `wf preview` again. React renders the field and controls; each generation awaits the C++ callback:
 
@@ -208,7 +208,7 @@ cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure --parallel 4
 ```
 
-Tests and the `webfront-embedded-assets` regeneration target require Node.js, including assets without gzip. Normal C++ builds use versioned headers and do not require Node.js. Browser tests require an enabled engine; Linux CEF tests use Xvfb. See [AGENTS.md](AGENTS.md) for contributor commands and [developer environment testing](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
+Configuring with tests enabled downloads, and verifies against their SHA-512, the pinned bootstrap environment and the packages of the test registry; the embedded assets are generated and checked by CMake alone (the `webfront-embedded-assets` target regenerates them). Normal C++ builds use versioned headers. Browser tests require an enabled engine; Linux CEF tests use Xvfb. See [AGENTS.md](AGENTS.md) for contributor commands and [developer environment testing](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
 CTest runs up to four tasks at a time; browser ports remain locked and embedded builds run serially.
 See [test timings and parallelism](docs/TEST_PERFORMANCE.md) for measurements and constraints.
@@ -220,7 +220,7 @@ CI runs one combined C++ / native-browser job per desktop platform on each code 
 - WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there; avoid blocking it. Native windows must be created and shown on the main thread. Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
 - JavaScript calls to C++ always return Promises. C++ `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns `std::future<R>`. Missing functions, exceptions, malformed replies and disconnects fail the typed call.
 - The binary bridge supports scalars, strings, tuples, numeric typed arrays and packed bitsets. Arbitrary objects do not cross it. Strings have a 16-bit encoded length limit.
-- Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority. Package scripts, native Node add-ons and Node APIs are unsupported. Previews transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
+- Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority. Package installation scripts, native add-ons and the APIs of server-side JavaScript runtimes are unsupported. Previews transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - Packaging, accessibility and native-engine deployment still need application-specific work. General DOM abstractions remain future work. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
 [Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [UI components](docs/UI_COMPONENTS.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)

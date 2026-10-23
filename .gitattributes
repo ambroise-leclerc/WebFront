@@ -167,7 +167,6 @@ include/webfront/system/*Data.hpp                   text eol=lf
 
 # Browser-powered developer bootstrap sources and generated payloads.
 js/developer/environment/*                          text eol=lf
-js/developer/vendor/package-lock.json              text eol=lf
 
 # Starter archives and every hashed distribution input must be identical on Windows.
 js/developer/tools/starters/pi/*               text eol=lf

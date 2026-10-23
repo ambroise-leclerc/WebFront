@@ -56,11 +56,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: js/developer/vendor/package-lock.json
+      # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
+      - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
         with:
           version: '4.4.4'
@@ -74,7 +71,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
       # Ubuntu 26.04 ships GCC 16 in its main archive (no flaky toolchain PPA). The image already
-      # provides CMake, Ninja, Node.js, pkg-config and Xvfb, so install only the missing pieces.
+      # provides CMake, Ninja, pkg-config and Xvfb, so install only the missing pieces.
       - name: Install GCC 16, WebKitGTK and coverage tools
         if: runner.os == 'Linux'
         run: |
@@ -93,11 +90,6 @@ jobs:
         run: |
           command -v sccache
           sccache --version
-      - name: Prepare offline developer fixtures
-        run: |
-          npm ci --prefix js/developer/vendor --ignore-scripts
-          node js/developer/tools/build.mjs build-developer-environment
-          node js/developer/tools/fixtures.mjs build-developer-environment
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       - name: Configure
         run: >-
@@ -106,7 +98,6 @@ jobs:
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
-          -DWEBFRONT_DEVELOPER_FIXTURES=${{ github.workspace }}/build-developer-environment
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel 2
       - name: Ensure WebView2 Evergreen runtime
@@ -182,9 +173,7 @@ jobs:
           path: .cache/CPM
           key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-extended-${{ runner.os }}-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
+      - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
         with:
           version: '4.4.4'
@@ -253,9 +242,7 @@ jobs:
           path: .cache/CPM
           key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-extended-${{ runner.os }}-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
+      - uses: ./.github/actions/remove-node
 
       - uses: ./.github/actions/setup-cmake
         with:
@@ -271,13 +258,9 @@ jobs:
           echo "CC=clang-23" >> "$GITHUB_ENV"
           echo "CXX=clang++-23" >> "$GITHUB_ENV"
 
-      - name: Prepare offline developer environment and starter fixtures
-        run: |
-          npm ci --prefix js/developer/vendor --ignore-scripts
-          node js/developer/tools/build.mjs build-developer-environment
-          node js/developer/tools/fixtures.mjs build-developer-environment
+      # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON
 
       - name: Build browser test
         run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2

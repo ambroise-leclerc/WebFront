@@ -2,6 +2,7 @@
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
 #   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
 #   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
+# PROVISION is the provision.json of ENVIRONMENT, from which an INTEGRITY left empty is read when the test runs.
 # PROFILE is a directory for the browser's own persistent state (WebKitGTK profile), emptied first: a browser reuses the
 # modules it loaded by URL, and the first page that loads another environment through the same profile fails with
 # "Importing a module script failed". Every case then starts from nothing.
@@ -27,6 +28,11 @@ if(FORGE)
     endif()
     set(ENVIRONMENT "${WORK}/forged.tgz")
     webfront_file_sri("${ENVIRONMENT}" INTEGRITY)
+endif()
+
+if(PROVISION AND ENVIRONMENT AND NOT INTEGRITY AND NOT FORGE)
+    file(READ "${PROVISION}" provision)
+    string(JSON INTEGRITY GET "${provision}" integrity)
 endif()
 
 if(FRESH_PROJECT)

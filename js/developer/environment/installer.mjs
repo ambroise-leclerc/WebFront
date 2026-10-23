@@ -114,7 +114,7 @@ export async function install(bridge, args, {registry, registryExplicit, signal,
     if (specs.length && project.status === 'desynchronized') throw new Error(desynchronized);
     if (!specs.length && !update && project.status === 'desynchronized') throw new Error(desynchronized);
     progress(describeRegistry(effective));
-    // npm ci: exactly the locked graph, every archive checked against the recorded integrity.
+    // Exactly the locked graph, every archive checked against the recorded integrity.
     const locked = project.status === 'consistent' || project.status === 'legacy';
     if (!specs.length && !update && locked) {
         const {restored} = await restorePackages(bridge, project.lock, options);

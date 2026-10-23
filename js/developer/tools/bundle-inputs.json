@@ -42,7 +42,6 @@
   "js/developer/tools/distribution.json",
   "js/developer/tools/archive.mjs",
   "js/developer/tools/distribution.mjs",
-  "js/developer/tools/asset-header.mjs",
   "js/developer/scripts/build.mjs",
   "webfront.project.json",
   "js/core/bootstrap/bootstrap.bundle.mjs",

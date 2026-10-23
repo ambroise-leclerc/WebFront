@@ -8,7 +8,7 @@ The package names in their manifests are identifiers, not a requirement to own o
 The environment builds itself: the pinned bootstrap environment (`cmake/WebFrontBootstrap.cmake`) runs the scripts of
 `js/developer/scripts/` on the sources of this repository, which is a `wf` project (`webfront.project.json` and its
 lock). Building, reviewing and publishing need a C++23 compiler, CMake, the engine of the driver's frontend and `gh`
-and `jq` for the host operations; they need no Node.js, npm or npx.
+and `jq` for the host operations.
 
 ## Build and review
 
@@ -16,7 +16,7 @@ The driver `webfront-wf` runs one `wf` command without interaction on a project 
 works; WebKitGTK on Linux is the one CI uses.
 
 ```sh
-cmake -S . -B build-driver -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON -DWEBFRONT_REQUIRE_NODE=OFF \
+cmake -S . -B build-driver -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
   -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
 cmake --build build-driver --target webfront-wf
 wf() { xvfb-run -a build-driver/test/web/webfront-wf --project "$PWD" -- "$@"; }
@@ -29,9 +29,9 @@ cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
 
 `wf run build <directory> --refresh-bootstrap` also rebuilds the checked-in bootstrap bundles
 (`js/core/bootstrap/bootstrap.bundle.mjs`, `js/developer/environment/packages.bundle.mjs`), their checksums
-(`js/developer/environment/bundles.json`, over the inputs of `js/developer/tools/bundle-inputs.json`) and the embedded
-headers `DeveloperIndexHtmlData.hpp` and `DeveloperBootstrapData.hpp`. `wf run embed-core` regenerates the headers of the core's embedded assets from their readable sources (the same bytes as
-the CMake target `webfront-embedded-assets`). A script may only write where `permissions.publish`
+(`js/developer/environment/bundles.json`, over the inputs of `js/developer/tools/bundle-inputs.json`) and the pinned
+header. The core headers that embed the bootstrap bundle (`DeveloperIndexHtmlData.hpp`, `DeveloperBootstrapData.hpp`) are
+rendered from their sources by CMake, like the others: `cmake --build <dir> --target webfront-embedded-assets`. A script may only write where `permissions.publish`
 of `webfront.project.json` allows: the `build-*` directories and these checked-in outputs.
 
 The output of a script reaches the terminal of an environment 0.6.1 or later; with 0.6.0 the command prints
@@ -90,12 +90,11 @@ Initial Pages enablement is deliberately a maintainer operation, not a side effe
 ## Automated publication
 
 The **Developer packages** workflow builds packages on relevant pushes/PRs and retains them as an
-artifact. Its `wf-package` job removes Node.js, npm and npx from the runner, builds the driver, restores the locked
+artifact. Its `wf-package` job removes every JavaScript runtime from the runner, builds the driver, restores the locked
 dependencies, builds the distribution twice and compares the repeat build and the checked-in bootstrap header before
-permitting publication. During the transition from Node.js (#318), the `package` job also builds it with the Node.js tools
-and `wf-package` requires the same bytes.
+permitting publication; it also runs the specs of the environment with `wf test`.
 It publishes only on a `developer-v<version>` tag or an explicit workflow dispatch with `publish=true`. The `publish` job
-runs the same way, without Node.js: `wf run site` stages the new version into a checkout of `gh-pages` and refuses to
+runs the same way: `wf run site` stages the new version into a checkout of `gh-pages` and refuses to
 change a published one, `pages.sh` checks the configured source and requests the build, and `archive-release.sh`
 archives the files in a prerelease.
 Use the dedicated tag `developer-v<version>` matching `distribution.json`; the C++ library's `v*` releases remain separate.
@@ -115,12 +114,12 @@ Pages, whose cross-origin behavior is checked independently of Release asset red
 
 Check the canonical Pages URL, its `Access-Control-Allow-Origin` response and the archive checksum.
 Then run the optional live smoke test (the ordinary CTest suite remains entirely offline). Its fixtures (the local
-registry and the test pages) are still provisioned with Node.js until #318 and #319 replace them:
+registry and the test pages) are the ones that the CTest case `DeveloperFixtures` assembles in the build directory:
 
 ```sh
-node js/developer/tools/fixtures.mjs build-distribution
+ctest --test-dir build-native -R '^DeveloperFixtures$' --output-on-failure
 ./build-native/test/web/developer_integration \
-  "$PWD/build-distribution" "$PWD/build-native/test/web/public-generated" --public
+  "$PWD/build-native/test/web/developer-fixtures" "$PWD/build-native/test/web/public-generated" --public
 ```
 
 This mode downloads the pinned environment and both starters from Pages, fetches exact React/React DOM

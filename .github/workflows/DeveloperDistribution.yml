@@ -10,7 +10,7 @@ on:
       - 'js/developer/scripts/**'
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
-      - 'js/developer/vendor/package*.json'
+      - 'test/developer/**'
       - 'webfront.project.json'
       - 'webfront-packages.lock.json'
       - 'cmake/WebFrontBootstrap.cmake'
@@ -27,7 +27,7 @@ on:
       - 'js/developer/scripts/**'
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
-      - 'js/developer/vendor/package*.json'
+      - 'test/developer/**'
       - 'webfront.project.json'
       - 'webfront-packages.lock.json'
       - 'cmake/WebFrontBootstrap.cmake'
@@ -54,58 +54,9 @@ env:
   PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
 
 jobs:
-  # The Node.js build and its tests are kept during the transition (#315 to #318): the wf-package job below compares its
-  # bytes with these, then publishes its own. #318 removes this job with the Node.js tools.
-  package:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: js/developer/vendor/package-lock.json
-      - name: Install pinned maintenance dependencies
-        run: npm ci --prefix js/developer/vendor --ignore-scripts
-      - name: Build and verify the environment and starter packages
-        run: |
-          node js/developer/tools/build.mjs build-distribution
-          node js/developer/tools/build.mjs build-distribution-repeat
-          cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
-          cmp build-distribution/pi-starter.tgz build-distribution-repeat/pi-starter.tgz
-          cmp build-distribution/life-starter.tgz build-distribution-repeat/life-starter.tgz
-          # The pin names the last published version. Sources at that version must rebuild it; sources ahead of it
-          # leave the header pinning the published archive, which is checked against the deployed file.
-          pinned=$(sed -n 's/.*version{"\([^"]*\)"}.*/\1/p' include/webfront/system/DeveloperReleaseData.hpp)
-          building=$(node -p "require('./js/developer/tools/distribution.json').version")
-          if [ "$pinned" = "$building" ] || [ "$PUBLISHING" = true ]; then
-            cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
-          else
-            echo "::notice::Sources build $building; DeveloperReleaseData.hpp still pins the published $pinned."
-            node js/developer/tools/pin-check.mjs
-          fi
-          node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs js/developer/tools/manifest-check.mjs js/developer/tools/restore-check.mjs js/developer/tools/scripts-check.mjs js/developer/tools/development-check.mjs js/developer/tools/testing-check.mjs
-      - name: Check the dedicated release tag
-        if: startsWith(github.ref, 'refs/tags/developer-v')
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: node js/developer/tools/release-check.mjs "$RELEASE_TAG"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: developer-distribution-node
-          if-no-files-found: error
-          path: |
-            build-distribution/environment.tgz
-            build-distribution/pi-starter.tgz
-            build-distribution/life-starter.tgz
-            build-distribution/provision.json
-            build-distribution/DeveloperReleaseData.hpp
-
   # The environment builds itself: the pinned bootstrap environment runs js/developer/scripts on these sources, with the
-  # locked build dependencies restored from npm. No Node.js, npm or npx is available to any step.
+  # locked build dependencies restored from npm. No JavaScript runtime or package manager is available to any step.
   wf-package:
-    needs: package
     runs-on: ubuntu-26.04
     # The whole job takes about two minutes; a longer one is a stalled step (a package mirror, say): fail early.
     timeout-minutes: 15
@@ -139,17 +90,9 @@ jobs:
             echo "::notice::Sources build $building; DeveloperReleaseData.hpp still pins the published $pinned."
             wf run pin
           fi
-      # Transition: the Node.js build and the wf build must be the same bytes. #318 removes this comparison with the
-      # Node.js build.
-      - uses: actions/download-artifact@v4
-        with:
-          name: developer-distribution-node
-          path: build-distribution-node
-      - name: Compare with the Node.js build
-        run: |
-          for name in environment.tgz pi-starter.tgz life-starter.tgz provision.json DeveloperReleaseData.hpp; do
-            cmp "build-distribution/$name" "build-distribution-node/$name"
-          done
+      # The specs of the environment run by the project's own wf test, under the locked jasmine-core.
+      - name: Run the specs of the environment
+        run: wf test --timeout 300
       - uses: actions/upload-artifact@v4
         with:
           name: developer-distribution

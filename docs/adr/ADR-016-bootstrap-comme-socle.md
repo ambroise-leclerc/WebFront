@@ -6,7 +6,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-22 | Acceptée | Ambroise Leclerc | Décision initiale : environnement bootstrap comme architecture de base, liste normative du cœur, scripts autorisés, indépendance vis-à-vis de Node.js. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 | 1.1 | 2026-10-23 | Acceptée | Ambroise Leclerc | Garde-fou `MinimalCoreAssets` (#314) : la liste est vérifiée par CTest, budget de 150 Kio d'octets décodés ; le favicon devient `FaviconData`, généré par CMake pur depuis `js/core/favicon.ico`. | [c0ee031](https://github.com/ambroise-leclerc/WebFront/commit/c0ee03131d3104721f8a24224533e753a5f6ad13) |
-| 1.2 | 2026-10-23 | Acceptée | Ambroise Leclerc | Auto-hébergement (#315) : le dépôt est un projet `wf` dont les scripts construisent l'environnement, le site et la vérification du pin avec l'environnement d'amorçage épinglé ; octets identiques à la construction Node.js, preuve de reconstruction du bundle bootstrap. | — |
+| 1.2 | 2026-10-23 | Acceptée | Ambroise Leclerc | Auto-hébergement (#315) : le dépôt est un projet `wf` dont les scripts construisent l'environnement, le site et la vérification du pin avec l'environnement d'amorçage épinglé ; octets identiques à la construction de l'époque, preuve de reconstruction du bundle bootstrap. | — |
+| 1.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | Tests, régénération et CI sans Node.js ni npm (#318) : les en-têtes du cœur sont produits et vérifiés par un générateur CMake pur (`js/core/EmbedAsset.cmake`), qui remplace `wf run embed-core` et le générateur Node.js ; les paquets du registre de test sont téléchargés et vérifiés au configure ; les tests JavaScript deviennent des specs Jasmine exécutées par `wf test` ; garde-fou global `NoNodeDependency`. | — |
 
 ## Statut et date
 
@@ -33,7 +34,7 @@ et un second système de terminal et d'outils (`Terminal.hpp`, `ToolManager.hpp`
 ## Décision
 
 L'environnement bootstrap devient l'architecture de base : un outil de développement complet
-« à la node.js » (manifeste de projet, install, run, test, build, embed) fourni par une archive
+(manifeste de projet, install, run, test, build, embed) fourni par une archive
 téléchargée et vérifiée, tandis que le code source de WebFront redevient minimaliste.
 
 ### Liste normative des ressources du cœur
@@ -78,11 +79,21 @@ autorisés ont l'autorité du bridge et du projet désigné. Un durcissement ult
 
 Aucun usage (utilisateur, contributeur, CI) ne requiert Node.js ou npm : seuls restent un
 compilateur C++23, CMake et le moteur du frontend choisi. Les en-têtes du cœur sont régénérés et
-vérifiés sans Node (#318) : le pilote C++ non interactif exécute les scripts d'assemblage dans le
-navigateur à partir d'une version d'amorçage épinglée (#321), puis compare les octets produits aux
-en-têtes versionnés. Les paquets de test viennent d'un registre local alimenté par CMake au
-configure ; aucun test ne dépend du réseau public ensuite. Aucune source tierce n'est vendorisée
-et `third_party/` disparaît (#319) ; les bibliothèques sont des paquets npm verrouillés, jamais
+vérifiés sans Node (#318), **par CMake seul** : `js/core/EmbedAsset.cmake` rend l'en-tête de chaque
+ressource (six sources de moins de 30 Kio, quelques dixièmes de seconde) et compare ses octets exacts à ceux du fichier
+versionné. Le choix d'un générateur CMake pur plutôt que d'un script exécuté par `wf` tient à ce que la fraîcheur des
+en-têtes doit être vérifiable par un build qui n'a pas de navigateur (la CI CEF-off, les sanitizers) ; une seule
+implémentation du rendu subsiste, la compression gzip n'ayant plus d'usage dans le cœur (elle reste celle de `wf embed`,
+dans l'environnement, avec le `fflate` verrouillé). Un test Catch2 décode chaque en-tête avec les données C++ qu'il
+déclare et le compare au fichier source ; un test CMake vérifie les sommes de contrôle des entrées des bundles
+(`bundles.json`) : une source modifiée sans reconstruction est détectée sans navigateur. La reconstruction effective
+sources → bundle est prouvée dans la suite navigateur par `wf run` (`SelfBuildRefreshMatchesSources`), puis bundle →
+en-tête par CMake. Le pilote C++ non interactif exécute les scripts d'assemblage et les specs (`wf test`) dans le navigateur
+à partir d'une version d'amorçage épinglée (#321). Les paquets de test sont téléchargés par CMake au configure, listés par nom,
+version et intégrité SHA-512 (`test/web/registry-packages.json`), puis servis hors ligne par un registre que `wf run
+test-registry` construit ; aucun test ne dépend du réseau public ensuite. Un garde-fou global (`NoNodeDependency`) audite
+tous les fichiers suivis, ses exceptions étant listées et motivées dans `test/cmake/NodeGuardExceptions.cmake`. Aucune
+source tierce n'est vendorisée et `third_party/` disparaît (#319) ; les bibliothèques sont des paquets npm verrouillés, jamais
 committés.
 
 ### Sources vendorisées et artefacts générés
@@ -102,12 +113,11 @@ d'amorçage épinglé (`cmake/WebFrontBootstrap.cmake`) par le pilote `webfront-
 Worker du script : ils lisent les sources du projet et les paquets verrouillés, n'écrivent que sous `permissions.publish`
 (répertoires `build-*` et sorties versionnées nommées) et n'ont ni shell ni API Node. Ils produisent `environment.tgz`,
 `environment.json`, `provision.json`, `bootstrap.bundle.mjs` et `DeveloperReleaseData.hpp` **octet pour octet** comme la
-construction Node.js, deux constructions successives étant identiques ; les CTest `SelfBuild*` l'exigent à chaque exécution
-avec `WEBFRONT_DEVELOPER_FIXTURES` et, tant que Node.js subsiste (#318), le job `wf-package` de `DeveloperDistribution.yml`
-compare aussi les deux constructions. La preuve de reconstruction du bundle bootstrap exigée plus haut est
+construction qui a précédé (la 0.6.1 publiée), deux constructions successives étant identiques ; les CTest `SelfBuild*` l'exigent
+à chaque exécution et le job `wf-package` de `DeveloperDistribution.yml` compare aussi les deux constructions. La preuve de reconstruction du bundle bootstrap exigée plus haut est
 `SelfBuildRefreshMatchesSources` : `wf run build --refresh-bootstrap` régénère `bootstrap.bundle.mjs`, `packages.bundle.mjs`,
-leurs sommes de contrôle et les deux en-têtes `DeveloperIndexHtmlData.hpp` et `DeveloperBootstrapData.hpp`, identiques aux
-fichiers versionnés ; `wf run embed-core` régénère les six en-têtes du cœur (`SelfBuildCoreHeaders`). Les opérations d'hôte de la
+leurs sommes de contrôle, identiques aux fichiers versionnés, et `EmbedAsset.cmake` en rend les deux en-têtes
+`DeveloperIndexHtmlData.hpp` et `DeveloperBootstrapData.hpp`, identiques eux aussi. Les opérations d'hôte de la
 publication (Pages, prerelease, dépôt `gh-pages`) restent des scripts shell et des étapes de workflow : elles n'entrent pas
 dans l'API `context`. L'environnement 0.6.1 construit ainsi par la 0.6.0 corrige aussi `runNonInteractive`, qui perdait la
 sortie d'une commande avant sa fin ; la 0.6.0 reste immuable.
@@ -146,6 +156,8 @@ développeur ni outillage. L'outillage de construction n'est jamais embarqué da
 - Conserver deux systèmes (composants C++ et environnement) : écarté, double maintenance de
   deux terminaux, deux `wf` et deux modèles d'installation.
 - Garder Node.js pour la régénération et les tests : écarté, contraire à l'autonomie visée.
+- Régénérer les en-têtes du cœur par un script `wf` (`wf run embed-core`, essayé dans #315) : écarté par #318, car il exige un
+  navigateur pour vérifier la fraîcheur ; un seul rendu, en CMake, sert la génération et la vérification.
 - Garder les bibliothèques vendorisées pour les tests : écarté, le poids du dépôt et la
   provenance floue ne se justifient pas face à des paquets verrouillés par intégrité.
 - **Coût accepté :** le premier lancement du mode développeur nécessite l'accès à la release ou

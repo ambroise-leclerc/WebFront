@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "manifestDigest": "21fb3318f7bf56509632d83f1c530ae8e14b5c8dabaaee4b3d24a2ecd4cc3fd3",
+  "manifestDigest": "189c5d492e1fd24af283f48702a79bcd3e411a63fbe669cafa37927545be698e",
   "registry": "https://registry.npmjs.org/",
   "roots": {
     "@xterm/addon-fit": {
@@ -14,6 +14,10 @@
     "esbuild-wasm": {
       "requested": "0.28.2",
       "id": "esbuild-wasm@0.28.2"
+    },
+    "jasmine-core": {
+      "requested": "7.0.2",
+      "id": "jasmine-core@7.0.2"
     },
     "react": {
       "requested": "19.3.1",
@@ -394,6 +398,98 @@
         "package.json",
         "wasm_exec.js",
         "wasm_exec_node.js"
+      ],
+      "dependencies": {}
+    },
+    "jasmine-core@7.0.2": {
+      "name": "jasmine-core",
+      "version": "7.0.2",
+      "integrity": "sha512-YMVijt84KPQQFm1db1AQAxTXfq0k3wU06OkepLViljURFqiRQ7EYYX2eUAshhUv9fA9t1E2N65GrdqvupA9VPQ==",
+      "key": "jasmine-core@7.0.2-YMVijt84KPQQFm1db1AQAxTXfq0k3wU06OkepLViljURFqiRQ7EYYX2eUAshhUv9fA9t1E2N65GrdqvupA9VPQ",
+      "manifest": {
+        "name": "jasmine-core",
+        "license": "MIT",
+        "version": "7.0.2",
+        "repository": {
+          "type": "git",
+          "url": "https://github.com/jasmine/jasmine.git"
+        },
+        "keywords": [
+          "test",
+          "testing",
+          "jasmine",
+          "tdd",
+          "bdd"
+        ],
+        "scripts": {
+          "lint": "eslint \"src/**/*.js\" \"spec/**/*.js\" && prettier --check \"src/**/*.js\" \"spec/**/*.js\"",
+          "test": "node scripts/runSpecsInNode.js && npm run lint",
+          "test:parallel": "node scripts/runSpecsInParallel.js",
+          "cleanup": "prettier --write \"src/**/*.js\" \"spec/**/*.js\"",
+          "build": "node scripts/buildDistribution.js",
+          "buildStandaloneDist": "node scripts/buildStandaloneDist.js",
+          "serve": "node spec/support/localJasmineBrowser.js",
+          "serve:performance": "node spec/support/localJasmineBrowser.js jasmine-browser-performance.json",
+          "ci": "node spec/support/ci.js",
+          "ci:performance": "node spec/support/ci.js jasmine-browser-performance.json"
+        },
+        "description": "Simple JavaScript testing framework for browsers and node.js",
+        "homepage": "https://jasmine.github.io",
+        "main": "./lib/jasmine-core.js",
+        "exports": {
+          ".": "./lib/jasmine-core.js"
+        },
+        "files": [
+          "LICENSE",
+          "README.md",
+          "images/*.{png,svg}",
+          "lib/**/*.{js,css}",
+          "package.json"
+        ],
+        "devDependencies": {
+          "@eslint/eslintrc": "^3.3.1",
+          "@eslint/js": "^9.24.0",
+          "@jasminejs/reporters": "^1.1.0",
+          "archiver": "^8.0.0",
+          "css-url-embed": "^0.1.0",
+          "ejs": "^3.1.10",
+          "eslint": "^9.24.0",
+          "eslint-plugin-compat": "^6.0.2",
+          "glob": "^13.0.0",
+          "globals": "^16.0.0",
+          "jasmine": "^7.0.0",
+          "jasmine-browser-runner": "^5.0.0",
+          "jsdom": "^26.0.0",
+          "prettier": "1.17.1",
+          "sass": "^1.58.3"
+        },
+        "browserslist": [
+          "Safari >= 26",
+          "Firefox >= 140",
+          "last 2 Chrome versions",
+          "last 2 Edge versions"
+        ]
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "images/jasmine-horizontal.png",
+        "images/jasmine-horizontal.svg",
+        "images/jasmine_favicon.png",
+        "lib/jasmine-core.js",
+        "lib/jasmine-core/boot.js",
+        "lib/jasmine-core/example/node_example/lib/jasmine_examples/Player.js",
+        "lib/jasmine-core/example/node_example/lib/jasmine_examples/Song.js",
+        "lib/jasmine-core/example/node_example/spec/helpers/jasmine_examples/SpecHelper.js",
+        "lib/jasmine-core/example/node_example/spec/jasmine_examples/PlayerSpec.js",
+        "lib/jasmine-core/example/spec/PlayerSpec.js",
+        "lib/jasmine-core/example/spec/SpecHelper.js",
+        "lib/jasmine-core/example/src/Player.js",
+        "lib/jasmine-core/example/src/Song.js",
+        "lib/jasmine-core/jasmine-html.js",
+        "lib/jasmine-core/jasmine.css",
+        "lib/jasmine-core/jasmine.js",
+        "package.json"
       ],
       "dependencies": {}
     },

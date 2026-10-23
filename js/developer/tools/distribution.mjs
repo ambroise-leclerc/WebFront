@@ -26,7 +26,7 @@ export function bootstrapHeader(version, base, integrity) {
     const url = new URL(versionPath(version) + 'environment.tgz', baseUrl(base));
     return `#pragma once
 
-// Pinned developer distribution. Regenerate with js/developer/tools/build.mjs --refresh-bootstrap.
+// Pinned developer distribution. Regenerate with wf run build <directory> --refresh-bootstrap.
 #include <string_view>
 
 namespace webfront::developer::release {

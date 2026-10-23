@@ -2,7 +2,7 @@
 
 The developer environment downloads its terminal, npm resolver and WebAssembly compiler at
 runtime. The application's C++ executable initially contains the bridge and a small bootstrap;
-it does not embed React, Babel, xterm or esbuild. Node.js and npm are **not required on the
+it does not embed React, Babel, xterm or esbuild. No separate JavaScript runtime is **required on the
 application developer's machine**. A C++ compiler, CMake and the selected native webview remain
 necessary. TypeScript/JSX is transformed in the browser without type checking; `wf check` type-checks the project
 with the TypeScript compiler it locks.
@@ -51,7 +51,7 @@ The default configuration is generated in `include/webfront/system/DeveloperRele
 `https://ambroise-leclerc.github.io/WebFront/developer/0.6.1/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.1`. Published 0.6.0, 0.5.0, 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
-HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
+HTTPS/CORS repository or a same-origin test fixture. Users install no JavaScript tooling.
 
 The environment archive contains pinned Life and PI starter descriptors. `wf create life` downloads and
 verifies that separate archive, creates a new `ui` directory and prints the install/preview/embed
@@ -81,7 +81,7 @@ with a plain console application.
 ```sh
 mkdir -p life-project/.webfront/developer/preview/provision
 cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
   /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
@@ -171,7 +171,7 @@ the operations of the `context` API of scripts; they are not a sandbox.
   0.5.0), the manifest takes its roots as dependencies (`^version`, or the range they were installed with).
 - `wf install <package>[@range]` resolves, downloads and verifies into the cache, then publishes the
   manifest (the requested range, or `^version` when none was given) and the lock in a single transaction.
-- `wf install` without argument installs exactly the locked graph (like `npm ci`) when the lock agrees
+- `wf install` without argument installs exactly the locked graph when the lock agrees
   with the manifest, resolves the manifest and creates the lock when there is none, and fails when they
   disagree. `wf install --update` resolves the manifest again.
 - `wf preview [entry]` and `wf embed <provider>` use `entries` and `providers`; an explicit path still works.
@@ -243,7 +243,7 @@ and tarballs from the application (`fs::NativeDebugFS` or an application provide
 
 ## Scripts (`wf run`, `wf exec`)
 
-WebFront scripts replace npm scripts and `npx` for producing a project's resources, without Node.js:
+WebFront scripts produce a project's resources, in the browser:
 
 ```json
 {
@@ -441,7 +441,7 @@ The last successful preview stays available. Browser disconnection also stops th
 
 `wf test [--timeout <seconds>] [pattern]` runs the project's Jasmine specs in the browser. The project chooses
 the Jasmine: `wf install jasmine-core` resolves it from the registry like any package, and the lock pins its version
-and integrity. Nothing else is needed: no Node.js, no npm and no public network once the package is in the cache.
+and integrity. Nothing else is needed, and no public network once the package is in the cache.
 
 ```json
 {
@@ -520,7 +520,7 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
 
 `webtest`, the Jasmine bridge suite (`test/web/suite/`, #311), is this driver with the C++ callbacks of its specs
 (`test/driver/WfDriver.hpp`: `run` and `main` take a setup that adds pages, registers callbacks before the page opens and
-decides the final status). CTest copies the project, runs `wf install` from the fixtures' registry, then `webtest ... -- test`.
+decides the final status). CTest copies the project, runs `wf install` from the registry that `wf run test-registry` built, then `webtest ... -- test`.
 
 **Compatibility contract.** `environment.json` declares `protocol` (the environment's wire protocol) and `api` (the
 `webfront.developer.*` callbacks it expects; absent means 1, the value of every environment published before the
@@ -530,7 +530,7 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
 The pin, for the release and for the bootstrap of the tests (`cmake/WebFrontBootstrap.cmake`), is 0.6.1: 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), and 0.6.1 fixes `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary. The other `WfDriver*` cases run the environment built from the current sources
-(`WEBFRONT_DEVELOPER_FIXTURES`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
+(the `SelfBuild` cases, assembled by the fixture `DeveloperFixtures`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
 report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
 configure-time provisioning (verified download, reuse, local directory, wrong digest, malformed value). The Linux CEF CI job
@@ -571,7 +571,7 @@ The environment builds itself (#315). The repository is a `wf` project: `webfron
 dependencies (esbuild-wasm, semver, xterm and its fit addon, and the React versions the starters pin), the scripts
 and the permissions (`files` it reads, `publish` where it writes), and `webfront-packages.lock.json` locks them by
 SHA-512. The scripts of `js/developer/scripts/` run in the pinned bootstrap environment with the driver `webfront-wf`
-(see [the test driver](#the-test-driver-webfront-wf-and-the-bootstrap-environment)). They need no Node.js, npm or npx; they prepare
+(see [the test driver](#the-test-driver-webfront-wf-and-the-bootstrap-environment)). They prepare
 a tarball that application developers can download. No command publishes anything to a registry automatically.
 
 ```sh
@@ -584,62 +584,54 @@ wf run build build-developer-environment --refresh-bootstrap
 Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `life-starter.tgz`,
 `pi-starter.tgz`, `provision.json` and `DeveloperReleaseData.hpp`. The version and public base URL are in
 `js/developer/tools/distribution.json`. `--refresh-bootstrap` additionally refreshes the two checked-in JS bundles, their
-input checksums (`bundles.json`, over `js/developer/tools/bundle-inputs.json`) and the embedded bootstrap headers. Without
-that flag, it writes only to the output directory. `site.mjs` stages a build into the GitHub Pages site, `pin.mjs`
-checks the pinned header against the published archive and `embed-core.mjs` regenerates the headers of the core's embedded assets. The archives have the package identifiers
+input checksums (`bundles.json`, over `js/developer/tools/bundle-inputs.json`) and the pinned header; the core headers that embed
+the bundles come from `cmake --build <dir> --target webfront-embedded-assets`. Without
+that flag, it writes only to the output directory. `site.mjs` stages a build into the GitHub Pages site and `pin.mjs`
+checks the pinned header against the published archive. The headers of the core's embedded assets are rendered by `js/core/EmbedAsset.cmake`, in pure CMake (see below). The archives have the package identifiers
 `@webfront/developer-environment`, `@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static
 GitHub Pages downloads; no npm publication or scope ownership is required.
 
-During the transition from Node.js (#318), the Node.js tools (`js/developer/tools/build.mjs` and the others) build the
-same bytes, which the CTest case `SelfBuildMatchesFixtures` and the `wf-package` job require; they also still provision
-the offline test fixtures (the local registry and test pages):
+The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local
+registry: the build, a repeat build (same bytes), the checked-in bootstrap bundles and checksums rebuilt by wf alone (and the
+core headers rendered from them by CMake), the staging of the site (a second staging repeats the same bytes, a changed
+published file is refused) and the permissions of the manifest. `DeveloperSpecs` runs the pure JavaScript specs of
+`test/developer/` with `wf test` on that copy; the CEF-off CTest cases check the generated headers (`*AssetFresh`,
+`EmbeddedAssetGenerator`, and the Catch2 scenario on the embedded assets of the core), the checksums of the bundle inputs (`BundleInputsFresh`) and the names the
+terminal and `webfront::Commands` reserve (`CommandNamesAgree`) with CMake and Catch2 alone, and `NoNodeDependency` audits
+every file of the project. The maintainer procedure is in `js/developer/tools/PUBLISHING.md`.
 
-```sh
-npm ci --prefix js/developer/vendor --ignore-scripts
-node js/developer/tools/build.mjs build-developer-environment
-node js/developer/tools/fixtures.mjs build-developer-environment
-```
-
-The `SelfBuild*` CTest cases (with `WEBFRONT_DEVELOPER_FIXTURES`) run the scripts on a copy of the sources, with the
-dependencies installed from the local registry: the build, a repeat build (same bytes), the checked-in bootstrap bundles,
-checksums and core headers rebuilt by wf alone, the headers of the core regenerated from their sources, the staging of the site (a second staging repeats the same bytes, a changed
-published file is refused) and the permissions of the manifest. `WEBFRONT_REQUIRE_NODE=OFF` configures a test build without
-Node.js: the checks that still use it (asset freshness, `DeveloperJavaScript`, `EmbeddedAssetGenerator`) are then not registered.
-The maintainer procedure is in `js/developer/tools/PUBLISHING.md`.
-
-To try the local archive without an HTTPS server, after building the packages above:
+To try the local archive without an HTTPS server, after building the packages above (with `wf run build build-developer-environment`):
 
 ```sh
 mkdir -p life-project/.webfront/developer/preview/provision
 cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
   /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```
 
 The preview command later replaces that directory, but the verified archive is already cached
 independently for subsequent launches. These are maintainer provisioning commands; the application's
-terminal still installs and builds browser dependencies without a local Node/npm installation.
+terminal installs and builds browser dependencies without any local JavaScript tooling.
 
-Fixture provisioning writes the tests' local npm registry (`js/developer/tools/registry-fixture.mjs`):
-packuments and tarballs packed reproducibly from the pinned `jasmine-core`, React, React DOM and scheduler of the
-maintainer's npm installation, plus synthetic packages for the edge cases (a newer version under a locked range,
-an archive that no longer matches its integrity). The test application serves it from its own origin and imposes
-it through the `registry` option. The CEF-off `DeveloperJavaScript` case generates the synthetic part in memory to
-test `wf restore`. No CTest case downloads from the public registry. Generating the fixture and the packages'
-logic use only browser APIs; reading `node_modules` and writing files (`registry-fixture-node.mjs`) are the
-Node-only part, so that `wf` can take the fixture over (#318).
+**The tests' local npm registry** is built by `wf run test-registry` (`test/web/registry/`): the packuments and tarballs as
+plain files, from the real packages that CMake downloaded at configure time (`test/web/registry-packages.json` lists each by
+name, version and SHA-512 integrity; a wrong digest stops the configure, `-DWEBFRONT_REGISTRY_DIR=<directory>` replaces the
+downloads on a machine without network access) kept byte for byte, and from synthetic packages for the edge cases (a newer
+version under a locked range, an archive that no longer matches its integrity, typed and untyped packages). The test
+application serves it from its own origin and imposes it through the `registry` option. The CEF-off `DeveloperSpecs` case
+generates the synthetic part in memory to test `wf restore`. No CTest case downloads from the public registry. Nothing is
+committed: the archives live in the build directory.
 
 ```sh
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON \
-  -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DENABLE_TESTING=ON \
-  -DWEBFRONT_DEVELOPER_FIXTURES="$PWD/build-developer-environment"
+  -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DENABLE_TESTING=ON
 cmake --build build-native --parallel
 ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
 ```
 
-The GitHub CI prepares these fixtures for both WKWebView and CEF jobs. The initial 0.2.0 Life version passed
+The CTest fixtures prepare the registry and the environment under test in every browser job (WKWebView, WebKitGTK, WebView2, CEF). The initial 0.2.0 Life version passed
 WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 [run 39421265580](https://github.com/ambroise-leclerc/WebFront/actions/runs/39421265580).
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in

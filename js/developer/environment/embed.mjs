@@ -30,7 +30,7 @@ function declarationOf(name, compressed) {
     };`;
 }
 
-// The same big-endian word layout, padding and gzip settings as EmbedTextAsset.cmake.
+// The same big-endian word layout and padding as js/core/EmbedAsset.cmake, with the gzip settings of the environment.
 export function generateProvider(files, className = 'ApplicationAssets', notices = '') {
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(className)) throw new Error('Invalid generated provider name');
     const declarations = [];

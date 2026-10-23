@@ -2,7 +2,7 @@ name: Build the wf driver
 description: >-
   Builds webfront-wf (WebKitGTK frontend), the non-interactive driver of the WebFront developer environment, from the
   bootstrap environment pinned by cmake/WebFrontBootstrap.cmake, and installs a `wf` command that runs a wf command on the
-  project at the root of the workspace. Node.js is neither used nor required (WEBFRONT_REQUIRE_NODE=OFF).
+  project at the root of the workspace. Node.js is neither used nor required.
 runs:
   using: composite
   steps:
@@ -21,7 +21,7 @@ runs:
       shell: bash
       run: |
         cmake -S . -B build-driver -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON \
-          -DWEBFRONT_REQUIRE_NODE=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK \
+          -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK \
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
         cmake --build build-driver --target webfront-wf --parallel 2
     - name: Install the wf command
