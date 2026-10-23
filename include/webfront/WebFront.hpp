@@ -91,6 +91,13 @@ public:
         return webFront.spawn(std::move(task));
     }
 
+    /// A sender completing once at most `limit` frames await the network for this browser, or at once when it is gone;
+    /// co_await propagates the task's stop token. It paces output to a browser that reads slower than it is written.
+    [[nodiscard]] auto writesAtMost(std::size_t limit) const {
+        using Link = typename decltype(webFront.findLink(webLinkId))::element_type;
+        return detail::WritesAtMost<Link>{webFront.findLink(webLinkId), limit};
+    }
+
     /// A sender completing on the server context after the duration; see BasicWF::resumeAfter.
     template <typename Rep, typename Period>
     [[nodiscard]] auto resumeAfter(std::chrono::duration<Rep, Period> duration) const {
@@ -406,14 +413,6 @@ public:
         return found == webLinks.end() ? nullptr : found->second;
     }
 
-    /// The link of a connected browser; throws std::out_of_range once its connection closed and was released. The
-    /// reference is only safe on the server thread, which releases links: elsewhere, use findLink().
-    WebLink<Net, Policy>& getLink(WebLinkId id) {
-        if (auto link = findLink(id))
-            return *link;
-        throw std::out_of_range("Browser connection closed");
-    }
-
     /// The browsers connected now: a closed connection is released shortly after its closure.
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
@@ -593,14 +592,19 @@ private:
                 uiSubscribers->notify(UI{*this, event.webLinkId});
                 break;
             case WebLinkEvent::Code::closed:
+                // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
+                if (httpServer.taskScope().stopRequested())
+                    break;
                 uiClosedSubscribers->notify(UI{*this, event.webLinkId});
                 // The link is running this handler: it is released afterwards, by a task on the server context.
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
             case WebLinkEvent::Code::cppFunctionCalled: {
-                // The calling link is running this handler: it is registered and cannot be released meanwhile.
+                // The calling link is normally registered: the server thread registers it before it can read anything.
                 const auto link = findLink(event.webLinkId);
+                if (!link)
+                    break;
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId});
                 else

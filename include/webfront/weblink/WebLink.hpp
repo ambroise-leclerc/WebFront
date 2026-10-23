@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <limits>
 #include <map>
@@ -132,6 +133,7 @@ public:
         ws->onMessage([this, guard = handlers](std::span<const std::byte> data) { guard->run([&] { onBinaryMessage(data); }); });
         // Retire the transport before the WebSocket logs the write error, so it is never fed its own failure.
         ws->onWriteError([this, guard = handlers](std::error_code) { guard->run([&] { detachTransport(true); }); });
+        ws->onWritten([this, guard = handlers] { guard->run([&] { wakeWriters(); }); });
         ws->onClose([this, guard = handlers](websocket::CloseEvent event) {
             guard->run([&] {
                 const log::ContextScope context(linkContext());
@@ -168,6 +170,28 @@ public:
     static constexpr std::size_t maxPendingLogFrames = 64;
     [[nodiscard]] std::uint64_t droppedLogFrames() const { return droppedLogs.load(std::memory_order_relaxed); }
     [[nodiscard]] std::size_t pendingWrites() const { return ws->pendingWrites(); }
+
+    /// Returns 0 when at most `limit` frames await the network. Otherwise registers `ready`, called once they do, on
+    /// the thread that writes the frame bringing them down, and returns its identifier for cancelWrites(). A waiter
+    /// left when the link is destroyed is never called.
+    std::uint64_t whenWritesAtMost(std::size_t limit, std::function<void()> ready) {
+        std::lock_guard lock(writersMutex);
+        if (ws->pendingWrites() <= limit)
+            return 0;
+        const auto waiter = ++lastWriter;
+        writers.emplace(waiter, Writer{limit, std::move(ready)});
+        return waiter;
+    }
+
+    /// Forgets a waiter of whenWritesAtMost() that was not called yet.
+    void cancelWrites(std::uint64_t waiter) {
+        std::function<void()> removed;  // destroyed outside the lock
+        std::lock_guard lock(writersMutex);
+        if (auto found = writers.find(waiter); found != writers.end()) {
+            removed = std::move(found->second.ready);
+            writers.erase(found);
+        }
+    }
 
     void sendCommand(auto message) { ws->write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
@@ -279,6 +303,35 @@ public:
     }
 
 private:
+    struct Writer {
+        std::size_t           limit;
+        std::function<void()> ready;
+    };
+    std::mutex                        writersMutex;
+    std::map<std::uint64_t, Writer>   writers;  // waiters of whenWritesAtMost(), by identifier
+    std::uint64_t                     lastWriter = 0;
+
+    // The queue shrank: the waiters it now satisfies are removed, then called outside the lock.
+    void wakeWriters() {
+        std::vector<std::function<void()>> ready;
+        {
+            std::lock_guard lock(writersMutex);
+            if (writers.empty())
+                return;
+            const auto queued = ws->pendingWrites();
+            for (auto writer = writers.begin(); writer != writers.end();) {
+                if (queued > writer->second.limit) {
+                    ++writer;
+                    continue;
+                }
+                ready.push_back(std::move(writer->second.ready));
+                writer = writers.erase(writer);
+            }
+        }
+        for (auto& call : ready)
+            call();
+    }
+
     /// Context for link-level logs outside any call; operationId stays empty.
     [[nodiscard]] log::Context linkContext() const {
         return {.component = "weblink", .webLinkId = idText.view(), .direction = log::CallDirection::None, .callId = {}};
@@ -327,5 +380,94 @@ private:
         pending->close(std::move(error));
     }
 };
+
+
+namespace detail {
+/// Completes once at most `limit` frames await the network on a link (WebLink::whenWritesAtMost), or stopped by the
+/// receiver's stop token. A link that is gone completes it at once: nothing is left to wait for.
+template <typename Link>
+class WritesAtMost {
+public:
+    using sender_concept        = networking::ex::sender_t;
+    using completion_signatures = networking::ex::completion_signatures<networking::ex::set_value_t(), networking::ex::set_stopped_t()>;
+
+    WritesAtMost(std::weak_ptr<Link> waited, std::size_t pending) : link(std::move(waited)), limit(pending) {}
+
+    template <typename Receiver>
+    class Operation {
+        using StopToken = networking::ex::stop_token_of_t<networking::ex::env_of_t<Receiver>>;
+        // Shared with the link's waiter, which may run on another thread after a stop completed the operation.
+        struct State {
+            std::atomic<bool>          done{false};
+            std::atomic<std::uint64_t> waiter{0};
+            Operation*                 operation;
+        };
+        struct OnStop {
+            Operation* operation;
+            void       operator()() noexcept { operation->stopped(); }
+        };
+
+        Receiver                                                        receiver;
+        std::weak_ptr<Link>                                             link;
+        std::size_t                                                     limit;
+        std::shared_ptr<State>                                          state;
+        std::optional<networking::ex::stop_callback_for_t<StopToken, OnStop>> stopCallback;
+
+        void stopped() noexcept {
+            if (state->done.exchange(true))
+                return;
+            if (auto waited = link.lock())
+                waited->cancelWrites(state->waiter);
+            networking::ex::set_stopped(std::move(receiver));  // may destroy this operation
+        }
+
+    public:
+        Operation(Receiver r, std::weak_ptr<Link> waited, std::size_t pending)
+            : receiver(std::move(r)), link(std::move(waited)), limit(pending), state(std::make_shared<State>()) {
+            state->operation = this;
+        }
+        Operation(Operation&&) = delete;
+
+        void start() noexcept {
+            auto token = networking::ex::get_stop_token(networking::ex::get_env(receiver));
+            auto waited = link.lock();
+            if (token.stop_requested()) {
+                state->done = true;
+                return networking::ex::set_stopped(std::move(receiver));
+            }
+            if (!waited) {
+                state->done = true;
+                return networking::ex::set_value(std::move(receiver));
+            }
+            stopCallback.emplace(std::move(token), OnStop{this});
+            const auto shared = state;  // the operation may be gone once the waiter or a stop completed it
+            std::uint64_t waiter = 0;
+            try {
+                waiter = waited->whenWritesAtMost(limit, [shared] {
+                    if (shared->done.exchange(true))
+                        return;  // stopped first
+                    auto* operation = shared->operation;
+                    operation->stopCallback.reset();  // waits for a stop callback running on another thread
+                    networking::ex::set_value(std::move(operation->receiver));
+                });
+            } catch (...) { }  // registering failed: there is nothing to wait for
+            shared->waiter = waiter;
+            if (waiter == 0 && !shared->done.exchange(true)) {
+                stopCallback.reset();
+                networking::ex::set_value(std::move(receiver));
+            }
+        }
+    };
+
+    template <typename Receiver>
+    Operation<Receiver> connect(Receiver receiver) const {
+        return Operation<Receiver>(std::move(receiver), link, limit);
+    }
+
+private:
+    std::weak_ptr<Link> link;
+    std::size_t         limit;
+};
+}  // namespace detail
 
 } // namespace webfront

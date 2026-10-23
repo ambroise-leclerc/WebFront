@@ -53,6 +53,7 @@ struct FakeUI {
     TaskHandle  spawn(Task task) const;
     auto        jsFunction(string_view name) const;
     size_t      pendingWrites() const;
+    auto        writesAtMost(size_t limit) const;
     auto        resumeAfter(chrono::milliseconds) const;
 };
 
@@ -65,7 +66,6 @@ struct FakeApp {
     function<void(FakeUI, uint32_t)>           cancel;
     shared_ptr<detail::UISubscribers<FakeUI>>  closed = make_shared<detail::UISubscribers<FakeUI>>();
     vector<BrowserCall>                        calls;
-    set<int>                                   gone;  // links whose browser calls throw, like a closed connection
 
     template <typename R, typename... Args>
     bool cppFunction(string name, auto&& function) {
@@ -89,8 +89,8 @@ struct FakeApp {
         return FakeUI{this, link};
     }
 
+    // The calls to a disconnected browser are still recorded, as if a later browser had been given its identifier.
     void disconnect(int link) {
-        gone.insert(link);
         closed->notify(ui(link));
     }
 
@@ -119,18 +119,21 @@ size_t FakeUI::pendingWrites() const {
     return app->backlog;
 }
 
-auto FakeUI::resumeAfter(chrono::milliseconds) const {
-    return networking::ex::just() | networking::ex::then([app = app] {
+// The browser reads until the queue is down to half the limit.
+auto FakeUI::writesAtMost(size_t limit) const {
+    return networking::ex::just() | networking::ex::then([app = app, limit] {
         ++app->pauses;
         app->paced.push_back("pause");
-        app->backlog -= min<size_t>(app->backlog, 10);
+        app->backlog = min(app->backlog, limit / 2);
     });
+}
+
+auto FakeUI::resumeAfter(chrono::milliseconds) const {
+    return networking::ex::just();
 }
 
 auto FakeUI::jsFunction(string_view name) const {
     return [app = app, link = link, function = string(name)](uint32_t id, const auto&... values) {
-        if (app->gone.contains(link))
-            throw out_of_range("Connection closed");
         app->calls.push_back(BrowserCall{link, function, id, {text(values)...}});
         if (app->queueing) {
             ++app->backlog;
@@ -294,7 +297,7 @@ SCENARIO("Command output is split under the bridge string limit on character bou
 }
 
 SCENARIO("Printing waits while the browser has not read the output") {
-    GIVEN("a browser that has 55 frames to read") {
+    GIVEN("a browser that has more frames to read than allowed") {
         FakeApp           app;
         Commands<FakeApp> commands{app};
         commands.add("print", "", [](Context context) -> Task {
@@ -303,8 +306,8 @@ SCENARIO("Printing waits while the browser has not read the output") {
         app.backlog = 55;
         WHEN("a command prints") {
             app.start(app.ui(1), 1, "print", "[]");
-            THEN("it waits until no more than the allowed frames are pending, then ends") {
-                CHECK(app.pauses == 3);
+            THEN("it waits once, until no more than the allowed frames are pending, then ends") {
+                CHECK(app.pauses == 1);
                 CHECK(app.backlog <= commands::maxPendingOutput);
                 CHECK(app.callsOf(1).back().values == vector<string>{"0", ""});
             }
@@ -402,6 +405,37 @@ SCENARIO("Each browser has its own commands") {
                 CHECK(app.callsOf(2).size() == before);
             }
         }
+    }
+}
+
+SCENARIO("A browser given the identifier of a disconnected one starts afresh") {
+    GIVEN("a command that ignores its stop, in a browser that disconnects") {
+        Fixture fixture;
+        auto&   app    = fixture.app;
+        auto    finish = make_shared<testing::ManualSender::Completion>();
+        fixture.commands.add("deaf", "", [finish](Context) -> Task {
+            co_await networking::ex::write_env(testing::ManualSender([finish](auto completion) { *finish = std::move(completion); }),
+                                               networking::ex::prop{networking::ex::get_stop_token, networking::ex::never_stop_token{}});
+        });
+        app.start(app.ui(2), 1, "deaf", "[]");
+        app.disconnect(2);
+        WHEN("a new browser with the same identifier runs a command with the same number") {
+            app.start(app.ui(2), 1, "greet", R"(["again"])");
+            THEN("it runs, and only its own messages reach the new browser") {
+                const auto calls = app.callsOf(2);
+                REQUIRE(calls.size() == 2);
+                CHECK(calls[0].values == vector<string>{"Hello again\n"});
+                CHECK(calls[1].values == vector<string>{"0", ""});
+            }
+            AND_WHEN("the deaf command ends at last") {
+                finish->complete({}, 0);
+                THEN("its exit report does not reach the new browser either") {
+                    CHECK(app.callsOf(2).size() == 2);
+                }
+            }
+        }
+        if (finish->complete)
+            finish->complete({}, 0);  // lets the shutdown drain it
     }
 }
 

@@ -346,3 +346,52 @@ SCENARIO("A browser that stops reading bounds the diagnostic frames queued for i
     CHECK(link.pendingWrites() == 0);
     log::setLogLevel(log::Disabled);
 }
+
+namespace {
+template <typename Writes>
+networking::Task waitWrites(Writes writes, bool& woken) {
+    co_await std::move(writes);
+    woken = true;
+}
+}  // namespace
+
+SCENARIO("A link wakes a writer once its write queue drains") {
+    InjectableSocket::reset();
+    InlineTaskScope scope;
+    auto            link = make_shared<WebLink<InjectableNetworking>>(InjectableSocket{}, 12, [](WebLinkEvent) { }, scope);
+    InjectableSocket::deferWrites();
+    for (msg::CallId call = 1; call <= 3; ++call)
+        link->sendError(call, "queued");
+    REQUIRE(link->pendingWrites() == 3);
+    using Writes = webfront::detail::WritesAtMost<WebLink<InjectableNetworking>>;
+    bool woken = false;
+    GIVEN("a task waiting for at most one queued frame") {
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{link, 1}, woken));
+        THEN("it wakes when the second write ends, not before") {
+            CHECK_FALSE(woken);
+            InjectableSocket::completeDeferredWrites();
+            CHECK_FALSE(woken);
+            InjectableSocket::completeDeferredWrites();
+            CHECK(woken);
+        }
+    }
+    GIVEN("a waiting task that is stopped") {
+        networking::ex::inplace_stop_source stop;
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, stop.get_token(), waitWrites(Writes{link, 0}, woken));
+        stop.request_stop();
+        THEN("it unwinds, and the drained queue does not call it") {
+            while (InjectableSocket::completeDeferredWrites() > 0) { }
+            CHECK_FALSE(woken);
+            CHECK(link->pendingWrites() == 0);
+        }
+    }
+    GIVEN("a link that is gone") {
+        std::weak_ptr<WebLink<InjectableNetworking>> gone;
+        networking::Spawn(scope, networking::ex::inline_scheduler{}, waitWrites(Writes{gone, 0}, woken));
+        THEN("the task does not wait") {
+            CHECK(woken);
+        }
+    }
+    InjectableSocket::deferWrites(false);
+    while (InjectableSocket::completeDeferredWrites() > 0) { }
+}

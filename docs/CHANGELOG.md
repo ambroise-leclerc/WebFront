@@ -45,11 +45,14 @@
   output, stopped by Ctrl+C, the browser's disconnection or shutdown; the terminal does not wait for a stopped
   command; `co_await context.print(text)` waits for a slow browser. New `app.resumeAfter(duration)`/
   `ui.resumeAfter(duration)` timer sender, `app.subscribeUIClosed(handler)`, `app.connectedBrowsers()`, `UI::id()`,
-  `UI::pendingWrites()`, `app.findLink(id)` and `json::Reader::array`. `cppFunction` returns false when the name was
+  `UI::pendingWrites()`, `UI::writesAtMost(limit)` (woken by the write that drains the queue), `app.findLink(id)` and
+  `json::Reader::array`. `cppFunction` returns false when the name was
   already registered.
 
 ### Changed
 
+- **Breaking:** `BasicWF::getLink(id)`, whose reference could outlive a released connection, is replaced by
+  `findLink(id)`, which shares the link with the caller (null once the browser is gone).
 - `DeveloperBootstrapOptions::registry` is now `std::optional<std::string>`: unset, the manifest's registry
   applies; set, it must be HTTPS or a same-origin path and takes precedence over the manifest. The environment
   configuration gains `registryExplicit`; earlier environments keep reading `registry`.

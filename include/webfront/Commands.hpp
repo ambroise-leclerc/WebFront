@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -98,18 +97,13 @@ struct Run {
 
     Run(UI caller, std::uint32_t commandId, std::vector<std::string> args) : ui(std::move(caller)), id(commandId), arguments(std::move(args)) { }
 
-    /// Calls a browser function of the terminal, unless the browser is gone. Returns false when the call could not
-    /// be made.
+    /// Calls a browser function of the terminal, unless the browser disconnected (Registry::closed): its connection
+    /// is gone, and a later browser may get its identifier. Returns false when the call was not made.
     bool send(std::string_view function, auto&&... values) {
         if (disconnected.load())
             return false;
-        try {
-            ui.jsFunction(function)(id, std::forward<decltype(values)>(values)...);
-            return true;
-        } catch (const std::exception&) {
-            disconnected = true;  // the link is gone: nothing more reaches this browser
-            return false;
-        }
+        ui.jsFunction(function)(id, std::forward<decltype(values)>(values)...);
+        return true;
     }
 };
 
@@ -150,8 +144,8 @@ public:
         for (const auto piece : detail::chunks(text)) {
             if (command->stop.stop_requested() || !command->send("webfront.commands.output", piece))
                 co_return;
-            while (!command->stop.stop_requested() && command->ui.pendingWrites() > maxPendingOutput)
-                co_await command->ui.resumeAfter(std::chrono::milliseconds(5));
+            if (command->ui.pendingWrites() > maxPendingOutput)
+                co_await command->ui.writesAtMost(maxPendingOutput);  // woken by the write that drains the queue
         }
     }
 
@@ -248,18 +242,21 @@ public:
             handle->requestStop();  // outside the lock: the command may complete inline and unregister itself
     }
 
-    /// A disconnected browser: its commands are stopped and never write to the connection again.
+    /// A disconnected browser: its commands are stopped, never write to the connection again and leave the session at
+    /// once, so that a later browser given the same identifier starts afresh even if one of them ignores its stop.
     void closed(const UI& ui) {
         std::vector<TaskHandle> handles;
         {
             std::scoped_lock lock{mutex};
-            for (auto& [key, command] : running) {
-                if (key.first != ui.id())
+            for (auto command = running.begin(); command != running.end();) {
+                if (command->first.first != ui.id()) {
+                    ++command;
                     continue;
-                command.run->disconnected = true;
-                command.cancelRequested   = true;
-                if (command.handle)
-                    handles.push_back(*command.handle);
+                }
+                command->second.run->disconnected = true;
+                if (command->second.handle)
+                    handles.push_back(*command->second.handle);
+                command = running.erase(command);
             }
         }
         for (const auto& handle : handles)
@@ -319,7 +316,9 @@ private:
             owner->finished(Key{run->ui.id(), run->id}, run);
         // A command that returns once asked to stop was interrupted too, whatever it returned.
         const int code = stopped || run->stop.stop_requested() ? interruptedExitCode : !error.empty() ? 1 : run->exitCode;
-        run->send("webfront.commands.exit", code, error.empty() ? std::string_view{} : chunks(error).front());
+        try {
+            run->send("webfront.commands.exit", code, error.empty() ? std::string_view{} : chunks(error).front());
+        } catch (...) { }  // nothing is left to report it to
     }
 };
 
@@ -346,23 +345,26 @@ public:
     using UI      = typename App::UI;
     using Context = commands::Context<UI>;
 
-    /// Throws std::logic_error if the application already has a Commands object: its bridge functions are taken.
+    /// Throws std::logic_error if one of its bridge functions is already registered, as by another Commands object.
     explicit Commands(App& app) : registry(std::make_shared<commands::detail::Registry<UI>>()) {
-        if (!app.template cppFunction<std::string>("webfront.commands.list", [owner = registry] {
-                return owner->list();
-            }))
-            throw std::logic_error("This application already has webfront::Commands: create one per application");
+        const auto registered = [](bool added) {
+            if (!added)
+                throw std::logic_error("The webfront.commands bridge functions are taken: create one webfront::Commands per application");
+        };
+        registered(app.template cppFunction<std::string>("webfront.commands.list", [owner = registry] {
+            return owner->list();
+        }));
+        registered(app.template cppFunction<void, UI, std::uint32_t, std::string, std::string>(
+            "webfront.commands.start", [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
+                owner->start(std::move(ui), id, name, arguments);
+            }));
+        registered(app.template cppFunction<void, UI, std::uint32_t>("webfront.commands.cancel", [owner = registry](UI ui, std::uint32_t id) {
+            owner->cancel(ui, id);
+        }));
         registry->keep(app.subscribeUIClosed([weak = std::weak_ptr(registry)](UI ui) {
             if (auto owner = weak.lock())
                 owner->closed(ui);
         }));
-        app.template cppFunction<void, UI, std::uint32_t, std::string, std::string>(
-            "webfront.commands.start", [owner = registry](UI ui, std::uint32_t id, const std::string& name, const std::string& arguments) {
-                owner->start(std::move(ui), id, name, arguments);
-            });
-        app.template cppFunction<void, UI, std::uint32_t>("webfront.commands.cancel", [owner = registry](UI ui, std::uint32_t id) {
-            owner->cancel(ui, id);
-        });
     }
 
     /// Registers a command. Throws std::invalid_argument for an empty name, one with whitespace, quotes or
