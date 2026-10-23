@@ -16,6 +16,8 @@ on:
       - 'cmake/WebFrontBootstrap.cmake'
       - 'include/webfront/system/DeveloperReleaseData.hpp'
       - '.github/actions/wf-driver/**'
+      - '.github/actions/remove-node/**'
+      - '.github/actions/setup-cmake/**'
       - '.github/workflows/DeveloperDistribution.yml'
   pull_request:
     branches: [develop, master]
@@ -31,6 +33,8 @@ on:
       - 'cmake/WebFrontBootstrap.cmake'
       - 'include/webfront/system/DeveloperReleaseData.hpp'
       - '.github/actions/wf-driver/**'
+      - '.github/actions/remove-node/**'
+      - '.github/actions/setup-cmake/**'
       - '.github/workflows/DeveloperDistribution.yml'
   workflow_dispatch:
     inputs:
