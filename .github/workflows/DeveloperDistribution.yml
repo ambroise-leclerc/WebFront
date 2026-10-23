@@ -58,6 +58,7 @@ jobs:
   # bytes with these, then publishes its own. #318 removes this job with the Node.js tools.
   package:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -106,6 +107,8 @@ jobs:
   wf-package:
     needs: package
     runs-on: ubuntu-26.04
+    # The whole job takes about two minutes; a longer one is a stalled step (a package mirror, say): fail early.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/remove-node
@@ -162,6 +165,7 @@ jobs:
     if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: wf-package
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     permissions:
       contents: write
       pages: write
