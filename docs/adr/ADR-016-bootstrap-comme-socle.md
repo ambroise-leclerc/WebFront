@@ -5,6 +5,7 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-22 | Acceptée | Ambroise Leclerc | Décision initiale : environnement bootstrap comme architecture de base, liste normative du cœur, scripts autorisés, indépendance vis-à-vis de Node.js. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 1.1 | 2026-10-23 | Acceptée | Ambroise Leclerc | Garde-fou `MinimalCoreAssets` (#314) : la liste est vérifiée par CTest, budget de 150 Kio d'octets décodés ; le favicon devient `FaviconData`, généré par CMake pur depuis `js/core/favicon.ico`. | — |
 
 ## Statut et date
 
@@ -43,15 +44,16 @@ téléchargée et vérifiée, tandis que le code source de WebFront redevient mi
 | `WebFrontJsData` | Bridge `WebFront.js` |
 | `FallbackIndexHtmlData` | Page de repli |
 | `FallbackModuleData` | Module de repli |
-| favicon (`WebFrontIco`, servi par `IndexFS`) | Icône par défaut |
+| `FaviconData` (alias `IndexFS::WebFrontIco`, source `js/core/favicon.ico`) | Icône par défaut |
 | `DeveloperIndexHtmlData` | Page du bootstrap développeur |
 | `DeveloperBootstrapData` | Chargeur bootstrap (`bootstrap.bundle.mjs`) |
 | `DeveloperReleaseData` | Release épinglée (URL et SHA-512) |
 
 Toute autre ressource web (bibliothèques, runner de test, pages de test, terminal, providers
 applicatifs) est produite par un script autorisé et livrée par l'archive d'environnement ou par un
-paquet npm verrouillé par intégrité. Cette liste est normative : un test garde-fou (#314) la
-compare aux fichiers de ressources de `include/webfront/system/` et impose un budget de taille ;
+paquet npm verrouillé par intégrité. Cette liste est normative : le test garde-fou `MinimalCoreAssets` (#314) la
+compare aux en-têtes de ressources de `include/webfront/` et impose un budget de 150 Kio d'octets décodés
+(somme des `dataSize` après décodage gzip, indépendante de l'encodage) ;
 ajouter une ressource exige de modifier cette ADR (nouvelle version) et ce test dans le même
 changement. Le C++ header-only (filesystems, serveur, bridge, frontends) n'est pas concerné.
 

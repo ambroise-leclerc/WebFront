@@ -3,7 +3,7 @@
 The C++ library embeds only what every application needs: the browser bridge (`WebFront.js`), the
 fallback page and module, and the bootstrap page and loader of the developer environment, with the
 pinned release data (`Developer*Data.hpp`). Each is generated from a readable source under `js/core/`
-into a header under `include/webfront/system/`. Libraries such as React, Babel and Jasmine are not
+(including the default favicon, `js/core/favicon.ico`) into a header under `include/webfront/system/`. Libraries such as React, Babel and Jasmine are not
 embedded: they are npm packages that `wf install` locks and downloads (see
 [DEVELOPER_ENVIRONMENT.md](DEVELOPER_ENVIRONMENT.md)), and the tests obtain them from a local registry.
 Normal C++ consumer builds use the checked-in headers and need neither Node.js nor npm.
@@ -14,6 +14,17 @@ Normal C++ consumer builds use the checked-in headers and need neither Node.js n
 were removed. An application that served them replaces them with `wf install` of the package it needs
 (`react`, `react-dom`, `@babel/standalone`, `jasmine-core`) and `wf embed`, which generates a
 header-only provider for the application's own build output.
+
+## Guard
+
+The `MinimalCoreAssets` CTest case (`test/cmake/CheckMinimalCoreAssets.cmake`, pure CMake) lists every
+resource header of `include/webfront/` (named `*Data.hpp` or declaring a `dataSize` payload) and fails on one
+outside the normative list of [ADR-016](adr/ADR-016-bootstrap-comme-socle.md), or when the decoded payloads exceed
+150 KiB. The budget counts decoded bytes (gzip streams are measured by their trailer), so it does not depend on the
+encoding; the test also prints the encoded bytes and the size of the headers. Adding a resource means amending the ADR
+and the list in the script together. `MinimalCoreAssetsRejectsUnlisted` proves the guard fails on an unlisted
+header, a hidden payload and an oversized resource. `du -sh include/webfront/system` was 2.7 MB when the epic began
+and is 188 KB now.
 
 ## Maintenance
 
@@ -33,6 +44,9 @@ once, avoiding the growing-string CMake loop. Generation and checking use the sa
 intermediate files. `EmbeddedAssetGenerator` covers empty and binary inputs, word boundaries, padding,
 line wrapping and a nonzero status for stale or missing files; a per-asset `*AssetFresh` test attributes
 each stale header. `.gitattributes` keeps sources and headers at LF.
+
+The favicon is binary and small, so `js/core/EmbedBinaryAsset.cmake` renders it (identity encoded, same header format)
+with CMake alone: no Node.js and no compressor. `FaviconAssetFresh` compares the checked-in `FaviconData.hpp` with it.
 
 The renderer can pack gzip-compressed bytes (`encoding = "gzip"`, `dataSize` excluding the trailing word
 padding) with the vendored fflate `gzipSync` (level 9, mem 8, mtime 0, no filename, fixed OS byte), so

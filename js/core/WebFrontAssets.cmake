@@ -28,6 +28,21 @@ function(_webfront_add_embedded_text_asset source header struct test_name)
     endif()
 endfunction()
 
+# The favicon is binary and small: a pure CMake renderer, with no Node.js, produces its header.
+function(_webfront_add_embedded_binary_asset source header struct test_name)
+    add_custom_command(TARGET webfront-embedded-assets POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DINPUT=${source} -DOUTPUT=${header} -DSTRUCT=${struct}
+            -P ${_WEBFRONT_ASSETS_DIR}/EmbedBinaryAsset.cmake
+        COMMENT "Regenerating ${header}"
+        VERBATIM
+    )
+    if(ENABLE_TESTING)
+        add_test(NAME ${test_name}
+            COMMAND ${CMAKE_COMMAND} -DINPUT=${source} -DCHECK=${header} -DSTRUCT=${struct}
+                -P ${_WEBFRONT_ASSETS_DIR}/EmbedBinaryAsset.cmake)
+    endif()
+endfunction()
+
 function(webfront_add_embedded_assets)
     find_package(Git QUIET)
     set(root "${_WEBFRONT_ASSETS_DIR}/../..")
@@ -42,6 +57,9 @@ function(webfront_add_embedded_assets)
     _webfront_add_embedded_text_asset(
         "${root}/js/core/fallback/webfront-fallback.mjs" "${root}/include/webfront/system/FallbackModuleData.hpp"
         FallbackModuleData FallbackModuleAssetFresh)
+    _webfront_add_embedded_binary_asset(
+        "${root}/js/core/favicon.ico" "${root}/include/webfront/system/FaviconData.hpp"
+        FaviconData FaviconAssetFresh)
 
     _webfront_add_embedded_text_asset(
         "${root}/js/core/bootstrap/index.html" "${root}/include/webfront/system/DeveloperIndexHtmlData.hpp"
@@ -51,6 +69,12 @@ function(webfront_add_embedded_assets)
         DeveloperBootstrapData DeveloperBootstrapAssetFresh)
 
     if(ENABLE_TESTING)
+        add_test(NAME MinimalCoreAssets
+            COMMAND ${CMAKE_COMMAND} -DROOT=${root} -P ${root}/test/cmake/CheckMinimalCoreAssets.cmake)
+        # The guard must fail on an asset header outside the normative list.
+        add_test(NAME MinimalCoreAssetsRejectsUnlisted
+            COMMAND ${CMAKE_COMMAND} -DROOT=${root} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/minimal-core-assets
+                -P ${root}/test/cmake/CheckMinimalCoreAssetsNegative.cmake)
         find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
         add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
             --test "${root}/js/developer/tools/check.mjs" "${root}/js/developer/tools/distribution-check.mjs"

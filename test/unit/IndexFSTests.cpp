@@ -1,5 +1,4 @@
 #include <catch2/catch_test_macros.hpp>
-#include <webfront/http/Gzip.hpp>
 #include <webfront/system/IndexFS.hpp>
 #include <webfront/tooling/HexDump.hpp>
 
@@ -54,12 +53,9 @@ SCENARIO("IndexFileSystem provides basic files for browser support") {
                 array<uint8_t, 1024> buffer;
                 auto readSize = faviconFile->read(span(reinterpret_cast<char*>(buffer.data()), buffer.size()));
                 array<uint8_t, 16> head, tail;
-                REQUIRE(faviconFile->getEncoding() == "gzip");
-                const auto decoded = http::gzip::decodeGzip(string_view(reinterpret_cast<const char*>(buffer.data()), readSize));
-                REQUIRE(decoded);
-                REQUIRE(decoded->size() == 766);
-                copy(decoded->begin(), decoded->end(), buffer.begin());
-                readSize = decoded->size();
+                REQUIRE_FALSE(faviconFile->isEncoded());
+                REQUIRE(faviconFile->getEncoding().empty());
+                REQUIRE(readSize == 766);
                 head     = {0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x20, 0x20, 0x10, 0x00, 0x01, 0x00, 0x04, 0x00, 0xE8, 0x02};
                 tail     = {0X00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x07};
                 REQUIRE(equal(head.begin(), head.end(), buffer.begin()));

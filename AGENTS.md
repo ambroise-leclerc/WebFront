@@ -15,7 +15,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `include/webfront/`: public header-only library, included as `<webfront/...>`. `WebFront.hpp` is the main orchestration API; `Commands.hpp` adds an application's C++ commands to the developer environment's terminal.
 - `include/webfront/http/`: HTTP and WebSocket protocol implementation.
 - `include/webfront/weblink/`: bridge message encoding and routing.
-- `include/webfront/system/`: layered virtual filesystems and embedded web resources.
+- `include/webfront/system/`: layered virtual filesystems and the embedded web resources, a closed list guarded by the `MinimalCoreAssets` CTest case (normative list and 150 KiB decoded budget in ADR-016; changing it means amending the ADR and `test/cmake/CheckMinimalCoreAssets.cmake` together).
 - `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), build and vendoring tools. Production C++ remains header-only in `include/webfront/`.

@@ -53,6 +53,7 @@
 # re-read those sources, so Windows checkouts must preserve LF for every asset.
 js/core/WebFront.js                          text eol=lf
 js/core/bootstrap/*                          text eol=lf
+js/core/favicon.ico                          binary
 include/webfront/system/WebFrontJsData.hpp           text eol=lf
 js/core/fallback/index.html                  text eol=lf
 js/core/fallback/webfront-fallback.mjs       text eol=lf
