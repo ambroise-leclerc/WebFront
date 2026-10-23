@@ -16,6 +16,8 @@ async function writeFile(path, text) {
     await call('write', id, 'output', 0, new TextEncoder().encode(text));
     await call('commit', id);
 }
+// Ends the --public smoke test, which has no local registry for the checks that follow the generated headers.
+class PublicSmokeDone extends Error {}
 try {
     await webFront.ready;
     for (let attempt = 0; attempt < 300; ++attempt) {
@@ -144,6 +146,7 @@ try {
     const lifeHeader = await webFront.cppFunction('test.header')('LifeUI');
     await runtime.execute(['embed', 'life-ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
     assert(await webFront.cppFunction('test.header')('LifeUI') === lifeHeader, 'Life header must be deterministic');
+    if (!config.registryExplicit) throw new PublicSmokeDone();
     // A dependency added by hand desynchronizes the lock: commands say so and nothing is resolved implicitly.
     manifest.dependencies.scheduler = '*';
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
@@ -638,8 +641,12 @@ try {
     await waitState('final', 'running');
     await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers + scripts + type check + terminal passed');
 } catch (error) {
-    console.error(error);
-    await webFront.cppFunction('test.report')(false, String(error.stack ?? error));
+    if (error instanceof PublicSmokeDone)
+        await webFront.cppFunction('test.report')(true, 'Public distribution: WASM + npm + TSX + PI + Life animation + deterministic headers passed');
+    else {
+        console.error(error);
+        await webFront.cppFunction('test.report')(false, String(error.stack ?? error));
+    }
 } finally {
     setTimeout(() => globalThis.close(), 0);
 }

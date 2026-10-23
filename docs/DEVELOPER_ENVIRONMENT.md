@@ -48,7 +48,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.5.0/environment.tgz`. This version (project manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published by the `developer-v0.5.0` tag (see `js/developer/tools/PUBLISHING.md`). Published 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.5.0/environment.tgz`. This version (project manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.5.0`. Published 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
