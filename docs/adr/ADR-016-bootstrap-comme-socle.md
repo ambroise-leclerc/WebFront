@@ -5,7 +5,8 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-22 | Acceptée | Ambroise Leclerc | Décision initiale : environnement bootstrap comme architecture de base, liste normative du cœur, scripts autorisés, indépendance vis-à-vis de Node.js. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
-| 1.1 | 2026-10-23 | Acceptée | Ambroise Leclerc | Garde-fou `MinimalCoreAssets` (#314) : la liste est vérifiée par CTest, budget de 150 Kio d'octets décodés ; le favicon devient `FaviconData`, généré par CMake pur depuis `js/core/favicon.ico`. | — |
+| 1.1 | 2026-10-23 | Acceptée | Ambroise Leclerc | Garde-fou `MinimalCoreAssets` (#314) : la liste est vérifiée par CTest, budget de 150 Kio d'octets décodés ; le favicon devient `FaviconData`, généré par CMake pur depuis `js/core/favicon.ico`. | [c0ee031](https://github.com/ambroise-leclerc/WebFront/commit/c0ee03131d3104721f8a24224533e753a5f6ad13) |
+| 1.2 | 2026-10-23 | Acceptée | Ambroise Leclerc | Auto-hébergement (#315) : le dépôt est un projet `wf` dont les scripts construisent l'environnement, le site et la vérification du pin avec l'environnement d'amorçage épinglé ; octets identiques à la construction Node.js, preuve de reconstruction du bundle bootstrap. | — |
 
 ## Statut et date
 
@@ -91,6 +92,25 @@ incorporées dans un artefact généré autorisé, désigné nominativement. Exc
 bootstrap (`bootstrap.bundle.mjs` → `DeveloperBootstrapData.hpp`), qui incorpore notamment le
 décompresseur. Il est accompagné de son lock, de ses notices de licence et d'une preuve de
 reconstruction (#315). Toute autre exception exige une révision de cette ADR.
+
+### Auto-hébergement de l'environnement (#315)
+
+Le dépôt est lui-même un projet `wf` : `webfront.project.json` (dépendances de construction exactes, scripts, permissions) et
+`webfront-packages.lock.json` (intégrités SHA-512) sont à la racine, qui reste une liste fermée où ces deux fichiers
+s'ajoutent. Les scripts `js/developer/scripts/` (`build.mjs`, `site.mjs`, `pin.mjs`) s'exécutent dans l'environnement
+d'amorçage épinglé (`cmake/WebFrontBootstrap.cmake`) par le pilote `webfront-wf`, avec l'esbuild-wasm verrouillé dans le
+Worker du script : ils lisent les sources du projet et les paquets verrouillés, n'écrivent que sous `permissions.publish`
+(répertoires `build-*` et sorties versionnées nommées) et n'ont ni shell ni API Node. Ils produisent `environment.tgz`,
+`environment.json`, `provision.json`, `bootstrap.bundle.mjs` et `DeveloperReleaseData.hpp` **octet pour octet** comme la
+construction Node.js, deux constructions successives étant identiques ; les CTest `SelfBuild*` l'exigent à chaque exécution
+avec `WEBFRONT_DEVELOPER_FIXTURES` et, tant que Node.js subsiste (#318), le job `wf-package` de `DeveloperDistribution.yml`
+compare aussi les deux constructions. La preuve de reconstruction du bundle bootstrap exigée plus haut est
+`SelfBuildRefreshMatchesSources` : `wf run build --refresh-bootstrap` régénère `bootstrap.bundle.mjs`, `packages.bundle.mjs`,
+leurs sommes de contrôle et les deux en-têtes `DeveloperIndexHtmlData.hpp` et `DeveloperBootstrapData.hpp`, identiques aux
+fichiers versionnés ; `wf run embed-core` régénère les six en-têtes du cœur (`SelfBuildCoreHeaders`). Les opérations d'hôte de la
+publication (Pages, prerelease, dépôt `gh-pages`) restent des scripts shell et des étapes de workflow : elles n'entrent pas
+dans l'API `context`. L'environnement 0.6.1 construit ainsi par la 0.6.0 corrige aussi `runNonInteractive`, qui perdait la
+sortie d'une commande avant sa fin ; la 0.6.0 reste immuable.
 
 ### Distribution
 

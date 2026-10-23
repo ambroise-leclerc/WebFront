@@ -55,7 +55,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Proposée | 2026-10-20 | 0.2 — 2026-10-22 |
 | [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Proposée | 2026-10-20 | 0.2 — 2026-10-22 |
 | [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Proposée | 2026-10-20 | 0.2 — 2026-10-22 |
-| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.0 — 2026-10-22 |
+| [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.2 — 2026-10-23 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.

@@ -4,6 +4,17 @@
 
 ### Added
 
+- The developer environment builds itself (#315, sources of distribution 0.6.1, release pin unchanged at 0.6.0): the
+  repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json`) and the scripts of
+  `js/developer/scripts/` run in the pinned bootstrap environment with `webfront-wf`. `build.mjs` bundles the environment
+  with the locked esbuild-wasm and writes `environment.tgz`, the starters, `provision.json` and the pinned header (with
+  `--refresh-bootstrap`, the bootstrap bundles, their checksums and the core headers); `site.mjs` stages the Pages site
+  and refuses to change a published version; `pin.mjs` checks the pinned header against the published archive; `embed-core.mjs` regenerates the core headers. The bytes
+  are those of the Node.js build, twice in a row (CTest `SelfBuild*`, job `wf-package` of *Developer packages*). The
+  publication runs without Node.js (`pages.sh`, `archive-release.sh`, a shell tag check); `-DWEBFRONT_REQUIRE_NODE=OFF`
+  configures a test build without it. The inventory of the Node.js tools and their destination is
+  `docs/NODE_TOOLS_MIGRATION.md`; the maintainer procedure is `js/developer/tools/PUBLISHING.md`.
+
 - `webfront-wf` test driver and bootstrap provisioning (#321, developer distribution 0.6.0 published as `developer-v0.6.0`, pinned by `DeveloperReleaseData.hpp` and by the bootstrap): runs one `wf` command without interaction on a project
   and exits with its status (64 usage, 70 bootstrap failure, 71 time limit, 72 no result), with an optional JSON report.
   `cmake/WebFrontBootstrap.cmake` pins the bootstrap environment (0.6.0) and, with `ENABLE_TESTING=ON`, downloads
@@ -118,6 +129,10 @@
   `<webfront/system/FileSystem.hpp>`. Published 0.4.0 remains immutable.
 
 ### Fixed
+
+- `runNonInteractive` (developer environment 0.6.1) kept only the summary of a command: `output += await execute(...)` read
+  `output` before the command ran, so what it wrote meanwhile (a script's console output, install progress) was lost on
+  success. Regression test `WfDriverScriptOutput`.
 
 - A browser's disconnection is now reported and its connection released: `WebLink` emits its `closed` event once when
   the browser closes the connection or it fails. The event was never emitted before, so nothing observed

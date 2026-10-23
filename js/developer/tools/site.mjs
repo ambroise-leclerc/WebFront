@@ -3,49 +3,9 @@ import {readFile, writeFile, mkdir, readdir, stat} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
+import {baseUrl, versionName, versionPath, bootstrapHeader, distributionFiles} from './distribution.mjs';
+export {baseUrl, versionPath, bootstrapHeader, distributionFiles};
 
-function isHttpsDirectory(url) {
-    if (url.protocol !== 'https:') return false;
-    if (url.username || url.password) return false;
-    return !url.search && !url.hash;
-}
-
-export function baseUrl(value) {
-    const url = new URL(value);
-    if (!isHttpsDirectory(url)) throw new Error('Distribution base URL must be an HTTPS directory URL');
-    if (!url.pathname.endsWith('/')) url.pathname += '/';
-    return url.href;
-}
-export function versionPath(version) {
-    if (!versionName.test(version)) throw new Error('Invalid distribution version');
-    return `developer/${version}/`;
-}
-export function bootstrapHeader(version, base, integrity) {
-    if (!/^sha512-[A-Za-z0-9+/]{86}==$/.test(integrity)) throw new Error('Invalid distribution SHA-512');
-    const url = new URL(versionPath(version) + 'environment.tgz', baseUrl(base));
-    return `#pragma once
-
-// Pinned developer distribution. Regenerate with js/developer/tools/build.mjs --refresh-bootstrap.
-#include <string_view>
-
-namespace webfront::developer::release {
-inline constexpr std::string_view version{${JSON.stringify(version)}};
-inline constexpr std::string_view environment{${JSON.stringify(url.href)}};
-inline constexpr std::string_view integrity{${JSON.stringify(integrity)}};
-} // namespace webfront::developer::release
-`;
-}
-
-const validArchive = name => typeof name === 'string' && /^[a-z0-9-]+-starter\.tgz$/.test(name);
-const versionName = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-
-// A manifest may add starters without changing the publication machinery.
-export function distributionFiles(manifest) {
-    const archives = Object.values(manifest.starters ?? {}).map(starter => starter.archive);
-    if (archives.length === 0 || !archives.every(validArchive)) throw new Error('Invalid distribution starter archives');
-    if (new Set(archives).size !== archives.length) throw new Error('Invalid distribution starter archives');
-    return ['environment.tgz', ...archives, 'provision.json', 'DeveloperReleaseData.hpp'];
-}
 const digest = bytes => 'sha512-' + createHash('sha512').update(bytes).digest('base64');
 
 async function readDistribution(distribution) {

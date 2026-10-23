@@ -173,3 +173,8 @@ js/developer/vendor/package-lock.json              text eol=lf
 js/developer/tools/starters/pi/*               text eol=lf
 examples/life/ui/*                          text eol=lf
 js/developer/tools/*                           text eol=lf
+
+# The wf project of the repository: its scripts, manifest and lock are hashed inputs of the self-build.
+js/developer/scripts/*                      text eol=lf
+webfront.project.json                       text eol=lf
+webfront-packages.lock.json                 text eol=lf

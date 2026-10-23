@@ -15,7 +15,8 @@ function(_webfront_add_embedded_text_asset source header struct test_name)
         COMMENT "Regenerating ${header}"
         VERBATIM
     )
-    if(ENABLE_TESTING)
+    # The text asset generator is still a Node.js tool (#318): its freshness checks need Node.js.
+    if(ENABLE_TESTING AND WEBFRONT_NODE_EXECUTABLE)
         add_test(NAME ${test_name}
             COMMAND ${CMAKE_COMMAND}
                 -DINPUT=${source}
@@ -48,6 +49,19 @@ function(webfront_add_embedded_assets)
     set(root "${_WEBFRONT_ASSETS_DIR}/../..")
     cmake_path(NORMAL_PATH root)
     add_custom_target(webfront-embedded-assets COMMENT "Regenerating embedded browser bridge and fallback-page assets")
+    # Until #318 removes Node.js from the tests, the checks that still use it are registered when it is found. The default
+    # requires it, so that a test build never silently drops them; the job that proves a build without Node.js sets
+    # WEBFRONT_REQUIRE_NODE=OFF.
+    if(ENABLE_TESTING)
+        if(WEBFRONT_REQUIRE_NODE)
+            find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+        else()
+            find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs)
+            if(NOT WEBFRONT_NODE_EXECUTABLE)
+                message(STATUS "Node.js not found and not required: the asset freshness and JavaScript tests are not registered")
+            endif()
+        endif()
+    endif()
     _webfront_add_embedded_text_asset(
         "${root}/js/core/WebFront.js" "${root}/include/webfront/system/WebFrontJsData.hpp"
         WebFrontJsData WebFrontJsAssetsFresh)
@@ -75,14 +89,15 @@ function(webfront_add_embedded_assets)
         add_test(NAME MinimalCoreAssetsRejectsUnlisted
             COMMAND ${CMAKE_COMMAND} -DROOT=${root} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/minimal-core-assets
                 -P ${root}/test/cmake/CheckMinimalCoreAssetsNegative.cmake)
-        find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
-        add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
-            --test "${root}/js/developer/tools/check.mjs" "${root}/js/developer/tools/distribution-check.mjs"
-            "${root}/js/developer/tools/manifest-check.mjs" "${root}/js/developer/tools/restore-check.mjs" "${root}/js/developer/tools/scripts-check.mjs")
-        set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
-        add_test(NAME EmbeddedAssetGenerator COMMAND ${CMAKE_COMMAND} -E env
-            "WEBFRONT_TEST_CMAKE=${CMAKE_COMMAND}" "${WEBFRONT_NODE_EXECUTABLE}"
-            --test "${root}/js/developer/vendor/embed.test.mjs")
-        set_tests_properties(EmbeddedAssetGenerator PROPERTIES TIMEOUT 30)
+        if(WEBFRONT_NODE_EXECUTABLE)
+            add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
+                --test "${root}/js/developer/tools/check.mjs" "${root}/js/developer/tools/distribution-check.mjs"
+                "${root}/js/developer/tools/manifest-check.mjs" "${root}/js/developer/tools/restore-check.mjs" "${root}/js/developer/tools/scripts-check.mjs")
+            set_tests_properties(DeveloperJavaScript PROPERTIES TIMEOUT 30)
+            add_test(NAME EmbeddedAssetGenerator COMMAND ${CMAKE_COMMAND} -E env
+                "WEBFRONT_TEST_CMAKE=${CMAKE_COMMAND}" "${WEBFRONT_NODE_EXECUTABLE}"
+                --test "${root}/js/developer/vendor/embed.test.mjs")
+            set_tests_properties(EmbeddedAssetGenerator PROPERTIES TIMEOUT 30)
+        endif()
     endif()
 endfunction()

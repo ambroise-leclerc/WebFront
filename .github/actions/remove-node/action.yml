@@ -1,0 +1,22 @@
+name: Remove Node.js
+description: >-
+  Deletes node, nodejs, npm, npx and corepack from the runner (an ephemeral machine), then checks that none is reachable:
+  the steps that follow are the proof that a path needs no Node.js.
+runs:
+  using: composite
+  steps:
+    - name: Remove Node.js, npm and npx
+      shell: bash
+      run: |
+        for tool in node nodejs npm npx corepack; do
+          while path=$(command -v "$tool"); do
+            sudo rm -f "$path" || exit 1
+            hash -r
+          done
+        done
+        for tool in node nodejs npm npx; do
+          if command -v "$tool"; then
+            echo "::error::$tool is still reachable"
+            exit 1
+          fi
+        done

@@ -8,9 +8,11 @@ import {compress} from '../environment/embed.mjs';
 
 /**
  * Pinned packages copied from js/developer/vendor/node_modules, at the versions of its package-lock.json; typescript5
- * is the npm alias of the typescript 5.x that wf check is also tested with.
+ * is the npm alias of the typescript 5.x that wf check is also tested with. The others are the build dependencies of
+ * the environment, which the project at the root of the repository installs to build itself with wf run.
  */
-export const pinnedPackages = ['jasmine-core', 'react', 'react-dom', 'scheduler', 'typescript', 'typescript5'];
+export const pinnedPackages = ['jasmine-core', 'react', 'react-dom', 'scheduler', 'typescript', 'typescript5',
+    'esbuild-wasm', 'semver', '@xterm/xterm', '@xterm/addon-fit'];
 
 const encoder = new TextEncoder();
 async function integrity(bytes) {

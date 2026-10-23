@@ -17,6 +17,29 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     add_dependencies(webtest frontend_lifecycle)
 endif()
 
+# The publication script that archives the files in a release refuses a missing or invalid manifest (needs bash and jq).
+find_program(WEBFRONT_BASH bash)
+find_program(WEBFRONT_JQ jq)
+if(WEBFRONT_BASH AND WEBFRONT_JQ AND NOT WIN32)
+    add_test(NAME ArchiveReleaseRejectsInvalidManifest COMMAND ${CMAKE_COMMAND}
+        -DSCRIPT=${PROJECT_SOURCE_DIR}/js/developer/tools/archive-release.sh -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/archive-release
+        -DBASH=${WEBFRONT_BASH} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckArchiveRelease.cmake)
+    set_tests_properties(ArchiveReleaseRejectsInvalidManifest PROPERTIES TIMEOUT 30)
+endif()
+
+# A browser reuses the modules it loaded, by URL, in its profile (WebKitGTK: XDG_DATA_HOME and XDG_CACHE_HOME). The first
+# page that loads another version of the environment through the same profile fails with "Importing a module script
+# failed", and the pinned bootstrap environment differs from the one built from the sources as soon as they are ahead of
+# the pin. Each group of tests that does not go through RunWfDriver.cmake (which empties its own profile) has a profile of
+# its own, emptied by the fixture WebProfileReset before the tests run.
+function(webfront_use_own_profile name group)
+    set(directory "${CMAKE_CURRENT_BINARY_DIR}/webkitgtk-profiles/${group}")
+    set_property(TEST ${name} APPEND PROPERTY ENVIRONMENT "XDG_DATA_HOME=${directory}/data" "XDG_CACHE_HOME=${directory}/cache")
+    set_property(TEST ${name} APPEND PROPERTY FIXTURES_REQUIRED WebProfileReset)
+endfunction()
+add_test(NAME WebProfileReset COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/webkitgtk-profiles")
+set_tests_properties(WebProfileReset PROPERTIES FIXTURES_SETUP WebProfileReset LABELS "web-integration" TIMEOUT 30)
+
 # Optional offline fixtures (the local npm registry, the environment built from the sources) are provisioned by
 # maintainers, never downloaded by CTest.
 set(WEBFRONT_DEVELOPER_FIXTURES "" CACHE PATH "Prepared browser developer environment/registry fixtures")
@@ -32,6 +55,7 @@ if(WEBFRONT_DEVELOPER_FIXTURES
     webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle
         ARGUMENTS --project "${_suite_project}" --registry-dir "${WEBFRONT_DEVELOPER_FIXTURES}/registry" --timeout ${_suite_timeout}
                   -- test --timeout ${_suite_timeout})
+    webfront_use_own_profile(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} jasmine)
 else()
     webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle SKIP_JASMINE)
     if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION})
@@ -92,6 +116,7 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         "${WEBFRONT_DEVELOPER_FIXTURES}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated")
     webfront_set_browser_test_properties(DeveloperBrowserIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 180)
     set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+    webfront_use_own_profile(DeveloperBrowserIntegration developer)
     # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
     if(TARGET webfront-wf)
         file(READ "${WEBFRONT_DEVELOPER_FIXTURES}/provision.json" _provision)
@@ -116,7 +141,7 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [PINNED] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
             cmake_parse_arguments(ARG "PINNED" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
-            set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}")
+            set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
                     list(APPEND options "-DEXPECT_${option}=${ARG_${option}}")
@@ -155,6 +180,8 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         # The pinned bootstrap environment, downloaded and verified at configure time, runs a command by itself.
         webfront_add_driver_test(WfDriverPinned 0 "init" PINNED OUTPUT "Created webfront.project.json" FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-pinned")
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
+        # What a script writes to its console before it ends reaches the result of the command.
+        webfront_add_driver_test(WfDriverScriptOutput 0 "run|echo|one|two" OUTPUT "echo says one two")
         webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
             INTEGRITY "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
@@ -177,12 +204,83 @@ if(WEBFRONT_DEVELOPER_FIXTURES
             add_test(NAME WebSuiteInstall
                 COMMAND ${_developer_xvfb_prefix} ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
                     -DPROJECT=${_suite_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work -DENVIRONMENT= -DINTEGRITY=
-                    -DREGISTRY=${WEBFRONT_DEVELOPER_FIXTURES}/registry -DEXPECT_STATUS=0 -DCOMMAND=install "-DEXPECT_OUTPUT=Installed [0-9]+ packages"
+                    -DREGISTRY=${WEBFRONT_DEVELOPER_FIXTURES}/registry -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/WebSuiteInstall -DEXPECT_STATUS=0 -DCOMMAND=install "-DEXPECT_OUTPUT=Installed [0-9]+ packages"
                     -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
             webfront_set_browser_test_properties(WebSuiteInstall "${CMAKE_CURRENT_SOURCE_DIR}" 120)
             set_tests_properties(WebSuiteInstall PROPERTIES FIXTURES_REQUIRED WebSuiteProject FIXTURES_SETUP WebSuiteInstalled)
             set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled)
         endif()
+
+        # The environment builds itself (#315): the pinned bootstrap environment runs js/developer/scripts on a copy of the
+        # sources, with the build dependencies installed from the local registry. The outputs stay inside that copy.
+        set(_self_project "${CMAKE_CURRENT_BINARY_DIR}/self-build-project")
+        file(READ "${PROJECT_SOURCE_DIR}/js/developer/tools/distribution.json" _distribution)
+        string(JSON _self_version GET "${_distribution}" version)
+        # webfront_add_self_build_test(<name> <expected status> <wf command words separated by |> [OUTPUT <regex>]
+        #     [REQUIRES <fixture>] [PROVIDES <fixture>]): the project is the copy, the environment the pinned bootstrap one.
+        function(webfront_add_self_build_test name status command)
+            cmake_parse_arguments(ARG "" "OUTPUT;REQUIRES;PROVIDES" "" ${ARGN})
+            set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROJECT=${_self_project} -DENVIRONMENT= -DINTEGRITY=
+                -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
+            if(ARG_OUTPUT)
+                list(APPEND options "-DEXPECT_OUTPUT=${ARG_OUTPUT}")
+            endif()
+            add_test(NAME ${name} COMMAND ${_wf_run} ${options} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+            webfront_set_browser_test_properties(${name} "${CMAKE_CURRENT_SOURCE_DIR}" 120)
+            # The browser port stays locked (webfront_set_browser_test_properties), with the project they all write.
+            set_tests_properties(${name} PROPERTIES FIXTURES_REQUIRED "${ARG_REQUIRES}" RESOURCE_LOCK "webfront_port_9002;self-build-project")
+            if(ARG_PROVIDES)
+                set_tests_properties(${name} PROPERTIES FIXTURES_SETUP ${ARG_PROVIDES})
+            endif()
+        endfunction()
+        # webfront_add_self_build_check(<name> <script> <requires> [<arguments>...]): a CMake script on the copy.
+        function(webfront_add_self_build_check name script requires)
+            add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} ${ARGN} -P ${PROJECT_SOURCE_DIR}/test/cmake/${script})
+            set_tests_properties(${name} PROPERTIES FIXTURES_REQUIRED "${requires}" RESOURCE_LOCK self-build-project
+                LABELS "web-integration" TIMEOUT 120)
+        endfunction()
+
+        add_test(NAME SelfBuildProject COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareSelfBuildProject.cmake)
+        set_tests_properties(SelfBuildProject PROPERTIES FIXTURES_SETUP SelfBuildProject RESOURCE_LOCK self-build-project
+            LABELS "web-integration" TIMEOUT 60)
+        webfront_add_self_build_test(SelfBuildInstall 0 "install" OUTPUT "Installed [0-9]+ packages"
+            REQUIRES SelfBuildProject PROVIDES SelfBuildInstalled)
+        webfront_add_self_build_test(SelfBuild 0 "run|build|build-distribution" OUTPUT "Script build completed"
+            REQUIRES SelfBuildInstalled PROVIDES SelfBuilt)
+        webfront_add_self_build_test(SelfBuildRepeat 0 "run|build|build-distribution-repeat" OUTPUT "Script build completed"
+            REQUIRES SelfBuilt PROVIDES SelfBuiltTwice)
+        # The permissions of webfront.project.json frame where a script writes.
+        webfront_add_self_build_test(SelfBuildOutsidePermissions 1 "run|build|elsewhere" OUTPUT "Permission denied: writing elsewhere"
+            REQUIRES SelfBuilt)
+        # Reproducible, and (during the transition from Node.js) the very bytes of the environment the fixtures were built from.
+        set(_self_outputs environment.tgz environment.json provision.json DeveloperReleaseData.hpp runtime.mjs compiler.mjs
+            script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json pi-starter.tgz life-starter.tgz)
+        webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfBuiltTwice
+            -DLEFT=${_self_project}/build-distribution -DRIGHT=${_self_project}/build-distribution-repeat "-DFILES=${_self_outputs}")
+        webfront_add_self_build_check(SelfBuildMatchesFixtures CompareFiles.cmake SelfBuilt
+            -DLEFT=${_self_project}/build-distribution -DRIGHT=${WEBFRONT_DEVELOPER_FIXTURES} "-DFILES=${_self_outputs}")
+        # The checked-in bootstrap bundles, checksums and core headers are rebuilt from the sources by wf alone.
+        webfront_add_self_build_test(SelfBuildRefresh 0 "run|build|build-distribution|--refresh-bootstrap" OUTPUT "Script build completed"
+            REQUIRES SelfBuilt PROVIDES SelfRefreshed)
+        webfront_add_self_build_check(SelfBuildRefreshMatchesSources CheckSelfBuildRefresh.cmake SelfRefreshed
+            -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project} -DOUTPUT=build-distribution)
+        # The headers of the core's embedded assets are regenerated from their readable sources by wf alone.
+        webfront_add_self_build_test(SelfBuildCoreHeaders 0 "run|embed-core" OUTPUT "Script embed-core completed"
+            REQUIRES SelfBuildProject PROVIDES SelfCoreHeaders)
+        webfront_add_self_build_check(SelfBuildCoreHeadersMatch CompareFiles.cmake SelfCoreHeaders
+            -DLEFT=${_self_project}/include/webfront/system -DRIGHT=${PROJECT_SOURCE_DIR}/include/webfront/system
+            "-DFILES=WebFrontJsData.hpp;FallbackIndexHtmlData.hpp;FallbackModuleData.hpp;FaviconData.hpp;DeveloperIndexHtmlData.hpp;DeveloperBootstrapData.hpp")
+        # The Pages site keeps every version and refuses to change a published one.
+        webfront_add_self_build_test(SelfBuildSite 0 "run|site|build-distribution|build-site" OUTPUT "Script site completed"
+            REQUIRES SelfBuilt PROVIDES SelfStaged)
+        webfront_add_self_build_test(SelfBuildSiteRepeat 0 "run|site|build-distribution|build-site" OUTPUT "Script site completed"
+            REQUIRES SelfStaged PROVIDES SelfStagedTwice)
+        webfront_add_self_build_check(SelfBuildSiteTamper TamperFile.cmake SelfStagedTwice
+            -DFILE=${_self_project}/build-site/developer/${_self_version}/provision.json)
+        set_tests_properties(SelfBuildSiteTamper PROPERTIES FIXTURES_SETUP SelfTampered)
+        webfront_add_self_build_test(SelfBuildSiteRefusesChange 1 "run|site|build-distribution|build-site" OUTPUT "differs; increment the distribution version"
+            REQUIRES SelfTampered)
     endif()
     # Build the actual browser-generated header only after the setup test has produced it.
     add_executable(developer_embedded EXCLUDE_FROM_ALL DeveloperEmbeddedTest.cpp)

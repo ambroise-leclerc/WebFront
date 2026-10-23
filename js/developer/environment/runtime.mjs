@@ -267,8 +267,11 @@ export async function execute(args, context) {
 export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
     let exitCode = 0, output = '', report = null;
     const collect = text => { output += text; write(text); };
-    try { output += await execute(argv, {...context, write: collect, onReport: value => { report = value; }}); }
-    catch (error) {
+    try {
+        // Not `output += await ...`: the left side is read before the command runs, which would drop what it wrote.
+        const summary = await execute(argv, {...context, write: collect, onReport: value => { report = value; }});
+        output += summary;
+    } catch (error) {
         exitCode = error?.exitCode ?? 1;
         output += error?.message ?? String(error);
     }
