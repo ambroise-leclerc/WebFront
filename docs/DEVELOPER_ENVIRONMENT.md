@@ -468,7 +468,7 @@ and integrity. Nothing else is needed: no Node.js, no npm and no public network 
 - Exit codes: 0 when every executed spec passed; 1 for a failed spec, a failure outside the specs, an unhandled
   asynchronous exception or rejection (Jasmine reports both as failures), a spec file that does not build or load,
   `fit`/`fdescribe`, and a run that executed nothing (no specs, or a pattern matching none); 124 at the time limit
-  (`--timeout`, default 60 s, 1 to 3600, covering the build and the publication as well as the run); 130 on Ctrl+C. Jasmine's own per-spec timeout (5 s by default) still ends a
+  (`--timeout`, default 60 s, 1 to 3600, covering the build and the publication as well as the run, and never later than the `--timeout` of a `wf run` script that runs `wf test`); 130 on Ctrl+C, at any step. Jasmine's own per-spec timeout (5 s by default) still ends a
   spec that never completes, which fails.
 - A synchronous infinite loop in a spec blocks the page that hosts the frame, as it would in any same-origin frame:
   the time limit cannot fire. Use asynchronous waits, which the time limit and Ctrl+C do stop.

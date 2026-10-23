@@ -19,7 +19,7 @@ async function load(entry) {
         return await import(pathToFileURL(path));
     } finally { await rm(temporary, {recursive: true, force: true}); }
 }
-const {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult} = await load('js/developer/environment/testing.mjs');
+const {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult, abortable} = await load('js/developer/environment/testing.mjs');
 const {bundleTests} = await load('js/developer/environment/bundler.mjs');
 const encode = text => new TextEncoder().encode(text);
 const decode = bytes => new TextDecoder().decode(bytes);
@@ -96,6 +96,31 @@ test('a result is cut to fit a bridge string, keeping the counts and the status'
     const tiny = fitResult(result, 2000);
     assert.ok(encoded(tiny) <= 2000 && tiny.report.failed === 4 && tiny.exitCode === 1);
     assert.ok(encoded(fitResult({exitCode: 1, output: 'x'.repeat(100000), report: null})) <= 60000);
+    // Every string of the report counts: a load error of NUL characters is six bytes each once encoded as JSON.
+    const unloaded = buildReport({type: 'error', message: '\u0000'.repeat(16384)}, {pattern: '\u0000'.repeat(5000)});
+    const unloadedResult = {exitCode: 1, output: formatReport(unloaded), report: unloaded};
+    assert.ok(encoded(unloadedResult) > 65535);
+    const unloadedFitted = fitResult(unloadedResult);
+    assert.ok(encoded(unloadedFitted) <= 60000 && unloadedFitted.report.status === 'error' && unloadedFitted.exitCode === 1, `fitted to ${encoded(unloadedFitted)} bytes`);
+    // Whatever the report holds, the limit is kept and the status and the counts survive.
+    const crowded = buildReport({type: 'done', version: 'v', overall: 'failed', durationMs: 1, specs: Array.from({length: 100}, (_, index) => spec('n'.repeat(1000) + index, index % 2 ? 'failed' : 'pending',
+        {reason: 'r'.repeat(1000), failures: [failure('\u0000'.repeat(16000), '\u0001'.repeat(16000))]})), global: [failure('\u0000'.repeat(16000))],
+        suites: [{name: 's'.repeat(1000), failures: [failure('\u0000'.repeat(16000))]}], incomplete: 'i'.repeat(1000)}, {pattern: 'p'.repeat(10000)});
+    for (const limit of [60000, 20000, 5000]) {
+        const result = fitResult({exitCode: 1, output: 'o'.repeat(50000), report: crowded}, limit);
+        assert.ok(encoded(result) <= limit && result.report.failed === 50 && result.report.pending === 50 && result.report.status === 'failed', `limit ${limit}: ${encoded(result)} bytes`);
+    }
+});
+
+test('abortable stops waiting at once, whatever the promise waits for', async () => {
+    const controller = new AbortController();
+    const never = new Promise(() => {});
+    const waiting = abortable(never, controller.signal);
+    controller.abort(new Error('stopped'));
+    await assert.rejects(waiting, /stopped/);
+    await assert.rejects(abortable(never, controller.signal), /stopped/);
+    assert.equal(await abortable(Promise.resolve(3), new AbortController().signal), 3);
+    await assert.rejects(abortable(Promise.reject(new Error('own')), new AbortController().signal), /own/);
 });
 
 test('a report is bounded: what the specs post is cut, not trusted', () => {

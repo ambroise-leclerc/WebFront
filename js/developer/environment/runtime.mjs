@@ -13,7 +13,7 @@ import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {build, dev} from './development.mjs';
-import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, testDirectory} from './testing.mjs';
+import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 
@@ -199,41 +199,46 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
 }
 
 // wf test [--timeout <seconds>] [pattern]: the specs of "test.specs" under the Jasmine of the lock, in a frame of this page.
-// context.onReport receives the structured report, also when the run fails.
-async function test(args, {bridge, signal, write = () => {}, createFrame, onReport}) {
+// context.onReport receives the structured report, also when the run fails. --timeout, never later than the deadline
+// of the wf script that runs this command, covers the whole command: no step waits for the bridge past it, and Ctrl+C
+// ends every step as well.
+async function test(args, {bridge, signal, write = () => {}, createFrame, onReport, deadline: inherited}) {
     const {timeout, pattern} = parseTestOptions(args);
-    // --timeout covers the whole command: the build, the publication and the run share one deadline.
-    const deadline = Date.now() + timeout * 1000;
+    const deadline = runDeadline(timeout, inherited);
     const limit = new AbortController();
-    const timer = setTimeout(() => limit.abort(), timeout * 1000);
+    const timer = setTimeout(() => limit.abort(), secondsLeft(deadline) * 1000);
     const preparing = signal ? AbortSignal.any([signal, limit.signal]) : limit.signal;
+    const step = promise => abortable(promise, preparing);
     const runId = crypto.randomUUID();
     const directory = `${testDirectory}/${runId}`;
     let jasmineVersion = '';
     let reported = false;
     const finished = report => { reported = true; report.jasmine = jasmineVersion; onReport?.(report); return report; };
     try {
-        const project = await loadManifest(bridge);
+        const project = await step(loadManifest(bridge));
         const specs = specFiles(project.manifest);
         const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
         const jasmine = jasmineCore(lock);
         jasmineVersion = jasmine.node.version;
-        const files = await buildInWorker(bridge, {type: 'tests', specs, lock}, preparing);
-        const jasmineBytes = await readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`);
-        await publish(bridge, directory, runnerFiles(files, jasmineBytes), {signal: preparing});
+        const files = await step(buildInWorker(bridge, {type: 'tests', specs, lock}, preparing));
+        const jasmineBytes = await step(readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`));
+        await step(publish(bridge, directory, runnerFiles(files, jasmineBytes), {signal: preparing}));
         write(syncNotice(project));
-        const report = finished(await runInFrame({pattern, timeout: Math.max(0.001, (deadline - Date.now()) / 1000), runId, signal, write, createFrame}));
+        const report = finished(await runInFrame({pattern, timeout: Math.max(0.001, secondsLeft(deadline)), runId, signal, write, createFrame}));
         write('\n');
         return reportResult(report);
     } catch (error) {
-        // The limit's own abort ends the preparation like the limit ends the run: with exit code 124 and its report.
-        if (limit.signal.aborted && !signal?.aborted && !error.report) error = stoppedRun('timeout', pattern);
+        // An abort of the preparation ends the command like it ends a run: Ctrl+C with 130, the limit with 124, and a report.
+        if (!error.report) {
+            if (signal?.aborted) error = stoppedRun('interrupted', pattern);
+            else if (limit.signal.aborted) error = stoppedRun('timeout', pattern);
+        }
         if (error.report && !reported) finished(error.report);
         throw error;
     } finally {
         clearTimeout(timer);
-        // The files of the run are not needed any more; an empty directory replaces them (best effort).
-        await publish(bridge, directory, new Map()).catch(() => {});
+        // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds.
+        await Promise.race([publish(bridge, directory, new Map()).catch(() => {}), new Promise(resolve => setTimeout(resolve, 2000))]);
     }
 }
 

@@ -148,6 +148,16 @@ export function formatReport(report) {
 }
 
 const progress = {passed: '.', failed: 'F', pending: '*'};
+/** The promise, or a rejection with the signal's reason as soon as the signal aborts, whatever the promise is waiting for. */
+export function abortable(promise, signal) {
+    return new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        if (signal.aborted) abort();
+        signal.addEventListener('abort', abort, {once: true});
+        promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
+}
+
 export const stoppedRun = (reason, pattern) => {
     const [message, exitCode] = reason === 'timeout' ? ['Tests stopped at their time limit', 124] : ['Tests stopped by Ctrl+C', 130];
     return Object.assign(new ScriptExit(message, exitCode), {report: emptyReport(reason, exitCode, {pattern, error: message})});
@@ -219,14 +229,23 @@ export function fitResult(result, limit = resultLimit) {
     const steps = [
         ...[4096, 1024, 256].map(length => () => { fitted.output = clipText(fitted.output, length); }),
         () => { for (const problem of problems(fitted.report)) problem.stack = ''; },
-        ...[2048, 512, 128].map(length => () => { for (const problem of problems(fitted.report)) problem.message = clipText(problem.message, length); }),
+        ...[2048, 512, 128].map(length => () => {
+            for (const problem of problems(fitted.report)) problem.message = clipText(problem.message, length);
+            for (const key of ['error', 'incomplete', 'pattern']) if (typeof fitted.report[key] === 'string') fitted.report[key] = clipText(fitted.report[key], length);
+        }),
         ...[10, 3, 0].map(count => () => {
             for (const key of ['failures', 'suites', 'pendingSpecs']) if (fitted.report[key]) fitted.report[key].length = Math.min(fitted.report[key].length, count);
             fitted.report.global.length = Math.min(fitted.report.global.length, count);
         }),
         () => { fitted.output = ''; },
+        // Whatever is left: the status and the counts, which are numbers and short words.
+        () => {
+            const {status, exitCode, jasmine, total, passed, failed, pending, excluded, durationMs} = fitted.report;
+            fitted.report = {status, exitCode, jasmine: clipText(String(jasmine ?? ''), 32), total, passed, failed, pending, excluded, durationMs,
+                failures: [], pendingSpecs: [], suites: [], global: [], pattern: '', incomplete: '', error: ''};
+        },
     ];
-    for (const step of fitted.report ? steps : steps.slice(0, 3).concat(steps.at(-1))) {
+    for (const step of fitted.report ? steps : steps.slice(0, 3).concat(steps.at(-2))) {
         step();
         if (byteLength(fitted) <= limit) break;
     }

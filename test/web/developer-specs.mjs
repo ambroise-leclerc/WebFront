@@ -494,6 +494,23 @@ try {
     const slowRun = await tested(['--timeout', '1'], {bridge: slowBridge});
     assert(slowRun.error?.exitCode === 124 && slowRun.report?.status === 'timeout' && performance.now() - slowStarted < 20000 && !document.querySelector('iframe[title="WebFront tests"]'),
         `The time limit must cover the preparation of a run: ${slowRun.error}`);
+    // A bridge operation that never returns, Ctrl+C during the build, and a script's deadline: each ends the command.
+    const stuckBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ? () => new Promise(() => {}) : webFront.cppFunction(name)};
+    const stuckStarted = performance.now();
+    const stuck = await tested(['--timeout', '1'], {bridge: stuckBridge});
+    assert(stuck.error?.exitCode === 124 && stuck.report?.status === 'timeout' && performance.now() - stuckStarted < 8000, `A blocked bridge operation must not hold the command past its limit: ${stuck.error}`);
+    const interruptPreparing = new AbortController();
+    const preparingRun = tested([], {bridge: slowBridge, signal: interruptPreparing.signal});
+    await delay(300);
+    interruptPreparing.abort(new Error('Interrupted'));
+    const preparingResult = await preparingRun;
+    assert(preparingResult.error?.exitCode === 130 && preparingResult.report?.status === 'interrupted', `Ctrl+C during the preparation must end with 130 and a report: ${preparingResult.error}`);
+    const withScript = await readManifest();
+    await writeFile('webfront.project.json', JSON.stringify({...withScript, scripts: {...withScript.scripts, specs: 'wf test'}}, null, 2));
+    const quickBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
+        async (...parameters) => { await delay(400); return webFront.cppFunction(name)(...parameters); } : webFront.cppFunction(name)};
+    const inherited = await runtime.execute(['run', '--timeout', '1', 'specs'], {...runContext(), bridge: quickBridge, onReport: () => {}}).then(() => null, error => error);
+    assert(inherited?.exitCode === 124, `wf test must keep the deadline of the script that runs it: ${inherited}`);
     // Each run publishes its own directory, emptied at the end: runs of two sessions never share files.
     const runDirectories = JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/test')));
     assert(runDirectories.length > 1 && runDirectories.every(name => /^[0-9a-f-]{36}\/?$/.test(name)), `Each run must have its own directory: ${runDirectories}`);
