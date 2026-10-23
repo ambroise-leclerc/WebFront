@@ -4,6 +4,13 @@
 
 ### Added
 
+- `wf build [entry]` / `wf dev [entry]` (#309, environment sources; release pin unchanged): build all manifest
+  entries to `.webfront/developer/build/` without opening the preview, or continuously rebuild one preview
+  with a persistent esbuild/WASM context. Sequential 750 ms polling watches read inputs and missing imports
+  (1,024 paths, 32 MiB per pass). Build/publication errors preserve the last good preview; diagnostics with
+  file/line/column stream to the terminal and overlay the preview. Corrections resume rebuilding; Ctrl+C
+  terminates the Worker, stops polling and aborts staged output.
+
 - Project manifest `webfront.project.json` (format 1: `name`, `version`, `dependencies`, `registry`, `scripts`,
   `entries`, `providers`, `test`, `permissions`), strictly validated; `wf init`, `wf install [--update]` and
   manifest-driven `wf preview`/`wf embed` in developer distribution 0.5.0, which `DeveloperReleaseData.hpp` pins

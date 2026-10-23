@@ -57,19 +57,32 @@ function virtualPluginWith(lock, packages, readProject, loaded) {
         return {contents: loader ? decoder.decode(bytes) : bytes, loader: loader ?? 'file'};
     };
     return {name: 'webfront-project', setup(build) {
+        // Resolution caches belong to one rebuild: source bytes must never survive into the next one.
+        build.onStart?.(() => loaded.clear());
         build.onResolve({filter: /.*/}, args => resolveImport(args, lock, find));
         build.onLoad({filter: /.*/, namespace: 'empty'}, () => ({contents: '', loader: 'js'}));
         for (const namespace of ['project', 'npm']) build.onLoad({filter: /.*/, namespace}, load(namespace));
     }};
 }
 
-export async function bundle(esbuild, {entry, lock, packages, readProject}) {
-    const result = await esbuild.build({entryPoints: [entry], bundle: true, write: false,
+function applicationOptions({entry, lock, packages, readProject}) {
+    return {entryPoints: [entry], bundle: true, write: false,
         outdir: '/output', entryNames: 'app', assetNames: 'assets/[name]-[hash]',
         format: 'esm', platform: 'browser', target: 'es2020', jsx: 'automatic', minify: true,
         define: {'process.env.NODE_ENV': '"production"'}, legalComments: 'inline',
-        plugins: [virtualPlugin(lock, packages, readProject)]});
-    return new Map(result.outputFiles.map(file => [file.path.replace(/^\/output\//, ''), file.contents]));
+        plugins: [virtualPlugin(lock, packages, readProject)]};
+}
+
+const outputFiles = result => new Map(result.outputFiles.map(file => [file.path.replace(/^\/output\//, ''), file.contents]));
+
+export async function bundle(esbuild, options) {
+    return outputFiles(await esbuild.build(applicationOptions(options)));
+}
+
+/** One esbuild context for repeated builds; the virtual filesystem is read again on every rebuild. */
+export async function bundleContext(esbuild, options) {
+    const context = await esbuild.context(applicationOptions(options));
+    return {rebuild: async () => outputFiles(await context.rebuild()), dispose: () => context.dispose()};
 }
 
 // Node.js built-in modules: a script importing one fails while it is loaded, unless a locked package of that name

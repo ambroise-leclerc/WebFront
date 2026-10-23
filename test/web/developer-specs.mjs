@@ -68,6 +68,67 @@ try {
         if (attempt === 99) throw new Error('React preview did not display C++ PI');
         await delay(50);
     }
+    // wf build does not navigate; wf dev keeps one WASM context, reloads only committed output and recovers.
+    assert((await runtime.complete('wf d', context)).candidates.includes('dev'), 'Completion must list wf dev');
+    assert((await runtime.complete('wf build m', context)).candidates.includes('main') &&
+        (await runtime.complete('wf dev m', context)).candidates.includes('main'), 'Build/dev completion must list manifest entries');
+    const frameBeforeBuild = frame.contentDocument;
+    const frameURLBeforeBuild = frame.contentWindow.location.href;
+    await runtime.execute(['build'], context);
+    assert(frame.contentDocument === frameBeforeBuild && frame.contentWindow.location.href === frameURLBeforeBuild,
+        'wf build must leave the preview alone');
+    assert((await readFile('.webfront/developer/build/app.js')).length > 0, 'wf build must publish compiled JS');
+    assert(new TextDecoder().decode(await readFile('.webfront/developer/build/index.html')).includes('./app.js'), 'wf build must publish HTML and JS');
+    const waitDev = async (predicate, message) => {
+        for (let attempt = 0; !predicate(); ++attempt) {
+            if (attempt === 300) throw new Error(message);
+            await delay(30);
+        }
+    };
+    await writeFile('watch/main.ts', "import {value} from './value'; document.getElementById('root').textContent = value;\n");
+    await writeFile('watch/value.ts', "export const value: string = 'watch-one';\n");
+    let devOutput = '';
+    const devStop = new AbortController();
+    const devResult = runtime.execute(['dev', 'watch/main.ts'], {...context, signal: devStop.signal,
+        write: text => { devOutput += text; }}).then(() => null, error => error);
+    try {
+        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-one', 'Initial dev preview did not mount');
+        await writeFile('watch/value.ts', "export const value: string = 'watch-two';\n");
+        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-two', 'Changed dependency was not rebuilt');
+        const lastGoodDocument = frame.contentDocument;
+        const lastGoodJS = new TextDecoder().decode(await readFile('.webfront/developer/preview/app.js'));
+        await writeFile('watch/value.ts', 'export const value = ;\n');
+        await waitDev(() => frame.contentDocument?.getElementById('webfront-build-diagnostics'), 'Syntax error was not overlaid');
+        assert(frame.contentDocument === lastGoodDocument && frame.contentDocument.getElementById('root').textContent === 'watch-two', 'A syntax error must preserve the running preview');
+        assert(new TextDecoder().decode(await readFile('.webfront/developer/preview/app.js')) === lastGoodJS, 'A syntax error must preserve published output');
+        assert(/watch\/value.ts:1:/.test(devOutput) && /watch\/value.ts:1:/.test(frame.contentDocument.getElementById('webfront-build-diagnostics').textContent), 'Terminal and overlay must locate the syntax error');
+        await writeFile('watch/value.ts', "export const value: string = 'watch-three';\n");
+        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-three', 'Corrected source did not recover');
+        assert(!frame.contentDocument.getElementById('webfront-build-diagnostics'), 'Successful build must clear the overlay');
+        await writeFile('watch/main.ts', "import {value} from './created'; document.getElementById('root').textContent = value;\n");
+        await waitDev(() => frame.contentDocument?.getElementById('webfront-build-diagnostics'), 'Missing import was not reported');
+        await writeFile('watch/created.ts', "export const value = 'watch-created';\n");
+        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-created', 'Creating a missing import must recover');
+        assert(history.length === historyLength, 'Dev reloads must replace session history');
+    } finally { devStop.abort(); }
+    assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
+    const afterStop = frame.contentDocument;
+    await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
+    await delay(1600);
+    assert(frame.contentDocument === afterStop && frame.contentDocument.getElementById('root').textContent === 'watch-created', 'Stopped dev must not rebuild or reload');
+    assert(JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/staging'))).length === 0, 'Stopped dev must leave no staging');
+    // Each named entry gets its own relative HTML/assets when building all manifest entries.
+    await writeFile('webfront.project.json', JSON.stringify({...manifest, entries: {one: 'watch/value.ts', two: 'watch/created.ts'}}));
+    await runtime.execute(['build'], context);
+    for (const name of ['one', 'two']) assert((await readFile(`.webfront/developer/build/${name}/index.html`)).length > 0, `Missing build entry ${name}`);
+    const firstEntryBuild = new TextDecoder().decode(await readFile('.webfront/developer/build/one/app.js'));
+    const secondEntryBuild = new TextDecoder().decode(await readFile('.webfront/developer/build/two/app.js'));
+    await writeFile('watch/created.ts', 'export const value = ;\n');
+    assert(await runtime.execute(['build'], context).then(() => false, () => true), 'A failed build must reject');
+    assert(new TextDecoder().decode(await readFile('.webfront/developer/build/one/app.js')) === firstEntryBuild &&
+        new TextDecoder().decode(await readFile('.webfront/developer/build/two/app.js')) === secondEntryBuild, 'Failure in a later entry must preserve the entire previous build');
+    await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
+    await writeFile('webfront.project.json', JSON.stringify(manifest));
     await runtime.execute(['embed', 'PiUI'], context);
     // Repeat the browser build to prove reproducibility, including licenses and packed gzip bytes.
     const first = await webFront.cppFunction('test.header')('PiUI');
