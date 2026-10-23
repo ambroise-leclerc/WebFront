@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Remove the retired PI starter from source distributions and `wf create`; Life remains the maintained React/C++ starter.
+  Preserve real-time fallbacks in scoped test clocks, release preparation cancellation before the test frame runs,
+  and retain independent reproducibility, bootstrap-refresh and packaged permission checks. The attribution audit
+  ignores user signature/log display settings.
+
+### Fixed
+
+- Script injection works before the page body exists, including a driver handshake completed during HTML parsing.
+
+- `wf test` supports WebKit engines without `AbortSignal.any()` (#335), preserving cancellation/deadline reports and
+  exit codes. Deadline and cleanup timers and the external cancellation listener are released on every exit.
+  The driver also remembers a watchdog close requested before the browser handshake; a late connection closes
+  without launching a command. Environment sources advance to 0.6.2 while the release and test-bootstrap pins remain on published 0.6.1.
+- Browser regressions advance deadlines, grace periods and dev polling explicitly instead of sleeping. Native command
+  cancellation uses a release handshake, repeated type checks reuse immutable fixture bytes, cache/command fixtures
+  drop the large application-only dependency graph after the Life checks, and the shared bridge
+  runner avoids full binary debug dumps. Retired PI and Signal Studio application tests are removed; Life retains
+  React/TSX, preview, reproducible generation and rootless embedded coverage. Reproducibility compares two identical
+  builds, followed by a separate bootstrap refresh; packaged-script permission checks remain end-to-end.
+
+
 ### Added
 
 - Tests, regeneration and CI without a JavaScript runtime or package manager (#318, epic #303). Configuring with `ENABLE_TESTING=ON` downloads, and

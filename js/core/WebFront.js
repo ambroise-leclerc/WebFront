@@ -187,7 +187,7 @@
             case TextCommand.injectScript: {
                 const script = document.createElement("script");
                 script.text = text;
-                document.body.appendChild(script);
+                (document.body ?? document.head ?? document.documentElement).appendChild(script);
                 break;
             }
             default:

@@ -53,7 +53,7 @@ its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install no JavaScript tooling.
 
-The environment archive contains pinned Life and PI starter descriptors. `wf create life` downloads and
+The current environment archive contains the pinned Life starter descriptor. `wf create life` downloads and
 verifies that separate archive, creates a new `ui` directory and prints the install/preview/embed
 commands. Existing directories are never replaced. The trusted environment hash protects both
 its own code and the starter descriptor; `provision.json` on the server is not a new trust anchor.
@@ -136,9 +136,8 @@ Reconfigure the native build with
 `WebFrontLifeEmbedded` and run it. Recompilation is explicit. The resulting binary needs neither
 project sources, downloaded cache nor network.
 
-The PI starter remains available through `wf create pi` for existing projects and regression
-coverage. Its sources are maintained under `js/developer/tools/starters/pi/`; the public C++
-examples are limited to Hello World and Life. Existing embedded React/Babel providers remain supported.
+The current distribution provides the Life starter; the retired PI starter is no longer shipped.
+The former embedded React/Babel providers have been removed; use the generated application provider.
 
 ## Project manifest (`webfront.project.json`)
 
@@ -582,13 +581,13 @@ wf run build build-developer-environment --refresh-bootstrap
 
 `js/developer/scripts/build.mjs` bundles the environment and compiler with the locked esbuild-wasm (run in the script's
 Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `life-starter.tgz`,
-`pi-starter.tgz`, `provision.json` and `DeveloperReleaseData.hpp`. The version and public base URL are in
+`provision.json` and `DeveloperReleaseData.hpp`. The version and public base URL are in
 `js/developer/tools/distribution.json`. `--refresh-bootstrap` additionally refreshes the two checked-in JS bundles, their
 input checksums (`bundles.json`, over `js/developer/tools/bundle-inputs.json`) and the pinned header; the core headers that embed
 the bundles come from `cmake --build <dir> --target webfront-embedded-assets`. Without
 that flag, it writes only to the output directory. `site.mjs` stages a build into the GitHub Pages site and `pin.mjs`
 checks the pinned header against the published archive. The headers of the core's embedded assets are rendered by `js/core/EmbedAsset.cmake`, in pure CMake (see below). The archives have the package identifiers
-`@webfront/developer-environment`, `@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static
+`@webfront/developer-environment` and `@webfront/life-starter`. They are distributed as static
 GitHub Pages downloads; no npm publication or scope ownership is required.
 
 The `SelfBuild*` CTest cases run the scripts on a copy of the sources, with the dependencies installed from the local
@@ -637,9 +636,21 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, PI and Life previews, C++ generation/animation and
-repeatable header generation. Its CTest fixtures then build that **browser-generated** header and run
-`DeveloperEmbeddedIntegration` and `LifeEmbeddedIntegration` from empty working directories
+`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
+**browser-generated** header and run `LifeEmbeddedIntegration` from an empty working directory
 with no developer callbacks.
-The standard CEF-off suite also checks project transactions, path rejection, PI, Life rules and boundaries, MIME types,
+Deadline and grace-period regressions advance a scoped clock instead of sleeping for seconds; Worker startup,
+bridge transfers and UI rendering still use the real browser. Dev polling is advanced explicitly after a committed
+edit, and native command cancellation waits on a test-controlled release rather than an arbitrary linger duration.
+Repeated type checks reuse immutable package bytes after the first real bridge read. After the Life application
+checks, cache/command fixtures drop React DOM and retain a small real dependency graph, avoiding repeated transfers
+of unrelated server/development bundles while preserving restore, integrity, compilation and rollback assertions. Retired PI and Signal Studio
+application tests are removed; bridge scalars, arrays, exceptions and Promise rejection remain covered by the shared
+bridge suite, and React/TSX/embedding by the maintained Life example. The browser suite remains one CTest case:
+its total duration is reported without subdividing it into artificial timing units. Snapshot/NodeNext assertions
+use the already installed real TypeScript compiler in the browser workflow. Developer specs, including cancellation
+and clock regressions, run through the repository's own `wf test`. Two identical self-build invocations verify byte reproducibility; a separate build verifies bootstrap refresh.
+The packaged-script permission rejection is also exercised end to end.
+
+The standard CEF-off suite also checks project transactions, path rejection, Life rules and boundaries, MIME types,
 bootstrap freshness, package resolution, gzip generation, interruption and offline cache reuse.

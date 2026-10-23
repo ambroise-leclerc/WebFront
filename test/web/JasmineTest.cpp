@@ -7,7 +7,6 @@
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
-#include "../fixtures/SignalDemo.hpp"
 #include "RejectedWebSocketServer.hpp"
 
 #include <array>
@@ -271,7 +270,6 @@ private:
             return state.senderCancellationObserved.load();
         });
         webFront->cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
-        webFront->cppFunction("signal.generate", &demo::generateSignal);
         webFront->cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket->url(); });
         uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;
@@ -421,7 +419,7 @@ private:
 }  // namespace
 
 int main(int argc, char** argv) {
-    log::setLogLevel(log::Debug);
+    log::setLogLevel(log::Warn);
     const auto consoleSink = log::addSinks(log::clogSink);
 
     BrowserIntegrationTest test;

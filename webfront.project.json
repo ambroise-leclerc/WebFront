@@ -25,6 +25,7 @@
       "test/developer/specs/scripts-specs.mjs",
       "test/developer/specs/development-specs.mjs",
       "test/developer/specs/testing-specs.mjs",
+      "test/developer/specs/timers-specs.mjs",
       "test/developer/specs/distribution-specs.mjs"
     ]
   },

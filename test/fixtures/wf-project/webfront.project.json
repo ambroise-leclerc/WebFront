@@ -3,6 +3,12 @@
   "name": "wf-driver-fixture",
   "version": "0.1.0",
   "dependencies": {},
-  "scripts": {"sleep": "tools/sleep.mjs", "echo": "tools/echo.mjs"},
-  "test": {"specs": ["tests/arithmetic.spec.js"]}
+  "scripts": {
+    "echo": "tools/echo.mjs"
+  },
+  "test": {
+    "specs": [
+      "tests/arithmetic.spec.js"
+    ]
+  }
 }

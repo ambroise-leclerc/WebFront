@@ -22,6 +22,7 @@
 #include <string_view>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace webfront::testdriver {
@@ -236,6 +237,30 @@ inline constexpr auto driverScript = R"JS(
 })();
 )JS";
 
+// Owns the connected UI and remembers a close requested before the handshake. Connection and
+// watchdog callbacks share one lock, so neither ordering can lose the close or launch a late command.
+template <typename UI>
+class DriverBrowser {
+public:
+    void connected(UI ui) {
+        std::scoped_lock lock{mutex};
+        browser.emplace(std::move(ui));
+        browser->addScript(closing ? "window.close()" : driverScript);
+    }
+    void close() {
+        std::scoped_lock lock{mutex};
+        if (std::exchange(closing, true))
+            return;
+        if (browser)
+            browser->addScript("window.close()");
+    }
+
+private:
+    std::mutex mutex;
+    std::optional<UI> browser;
+    bool closing = false;
+};
+
 inline std::string jsonArray(const std::vector<std::string>& items) {
     std::string json = "[";
     for (const auto& item : items)
@@ -314,12 +339,9 @@ int run(const Options& options, Setup&& setup = {}) {
                    .integrity   = *options.integrity,
                    .registry    = options.registryDirectory ? std::optional<std::string>{"/driver/registry/"} : std::nullopt});
 
-    std::mutex             uiMutex;
-    std::optional<typename App::UI> browser;
-    auto                   subscription = app.subscribeUIStarted([&](typename App::UI ui) {
-        ui.addScript(driverScript);
-        std::scoped_lock lock{uiMutex};
-        browser.emplace(ui);
+    DriverBrowser<typename App::UI> browser;
+    auto subscription = app.subscribeUIStarted([&](typename App::UI ui) {
+        browser.connected(ui);
     });
     // The time limit: ask the page to close, then end the process if the browser does not follow.
     std::jthread watchdog([&](std::stop_token stop) {
@@ -335,14 +357,9 @@ int run(const Options& options, Setup&& setup = {}) {
             || stop.stop_requested())
             return;
         outcome.timedOut();
-        {
-            std::scoped_lock ui{uiMutex};
-            if (browser) {
-                try {
-                    browser->addScript("window.close()");
-                } catch (const std::exception&) {}  // the bridge is gone: the forced exit below still applies
-            }
-        }
+        try {
+            browser.close();
+        } catch (const std::exception&) {}  // the bridge is gone: the forced exit below still applies
         if (!stop.stop_requested()
             && !wake.wait_for(lock,
                               stop,

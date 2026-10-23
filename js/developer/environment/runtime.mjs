@@ -206,15 +206,20 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
     const {timeout, pattern} = parseTestOptions(args);
     const deadline = runDeadline(timeout, inherited);
     const limit = new AbortController();
-    const timer = setTimeout(() => limit.abort(), secondsLeft(deadline) * 1000);
-    const preparing = signal ? AbortSignal.any([signal, limit.signal]) : limit.signal;
+    // Forward Ctrl+C into the deadline controller: older supported WebKit lacks AbortSignal.any.
+    const interrupt = () => limit.abort(signal.reason);
+    const preparing = limit.signal;
     const step = promise => abortable(promise, preparing);
     const runId = crypto.randomUUID();
     const directory = `${testDirectory}/${runId}`;
     let jasmineVersion = '';
     let reported = false;
     const finished = report => { reported = true; report.jasmine = jasmineVersion; onReport?.(report); return report; };
+    let timer;
     try {
+        timer = setTimeout(() => limit.abort(), secondsLeft(deadline) * 1000);
+        signal?.addEventListener('abort', interrupt, {once: true});
+        if (signal?.aborted) interrupt();
         const project = await step(loadManifest(bridge));
         const specs = specFiles(project.manifest);
         const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
@@ -223,6 +228,8 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
         const files = await step(buildInWorker(bridge, {type: 'tests', specs, lock}, preparing));
         const jasmineBytes = await step(readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`));
         await step(publish(bridge, directory, runnerFiles(files, jasmineBytes), {signal: preparing}));
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', interrupt);
         write(syncNotice(project));
         const report = finished(await runInFrame({pattern, timeout: Math.max(0.001, secondsLeft(deadline)), runId, signal, write, createFrame}));
         write('\n');
@@ -237,8 +244,13 @@ async function test(args, {bridge, signal, write = () => {}, createFrame, onRepo
         throw error;
     } finally {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', interrupt);
         // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds.
-        await Promise.race([publish(bridge, directory, new Map()).catch(() => {}), new Promise(resolve => setTimeout(resolve, 2000))]);
+        let cleanupTimer;
+        try {
+            await Promise.race([publish(bridge, directory, new Map()).catch(() => {}),
+                new Promise(resolve => { cleanupTimer = setTimeout(resolve, 2000); })]);
+        } finally { clearTimeout(cleanupTimer); }
     }
 }
 

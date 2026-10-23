@@ -1,5 +1,4 @@
 #include "../../examples/life/Life.hpp"
-#include "../fixtures/Pi.hpp"
 #include "../unit/TemporaryDirectory.hpp"
 #include <webfront/Commands.hpp>
 #include <webfront/WebFront.hpp>
@@ -10,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <utility>
 
 namespace {
@@ -28,7 +28,7 @@ std::string readFixtureText(const std::filesystem::path& path) {
 
 class FixturesFS {
 public:
-    explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) { }
+    explicit FixturesFS(std::filesystem::path projectRoot) : root(std::filesystem::canonical(projectRoot)) {}
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
         if (!relative.starts_with("fixtures/"))
@@ -58,10 +58,9 @@ std::string readIntegrity(const std::filesystem::path& config) {
 
 template <typename App>
 void registerCallbacks(App& app, const std::filesystem::path& project, std::atomic<bool>& passed) {
-    app.cppFunction("pi", &webfront::demo::pi);
     app.cppFunction("life.step", &webfront::demo::nextLife);
     app.cppFunction("test.header", [project](std::string name) {
-        if (name != "PiUI" && name != "LifeUI")
+        if (name != "LifeUI")
             throw std::invalid_argument("Unknown generated fixture");
         const auto header = readFixtureText(project / "generated" / (name + ".hpp"));
         // The generated header is larger than a bridge string: return a stable small digest.
@@ -81,6 +80,9 @@ void registerCallbacks(App& app, const std::filesystem::path& project, std::atom
         std::scoped_lock lock{result->mutex};
         return result->json;
     });
+    app.cppFunction("test.progress", [](std::string message) {
+        std::cout << "Developer integration: " << message << std::endl;
+    });
     app.cppFunction("test.report", [&passed](bool success, std::string message) {
         std::cout << message << std::endl;
         passed.store(success);
@@ -94,6 +96,18 @@ public:
         std::scoped_lock lock{mutex};
         states[tag] = std::move(state);
     }
+    void release(const std::string& tag) {
+        std::scoped_lock lock{mutex};
+        releasedTags.insert(tag);
+    }
+    void releaseAll() {
+        std::scoped_lock lock{mutex};
+        allReleased = true;
+    }
+    bool released(const std::string& tag) const {
+        std::scoped_lock lock{mutex};
+        return allReleased || releasedTags.contains(tag);
+    }
     std::string get(const std::string& tag) const {
         std::scoped_lock lock{mutex};
         const auto       found = states.find(tag);
@@ -103,6 +117,8 @@ public:
 private:
     mutable std::mutex                 mutex;
     std::map<std::string, std::string> states;
+    std::set<std::string>              releasedTags;
+    bool                               allReleased = false;
 };
 
 namespace ex = webfront::networking::ex;
@@ -127,7 +143,7 @@ webfront::Task waitUntilStopped(Context context, std::shared_ptr<CommandStates> 
         co_await context.ui().resumeAfter(20ms);
 }
 
-// After Ctrl+C, keeps running for a while, deaf to the stop request, before it ends.
+// After Ctrl+C, remains deaf to the stop request until the test releases it.
 template <typename Context>
 webfront::Task lingerAfterStop(Context context, std::shared_ptr<CommandStates> states) {
     const auto tag = context.args().at(0);
@@ -139,7 +155,7 @@ webfront::Task lingerAfterStop(Context context, std::shared_ptr<CommandStates> s
     while (!context.stopRequested())
         co_await deafPause();
     states->set(tag, "stopping");
-    for (int i = 0; i < 40; ++i)
+    while (!states->released(tag))
         co_await deafPause();
 }
 
@@ -199,8 +215,7 @@ void bootstrapApp(App& app, std::string_view mode, const std::string& integrity)
 
 void copyHeaders(const std::filesystem::path& project, const std::filesystem::path& output) {
     std::filesystem::create_directories(output);
-    for (const auto* name : {"PiUI.hpp", "LifeUI.hpp"})
-        std::filesystem::copy_file(project / "generated" / name, output / name, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy_file(project / "generated/LifeUI.hpp", output / "LifeUI.hpp", std::filesystem::copy_options::overwrite_existing);
 }
 
 constexpr auto runScript =
@@ -220,11 +235,14 @@ int main(int argc, char** argv) {
         App               app{project.path()};
         std::atomic<bool> passed{false};
         registerCallbacks(app, project.path(), passed);
-        auto                   states = std::make_shared<CommandStates>();
-        webfront::Commands     commands{app};
+        auto               states = std::make_shared<CommandStates>();
+        webfront::Commands commands{app};
         registerCommands(commands, states);
         app.cppFunction("test.command", [states](std::string tag) {
             return states->get(tag);
+        });
+        app.cppFunction("test.release", [states](std::string tag) {
+            states->release(tag);
         });
         app.cppFunction("test.browsers", [&app] {
             return static_cast<double>(app.connectedBrowsers());
@@ -234,8 +252,14 @@ int main(int argc, char** argv) {
             if (!std::exchange(injected, true))
                 ui.addScript(runScript);
         });
-        app.show();
+        try {
+            app.show();
+        } catch (...) {
+            states->releaseAll();
+            throw;
+        }
         // The test ends while the "final" command runs: shutdown drains it.
+        states->releaseAll();
         app.shutdown();
         if (!passed.load())
             return 1;

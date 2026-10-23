@@ -1,4 +1,5 @@
-// Autonomous real-engine test: compiled WASM, npm graph, PI bridge, preview, cache and embedding.
+import {withTimers, untilReady} from './timers.mjs';
+// Autonomous real-engine test: compiled WASM, npm graph, Life bridge, preview, cache and embedding.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const call = (name, ...args) => webFront.cppFunction(`webfront.developer.${name}`)(...args);
@@ -30,11 +31,15 @@ try {
     const runtime = await import('/webfront/developer/environment/runtime.mjs');
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
     const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
+    const currentDistribution = !config.environment.startsWith('https:');
+    if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['life']), 'Only the Life starter must be shipped');
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
     const context = {bridge: webFront, config, preview: document.getElementById('preview'), signal: new AbortController().signal,
         write: text => console.log(text)};
-    await runtime.execute(['create', 'pi'], context);
-    const overwriteRefused = await runtime.execute(['create', 'pi'], context).then(() => false, () => true);
+    if (currentDistribution) assert(await runtime.execute(['create', 'pi'], context).then(() => false, error => /Unknown pinned starter/.test(error.message)),
+        'The retired PI starter must not be offered');
+    await runtime.execute(['create', 'life'], context);
+    const overwriteRefused = await runtime.execute(['create', 'life'], context).then(() => false, () => true);
     assert(overwriteRefused, 'A starter must not replace an existing project');
     const noManifest = await runtime.execute(['install', 'react@19.3.1'], context).then(() => false, error => /run wf init/.test(error.message));
     assert(noManifest, 'wf install must ask for a manifest first');
@@ -42,32 +47,20 @@ try {
     const initRefused = await runtime.execute(['init'], context).then(() => false, () => true);
     assert(initRefused, 'wf init must not replace an existing manifest');
     await runtime.execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
-    const lock = await runtime.readLock(webFront);
+    let lock = await runtime.readLock(webFront);
     assert(lock.manifestDigest?.length === 64, 'The lock must record the digest of the manifest dependencies');
     const manifest = JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
     assert(manifest.dependencies.react === '19.3.1' && manifest.dependencies['react-dom'] === '19.3.1', 'The manifest must record the requested ranges');
     // Entries and providers declared in the manifest drive wf preview and wf embed.
     manifest.entries = {main: 'ui/main.tsx'};
-    manifest.providers = {PiUI: {entry: 'main', output: 'generated/PiUI.hpp'}};
+    manifest.providers = {LifeUI: {entry: 'main', output: 'generated/LifeUI.hpp'}};
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
     assert(!(await runtime.execute(['list'], context)).includes('Warning'), 'Editing entries must not desynchronize the lock');
     assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
     const listed = await runtime.execute(['list'], context);
     assert(listed.split('\n').length === 3 && listed.includes('react@19.3.1'), 'wf list must name the installed packages');
     const historyLength = history.length;
-    await runtime.execute(['preview'], context);
     const frame = context.preview;
-    for (let attempt = 0; attempt < 300; ++attempt) {
-        if (frame.contentDocument?.querySelector('button')) break;
-        if (attempt === 299) throw new Error('React preview did not mount');
-        await delay(50);
-    }
-    frame.contentDocument.querySelector('button').click();
-    for (let attempt = 0; attempt < 100; ++attempt) {
-        if (frame.contentDocument.querySelector('output')?.textContent.startsWith('3.14159265358979323846264338327950288419716939937510')) break;
-        if (attempt === 99) throw new Error('React preview did not display C++ PI');
-        await delay(50);
-    }
     // wf build does not navigate; wf dev keeps one WASM context, reloads only committed output and recovers.
     assert((await runtime.complete('wf d', context)).candidates.includes('dev'), 'Completion must list wf dev');
     assert((await runtime.complete('wf build m', context)).candidates.includes('main') &&
@@ -89,34 +82,45 @@ try {
     await writeFile('watch/value.ts', "export const value: string = 'watch-one';\n");
     let devOutput = '';
     const devStop = new AbortController();
-    const devResult = runtime.execute(['dev', 'watch/main.ts'], {...context, signal: devStop.signal,
-        write: text => { devOutput += text; }}).then(() => null, error => error);
-    try {
-        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-one', 'Initial dev preview did not mount');
-        await writeFile('watch/value.ts', "export const value: string = 'watch-two';\n");
-        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-two', 'Changed dependency was not rebuilt');
-        const lastGoodDocument = frame.contentDocument;
-        const lastGoodJS = new TextDecoder().decode(await readFile('.webfront/developer/preview/app.js'));
-        await writeFile('watch/value.ts', 'export const value = ;\n');
-        await waitDev(() => frame.contentDocument?.getElementById('webfront-build-diagnostics'), 'Syntax error was not overlaid');
-        assert(frame.contentDocument === lastGoodDocument && frame.contentDocument.getElementById('root').textContent === 'watch-two', 'A syntax error must preserve the running preview');
-        assert(new TextDecoder().decode(await readFile('.webfront/developer/preview/app.js')) === lastGoodJS, 'A syntax error must preserve published output');
-        assert(/watch\/value.ts:1:/.test(devOutput) && /watch\/value.ts:1:/.test(frame.contentDocument.getElementById('webfront-build-diagnostics').textContent), 'Terminal and overlay must locate the syntax error');
-        await writeFile('watch/value.ts', "export const value: string = 'watch-three';\n");
-        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-three', 'Corrected source did not recover');
-        assert(!frame.contentDocument.getElementById('webfront-build-diagnostics'), 'Successful build must clear the overlay');
-        await writeFile('watch/main.ts', "import {value} from './created'; document.getElementById('root').textContent = value;\n");
-        await waitDev(() => frame.contentDocument?.getElementById('webfront-build-diagnostics'), 'Missing import was not reported');
-        await writeFile('watch/created.ts', "export const value = 'watch-created';\n");
-        await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-created', 'Creating a missing import must recover');
-        assert(history.length === historyLength, 'Dev reloads must replace session history');
-    } finally { devStop.abort(); }
-    assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
-    const afterStop = frame.contentDocument;
-    await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
-    await delay(1600);
-    assert(frame.contentDocument === afterStop && frame.contentDocument.getElementById('root').textContent === 'watch-created', 'Stopped dev must not rebuild or reload');
-    assert(JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/staging'))).length === 0, 'Stopped dev must leave no staging');
+    await withTimers([750], async clock => {
+        const poll = async () => {
+            await waitDev(() => clock.pending() > 0, 'Dev polling deadline was not armed');
+            clock.fire(750);
+        };
+        const devResult = runtime.execute(['dev', 'watch/main.ts'], {...context, signal: devStop.signal,
+            write: text => { devOutput += text; }}).then(() => null, error => error);
+        try {
+            await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-one', 'Initial dev preview did not mount');
+            await writeFile('watch/value.ts', "export const value: string = 'watch-two';\n");
+            await poll();
+            await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-two', 'Changed dependency was not rebuilt');
+            const lastGoodDocument = frame.contentDocument;
+            const lastGoodJS = new TextDecoder().decode(await readFile('.webfront/developer/preview/app.js'));
+            await writeFile('watch/value.ts', 'export const value = ;\n');
+            await poll();
+            await waitDev(() => frame.contentDocument?.getElementById('webfront-build-diagnostics'), 'Syntax error was not overlaid');
+            assert(frame.contentDocument === lastGoodDocument && frame.contentDocument.getElementById('root').textContent === 'watch-two', 'A syntax error must preserve the running preview');
+            assert(new TextDecoder().decode(await readFile('.webfront/developer/preview/app.js')) === lastGoodJS, 'A syntax error must preserve published output');
+            assert(/watch\/value.ts:1:/.test(devOutput) && /watch\/value.ts:1:/.test(frame.contentDocument.getElementById('webfront-build-diagnostics').textContent), 'Terminal and overlay must locate the syntax error');
+            await writeFile('watch/value.ts', "export const value: string = 'watch-three';\n");
+            await poll();
+            await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-three', 'Corrected source did not recover');
+            assert(!frame.contentDocument.getElementById('webfront-build-diagnostics'), 'Successful build must clear the overlay');
+            await writeFile('watch/main.ts', "import {value} from './created'; document.getElementById('root').textContent = value;\n");
+            await poll();
+            await waitDev(() => frame.contentDocument?.getElementById('webfront-build-diagnostics'), 'Missing import was not reported');
+            await writeFile('watch/created.ts', "export const value = 'watch-created';\n");
+            await poll();
+            await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-created', 'Creating a missing import must recover');
+            assert(history.length === historyLength, 'Dev reloads must replace session history');
+        } finally { devStop.abort(); }
+        assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
+        const afterStop = frame.contentDocument;
+        await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
+        assert(clock.pending() === 0, 'Stopped dev must remove its polling timer');
+        assert(frame.contentDocument === afterStop && frame.contentDocument.getElementById('root').textContent === 'watch-created', 'Stopped dev must not rebuild or reload');
+        assert(JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/staging'))).length === 0, 'Stopped dev must leave no staging');
+    });
     // Each named entry gets its own relative HTML/assets when building all manifest entries.
     await writeFile('webfront.project.json', JSON.stringify({...manifest, entries: {one: 'watch/value.ts', two: 'watch/created.ts'}}));
     await runtime.execute(['build'], context);
@@ -129,14 +133,8 @@ try {
         new TextDecoder().decode(await readFile('.webfront/developer/build/two/app.js')) === secondEntryBuild, 'Failure in a later entry must preserve the entire previous build');
     await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
     await writeFile('webfront.project.json', JSON.stringify(manifest));
-    await runtime.execute(['embed', 'PiUI'], context);
-    // Repeat the browser build to prove reproducibility, including licenses and packed gzip bytes.
-    const first = await webFront.cppFunction('test.header')('PiUI');
-    await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/PiUI.hpp'], context);
-    assert(await webFront.cppFunction('test.header')('PiUI') === first, 'Header generation must be deterministic');
-    // Keep the original PI regression and exercise the new primary starter in the same engine.
-    await runtime.execute(['create', 'life', 'life-ui'], context);
-    await runtime.execute(['preview', 'life-ui/main.tsx'], context);
+    // Exercise the maintained public application rather than the retired PI demo.
+    await runtime.execute(['preview'], context);
     for (let attempt = 0; !frame.contentDocument?.querySelector('[data-testid="pattern-blinker"]'); ++attempt) {
         if (attempt === 200) throw new Error('Life preview did not mount');
         await delay(50);
@@ -203,11 +201,18 @@ try {
     }
     assert(button('population').textContent === '5', 'C++ glider survives four steps');
     assert(life.querySelector('canvas').width > 0 && !life.querySelector('[role="alert"]').textContent, 'Life canvas rendered without errors');
-    await runtime.execute(['embed', 'life-ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
+    await runtime.execute(['embed', 'LifeUI'], context);
     const lifeHeader = await webFront.cppFunction('test.header')('LifeUI');
-    await runtime.execute(['embed', 'life-ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
+    await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
     assert(await webFront.cppFunction('test.header')('LifeUI') === lifeHeader, 'Life header must be deterministic');
     if (!config.registryExplicit) throw new PublicSmokeDone();
+    // The application path above needs React DOM. Cache/command regressions do not: keep a small
+    // real graph instead of repeatedly transferring React DOM's server/development files through the bridge.
+    manifest.dependencies = {react: '19.3.1', 'webfront-fixture-lib': '1.0.0'};
+    await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
+    await runtime.execute(['install', '--update'], context);
+    lock = await runtime.readLock(webFront);
+    assert(Object.keys(lock.packages).length === 2 && !lock.roots['react-dom'], 'Command fixtures must not retain the application dependency graph');
     // A dependency added by hand desynchronizes the lock: commands say so and nothing is resolved implicitly.
     manifest.dependencies.scheduler = '*';
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
@@ -216,7 +221,7 @@ try {
     assert(refused, 'wf install must not resolve a desynchronized manifest');
     delete manifest.dependencies.scheduler;
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
-    assert(/Installed 3 packages/.test(await runtime.execute(['install'], context)), 'A consistent lock must install its exact graph');
+    assert(/Installed 2 packages/.test(await runtime.execute(['install'], context)), 'A consistent lock must install its exact graph');
     // wf restore rebuilds an emptied cache from the lock alone, from the application's local registry although the
     // manifest names another one; --offline only checks the cache, without any request.
     const requests = [];
@@ -232,18 +237,19 @@ try {
         assert(/react@19\.3\.1 \(missing\)/.test(missing) && requests.length === 0, 'An offline check must list missing packages without any request');
         await writeFile('webfront.project.json', JSON.stringify({...manifest, registry: 'https://registry.invalid/'}, null, 2));
         const restored = await runtime.execute(['restore'], context);
-        assert(/Restored 3 of 3 packages/.test(restored) && restored.includes('Registry: /fixtures/registry/ (application option)'), `wf restore must use and name the application registry: ${restored}`);
+        assert(/Restored 2 of 2 packages/.test(restored) && restored.includes('Registry: /fixtures/registry/ (application option)'), `wf restore must use and name the application registry: ${restored}`);
         assert(requests.length > 0 && requests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), 'wf restore must contact the application registry only');
         requests.length = 0;
-        assert(/Cache verified offline: 3 packages/.test(await runtime.execute(['restore', '--offline'], context)) && requests.length === 0, 'A complete cache must verify offline');
+        assert(/Cache verified offline: 2 packages/.test(await runtime.execute(['restore', '--offline'], context)) && requests.length === 0, 'A complete cache must verify offline');
     } finally {
         globalThis.fetch = pageFetch;
     }
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
     const previous = frame.contentWindow.location.href;
-    await runtime.execute(['preview'], context);
-    const piMounted = () => frame.contentDocument?.querySelector('output') && !frame.contentDocument.querySelector('[data-testid]');
-    for (let attempt = 0; frame.contentWindow.location.href === previous || !piMounted(); ++attempt) {
+    await writeFile('restore/main.js', "import value from 'webfront-fixture-lib'; document.getElementById('root').textContent = value;\n");
+    await runtime.execute(['preview', 'restore/main.js'], context);
+    const restoredMounted = () => frame.contentDocument?.getElementById('root')?.textContent === 'webfront-fixture-lib@1.0.0';
+    for (let attempt = 0; frame.contentWindow.location.href === previous || !restoredMounted(); ++attempt) {
         if (attempt === 300) throw new Error('The preview did not build from the restored cache');
         await delay(50);
     }
@@ -277,7 +283,7 @@ try {
     for (const [path, text] of Object.entries(scripts)) await writeFile(path, text);
     const mainBefore = await readFile('ui/main.tsx');
     const scriptManifest = {...manifest, permissions: {files: ['tools'], publish: ['generated/script']},
-        scripts: Object.fromEntries([...Object.keys(scripts).map(path => [path.split('/')[1].split('.')[0], path]), ['listing', 'wf list'], ['nested', 'wf run loop']])};
+        scripts: Object.fromEntries([...Object.keys(scripts).map(path => [path.split('/')[1].split('.')[0], path]), ['listing', 'wf list'], ['nested', 'wf run --timeout 120 loop']])};
     await writeFile('webfront.project.json', JSON.stringify(scriptManifest, null, 2));
     assert(/Script gen completed/.test(await runtime.execute(['run', 'gen', 'a', 'b'], runContext())), 'A TypeScript script must run');
     assert(new TextDecoder().decode(await readFile('generated/script/out.txt')) === 'a+b' && scriptOutput.includes('wrote a+b\r\n'), 'The script must write an allowed file and stream its console');
@@ -296,16 +302,26 @@ try {
     const stopped = await waiting;
     assert(stopped?.exitCode === 130 && !/grace period/.test(stopped.message), `Ctrl+C must stop a cooperative script: ${stopped}`);
     const interrupt = new AbortController();
-    const started = performance.now();
     const looping = failure(runtime.execute(['run', 'loop'], runContext(interrupt.signal)));
     await printed('looping');
-    interrupt.abort(new Error('Interrupted'));
-    const killed = await looping;
-    assert(killed?.exitCode === 130 && /terminated after the 2 s grace period/.test(killed.message) && performance.now() - started < 15000, `A busy script must be terminated after Ctrl+C: ${killed}`);
-    const timedOut = await failure(runtime.execute(['run', '--timeout', '1', 'loop'], runContext()));
-    assert(timedOut?.exitCode === 124 && /stopped at its time limit/.test(timedOut.message), `The time limit must stop a busy script: ${timedOut}`);
-    const nested = await failure(runtime.execute(['run', '--timeout', '1', 'nested'], runContext()));
-    assert(nested?.exitCode === 124, `The time limit must cover a script run through a wf command: ${nested}`);
+    await withTimers([2000], async clock => {
+        interrupt.abort(new Error('Interrupted'));
+        clock.fire(2000);
+        const killed = await looping;
+        assert(killed?.exitCode === 130 && /terminated after the 2 s grace period/.test(killed.message), `A busy script must be terminated after Ctrl+C: ${killed}`);
+    });
+    // Real Worker/bridge preparation gets a generous bound; only the deadline under test is advanced.
+    for (const target of ['loop', 'nested']) {
+        scriptOutput.length = 0;
+        await withTimers([60000, 2000], async clock => {
+            const running = failure(runtime.execute(['run', '--timeout', '60', target], runContext()));
+            await printed('looping');
+            clock.fire(60000);
+            clock.fire(2000);
+            const timedOut = await running;
+            assert(timedOut?.exitCode === 124 && /stopped at its time limit/.test(timedOut.message), `The inherited time limit must stop ${target}: ${timedOut}`);
+        });
+    }
     assert(/react@19\.3\.1/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a termination');
     assert(/completed/.test(await runtime.execute(['run', 'unawaited'], runContext())), 'A script that does not await its write must complete');
     assert(new TextDecoder().decode(await readFile('generated/script/unawaited.txt')) === 'done', 'A write the script did not await must be applied');
@@ -343,9 +359,28 @@ try {
         'check/util.ts': 'export const twice = (value: number): number => 2 * value;\n',
     };
     for (const [path, text] of Object.entries(checkFiles)) await writeFile(path, text);
+    const packageReads = new Map();
+    const checkBridge = {socket: webFront.socket, cppFunction: name => name !== 'webfront.developer.read' ? webFront.cppFunction(name) :
+        (path, offset) => {
+            if (!path.startsWith('.webfront/developer/packages/')) return webFront.cppFunction(name)(path, offset);
+            const key = `${path}:${offset}`;
+            if (!packageReads.has(key)) {
+                const reading = webFront.cppFunction(name)(path, offset).catch(error => {
+                    packageReads.delete(key);
+                    throw error;
+                });
+                packageReads.set(key, reading);
+            }
+            return packageReads.get(key);
+        }};
+    const retryFile = '.webfront/developer/packages/cache-retry-fixture/probe.txt';
+    const retryRead = checkBridge.cppFunction('webfront.developer.read');
+    assert(await retryRead(retryFile, 0).then(() => false, () => true), 'The first missing package read must fail');
+    await writeFile(retryFile, 'recovered');
+    assert(new TextDecoder().decode(await retryRead(retryFile, 0)) === 'recovered', 'A rejected package read must be retried');
     const checked = async (args = [], extra = {}) => {
         scriptOutput.length = 0;
-        const result = await runtime.execute(['check', ...args], {...runContext(), ...extra}).then(text => ({text}), error => ({error}));
+        const result = await runtime.execute(['check', ...args], {...runContext(), bridge: checkBridge, ...extra}).then(text => ({text}), error => ({error}));
         return {...result, output: scriptOutput.join('')};
     };
     try {
@@ -389,23 +424,29 @@ try {
     const before = [await listing(''), await listing('check')];
     const stopCheck = new AbortController();
     scriptOutput.length = 0;
-    const checkStarted = performance.now();
-    const longCheck = failure(runtime.execute(['check'], runContext(stopCheck.signal)));
+    const longCheck = failure(runtime.execute(['check'], {...runContext(stopCheck.signal), bridge: checkBridge}));
     await printed('Checking 3 root files');
-    stopCheck.abort(new Error('Interrupted'));
-    const checkStopped = await longCheck;
-    assert(checkStopped?.exitCode === 130 && /Type check stopped by Ctrl\+C \(terminated after the 2 s grace period\)/.test(checkStopped.message) &&
-        performance.now() - checkStarted < 30000, `Ctrl+C must terminate a long check after the grace period: ${checkStopped}`);
+    await withTimers([2000], async clock => {
+        stopCheck.abort(new Error('Interrupted'));
+        clock.fire(2000);
+        const checkStopped = await longCheck;
+        assert(checkStopped?.exitCode === 130 && /Type check stopped by Ctrl\+C \(terminated after the 2 s grace period\)/.test(checkStopped.message),
+            `Ctrl+C must terminate a long check after the grace period: ${checkStopped}`);
+    });
     assert(JSON.stringify([await listing(''), await listing('check')]) === JSON.stringify(before), 'A check must not write any project file');
     assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
     assert(/typescript@6\.0\.3/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a stopped check');
     // wf test: the specs of the manifest under the locked jasmine-core, in a frame of this page.
     const testOutput = [];
+    let testRun = 0;
     const tested = async (args = [], extra = {}) => {
+        const label = `wf test #${++testRun} ${args.join(' ')}`;
+        await webFront.cppFunction('test.progress')(`${label}: starting`);
         testOutput.length = 0;
         let report = null;
         const result = await runtime.execute(['test', ...args], {...runContext(), write: text => testOutput.push(text), onReport: value => { report = value; }, ...extra})
             .then(text => ({text}), error => ({error}));
+        await webFront.cppFunction('test.progress')(`${label}: ${report?.status ?? result.error?.message ?? 'done'}`);
         return {...result, report, output: testOutput.join('')};
     };
     const readManifest = async () => JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
@@ -471,46 +512,120 @@ try {
     const unloaded = await tested();
     assert(unloaded.error?.exitCode === 1 && unloaded.report?.status !== 'passed' && /loading boom/.test(unloaded.error.message), `A spec that throws while loading must fail: ${unloaded.error}\n${JSON.stringify(unloaded.report)}`);
     // A time limit and Ctrl+C end a run that does not return, remove the frame and report it.
-    await writeFile('tests/hang.spec.js', "describe('hanging', () => {\n    it('never ends', () => new Promise(() => {}), 600000);\n});\n");
+    const hangingToken = crypto.randomUUID();
+    await writeFile('tests/hang.spec.js', `describe('hanging', () => {\n    it('never ends', () => {\n` +
+        `        parent.postMessage({hangingSpec: ${JSON.stringify(hangingToken)}}, location.origin);\n` +
+        "        return new Promise(() => {});\n    }, 600000);\n});\n");
     await specsOf(['tests/hang.spec.js']);
-    const hung = await tested(['--timeout', '2']);
-    assert(hung.error?.exitCode === 124 && hung.report?.status === 'timeout' && /time limit/.test(hung.error.message), `A hanging run must stop at its time limit: ${hung.error}`);
-    assert(!document.querySelector('iframe[title="WebFront tests"]'), 'A timed out run must remove its frame');
+    const hangingStarted = () => {
+        let receive;
+        const ready = new Promise(resolve => {
+            receive = event => {
+                const frame = document.querySelector('iframe[title="WebFront tests"]');
+                if (event.origin === location.origin && event.source === frame?.contentWindow && event.data?.hangingSpec === hangingToken)
+                    resolve();
+            };
+            window.addEventListener('message', receive);
+        });
+        return {ready, dispose: () => window.removeEventListener('message', receive)};
+    };
+    // Wait for the spec itself: removing a merely inserted frame can interrupt its navigation instead of its run.
+    await withTimers([60000], async clock => {
+        const started = hangingStarted();
+        try {
+            const hanging = tested(['--timeout', '60']);
+            await untilReady(started.ready, hanging);
+            assert(clock.pending() === 1, 'Only the frame deadline must remain after preparation');
+            clock.fire(60000);
+            const hung = await hanging;
+            assert(hung.error?.exitCode === 124 && hung.report?.status === 'timeout' && /time limit/.test(hung.error.message), `A hanging run must stop at its time limit: ${hung.error}`);
+            assert(!document.querySelector('iframe[title="WebFront tests"]'), 'A timed out run must remove its frame');
+        } finally { started.dispose(); }
+    });
     const stopTests = new AbortController();
-    const interrupted = tested([], {signal: stopTests.signal});
-    for (let attempt = 0; !document.querySelector('iframe[title="WebFront tests"]'); ++attempt) {
-        if (attempt === 300) throw new Error('The runner frame did not appear');
-        await delay(30);
-    }
-    await delay(300);
-    stopTests.abort(new Error('Interrupted'));
-    const interruptedRun = await interrupted;
-    assert(interruptedRun.error?.exitCode === 130 && interruptedRun.report?.status === 'interrupted' && !document.querySelector('iframe[title="WebFront tests"]'), `Ctrl+C must stop a run: ${interruptedRun.error}`);
-    // --timeout covers the preparation too: slow project reads cannot hold a run past its limit.
-    const slowBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
-        async (...parameters) => { await delay(700); return webFront.cppFunction(name)(...parameters); } : webFront.cppFunction(name)};
+    const started = hangingStarted();
+    try {
+        const interrupted = tested([], {signal: stopTests.signal});
+        await untilReady(started.ready, interrupted);
+        stopTests.abort(new Error('Interrupted'));
+        const interruptedRun = await interrupted;
+        assert(interruptedRun.error?.exitCode === 130 && interruptedRun.report?.status === 'interrupted' && !document.querySelector('iframe[title="WebFront tests"]'), `Ctrl+C must stop a run: ${interruptedRun.error}`);
+    } finally { started.dispose(); }
+    // The command must stop even when the bridge read never settles. Wait for the read, not wall time.
+    const blockedRead = () => {
+        let started;
+        const ready = new Promise(resolve => { started = resolve; });
+        const bridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
+            () => { started(); return new Promise(() => {}); } : webFront.cppFunction(name)};
+        return {bridge, ready};
+    };
     await specsOf(['tests/pass.spec.js']);
-    const slowStarted = performance.now();
-    const slowRun = await tested(['--timeout', '1'], {bridge: slowBridge});
-    assert(slowRun.error?.exitCode === 124 && slowRun.report?.status === 'timeout' && performance.now() - slowStarted < 20000 && !document.querySelector('iframe[title="WebFront tests"]'),
-        `The time limit must cover the preparation of a run: ${slowRun.error}`);
-    // A bridge operation that never returns, Ctrl+C during the build, and a script's deadline: each ends the command.
-    const stuckBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ? () => new Promise(() => {}) : webFront.cppFunction(name)};
-    const stuckStarted = performance.now();
-    const stuck = await tested(['--timeout', '1'], {bridge: stuckBridge});
-    assert(stuck.error?.exitCode === 124 && stuck.report?.status === 'timeout' && performance.now() - stuckStarted < 8000, `A blocked bridge operation must not hold the command past its limit: ${stuck.error}`);
+    await withTimers([60000], async clock => {
+        const blocked = blockedRead();
+        const running = tested(['--timeout', '60'], {bridge: blocked.bridge});
+        await untilReady(blocked.ready, running);
+        clock.fire(60000);
+        const result = await running;
+        assert(result.error?.exitCode === 124 && result.report?.status === 'timeout', `A blocked bridge must report the preparation timeout: ${result.error}`);
+    });
+    const blocked = blockedRead();
     const interruptPreparing = new AbortController();
-    const preparingRun = tested([], {bridge: slowBridge, signal: interruptPreparing.signal});
-    await delay(300);
+    const preparingRun = tested([], {bridge: blocked.bridge, signal: interruptPreparing.signal});
+    await untilReady(blocked.ready, preparingRun);
     interruptPreparing.abort(new Error('Interrupted'));
     const preparingResult = await preparingRun;
-    assert(preparingResult.error?.exitCode === 130 && preparingResult.report?.status === 'interrupted', `Ctrl+C during the preparation must end with 130 and a report: ${preparingResult.error}`);
+    assert(preparingResult.error?.exitCode === 130 && preparingResult.report?.status === 'interrupted', `Ctrl+C during preparation must end with 130 and a report: ${preparingResult.error}`);
+    // macOS 13.3 supports WKWebView, but its WebKit need not provide AbortSignal.any (Safari 17.4).
+    const signalAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+    Object.defineProperty(AbortSignal, 'any', {configurable: true, value: undefined});
+    try {
+        const legacyPassing = await tested([], {signal: new AbortController().signal});
+        assert(legacyPassing.report?.status === 'passed' && legacyPassing.report.exitCode === 0,
+            `A terminal run must work without AbortSignal.any: ${legacyPassing.error}`);
+        const alreadyStopped = new AbortController();
+        alreadyStopped.abort(new Error('Interrupted'));
+        const legacyStopped = await tested([], {signal: alreadyStopped.signal});
+        assert(legacyStopped.error?.exitCode === 130 && legacyStopped.report?.status === 'interrupted',
+            `An already aborted signal must report interruption without AbortSignal.any: ${legacyStopped.error}`);
+        await withTimers([60000], async clock => {
+            const blocked = blockedRead();
+            const running = tested(['--timeout', '60'], {bridge: blocked.bridge, signal: new AbortController().signal});
+            await untilReady(blocked.ready, running);
+            clock.fire(60000);
+            const result = await running;
+            assert(result.error?.exitCode === 124 && result.report?.status === 'timeout',
+                `The preparation deadline must report timeout without AbortSignal.any: ${result.error}`);
+        });
+        const legacyStop = new AbortController();
+        const blocked = blockedRead();
+        const legacyPreparing = tested([], {bridge: blocked.bridge, signal: legacyStop.signal});
+        await untilReady(blocked.ready, legacyPreparing);
+        legacyStop.abort(new Error('Interrupted'));
+        const legacyInterrupted = await legacyPreparing;
+        assert(legacyInterrupted.error?.exitCode === 130 && legacyInterrupted.report?.status === 'interrupted',
+            `Ctrl+C during preparation must report interruption without AbortSignal.any: ${legacyInterrupted.error}`);
+    } finally {
+        if (signalAny) Object.defineProperty(AbortSignal, 'any', signalAny);
+        else delete AbortSignal.any;
+    }
     const withScript = await readManifest();
-    await writeFile('webfront.project.json', JSON.stringify({...withScript, scripts: {...withScript.scripts, specs: 'wf test'}}, null, 2));
-    const quickBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
-        async (...parameters) => { await delay(400); return webFront.cppFunction(name)(...parameters); } : webFront.cppFunction(name)};
-    const inherited = await runtime.execute(['run', '--timeout', '1', 'specs'], {...runContext(), bridge: quickBridge, onReport: () => {}}).then(() => null, error => error);
-    assert(inherited?.exitCode === 124, `wf test must keep the deadline of the script that runs it: ${inherited}`);
+    await writeFile('webfront.project.json', JSON.stringify({...withScript, scripts: {...withScript.scripts, specs: 'wf test --timeout 120'}}, null, 2));
+    await withTimers([60000], async clock => {
+        let started;
+        const ready = new Promise(resolve => { started = resolve; });
+        let reads = 0;
+        const bridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
+            (...args) => {
+                // The first manifest/lock pair belongs to wf run; block preparation of its nested wf test.
+                if (++reads > 2) { started(); return new Promise(() => {}); }
+                return webFront.cppFunction(name)(...args);
+            } : webFront.cppFunction(name)};
+        const running = runtime.execute(['run', '--timeout', '60', 'specs'], {...runContext(), bridge, onReport: () => {}}).then(() => null, error => error);
+        await untilReady(ready, running);
+        clock.fire(60000);
+        const inherited = await running;
+        assert(inherited?.exitCode === 124, `wf test must keep the deadline of the script that runs it: ${inherited}`);
+    });
     // Each run publishes its own directory, emptied at the end: runs of two sessions never share files.
     const runDirectories = JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/test')));
     assert(runDirectories.length > 1 && runDirectories.every(name => /^[0-9a-f-]{36}\/?$/.test(name)), `Each run must have its own directory: ${runDirectories}`);
@@ -575,6 +690,7 @@ try {
     assert(echoed.join('') === 'after Ctrl+C\r\n', `The next command must run normally: ${echoed}`);
     assert(['running', 'stopping'].includes(await commandState('first')), 'The second command must answer before the first one ends');
     await waitState('first', 'stopping');
+    await webFront.cppFunction('test.release')('first');
     await waitState('first', 'cancelled');
     // Sessions: a second browser has its own commands; a long command there does not delay this one, Ctrl+C here does
     // not stop it, and its disconnection does.
@@ -701,6 +817,7 @@ try {
     const lingerState = await commandState('terminal');
     assert(editor.status === 0 && lastRows(2)[0] === 'next' && ['running', 'stopping'].includes(lingerState), `Ctrl+C must interrupt a C++ command: ${lastRows(3)} ${editor.status} ${lingerState}`);
     await waitState('terminal', 'stopping');
+    await webFront.cppFunction('test.release')('terminal');
     // Pasted lines run one after the other; the last one, without a line break, waits on the prompt.
     // Keys typed one by one while a command runs are applied after it, Enter included.
     terminal.input('sleep 300\r');
@@ -769,6 +886,7 @@ try {
     terminal.input('\r');
     terminal.input('\x03');
     await waitState('replay', 'stopping');
+    await webFront.cppFunction('test.release')('replay');
     for (let attempt = 0; editor.busy; ++attempt) {
         if (attempt === 100) throw new Error(`Ctrl+C typed during a completion must interrupt the replayed command: ${lastRows(3)}`);
         await delay(20);
@@ -840,13 +958,13 @@ try {
     // The application stops while this command runs: its shutdown must drain it (checked in C++).
     void failure(runtime.runLine('wait final', lineContext()));
     await waitState('final', 'running');
-    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + PI + Life animation + deterministic headers + scripts + type check + terminal passed');
+    await webFront.cppFunction('test.report')(true, 'WASM + npm + TSX + Life animation + deterministic headers + scripts + type check + terminal passed');
 } catch (error) {
     if (error instanceof PublicSmokeDone)
-        await webFront.cppFunction('test.report')(true, 'Public distribution: WASM + npm + TSX + PI + Life animation + deterministic headers passed');
+        await webFront.cppFunction('test.report')(true, 'Public distribution: WASM + npm + TSX + Life animation + deterministic headers passed');
     else {
         console.error(error);
-        await webFront.cppFunction('test.report')(false, String(error.stack ?? error));
+        await webFront.cppFunction('test.report')(false, `${error.message ?? error}\n${error.stack ?? ''}`);
     }
 } finally {
     setTimeout(() => globalThis.close(), 0);

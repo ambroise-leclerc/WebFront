@@ -18,7 +18,7 @@ describe('The project manifest', () => {
         expect(manifest.entries).toEqual({});
         const full = {...minimal, dependencies: {react: '^19.0.0', '@scope/lib': '>=1.2.0 <2', tool: 'latest'}, registry: 'https://registry.test/',
             scripts: {build: 'wf embed main'}, entries: {main: 'ui/main.tsx'},
-            providers: {PiUI: {entry: 'main', output: 'generated/PiUI.hpp'}}, test: {specs: ['spec/a.mjs']},
+            providers: {AppUI: {entry: 'main', output: 'generated/AppUI.hpp'}}, test: {specs: ['spec/a.mjs']},
             permissions: {files: ['ui'], publish: ['generated'], fetch: ['https://registry.npmjs.org']}};
         const text = serializeManifest(validateManifest(full));
         expect(JSON.parse(text)).toEqual(full);
@@ -72,8 +72,8 @@ describe('The project manifest', () => {
     });
 
     it('wf embed names the generated class after the provider, and refuses a file name that is not a C++ name', () => {
-        const manifest = validateManifest({...minimal, entries: {main: 'ui/main.tsx'}, providers: {PiUI: {entry: 'main', output: 'generated/pi-ui.hpp'}}});
-        expect(embedTarget(manifest, ['PiUI'])).toEqual({entry: 'ui/main.tsx', output: 'generated/pi-ui.hpp', className: 'PiUI'});
+        const manifest = validateManifest({...minimal, entries: {main: 'ui/main.tsx'}, providers: {AppUI: {entry: 'main', output: 'generated/app-ui.hpp'}}});
+        expect(embedTarget(manifest, ['AppUI'])).toEqual({entry: 'ui/main.tsx', output: 'generated/app-ui.hpp', className: 'AppUI'});
         expect(embedTarget(manifest, ['ui/main.tsx', '--output', 'generated/LifeUI.hpp']).className).toBe('LifeUI');
         throws(() => embedTarget(manifest, ['ui/main.tsx', '--output', 'generated/life-ui.hpp']), /not a C\+\+ class name/);
         throws(() => embedTarget(manifest, ['ui/main.tsx']), /--output/);

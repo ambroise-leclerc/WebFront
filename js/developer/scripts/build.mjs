@@ -74,10 +74,10 @@ export default async function (context) {
 
     // The starter is pinned by the environment's own trusted archive, not by unverified remote metadata.
     const starters = {};
-    for (const [name, provider] of [['pi', 'PiUI'], ['life', 'LifeUI']]) {
+    for (const [name, provider] of [['life', 'LifeUI']]) {
         const starterFiles = new Map();
         for (const file of ['main.tsx', 'style.css'])
-            starterFiles.set(`package/${file}`, await project.read(`${name === 'life' ? 'examples/life/ui' : 'js/developer/tools/starters/pi'}/${file}`));
+            starterFiles.set(`package/${file}`, await project.read(`examples/life/ui/${file}`));
         const recipe = {format: 1, name: `${name}-starter`, version, dependencies: {
             react: dependencies.react, 'react-dom': dependencies['react-dom']},
             entries: {main: 'main.tsx'}, providers: {[provider]: {entry: 'main', output: `generated/${provider}.hpp`}}};

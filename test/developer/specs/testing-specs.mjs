@@ -1,5 +1,6 @@
 // Specs of wf test's host side, which supplement the real-browser regression in test/web/developer-specs.mjs.
 import {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult, abortable} from '../../../js/developer/environment/testing.mjs';
+import {execute} from '../../../js/developer/environment/runtime.mjs';
 import {bundleTests} from '../../../js/developer/environment/bundler.mjs';
 import {rejects, throws, esbuild} from '../support.mjs';
 
@@ -107,6 +108,97 @@ describe('wf test', () => {
         await rejects(abortable(never, controller.signal), /stopped/);
         expect(await abortable(Promise.resolve(3), new AbortController().signal)).toBe(3);
         await rejects(abortable(Promise.reject(new Error('own')), new AbortController().signal), /own/);
+    });
+
+    it('reports cancellation and deadlines without AbortSignal.any and releases listeners and timers', async () => {
+        const originalAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+        const nativeSet = globalThis.setTimeout;
+        const nativeClear = globalThis.clearTimeout;
+        const timers = new Set();
+        globalThis.setTimeout = (callback, milliseconds, ...args) => {
+            const timer = nativeSet(() => { timers.delete(timer); callback(...args); }, milliseconds);
+            timers.add(timer);
+            return timer;
+        };
+        globalThis.clearTimeout = timer => { timers.delete(timer); nativeClear(timer); };
+        Object.defineProperty(AbortSignal, 'any', {configurable: true, value: undefined});
+        try {
+            for (const mode of ['already interrupted', 'interrupt while reading', 'deadline', 'read failure']) {
+                const controller = new AbortController();
+                const listeners = new Set();
+                const add = controller.signal.addEventListener.bind(controller.signal);
+                const remove = controller.signal.removeEventListener.bind(controller.signal);
+                controller.signal.addEventListener = (type, listener, ...args) => {
+                    if (type === 'abort') listeners.add(listener);
+                    add(type, listener, ...args);
+                };
+                controller.signal.removeEventListener = (type, listener, ...args) => {
+                    if (type === 'abort') listeners.delete(listener);
+                    remove(type, listener, ...args);
+                };
+                const calls = [], reports = [];
+                const bridge = {cppFunction: name => async () => {
+                    calls.push(name);
+                    if (name === 'webfront.developer.read') {
+                        if (mode === 'read failure') throw new Error('read failed');
+                        return new Promise(() => {});
+                    }
+                    return 'transaction';
+                }};
+                if (mode === 'already interrupted') controller.abort(new Error('Interrupted'));
+                const running = execute(['test', 'pattern'], {bridge, signal: controller.signal,
+                    deadline: mode === 'deadline' ? Date.now() : undefined, onReport: report => reports.push(report)});
+                if (mode === 'interrupt while reading') {
+                    await Promise.resolve();
+                    controller.abort(new Error('Interrupted'));
+                    expect(calls).toContain('webfront.developer.read');
+                }
+                await rejects(running, error => {
+                    if (mode === 'read failure') return error.message === 'read failed' && reports.length === 0;
+                    const code = mode === 'deadline' ? 124 : 130;
+                    expect(error.exitCode).withContext(mode).toBe(code);
+                    expect(error.report.status).toBe(mode === 'deadline' ? 'timeout' : 'interrupted');
+                    expect(error.report.exitCode).toBe(code);
+                    expect(error.report.pattern).toBe('pattern');
+                    expect(reports).toEqual([error.report]);
+                    return true;
+                });
+                expect(listeners.size).withContext(`${mode}: cancellation listener released`).toBe(0);
+                expect(timers.size).withContext(`${mode}: deadline and cleanup timers released`).toBe(0);
+                expect(calls).toContain('webfront.developer.commit');
+            }
+        } finally {
+            globalThis.setTimeout = nativeSet;
+            globalThis.clearTimeout = nativeClear;
+            timers.forEach(nativeClear);
+            if (originalAny) Object.defineProperty(AbortSignal, 'any', originalAny);
+            else delete AbortSignal.any;
+        }
+    });
+
+    it('bounds cleanup when the bridge never publishes the empty test directory', async () => {
+        const originalSet = globalThis.setTimeout;
+        const delays = [];
+        // Keep the production two-second bound, but exercise its real event-loop completion in 20 ms.
+        globalThis.setTimeout = (callback, milliseconds, ...args) => {
+            delays.push(milliseconds);
+            return originalSet(callback, milliseconds === 2000 ? 20 : milliseconds, ...args);
+        };
+        let cleanupStarted = false;
+        const bridge = {cppFunction: name => async () => {
+            if (name.endsWith('.state')) return 'transaction';
+            if (name.endsWith('.read')) throw new Error('read failed');
+            if (name.endsWith('.begin')) {
+                cleanupStarted = true;
+                return new Promise(() => {});
+            }
+            throw new Error(`Unexpected call: ${name}`);
+        }};
+        try {
+            await rejects(execute(['test'], {bridge}), /read failed/);
+            expect(cleanupStarted).toBeTrue();
+            expect(delays).toContain(2000);
+        } finally { globalThis.setTimeout = originalSet; }
     });
 
     it('a report is bounded: what the specs post is cut, not trusted', () => {
