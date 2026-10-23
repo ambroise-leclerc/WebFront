@@ -529,7 +529,7 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 `Incompatible WebFront developer environment: api version 2, this application supports 1`; it never falls back. A change
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
-The pin is 0.6.0, the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive). The other `WfDriver*` cases run the environment built from the current sources
+The pin is 0.6.0, the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive). The sources build 0.6.1, not published yet: it fixes `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary; the pinned 0.6.0 still does, and the `SelfBuild*` cases therefore check the summary of the scripts, not their console output. The other `WfDriver*` cases run the environment built from the current sources
 (`WEBFRONT_DEVELOPER_FIXTURES`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
 report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
@@ -567,23 +567,45 @@ blocks the public network after the configure step.
 
 ## Environment distribution and offline tests (maintainers)
 
-These commands require Node/npm **only for environment maintainers**. They prepare a tarball that
-application developers can download. No command publishes anything to a registry automatically.
+The environment builds itself (#315). The repository is a `wf` project: `webfront.project.json` declares the build
+dependencies (esbuild-wasm, semver, xterm and its fit addon, and the React versions the starters pin), the scripts
+and the permissions (`files` it reads, `publish` where it writes), and `webfront-packages.lock.json` locks them by
+SHA-512. The scripts of `js/developer/scripts/` run in the pinned bootstrap environment with the driver `webfront-wf`
+(see [the test driver](#the-test-driver-webfront-wf-and-the-bootstrap-environment)). They need no Node.js, npm or npx; they prepare
+a tarball that application developers can download. No command publishes anything to a registry automatically.
+
+```sh
+wf() { xvfb-run -a build-driver/test/web/webfront-wf --project "$PWD" -- "$@"; }   # the driver of the repository
+wf restore                                          # the locked build dependencies
+wf run build build-developer-environment --refresh-bootstrap
+```
+
+`js/developer/scripts/build.mjs` bundles the environment and compiler with the locked esbuild-wasm (run in the script's
+Worker), includes esbuild.wasm, xterm styles and licenses, and writes deterministic `environment.tgz`, `life-starter.tgz`,
+`pi-starter.tgz`, `provision.json` and `DeveloperReleaseData.hpp`. The version and public base URL are in
+`js/developer/tools/distribution.json`. `--refresh-bootstrap` additionally refreshes the two checked-in JS bundles, their
+input checksums (`bundles.json`, over `js/developer/tools/bundle-inputs.json`) and the embedded bootstrap headers. Without
+that flag, it writes only to the output directory. `site.mjs` stages a build into the GitHub Pages site, `pin.mjs`
+checks the pinned header against the published archive and `embed-core.mjs` regenerates the headers of the core's embedded assets. The archives have the package identifiers
+`@webfront/developer-environment`, `@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static
+GitHub Pages downloads; no npm publication or scope ownership is required.
+
+During the transition from Node.js (#318), the Node.js tools (`js/developer/tools/build.mjs` and the others) build the
+same bytes, which the CTest case `SelfBuildMatchesFixtures` and the `wf-package` job require; they also still provision
+the offline test fixtures (the local registry and test pages):
 
 ```sh
 npm ci --prefix js/developer/vendor --ignore-scripts
-node js/developer/tools/build.mjs build-developer-environment --refresh-bootstrap
+node js/developer/tools/build.mjs build-developer-environment
 node js/developer/tools/fixtures.mjs build-developer-environment
 ```
 
-`build.mjs` bundles the environment and compiler, includes esbuild.wasm, xterm styles and licenses,
-and writes deterministic `environment.tgz`, `life-starter.tgz`, `pi-starter.tgz`, `provision.json` and
-`DeveloperReleaseData.hpp`. The version and public base URL are in `js/developer/tools/distribution.json`. Dependencies are
-pinned in `js/developer/vendor/package-lock.json`. `--refresh-bootstrap` additionally refreshes the two
-checked-in JS bundles, their input checksums and the embedded bootstrap headers. Without that flag,
-it writes only to the output directory. The archives have the package identifiers `@webfront/developer-environment`,
-`@webfront/life-starter` and `@webfront/pi-starter`. They are distributed as static GitHub Pages downloads; no npm publication or
-scope ownership is required. Node/npm is only used by maintainers to build them.
+The `SelfBuild*` CTest cases (with `WEBFRONT_DEVELOPER_FIXTURES`) run the scripts on a copy of the sources, with the
+dependencies installed from the local registry: the build, a repeat build (same bytes), the checked-in bootstrap bundles,
+checksums and core headers rebuilt by wf alone, the headers of the core regenerated from their sources, the staging of the site (a second staging repeats the same bytes, a changed
+published file is refused) and the permissions of the manifest. `WEBFRONT_REQUIRE_NODE=OFF` configures a test build without
+Node.js: the checks that still use it (asset freshness, `DeveloperJavaScript`, `EmbeddedAssetGenerator`) are then not registered.
+The maintainer procedure is in `js/developer/tools/PUBLISHING.md`.
 
 To try the local archive without an HTTPS server, after building the packages above:
 

@@ -13,14 +13,15 @@
   "scripts": {
     "build": "js/developer/scripts/build.mjs",
     "site": "js/developer/scripts/site.mjs",
-    "pin": "js/developer/scripts/pin.mjs"
+    "pin": "js/developer/scripts/pin.mjs",
+    "embed-core": "js/developer/scripts/embed-core.mjs"
   },
   "permissions": {
     "files": [
       "webfront.project.json",
       "webfront-packages.lock.json",
       ".webfront/developer/packages",
-      "js/core/bootstrap",
+      "js/core",
       "js/developer/environment",
       "js/developer/tools",
       "js/developer/scripts",
@@ -39,7 +40,11 @@
       "js/developer/environment/bundles.json",
       "include/webfront/system/DeveloperReleaseData.hpp",
       "include/webfront/system/DeveloperIndexHtmlData.hpp",
-      "include/webfront/system/DeveloperBootstrapData.hpp"
+      "include/webfront/system/DeveloperBootstrapData.hpp",
+      "include/webfront/system/WebFrontJsData.hpp",
+      "include/webfront/system/FallbackIndexHtmlData.hpp",
+      "include/webfront/system/FallbackModuleData.hpp",
+      "include/webfront/system/FaviconData.hpp"
     ],
     "fetch": [
       "https://ambroise-leclerc.github.io"

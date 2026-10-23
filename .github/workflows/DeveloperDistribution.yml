@@ -7,20 +7,30 @@ on:
     paths:
       - 'js/developer/environment/**'
       - 'js/developer/tools/starters/pi/**'
+      - 'js/developer/scripts/**'
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
       - 'js/developer/vendor/package*.json'
+      - 'webfront.project.json'
+      - 'webfront-packages.lock.json'
+      - 'cmake/WebFrontBootstrap.cmake'
       - 'include/webfront/system/DeveloperReleaseData.hpp'
+      - '.github/actions/wf-driver/**'
       - '.github/workflows/DeveloperDistribution.yml'
   pull_request:
     branches: [develop, master]
     paths:
       - 'js/developer/environment/**'
       - 'js/developer/tools/starters/pi/**'
+      - 'js/developer/scripts/**'
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
       - 'js/developer/vendor/package*.json'
+      - 'webfront.project.json'
+      - 'webfront-packages.lock.json'
+      - 'cmake/WebFrontBootstrap.cmake'
       - 'include/webfront/system/DeveloperReleaseData.hpp'
+      - '.github/actions/wf-driver/**'
       - '.github/workflows/DeveloperDistribution.yml'
   workflow_dispatch:
     inputs:
@@ -36,7 +46,12 @@ concurrency:
   group: developer-packages-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') }}
 
+env:
+  PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+
 jobs:
+  # The Node.js build and its tests are kept during the transition (#315 to #318): the wf-package job below compares its
+  # bytes with these, then publishes its own. #318 removes this job with the Node.js tools.
   package:
     runs-on: ubuntu-24.04
     steps:
@@ -49,8 +64,6 @@ jobs:
       - name: Install pinned maintenance dependencies
         run: npm ci --prefix js/developer/vendor --ignore-scripts
       - name: Build and verify the environment and starter packages
-        env:
-          PUBLISHING: ${{ startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
         run: |
           node js/developer/tools/build.mjs build-distribution
           node js/developer/tools/build.mjs build-distribution-repeat
@@ -75,6 +88,63 @@ jobs:
         run: node js/developer/tools/release-check.mjs "$RELEASE_TAG"
       - uses: actions/upload-artifact@v4
         with:
+          name: developer-distribution-node
+          if-no-files-found: error
+          path: |
+            build-distribution/environment.tgz
+            build-distribution/pi-starter.tgz
+            build-distribution/life-starter.tgz
+            build-distribution/provision.json
+            build-distribution/DeveloperReleaseData.hpp
+
+  # The environment builds itself: the pinned bootstrap environment runs js/developer/scripts on these sources, with the
+  # locked build dependencies restored from npm. No Node.js, npm or npx is available to any step.
+  wf-package:
+    needs: package
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/wf-driver
+      - name: Restore the locked build dependencies
+        run: wf restore
+      - name: Build the environment and starter packages twice
+        run: |
+          wf run build build-distribution
+          wf run build build-distribution-repeat
+          for name in environment.tgz pi-starter.tgz life-starter.tgz provision.json DeveloperReleaseData.hpp; do
+            cmp "build-distribution/$name" "build-distribution-repeat/$name"
+          done
+          echo "environment.tgz sha512-$(openssl dgst -sha512 -binary build-distribution/environment.tgz | base64 -w0)"
+      - name: Check the release tag and the pinned header
+        run: |
+          building=$(jq -r .version js/developer/tools/distribution.json)
+          if [[ "$GITHUB_REF" == refs/tags/developer-v* ]] && [ "$GITHUB_REF_NAME" != "developer-v$building" ]; then
+            echo "::error::Expected the dedicated tag developer-v$building"
+            exit 1
+          fi
+          # The pin names the last published version. Sources at that version must rebuild it; sources ahead of it
+          # leave the header pinning the published archive, which is checked against the deployed file.
+          pinned=$(sed -n 's/.*version{"\([^"]*\)"}.*/\1/p' include/webfront/system/DeveloperReleaseData.hpp)
+          if [ "$pinned" = "$building" ] || [ "$PUBLISHING" = true ]; then
+            cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
+          else
+            echo "::notice::Sources build $building; DeveloperReleaseData.hpp still pins the published $pinned."
+            wf run pin
+          fi
+      # Transition: the Node.js build and the wf build must be the same bytes. #318 removes this comparison with the
+      # Node.js build.
+      - uses: actions/download-artifact@v4
+        with:
+          name: developer-distribution-node
+          path: build-distribution-node
+      - name: Compare with the Node.js build
+        run: |
+          for name in environment.tgz pi-starter.tgz life-starter.tgz provision.json DeveloperReleaseData.hpp; do
+            cmp "build-distribution/$name" "build-distribution-node/$name"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
           name: developer-distribution
           if-no-files-found: error
           path: |
@@ -86,8 +156,8 @@ jobs:
 
   publish:
     if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/developer-v') || (github.event_name == 'workflow_dispatch' && inputs.publish))
-    needs: package
-    runs-on: ubuntu-24.04
+    needs: wf-package
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
       pages: write
@@ -98,21 +168,23 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/wf-driver
+      - name: Restore the locked build dependencies
+        run: wf restore
       - uses: actions/download-artifact@v4
         with:
           name: developer-distribution
           path: build-distribution
       - name: Check the configured Pages source before pushing
-        run: node js/developer/tools/pages.mjs --check
+        run: js/developer/tools/pages.sh --check
       - name: Preserve existing versions and publish the static branch
         shell: bash
         run: |
           set -euo pipefail
           gh auth setup-git
-          site="$RUNNER_TEMP/developer-pages"
+          # In the workspace, since the wf script writes inside the project (permissions.publish of webfront.project.json).
+          site=build-site
           git init --initial-branch=gh-pages "$site"
           git -C "$site" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
           result=0
@@ -123,19 +195,19 @@ jobs:
           elif [ "$result" != 2 ]; then
             exit "$result"
           fi
-          node js/developer/tools/site.mjs build-distribution "$site"
+          wf run site build-distribution "$site"
           git -C "$site" config user.name "$GITHUB_ACTOR"
           git -C "$site" config user.email "$GITHUB_ACTOR@users.noreply.github.com"
           git -C "$site" add .nojekyll index.html developer
           if ! git -C "$site" diff --cached --quiet; then
-            version=$(node -p "require('./js/developer/tools/distribution.json').version")
+            version=$(jq -r .version js/developer/tools/distribution.json)
             git -C "$site" commit -m "Publish developer packages $version [#288]"
             git -C "$site" push origin HEAD:refs/heads/gh-pages
           fi
       - name: Request the configured Pages build
-        run: node js/developer/tools/pages.mjs
+        run: js/developer/tools/pages.sh
       - name: Archive tagged packages in a dedicated prerelease
         if: startsWith(github.ref, 'refs/tags/developer-v')
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node js/developer/tools/archive-release.mjs "$RELEASE_TAG" build-distribution
+        run: js/developer/tools/archive-release.sh "$RELEASE_TAG" build-distribution

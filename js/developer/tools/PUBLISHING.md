@@ -5,15 +5,38 @@ are published under `developer/<version>/`. React, React DOM and scheduler stay 
 hosts only WebFront's development environment, its pinned Life/PI starters and provisioning metadata.
 The package names in their manifests are identifiers, not a requirement to own or publish npm scopes.
 
+The environment builds itself: the pinned bootstrap environment (`cmake/WebFrontBootstrap.cmake`) runs the scripts of
+`js/developer/scripts/` on the sources of this repository, which is a `wf` project (`webfront.project.json` and its
+lock). Building, reviewing and publishing need a C++23 compiler, CMake, the engine of the driver's frontend and `gh`
+and `jq` for the host operations; they need no Node.js, npm or npx.
+
 ## Build and review
 
+The driver `webfront-wf` runs one `wf` command without interaction on a project (here, the repository). Any frontend
+works; WebKitGTK on Linux is the one CI uses.
+
 ```sh
-npm ci --prefix js/developer/vendor --ignore-scripts
-node js/developer/tools/build.mjs build-distribution --refresh-bootstrap
-node js/developer/tools/fixtures.mjs build-distribution
-node --test js/developer/tools/check.mjs js/developer/tools/distribution-check.mjs js/developer/tools/manifest-check.mjs
-node js/developer/tools/site.mjs build-distribution build-developer-site
+cmake -S . -B build-driver -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON -DWEBFRONT_REQUIRE_NODE=OFF \
+  -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+cmake --build build-driver --target webfront-wf
+wf() { xvfb-run -a build-driver/test/web/webfront-wf --project "$PWD" -- "$@"; }
+
+wf restore                                    # the locked build dependencies, verified against their SHA-512
+wf run build build-distribution               # environment, starters, provision.json, pinned header
+wf run build build-distribution-repeat        # must be the same bytes
+cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
 ```
+
+`wf run build <directory> --refresh-bootstrap` also rebuilds the checked-in bootstrap bundles
+(`js/core/bootstrap/bootstrap.bundle.mjs`, `js/developer/environment/packages.bundle.mjs`), their checksums
+(`js/developer/environment/bundles.json`, over the inputs of `js/developer/tools/bundle-inputs.json`) and the embedded
+headers `DeveloperIndexHtmlData.hpp` and `DeveloperBootstrapData.hpp`. `wf run embed-core` regenerates the headers of the core's embedded assets from their readable sources (the same bytes as
+the CMake target `webfront-embedded-assets`). A script may only write where `permissions.publish`
+of `webfront.project.json` allows: the `build-*` directories and these checked-in outputs.
+
+The output of a script reaches the terminal of an environment 0.6.1 or later; with the pinned 0.6.0 the command prints
+only its summary. The integrity of an archive is `openssl dgst -sha512 -binary build-distribution/environment.tgz | base64 -w0`,
+prefixed by `sha512-`.
 
 Review and commit the updated checked-in bootstrap bundles and checksums. Regenerating
 `include/webfront/system/DeveloperReleaseData.hpp` is part of the release procedure ("Pinning a new version"): the header
@@ -32,13 +55,17 @@ changed environment, starter, public URL or provisioning configuration.
 `distribution.json` names the version under development; `DeveloperReleaseData.hpp` pins the last version that is
 published. Pull requests and branch pushes therefore require the header to match a fresh build only when both name
 the same version; a publication (a `developer-v*` tag or a dispatch with `publish=true`) always requires it. When the
-sources are ahead, `pin-check.mjs` requires the header to be exactly the one generated for its version and the deployed
+sources are ahead, `wf run pin` requires the header to be exactly the one generated for its version and the deployed
 archive at its URL to have its integrity.
 
 1. Merge the changes with the header still on the previous version.
-2. On a release branch, run `build.mjs build-distribution --refresh-bootstrap` and commit the new header.
+2. On a release branch, run `wf run build build-distribution --refresh-bootstrap` and commit the new header (and the
+   checksums of `bundles.json`, which cover it).
 3. Tag `developer-v<version>` on that commit; the workflow publishes the site.
 4. Verify the deployed files (below), then merge the release branch so the default bootstrap points to the new version.
+
+Once the new version is published, `cmake/WebFrontBootstrap.cmake` may pin it as the bootstrap environment of the
+tests, in a pull request of its own.
 
 ## One-time Pages configuration
 
@@ -63,12 +90,18 @@ Initial Pages enablement is deliberately a maintainer operation, not a side effe
 ## Automated publication
 
 The **Developer packages** workflow builds packages on relevant pushes/PRs and retains them as an
-artifact. It compares a repeat build and the checked-in bootstrap header before permitting publication.
-It publishes only on a `developer-v<version>` tag or an explicit workflow dispatch with `publish=true`.
+artifact. Its `wf-package` job removes Node.js, npm and npx from the runner, builds the driver, restores the locked
+dependencies, builds the distribution twice and compares the repeat build and the checked-in bootstrap header before
+permitting publication. During the transition from Node.js (#318), the `package` job also builds it with the Node.js tools
+and `wf-package` requires the same bytes.
+It publishes only on a `developer-v<version>` tag or an explicit workflow dispatch with `publish=true`. The `publish` job
+runs the same way, without Node.js: `wf run site` stages the new version into a checkout of `gh-pages` and refuses to
+change a published one, `pages.sh` checks the configured source and requests the build, and `archive-release.sh`
+archives the files in a prerelease.
 Use the dedicated tag `developer-v<version>` matching `distribution.json`; the C++ library's `v*` releases remain separate.
 
 ```sh
-version=$(node -p "require('./js/developer/tools/distribution.json').version")
+version=$(jq -r .version js/developer/tools/distribution.json)
 git tag "developer-v$version"
 git push origin "developer-v$version"
 ```
@@ -81,9 +114,11 @@ Pages, whose cross-origin behavior is checked independently of Release asset red
 ## Validate the deployed files
 
 Check the canonical Pages URL, its `Access-Control-Allow-Origin` response and the archive checksum.
-Then run the optional live smoke test (the ordinary CTest suite remains entirely offline):
+Then run the optional live smoke test (the ordinary CTest suite remains entirely offline). Its fixtures (the local
+registry and the test pages) are still provisioned with Node.js until #318 and #319 replace them:
 
 ```sh
+node js/developer/tools/fixtures.mjs build-distribution
 ./build-native/test/web/developer_integration \
   "$PWD/build-distribution" "$PWD/build-native/test/web/public-generated" --public
 ```
