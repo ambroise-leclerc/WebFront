@@ -177,7 +177,7 @@ jobs:
           name: developer-distribution
           path: build-distribution
       - name: Check the configured Pages source before pushing
-        run: js/developer/tools/pages.sh --check
+        run: bash js/developer/tools/pages.sh --check
       - name: Preserve existing versions and publish the static branch
         shell: bash
         run: |
@@ -205,9 +205,9 @@ jobs:
             git -C "$site" push origin HEAD:refs/heads/gh-pages
           fi
       - name: Request the configured Pages build
-        run: js/developer/tools/pages.sh
+        run: bash js/developer/tools/pages.sh
       - name: Archive tagged packages in a dedicated prerelease
         if: startsWith(github.ref, 'refs/tags/developer-v')
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: js/developer/tools/archive-release.sh "$RELEASE_TAG" build-distribution
+        run: bash js/developer/tools/archive-release.sh "$RELEASE_TAG" build-distribution
