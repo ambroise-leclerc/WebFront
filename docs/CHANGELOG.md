@@ -4,7 +4,7 @@
 
 ### Added
 
-- The developer environment builds itself (#315, sources of distribution 0.6.1, release pin unchanged at 0.6.0): the
+- The developer environment builds itself (#315, distribution 0.6.1, published as `developer-v0.6.1` and pinned by `DeveloperReleaseData.hpp`; the bootstrap of the tests stays 0.6.0): the
   repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json`) and the scripts of
   `js/developer/scripts/` run in the pinned bootstrap environment with `webfront-wf`. `build.mjs` bundles the environment
   with the locked esbuild-wasm and writes `environment.tgz`, the starters, `provision.json` and the pinned header (with

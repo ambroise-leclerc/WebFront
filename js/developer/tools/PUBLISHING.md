@@ -34,7 +34,7 @@ headers `DeveloperIndexHtmlData.hpp` and `DeveloperBootstrapData.hpp`. `wf run e
 the CMake target `webfront-embedded-assets`). A script may only write where `permissions.publish`
 of `webfront.project.json` allows: the `build-*` directories and these checked-in outputs.
 
-The output of a script reaches the terminal of an environment 0.6.1 or later; with the pinned 0.6.0 the command prints
+The output of a script reaches the terminal of an environment 0.6.1 or later; with 0.6.0 the command prints
 only its summary. The integrity of an archive is `openssl dgst -sha512 -binary build-distribution/environment.tgz | base64 -w0`,
 prefixed by `sha512-`.
 

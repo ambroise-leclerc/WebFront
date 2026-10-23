@@ -10,7 +10,7 @@ removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live
 components, build tools, vendoring tools); tests live in `test/{unit,web,fuzz,fixtures,cmake}`. The CTest
 case `RepositoryLayout` enforces the root. The generated-provider include changed, so the developer
 distribution is bumped to 0.4.1, published and archived as `developer-v0.4.1`. Version 0.5.0 (project manifest, `wf restore`,
-`wf run`/`wf exec`, `wf check`, the complete terminal) was published as `developer-v0.5.0`; 0.6.0 (`wf build`, `wf dev`, `wf test`, the non-interactive entry) is pinned by `DeveloperReleaseData.hpp`, published and archived as `developer-v0.6.0`. On 2026-10-23 Pages returned HTTP 200 for 0.6.0,
+`wf run`/`wf exec`, `wf check`, the complete terminal) was published as `developer-v0.5.0`; 0.6.0 (`wf build`, `wf dev`, `wf test`, the non-interactive entry) was published as `developer-v0.6.0`, and 0.6.1 (the output of a script reaches `webfront-wf`) is pinned by `DeveloperReleaseData.hpp`, published and archived as `developer-v0.6.1`. On 2026-10-23 Pages returned HTTP 200 for 0.6.1,
 CORS `*` and archives byte-identical to a reproducible local build; the live `--public` test (WebKitGTK, Linux) downloaded them,
 fetched React from npm, ran the PI and Life previews and generated both providers.
 
