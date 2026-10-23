@@ -81,6 +81,12 @@
 
 ### Changed
 
+- The browser integration suite `test/web/` runs through `wf test` (#311): `test/web/suite/` is a WebFront project
+  (`jasmine-core`, `react`, `react-dom` from the local registry), `webtest` is the `webfront-wf` driver with the
+  callbacks of the specs (`test/driver/WfDriver.hpp`), and the Signal Studio page is a JSX module built by esbuild-wasm.
+  `SpecRunner.html` and the `TestFS` composition of `JasmineFS`, `ReactFS` and `BabelFS` are removed from the test. The
+  Jasmine CTest case needs `WEBFRONT_DEVELOPER_FIXTURES` (otherwise only the lifecycle and engine cases are registered);
+  the pinned bootstrap environment runs it.
 - **Breaking:** `BasicWF::getLink(id)`, whose reference could outlive a released connection, is replaced by
   `findLink(id)`, which shares the link with the caller (null once the browser is gone).
 - `DeveloperBootstrapOptions::registry` is now `std::optional<std::string>`: unset, the manifest's registry

@@ -1,15 +1,14 @@
-#include <webfront/system/BabelFS.hpp>
+// The browser integration test: the specs of test/web/suite run under `wf test` in the developer environment of an
+// application that registers the C++ callbacks they call. Usage is that of webfront-wf (test/driver/WfDriver.hpp), e.g.
+//   webtest --project <copy of test/web/suite, after wf install> --registry-dir <registry> -- test --timeout 120
+// The status is that of `wf test`, and 1 when the specs passed but C++ did not observe every call they make.
 #include <webfront/system/FileSystem.hpp>
-#include <webfront/system/IndexFS.hpp>
-#include <webfront/system/JasmineFS.hpp>
-#include <webfront/system/NativeFS.hpp>
-#include <webfront/system/ReactFS.hpp>
 #include <webfront/tooling/Logger.hpp>
-#include <webfront/tooling/PathUtils.hpp>
 #include <webfront/WebFront.hpp>
 
-#include "RejectedWebSocketServer.hpp"
+#include "../driver/WfDriver.hpp"
 #include "../fixtures/SignalDemo.hpp"
+#include "RejectedWebSocketServer.hpp"
 
 #include <array>
 #include <atomic>
@@ -46,97 +45,66 @@ struct TestState {
     atomic<bool> cppResultObserved{false};
     atomic<bool> senderResultsObserved{false};
     atomic<bool> senderCancellationObserved{false};
-    atomic<bool> jasmineReported{false};
+    atomic<bool> specsFinished{false};
     atomic<bool> subscriberNotified{false};
-    atomic<bool> passed{false};
 };
 
-// Serve the actual example page so the React regression exercises the shipped UI.
-class ReactDemoFS {
+// The pages the specs fetch or embed (origin probes, a path containing a plus), served from the project directory.
+class TestPages {
 public:
-    explicit ReactDemoFS(filesystem::path root) : page(root / "fixtures" / "react.html") {}
+    explicit TestPages(const filesystem::path& project) : root(project / "pages") { }
 
     optional<fs::File> open(filesystem::path file) const {
-        if (file.relative_path().generic_string() != "demos/react.html")
-            return {};
-        ifstream stream(page, ios::binary);
-        if (!stream)
-            return {};
-        return fs::File{std::move(stream)};
+        try {
+            const auto path = developer::projectPath(root, file.relative_path().generic_string());
+            ifstream   stream(path, ios::binary);
+            if (stream && filesystem::is_regular_file(path))
+                return fs::File{std::move(stream)};
+        } catch (const exception&) {}
+        return {};
     }
 
 private:
-    filesystem::path page;
+    filesystem::path root;
 };
 
-// Load the full Jasmine suite at the filename used by the WebView2 lifecycle regression.
-// A missing escape for the literal hash would request a different file and never report a result.
-class EncodedRunnerFS {
-public:
-    explicit EncodedRunnerFS(filesystem::path root) : page(root / "SpecRunner.html") { }
-
-    optional<fs::File> open(filesystem::path file) const {
-        const auto request = file.relative_path().generic_string();
-        if (request != "encoded path #.html" && request != "a+b.html")
-            return {};
-        ifstream stream(page, ios::binary);
-        if (!stream)
-            return {};
-        return fs::File{std::move(stream)};
-    }
-
-private:
-    filesystem::path page;
-};
-
-using TestFS = fs::Multi<EncodedRunnerFS,
-                         ReactDemoFS,
-                         fs::NativeDebugFS,
-                         fs::IndexFS,
-                         fs::JasmineFS,
-                         fs::ReactFS,
-                         fs::BabelFS>;
-// CMake chooses an embedded frontend; the same specs run under CEF/Xvfb and Windows WebView2.
+// CMake chooses an embedded frontend; the same specs run under CEF/Xvfb, WebKitGTK, WebView2 and WKWebView.
 #ifndef WEBFRONT_TEST_FRONTEND
     #define WEBFRONT_TEST_FRONTEND webfront::frontend::CEFFrontend
 #endif
-using TestWF = BasicWFWithFrontend<NetProvider, TestFS, WEBFRONT_TEST_FRONTEND>;
+using TestWF = BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, testdriver::DriverFS, TestPages>;
 
 class BrowserIntegrationTest {
 public:
-    explicit BrowserIntegrationTest(const filesystem::path& docRoot) : webFront("9002", docRoot) {
+    using Pages = TestPages;
+
+    ~BrowserIntegrationTest() {
+        joinBitsetFutureChecks();
+    }
+
+    /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
+    /// subprocesses have dispatched (driver main), in the browser process.
+    void configure(TestWF& app) {
+        log::info("Starting automated Jasmine browser integration test");
+        webFront = &app;
+        rejectedWebSocket.emplace();
         registerCallbacks();
         registerBitsetCallbacks();
     }
 
-    ~BrowserIntegrationTest() {
-        if (bitsetFutureThread.joinable())
-            bitsetFutureThread.join();
-        webFront.shutdown();
-    }
-
-#ifdef _MSC_VER
-    // With an unavailable embedded frontend, openAndRun() unconditionally throws. MSVC's
-    // inliner detects that and flags the return below as unreachable, uniquely among our compilers,
-    // turning it into an error under /WX; see the matching suppression in include/webfront/WebFront.hpp.
-    #pragma warning(push)
-    #pragma warning(disable : 4702)
-#endif
-    int run() {
-        log::info("Starting automated Jasmine browser integration test");
-        // Exercise the same page-reference contract under both embedded frontends.
-        webFront.openAndRun("encoded path %23.html?webfront=1#integration");
+    /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
+    int finish(int status) {
+        joinBitsetFutureChecks();
+        if (status != 0) {
+            log::error("wf test did not pass (status {})", status);
+            return status;
+        }
         return result();
     }
-#ifdef _MSC_VER
-    #pragma warning(pop)
-#endif
 
 private:
-    // WebFront dispatches CEF subprocesses during construction. Start the fixture's
-    // networking thread only after that bootstrap has completed in the browser process.
-    TestWF               webFront;
-    RejectedWebSocketServer rejectedWebSocket;
+    TestWF*                          webFront{};
+    optional<RejectedWebSocketServer> rejectedWebSocket;
     optional<TaskHandle>             cancelledTask;
     TestState            state;
     optional<TestWF::UI> connectedUI;
@@ -144,6 +112,11 @@ private:
     future<string> cppResult;
     jthread bitsetFutureThread;
     static constexpr chrono::seconds cppResultWaitTimeout{10};
+
+    void joinBitsetFutureChecks() {
+        if (bitsetFutureThread.joinable())
+            bitsetFutureThread.join();
+    }
 
     const array<uint8_t, 2>  cppU8{0, 255};
     const array<int8_t, 2>   cppI8{-128, 127};
@@ -202,7 +175,7 @@ private:
         } catch (const exception& error) {
             log::error("Bitset future checks failed: {}", error.what());
         }
-        webFront.spawn(reportBitsetFutureChecks(ui, passed));
+        webFront->spawn(reportBitsetFutureChecks(ui, passed));
     }
 
     Task reportBitsetFutureChecks(TestWF::UI ui, bool passed) {
@@ -275,59 +248,59 @@ private:
     }
 
     void registerBitsetCallbacks() {
-        webFront.cppFunction("bitsetEcho", [](const bitset<9>& value) {
+        webFront->cppFunction("bitsetEcho", [](const bitset<9>& value) {
             return value;
         });
-        webFront.cppFunction("bitsetEmpty", [](bitset<0> value) {
+        webFront->cppFunction("bitsetEmpty", [](bitset<0> value) {
             return value;
         });
-        webFront.cppFunction("bitsetGrid", [](const bitset<1024>& value) {
+        webFront->cppFunction("bitsetGrid", [](const bitset<1024>& value) {
             return value;
         });
-        webFront.cppFunction("bitsetTuple", [](tuple<bitset<9>, int> value) {
+        webFront->cppFunction("bitsetTuple", [](tuple<bitset<9>, int> value) {
             return value;
         });
     }
 
     void registerCallbacks() {
-        webFront.cppFunction("cancelBrowserSender", [this] {
+        webFront->cppFunction("cancelBrowserSender", [this] {
             if (cancelledTask)
                 cancelledTask->requestStop();
         });
-        webFront.cppFunction("senderCancellationObserved", [this] {
+        webFront->cppFunction("senderCancellationObserved", [this] {
             return state.senderCancellationObserved.load();
         });
-        webFront.cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
-        webFront.cppFunction("signal.generate", &demo::generateSignal);
-        webFront.cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket.url(); });
-        uiSubscription = webFront.subscribeUIStarted([this](TestWF::UI) {
+        webFront->cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
+        webFront->cppFunction("signal.generate", &demo::generateSignal);
+        webFront->cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket->url(); });
+        uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;
         });
-        webFront.cppFunction("callBackCaller", [](TestWF::UI caller, const string& token) {
+        webFront->cppFunction("callBackCaller", [](TestWF::UI caller, const string& token) {
             caller.jsFunction("webfrontTests.receiveFromCaller")(token);
         });
-        webFront.cppFunction("browserReady", [this](TestWF::UI ui) {
+        webFront->cppFunction("browserReady", [this](TestWF::UI ui) {
             // Raw origin probes create extra sessions; bind calls to the document reporting ready.
             connectedUI.emplace(ui);
             browserReady();
         });
-        webFront.cppFunction<void, string>("recordFromJs", [this](const string& token) {
+        webFront->cppFunction<void, string>("recordFromJs", [this](const string& token) {
             recordFromJs(token);
         });
-        webFront.cppFunction<void, string>("recordExtendedFrameFromJs", [this](const string& value) {
+        webFront->cppFunction<void, string>("recordExtendedFrameFromJs", [this](const string& value) {
             state.jsExtendedFrameObserved = value == string(126, 'x');
         });
-        webFront.cppFunction<void, string, string>("reportJasmine", [this](const string& overallStatus, const string& failures) {
-            reportJasmine(overallStatus, failures);
+        webFront->cppFunction("specsFinished", [this] {
+            specsFinished();
         });
-        webFront.cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
-        webFront.cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
-        webFront.cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
-        webFront.cppFunction("integerInCpp", [](int value) {
+        webFront->cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
+        webFront->cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
+        webFront->cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
+        webFront->cppFunction("integerInCpp", [](int value) {
             return value;
         });
-        webFront.cppFunction<size_t, string>("lengthInCpp", [](const string& value) { return value.size(); });
-        webFront.cppFunction<void,
+        webFront->cppFunction<size_t, string>("lengthInCpp", [](const string& value) { return value.size(); });
+        webFront->cppFunction<void,
                              vector<uint8_t>,
                              vector<int8_t>,
                              vector<uint16_t>,
@@ -351,7 +324,7 @@ private:
                    const vector<double>&   doubles) {
                 recordArraysFromJs(u8, i8, u16, i16, u32, i32, u64, i64, floats, doubles);
             });
-        webFront.cppFunction<void, tuple<int, string>>("recordTupleFromJs", [this](const tuple<int, string>& value) {
+        webFront->cppFunction<void, tuple<int, string>>("recordTupleFromJs", [this](const tuple<int, string>& value) {
             state.jsTupleObserved = value == tuple<int, string>{42, "tuple"};
         });
     }
@@ -381,9 +354,9 @@ private:
 
     void browserReady() {
         state.browserReady = true;
-        webFront.spawn(checkSenderResults(requireUI()));
+        webFront->spawn(checkSenderResults(requireUI()));
         startBitsetFutureChecks(requireUI());
-        webFront.spawn(checkBitsetResults(requireUI()));
+        webFront->spawn(checkBitsetResults(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
         requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(
@@ -409,14 +382,10 @@ private:
         }
     }
 
-    void reportJasmine(const string& overallStatus, const string& failures) {
-        state.jasmineReported   = true;
+    /// The last spec: everything the specs sent over this connection has been handled.
+    void specsFinished() {
         state.cppResultObserved = cppResultMatches();
-        state.passed            = overallStatus == "passed" && state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
-                                  && rejectedWebSocket.rejectedRequests() >= 2;
-        if (!failures.empty())
-            log::error("Jasmine failures:\n{}", failures);
-        requireUI().jsFunction("webfrontTests.close")(state.passed.load());
+        state.specsFinished     = true;
     }
 
     bool cppCallsObserved() const {
@@ -434,12 +403,13 @@ private:
     }
 
     int result() const {
-        if (!state.jasmineReported) {
-            log::error("Jasmine did not report a result");
+        if (!state.specsFinished) {
+            log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!state.passed) {
-            log::error("Jasmine or one of the bridge-direction checks failed");
+        if (!(state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
+              && rejectedWebSocket->rejectedRequests() >= 2)) {
+            log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;
         }
 
@@ -448,25 +418,14 @@ private:
     }
 };
 
-int runBrowserIntegration() {
-    const auto             docRoot = tooling::findTestRoot("SpecRunner.html");
-    BrowserIntegrationTest test(docRoot);
-    return test.run();
-}
-
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     log::setLogLevel(log::Debug);
     const auto consoleSink = log::addSinks(log::clogSink);
 
-    int result = 1;
-    try {
-        result = runBrowserIntegration();
-    } catch (const exception& error) {
-        log::error("Browser integration test failed: {}", error.what());
-        cerr << error.what() << '\n';
-    }
+    BrowserIntegrationTest test;
+    const int              result = webfront::testdriver::main<WEBFRONT_TEST_FRONTEND>(argc, argv, "webtest", test);
     log::removeSinks(consoleSink);
     return result;
 }

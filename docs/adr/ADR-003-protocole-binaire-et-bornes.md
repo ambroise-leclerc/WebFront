@@ -93,5 +93,5 @@ refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur p
 - [Codec C++](../../include/webfront/weblink/Messages.hpp), [codec JS](../../js/core/WebFront.js),
   [politique de buffers](../../include/webfront/http/BuffersPolicy.hpp).
 - Tests : [MessagesTests](../../test/unit/MessagesTests.cpp), [WebSocketTests](../../test/unit/WebSocketTests.cpp),
-  [spécifications navigateur](../../test/web/js/webfront-specs.mjs).
+  [spécifications navigateur](../../test/web/suite/specs/webfront-specs.mjs).
 - Voir [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) et [ADR-012](ADR-012-preuves-et-tests.md).

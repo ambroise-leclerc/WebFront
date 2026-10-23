@@ -14,6 +14,20 @@ distribution is bumped to 0.4.1, published and archived as `developer-v0.4.1`. V
 CORS `*` and archives byte-identical to a reproducible local build; the live `--public` test (WebKitGTK, Linux) downloaded them,
 fetched React from npm, ran the PI and Life previews and generated both providers.
 
+## Browser suite as a WebFront project (#311, epic #303)
+
+The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.project.json`: `jasmine-core`, `react`,
+`react-dom`, `test.specs`). `webtest` is the `webfront-wf` driver (`test/driver/WfDriver.hpp`) plus the C++ callbacks the
+specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
+local registry of `WEBFRONT_DEVELOPER_FIXTURES` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
+pinned 0.6.0 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
+composition and the use of `JasmineFS`, `ReactFS` and `BabelFS` by the browser test are gone; the Signal Studio page is a
+JSX module built by esbuild-wasm with the locked React and rendered in the runner frame by the specs. The specs now run
+in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
+by the `path-encoding` lifecycle case, and `webtest` also checks that C++ observed every call the specs make. The Jasmine
+case is registered only with `WEBFRONT_DEVELOPER_FIXTURES`; the registry fixtures are still produced by the Node tools
+(#318, #319). The unit tests of `JasmineFS`, `ReactFS` and `BabelFS` and their sources remain until #312.
+
 ## CI test duration (#298, 2026-10-21)
 
 The maintenance asset renderer generates and compares headers in Node, preserving

@@ -2,27 +2,25 @@ import './content-policy-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
 import './react-demo-specs.mjs';
 
+// The page of the application is covered by the lifecycle cases (path-encoding): these specs run in the frame of wf test.
 describe('Frontend page URL', () => {
-    it('opens a filename containing spaces and a literal hash', () => {
-        expect(decodeURIComponent(location.pathname)).toBe('/encoded path #.html');
-    });
     it('serves a filename containing a literal plus through the C++ URL builder', async () => {
         const url = await webFront.cppFunction('plusPageUrl')();
         expect(new URL(url).pathname).toBe('/a%2Bb.html');
         const response = await fetch(url);
         expect(response.ok).toBeTrue();
-        expect(await response.text()).toContain('<title>WebFront automated browser tests</title>');
+        expect(await response.text()).toContain('<title>Plus in a path</title>');
     });
-    it('preserves the query and fragment passed by C++', () => {
-        expect(location.search).toBe('?webfront=1');
-        expect(location.hash).toBe('#integration');
+    it('runs in the frame of the test runner, served from the origin of the application', () => {
         expect(location.hostname).toBe('127.0.0.1');
+        expect(window.parent).not.toBe(window);
     });
 });
 
 const cppToken = 'cpp-to-js-token';
 const jsToken = 'js-to-cpp-token';
-const status = document.getElementById('bridge-status');
+const status = document.body.appendChild(document.createElement('p'));
+status.textContent = 'Waiting for the C++/JavaScript bridge…';
 
 const browserReadyTimeoutMs = 10000;
 
@@ -121,11 +119,6 @@ globalThis.webfrontTests = {
         const result = `js-result:${value}`;
         resolveCppResult(result);
         return result;
-    },
-
-    close(passed) {
-        status.textContent = passed ? 'Bridge integration passed' : 'Bridge integration failed';
-        setTimeout(() => globalThis.close(), 0);
     }
 };
 
@@ -289,15 +282,7 @@ describe('WebFront browser integration', () => {
     });
 });
 
-jasmine.getEnv().addReporter({
-    failures: [],
-    specDone(result) {
-        for (const failure of result.failedExpectations)
-            this.failures.push(`${result.fullName}: ${failure.message}`);
-    },
-    async jasmineDone(result) {
-        await webFront.cppFunction('reportJasmine')(result.overallStatus, this.failures.join('\n'));
-    }
-});
+// C++ also checks what it observed: it is told over this connection, after every call the specs sent.
+afterAll(async () => { await webFront.cppFunction('specsFinished')(); });
 
 await notifyBrowserReady();

@@ -177,7 +177,10 @@ function(webfront_set_browser_test_properties name assets_directory timeout)
 endfunction()
 
 # Shared Jasmine and lifecycle registration; engine-specific cases stay in the support module.
+# ARGUMENTS are passed to the Jasmine target (webtest runs `wf test` on a prepared project); SKIP_JASMINE registers the
+# lifecycle and engine cases only, when the target cannot run on this configuration.
 function(webfront_add_browser_tests target frontend assets_directory lifecycle_target)
+    cmake_parse_arguments(ARG "SKIP_JASMINE" "" "ARGUMENTS" ${ARGN})
     if(NOT frontend IN_LIST WEBFRONT_FRONTEND_REGISTRY)
         message(FATAL_ERROR "Unknown browser-test frontend '${frontend}'")
     endif()
@@ -218,11 +221,13 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             webfront_set_browser_test_properties("${lifecycle_name}" "${assets_directory}"
                 "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
         endforeach()
-        set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
-        add_test(NAME ${name} COMMAND ${command})
-        list(APPEND shared_tests "${name}")
-        webfront_set_browser_test_properties("${name}" "${assets_directory}"
-            "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
+        if(NOT ARG_SKIP_JASMINE)
+            set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
+            add_test(NAME ${name} COMMAND ${command} ${ARG_ARGUMENTS})
+            list(APPEND shared_tests "${name}")
+            webfront_set_browser_test_properties("${name}" "${assets_directory}"
+                "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
+        endif()
     endif()
     # Per-engine tests may be independent of a display and must not be skipped with Jasmine.
     set(setup "${WEBFRONT_FRONTEND_${frontend}_TEST_SETUP}")

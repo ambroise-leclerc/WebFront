@@ -82,5 +82,5 @@ ci-dessous restent en vigueur et ne doivent pas être étendues à de nouvelles 
 - [Maintenance des assets](../EMBEDDED_ASSETS.md), [contrat HTTP](../HTTP_ASSETS.md),
   [génération](../../js/core/WebFrontAssets.cmake).
 - Tests : `Asset.*Fresh`, `EmbeddedGzipContents`, [HTTPEncodingTests](../../test/unit/HTTPEncodingTests.cpp),
-  [React dans le navigateur](../../test/web/js/react-demo-specs.mjs).
+  [React dans le navigateur](../../test/web/suite/specs/react-demo-specs.mjs).
 - Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md) et [ADR-016](ADR-016-bootstrap-comme-socle.md).

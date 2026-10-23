@@ -1,4 +1,4 @@
-import { watchOriginProbe } from './origin-probe.mjs';
+import { watchOriginProbe } from '../pages/js/origin-probe.mjs';
 
 describe('Server bridge origin authorization', () => {
     const socketUrl = new URL('/', location.href);
