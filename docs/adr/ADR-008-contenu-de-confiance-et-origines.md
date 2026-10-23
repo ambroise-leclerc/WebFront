@@ -66,5 +66,5 @@ WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
 - [Politique et capacités détaillées](../CONTENT_POLICY.md),
   [ContentPolicy](../../include/webfront/ContentPolicy.hpp).
 - Tests : [ContentPolicyTests](../../test/unit/ContentPolicyTests.cpp),
-  [content-policy-specs](../../test/web/js/content-policy-specs.mjs).
+  [content-policy-specs](../../test/web/suite/specs/content-policy-specs.mjs).
 - Voir [ADR-007](ADR-007-frontends-explicites.md) et [ADR-010](ADR-010-composants-et-outils-optionnels.md).

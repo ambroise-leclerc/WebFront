@@ -518,6 +518,10 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
   after asking the page to close; **72** the browser closed without a result. `--report` writes the JSON result
   `{exitCode, output, report}` of the command, cut to fit a bridge string as described above.
 
+`webtest`, the Jasmine bridge suite (`test/web/suite/`, #311), is this driver with the C++ callbacks of its specs
+(`test/driver/WfDriver.hpp`: `run` and `main` take a setup that adds pages, registers callbacks before the page opens and
+decides the final status). CTest copies the project, runs `wf install` from the fixtures' registry, then `webtest ... -- test`.
+
 **Compatibility contract.** `environment.json` declares `protocol` (the environment's wire protocol) and `api` (the
 `webfront.developer.*` callbacks it expects; absent means 1, the value of every environment published before the
 field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]}`, from `developer::protocolVersion` and

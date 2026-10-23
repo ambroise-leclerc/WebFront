@@ -20,7 +20,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
 - `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
-- `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
+- `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
 - `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
@@ -51,10 +51,12 @@ ctest --test-dir build --output-on-failure --parallel 4
 # Run one Catch2 scenario directly
 ./build/test/unit/tests "Scenario: JsFunction"
 
-# Linux real-browser integration test
+# Linux real-browser integration test (the Jasmine suite needs the offline registry of the fixtures)
+node js/developer/tools/build.mjs build-developer-environment
+node js/developer/tools/fixtures.mjs build-developer-environment
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
-cmake --build build-cef --target webtest --parallel
+  -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=$PWD/build-developer-environment
+cmake --build build-cef --target webtest webfront-wf --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
 
 ```
@@ -97,7 +99,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 - Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
-- Jasmine tests use native modules and must report completion to C++, close themselves, return a meaningful process status, and have a CTest timeout.
+- Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. Without `WEBFRONT_DEVELOPER_FIXTURES` the Jasmine case is not registered.
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
 

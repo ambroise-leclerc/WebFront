@@ -16,7 +16,28 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     webfront_setup_frontends_for_target(frontend_lifecycle)
     add_dependencies(webtest frontend_lifecycle)
 endif()
-webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle)
+
+# Optional offline fixtures (the local npm registry, the environment built from the sources) are provisioned by
+# maintainers, never downloaded by CTest.
+set(WEBFRONT_DEVELOPER_FIXTURES "" CACHE PATH "Prepared browser developer environment/registry fixtures")
+# The Jasmine suite is a WebFront project (suite/) that webtest runs with `wf test` in the pinned bootstrap environment;
+# its dependencies come from the local registry of the fixtures. Without them, only the lifecycle and engine cases run.
+set(_webtest_runs OFF)
+if(WEBFRONT_DEVELOPER_FIXTURES
+   AND ${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
+   AND CMAKE_SYSTEM_NAME IN_LIST WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_PLATFORMS)
+    set(_webtest_runs ON)
+    set(_suite_project "${CMAKE_CURRENT_BINARY_DIR}/web-suite-project")
+    math(EXPR _suite_timeout "${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_TIMEOUT} - 10")
+    webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle
+        ARGUMENTS --project "${_suite_project}" --registry-dir "${WEBFRONT_DEVELOPER_FIXTURES}/registry" --timeout ${_suite_timeout}
+                  -- test --timeout ${_suite_timeout})
+else()
+    webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle SKIP_JASMINE)
+    if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION})
+        message(STATUS "The Jasmine browser suite needs WEBFRONT_DEVELOPER_FIXTURES (build.mjs and fixtures.mjs); only the lifecycle cases are registered")
+    endif()
+endif()
 
 # The pinned bootstrap environment is downloaded and verified at configure time (or taken from WEBFRONT_BOOTSTRAP_DIR on a
 # machine without network access); webfront-wf runs wf commands without interaction from it, or from an environment passed
@@ -31,6 +52,9 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     target_compile_definitions(webfront-wf PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
         WEBFRONT_BOOTSTRAP_ARCHIVE="${WEBFRONT_BOOTSTRAP_ARCHIVE}" WEBFRONT_BOOTSTRAP_INTEGRITY="${WEBFRONT_BOOTSTRAP_INTEGRITY}")
     webfront_setup_frontends_for_target(webfront-wf)
+    # webtest runs its suite in the same bootstrap environment.
+    target_compile_definitions(webtest PRIVATE
+        WEBFRONT_BOOTSTRAP_ARCHIVE="${WEBFRONT_BOOTSTRAP_ARCHIVE}" WEBFRONT_BOOTSTRAP_INTEGRITY="${WEBFRONT_BOOTSTRAP_INTEGRITY}")
 endif()
 
 # Exercise actual CEF command IDs, context-menu filtering and DevTools creation in the vendored runtime.
@@ -46,8 +70,6 @@ if(WEBFRONT_EMBED_CEF AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endif()
 endif()
 
-# Optional offline fixtures are provisioned by maintainers, never downloaded by CTest.
-set(WEBFRONT_DEVELOPER_FIXTURES "" CACHE PATH "Prepared browser developer environment/registry fixtures")
 if(WEBFRONT_DEVELOPER_FIXTURES
    AND ${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
    AND CMAKE_SYSTEM_NAME IN_LIST WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_PLATFORMS)
@@ -144,6 +166,23 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         add_test(NAME WfDriverBadTimeout COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}" --timeout abc -- list)
         set_tests_properties(WfDriverBadTimeout PROPERTIES PASS_REGULAR_EXPRESSION "--timeout expects whole seconds" LABELS "web-integration" TIMEOUT 30)
         set_tests_properties(WfDriverUsage PROPERTIES PASS_REGULAR_EXPRESSION "A wf command is required" LABELS "web-integration" TIMEOUT 30)
+
+        # The Jasmine suite of webtest: a fresh copy of the project, its dependencies installed from the local registry,
+        # then `wf test` (the WebFront*Integration case) in the pinned bootstrap environment.
+        if(_webtest_runs)
+            add_test(NAME WebSuiteProject
+                COMMAND ${CMAKE_COMMAND} -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/suite -DPROJECT=${_suite_project}
+                    -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareWfProject.cmake)
+            set_tests_properties(WebSuiteProject PROPERTIES FIXTURES_SETUP WebSuiteProject LABELS "web-integration" TIMEOUT 30)
+            add_test(NAME WebSuiteInstall
+                COMMAND ${_developer_xvfb_prefix} ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
+                    -DPROJECT=${_suite_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work -DENVIRONMENT= -DINTEGRITY=
+                    -DREGISTRY=${WEBFRONT_DEVELOPER_FIXTURES}/registry -DEXPECT_STATUS=0 -DCOMMAND=install "-DEXPECT_OUTPUT=Installed [0-9]+ packages"
+                    -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+            webfront_set_browser_test_properties(WebSuiteInstall "${CMAKE_CURRENT_SOURCE_DIR}" 120)
+            set_tests_properties(WebSuiteInstall PROPERTIES FIXTURES_REQUIRED WebSuiteProject FIXTURES_SETUP WebSuiteInstalled)
+            set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled)
+        endif()
     endif()
     # Build the actual browser-generated header only after the setup test has produced it.
     add_executable(developer_embedded EXCLUDE_FROM_ALL DeveloperEmbeddedTest.cpp)

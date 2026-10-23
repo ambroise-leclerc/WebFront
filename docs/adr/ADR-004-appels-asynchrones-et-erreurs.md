@@ -73,5 +73,5 @@ ordinaires sont déduites ; les lambdas génériques et opérateurs surchargés 
 - [API C++](../../include/webfront/WebFront.hpp), [fonctions JS](../../include/webfront/JsFunction.hpp),
   [exécution asynchrone](../ASYNC_EXECUTION.md).
 - Tests : [JSFunctionTests](../../test/unit/JSFunctionTests.cpp), [WebLinkTests](../../test/unit/WebLinkTests.cpp),
-  [webfront-specs](../../test/web/js/webfront-specs.mjs).
+  [webfront-specs](../../test/web/suite/specs/webfront-specs.mjs).
 - Voir [ADR-003](ADR-003-protocole-binaire-et-bornes.md) et [ADR-006](ADR-006-taches-structurees-et-arret.md).
