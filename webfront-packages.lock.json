@@ -1,0 +1,850 @@
+{
+  "format": 1,
+  "manifestDigest": "21fb3318f7bf56509632d83f1c530ae8e14b5c8dabaaee4b3d24a2ecd4cc3fd3",
+  "registry": "https://registry.npmjs.org/",
+  "roots": {
+    "@xterm/addon-fit": {
+      "requested": "0.11.0",
+      "id": "@xterm+addon-fit@0.11.0"
+    },
+    "@xterm/xterm": {
+      "requested": "6.0.0",
+      "id": "@xterm+xterm@6.0.0"
+    },
+    "esbuild-wasm": {
+      "requested": "0.28.2",
+      "id": "esbuild-wasm@0.28.2"
+    },
+    "react": {
+      "requested": "19.3.1",
+      "id": "react@19.3.1"
+    },
+    "react-dom": {
+      "requested": "19.3.1",
+      "id": "react-dom@19.3.1"
+    },
+    "semver": {
+      "requested": "7.7.3",
+      "id": "semver@7.7.3"
+    }
+  },
+  "packages": {
+    "@xterm+addon-fit@0.11.0": {
+      "name": "@xterm/addon-fit",
+      "version": "0.11.0",
+      "integrity": "sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==",
+      "key": "@xterm+addon-fit@0.11.0-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo-vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g",
+      "manifest": {
+        "name": "@xterm/addon-fit",
+        "version": "0.11.0",
+        "author": {
+          "name": "The xterm.js authors",
+          "url": "https://xtermjs.org/"
+        },
+        "main": "lib/addon-fit.js",
+        "module": "lib/addon-fit.mjs",
+        "types": "typings/addon-fit.d.ts",
+        "repository": "https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit",
+        "license": "MIT",
+        "keywords": [
+          "terminal",
+          "xterm",
+          "xterm.js"
+        ],
+        "scripts": {
+          "build": "../../node_modules/.bin/tsc -p .",
+          "prepackage": "npm run build",
+          "package": "../../node_modules/.bin/webpack",
+          "prepublishOnly": "npm run package",
+          "start": "node ../../demo/start"
+        },
+        "commit": "f447274f430fd22513f6adbf9862d19524471c04"
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "lib/addon-fit.js",
+        "lib/addon-fit.js.map",
+        "lib/addon-fit.mjs",
+        "lib/addon-fit.mjs.map",
+        "package.json",
+        "src/FitAddon.ts",
+        "typings/addon-fit.d.ts"
+      ],
+      "dependencies": {}
+    },
+    "@xterm+xterm@6.0.0": {
+      "name": "@xterm/xterm",
+      "version": "6.0.0",
+      "integrity": "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==",
+      "key": "@xterm+xterm@6.0.0-TQwDdQGtwwDt-2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc_Zgc5kq5omJ-V0a8_kIM2WD3sMOYg",
+      "manifest": {
+        "name": "@xterm/xterm",
+        "description": "Full xterm terminal, in your browser",
+        "version": "6.0.0",
+        "main": "lib/xterm.js",
+        "module": "lib/xterm.mjs",
+        "style": "css/xterm.css",
+        "types": "typings/xterm.d.ts",
+        "repository": "https://github.com/xtermjs/xterm.js",
+        "license": "MIT",
+        "workspaces": [
+          "addons/*"
+        ],
+        "keywords": [
+          "cli",
+          "command-line",
+          "console",
+          "pty",
+          "shell",
+          "ssh",
+          "styles",
+          "terminal-emulator",
+          "terminal",
+          "tty",
+          "vt100",
+          "webgl",
+          "xterm"
+        ],
+        "scripts": {
+          "setup": "npm run build",
+          "start": "node demo/start",
+          "build": "npm run tsc",
+          "watch": "npm run tsc-watch",
+          "tsc": "tsc -b ./tsconfig.all.json",
+          "tsc-watch": "tsc -b -w ./tsconfig.all.json --preserveWatchOutput",
+          "esbuild": "node bin/esbuild_all.mjs",
+          "esbuild-watch": "node bin/esbuild_all.mjs --watch",
+          "esbuild-package": "node bin/esbuild_all.mjs --prod",
+          "esbuild-package-watch": "node bin/esbuild_all.mjs --prod --watch",
+          "esbuild-package-headless-only": "node bin/esbuild.mjs --prod --headless",
+          "esbuild-demo": "node bin/esbuild.mjs --demo-client",
+          "esbuild-demo-watch": "node bin/esbuild.mjs --demo-client --watch",
+          "test": "npm run test-unit",
+          "posttest": "npm run lint",
+          "lint": "eslint -c .eslintrc.json --max-warnings 0 --ext .ts src/ addons/",
+          "lint-fix": "eslint -c .eslintrc.json --fix --ext .ts src/ addons/",
+          "lint-api": "eslint --no-eslintrc -c .eslintrc.json.typings --max-warnings 0 --no-ignore --ext .d.ts typings/",
+          "test-unit": "node ./bin/test_unit.js",
+          "test-unit-coverage": "node ./bin/test_unit.js --coverage",
+          "test-unit-dev": "cross-env NODE_PATH='./out' mocha",
+          "test-integration": "node ./bin/test_integration.js --workers=75%",
+          "test-integration-chromium": "node ./bin/test_integration.js --workers=75% \"--project=ChromeStable\"",
+          "test-integration-firefox": "node ./bin/test_integration.js --workers=75% \"--project=FirefoxStable\"",
+          "test-integration-webkit": "node ./bin/test_integration.js --workers=75% \"--project=WebKit\"",
+          "test-integration-debug": "node ./bin/test_integration.js  --workers=1 --headed --timeout=30000",
+          "benchmark": "NODE_PATH=./out xterm-benchmark -r 5 -c test/benchmark/benchmark.json",
+          "benchmark-baseline": "NODE_PATH=./out xterm-benchmark -r 5 -c test/benchmark/benchmark.json --baseline out-test/benchmark/*benchmark.js",
+          "benchmark-eval": "NODE_PATH=./out xterm-benchmark -r 5 -c test/benchmark/benchmark.json --eval out-test/benchmark/*benchmark.js",
+          "clean": "rm -rf lib out addons/*/lib addons/*/out",
+          "vtfeatures": "node bin/extract_vtfeatures.js src/**/*.ts src/*.ts",
+          "prepackage": "npm run build",
+          "package": "webpack",
+          "postpackage": "npm run esbuild-package",
+          "prepackage-headless": "npm run esbuild-package-headless-only",
+          "package-headless": "webpack --config ./webpack.config.headless.js",
+          "postpackage-headless": "node ./bin/package_headless.js",
+          "prepublishOnly": "npm run package"
+        },
+        "devDependencies": {
+          "@lunapaint/png-codec": "^0.2.0",
+          "@playwright/test": "^1.37.1",
+          "@stylistic/eslint-plugin": "^2.3.0",
+          "@types/chai": "^4.2.22",
+          "@types/debug": "^4.1.7",
+          "@types/deep-equal": "^1.0.1",
+          "@types/express": "4",
+          "@types/express-ws": "^3.0.1",
+          "@types/jsdom": "^16.2.13",
+          "@types/mocha": "^9.0.0",
+          "@types/node": "^18.16.0",
+          "@types/trusted-types": "^1.0.6",
+          "@types/utf8": "^3.0.0",
+          "@types/webpack": "^5.28.0",
+          "@types/ws": "^8.2.0",
+          "@typescript-eslint/eslint-plugin": "^6.2.00",
+          "@typescript-eslint/parser": "^6.2.00",
+          "chai": "^4.3.4",
+          "cross-env": "^7.0.3",
+          "deep-equal": "^2.0.5",
+          "esbuild": "~0.25.2",
+          "eslint": "^8.56.0",
+          "eslint-plugin-jsdoc": "^46.9.1",
+          "express": "^4.19.2",
+          "express-ws": "^5.0.2",
+          "jsdom": "^18.0.1",
+          "mocha": "^10.1.0",
+          "mustache": "^4.2.0",
+          "node-pty": "1.1.0-beta19",
+          "nyc": "^15.1.0",
+          "source-map-loader": "^3.0.0",
+          "source-map-support": "^0.5.20",
+          "ts-loader": "^9.3.1",
+          "typescript": "5.5",
+          "utf8": "^3.0.0",
+          "webpack": "^5.61.0",
+          "webpack-cli": "^4.9.1",
+          "ws": "^8.2.3",
+          "xterm-benchmark": "^0.3.1"
+        },
+        "commit": "f447274f430fd22513f6adbf9862d19524471c04"
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "css/xterm.css",
+        "lib/xterm.js",
+        "lib/xterm.js.map",
+        "lib/xterm.mjs",
+        "lib/xterm.mjs.map",
+        "package.json",
+        "src/browser/AccessibilityManager.ts",
+        "src/browser/Clipboard.ts",
+        "src/browser/ColorContrastCache.ts",
+        "src/browser/CoreBrowserTerminal.ts",
+        "src/browser/Linkifier.ts",
+        "src/browser/LocalizableStrings.ts",
+        "src/browser/OscLinkProvider.ts",
+        "src/browser/RenderDebouncer.ts",
+        "src/browser/TimeBasedDebouncer.ts",
+        "src/browser/Types.ts",
+        "src/browser/Viewport.ts",
+        "src/browser/decorations/BufferDecorationRenderer.ts",
+        "src/browser/decorations/ColorZoneStore.ts",
+        "src/browser/decorations/OverviewRulerRenderer.ts",
+        "src/browser/input/CompositionHelper.ts",
+        "src/browser/input/Mouse.ts",
+        "src/browser/input/MoveToCell.ts",
+        "src/browser/public/Terminal.ts",
+        "src/browser/renderer/dom/DomRenderer.ts",
+        "src/browser/renderer/dom/DomRendererRowFactory.ts",
+        "src/browser/renderer/dom/WidthCache.ts",
+        "src/browser/renderer/shared/Constants.ts",
+        "src/browser/renderer/shared/RendererUtils.ts",
+        "src/browser/renderer/shared/SelectionRenderModel.ts",
+        "src/browser/renderer/shared/Types.ts",
+        "src/browser/selection/SelectionModel.ts",
+        "src/browser/selection/Types.ts",
+        "src/browser/services/CharSizeService.ts",
+        "src/browser/services/CharacterJoinerService.ts",
+        "src/browser/services/CoreBrowserService.ts",
+        "src/browser/services/LinkProviderService.ts",
+        "src/browser/services/MouseService.ts",
+        "src/browser/services/RenderService.ts",
+        "src/browser/services/SelectionService.ts",
+        "src/browser/services/Services.ts",
+        "src/browser/services/ThemeService.ts",
+        "src/browser/shared/Constants.ts",
+        "src/common/CircularList.ts",
+        "src/common/Clone.ts",
+        "src/common/Color.ts",
+        "src/common/CoreTerminal.ts",
+        "src/common/InputHandler.ts",
+        "src/common/MultiKeyMap.ts",
+        "src/common/Platform.ts",
+        "src/common/SortedList.ts",
+        "src/common/TaskQueue.ts",
+        "src/common/TypedArrayUtils.ts",
+        "src/common/Types.ts",
+        "src/common/WindowsMode.ts",
+        "src/common/buffer/AttributeData.ts",
+        "src/common/buffer/Buffer.ts",
+        "src/common/buffer/BufferLine.ts",
+        "src/common/buffer/BufferRange.ts",
+        "src/common/buffer/BufferReflow.ts",
+        "src/common/buffer/BufferSet.ts",
+        "src/common/buffer/CellData.ts",
+        "src/common/buffer/Constants.ts",
+        "src/common/buffer/Marker.ts",
+        "src/common/buffer/Types.ts",
+        "src/common/data/Charsets.ts",
+        "src/common/data/EscapeSequences.ts",
+        "src/common/input/Keyboard.ts",
+        "src/common/input/TextDecoder.ts",
+        "src/common/input/UnicodeV6.ts",
+        "src/common/input/WriteBuffer.ts",
+        "src/common/input/XParseColor.ts",
+        "src/common/parser/Constants.ts",
+        "src/common/parser/DcsParser.ts",
+        "src/common/parser/EscapeSequenceParser.ts",
+        "src/common/parser/OscParser.ts",
+        "src/common/parser/Params.ts",
+        "src/common/parser/Types.ts",
+        "src/common/public/AddonManager.ts",
+        "src/common/public/BufferApiView.ts",
+        "src/common/public/BufferLineApiView.ts",
+        "src/common/public/BufferNamespaceApi.ts",
+        "src/common/public/ParserApi.ts",
+        "src/common/public/UnicodeApi.ts",
+        "src/common/services/BufferService.ts",
+        "src/common/services/CharsetService.ts",
+        "src/common/services/CoreMouseService.ts",
+        "src/common/services/CoreService.ts",
+        "src/common/services/DecorationService.ts",
+        "src/common/services/InstantiationService.ts",
+        "src/common/services/LogService.ts",
+        "src/common/services/OptionsService.ts",
+        "src/common/services/OscLinkService.ts",
+        "src/common/services/ServiceRegistry.ts",
+        "src/common/services/Services.ts",
+        "src/common/services/UnicodeService.ts",
+        "src/vs/base/browser/browser.ts",
+        "src/vs/base/browser/canIUse.ts",
+        "src/vs/base/browser/dom.ts",
+        "src/vs/base/browser/fastDomNode.ts",
+        "src/vs/base/browser/globalPointerMoveMonitor.ts",
+        "src/vs/base/browser/iframe.ts",
+        "src/vs/base/browser/keyboardEvent.ts",
+        "src/vs/base/browser/mouseEvent.ts",
+        "src/vs/base/browser/touch.ts",
+        "src/vs/base/browser/ui/scrollbar/abstractScrollbar.ts",
+        "src/vs/base/browser/ui/scrollbar/horizontalScrollbar.ts",
+        "src/vs/base/browser/ui/scrollbar/scrollableElement.ts",
+        "src/vs/base/browser/ui/scrollbar/scrollableElementOptions.ts",
+        "src/vs/base/browser/ui/scrollbar/scrollbarArrow.ts",
+        "src/vs/base/browser/ui/scrollbar/scrollbarState.ts",
+        "src/vs/base/browser/ui/scrollbar/scrollbarVisibilityController.ts",
+        "src/vs/base/browser/ui/scrollbar/verticalScrollbar.ts",
+        "src/vs/base/browser/ui/widget.ts",
+        "src/vs/base/browser/window.ts",
+        "src/vs/base/common/arrays.ts",
+        "src/vs/base/common/arraysFind.ts",
+        "src/vs/base/common/assert.ts",
+        "src/vs/base/common/async.ts",
+        "src/vs/base/common/cancellation.ts",
+        "src/vs/base/common/charCode.ts",
+        "src/vs/base/common/collections.ts",
+        "src/vs/base/common/decorators.ts",
+        "src/vs/base/common/equals.ts",
+        "src/vs/base/common/errors.ts",
+        "src/vs/base/common/event.ts",
+        "src/vs/base/common/functional.ts",
+        "src/vs/base/common/hash.ts",
+        "src/vs/base/common/iterator.ts",
+        "src/vs/base/common/keyCodes.ts",
+        "src/vs/base/common/keybindings.ts",
+        "src/vs/base/common/lazy.ts",
+        "src/vs/base/common/lifecycle.ts",
+        "src/vs/base/common/linkedList.ts",
+        "src/vs/base/common/map.ts",
+        "src/vs/base/common/numbers.ts",
+        "src/vs/base/common/observable.ts",
+        "src/vs/base/common/observableInternal/api.ts",
+        "src/vs/base/common/observableInternal/autorun.ts",
+        "src/vs/base/common/observableInternal/base.ts",
+        "src/vs/base/common/observableInternal/debugName.ts",
+        "src/vs/base/common/observableInternal/derived.ts",
+        "src/vs/base/common/observableInternal/lazyObservableValue.ts",
+        "src/vs/base/common/observableInternal/logging.ts",
+        "src/vs/base/common/observableInternal/promise.ts",
+        "src/vs/base/common/observableInternal/utils.ts",
+        "src/vs/base/common/platform.ts",
+        "src/vs/base/common/scrollable.ts",
+        "src/vs/base/common/sequence.ts",
+        "src/vs/base/common/stopwatch.ts",
+        "src/vs/base/common/strings.ts",
+        "src/vs/base/common/symbols.ts",
+        "src/vs/base/common/uint.ts",
+        "src/vs/patches/nls.ts",
+        "src/vs/typings/base-common.d.ts",
+        "src/vs/typings/require.d.ts",
+        "src/vs/typings/vscode-globals-nls.d.ts",
+        "src/vs/typings/vscode-globals-product.d.ts",
+        "typings/xterm.d.ts"
+      ],
+      "dependencies": {}
+    },
+    "esbuild-wasm@0.28.2": {
+      "name": "esbuild-wasm",
+      "version": "0.28.2",
+      "integrity": "sha512-GccVwhv3mmOUVQHCQm2Ox/rby8n/EqUwvZxE6Pjfikrq/lWw9g9WX/u9EykWnpot3Ko6j426DgQdea2xWKIAQA==",
+      "key": "esbuild-wasm@0.28.2-GccVwhv3mmOUVQHCQm2Ox_rby8n_EqUwvZxE6Pjfikrq_lWw9g9WX_u9EykWnpot3Ko6j426DgQdea2xWKIAQA",
+      "manifest": {
+        "name": "esbuild-wasm",
+        "version": "0.28.2",
+        "description": "The cross-platform WebAssembly binary for esbuild, a JavaScript bundler.",
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/evanw/esbuild.git"
+        },
+        "license": "MIT",
+        "engines": {
+          "node": ">=18"
+        },
+        "main": "lib/main.js",
+        "browser": "lib/browser.js",
+        "types": "lib/main.d.ts",
+        "directories": {
+          "bin": "bin"
+        }
+      },
+      "files": [
+        "LICENSE.md",
+        "README.md",
+        "bin/esbuild",
+        "esbuild.wasm",
+        "esm/browser.d.ts",
+        "esm/browser.js",
+        "esm/browser.min.js",
+        "lib/browser.d.ts",
+        "lib/browser.js",
+        "lib/browser.min.js",
+        "lib/main.d.ts",
+        "lib/main.js",
+        "package.json",
+        "wasm_exec.js",
+        "wasm_exec_node.js"
+      ],
+      "dependencies": {}
+    },
+    "react@19.3.1": {
+      "name": "react",
+      "version": "19.3.1",
+      "integrity": "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==",
+      "key": "react@19.3.1-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw",
+      "manifest": {
+        "name": "react",
+        "description": "React is a JavaScript library for building user interfaces.",
+        "keywords": [
+          "react"
+        ],
+        "version": "19.3.1",
+        "homepage": "https://react.dev/",
+        "bugs": "https://github.com/react/react/issues",
+        "license": "MIT",
+        "files": [
+          "LICENSE",
+          "README.md",
+          "index.js",
+          "cjs/",
+          "compiler-runtime.js",
+          "jsx-runtime.js",
+          "jsx-runtime.react-server.js",
+          "jsx-dev-runtime.js",
+          "jsx-dev-runtime.react-server.js",
+          "react.react-server.js"
+        ],
+        "main": "index.js",
+        "exports": {
+          ".": {
+            "react-server": "./react.react-server.js",
+            "default": "./index.js"
+          },
+          "./package.json": "./package.json",
+          "./jsx-runtime": {
+            "react-server": "./jsx-runtime.react-server.js",
+            "default": "./jsx-runtime.js"
+          },
+          "./jsx-dev-runtime": {
+            "react-server": "./jsx-dev-runtime.react-server.js",
+            "default": "./jsx-dev-runtime.js"
+          },
+          "./compiler-runtime": {
+            "react-server": "./compiler-runtime.js",
+            "default": "./compiler-runtime.js"
+          }
+        },
+        "repository": {
+          "type": "git",
+          "url": "https://github.com/react/react.git",
+          "directory": "packages/react"
+        },
+        "engines": {
+          "node": ">=0.10.0"
+        }
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "cjs/react-compiler-runtime.development.js",
+        "cjs/react-compiler-runtime.production.js",
+        "cjs/react-compiler-runtime.profiling.js",
+        "cjs/react-jsx-dev-runtime.development.js",
+        "cjs/react-jsx-dev-runtime.production.js",
+        "cjs/react-jsx-dev-runtime.profiling.js",
+        "cjs/react-jsx-dev-runtime.react-server.development.js",
+        "cjs/react-jsx-dev-runtime.react-server.production.js",
+        "cjs/react-jsx-runtime.development.js",
+        "cjs/react-jsx-runtime.production.js",
+        "cjs/react-jsx-runtime.profiling.js",
+        "cjs/react-jsx-runtime.react-server.development.js",
+        "cjs/react-jsx-runtime.react-server.production.js",
+        "cjs/react.development.js",
+        "cjs/react.production.js",
+        "cjs/react.react-server.development.js",
+        "cjs/react.react-server.production.js",
+        "compiler-runtime.js",
+        "index.js",
+        "jsx-dev-runtime.js",
+        "jsx-dev-runtime.react-server.js",
+        "jsx-runtime.js",
+        "jsx-runtime.react-server.js",
+        "package.json",
+        "react.react-server.js"
+      ],
+      "dependencies": {}
+    },
+    "react-dom@19.3.1": {
+      "name": "react-dom",
+      "version": "19.3.1",
+      "integrity": "sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==",
+      "key": "react-dom@19.3.1-Y0bARz53lhEC1NMCASs0_j-faB_zqt3R8hpvg1e8-61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe-ZeBCavQPtKQ",
+      "manifest": {
+        "name": "react-dom",
+        "version": "19.3.1",
+        "description": "React package for working with the DOM.",
+        "main": "index.js",
+        "repository": {
+          "type": "git",
+          "url": "https://github.com/react/react.git",
+          "directory": "packages/react-dom"
+        },
+        "keywords": [
+          "react"
+        ],
+        "license": "MIT",
+        "bugs": {
+          "url": "https://github.com/react/react/issues"
+        },
+        "homepage": "https://react.dev/",
+        "dependencies": {
+          "scheduler": "^0.28.0"
+        },
+        "peerDependencies": {
+          "react": "^19.3.1"
+        },
+        "files": [
+          "LICENSE",
+          "README.md",
+          "client.js",
+          "client.react-server.js",
+          "index.js",
+          "profiling.js",
+          "profiling.react-server.js",
+          "react-dom.react-server.js",
+          "server.browser.js",
+          "server.bun.js",
+          "server.edge.js",
+          "server.js",
+          "server.node.js",
+          "server.react-server.js",
+          "static.browser.js",
+          "static.edge.js",
+          "static.js",
+          "static.node.js",
+          "static.react-server.js",
+          "test-utils.js",
+          "cjs/"
+        ],
+        "exports": {
+          ".": {
+            "react-server": "./react-dom.react-server.js",
+            "default": "./index.js"
+          },
+          "./client": {
+            "react-server": "./client.react-server.js",
+            "default": "./client.js"
+          },
+          "./server": {
+            "react-server": "./server.react-server.js",
+            "workerd": "./server.edge.js",
+            "bun": "./server.bun.js",
+            "deno": "./server.node.js",
+            "worker": "./server.browser.js",
+            "node": "./server.node.js",
+            "edge-light": "./server.edge.js",
+            "browser": "./server.browser.js",
+            "default": "./server.node.js"
+          },
+          "./server.browser": {
+            "react-server": "./server.react-server.js",
+            "default": "./server.browser.js"
+          },
+          "./server.bun": {
+            "react-server": "./server.react-server.js",
+            "default": "./server.bun.js"
+          },
+          "./server.edge": {
+            "react-server": "./server.react-server.js",
+            "default": "./server.edge.js"
+          },
+          "./server.node": {
+            "react-server": "./server.react-server.js",
+            "default": "./server.node.js"
+          },
+          "./static": {
+            "react-server": "./static.react-server.js",
+            "workerd": "./static.edge.js",
+            "deno": "./static.browser.js",
+            "worker": "./static.browser.js",
+            "node": "./static.node.js",
+            "edge-light": "./static.edge.js",
+            "browser": "./static.browser.js",
+            "default": "./static.node.js"
+          },
+          "./static.browser": {
+            "react-server": "./static.react-server.js",
+            "default": "./static.browser.js"
+          },
+          "./static.edge": {
+            "react-server": "./static.react-server.js",
+            "default": "./static.edge.js"
+          },
+          "./static.node": {
+            "react-server": "./static.react-server.js",
+            "default": "./static.node.js"
+          },
+          "./profiling": {
+            "react-server": "./profiling.react-server.js",
+            "default": "./profiling.js"
+          },
+          "./test-utils": "./test-utils.js",
+          "./package.json": "./package.json"
+        },
+        "browser": {
+          "./server.js": "./server.browser.js",
+          "./static.js": "./static.browser.js"
+        }
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "cjs/react-dom-client.development.js",
+        "cjs/react-dom-client.production.js",
+        "cjs/react-dom-profiling.development.js",
+        "cjs/react-dom-profiling.profiling.js",
+        "cjs/react-dom-server-legacy.browser.development.js",
+        "cjs/react-dom-server-legacy.browser.production.js",
+        "cjs/react-dom-server-legacy.node.development.js",
+        "cjs/react-dom-server-legacy.node.production.js",
+        "cjs/react-dom-server.browser.development.js",
+        "cjs/react-dom-server.browser.production.js",
+        "cjs/react-dom-server.bun.development.js",
+        "cjs/react-dom-server.bun.production.js",
+        "cjs/react-dom-server.edge.development.js",
+        "cjs/react-dom-server.edge.production.js",
+        "cjs/react-dom-server.node.development.js",
+        "cjs/react-dom-server.node.production.js",
+        "cjs/react-dom-test-utils.development.js",
+        "cjs/react-dom-test-utils.production.js",
+        "cjs/react-dom.development.js",
+        "cjs/react-dom.production.js",
+        "cjs/react-dom.react-server.development.js",
+        "cjs/react-dom.react-server.production.js",
+        "client.js",
+        "client.react-server.js",
+        "index.js",
+        "package.json",
+        "profiling.js",
+        "profiling.react-server.js",
+        "react-dom.react-server.js",
+        "server.browser.js",
+        "server.bun.js",
+        "server.edge.js",
+        "server.js",
+        "server.node.js",
+        "server.react-server.js",
+        "static.browser.js",
+        "static.edge.js",
+        "static.js",
+        "static.node.js",
+        "static.react-server.js",
+        "test-utils.js"
+      ],
+      "dependencies": {
+        "scheduler": "scheduler@0.28.0",
+        "react": "react@19.3.1"
+      }
+    },
+    "scheduler@0.28.0": {
+      "name": "scheduler",
+      "version": "0.28.0",
+      "integrity": "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw==",
+      "key": "scheduler@0.28.0-juorfCmIkIw8tT-p5BXSm6PJjQF_ycEYmKyzURCIt_RaZIhL-PulbQ9Yu2z1HdOJDdqDTlxA1-xKBmHXJsczAw",
+      "manifest": {
+        "name": "scheduler",
+        "version": "0.28.0",
+        "description": "Cooperative scheduler for the browser environment.",
+        "repository": {
+          "type": "git",
+          "url": "https://github.com/react/react.git",
+          "directory": "packages/scheduler"
+        },
+        "license": "MIT",
+        "keywords": [
+          "react"
+        ],
+        "bugs": {
+          "url": "https://github.com/react/react/issues"
+        },
+        "homepage": "https://react.dev/",
+        "files": [
+          "LICENSE",
+          "README.md",
+          "index.js",
+          "index.native.js",
+          "unstable_mock.js",
+          "unstable_post_task.js",
+          "cjs/"
+        ]
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "cjs/scheduler-unstable_mock.development.js",
+        "cjs/scheduler-unstable_mock.production.js",
+        "cjs/scheduler-unstable_post_task.development.js",
+        "cjs/scheduler-unstable_post_task.production.js",
+        "cjs/scheduler.development.js",
+        "cjs/scheduler.native.development.js",
+        "cjs/scheduler.native.production.js",
+        "cjs/scheduler.production.js",
+        "index.js",
+        "index.native.js",
+        "package.json",
+        "unstable_mock.js",
+        "unstable_post_task.js"
+      ],
+      "dependencies": {}
+    },
+    "semver@7.7.3": {
+      "name": "semver",
+      "version": "7.7.3",
+      "integrity": "sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q==",
+      "key": "semver@7.7.3-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl-dPb_rExr0Btby5loQm20Q",
+      "manifest": {
+        "name": "semver",
+        "version": "7.7.3",
+        "description": "The semantic version parser used by npm.",
+        "main": "index.js",
+        "scripts": {
+          "test": "tap",
+          "snap": "tap",
+          "lint": "npm run eslint",
+          "postlint": "template-oss-check",
+          "lintfix": "npm run eslint -- --fix",
+          "posttest": "npm run lint",
+          "template-oss-apply": "template-oss-apply --force",
+          "eslint": "eslint \"**/*.{js,cjs,ts,mjs,jsx,tsx}\""
+        },
+        "devDependencies": {
+          "@npmcli/eslint-config": "^5.0.0",
+          "@npmcli/template-oss": "4.25.1",
+          "benchmark": "^2.1.4",
+          "tap": "^16.0.0"
+        },
+        "license": "ISC",
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/npm/node-semver.git"
+        },
+        "bin": {
+          "semver": "bin/semver.js"
+        },
+        "files": [
+          "bin/",
+          "lib/",
+          "classes/",
+          "functions/",
+          "internal/",
+          "ranges/",
+          "index.js",
+          "preload.js",
+          "range.bnf"
+        ],
+        "tap": {
+          "timeout": 30,
+          "coverage-map": "map.js",
+          "nyc-arg": [
+            "--exclude",
+            "tap-snapshots/**"
+          ]
+        },
+        "engines": {
+          "node": ">=10"
+        },
+        "author": "GitHub Inc.",
+        "templateOSS": {
+          "//@npmcli/template-oss": "This file is partially managed by @npmcli/template-oss. Edits may be overwritten.",
+          "version": "4.25.1",
+          "engines": ">=10",
+          "distPaths": [
+            "classes/",
+            "functions/",
+            "internal/",
+            "ranges/",
+            "index.js",
+            "preload.js",
+            "range.bnf"
+          ],
+          "allowPaths": [
+            "/classes/",
+            "/functions/",
+            "/internal/",
+            "/ranges/",
+            "/index.js",
+            "/preload.js",
+            "/range.bnf",
+            "/benchmarks"
+          ],
+          "publish": "true"
+        }
+      },
+      "files": [
+        "LICENSE",
+        "README.md",
+        "bin/semver.js",
+        "classes/comparator.js",
+        "classes/index.js",
+        "classes/range.js",
+        "classes/semver.js",
+        "functions/clean.js",
+        "functions/cmp.js",
+        "functions/coerce.js",
+        "functions/compare-build.js",
+        "functions/compare-loose.js",
+        "functions/compare.js",
+        "functions/diff.js",
+        "functions/eq.js",
+        "functions/gt.js",
+        "functions/gte.js",
+        "functions/inc.js",
+        "functions/lt.js",
+        "functions/lte.js",
+        "functions/major.js",
+        "functions/minor.js",
+        "functions/neq.js",
+        "functions/parse.js",
+        "functions/patch.js",
+        "functions/prerelease.js",
+        "functions/rcompare.js",
+        "functions/rsort.js",
+        "functions/satisfies.js",
+        "functions/sort.js",
+        "functions/valid.js",
+        "index.js",
+        "internal/constants.js",
+        "internal/debug.js",
+        "internal/identifiers.js",
+        "internal/lrucache.js",
+        "internal/parse-options.js",
+        "internal/re.js",
+        "package.json",
+        "preload.js",
+        "range.bnf",
+        "ranges/gtr.js",
+        "ranges/intersects.js",
+        "ranges/ltr.js",
+        "ranges/max-satisfying.js",
+        "ranges/min-satisfying.js",
+        "ranges/min-version.js",
+        "ranges/outside.js",
+        "ranges/simplify.js",
+        "ranges/subset.js",
+        "ranges/to-comparators.js",
+        "ranges/valid.js"
+      ],
+      "dependencies": {}
+    }
+  }
+}

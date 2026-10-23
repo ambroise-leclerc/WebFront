@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "name": "webfront-developer-tools",
+  "version": "0.1.0",
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "esbuild-wasm": "0.28.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "semver": "7.7.3"
+  },
+  "scripts": {
+    "build": "js/developer/scripts/build.mjs",
+    "site": "js/developer/scripts/site.mjs",
+    "pin": "js/developer/scripts/pin.mjs"
+  },
+  "permissions": {
+    "files": [
+      "webfront.project.json",
+      "webfront-packages.lock.json",
+      ".webfront/developer/packages",
+      "js/core/bootstrap",
+      "js/developer/environment",
+      "js/developer/tools",
+      "js/developer/scripts",
+      "examples/life/ui",
+      "third_party/fflate",
+      "include/webfront/system/DeveloperReleaseData.hpp"
+    ],
+    "publish": [
+      "build-distribution",
+      "build-distribution-repeat",
+      "build-developer-environment",
+      "build-site",
+      "js/core/bootstrap/bootstrap.bundle.mjs",
+      "js/developer/environment/packages.bundle.mjs",
+      "js/developer/environment/PACKAGES-LICENSE.txt",
+      "js/developer/environment/bundles.json",
+      "include/webfront/system/DeveloperReleaseData.hpp",
+      "include/webfront/system/DeveloperIndexHtmlData.hpp",
+      "include/webfront/system/DeveloperBootstrapData.hpp"
+    ],
+    "fetch": [
+      "https://ambroise-leclerc.github.io"
+    ]
+  }
+}

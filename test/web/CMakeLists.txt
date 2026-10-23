@@ -155,6 +155,8 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         # The pinned bootstrap environment, downloaded and verified at configure time, runs a command by itself.
         webfront_add_driver_test(WfDriverPinned 0 "init" PINNED OUTPUT "Created webfront.project.json" FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-pinned")
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
+        # What a script writes to its console before it ends reaches the result of the command.
+        webfront_add_driver_test(WfDriverScriptOutput 0 "run|echo|one|two" OUTPUT "echo says one two")
         webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
             INTEGRITY "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
