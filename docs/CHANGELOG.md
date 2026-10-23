@@ -88,7 +88,7 @@
 
 - Guard of the minimal core (#314): the `MinimalCoreAssets` CTest case lists the generated resource headers of
   `include/webfront/` and fails on one outside the normative list of ADR-016 or when the decoded payloads exceed 150 KiB
-  (currently 35 766 bytes in 99 341 bytes of headers; `include/webfront/system` went from 2.7 MB in #303 to 188 KB).
+  (currently 35 766 bytes in 99 341 bytes of headers; `include/webfront/system` went from about 2.5 MB at the start of #303 to 188 KB).
   The default favicon is the source `js/core/favicon.ico` rendered by `js/core/EmbedBinaryAsset.cmake`, pure CMake with
   no Node.js, into `FaviconData.hpp` (`FaviconAssetFresh` checks it); it is no longer a hand-written gzip array in
   `IndexFS.hpp` and is served unencoded. `IndexFS::WebFrontIco` stays an alias of the generated struct.

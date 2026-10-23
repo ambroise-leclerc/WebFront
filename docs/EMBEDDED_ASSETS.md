@@ -23,7 +23,7 @@ outside the normative list of [ADR-016](adr/ADR-016-bootstrap-comme-socle.md), o
 150 KiB. The budget counts decoded bytes (gzip streams are measured by their trailer), so it does not depend on the
 encoding; the test also prints the encoded bytes and the size of the headers. Adding a resource means amending the ADR
 and the list in the script together. `MinimalCoreAssetsRejectsUnlisted` proves the guard fails on an unlisted
-header, a hidden payload and an oversized resource. `du -sh include/webfront/system` was 2.7 MB when the epic began
+header, a hidden payload and an oversized resource. `du -sh include/webfront/system` was about 2.5 MB when the epic began
 and is 188 KB now.
 
 ## Maintenance
