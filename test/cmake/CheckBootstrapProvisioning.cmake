@@ -2,9 +2,10 @@
 # Usage: cmake -DROOT=<source> -DWORK=<scratch directory> -P CheckBootstrapProvisioning.cmake
 include("${ROOT}/cmake/WebFrontBootstrap.cmake")
 
-set(content "webfront bootstrap test archive\n")
-set(sri "sha512-k0ItCZvKz9jrgv4XNPzy3yvOrM7JhFjHoBM8YdCPu8FxcXuDSfGXOpWgeHndSdPASykMPm7I2RKFLU8sThVZ+w==")
-set(hex "93422d099bcacfd8eb82fe1734fcf2df2bceaccec98458c7a0133c61d08fbbc171717b8349f1973a95a07879dd49d3c04b290c3e6ec8d912852d4f2c4e1559fb")
+# No line break: a text-mode write would turn it into CRLF on Windows and change the digest.
+set(content "webfront bootstrap test archive")
+set(sri "sha512-tp5zEsnN4U2b4SrnPY7GY6cYRK/sFQRO9ZX/xlR7mRyMxqedrks3Oc6EVPRYECyrQE8C4FAg6wH5CVNFoNoT6Q==")
+set(hex "b69e7312c9cde14d9be12ae73d8ec663a71844afec15044ef595ffc6547b991c8cc6a79dae4b3739ce8454f458102cab404f02e05020eb01f9095345a0da13e9")
 
 function(expect_equal actual expected message)
     if(NOT actual STREQUAL expected)

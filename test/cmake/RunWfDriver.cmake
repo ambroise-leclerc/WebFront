@@ -1,7 +1,7 @@
 # Runs webfront-wf and checks its exit status and output.
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
 #   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
-#   -DWORK=<dir>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
+#   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
 # FORGE replaces ENVIRONMENT with an archive whose environment.json declares the given protocol and API versions.
 if(FORGE)
     include("${ROOT}/cmake/WebFrontBootstrap.cmake")
@@ -26,6 +26,29 @@ if(FRESH_PROJECT)
     file(REMOVE_RECURSE "${PROJECT}")
     file(MAKE_DIRECTORY "${PROJECT}")
 endif()
+if(RENAME_ENTRY)
+    # The real environment, with its entry module renamed: the driver must follow environment.json.
+    include("${ROOT}/cmake/WebFrontBootstrap.cmake")
+    file(REMOVE_RECURSE "${WORK}/renamed")
+    file(MAKE_DIRECTORY "${WORK}/renamed")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar xzf "${ENVIRONMENT}" WORKING_DIRECTORY "${WORK}/renamed" RESULT_VARIABLE unpacked)
+    if(NOT unpacked EQUAL 0)
+        message(FATAL_ERROR "Cannot unpack the environment")
+    endif()
+    file(RENAME "${WORK}/renamed/package/runtime.mjs" "${WORK}/renamed/package/${RENAME_ENTRY}")
+    file(READ "${WORK}/renamed/package/environment.json" manifest)
+    string(JSON manifest SET "${manifest}" entry "\"${RENAME_ENTRY}\"")
+    file(WRITE "${WORK}/renamed/package/environment.json" "${manifest}")
+    file(REMOVE "${WORK}/renamed.tgz")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar czf "${WORK}/renamed.tgz" --format=gnutar package
+        WORKING_DIRECTORY "${WORK}/renamed" RESULT_VARIABLE packed)
+    if(NOT packed EQUAL 0)
+        message(FATAL_ERROR "Cannot repack the environment")
+    endif()
+    set(ENVIRONMENT "${WORK}/renamed.tgz")
+    webfront_file_sri("${ENVIRONMENT}" INTEGRITY)
+endif()
+
 set(arguments --project "${PROJECT}")
 if(ENVIRONMENT)
     list(APPEND arguments --environment "${ENVIRONMENT}" --integrity "${INTEGRITY}")

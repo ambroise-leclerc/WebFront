@@ -91,16 +91,16 @@ if(WEBFRONT_DEVELOPER_FIXTURES
 
         # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
         #     [OUTPUT <regex>] [REPORT <regex>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
-        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [REQUIRES <fixture>] [PROVIDES <fixture>])
+        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
-            cmake_parse_arguments(ARG "" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;REQUIRES;PROVIDES" "" ${ARGN})
+            cmake_parse_arguments(ARG "" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
             set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}")
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
                     list(APPEND options "-DEXPECT_${option}=${ARG_${option}}")
                 endif()
             endforeach()
-            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT)
+            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY)
                 if(ARG_${option})
                     list(APPEND options "-D${option}=${ARG_${option}}")
                 endif()
@@ -124,6 +124,8 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         # The starters pinned by the environment are served next to its archive.
         webfront_add_driver_test(WfDriverCreateStarter 0 "create|pi" OUTPUT "Created"
             FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-starter")
+        # The entry module is the one environment.json declares, not a fixed name.
+        webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
         webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"

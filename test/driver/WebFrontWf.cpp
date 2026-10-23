@@ -220,11 +220,11 @@ constexpr auto driverScript = R"JS(
             if (text.startsWith('Developer environment ready.')) break;
             await new Promise(resolve => setTimeout(resolve, 50));
         }
-        const runtime = await import('/webfront/developer/environment/runtime.mjs');
-        if (typeof runtime.runNonInteractive !== 'function')
-            throw Object.assign(new Error('Bootstrap failed: this developer environment has no non-interactive mode'), {bootstrap: true});
         const config = JSON.parse(await report('webfront.developer.config'));
         const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
+        const runtime = await import(`/webfront/developer/environment/${environment.entry}`);
+        if (typeof runtime.runNonInteractive !== 'function')
+            throw Object.assign(new Error('Bootstrap failed: this developer environment has no non-interactive mode'), {bootstrap: true});
         config.starters = Object.fromEntries(Object.entries(environment.starters ?? {}).map(([name, value]) =>
             [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
         const argv = JSON.parse(await report('wf.arguments'));
