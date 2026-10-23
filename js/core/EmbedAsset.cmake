@@ -97,5 +97,7 @@ if(DEFINED CHECK)
 else()
     get_filename_component(directory "${OUTPUT}" DIRECTORY)
     file(MAKE_DIRECTORY "${directory}")
-    file(WRITE "${OUTPUT}" "${contents}")
+    # file(WRITE) opens the file in text mode, which writes CRLF on Windows: file(CONFIGURE) writes the line ends it is told to.
+    # The header holds no @ and no ${...} that it could substitute.
+    file(CONFIGURE OUTPUT "${OUTPUT}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()

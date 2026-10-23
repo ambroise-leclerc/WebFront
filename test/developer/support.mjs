@@ -46,7 +46,6 @@ export async function hexDigest(algorithm, bytes) {
 // The specs run in the page of `wf test`, whose bridge reaches the project of the application: they can read any file of
 // the project, the sources they test included.
 import {readProject} from '../../js/developer/environment/io.mjs';
-import * as esbuildWasm from 'esbuild-wasm';
 
 /** The bytes of a project file. */
 export const projectBytes = path => readProject(webFront, path);
@@ -83,19 +82,4 @@ export async function freshModule(path, loading = new Map()) {
     const url = URL.createObjectURL(new Blob([source], {type: 'text/javascript'}));
     loading.set(path, url);
     return url;
-}
-
-let initialized;
-/**
- * The esbuild-wasm of the project's lock, initialized once for the page: the compiler the environment itself uses.
- */
-export function esbuild() {
-    initialized ??= (async () => {
-        const lock = JSON.parse(await projectText('webfront-packages.lock.json'));
-        const key = lock.packages[lock.roots['esbuild-wasm'].id].key;
-        const wasmModule = await WebAssembly.compile(await projectBytes(`.webfront/developer/packages/${key}/esbuild.wasm`));
-        await esbuildWasm.initialize({wasmModule, worker: false});
-        return esbuildWasm;
-    })();
-    return initialized;
 }

@@ -264,15 +264,13 @@ if(_browser_tests_available)
         # project's own `wf test`, in the browser, under the jasmine-core of its lock. They read the sources of the copy.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)
-        webfront_add_self_build_test(SelfBuildRepeat 0 "run|build|build-distribution-repeat" OUTPUT "Script build completed"
-            REQUIRES SelfBuilt PROVIDES SelfBuiltTwice)
         # The permissions of webfront.project.json frame where a script writes.
-        webfront_add_self_build_test(SelfBuildOutsidePermissions 1 "run|build|elsewhere" OUTPUT "Permission denied: writing elsewhere"
-            REQUIRES SelfBuilt)
-        # Reproducible: two builds give the very same bytes.
+        webfront_add_self_build_test(SelfBuildOutsidePermissions 1 "run|outside" OUTPUT "Permission denied: writing elsewhere" NO_REGISTRY
+            REQUIRES SelfBuildProject)
+        # Reproducible: the second build, which also refreshes the checked-in bundles, gives the very same bytes.
         set(_self_outputs environment.tgz environment.json provision.json DeveloperReleaseData.hpp runtime.mjs compiler.mjs
             script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json pi-starter.tgz life-starter.tgz)
-        webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfBuiltTwice
+        webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfRefreshed
             -DLEFT=${_self_project}/build-distribution -DRIGHT=${_self_project}/build-distribution-repeat "-DFILES=${_self_outputs}")
         # The fixtures of the tests that run the environment under test: its outputs, the registry and the pages of the tests.
         add_test(NAME DeveloperFixtures COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
@@ -281,10 +279,10 @@ if(_browser_tests_available)
             RESOURCE_LOCK self-build-project LABELS "web-integration" TIMEOUT 60)
         # The checked-in bootstrap bundles and checksums are rebuilt from the sources by wf, and the core headers that embed
         # them by CMake: all of them are the checked-in ones.
-        webfront_add_self_build_test(SelfBuildRefresh 0 "run|build|build-distribution|--refresh-bootstrap" OUTPUT "Script build completed"
+        webfront_add_self_build_test(SelfBuildRefresh 0 "run|build|build-distribution-repeat|--refresh-bootstrap" OUTPUT "Script build completed"
             REQUIRES SelfBuilt PROVIDES SelfRefreshed)
         webfront_add_self_build_check(SelfBuildRefreshMatchesSources CheckSelfBuildRefresh.cmake SelfRefreshed
-            -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project} -DOUTPUT=build-distribution)
+            -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project} -DOUTPUT=build-distribution-repeat)
         # The Pages site keeps every version and refuses to change a published one.
         webfront_add_self_build_test(SelfBuildSite 0 "run|site|build-distribution|build-site" OUTPUT "Script site completed"
             REQUIRES SelfBuilt PROVIDES SelfStaged)

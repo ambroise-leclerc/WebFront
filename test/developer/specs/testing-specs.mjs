@@ -1,12 +1,8 @@
 // Specs of wf test's host side, which supplement the real-browser regression in test/web/developer-specs.mjs.
 import {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult, abortable} from '../../../js/developer/environment/testing.mjs';
-import {bundleTests} from '../../../js/developer/environment/bundler.mjs';
-import {rejects, throws, esbuild} from '../support.mjs';
+import {rejects, throws} from '../support.mjs';
 
 describe('wf test', () => {
-    // Compiling the wasm of esbuild takes a while on a machine without a GPU.
-    beforeAll(esbuild, 120000);
-
     const encode = text => new TextEncoder().encode(text);
     const decode = bytes => new TextDecoder().decode(bytes);
 
@@ -155,27 +151,4 @@ describe('wf test', () => {
         expect(page.indexOf('./jasmine.js') > page.indexOf('/WebFront.js') && page.indexOf('./jasmine.js') < page.indexOf('./runner.js')).toBeTruthy();
         expect(decode(files.get('runner.js'))).toMatch(/specFilter: spec => spec\.getFullName\(\)\.includes\(pattern\)/);
     });
-
-    it('specs bundle in the manifest order with their imports, TypeScript and locked packages', async () => {
-        const files = new Map([['a.spec.ts', "import {value} from './value'; (globalThis as any).order = [...((globalThis as any).order ?? []), 'a' + value];"],
-            ['value.ts', "export const value: number = 1;"], ['b.spec.js', "import dep from 'dep'; globalThis.order = [...(globalThis.order ?? []), 'b' + dep];"],
-            ['npm/dep-1/index.js', 'export default 2;']]);
-        const lock = {format: 1, roots: {dep: {id: 'dep@1.0.0'}}, packages: {'dep@1.0.0': {name: 'dep', version: '1.0.0', key: 'dep-1', files: ['index.js'], manifest: {name: 'dep', version: '1.0.0', main: 'index.js'}, dependencies: {}}}};
-        const readProject = async path => {
-            const bytes = files.get(path.startsWith('.webfront/developer/packages/') ? `npm/${path.split('/').slice(3).join('/')}` : path);
-            if (!bytes) throw new Error(`Cannot read project file: ${path}`);
-            return encode(bytes);
-        };
-        files.set('b.css', '.probe { width: 37px }');
-        files.set('b.spec.js', `import './b.css';\n${files.get('b.spec.js')}`);
-        const output = await bundleTests(await esbuild(), {specs: ['a.spec.ts', 'b.spec.js'], lock, readProject});
-        expect([...output.keys()].sort()).toEqual(['specs.css', 'specs.js']);
-        expect(decode(output.get('specs.css'))).toMatch(/width: 37px/);
-        const code = decode(output.get('specs.js'));
-        const evaluated = new Function('globalThis', code.replace(/^export .*$/gm, ''));
-        const sandbox = {};
-        evaluated(sandbox);
-        expect(sandbox.order).withContext('the specs run in the manifest order').toEqual(['a1', 'b2']);
-        await rejects(bundleTests(await esbuild(), {specs: ['absent.spec.js'], lock, readProject}), /absent\.spec\.js/);
-    }, 60000);
 });

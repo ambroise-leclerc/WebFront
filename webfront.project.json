@@ -15,7 +15,8 @@
     "build": "js/developer/scripts/build.mjs",
     "site": "js/developer/scripts/site.mjs",
     "pin": "js/developer/scripts/pin.mjs",
-    "test-registry": "test/web/registry/build.mjs"
+    "test-registry": "test/web/registry/build.mjs",
+    "outside": "test/web/registry/outside.mjs"
   },
   "test": {
     "specs": [

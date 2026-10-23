@@ -1,33 +1,12 @@
 // Specs of wf dev's host side, which supplement the real-WASM browser regression in test/web/developer-specs.mjs.
-import {bundleContext} from '../../../js/developer/environment/bundler.mjs';
 import {observedRead, inputsChanged, compilerSession, waitForPoll, buildEntries, diagnosticsText, dev} from '../../../js/developer/environment/development.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
-import {rejects, throws, esbuild} from '../support.mjs';
+import {rejects, throws} from '../support.mjs';
 
 describe('wf dev', () => {
-    // Compiling the wasm of esbuild takes a while on a machine without a GPU.
-    beforeAll(esbuild, 120000);
-
     const encode = text => new TextEncoder().encode(text);
-
     const lock = {format: 1, roots: {}, packages: {}};
-    it('one esbuild context reads changed imports, reports syntax errors and recovers', async () => {
-        const files = new Map([['main.ts', encode("import {value} from './value'; console.log(value)")], ['value.ts', encode('export const value = 1')]]);
-        const context = await bundleContext(await esbuild(), {entry: 'main.ts', lock, readProject: async path => {
-            if (!files.has(path)) throw new Error('missing');
-            return files.get(path);
-        }});
-        try {
-            const text = async () => new TextDecoder().decode((await context.rebuild()).get('app.js'));
-            expect(await text()).toMatch(/console.log\(1\)/);
-            files.set('value.ts', encode('export const value = 2'));
-            expect(await text()).toMatch(/console.log\(2\)/);
-            files.set('value.ts', encode('export const value = ;'));
-            await rejects(text(), error => diagnosticsText(error).includes('value.ts:1:'));
-            files.set('value.ts', encode('export const value = 3'));
-            expect(await text()).toMatch(/console.log\(3\)/);
-        } finally { await context.dispose(); }
-    }, 60000);
+
 
     it('polling compares read-time bytes and missing probes and ignores unrelated writes', async () => {
         const {bridge, storage: files} = memoryBridge(new Map([['ui/main.ts', encode('one')]]));

@@ -4,7 +4,6 @@
 // Everything here uses only browser APIs: build.mjs runs it with wf.
 import {tar} from '../../../js/developer/tools/archive.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
-import {gunzip, readTar} from '../../../js/developer/environment/tarball.mjs';
 
 const encoder = new TextEncoder();
 async function integrity(bytes) {
@@ -21,11 +20,9 @@ function compareVersions(a, b) {
 }
 const newest = versions => versions.toSorted(compareVersions).at(-1);
 
-/** A real archive, kept byte for byte: its manifest is the package.json inside it. */
-export async function realPackage(bytes) {
-    const entry = readTar(await gunzip(bytes)).find(file => file.path === 'package/package.json');
-    if (!entry) throw new Error('An archive of the registry has no package/package.json');
-    return {manifest: JSON.parse(decoder.decode(entry.bytes)), bytes};
+/** A real archive, kept byte for byte, and the package.json that configure extracted from it (a large archive stays packed). */
+export function realPackage(bytes, manifestBytes) {
+    return {manifest: JSON.parse(decoder.decode(manifestBytes)), bytes};
 }
 
 function synthetic(name, version, fields = {}, extra = {}) {
