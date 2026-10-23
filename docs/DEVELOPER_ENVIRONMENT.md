@@ -48,7 +48,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.4.1/environment.tgz`. This version, published and archived as `developer-v0.4.1`, generates providers that include `<webfront/system/FileSystem.hpp>`. Published 0.4.0 stays immutable but targets the former include layout. The sources are ahead of that pin: `distribution.json` names 0.5.0 (the project manifest), which is not pinned until it has been published and verified (see `js/developer/tools/PUBLISHING.md`). The configuration pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.5.0/environment.tgz`. This version (project manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.5.0`. Published 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -142,7 +142,7 @@ examples are limited to Hello World and Life. Existing embedded React/Babel prov
 
 ## Project manifest (`webfront.project.json`)
 
-Available from developer distribution 0.5.0, which is not published yet: the default configuration still pins 0.4.1, whose environment predates the manifest.
+Available from developer distribution 0.5.0, which the default configuration pins; the 0.4.1 environment predates the manifest.
 A project has one manifest, the equivalent of `package.json`, which every `wf` command reads:
 
 ```json

@@ -224,7 +224,8 @@ int main(int argc, char** argv) {
         app.shutdown();
         if (!passed.load())
             return 1;
-        if (states->get("final") != "cancelled") {
+        const bool publicMode = argc == 4;  // ends before the terminal checks, which need the local registry
+        if (!publicMode && states->get("final") != "cancelled") {
             std::cerr << "The command running at shutdown was not drained: " << states->get("final") << '\n';
             return 1;
         }

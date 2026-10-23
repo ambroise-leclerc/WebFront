@@ -44,5 +44,5 @@
   "js/developer/vendor/package-lock.json": "f6aefe8b4cb0b15f866f41eae425f6654d2c6c2d96438fd0da878c5651585616",
   "js/core/bootstrap/bootstrap.bundle.mjs": "1069b307799ed2b0de53914748521731bc9796414a416d56340bbda983ef2443",
   "js/developer/environment/packages.bundle.mjs": "7c5b721c9252e81a4228bbef0441576fdb77af983e40675dbeab5976da582529",
-  "include/webfront/system/DeveloperReleaseData.hpp": "c97a8c3b21df3306c179f7b46d945159b5854f9d2810f135a4ab224c768c75d7"
+  "include/webfront/system/DeveloperReleaseData.hpp": "d5aaddb2ba839e4c8df46b7d37e2861163233a9018b0f2fb35a6f79831e16569"
 }
