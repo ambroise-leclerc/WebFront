@@ -285,7 +285,9 @@ jobs:
       # Everything is provisioned by the configure step: the tests must not reach the public network.
       - name: Cut the public network
         run: |
+          sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo iptables -A OUTPUT ! -o lo -j REJECT
+          sudo ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo ip6tables -A OUTPUT ! -o lo -j REJECT
       - name: Run Jasmine bridge test
         run: >-

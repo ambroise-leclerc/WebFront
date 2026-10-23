@@ -130,6 +130,8 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         webfront_add_driver_test(WfDriverIncompatibleApi 70 "list" OUTPUT "api version 2, this application supports 1" FORGE "1:2")
         webfront_add_driver_test(WfDriverIncompatibleProtocol 70 "list" OUTPUT "protocol version 2, this application supports 1" FORGE "2:1")
         add_test(NAME WfDriverUsage COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}")
+        add_test(NAME WfDriverBadTimeout COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}" --timeout abc -- list)
+        set_tests_properties(WfDriverBadTimeout PROPERTIES PASS_REGULAR_EXPRESSION "--timeout expects whole seconds" LABELS "web-integration" TIMEOUT 30)
         set_tests_properties(WfDriverUsage PROPERTIES PASS_REGULAR_EXPRESSION "A wf command is required" LABELS "web-integration" TIMEOUT 30)
     endif()
     # Build the actual browser-generated header only after the setup test has produced it.

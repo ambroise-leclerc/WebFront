@@ -8,6 +8,7 @@
 // wrong integrity, incompatible protocol or API); 71 time limit of the driver; 72 the browser closed without a result.
 #include <webfront/WebFront.hpp>
 
+#include <charconv>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -71,10 +72,10 @@ Options parse(int argc, char** argv) {
         else if (argument == "--report")
             options.report = value();
         else if (argument == "--timeout") {
-            const auto& seconds = value();
-            std::size_t used    = 0;
-            const long  parsed  = seconds.empty() || seconds[0] == '-' ? 0 : std::stol(seconds, &used);
-            if (parsed < 1 || used != seconds.size())
+            const auto& seconds     = value();
+            long        parsed      = 0;
+            const auto [end, error] = std::from_chars(seconds.data(), seconds.data() + seconds.size(), parsed);
+            if (error != std::errc{} || end != seconds.data() + seconds.size() || parsed < 1)
                 throw UsageError("--timeout expects whole seconds");
             options.timeout = std::chrono::seconds(parsed);
         } else if (argument.starts_with("--"))
