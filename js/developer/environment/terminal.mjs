@@ -248,10 +248,10 @@ export class LineEditor {
         this.row = 0;
         this.history = history.slice(-historyLimit);
         this.historyIndex = this.history.length;
-        this.queue = [];  // pasted lines waiting for the running command: {text, submit}
+        this.ahead = [];  // keys typed or pasted while a command runs, applied after it; '\r' ends a line
         this.status = 0;
         this.abort = null;
-        this.busy = null;
+        this.pending = new Set();  // commands and completions in progress
         this.running = false;
         this.completing = null;  // input received while a completion is pending, replayed after it
         this.closed = false;
@@ -264,7 +264,12 @@ export class LineEditor {
         ({clusters: this.promptCells, preceding: this.promptState} = cells(prompt));
     }
 
-    /** Resolves once no command, queued line or completion is pending. */
+    /** A Promise settled once the commands and completions now in progress are; null when there is none. */
+    get busy() {
+        return this.pending.size ? Promise.allSettled([...this.pending]) : null;
+    }
+
+    /** Resolves once no command, typed-ahead line or completion is pending. */
     async whenIdle() {
         while (this.busy) await this.busy;
     }
@@ -284,23 +289,47 @@ export class LineEditor {
         if (!data.startsWith('\x1b')) return this.insertText(data);
     }
 
-    // While a command runs, Ctrl+C aborts it and drops the pasted lines waiting for it; pasted lines wait their turn.
+    // While a command runs, Ctrl+C aborts it and drops the keys typed after it; other keys, typed or pasted, wait for
+    // the command and are applied after it.
     whileBusy(data) {
         if (data === '\x03') return this.interrupt();
-        if (/[\r\n]/.test(data)) this.enqueue(data.split(/\r\n?|\n/));
+        this.typeAhead(data);
+    }
+
+    // Keeps input for later, each line break as its own '\r'.
+    typeAhead(data) {
+        data.split(/\r\n?|\n/).forEach((part, index) => {
+            if (index > 0) this.ahead.push('\r');
+            if (part) this.ahead.push(part);
+        });
+    }
+
+    // Applies the keys typed ahead to the line, up to a line break: returns the line it submits, or null once the keys
+    // are used up, leaving what they typed on the line. Tab, which would wait for a completion, is ignored there.
+    readAhead() {
+        while (this.ahead.length) {
+            const data = this.ahead.shift();
+            if (data === '\r') {
+                this.moveTo(this.cells.length);
+                const line = this.line;
+                this.write('\r\n');
+                this.cells = [];
+                this.cursor = 0;
+                this.row = this.first = 0;
+                return line;
+            }
+            const action = keyActions.get(data);
+            if (action && data !== '\t') action(this);
+            else if (!action && !data.startsWith('\x1b')) this.insert(data);
+        }
+        return null;
     }
 
     interrupt() {
-        this.queue = [];
+        this.ahead = [];
         if (this.abort?.signal.aborted !== false) return;
         this.write('^C\r\n');
         this.abort.abort(new Error('Interrupted'));
-    }
-
-    enqueue([...segments]) {
-        const last = segments.pop();
-        for (const text of segments) this.queue.push({text, submit: true});
-        if (last) this.queue.push({text: last, submit: false});
     }
 
     // Typed or pasted text: printable characters are inserted; each line break submits the line, and the lines after
@@ -309,7 +338,7 @@ export class LineEditor {
         const [first, ...rest] = data.split(/\r\n?|\n/);
         this.insert(first);
         if (!rest.length) return;
-        this.enqueue(rest);
+        this.typeAhead(rest.join('\n'));
         return this.submit();
     }
 
@@ -419,8 +448,9 @@ export class LineEditor {
     }
 
     track(promise) {
-        this.busy = promise.finally(() => { this.busy = null; });
-        return this.busy;
+        const tracked = promise.finally(() => this.pending.delete(tracked));
+        this.pending.add(tracked);
+        return tracked;
     }
 
     remember(line) {
@@ -430,7 +460,7 @@ export class LineEditor {
         try { this.persist(line); } catch { /* the history is a convenience */ }
     }
 
-    // Moves below the line, runs it, then the pasted lines queued after it.
+    // Moves below the line, runs it, then the lines typed or pasted ahead.
     submit() {
         this.moveTo(this.cells.length);
         const line = this.line;
@@ -439,9 +469,7 @@ export class LineEditor {
         this.cursor = 0;
         this.row = this.first = 0;
         this.running = true;
-        const done = this.runLines(line).finally(() => { this.running = false; });
-        // A submission replayed after a completion is already tracked by it.
-        return this.busy ? done : this.track(done);
+        return this.track(this.runLines(line).finally(() => { this.running = false; }));
     }
 
     async runLines(line) {
@@ -451,15 +479,9 @@ export class LineEditor {
             await this.execute(line);
             if (this.closed) return;
             this.showPrompt();
-            const next = this.queue.shift();
-            if (!next) return;
-            this.setLine(next.text);
-            if (!next.submit) return;
-            this.write('\r\n');
-            line = next.text;
-            this.cells = [];
-            this.cursor = 0;
-            this.row = this.first = 0;
+            const next = this.readAhead();
+            if (next === null) return;
+            line = next;
         }
     }
 
@@ -484,25 +506,15 @@ export class LineEditor {
         }
     }
 
-    // Keys typed while the completion is pending are kept and applied once it is inserted, in order.
+    // Keys typed while the completion is pending are kept and applied once it is inserted, in order: once one of them
+    // submits the line, the next ones act on its command like keys typed while it runs (Ctrl+C interrupts it).
     async completeThenReplay() {
         this.completing = [];
         try { await this.completeLine(); }
         finally {
             const typed = this.completing;
             this.completing = null;
-            let keys = typed;
-            while (keys.length) {
-                const result = this.handle(keys.shift());
-                if (!this.running) continue;
-                // A replayed submission: a Ctrl+C typed after it interrupts its command now; the other keys follow it.
-                const interrupt = keys.lastIndexOf('\x03');
-                if (interrupt >= 0) {
-                    keys = keys.slice(interrupt + 1);
-                    this.interrupt();
-                }
-                await result;
-            }
+            for (const data of typed) this.handle(data);
         }
     }
 
@@ -536,7 +548,7 @@ export class LineEditor {
     /** Ends the session: the editor reads no more input until Enter starts a new session. */
     close() {
         this.closed = true;
-        this.queue = [];
+        this.ahead = [];
     }
 
     reopen() {

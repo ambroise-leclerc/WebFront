@@ -477,7 +477,7 @@ try {
         await rendered();
         await delay(10);
     }
-    assert(lastRows(3)[0] === '> echo ho typed-ahead' && editor.queue.length === 0, `The completed line must run once: ${lastRows(3)}`);
+    assert(lastRows(3)[0] === '> echo ho typed-ahead' && editor.ahead.length === 0, `The completed line must run once: ${lastRows(3)}`);
     await type('echo ok\r');
     assert(editor.status === 0, 'A successful command must reset the status');
     // Ctrl+C in the terminal: the prompt comes back at once, and a command typed then runs while the first one ends.
@@ -489,6 +489,12 @@ try {
     assert(editor.status === 0 && lastRows(2)[0] === 'next' && ['running', 'stopping'].includes(lingerState), `Ctrl+C must interrupt a C++ command: ${lastRows(3)} ${editor.status} ${lingerState}`);
     await waitState('terminal', 'stopping');
     // Pasted lines run one after the other; the last one, without a line break, waits on the prompt.
+    // Keys typed one by one while a command runs are applied after it, Enter included.
+    terminal.input('sleep 300\r');
+    for (const key of [...'echo ahead', '\r']) terminal.input(key);
+    await editor.whenIdle();
+    await rendered();
+    assert(JSON.stringify(lastRows(4)) === JSON.stringify(['> sleep 300', '> echo ahead', 'ahead', '> ']), `Keys typed during a command must be kept: ${lastRows(4)}`);
     terminal.paste('echo one\necho two\necho three');
     await editor.whenIdle();
     await rendered();
@@ -607,6 +613,12 @@ try {
     const merged = JSON.parse(new TextDecoder().decode(await readFile(runtime.historyPath)));
     const missing = [...lines('here'), ...lines('there')].filter(line => !merged.includes(line));
     assert(missing.length === 0, `Concurrent pages must keep every history line: ${missing}`);
+    // A history that cannot be read is never replaced by the lines of one terminal.
+    await writeFile(runtime.historyPath, '{broken');
+    again.terminal.input('echo kept\r');
+    await again.editor.whenIdle();
+    await runtime.historySaved();
+    assert(new TextDecoder().decode(await readFile(runtime.historyPath)) === '{broken', 'A malformed history must be left unchanged');
     pageTerminal.terminal.dispose();
     historyFrame.remove();
     again.terminal.dispose();

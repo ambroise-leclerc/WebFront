@@ -216,11 +216,19 @@ export async function execute(args, context) {
 export const historyPath = '.webfront/developer/history.json';
 const toTerminalText = text => String(text).replace(/(?<!\r)\n/g, '\r\n');
 
+// The history's lines; none when the project has no history yet. A history that cannot be read or is not a JSON array
+// of lines throws: it is shown as empty, but never replaced.
 async function readHistory(bridge) {
-    try {
-        const lines = JSON.parse(decoder.decode(await readProject(bridge, historyPath)));
-        return Array.isArray(lines) ? lines.filter(line => typeof line === 'string' && !/[\r\n]/.test(line)) : [];
-    } catch { return []; }
+    let bytes;
+    try { bytes = await readProject(bridge, historyPath); }
+    catch (error) {
+        if (error?.message?.includes('Cannot read project file:')) return [];
+        throw error;
+    }
+    let lines;
+    try { lines = JSON.parse(decoder.decode(bytes)); } catch { lines = null; }
+    if (!Array.isArray(lines)) throw new Error(`${historyPath} is not a JSON array of lines; it is left unchanged`);
+    return lines.filter(line => typeof line === 'string' && !/[\r\n]/.test(line));
 }
 
 // The history is written after each command, one write at a time; a failed write keeps the terminal usable. Each change
@@ -381,7 +389,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         return new Map();
     });
     const context = {bridge, config, preview, cppCommands, onExit};
-    const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history: await readHistory(bridge),
+    const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history: await readHistory(bridge).catch(() => []),
         remember: line => rememberLine(bridge, line),
         run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
         complete: line => complete(line, context)});

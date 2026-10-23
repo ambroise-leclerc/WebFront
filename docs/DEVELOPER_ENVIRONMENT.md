@@ -347,9 +347,9 @@ open, Enter starts a new session. No system shell is exposed.
   cells, combining marks none. The same widths are registered in xterm.js, so both always agree.
 - **History:** kept per project in `.webfront/developer/history.json` (500 lines), restored by the next terminal. Each
   line is added to the file as it is, with a conditional publication tried again on conflict, so terminals of several
-  pages on the same project keep each other's lines.
-- **Paste:** a multi-line paste runs its lines one after the other; a last line without a line break waits on the
-  prompt. Ctrl+C drops the lines still waiting.
+  pages on the same project keep each other's lines. A history file that cannot be read is never replaced.
+- **Typing ahead and paste:** keys typed or pasted while a command runs are applied after it, line by line; a last
+  line without a line break waits on the prompt. Ctrl+C drops the keys still waiting.
 - **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, its entries and
   providers after `wf preview` and `wf embed`, and project paths, also when the word is escaped (`my\ dir/`) or
   quoted (`"my dir/`); the completion is written the same way and closes the quote. Several candidates are completed
@@ -395,7 +395,8 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
 - A command must not block the server thread, which serves every browser: a handler that does not return
   `webfront::Task` does not compile. Long computations belong on another thread.
 
-The names `wf`, `clear`, `exit`, `help` and `history` are reserved. `context.write` has no flow control: a command
+A second `webfront::Commands` on the same application throws `std::logic_error`. The names `wf`, `clear`, `exit`,
+`help` and `history` are reserved. `context.write` has no flow control: a command
 writing large output with it, faster than the browser reads, grows the connection's write queue; use
 `context.print` for such output.
 
