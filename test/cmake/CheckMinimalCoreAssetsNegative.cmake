@@ -38,6 +38,45 @@ if(sneaky_result EQUAL 0 OR NOT sneaky_output MATCHES "system/Sneaky\\.hpp")
     message(FATAL_ERROR "The guard accepts an unlisted payload header:\n${sneaky_output}")
 endif()
 
+file(REMOVE "${WORK_DIR}/include/webfront/system/Sneaky.hpp")
+# A size the guard cannot read is refused rather than counted as zero.
+foreach(declaration "dataSize = 999999;" "dataSize{ 999999 };" "dataSize{0x10};" "dataSize{1'000};" "dataSize{kSize};")
+    file(WRITE "${WORK_DIR}/include/webfront/system/FaviconData.hpp"
+        "#pragma once\nstruct FaviconData { static constexpr std::string_view encoding{}; static constexpr std::size_t ${declaration} };\n")
+    run_guard(unreadable_result unreadable_output)
+    if(unreadable_result EQUAL 0 OR NOT unreadable_output MATCHES "FaviconData\\.hpp")
+        message(FATAL_ERROR "The guard accepts '${declaration}':\n${unreadable_output}")
+    endif()
+endforeach()
+# Spaced and '=' forms are read, so their size is counted against the budget.
+foreach(declaration "dataSize = 999999;" "dataSize{ 999999 };")
+    file(WRITE "${WORK_DIR}/include/webfront/system/FaviconData.hpp"
+        "#pragma once\nstruct FaviconData { static constexpr std::string_view encoding{}; static constexpr std::size_t ${declaration} };\n")
+    run_guard(spaced_result spaced_output)
+    if(spaced_result EQUAL 0 OR NOT spaced_output MATCHES "over the budget")
+        message(FATAL_ERROR "The guard does not count '${declaration}':\n${spaced_output}")
+    endif()
+endforeach()
+# An unknown encoding and a missing size are refused, and the release data must stay payload free.
+file(WRITE "${WORK_DIR}/include/webfront/system/FaviconData.hpp"
+    "#pragma once\nstruct FaviconData { static constexpr std::string_view encoding{\"br\"}; static constexpr std::size_t dataSize{8}; };\n")
+run_guard(encoding_result encoding_output)
+if(encoding_result EQUAL 0 OR NOT encoding_output MATCHES "unsupported encoding")
+    message(FATAL_ERROR "The guard accepts an unknown encoding:\n${encoding_output}")
+endif()
+file(WRITE "${WORK_DIR}/include/webfront/system/FaviconData.hpp" "#pragma once\nstruct FaviconData {};\n")
+run_guard(nosize_result nosize_output)
+if(nosize_result EQUAL 0 OR NOT nosize_output MATCHES "FaviconData\\.hpp")
+    message(FATAL_ERROR "The guard accepts a resource without a size:\n${nosize_output}")
+endif()
+file(COPY "${ROOT}/include/webfront/system/FaviconData.hpp" DESTINATION "${WORK_DIR}/include/webfront/system")
+file(APPEND "${WORK_DIR}/include/webfront/system/DeveloperReleaseData.hpp" "inline constexpr unsigned dataSize{999999};\n")
+run_guard(release_result release_output)
+if(release_result EQUAL 0 OR NOT release_output MATCHES "must not carry a payload")
+    message(FATAL_ERROR "The guard accepts a payload in the release data:\n${release_output}")
+endif()
+file(COPY "${ROOT}/include/webfront/system/DeveloperReleaseData.hpp" DESTINATION "${WORK_DIR}/include/webfront/system")
+
 # A resource that outgrows the budget is refused as well.
 file(REMOVE "${WORK_DIR}/include/webfront/system/Sneaky.hpp")
 file(WRITE "${WORK_DIR}/include/webfront/system/FaviconData.hpp"
