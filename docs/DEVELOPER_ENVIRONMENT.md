@@ -48,7 +48,7 @@ native tests from empty working directories, with developer callbacks absent. Pa
 HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.6.0/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.0`. Published 0.5.0, 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.6.1/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.1`. Published 0.6.0, 0.5.0, 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install neither npm nor Node.js.
@@ -435,7 +435,7 @@ the Worker, cancels polling and aborts staged publication; a publication already
 the preview before stopping.
 The last successful preview stays available. Browser disconnection also stops the loop.
 
-`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0, which `DeveloperReleaseData.hpp` pins (published as `developer-v0.6.0`).
+`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0 and later; `DeveloperReleaseData.hpp` pins 0.6.1 (published as `developer-v0.6.1`).
 
 ## Tests (`wf test`)
 
@@ -529,7 +529,7 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 `Incompatible WebFront developer environment: api version 2, this application supports 1`; it never falls back. A change
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
-The pin is 0.6.0, the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive). The sources build 0.6.1, not published yet: it fixes `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary; the pinned 0.6.0 still does, and the `SelfBuild*` cases therefore check the summary of the scripts, not their console output. The other `WfDriver*` cases run the environment built from the current sources
+The release pin is 0.6.1; the bootstrap environment of the tests (`cmake/WebFrontBootstrap.cmake`) is still 0.6.0, the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive). 0.6.1 fixes `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary; the pinned 0.6.0 still does, and the `SelfBuild*` cases therefore check the summary of the scripts, not their console output. The other `WfDriver*` cases run the environment built from the current sources
 (`WEBFRONT_DEVELOPER_FIXTURES`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
 report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
