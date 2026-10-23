@@ -390,6 +390,8 @@ of its browser with `webfront.commands.start`. In C++, the command is spawned li
   not wait for the command to end: the prompt returns at once and the next command runs, while the first one
   unwinds. Its late output and exit report are ignored.
 - The browser's disconnection stops its commands, and the application's shutdown drains them with its other tasks.
+  In the terminal, a command whose connection closes ends at once with an error (exit code 1): its exit report can
+  no longer arrive.
 - An exception thrown by a command is printed as an error, with exit code 1.
 - Each connected browser has its own session: a command in one browser neither delays nor is stopped by another.
 - A command must not block the server thread, which serves every browser: a handler that does not return

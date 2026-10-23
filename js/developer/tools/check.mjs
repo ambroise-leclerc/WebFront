@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {gunzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
 import {resolvePackages, downloadPackage, validateLock} from '../environment/packages.bundle.mjs';
 import {packageEntry, normalize, virtualPlugin} from '../environment/bundler.mjs';
 import {generateProvider, compress} from '../environment/embed.mjs';
@@ -226,4 +227,83 @@ test('the terminal and webfront::Commands reserve the same command names', async
     const declared = header.match(/reservedNames\{([^}]*)\}/);
     assert.ok(declared, 'Commands.hpp must declare commands::reservedNames');
     assert.deepEqual([...declared[1].matchAll(/"([^"]*)"/g)].map(match => match[1]).sort(), [...reservedNames].sort());
+});
+
+// A WebSocket the real bridge (js/core/WebFront.js) talks to: it records the frames sent, fires the on* handlers like a
+// browser, and counts the listeners added with addEventListener.
+class FakeWebSocket extends EventTarget {
+    static last = null;
+    constructor() {
+        super();
+        this.sent = [];
+        this.listeners = 0;
+        FakeWebSocket.last = this;
+    }
+    send(data) { this.sent.push(new Uint8Array(data.buffer ?? data).slice()); }
+    addEventListener(...args) { ++this.listeners; super.addEventListener(...args); }
+    removeEventListener(...args) { --this.listeners; super.removeEventListener(...args); }
+    fire(type, init = {}) {
+        const event = Object.assign(new Event(type), init);
+        this[`on${type}`]?.(event);
+        this.dispatchEvent(event);
+    }
+}
+
+// A bridge linked to the fake WebSocket, little-endian, and a helper answering a C++ call with a void return.
+async function linkedBridge() {
+    const source = await readFile(new URL('../../core/WebFront.js', import.meta.url), 'utf8');
+    const sandbox = {WebSocket: FakeWebSocket, location: {host: 'localhost'}, TextEncoder, TextDecoder, console};
+    vm.runInNewContext(source, sandbox);
+    const bridge = sandbox.webFront, socket = FakeWebSocket.last;
+    socket.fire('open');
+    socket.fire('message', {data: new Uint8Array([1, 0]).buffer});  // acknowledgement: little-endian
+    await bridge.ready;
+    const acknowledge = frame => socket.fire('message', {data: new Uint8Array([4, 0, frame[2], frame[3], 0, 0, 0, 0]).buffer});
+    return {bridge, socket, acknowledge};
+}
+
+// The command number of a webfront.commands.start frame: the number after the function name.
+const commandNumber = frame => {
+    const view = new DataView(frame.buffer);
+    return view.getFloat64(8 + 2 + view.getUint8(9) + 1, true);
+};
+
+const settled = promise => Promise.race([promise.then(() => 'resolved', () => 'rejected'), new Promise(resolve => setTimeout(() => resolve('pending'), 20))]);
+
+test('a C++ command whose start was acknowledged rejects when the connection closes, and unsubscribes', async () => {
+    const {runCommand} = await import('../environment/commands.mjs');
+    const {bridge, socket, acknowledge} = await linkedBridge();
+    const listenersBefore = socket.listeners;
+    const command = runCommand(bridge, 'wait', []);
+    command.catch(() => {});
+    const start = socket.sent.at(-1);
+    acknowledge(start);
+    assert.equal(await settled(command), 'pending');
+    assert.equal(socket.listeners, listenersBefore + 1);
+    socket.fire('close', {wasClean: false});
+    await assert.rejects(command, error => error.exitCode === 1 && /connection to the application closed/.test(error.message));
+    assert.equal(socket.listeners, listenersBefore);
+    // The exit report of the stopped command can no longer reach it; a late one is ignored.
+    globalThis.webfront.commands.exit(commandNumber(start), 130, '');
+    await assert.rejects(runCommand(bridge, 'wait', []), /not connected/);
+    assert.equal(socket.listeners, listenersBefore);
+});
+
+test('a C++ command that exits, or is interrupted, removes its close listener', async () => {
+    const {runCommand} = await import('../environment/commands.mjs');
+    const {bridge, socket, acknowledge} = await linkedBridge();
+    const listenersBefore = socket.listeners;
+    const finished = runCommand(bridge, 'echo', ['x']);
+    const start = socket.sent.at(-1);
+    acknowledge(start);
+    globalThis.webfront.commands.exit(commandNumber(start), 0, '');
+    assert.equal(await finished, '');
+    assert.equal(socket.listeners, listenersBefore);
+    const controller = new AbortController();
+    const interrupted = runCommand(bridge, 'wait', [], {signal: controller.signal});
+    acknowledge(socket.sent.at(-1));
+    controller.abort();
+    await assert.rejects(interrupted, error => error.exitCode === 130);
+    assert.equal(socket.listeners, listenersBefore);
+    socket.fire('close', {wasClean: true, code: 1000, reason: ''});
 });

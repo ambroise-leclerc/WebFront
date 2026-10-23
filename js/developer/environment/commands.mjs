@@ -34,21 +34,30 @@ const failure = (message, exitCode) => Object.assign(new Error(message), {exitCo
 /**
  * Runs a C++ command and resolves once it returns. It rejects with the command's exception (exit code 1), with its
  * non-zero exit code, or at once with exit code 130 when `signal` aborts: the command is then asked to stop, and its
- * late output and exit are ignored. `write` receives the output as it comes, with "\n" line endings.
+ * late output and exit are ignored. It also rejects when the bridge's connection closes, since its exit can no longer
+ * arrive (C++ stops the commands of a disconnected browser). `write` receives the output as it comes, with "\n" line
+ * endings.
  */
 export function runCommand(bridge, name, args, {signal, write = () => {}} = {}) {
     installReceivers();
     lastId = lastId % 0xffffffff + 1;
     const id = lastId;
+    // The bridge's WebSocket: its close event is the only notice of a disconnection once the start is acknowledged.
+    const socket = bridge.socket;
     return new Promise((resolve, reject) => {
         const finish = () => {
             running.delete(id);
             signal?.removeEventListener('abort', interrupt);
+            socket?.removeEventListener?.('close', disconnected);
         };
         const interrupt = () => {
             finish();
             bridge.cppFunction('webfront.commands.cancel')(id).catch(() => {});
             reject(failure('Interrupted', 130));
+        };
+        const disconnected = () => {
+            finish();
+            reject(failure('The connection to the application closed', 1));
         };
         if (signal?.aborted) return reject(failure('Interrupted', 130));
         running.set(id, {write, exit: (code, error) => {
@@ -57,6 +66,7 @@ export function runCommand(bridge, name, args, {signal, write = () => {}} = {}) 
             else reject(failure(error || `Command ${name} exited with code ${code}`, code));
         }});
         signal?.addEventListener('abort', interrupt, {once: true});
+        socket?.addEventListener?.('close', disconnected, {once: true});
         const failed = error => {
             if (!running.has(id)) return;
             finish();

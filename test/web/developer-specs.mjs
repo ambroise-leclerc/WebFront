@@ -395,12 +395,16 @@ try {
     await waitState('here', 'cancelled');
     assert(await commandState('second') === 'running', 'Ctrl+C in one browser must not stop the command of another');
     const browsers = await webFront.cppFunction('test.browsers')();
-    sessionFrame.remove();
+    // Its connection closes while its acknowledged command runs: the terminal stops waiting for an exit that cannot come.
+    second.bridge.socket.close();
+    const lost = await secondWait;
+    assert(lost?.exitCode === 1 && /connection to the application closed/.test(lost.message),
+        `A command of a closed connection must reject: ${lost?.message}`);
     await waitState('second', 'cancelled');
     for (let attempt = 0; await webFront.cppFunction('test.browsers')() !== browsers - 1; ++attempt)
         if (attempt === 200) throw new Error('The connection of a closed browser must be released');
         else await delay(25);
-    void secondWait;
+    sessionFrame.remove();
     // The terminal itself, mounted in this page with a real xterm.js.
     const host = document.createElement('div');
     host.style.cssText = 'width:640px;height:240px';
