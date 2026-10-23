@@ -163,7 +163,7 @@ A project has one manifest, the equivalent of `package.json`, which every `wf` c
 Only `format`, `name` and `version` are required. Validation is strict: an unknown key, a format
 newer than the environment reads, a path leaving the project, a non-HTTPS registry or origin and an
 unknown permission are errors printed in the terminal, never silently ignored. `scripts` and `permissions` are
-used by `wf run` and `wf exec` (below); `test` is validated here and used by `wf test` (#310). Permissions only frame
+used by `wf run` and `wf exec` (below); `test.specs` lists the spec files of `wf test`. Permissions only frame
 the operations of the `context` API of scripts; they are not a sandbox.
 
 - `wf init [name]` writes `webfront.project.json` at the project root, the manifest every `wf` command
@@ -435,8 +435,62 @@ the Worker, cancels polling and aborts staged publication; a publication already
 the preview before stopping.
 The last successful preview stays available. Browser disconnection also stops the loop.
 
-These commands are in the 0.6.0 environment sources (not published); the release pin stays on published 0.5.0. To try
+`wf build`, `wf dev` and `wf test` are in the 0.6.0 environment sources (not published); the release pin stays on published 0.5.0. To try
 them before the next release, provision an archive rebuilt from these sources as described below.
+
+## Tests (`wf test`)
+
+`wf test [--timeout <seconds>] [pattern]` runs the project's Jasmine specs in the browser. The project chooses
+the Jasmine: `wf install jasmine-core` resolves it from the registry like any package, and the lock pins its version
+and integrity. Nothing else is needed: no Node.js, no npm and no public network once the package is in the cache.
+
+```json
+{
+  "dependencies": {"jasmine-core": "7.0.2"},
+  "test": {"specs": ["tests/model.spec.ts", "tests/view.spec.tsx"]}
+}
+```
+
+- `test.specs` lists project paths, run in that order (JS, JSX, TS and TSX are built by esbuild-wasm in the Worker of
+  `wf build`, with the locked dependencies). Specs use the Jasmine globals (`describe`, `it`, `expect`, `jasmine`);
+  they do not import `jasmine-core`. Without specs, or without `jasmine-core` in the lock, the command says what to
+  declare or install.
+- The specs run in a hidden frame of the environment's page (1024 × 768, same origin, with the bridge loaded, so a
+  spec can call `webFront.cppFunction`). The runner page is published to `.webfront/developer/test/` and served by
+  the developer HTTP provider; each run replaces it, and the frame is removed at the end, on a time limit and on Ctrl+C.
+- `pattern` keeps the specs whose full name (suites and spec names) contains it; the others count as filtered out.
+  The order is fixed: no random shuffling.
+- The terminal shows `.`, `F` and `*` (passed, failed, pending) as specs end, then a summary line (`PASSED: 3 specs,
+  0 failures, 1 pending (12 ms, jasmine-core 7.0.2)`), each failure with its message and first stack frames, failures
+  outside any spec (an `afterAll`, a load error) and the pending specs with their reason.
+- Exit codes: 0 when every executed spec passed; 1 for a failed spec, a failure outside the specs, an unhandled
+  asynchronous exception or rejection (Jasmine reports both as failures), a spec file that does not build or load,
+  `fit`/`fdescribe`, and a run that executed nothing (no specs, or a pattern matching none); 124 at the time limit
+  (`--timeout`, default 60 s, 1 to 3600); 130 on Ctrl+C. Jasmine's own per-spec timeout (5 s by default) still ends a
+  spec that never completes, which fails.
+- A synchronous infinite loop in a spec blocks the page that hosts the frame, as it would in any same-origin frame:
+  the time limit cannot fire. Use asynchronous waits, which the time limit and Ctrl+C do stop.
+
+The report is structured: `{status, exitCode, total, passed, failed, pending, excluded, durationMs, jasmine, failures:
+[{name, messages: [{message, stack}]}], pendingSpecs, global, incomplete}`, bounded (100 failures, 8 messages of 16 KiB
+each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs did not load), `timeout` or `interrupted`.
+
+### Without a terminal
+
+An application that drives the environment from its own page (the C++ driver of #321 will be one) calls
+`runNonInteractive(argv, {bridge, config, preview, reporter, onExit})` from `runtime.mjs`:
+
+```js
+const runtime = await import('/webfront/developer/environment/runtime.mjs');
+await runtime.runNonInteractive(['test'], {bridge: webFront, config, preview,
+    reporter: json => webFront.cppFunction('app.result')(json)});
+```
+
+It runs the command, sends `{exitCode, output, report}` as JSON to the C++ function the application registered
+(`app.result` here; the report is `null` for commands other than `wf test`) and then calls `onExit(exitCode)`, which
+by default closes the window. A command that fails, or a result that cannot be sent, ends with a non-zero code and
+the session is never left open. The C++ side reads the result, closes the application's window if it has not been
+closed and returns the code as its process status.
 
 ## Dependencies, storage and limitations
 
@@ -525,7 +579,7 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, build without navigation, incremental dev reload/error/recovery/Ctrl+C, PI and Life previews, C++ generation/animation and
+`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, PI and Life previews, C++ generation/animation and
 repeatable header generation. Its CTest fixtures then build that **browser-generated** header and run
 `DeveloperEmbeddedIntegration` and `LifeEmbeddedIntegration` from empty working directories
 with no developer callbacks.

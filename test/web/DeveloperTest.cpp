@@ -8,6 +8,7 @@
 #include <chrono>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <utility>
 
@@ -65,6 +66,20 @@ void registerCallbacks(App& app, const std::filesystem::path& project, std::atom
         const auto header = readFixtureText(project / "generated" / (name + ".hpp"));
         // The generated header is larger than a bridge string: return a stable small digest.
         return std::to_string(std::hash<std::string>{}(header));
+    });
+    // The result a page sends after a non-interactive wf command (runNonInteractive), kept for the test to read back.
+    struct Result {
+        std::mutex  mutex;
+        std::string json;
+    };
+    auto result = std::make_shared<Result>();
+    app.cppFunction("test.result", [result](std::string json) {
+        std::scoped_lock lock{result->mutex};
+        result->json = std::move(json);
+    });
+    app.cppFunction("test.lastResult", [result] {
+        std::scoped_lock lock{result->mutex};
+        return result->json;
     });
     app.cppFunction("test.report", [&passed](bool success, std::string message) {
         std::cout << message << std::endl;

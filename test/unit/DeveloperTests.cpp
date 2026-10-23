@@ -106,12 +106,17 @@ SCENARIO("Developer filesystem serves only published resources and protects the 
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     fs::DeveloperFS    filesystem{project.path()};
-    GIVEN("published preview assets and private project files") {
+    GIVEN("published preview and test runner assets and private project files") {
         const auto id = store.begin(".webfront/developer/preview", true);
         store.write(id, "index.html", 0, bytes("preview"));
         store.commit(id);
+        const auto runner = store.begin(".webfront/developer/test", true);
+        store.write(runner, "index.html", 0, bytes("runner"));
+        store.commit(runner);
         THEN("the preview and bootstrap are served but project sources are not") {
             REQUIRE(filesystem.open("/webfront/developer/preview/index.html"));
+            REQUIRE(filesystem.open("/webfront/developer/test/index.html"));
+            REQUIRE_FALSE(filesystem.open("/webfront/developer/build/app.js"));
             REQUIRE(filesystem.open("/webfront-bootstrap.html"));
             REQUIRE(filesystem.open("/webfront-bootstrap.mjs"));
             REQUIRE(filesystem.open("/WebFront.js"));

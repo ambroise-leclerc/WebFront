@@ -13,6 +13,7 @@ import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {build, dev} from './development.mjs';
+import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 
@@ -197,19 +198,65 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
     return syncNotice(project) + runResult('Type check', outcome, host.publications);
 }
 
+// wf test [--timeout <seconds>] [pattern]: the specs of "test.specs" under the Jasmine of the lock, in a frame of this page.
+// context.onReport receives the structured report, also when the run fails.
+async function test(args, {bridge, signal, write = () => {}, createFrame, onReport}) {
+    const {timeout, pattern} = parseTestOptions(args);
+    const project = await loadManifest(bridge);
+    const specs = specFiles(project.manifest);
+    const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
+    const jasmine = jasmineCore(lock);
+    const files = await buildInWorker(bridge, {type: 'tests', specs, lock}, signal);
+    const jasmineBytes = await readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`);
+    await publish(bridge, testDirectory, runnerFiles(files.get('specs.js'), jasmineBytes), {signal});
+    write(syncNotice(project));
+    let report;
+    try { report = await runInFrame({pattern, timeout, signal, write, createFrame}); }
+    catch (error) { if (error.report) onReport?.({...error.report, jasmine: jasmine.node.version}); throw error; }
+    report.jasmine = jasmine.node.version;
+    onReport?.(report);
+    write('\n');
+    return reportResult(report);
+}
+
 async function list(_args, {bridge}) {
     const project = await loadProject(bridge);
     const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
-const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, build, dev, preview, embed, list, help};
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;
     if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
     return commands[command](rest, context);
+}
+
+/**
+ * Runs one wf command without a terminal, for a page that the application drives: the command's output goes to
+ * `write`, and the result {exitCode, output, report} is sent to C++ as JSON through `reporter` (for example
+ * json => bridge.cppFunction('app.report')(json)) before `onExit(exitCode)` ends the session (by default, closes the
+ * window). `report` is the structured report of wf test, null for other commands. A command that fails, or a result
+ * that cannot be sent, ends with a non-zero code; it never stays open. Resolves with the result.
+ */
+export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
+    let exitCode = 0, output = '', report = null;
+    const collect = text => { output += text; write(text); };
+    try { output += await execute(argv, {...context, write: collect, onReport: value => { report = value; }}); }
+    catch (error) {
+        exitCode = error?.exitCode ?? 1;
+        output += error?.message ?? String(error);
+    }
+    const result = {exitCode, output, report};
+    try { await reporter?.(JSON.stringify(result)); }
+    catch (error) {
+        result.exitCode = exitCode || 1;
+        result.output += `\nThe result could not be sent to the application: ${error?.message ?? error}`;
+    }
+    onExit(result.exitCode);
+    return result;
 }
 
 // --- Terminal ----------------------------------------------------------------------------------------------------

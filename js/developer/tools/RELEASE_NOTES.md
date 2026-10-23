@@ -10,4 +10,4 @@ Version 0.4.0 updates the Life starter text for a developer audience. The simula
 
 Version 0.5.0 introduces the project manifest `webfront.project.json`: `wf init`, manifest-driven `wf install` (with `--update`), `wf preview` and `wf embed`, and a lock that records the digest of the manifest dependencies. `wf install` now requires a manifest. The starters ship their own manifest.
 
-Version 0.6.0 (in development, not published) adds `wf build` and incremental `wf dev`, with bounded input polling, diagnostics in the preview and Ctrl+C cancellation. A publication whose commit has completed is displayed before cancellation ends the command. The default pin remains on published 0.5.0.
+Version 0.6.0 (in development, not published) adds `wf test` (the project's Jasmine, obtained by `wf install jasmine-core`, runs the specs of `test.specs` in the browser, with a structured report and a non-interactive entry), `wf build` and incremental `wf dev`, with bounded input polling, diagnostics in the preview and Ctrl+C cancellation. A publication whose commit has completed is displayed before cancellation ends the command. The default pin remains on published 0.5.0.
