@@ -19,7 +19,7 @@ Issue #199 tracks this one-time repository cleanup and closes with its documenta
 | #189 | Completed by #190 and the subsequent merged foundation work on `develop`. |
 | #114–#119 | #114 was completed by #197; the Grunt, Selenium, Chrome, Chromatic, and WebKit evaluations are superseded by the CEF/Xvfb Jasmine integration. |
 | #120–#124 | The integrated overlays, browser-backed download, and showcase application lack requirements or fall outside the minimal bridge foundation. |
-| #125, #133 | The defined ReactFS work and optional React example exist; Create React App integration is not part of the core roadmap. |
+| #125, #133 | The optional React example exists (ReactFS was later removed by #312); Create React App integration is not part of the core roadmap. |
 | #132 | Completed by the native ES-module demonstration in #196. |
 | #28 | A `BasicUI` already represents each connected `WebLink`; general DOM abstraction is outside the current scope. |
 | #38 | The core `File`, `IndexFS`, `NativeDebugFS`, and `Multi` filesystem layers are implemented. |

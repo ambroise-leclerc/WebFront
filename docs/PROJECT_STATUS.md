@@ -3,7 +3,7 @@
 ## Repository layout (#320, epic #303)
 
 The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js`, `test` and `third_party`
-(removed by #319), plus tool configuration files. Headers moved to `include/webfront/` and are included
+(reduced to fflate, removed by #319), plus tool configuration files. Headers moved to `include/webfront/` and are included
 as `<webfront/WebFront.hpp>`; the former `<WebFront.hpp>`, `<http/...>` or `<system/...>` spellings are
 removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live in `js/core/`
 (bridge, fallback, bootstrap loader and embedding modules) and `js/developer/` (environment, terminal
@@ -21,12 +21,12 @@ The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.pro
 specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
 local registry of `WEBFRONT_DEVELOPER_FIXTURES` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
 pinned 0.6.0 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
-composition and the use of `JasmineFS`, `ReactFS` and `BabelFS` by the browser test are gone; the Signal Studio page is a
+composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone; the Signal Studio page is a
 JSX module built by esbuild-wasm with the locked React and rendered in the runner frame by the specs. The specs now run
 in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
 by the `path-encoding` lifecycle case, and `webtest` also checks that C++ observed every call the specs make. The Jasmine
 case is registered only with `WEBFRONT_DEVELOPER_FIXTURES`; the registry fixtures are still produced by the Node tools
-(#318, #319). The unit tests of `JasmineFS`, `ReactFS` and `BabelFS` and their sources remain until #312.
+(#318, #319). The embedded Jasmine, React and Babel providers, their headers (~2.1 MB), `third_party/{babel,react,jasmine}`, `vendor/update.mjs` and `vendor/check.mjs`, their freshness tests and `EmbeddedGzipContents` were removed by #312 (migration: `wf install` and `wf embed`, see `docs/EMBEDDED_ASSETS.md`); the HTTP gzip and identity negotiation tests use a neutral fixture module.
 
 ## CI test duration (#298, 2026-10-21)
 

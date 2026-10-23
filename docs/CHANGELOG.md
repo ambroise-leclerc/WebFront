@@ -72,6 +72,11 @@
 
 ### Removed
 
+- `fs::BabelFS`, `fs::ReactFS`, `fs::JasmineFS` and their generated headers (`BabelData.hpp`, `ReactRuntimeData.hpp`,
+  `Jasmine{Js,Html,Css,Boot,Favicon}Data.hpp`, ~2.1 MB), `third_party/{babel,react,jasmine}`, `js/developer/vendor/update.mjs`
+  and `check.mjs`, their `*AssetFresh` tests, `EmbeddedGzipContents` and the `@babel/standalone` dependency (#312).
+  Migration: `wf install` the package you need and `wf embed` a provider for your build output. The HTTP encoding tests use
+  a neutral gzip fixture.
 - **Breaking:** the terminal component and the `wf` tool manager (#313): `webfront::Terminal`, `terminal::Shell`,
   `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`, `fs::ToolStore`, `fs::PackageFS`, their embedded
   modules, the embedded xterm.js copy, `third_party/xterm` and `cmake/UpdateXterm.cmake`. The developer environment's

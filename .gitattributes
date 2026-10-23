@@ -161,10 +161,6 @@ include/webfront/system/FallbackModuleData.hpp       text eol=lf
 test/fuzz/corpus/** binary
 
 # Pinned third-party sources and generated dependency data keep exact bytes on Windows.
-third_party/react/*                        text eol=lf
-third_party/babel/*                        text eol=lf
-third_party/jasmine/*                      text eol=lf
-third_party/jasmine/*.png                  binary
 third_party/fflate/*                       text eol=lf
 include/webfront/system/*Data.hpp                   text eol=lf
 
