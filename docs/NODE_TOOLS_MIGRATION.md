@@ -29,7 +29,7 @@ the CTest cases `SelfBuild*` and the `wf-package` job of `DeveloperDistribution.
 | `vendor/embed.mjs`, `js/core/EmbedTextAsset.cmake` | core header generator | `scripts/embed-core.mjs` (`wf run embed-core`) produces the same bytes (`SelfBuildCoreHeaders`); #318 chooses between it and a pure CMake generator, in ADR-016 | available (#315); switch and deletion by #318 |
 | `vendor/embed.test.mjs` | generator tests | CMake tests for processes and files, the browser for gzip | #318 |
 | `vendor/package.json`, `package-lock.json` | `npm ci` of the maintainers | `webfront.project.json` and its lock; the fixture packages by #319 | #318, #319 |
-| README and `DEVELOPER_ENVIRONMENT.md`: `node -p` extracting the integrity, `npm ci`; `CheckNewcomerDocs.cmake` pins that text | local review of an unpublished archive; the commands will read `provision.json` without Node.js | #317, #318 |
+| README and `DEVELOPER_ENVIRONMENT.md`: `node -p` extracting the integrity, `npm ci`; `CheckNewcomerDocs.cmake` pins that text | local review of an unpublished archive | the commands read `provision.json` without Node.js | #317, #318 |
 | `BuildAndTest.yml`: `setup-node`, `npm ci`, `node build.mjs`, `node fixtures.mjs` | fixtures of the desktop and CEF jobs | the environment built by wf, the registry of #319 | #318 |
 | `DeveloperDistribution.yml`: `package` job | Node.js build and tests | removed with the comparison | #318 |
 | `WebFrontAssets.cmake`: `DeveloperJavaScript`, `EmbeddedAssetGenerator`, asset freshness | Node.js tests | as above; `WEBFRONT_REQUIRE_NODE=OFF` does not register them | #318 |

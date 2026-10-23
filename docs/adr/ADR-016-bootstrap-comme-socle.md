@@ -106,7 +106,8 @@ construction Node.js, deux constructions successives étant identiques ; les CTe
 avec `WEBFRONT_DEVELOPER_FIXTURES` et, tant que Node.js subsiste (#318), le job `wf-package` de `DeveloperDistribution.yml`
 compare aussi les deux constructions. La preuve de reconstruction du bundle bootstrap exigée plus haut est
 `SelfBuildRefreshMatchesSources` : `wf run build --refresh-bootstrap` régénère `bootstrap.bundle.mjs`, `packages.bundle.mjs`,
-leurs sommes de contrôle et les en-têtes du cœur identiques aux fichiers versionnés. Les opérations d'hôte de la
+leurs sommes de contrôle et les deux en-têtes `DeveloperIndexHtmlData.hpp` et `DeveloperBootstrapData.hpp`, identiques aux
+fichiers versionnés ; `wf run embed-core` régénère les six en-têtes du cœur (`SelfBuildCoreHeaders`). Les opérations d'hôte de la
 publication (Pages, prerelease, dépôt `gh-pages`) restent des scripts shell et des étapes de workflow : elles n'entrent pas
 dans l'API `context`. L'environnement 0.6.1 construit ainsi par la 0.6.0 corrige aussi `runNonInteractive`, qui perdait la
 sortie d'une commande avant sa fin ; la 0.6.0 reste immuable.

@@ -9,13 +9,14 @@ import {bootstrapHeader, sriOf} from '../tools/distribution.mjs';
 export default async function (context) {
     const {project} = context;
     const header = await project.readText('include/webfront/system/DeveloperReleaseData.hpp');
-    const distribution = JSON.parse(await project.readText('js/developer/tools/distribution.json'));
     const field = name => header.match(new RegExp(`\\b${name}\\{"([^"]*)"\\}`))?.[1] ?? '';
     const version = field('version');
     const integrity = field('integrity');
-    if (header !== bootstrapHeader(version, distribution.baseUrl, integrity))
-        throw new Error(`DeveloperReleaseData.hpp is not the header generated for the published ${version}`);
+    // The base is the one the pinned URL was published under, not distribution.json's: the sources may have moved on.
     const url = field('environment');
+    const marker = `developer/${version}/environment.tgz`;
+    if (!url.endsWith('/' + marker) || header !== bootstrapHeader(version, url.slice(0, -marker.length), integrity))
+        throw new Error(`DeveloperReleaseData.hpp is not the header generated for the published ${version}`);
     const response = await context.fetch(url, {signal: context.signal});
     if (!response.ok) throw new Error(`The pinned environment ${url} is not published (${response.status})`);
     if (await sriOf(new Uint8Array(await response.arrayBuffer())) !== integrity)
