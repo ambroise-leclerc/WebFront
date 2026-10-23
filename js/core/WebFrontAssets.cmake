@@ -50,33 +50,6 @@ function(webfront_add_embedded_assets)
         "${root}/js/core/bootstrap/bootstrap.bundle.mjs" "${root}/include/webfront/system/DeveloperBootstrapData.hpp"
         DeveloperBootstrapData DeveloperBootstrapAssetFresh)
 
-    _webfront_add_embedded_text_asset(
-        "${root}/third_party/react/runtime.mjs" "${root}/include/webfront/system/ReactRuntimeData.hpp"
-        ReactRuntimeData ReactRuntimeAssetFresh ON)
-    _webfront_add_embedded_text_asset(
-        "${root}/third_party/babel/babel.min.js" "${root}/include/webfront/system/BabelData.hpp"
-        BabelData BabelAssetFresh ON)
-    foreach(asset IN ITEMS jasmine.js jasmine-html.js jasmine.css boot.js jasmine_favicon.png)
-        if(asset STREQUAL "jasmine.js")
-            set(struct JasmineJsData)
-        elseif(asset STREQUAL "jasmine-html.js")
-            set(struct JasmineHtmlData)
-        elseif(asset STREQUAL "jasmine.css")
-            set(struct JasmineCssData)
-        elseif(asset STREQUAL "boot.js")
-            set(struct JasmineBootData)
-        else()
-            set(struct JasmineFaviconData)
-        endif()
-        if(asset STREQUAL "jasmine_favicon.png")
-            set(compress OFF)
-        else()
-            set(compress ON)
-        endif()
-        _webfront_add_embedded_text_asset(
-            "${root}/third_party/jasmine/${asset}" "${root}/include/webfront/system/${struct}.hpp"
-            ${struct} ${struct}AssetFresh ${compress})
-    endforeach()
     if(ENABLE_TESTING)
         find_program(WEBFRONT_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
         add_test(NAME DeveloperJavaScript COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
@@ -87,7 +60,5 @@ function(webfront_add_embedded_assets)
             "WEBFRONT_TEST_CMAKE=${CMAKE_COMMAND}" "${WEBFRONT_NODE_EXECUTABLE}"
             --test "${root}/js/developer/vendor/embed.test.mjs")
         set_tests_properties(EmbeddedAssetGenerator PROPERTIES TIMEOUT 30)
-        add_test(NAME EmbeddedGzipContents COMMAND "${WEBFRONT_NODE_EXECUTABLE}"
-            "${root}/js/developer/vendor/check.mjs")
     endif()
 endfunction()
