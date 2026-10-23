@@ -127,3 +127,23 @@ export async function bundleScript(esbuild, {entry, lock, packages, readProject}
         plugins: [scriptPlugin(entry, lock, find), virtualPluginWith(lock, packages, readProject, loaded)]});
     return new Map(result.outputFiles.map(file => [file.path.replace(/^\/output\//, ''), file.contents]));
 }
+
+/**
+ * The specs of `wf test` as one ES module: the project's spec files imported in the manifest's order, with the locked
+ * dependencies. The Jasmine functions are globals of the runner page, so no spec imports jasmine-core.
+ */
+export async function bundleTests(esbuild, {specs, lock, packages, readProject}) {
+    const loaded = new Map();
+    const {find} = createFinder(packages, readProject, loaded, lock);
+    const contents = specs.map(path => `import ${JSON.stringify(`webfront-spec:${path}`)};`).join('\n');
+    const entry = {name: 'webfront-tests', setup(build) {
+        build.onResolve({filter: /^webfront-test-entry$/}, () => ({path: 'entry', namespace: 'webfront-tests'}));
+        build.onLoad({filter: /.*/, namespace: 'webfront-tests'}, () => ({contents, loader: 'js'}));
+        build.onResolve({filter: /^webfront-spec:/}, args => find('project', normalize(args.path.slice('webfront-spec:'.length))));
+    }};
+    const result = await esbuild.build({entryPoints: ['webfront-test-entry'], bundle: true, write: false,
+        outdir: '/output', entryNames: 'specs', assetNames: 'assets/[name]-[hash]', format: 'esm', platform: 'browser', target: 'es2022', jsx: 'automatic',
+        define: {'process.env.NODE_ENV': '"test"'}, legalComments: 'inline',
+        plugins: [entry, virtualPluginWith(lock, packages, readProject, loaded)]});
+    return new Map(result.outputFiles.map(file => [file.path.replace(/^\/output\//, ''), file.contents]));
+}

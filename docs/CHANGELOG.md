@@ -4,6 +4,13 @@
 
 ### Added
 
+- `wf test [--timeout <s>] [pattern]` (#310, environment sources; release pin unchanged): builds the manifest's
+  `test.specs` with esbuild-wasm and runs them under the project's locked `jasmine-core`, obtained by `wf install` from
+  the registry, in a hidden same-origin frame. Progress and a summary stream to the terminal; the structured report
+  (counts, failures, pending specs) is bounded, and the exit code is 0, 1 (failure, load error, nothing run), 124 (time
+  limit) or 130 (Ctrl+C). `runNonInteractive` runs a command without a terminal, sends `{exitCode, output, report}` to an
+  application's C++ function and ends the session. `DeveloperFS` also serves `.webfront/developer/test/`.
+
 - `wf build [entry]` / `wf dev [entry]` (#309, environment sources; release pin unchanged): build all manifest
   entries to `.webfront/developer/build/` without opening the preview, or continuously rebuild one preview
   with a persistent esbuild/WASM context. Sequential 750 ms polling watches read inputs and missing imports

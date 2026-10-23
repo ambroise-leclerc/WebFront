@@ -31,7 +31,7 @@ public:
         if (!root.empty() && path.starts_with(prefix)) {
             const auto relative = std::string_view(path).substr(prefix.size());
             // Only published resources, never source files, staging or the cached archive.
-            if (!relative.starts_with("environment/") && !relative.starts_with("preview/"))
+            if (!relative.starts_with("environment/") && !relative.starts_with("preview/") && !relative.starts_with("test/"))
                 return {};
             if (auto published = openPublished(relative))
                 return published;

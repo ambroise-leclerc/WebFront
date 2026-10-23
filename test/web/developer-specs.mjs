@@ -399,6 +399,146 @@ try {
     assert(JSON.stringify([await listing(''), await listing('check')]) === JSON.stringify(before), 'A check must not write any project file');
     assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
     assert(/typescript@6\.0\.3/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a stopped check');
+    // wf test: the specs of the manifest under the locked jasmine-core, in a frame of this page.
+    const testOutput = [];
+    const tested = async (args = [], extra = {}) => {
+        testOutput.length = 0;
+        let report = null;
+        const result = await runtime.execute(['test', ...args], {...runContext(), write: text => testOutput.push(text), onReport: value => { report = value; }, ...extra})
+            .then(text => ({text}), error => ({error}));
+        return {...result, report, output: testOutput.join('')};
+    };
+    const readManifest = async () => JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
+    const specsOf = async specs => writeFile('webfront.project.json', JSON.stringify({...await readManifest(), test: {specs}}, null, 2));
+    assert(/No specs: declare "test"/.test((await tested()).error?.message), 'wf test must ask for declared specs');
+    await writeFile('tests/pass.spec.js', "describe('passing', () => {\n    it('adds', () => expect(1 + 1).toBe(2));\n    it('is pending', () => pending('not yet'));\n" +
+        "    it('awaits', async () => { await Promise.resolve(); expect(true).toBeTrue(); });\n});\n");
+    await specsOf(['tests/pass.spec.js']);
+    assert(/jasmine-core is not installed: run wf install jasmine-core/.test((await tested()).error?.message), 'wf test must ask for jasmine-core');
+    const testRequests = [];
+    globalThis.fetch = (input, init) => {
+        testRequests.push(new URL(input instanceof Request ? input.url : input, location.href).href);
+        return pageFetch(input, init);
+    };
+    try { await runtime.execute(['install', 'jasmine-core'], context); } finally { globalThis.fetch = pageFetch; }
+    assert(testRequests.length > 0 && testRequests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), `jasmine-core must come from the local registry: ${testRequests}`);
+    const testLock = await runtime.readLock(webFront);
+    const jasmineVersion = testLock.packages[testLock.roots['jasmine-core'].id].version;
+    const passing = await tested();
+    assert(passing.text && passing.report?.status === 'passed' && passing.report.exitCode === 0 && passing.report.total === 3 && passing.report.passed === 2 &&
+        passing.report.pending === 1 && passing.report.failed === 0 && passing.report.jasmine === jasmineVersion,
+        `Passing specs must be reported exactly: ${passing.error}\n${JSON.stringify(passing.report)}`);
+    assert(passing.output.startsWith('.*.') && passing.text.startsWith('PASSED: 3 specs, 0 failures, 1 pending') && /PENDING passing is pending: not yet/.test(passing.text) &&
+        passing.text.includes(`jasmine-core ${jasmineVersion}`), `The terminal must show the progress and the summary: ${passing.output}\n${passing.text}`);
+    assert(!document.querySelector('iframe[title="WebFront tests"]'), 'The runner frame must be removed after a run');
+    // A failing spec and the asynchronous failures: a late exception, an unhandled rejection, a spec reaching the bridge.
+    await writeFile('tests/fail.spec.ts', "describe('failing', () => {\n    it('fails with a message', () => { const expected: number = 1; expect(expected).toBe(2); });\n});\n");
+    await writeFile('tests/async.spec.js', "describe('asynchronous', () => {\n    it('throws later', done => { setTimeout(() => { throw new Error('late boom'); }, 0); setTimeout(done, 80); });\n" +
+        "    it('rejects unhandled', async () => { Promise.reject(new Error('unhandled boom')); await new Promise(resolve => setTimeout(resolve, 80)); });\n" +
+        "    it('reaches the bridge', async () => expect(await webFront.cppFunction('test.browsers')()).toBeGreaterThan(0));\n});\n");
+    await specsOf(['tests/pass.spec.js', 'tests/fail.spec.ts', 'tests/async.spec.js']);
+    const failing = await tested();
+    const failedNames = failing.report?.failures.map(failure => failure.name);
+    assert(failing.error?.exitCode === 1 && failing.report?.status === 'failed' && failing.report.exitCode === 1 && failing.report.total === 7 && failing.report.passed === 3 &&
+        failing.report.failed === 3 && failing.report.pending === 1, `A failing run must report exact counts and exit 1: ${failing.error}\n${JSON.stringify(failing.report)}`);
+    assert(JSON.stringify(failedNames) === JSON.stringify(['failing fails with a message', 'asynchronous throws later', 'asynchronous rejects unhandled']), `The failed specs must be named in order: ${failedNames}`);
+    const messageOf = name => failing.report.failures.find(failure => failure.name.endsWith(name)).messages.map(message => message.message).join('\n');
+    assert(/Expected 1 to be 2\./.test(messageOf('fails with a message')) && /late boom/.test(messageOf('throws later')) && /unhandled boom/.test(messageOf('rejects unhandled')),
+        `Failure messages must be exact: ${JSON.stringify(failing.report.failures)}`);
+    assert(failing.error.message.startsWith('FAILED: 7 specs, 3 failures, 1 pending') && failing.error.message.includes('FAIL failing fails with a message\n  Expected 1 to be 2.') &&
+        failing.output.startsWith('.*.F'), `The terminal must show the failures: ${failing.output}\n${failing.error.message}`);
+    // A pattern keeps the specs whose full name contains it; one that matches nothing is not a pass.
+    const filtered = await tested(['passing']);
+    assert(filtered.report?.status === 'passed' && filtered.report.total === 3 && filtered.report.excluded === 4 && /4 filtered out/.test(filtered.text), `A pattern must filter the specs: ${filtered.error}\n${JSON.stringify(filtered.report)}`);
+    const unmatched = await tested(['no such spec']);
+    assert(unmatched.error?.exitCode === 1 && unmatched.report?.status === 'incomplete' && /No spec matches "no such spec"/.test(unmatched.error.message), `A pattern matching nothing must fail: ${unmatched.error}`);
+    // An afterAll that throws is reported with its suite; a stylesheet a spec imports is applied to its page.
+    await writeFile('tests/styled.css', '.probe { display: block; width: 37px; }\n');
+    await writeFile('tests/suite.spec.js', "import './styled.css';\ndescribe('cleanup', () => {\n    it('passes', () => {});\n    afterAll(() => { throw new Error('afterAll boom'); });\n});\n" +
+        "describe('styled', () => {\n    it('applies the imported stylesheet', () => {\n        const probe = document.createElement('div');\n        probe.className = 'probe';\n        document.body.append(probe);\n        expect(getComputedStyle(probe).width).toBe('37px');\n        probe.remove();\n    });\n});\n");
+    await specsOf(['tests/suite.spec.js']);
+    const suiteFailure = await tested();
+    assert(suiteFailure.error?.exitCode === 1 && suiteFailure.report?.status === 'failed' && suiteFailure.report.total === 2 && suiteFailure.report.passed === 2 && suiteFailure.report.failed === 0 &&
+        suiteFailure.report.suites.length === 1 && suiteFailure.report.suites[0].name === 'cleanup' && /afterAll boom/.test(suiteFailure.report.suites[0].messages[0].message) &&
+        /FAIL cleanup \(suite\)/.test(suiteFailure.error.message), `An afterAll failure must be reported with its suite, and the stylesheet applied: ${suiteFailure.error}\n${JSON.stringify(suiteFailure.report)}`);
+    // A spec that does not load fails the run: it is a build error for one that does not compile, a report for one that throws.
+    await writeFile('tests/missing.spec.js', "import './absent';\n");
+    await specsOf(['tests/pass.spec.js', 'tests/missing.spec.js']);
+    const unbuilt = await tested();
+    assert((unbuilt.error?.exitCode ?? 1) === 1 && /absent/.test(unbuilt.error.message) && !unbuilt.report, `An unresolved import must fail the build: ${unbuilt.error}`);
+    await writeFile('tests/throws.spec.js', "throw new Error('loading boom');\n");
+    await specsOf(['tests/throws.spec.js']);
+    const unloaded = await tested();
+    assert(unloaded.error?.exitCode === 1 && unloaded.report?.status !== 'passed' && /loading boom/.test(unloaded.error.message), `A spec that throws while loading must fail: ${unloaded.error}\n${JSON.stringify(unloaded.report)}`);
+    // A time limit and Ctrl+C end a run that does not return, remove the frame and report it.
+    await writeFile('tests/hang.spec.js', "describe('hanging', () => {\n    it('never ends', () => new Promise(() => {}), 600000);\n});\n");
+    await specsOf(['tests/hang.spec.js']);
+    const hung = await tested(['--timeout', '2']);
+    assert(hung.error?.exitCode === 124 && hung.report?.status === 'timeout' && /time limit/.test(hung.error.message), `A hanging run must stop at its time limit: ${hung.error}`);
+    assert(!document.querySelector('iframe[title="WebFront tests"]'), 'A timed out run must remove its frame');
+    const stopTests = new AbortController();
+    const interrupted = tested([], {signal: stopTests.signal});
+    for (let attempt = 0; !document.querySelector('iframe[title="WebFront tests"]'); ++attempt) {
+        if (attempt === 300) throw new Error('The runner frame did not appear');
+        await delay(30);
+    }
+    await delay(300);
+    stopTests.abort(new Error('Interrupted'));
+    const interruptedRun = await interrupted;
+    assert(interruptedRun.error?.exitCode === 130 && interruptedRun.report?.status === 'interrupted' && !document.querySelector('iframe[title="WebFront tests"]'), `Ctrl+C must stop a run: ${interruptedRun.error}`);
+    // --timeout covers the preparation too: slow project reads cannot hold a run past its limit.
+    const slowBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
+        async (...parameters) => { await delay(700); return webFront.cppFunction(name)(...parameters); } : webFront.cppFunction(name)};
+    await specsOf(['tests/pass.spec.js']);
+    const slowStarted = performance.now();
+    const slowRun = await tested(['--timeout', '1'], {bridge: slowBridge});
+    assert(slowRun.error?.exitCode === 124 && slowRun.report?.status === 'timeout' && performance.now() - slowStarted < 20000 && !document.querySelector('iframe[title="WebFront tests"]'),
+        `The time limit must cover the preparation of a run: ${slowRun.error}`);
+    // A bridge operation that never returns, Ctrl+C during the build, and a script's deadline: each ends the command.
+    const stuckBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ? () => new Promise(() => {}) : webFront.cppFunction(name)};
+    const stuckStarted = performance.now();
+    const stuck = await tested(['--timeout', '1'], {bridge: stuckBridge});
+    assert(stuck.error?.exitCode === 124 && stuck.report?.status === 'timeout' && performance.now() - stuckStarted < 8000, `A blocked bridge operation must not hold the command past its limit: ${stuck.error}`);
+    const interruptPreparing = new AbortController();
+    const preparingRun = tested([], {bridge: slowBridge, signal: interruptPreparing.signal});
+    await delay(300);
+    interruptPreparing.abort(new Error('Interrupted'));
+    const preparingResult = await preparingRun;
+    assert(preparingResult.error?.exitCode === 130 && preparingResult.report?.status === 'interrupted', `Ctrl+C during the preparation must end with 130 and a report: ${preparingResult.error}`);
+    const withScript = await readManifest();
+    await writeFile('webfront.project.json', JSON.stringify({...withScript, scripts: {...withScript.scripts, specs: 'wf test'}}, null, 2));
+    const quickBridge = {socket: webFront.socket, cppFunction: name => name === 'webfront.developer.read' ?
+        async (...parameters) => { await delay(400); return webFront.cppFunction(name)(...parameters); } : webFront.cppFunction(name)};
+    const inherited = await runtime.execute(['run', '--timeout', '1', 'specs'], {...runContext(), bridge: quickBridge, onReport: () => {}}).then(() => null, error => error);
+    assert(inherited?.exitCode === 124, `wf test must keep the deadline of the script that runs it: ${inherited}`);
+    // Each run publishes its own directory, emptied at the end: runs of two sessions never share files.
+    const runDirectories = JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/test')));
+    assert(runDirectories.length > 1 && runDirectories.every(name => /^[0-9a-f-]{36}\/?$/.test(name)), `Each run must have its own directory: ${runDirectories}`);
+    for (const name of runDirectories) assert(JSON.parse(new TextDecoder().decode(await call('list', `.webfront/developer/test/${name.replace(/\/$/, '')}`))).length === 0, `The files of a finished run must be removed: ${name}`);
+    assert(/--timeout expects whole seconds/.test((await tested(['--timeout', '0'])).error?.message) && /Usage: wf test/.test((await tested(['a', 'b'])).error?.message), 'wf test must check its options');
+    // Without a terminal: the result reaches C++ through the bridge and the session ends with the command's status.
+    await specsOf(['tests/pass.spec.js', 'tests/fail.spec.ts']);
+    const exits = [];
+    const sent = await runtime.runNonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
+    const received = JSON.parse(await webFront.cppFunction('test.lastResult')());
+    assert(sent.exitCode === 1 && exits.length === 1 && exits[0] === 1 && received.exitCode === 1 && received.report?.failed === 1 && received.report.total === 4 &&
+        received.report.failures[0].name === 'failing fails with a message' && received.output.includes('FAILED: 4 specs, 1 failure'), `A non-interactive failure must reach C++ and end the session with 1: ${JSON.stringify(received)}`);
+    await specsOf(['tests/pass.spec.js']);
+    await runtime.runNonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
+    const success = JSON.parse(await webFront.cppFunction('test.lastResult')());
+    assert(exits[1] === 0 && success.exitCode === 0 && success.report.status === 'passed', `A non-interactive success must end the session with 0: ${JSON.stringify(success)}`);
+    // A report too large for a bridge string is cut, not lost: C++ still receives the counts and the exit status.
+    await writeFile('tests/big.spec.js', "describe('big', () => {\n    for (let index = 0; index < 4; ++index) it('fails with a long message ' + index, () => { throw new Error('x'.repeat(10000)); });\n});\n");
+    await specsOf(['tests/big.spec.js']);
+    await runtime.runNonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
+    const cut = JSON.parse(await webFront.cppFunction('test.lastResult')());
+    assert(exits[2] === 1 && cut.exitCode === 1 && cut.truncated === true && cut.report?.failed === 4 && cut.report.total === 4 && cut.report.failures.length === 4,
+        `An oversized result must be cut to cross the bridge: ${JSON.stringify(cut).slice(0, 300)}`);
+    exits.splice(2, 1);
+    await runtime.runNonInteractive(['test', '--timeout', 'x'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
+    assert(exits[2] === 1, 'A command that fails and a result that cannot be sent must both end non-zero');
+    await runtime.runNonInteractive(['list'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
+    assert(exits[3] === 1, 'A result that cannot be sent must not end the session with 0');
     // The terminal: the application's C++ commands, run in this browser's session.
     assert(JSON.stringify([...runtime.builtinNames].sort()) === JSON.stringify([...runtime.reservedNames].sort()),
         `The terminal's own commands must be the names reserved to it: ${runtime.builtinNames}`);

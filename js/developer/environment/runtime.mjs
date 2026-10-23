@@ -13,6 +13,7 @@ import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
 import {build, dev} from './development.mjs';
+import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 
@@ -197,19 +198,88 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
     return syncNotice(project) + runResult('Type check', outcome, host.publications);
 }
 
+// wf test [--timeout <seconds>] [pattern]: the specs of "test.specs" under the Jasmine of the lock, in a frame of this page.
+// context.onReport receives the structured report, also when the run fails. --timeout, never later than the deadline
+// of the wf script that runs this command, covers the whole command: no step waits for the bridge past it, and Ctrl+C
+// ends every step as well.
+async function test(args, {bridge, signal, write = () => {}, createFrame, onReport, deadline: inherited}) {
+    const {timeout, pattern} = parseTestOptions(args);
+    const deadline = runDeadline(timeout, inherited);
+    const limit = new AbortController();
+    const timer = setTimeout(() => limit.abort(), secondsLeft(deadline) * 1000);
+    const preparing = signal ? AbortSignal.any([signal, limit.signal]) : limit.signal;
+    const step = promise => abortable(promise, preparing);
+    const runId = crypto.randomUUID();
+    const directory = `${testDirectory}/${runId}`;
+    let jasmineVersion = '';
+    let reported = false;
+    const finished = report => { reported = true; report.jasmine = jasmineVersion; onReport?.(report); return report; };
+    try {
+        const project = await step(loadManifest(bridge));
+        const specs = specFiles(project.manifest);
+        const lock = project.lock ?? {format: 1, roots: {}, packages: {}};
+        const jasmine = jasmineCore(lock);
+        jasmineVersion = jasmine.node.version;
+        const files = await step(buildInWorker(bridge, {type: 'tests', specs, lock}, preparing));
+        const jasmineBytes = await step(readProject(bridge, `${packageRoot}/${jasmine.node.key}/${jasmine.path}`));
+        await step(publish(bridge, directory, runnerFiles(files, jasmineBytes), {signal: preparing}));
+        write(syncNotice(project));
+        const report = finished(await runInFrame({pattern, timeout: Math.max(0.001, secondsLeft(deadline)), runId, signal, write, createFrame}));
+        write('\n');
+        return reportResult(report);
+    } catch (error) {
+        // An abort of the preparation ends the command like it ends a run: Ctrl+C with 130, the limit with 124, and a report.
+        if (!error.report) {
+            if (signal?.aborted) error = stoppedRun('interrupted', pattern);
+            else if (limit.signal.aborted) error = stoppedRun('timeout', pattern);
+        }
+        if (error.report && !reported) finished(error.report);
+        throw error;
+    } finally {
+        clearTimeout(timer);
+        // The files of the run are not needed any more: an empty directory replaces them, for at most two seconds.
+        await Promise.race([publish(bridge, directory, new Map()).catch(() => {}), new Promise(resolve => setTimeout(resolve, 2000))]);
+    }
+}
+
 async function list(_args, {bridge}) {
     const project = await loadProject(bridge);
     const names = Object.keys(project.lock?.packages ?? {}).sort().join('\n');
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
-const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, build, dev, preview, embed, list, help};
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
+const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;
     if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
     return commands[command](rest, context);
+}
+
+/**
+ * Runs one wf command without a terminal, for a page that the application drives: the command's output goes to
+ * `write`, and the result {exitCode, output, report} is sent to C++ as JSON through `reporter` (for example
+ * json => bridge.cppFunction('app.report')(json)) before `onExit(exitCode)` ends the session (by default, closes the
+ * window). `report` is the structured report of wf test, null for other commands; the result is cut to fit a bridge string (see fitResult). A command that fails, or a result
+ * that cannot be sent, ends with a non-zero code; it never stays open. Resolves with the result.
+ */
+export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
+    let exitCode = 0, output = '', report = null;
+    const collect = text => { output += text; write(text); };
+    try { output += await execute(argv, {...context, write: collect, onReport: value => { report = value; }}); }
+    catch (error) {
+        exitCode = error?.exitCode ?? 1;
+        output += error?.message ?? String(error);
+    }
+    const result = {exitCode, output, report};
+    try { await reporter?.(JSON.stringify(fitResult(result))); }
+    catch (error) {
+        result.exitCode = exitCode || 1;
+        result.output += `\nThe result could not be sent to the application: ${error?.message ?? error}`;
+    }
+    onExit(result.exitCode);
+    return result;
 }
 
 // --- Terminal ----------------------------------------------------------------------------------------------------
