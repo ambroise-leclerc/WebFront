@@ -481,7 +481,7 @@ each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs
 
 ### Without a terminal
 
-An application that drives the environment from its own page (the C++ driver of #321 will be one) calls
+An application that drives the environment from its own page (`webfront-wf`, below, is one) calls
 `runNonInteractive(argv, {bridge, config, preview, reporter, onExit})` from `runtime.mjs`:
 
 ```js
@@ -495,6 +495,44 @@ It runs the command, sends `{exitCode, output, report}` as JSON to the C++ funct
 by default closes the window. A command that fails, or a result that cannot be sent, ends with a non-zero code and
 the session is never left open. The C++ side reads the result, closes the application's window if it has not been
 closed and returns the code as its process status.
+
+### The test driver (`webfront-wf`) and the bootstrap environment
+
+`webfront-wf` (`test/driver/WebFrontWf.cpp`, built with the browser tests) starts a `BasicDeveloperApp` on a project, runs
+one `wf` command through `runNonInteractive`, prints its output and exits with its status:
+
+```sh
+webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512-...>] [--registry-dir <dir>] \
+            [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]
+```
+
+- Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
+  pins its URL and SHA-512 (distinct from `DeveloperReleaseData.hpp`, the environment applications start from, and changed
+  by an explicit pull request). With `ENABLE_TESTING=ON`, configure downloads it to `<build>/bootstrap/` and verifies the
+  digest; a wrong digest or an unreachable URL stops the configure. On a machine without network access, pass
+  `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the same way.
+- `--environment` and `--integrity` run an archive built elsewhere, such as the one built from the current sources (the
+  environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it.
+  The project is the directory `wf` reads and writes; run `wf install` once, then the other commands, on the same project.
+- Exit status: the command's own (`wf test`: 0, 1, 124, 130); **64** usage; **70** bootstrap failure (archive absent, wrong
+  integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's `--timeout` (default 600 s) elapsed,
+  after asking the page to close; **72** the browser closed without a result. `--report` writes the JSON result
+  `{exitCode, output, report}` of the command, cut to fit a bridge string as described above.
+
+**Compatibility contract.** `environment.json` declares `protocol` (the environment's wire protocol) and `api` (the
+`webfront.developer.*` callbacks it expects; absent means 1, the value of every environment published before the
+field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]}`, from `developer::protocolVersion` and
+`developer::apiVersion`. The loader refuses an archive outside those lists before publishing anything, with
+`Incompatible WebFront developer environment: api version 2, this application supports 1`; it never falls back. A change
+to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
+
+The pin is 0.5.0, the last published environment, which has no non-interactive mode: the driver reports it as a bootstrap
+failure (70). Until an environment that can run `wf test` is published and pinned (the milestone of #321, a maintainer
+step), the CTest cases `WfDriver*` run the environment built from the current sources (`WEBFRONT_DEVELOPER_FIXTURES`):
+`wf install` and `wf test` on a fixture project (pass, fail, report file), an unknown command, the time limit, a wrong
+integrity, a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
+configure-time provisioning (verified download, reuse, local directory, wrong digest, malformed value). The Linux CEF CI job
+blocks the public network after the configure step.
 
 ## Dependencies, storage and limitations
 

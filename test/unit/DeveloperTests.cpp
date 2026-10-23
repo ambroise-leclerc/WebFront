@@ -359,14 +359,14 @@ SCENARIO("The environment learns whether the application chose the npm registry"
     GIVEN("no registry option") {
         THEN("the default registry is passed and marked as not chosen, so the manifest's applies") {
             REQUIRE(developer::bootstrapConfig(trusted)
-                    == R"({"environment":"https://example.test/env.tgz","integrity":"sha512-abc","registry":"https://registry.npmjs.org/","registryExplicit":false})");
+                    == R"({"environment":"https://example.test/env.tgz","integrity":"sha512-abc","registry":"https://registry.npmjs.org/","registryExplicit":false,"supported":{"protocol":[1],"api":[1]}})");
         }
     }
     GIVEN("a same-origin mirror chosen by the application") {
         auto options     = trusted;
         options.registry = "/mirror/";
         THEN("it is passed as the application's choice") {
-            REQUIRE_THAT(developer::bootstrapConfig(options), Catch::Matchers::EndsWith(R"("registry":"/mirror/","registryExplicit":true})"));
+            REQUIRE_THAT(developer::bootstrapConfig(options), Catch::Matchers::EndsWith(R"("registry":"/mirror/","registryExplicit":true,"supported":{"protocol":[1],"api":[1]}})"));
         }
     }
 }

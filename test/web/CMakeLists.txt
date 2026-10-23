@@ -18,6 +18,21 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
 endif()
 webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle)
 
+# The pinned bootstrap environment is downloaded and verified at configure time (or taken from WEBFRONT_BOOTSTRAP_DIR on a
+# machine without network access); webfront-wf runs wf commands without interaction from it, or from an environment passed
+# explicitly (the one built from the current sources).
+include(WebFrontBootstrap)
+if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
+   AND CMAKE_SYSTEM_NAME IN_LIST WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_PLATFORMS)
+    webfront_provision_bootstrap(WEBFRONT_BOOTSTRAP_ARCHIVE URL "${WEBFRONT_BOOTSTRAP_URL}"
+        INTEGRITY "${WEBFRONT_BOOTSTRAP_INTEGRITY}" DESTINATION "${CMAKE_BINARY_DIR}/bootstrap" LOCAL_DIR "${WEBFRONT_BOOTSTRAP_DIR}")
+    add_executable(webfront-wf ../driver/WebFrontWf.cpp)
+    target_link_libraries(webfront-wf PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    target_compile_definitions(webfront-wf PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
+        WEBFRONT_BOOTSTRAP_ARCHIVE="${WEBFRONT_BOOTSTRAP_ARCHIVE}" WEBFRONT_BOOTSTRAP_INTEGRITY="${WEBFRONT_BOOTSTRAP_INTEGRITY}")
+    webfront_setup_frontends_for_target(webfront-wf)
+endif()
+
 # Exercise actual CEF command IDs, context-menu filtering and DevTools creation in the vendored runtime.
 if(WEBFRONT_EMBED_CEF AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(cef_content_policy CEFContentPolicy.cpp)
@@ -55,6 +70,75 @@ if(WEBFRONT_DEVELOPER_FIXTURES
         "${WEBFRONT_DEVELOPER_FIXTURES}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated")
     webfront_set_browser_test_properties(DeveloperBrowserIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 180)
     set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
+    # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
+    if(TARGET webfront-wf)
+        file(READ "${WEBFRONT_DEVELOPER_FIXTURES}/provision.json" _provision)
+        string(JSON _environment_integrity GET "${_provision}" integrity)
+        set(_wf_project "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-project")
+        set(_wf_run "${CMAKE_COMMAND}" -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
+            -DPROJECT=${_wf_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work
+            -DENVIRONMENT=${WEBFRONT_DEVELOPER_FIXTURES}/environment.tgz -DINTEGRITY=${_environment_integrity}
+            -DREGISTRY=${WEBFRONT_DEVELOPER_FIXTURES}/registry)
+        set(_developer_xvfb_prefix "")
+        if(_developer_xvfb)
+            set(_developer_xvfb_prefix "${_developer_xvfb}" -a)
+            set(_wf_run ${_developer_xvfb_prefix} ${_wf_run})
+        endif()
+        add_test(NAME WfDriverProject
+            COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR}/test/fixtures/wf-project -DPROJECT=${_wf_project}
+                -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareWfProject.cmake)
+        set_tests_properties(WfDriverProject PROPERTIES FIXTURES_SETUP WfDriverProject LABELS "web-integration" TIMEOUT 30)
+
+        # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
+        #     [OUTPUT <regex>] [REPORT <regex>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
+        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [REQUIRES <fixture>] [PROVIDES <fixture>])
+        function(webfront_add_driver_test name status command)
+            cmake_parse_arguments(ARG "" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
+            set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}")
+            foreach(option OUTPUT REPORT)
+                if(ARG_${option})
+                    list(APPEND options "-DEXPECT_${option}=${ARG_${option}}")
+                endif()
+            endforeach()
+            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY)
+                if(ARG_${option})
+                    list(APPEND options "-D${option}=${ARG_${option}}")
+                endif()
+            endforeach()
+            if(ARG_DRIVER_TIMEOUT)
+                list(APPEND options -DTIMEOUT=${ARG_DRIVER_TIMEOUT})
+            endif()
+            add_test(NAME ${name} COMMAND ${_wf_run} ${options} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+            webfront_set_browser_test_properties(${name} "${CMAKE_CURRENT_SOURCE_DIR}" 120)
+            set_tests_properties(${name} PROPERTIES FIXTURES_REQUIRED "WfDriverProject;${ARG_REQUIRES}")
+            if(ARG_PROVIDES)
+                set_tests_properties(${name} PROPERTIES FIXTURES_SETUP ${ARG_PROVIDES})
+            endif()
+        endfunction()
+
+        # The fixture manifest has no jasmine-core: wf test asks for it, and wf install resolves it from the local registry.
+        webfront_add_driver_test(WfDriverInstall 0 "install|jasmine-core" OUTPUT "Installed 1 packages" PROVIDES WfDriverInstalled)
+        webfront_add_driver_test(WfDriverTestPasses 0 "test|adds" OUTPUT "PASSED: 1 spec" REPORT "\"status\":\"passed\"" REQUIRES WfDriverInstalled)
+        # A failing command: its status, its output and the structured report reach CTest.
+        webfront_add_driver_test(WfDriverTestFails 1 "test|fails" OUTPUT "FAILED: 1 spec, 1 failure" REPORT "\"failed\":1" REQUIRES WfDriverInstalled)
+        # The starters pinned by the environment are served next to its archive.
+        webfront_add_driver_test(WfDriverCreateStarter 0 "create|pi" OUTPUT "Created"
+            FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-starter")
+        # The entry module is the one environment.json declares, not a fixed name.
+        webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
+        webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
+        webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4)
+        webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
+            INTEGRITY "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
+        webfront_add_driver_test(WfDriverMissingArchive 70 "list" OUTPUT "archive not found"
+            ENVIRONMENT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work/absent.tgz")
+        webfront_add_driver_test(WfDriverIncompatibleApi 70 "list" OUTPUT "api version 2, this application supports 1" FORGE "1:2")
+        webfront_add_driver_test(WfDriverIncompatibleProtocol 70 "list" OUTPUT "protocol version 2, this application supports 1" FORGE "2:1")
+        add_test(NAME WfDriverUsage COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}")
+        add_test(NAME WfDriverBadTimeout COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}" --timeout abc -- list)
+        set_tests_properties(WfDriverBadTimeout PROPERTIES PASS_REGULAR_EXPRESSION "--timeout expects whole seconds" LABELS "web-integration" TIMEOUT 30)
+        set_tests_properties(WfDriverUsage PROPERTIES PASS_REGULAR_EXPRESSION "A wf command is required" LABELS "web-integration" TIMEOUT 30)
+    endif()
     # Build the actual browser-generated header only after the setup test has produced it.
     add_executable(developer_embedded EXCLUDE_FROM_ALL DeveloperEmbeddedTest.cpp)
     target_link_libraries(developer_embedded PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)

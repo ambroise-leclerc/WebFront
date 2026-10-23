@@ -20,7 +20,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
 - `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
 - `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
-- `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
+- `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
 - `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.

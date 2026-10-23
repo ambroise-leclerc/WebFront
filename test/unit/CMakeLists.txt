@@ -40,6 +40,9 @@ add_test(NAME ReleaseVersionRegression
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-version-regression
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseVersionTests.cmake)
+add_test(NAME BootstrapProvisioning
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bootstrap-provisioning
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBootstrapProvisioning.cmake)
 
 # Windows bash.exe may be the WSL launcher rather than a native Bash runtime.
 if(UNIX)

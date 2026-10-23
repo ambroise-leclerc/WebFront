@@ -45,6 +45,12 @@ inline void validateBootstrap(std::string_view mode, const std::filesystem::path
         throw std::invalid_argument("The developer registry must be an HTTPS URL or a same-origin path");
 }
 
+/// The environment contract this C++ implements. An environment's environment.json declares the "protocol" it
+/// speaks and the "api" (the webfront.developer.* callbacks) it expects; the loader refuses any other version.
+/// Changing a callback increments apiVersion and requires publishing a new bootstrap environment.
+inline constexpr int protocolVersion = 1;
+inline constexpr int apiVersion      = 1;
+
 inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"};
 
 /// The configuration the environment reads. "registry" always names a usable registry, for environments
@@ -52,7 +58,8 @@ inline constexpr std::string_view defaultRegistry{"https://registry.npmjs.org/"}
 inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
     return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
          + ",\"registry\":" + json::quote(options.registry.value_or(std::string(defaultRegistry)))
-         + ",\"registryExplicit\":" + (options.registry ? "true" : "false") + "}";
+         + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
+         + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
 }
 }  // namespace developer
 

@@ -57,7 +57,7 @@ for (const [name, provider] of [['pi', 'PiUI'], ['life', 'LifeUI']]) {
     await writeFile(resolve(output, archive), starterBytes);
     starters[name] = {archive, integrity: 'sha512-' + createHash('sha512').update(starterBytes).digest('base64')};
 }
-await writeFile(resolve(output, 'environment.json'), JSON.stringify({protocol: 1, version, entry: 'runtime.mjs',
+await writeFile(resolve(output, 'environment.json'), JSON.stringify({protocol: 1, api: 1, version, entry: 'runtime.mjs',
     compiler: `esbuild-wasm@${dependencies['esbuild-wasm']}`, semver: dependencies.semver, starters}, null, 2) + '\n');
 await writeFile(resolve(output, 'package.json'), JSON.stringify({name: '@webfront/developer-environment', version,
     description: 'Browser-powered WebFront developer environment', type: 'module',
