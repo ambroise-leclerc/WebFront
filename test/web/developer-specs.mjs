@@ -520,10 +520,44 @@ try {
     await type('\x03');
     await type('clear\r');
     assert(buffer().length === terminal.rows && rows()[0] === '> ', `clear must empty the screen and the scrollback: ${rows()[0]}`);
+    // A line taller than the screen is drawn a screen at a time around the cursor, never duplicated on it.
+    terminal.resize(20, 4);
+    await rendered();
+    const digits = '0123456789'.repeat(10).slice(0, 95);
+    const tall = '> echo ' + digits;
+    const layoutRow = index => tall.slice(20 * index, 20 * index + 20);
+    const screen = () => rows().slice(buffer().baseY, buffer().baseY + terminal.rows);
+    const shows = (first, cursorY, cursorX, message) => {
+        const expected = [0, 1, 2, 3].map(index => layoutRow(first + index));
+        assert(JSON.stringify(screen()) === JSON.stringify(expected) && buffer().cursorY === cursorY && buffer().cursorX === cursorX,
+            `${message}: ${JSON.stringify(screen())} at ${buffer().cursorY},${buffer().cursorX}`);
+    };
+    await type('echo ' + digits);
+    shows(2, 3, 2, 'The end of a tall line must be on screen');
+    await type('\x01');
+    shows(0, 0, 2, 'Home must show the start of a tall line, once');
+    await type('\x05');
+    shows(2, 3, 2, 'End must show the end of a tall line again');
+    await type('\r');
+    assert(lastRows(2)[0] === digits.slice(80) && lastRows(1)[0] === '> ', `A tall line must run: ${screen()}`);
+    terminal.resize(80, 12);
+    await type('clear\r');
+    // Enter and Ctrl+C typed while a completion is pending: the command starts, then is interrupted at once.
+    terminal.input('lin');
+    terminal.input('\t');
+    terminal.input('replay');
+    terminal.input('\r');
+    terminal.input('\x03');
+    await waitState('replay', 'stopping');
+    for (let attempt = 0; editor.busy; ++attempt) {
+        if (attempt === 100) throw new Error(`Ctrl+C typed during a completion must interrupt the replayed command: ${lastRows(3)}`);
+        await delay(20);
+    }
+    assert(editor.status === 130 && lastRows(3)[0] === '> linger replay', `The replayed command must be interrupted: ${lastRows(3)} ${editor.status}`);
     // The history is kept per project: a new terminal recalls it.
     await runtime.historySaved();
     const saved = JSON.parse(new TextDecoder().decode(await readFile(runtime.historyPath)));
-    assert(saved.at(-1) === 'clear' && saved.includes('echo three'), `The history must be saved in the project: ${saved.slice(-3)}`);
+    assert(saved.at(-1) === 'linger replay' && saved.includes('clear') && saved.includes('echo three'), `The history must be saved in the project: ${saved.slice(-3)}`);
     await type('exit 4\r');
     assert(exitedWith === 4 && editor.closed && lastRows(2)[0] === 'Session ended. Press Enter to start a new session.', `exit must end the session with its code: ${exitedWith}`);
     await type('echo ignored');
@@ -554,6 +588,27 @@ try {
         `Terminals must not erase each other's history: ${shared.slice(-4)}`);
     other.terminal.dispose();
     otherHost.remove();
+    // Two pages, each with its own runtime module, write their histories at the same time: no line is lost.
+    const historyFrame = document.createElement('iframe');
+    historyFrame.src = '/fixtures/session.html';
+    document.body.append(historyFrame);
+    for (let attempt = 0; !historyFrame.contentWindow?.session; ++attempt) {
+        if (attempt === 200) throw new Error('The second page did not load');
+        await delay(25);
+    }
+    const page = await historyFrame.contentWindow.session;
+    const pageTerminal = await page.runtime.mount({bridge: page.bridge, config, terminal: historyFrame.contentDocument.getElementById('terminal'),
+        preview: context.preview, onExit: () => {}, fitToElement: false});
+    const lines = page => [1, 2, 3, 4, 5].map(index => `echo ${page}${index}`);
+    again.terminal.paste(lines('here').join('\n') + '\n');
+    pageTerminal.terminal.paste(lines('there').join('\n') + '\n');
+    await Promise.all([again.editor.whenIdle(), pageTerminal.editor.whenIdle()]);
+    await Promise.all([runtime.historySaved(), page.runtime.historySaved()]);
+    const merged = JSON.parse(new TextDecoder().decode(await readFile(runtime.historyPath)));
+    const missing = [...lines('here'), ...lines('there')].filter(line => !merged.includes(line));
+    assert(missing.length === 0, `Concurrent pages must keep every history line: ${missing}`);
+    pageTerminal.terminal.dispose();
+    historyFrame.remove();
     again.terminal.dispose();
     host.remove();
     // The application stops while this command runs: its shutdown must drain it (checked in C++).

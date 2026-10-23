@@ -54,11 +54,14 @@ export function runCommand(bridge, name, args, {signal, write = () => {}} = {}) 
             else reject(failure(error || `Command ${name} exited with code ${code}`, code));
         }});
         signal?.addEventListener('abort', interrupt, {once: true});
-        // A bridge that throws instead of rejecting must not leave the command registered.
-        Promise.resolve().then(() => bridge.cppFunction('webfront.commands.start')(id, name, JSON.stringify(args))).catch(error => {
+        const failed = error => {
             if (!running.has(id)) return;
             finish();
             reject(error);
-        });
+        };
+        // The start is sent now, before any cancel that Ctrl+C sends; a bridge that throws instead of rejecting must
+        // not leave the command registered.
+        try { bridge.cppFunction('webfront.commands.start')(id, name, JSON.stringify(args)).catch(failed); }
+        catch (error) { failed(error); }
     });
 }

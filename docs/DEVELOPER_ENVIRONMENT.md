@@ -341,11 +341,13 @@ commands and its own: `help`, `clear` (screen and scrollback), `history` (`histo
 open, Enter starts a new session. No system shell is exposed.
 
 - **Editing:** left/right, Home/End (Ctrl+A/Ctrl+E), Backspace/Delete, Ctrl+U/Ctrl+K, Ctrl+L, up/down through the
-  history. A line wider than the terminal wraps over several rows and is redrawn in place. The editor moves over
+  history. A line wider than the terminal wraps over several rows and is redrawn in place; a line taller than the
+  terminal is drawn a screen of rows at a time around the cursor, since rows that left the screen cannot be rewritten. The editor moves over
   grapheme clusters: CJK characters and emoji (ZWJ sequences, flags, skin tones, presentation selector) take two
   cells, combining marks none. The same widths are registered in xterm.js, so both always agree.
 - **History:** kept per project in `.webfront/developer/history.json` (500 lines), restored by the next terminal. Each
-  line is added to the file as it is, so terminals of several pages on the same project keep each other's lines.
+  line is added to the file as it is, with a conditional publication tried again on conflict, so terminals of several
+  pages on the same project keep each other's lines.
 - **Paste:** a multi-line paste runs its lines one after the other; a last line without a line break waits on the
   prompt. Ctrl+C drops the lines still waiting.
 - **Completion (Tab):** command names, `wf` subcommands, the manifest's scripts after `wf run`, its entries and

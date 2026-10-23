@@ -220,7 +220,7 @@ export const historyLimit = 500;
 
 /**
  * Line editor driven by the terminal's input data.
- *   write(text): displays text; columns(): the terminal's width;
+ *   write(text): displays text; columns() and rows(): the terminal's size;
  *   run(line, signal): a Promise of the command's output; it rejects with an Error whose exitCode (1 by default, 130
  *     once Ctrl+C aborted `signal`) becomes the status;
  *   complete(line): a Promise of {candidates}, the full words that can replace the word at the end of the line (its
@@ -229,8 +229,8 @@ export const historyLimit = 500;
  * Commands run one at a time; lines pasted together run one after the other.
  */
 export class LineEditor {
-    constructor({write, columns = () => 80, run, complete = async () => ({candidates: []}), prompt = '> ', history = [], remember = () => {}}) {
-        Object.assign(this, {columns, run, complete, persist: remember});
+    constructor({write, columns = () => 80, rows = () => 24, run, complete = async () => ({candidates: []}), prompt = '> ', history = [], remember = () => {}}) {
+        Object.assign(this, {columns, rows, run, complete, persist: remember});
         // Whether the cursor is at the start of a row: output streamed without a final line break is followed by one
         // before the prompt.
         this.atLineStart = true;
@@ -242,7 +242,10 @@ export class LineEditor {
         this.setPrompt(prompt);
         this.cells = [];
         this.cursor = 0;
-        this.row = 0;  // the cursor's row below the prompt's first row
+        // The line's rows that fit the screen are drawn from row `first` of its layout; the cursor is `row` rows below
+        // the first one drawn. Rows above the screen are in the scrollback, which cursor moves cannot reach.
+        this.first = 0;
+        this.row = 0;
         this.history = history.slice(-historyLimit);
         this.historyIndex = this.history.length;
         this.queue = [];  // pasted lines waiting for the running command: {text, submit}
@@ -267,7 +270,7 @@ export class LineEditor {
     }
 
     showPrompt() {
-        this.row = 0;
+        this.row = this.first = 0;
         this.write(this.prompt);
         if (this.cells.length) this.redraw();
     }
@@ -372,17 +375,37 @@ export class LineEditor {
         this.showPrompt();
     }
 
-    // Rewrites the prompt and the line from the prompt's first row, then places the cursor. A line that exactly fills
-    // its last row leaves xterm.js's cursor waiting to wrap: a line break moves it where the layout expects it.
+    // The rows of the line to draw: all of them when they fit the screen, else a screen of rows around the cursor,
+    // which stays where it was drawn while the cursor stays in it.
+    window(cursorRow, lastRow) {
+        const height = Math.max(1, this.rows());
+        let first = this.first;
+        if (lastRow < height) first = 0;
+        else if (cursorRow < first) first = cursorRow;
+        else if (cursorRow >= first + height) first = cursorRow - height + 1;
+        first = Math.max(0, Math.min(first, lastRow - height + 1));
+        return {first, last: Math.min(lastRow, first + height - 1)};
+    }
+
+    // Rewrites the line from its first drawn row, then places the cursor. A line taller than the screen is drawn a
+    // screen at a time: its rows above the screen cannot be rewritten. A line that exactly fills its last row leaves
+    // xterm.js's cursor waiting to wrap: a line break moves it where the layout expects it.
     redraw() {
         const columns = Math.max(1, this.columns());
         const all = [...this.promptCells, ...this.cells];
         const {starts, end} = layout(all, columns);
         const cursor = this.cursor === this.cells.length ? end : starts[this.promptCells.length + this.cursor];
-        let text = ansi.up(this.row) + '\r' + ansi.clearBelow + this.prompt + this.line;
-        if (end.column === 0 && end.row > 0) text += '\r\n';
-        text += ansi.up(end.row - cursor.row) + '\r' + ansi.right(cursor.column);
-        this.row = cursor.row;
+        const {first, last} = this.window(cursor.row, end.row);
+        let text = ansi.up(this.row) + '\r' + ansi.clearBelow;
+        text += all.filter((cell, index) => starts[index].row >= first && starts[index].row <= last).map(cell => cell.text).join('');
+        let written = last;
+        if (end.row <= last) {
+            written = end.row;
+            if (end.column === 0 && end.row > first) text += '\r\n';
+        }
+        text += ansi.up(written - cursor.row) + '\r' + ansi.right(cursor.column);
+        this.first = first;
+        this.row = cursor.row - first;
         this.write(text);
     }
 
@@ -390,7 +413,9 @@ export class LineEditor {
     resized() {
         const columns = Math.max(1, this.columns());
         const {starts, end} = layout([...this.promptCells, ...this.cells], columns);
-        this.row = (this.cursor === this.cells.length ? end : starts[this.promptCells.length + this.cursor]).row;
+        const cursor = this.cursor === this.cells.length ? end : starts[this.promptCells.length + this.cursor];
+        this.first = this.window(cursor.row, end.row).first;
+        this.row = cursor.row - this.first;
     }
 
     track(promise) {
@@ -412,7 +437,7 @@ export class LineEditor {
         this.write('\r\n');
         this.cells = [];
         this.cursor = 0;
-        this.row = 0;
+        this.row = this.first = 0;
         this.running = true;
         const done = this.runLines(line).finally(() => { this.running = false; });
         // A submission replayed after a completion is already tracked by it.
@@ -434,7 +459,7 @@ export class LineEditor {
             line = next.text;
             this.cells = [];
             this.cursor = 0;
-            this.row = 0;
+            this.row = this.first = 0;
         }
     }
 
@@ -466,9 +491,17 @@ export class LineEditor {
         finally {
             const typed = this.completing;
             this.completing = null;
-            for (const data of typed) {
-                const result = this.handle(data);
-                if (this.running) await result;  // a replayed submission: the next keys follow its command
+            let keys = typed;
+            while (keys.length) {
+                const result = this.handle(keys.shift());
+                if (!this.running) continue;
+                // A replayed submission: a Ctrl+C typed after it interrupts its command now; the other keys follow it.
+                const interrupt = keys.lastIndexOf('\x03');
+                if (interrupt >= 0) {
+                    keys = keys.slice(interrupt + 1);
+                    this.interrupt();
+                }
+                await result;
             }
         }
     }

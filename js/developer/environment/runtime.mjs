@@ -5,7 +5,7 @@ import {manifestPath} from './manifest.mjs';
 import {discoverCommands, runCommand} from './commands.mjs';
 export {discoverCommands};
 import {validateLock} from './packages.mjs';
-import {call, readProject, publish} from './io.mjs';
+import {call, readProject, publish, writeChunks} from './io.mjs';
 import {isUnsafe} from './paths.mjs';
 import {createStarter} from './starter.mjs';
 import {install, initProject} from './installer.mjs';
@@ -223,14 +223,31 @@ async function readHistory(bridge) {
     } catch { return []; }
 }
 
-// The history is written after each command, one write at a time; a failed write keeps the terminal usable. Each line
-// is added to the file as it is now, so the terminals of other pages on the project keep theirs.
+// The history is written after each command, one write at a time; a failed write keeps the terminal usable. Each change
+// applies to the file as it is now, and is committed only if the file did not change since it was read: the terminals
+// of other pages on the project, or of other applications, keep their lines.
 let historyWrites = Promise.resolve();
+// Another page writing the history, or having changed it since it was read: the change is tried again, shortly after.
+const historyConflict = /changed since it was read|already being written/;
+async function changeHistory(bridge, change) {
+    for (let attempt = 1; ; ++attempt) {
+        let id = null;
+        try {
+            const token = await call(bridge, 'state', historyPath);
+            const lines = change(await readHistory(bridge)).slice(-historyLimit);
+            id = await call(bridge, 'begin', historyPath, false);
+            await writeChunks(bridge, {id, path: 'output', bytes: encoder.encode(JSON.stringify(lines))});
+            await call(bridge, 'commitGroup', id, historyPath, token);
+            return;
+        } catch (error) {
+            if (id !== null) await call(bridge, 'abort', id).catch(() => {});
+            if (attempt === 20 || !historyConflict.test(error?.message)) throw error;
+            await new Promise(resolve => setTimeout(resolve, 10 + Math.random() * 40));
+        }
+    }
+}
 function writeHistory(bridge, change) {
-    historyWrites = historyWrites.then(async () => {
-        const lines = change(await readHistory(bridge)).slice(-historyLimit);
-        await publish(bridge, historyPath, textFile(JSON.stringify(lines)), {directory: false});
-    }).catch(() => {});
+    historyWrites = historyWrites.then(() => changeHistory(bridge, change)).catch(() => {});
     return historyWrites;
 }
 const rememberLine = (bridge, line) => writeHistory(bridge, lines => lines.at(-1) === line ? lines : [...lines, line]);
@@ -364,7 +381,7 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
         return new Map();
     });
     const context = {bridge, config, preview, cppCommands, onExit};
-    const editor = new LineEditor({write, columns: () => terminal.cols, prompt: '> ', history: await readHistory(bridge),
+    const editor = new LineEditor({write, columns: () => terminal.cols, rows: () => terminal.rows, prompt: '> ', history: await readHistory(bridge),
         remember: line => rememberLine(bridge, line),
         run: (line, signal) => runLine(line, {...context, editor, signal, write: text => editor.write(text)}),
         complete: line => complete(line, context)});
