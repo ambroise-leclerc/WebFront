@@ -86,6 +86,12 @@
 
 ### Changed
 
+- Guard of the minimal core (#314): the `MinimalCoreAssets` CTest case lists the generated resource headers of
+  `include/webfront/` and fails on one outside the normative list of ADR-016 or when the decoded payloads exceed 150 KiB
+  (currently 35 766 bytes in 99 341 bytes of headers; `include/webfront/system` went from about 2.5 MB at the start of #303 to 188 KB).
+  The default favicon is the source `js/core/favicon.ico` rendered by `js/core/EmbedBinaryAsset.cmake`, pure CMake with
+  no Node.js, into `FaviconData.hpp` (`FaviconAssetFresh` checks it); it is no longer a hand-written gzip array in
+  `IndexFS.hpp` and is served unencoded. `IndexFS::WebFrontIco` stays an alias of the generated struct.
 - The browser integration suite `test/web/` runs through `wf test` (#311): `test/web/suite/` is a WebFront project
   (`jasmine-core`, `react`, `react-dom` from the local registry), `webtest` is the `webfront-wf` driver with the
   callbacks of the specs (`test/driver/WfDriver.hpp`), and the Signal Studio page is a JSX module built by esbuild-wasm.

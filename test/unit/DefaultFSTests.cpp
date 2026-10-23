@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <type_traits>
 
 using namespace std;
 using namespace webfront;
@@ -36,6 +37,9 @@ string readAll(fs::File& file) {
 
 } // namespace
 
+// The default composition is the protected bridge, the optional root and IndexFS, nothing else.
+static_assert(std::is_same_v<fs::DefaultFS, fs::Multi<fs::detail::ProtectedWebFrontJsFS, fs::detail::OptionalDevRootFS, fs::IndexFS>>);
+
 SCENARIO("DefaultFS serves only embedded assets when no document root is configured") {
     GIVEN("a DefaultFS constructed with an empty document root") {
         fs::DefaultFS defaultFS{filesystem::path{}};
@@ -48,6 +52,7 @@ SCENARIO("DefaultFS serves only embedded assets when no document root is configu
 
         THEN("an arbitrary file is not found, and no local filesystem access is attempted") {
             REQUIRE_FALSE(defaultFS.open("does-not-exist.txt").has_value());
+            REQUIRE_FALSE(defaultFS.open("webfront-bootstrap.mjs").has_value());
         }
     }
 }
