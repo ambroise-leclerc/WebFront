@@ -6,7 +6,6 @@ on:
     branches: [develop, master]
     paths:
       - 'js/developer/environment/**'
-      - 'js/developer/components/tools/**'
       - 'js/developer/tools/starters/pi/**'
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
@@ -17,7 +16,6 @@ on:
     branches: [develop, master]
     paths:
       - 'js/developer/environment/**'
-      - 'js/developer/components/tools/**'
       - 'js/developer/tools/starters/pi/**'
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'

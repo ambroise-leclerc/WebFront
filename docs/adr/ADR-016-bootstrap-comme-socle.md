@@ -100,9 +100,9 @@ développeur ni outillage. L'outillage de construction n'est jamais embarqué da
 - **[ADR-009](ADR-009-modules-et-assets-reproductibles.md)** (v2.1) : les assets embarqués sont
   limités à la liste normative ; `BabelFS`, `ReactFS`, `JasmineFS` et leurs sources vendorisées
   sont retirés (#312, #319). Les tests migrent vers `wf test` (#311).
-- **[ADR-010](ADR-010-composants-et-outils-optionnels.md)** (v1.6) : `Terminal.hpp`,
+- **[ADR-010](ADR-010-composants-et-outils-optionnels.md)** (v1.7) : `Terminal.hpp`,
   `ToolManager.hpp`, `ToolStore`, `PackageFS`, `TerminalFS`, `ToolManagerFS` et xterm embarqué
-  sont retirés (#313). Le terminal et `wf` de l'environnement téléchargé les remplacent ; les
+  sont retirés (#313, effectué). Le terminal et `wf` de l'environnement téléchargé les remplacent ; les
   abonnements UI multiples et l'injection du navigateur appelant restent des contrats du cœur.
 - **[ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md),
   [ADR-014](ADR-014-construction-javascript-dans-le-browser.md),

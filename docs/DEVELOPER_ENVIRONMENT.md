@@ -359,7 +359,7 @@ open, Enter starts a new session. No system shell is exposed.
   sent in pieces below the 65,535-byte limit of bridge strings.
 
 An application adds its own commands with `webfront::Commands` (`<webfront/Commands.hpp>`), which replaces
-`terminal::Shell` of the standalone terminal component. A command is a coroutine:
+`terminal::Shell` of the removed terminal component ([migration](UI_COMPONENTS.md)). A command is a coroutine:
 
 ```cpp
 #include <webfront/Commands.hpp>
@@ -418,8 +418,7 @@ writing large output with it, faster than the browser reads, grows the connectio
   Preview/embed consume the locked local files without resolving versions again.
 - Unpacked packages are cached by name, version and integrity under `.webfront/developer/packages/`,
   each with a record of its files' digests. A failed install can leave unused cached packages, but the lock
-  file remains unchanged. A lock naming more than 512 packages is refused. The tools
-  installed by the existing `ToolManager` keep their separate store and `webfront-tools.lock.json`.
+  file remains unchanged. A lock naming more than 512 packages is refused.
 - Published environment/preview resources are served under `/webfront/developer/`. The protected
   `/WebFront.js` remains the library's version. Sources, staging and cached archives are not HTTP
   routes. Project reads and publications reject traversal and escaping symlinks. This does not

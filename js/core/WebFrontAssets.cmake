@@ -50,27 +50,6 @@ function(webfront_add_embedded_assets)
         "${root}/js/core/bootstrap/bootstrap.bundle.mjs" "${root}/include/webfront/system/DeveloperBootstrapData.hpp"
         DeveloperBootstrapData DeveloperBootstrapAssetFresh)
 
-    # Terminal component (include/webfront/system/TerminalFS.hpp). xterm.js files are vendored verbatim in
-    # third_party/xterm (see its VERSION file); refresh them with cmake/UpdateXterm.cmake.
-    _webfront_add_embedded_text_asset(
-        "${root}/js/developer/components/terminal/index.html" "${root}/include/webfront/system/TerminalIndexHtmlData.hpp"
-        TerminalIndexHtmlData TerminalIndexHtmlAssetFresh)
-    _webfront_add_embedded_text_asset(
-        "${root}/js/developer/components/terminal/terminal.mjs" "${root}/include/webfront/system/TerminalModuleData.hpp"
-        TerminalModuleData TerminalModuleAssetFresh)
-    # Browser side of the wf tool manager (include/webfront/system/ToolManagerFS.hpp).
-    _webfront_add_embedded_text_asset(
-        "${root}/js/developer/components/tools/wf.mjs" "${root}/include/webfront/system/ToolManagerModuleData.hpp"
-        ToolManagerModuleData ToolManagerModuleAssetFresh)
-    _webfront_add_embedded_text_asset(
-        "${root}/third_party/xterm/xterm.mjs" "${root}/include/webfront/system/XtermModuleData.hpp"
-        XtermModuleData XtermModuleAssetFresh ON)
-    _webfront_add_embedded_text_asset(
-        "${root}/third_party/xterm/xterm.css" "${root}/include/webfront/system/XtermCssData.hpp"
-        XtermCssData XtermCssAssetFresh ON)
-    _webfront_add_embedded_text_asset(
-        "${root}/third_party/xterm/addon-fit.mjs" "${root}/include/webfront/system/XtermFitAddonData.hpp"
-        XtermFitAddonData XtermFitAddonAssetFresh ON)
     _webfront_add_embedded_text_asset(
         "${root}/third_party/react/runtime.mjs" "${root}/include/webfront/system/ReactRuntimeData.hpp"
         ReactRuntimeData ReactRuntimeAssetFresh ON)

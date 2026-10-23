@@ -25,7 +25,9 @@ Babel is served at `/babel-standalone@8.0.7/babel.min.js`.
 Jasmine 7 boots its globals from `jasmine.js`; its single `boot.js` installs the HTML reporter
 and starts the suite on window load. The runner serves `/jasmine/7.0.2/` and awaits the final
 C++ reporting Promise. The favicon is served as its original PNG, without an extra gzip layer.
-The terminal keeps its existing `webfront/components/terminal/` URLs and MIME types.
+xterm.js and its fit addon are no longer embedded: they are locked dependencies
+(`js/developer/vendor/package.json`) bundled into the developer environment archive by
+`js/developer/tools/build.mjs`.
 
 ## Maintenance
 
@@ -37,8 +39,6 @@ Run from the repository root:
 # Online, maintenance only: exact versions and transitive integrity hashes are in package-lock.json.
 npm ci --prefix js/developer/vendor --ignore-scripts
 node js/developer/vendor/update.mjs
-# Refresh xterm only through its dedicated script, retaining readable upstream files and licenses.
-cmake -DXTERM_VERSION=6.0.0 -DFIT_VERSION=0.11.0 -P cmake/UpdateXterm.cmake
 
 # Offline after C++ dependencies are configured; npm/node_modules is not required here.
 cmake --build build --target webfront-embedded-assets
@@ -49,9 +49,8 @@ ctest --test-dir build -R 'Asset.*Fresh|EmbeddedGzipContents|EmbeddedAssetGenera
 `package-lock.json` pins the npm tarball URLs, integrity hashes, scheduler 0.28.0 and esbuild 0.28.2.
 When upgrading, recheck the registry's stable tags, update exact versions and the lockfile,
 then review sources, routes, tests, version inventory and size measurements together.
-`cmake/UpdateXterm.cmake` takes exact versions explicitly and records them in
-`third_party/xterm/VERSION`. `js/developer/vendor/update.mjs` records the other versions alongside
-their distribution files in `third_party/`.
+`js/developer/vendor/update.mjs` records the versions alongside their distribution files in
+`third_party/`.
 
 `js/core/EmbedTextAsset.cmake` delegates rendering and exact byte comparison to
 `js/developer/vendor/embed.mjs`. It assembles bounded lines of five 64-bit words and joins them

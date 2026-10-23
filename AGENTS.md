@@ -17,17 +17,15 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `include/webfront/weblink/`: bridge message encoding and routing.
 - `include/webfront/system/`: layered virtual filesystems and embedded web resources.
 - `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
-- `include/webfront/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/webfront/system/TerminalFS.hpp`, and installed tools by `include/webfront/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
-- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment, terminal/`wf` components, build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
+- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), build and vendoring tools. Production C++ remains header-only in `include/webfront/`.
 - `js/developer/tools/starters/pi/`, `test/fixtures/`, `test/web/fixtures/`: retained package and regression fixtures, not public example applications.
 - `test/unit/`: Catch2 unit tests; `test/web/`: Jasmine real-browser integration test; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
 - `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
-- `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
-- `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
+- `docs/UI_COMPONENTS.md`: what replaced the removed terminal component and `wf` tool manager, with the migration to `webfront::Commands`.
 - `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
 
 The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.

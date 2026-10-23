@@ -5,7 +5,6 @@
 #include <webfront/system/BabelFS.hpp>
 #include <webfront/system/JasmineFS.hpp>
 #include <webfront/system/ReactFS.hpp>
-#include <webfront/system/TerminalFS.hpp>
 
 #include <array>
 #include <fstream>
@@ -23,7 +22,7 @@ namespace {
 struct ModuleFile {
     static inline std::list names{"modules/main.mjs"};
 };
-constexpr std::array<std::pair<std::string_view, std::string_view>, 9> dependencies{
+constexpr std::array<std::pair<std::string_view, std::string_view>, 6> dependencies{
     {
      {"jasmine/7.0.2/jasmine.js", "jasmine/jasmine.js"},
      {"jasmine/7.0.2/jasmine-html.js", "jasmine/jasmine-html.js"},
@@ -31,9 +30,6 @@ constexpr std::array<std::pair<std::string_view, std::string_view>, 9> dependenc
      {"jasmine/7.0.2/boot.js", "jasmine/boot.js"},
      {"react@19.3.1/runtime.mjs", "react/runtime.mjs"},
      {"babel-standalone@8.0.7/babel.min.js", "babel/babel.min.js"},
-     {"webfront/components/terminal/xterm.mjs", "xterm/xterm.mjs"},
-     {"webfront/components/terminal/xterm.css", "xterm/xterm.css"},
-     {"webfront/components/terminal/addon-fit.mjs", "xterm/addon-fit.mjs"},
      }
 };
 }  // namespace
@@ -55,7 +51,7 @@ SCENARIO("RequestHandler serves JavaScript modules") {
 // WebKit does not advertise Brotli over loopback HTTP.
 
 SCENARIO("Embedded browser dependencies support gzip-only HTTP clients") {
-    using Filesystem = fs::Multi<fs::JasmineFS, fs::ReactFS, fs::BabelFS, fs::TerminalFS>;
+    using Filesystem = fs::Multi<fs::JasmineFS, fs::ReactFS, fs::BabelFS>;
     RequestHandler<Net, Filesystem> handler{"."};
     for (const auto& [path, sourceName] : dependencies) {
         WHEN("the client requests " << path << " without Brotli support") {
@@ -83,7 +79,7 @@ SCENARIO("Embedded browser dependencies support gzip-only HTTP clients") {
 }
 
 SCENARIO("Embedded browser dependencies support identity-only HTTP clients") {
-    using Filesystem = fs::Multi<fs::JasmineFS, fs::ReactFS, fs::BabelFS, fs::TerminalFS>;
+    using Filesystem = fs::Multi<fs::JasmineFS, fs::ReactFS, fs::BabelFS>;
     RequestHandler<Net, Filesystem> handler{"."};
     for (const auto& [path, sourceName] : dependencies) {
         GIVEN(path) {

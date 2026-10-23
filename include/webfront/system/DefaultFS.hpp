@@ -50,7 +50,7 @@ private:
 ///  3. IndexFS's embedded fallback page, favicon, and WebFront.js copy.
 using DefaultFS = Multi<detail::ProtectedWebFrontJsFS, detail::OptionalDevRootFS, IndexFS>;
 
-/// DefaultFS with additional embedded providers, such as a UI component's assets (e.g. TerminalFS).
+/// DefaultFS with additional embedded providers, such as the assets an application generated with wf embed.
 /// They are consulted after the protected WebFront.js and before the document root, so a
 /// development root cannot shadow a component's files.
 template <Provider... Extra>

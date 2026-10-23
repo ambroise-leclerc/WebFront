@@ -1,14 +1,9 @@
-#include <webfront/components/Terminal.hpp>
-#include <webfront/components/ToolManager.hpp>
 #include <webfront/system/BabelFS.hpp>
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/system/IndexFS.hpp>
 #include <webfront/system/JasmineFS.hpp>
 #include <webfront/system/NativeFS.hpp>
-#include <webfront/system/PackageFS.hpp>
 #include <webfront/system/ReactFS.hpp>
-#include <webfront/system/TerminalFS.hpp>
-#include <webfront/system/ToolManagerFS.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/tooling/PathUtils.hpp>
 #include <webfront/WebFront.hpp>
@@ -56,42 +51,6 @@ struct TestState {
     atomic<bool> passed{false};
 };
 
-/// Project directory of the tools installed by test/web/js/tools-specs.mjs: a fresh temporary
-/// directory, removed by main(), so the test never writes into the source tree.
-struct TestToolsProject {
-    static filesystem::path get() {
-        static const filesystem::path directory = [] {
-            const auto unique = to_string(chrono::system_clock::now().time_since_epoch().count());
-            auto       path   = filesystem::temp_directory_path() / ("webfront-webtest-tools-" + unique);
-            filesystem::create_directories(path);
-            return path;
-        }();
-        return directory;
-    }
-};
-
-/// Search endpoint of the fake npm registry used by test/web/js/tools-specs.mjs; its packuments and
-/// tarball are plain files under test/web/registry/ (see make_fixture.py), served by NativeDebugFS.
-/// The server drops the query string before looking up files, so tools-specs.mjs checks the query
-/// wf.mjs sends.
-class FakeRegistrySearchFS {
-public:
-    explicit FakeRegistrySearchFS(filesystem::path docRoot) : root(std::move(docRoot)) {}
-
-    optional<fs::File> open(filesystem::path file) const {
-        const auto request = file.relative_path().generic_string();
-        if (request != "registry/-/v1/search")
-            return {};
-        ifstream stream(root / "registry" / "search.json", ios::binary);
-        if (!stream.is_open())
-            return {};
-        return fs::File{std::move(stream)};
-    }
-
-private:
-    filesystem::path root;
-};
-
 // Serve the actual example page so the React regression exercises the shipped UI.
 class ReactDemoFS {
 public:
@@ -132,15 +91,11 @@ private:
 
 using TestFS = fs::Multi<EncodedRunnerFS,
                          ReactDemoFS,
-                         FakeRegistrySearchFS,
                          fs::NativeDebugFS,
                          fs::IndexFS,
                          fs::JasmineFS,
                          fs::ReactFS,
-                         fs::BabelFS,
-                         fs::TerminalFS,
-                         fs::ToolManagerFS,
-                         fs::BasicPackageFS<TestToolsProject>>;
+                         fs::BabelFS>;
 // CMake chooses an embedded frontend; the same specs run under CEF/Xvfb and Windows WebView2.
 #ifndef WEBFRONT_TEST_FRONTEND
     #define WEBFRONT_TEST_FRONTEND webfront::frontend::CEFFrontend
@@ -152,7 +107,6 @@ public:
     explicit BrowserIntegrationTest(const filesystem::path& docRoot) : webFront("9002", docRoot) {
         registerCallbacks();
         registerBitsetCallbacks();
-        registerTerminalCommands();
     }
 
     ~BrowserIntegrationTest() {
@@ -402,19 +356,6 @@ private:
         });
     }
 
-    /// Commands driven by test/web/js/terminal-specs.mjs, and the tool manager driven by
-    /// test/web/js/tools-specs.mjs against the fake registry under test/web/registry/.
-    void registerTerminalCommands() {
-        Terminal terminal{webFront, {.prompt = "test> ", .banner = "webtest terminal"}};
-        terminal.command("greet", "Greet someone", [](CommandArgs args) {
-            return "Hello, " + (args.empty() ? string{"world"} : args[0]) + "!";
-        });
-        terminal.command("fail", "Throw from C++", [](CommandArgs) -> string {
-            throw runtime_error("terminal command failed");
-        });
-        ToolManager<TestWF, TestToolsProject> tools{webFront, terminal, {.registry = "/registry/"}};
-    }
-
     /// The JS side echoes back the very arrays browserReady() sent it, so the cpp* members double as the
     /// expected values and there is a single place to edit when the fixtures change.
     template <typename T, size_t N>
@@ -526,8 +467,6 @@ int main() {
         log::error("Browser integration test failed: {}", error.what());
         cerr << error.what() << '\n';
     }
-    error_code ignored;
-    filesystem::remove_all(TestToolsProject::get(), ignored);
     log::removeSinks(consoleSink);
     return result;
 }

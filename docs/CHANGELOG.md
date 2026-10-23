@@ -49,6 +49,15 @@
   `json::Reader::array`. `cppFunction` returns false when the name was
   already registered, and `hasCppFunction(name)` tells whether it is.
 
+### Removed
+
+- **Breaking:** the terminal component and the `wf` tool manager (#313): `webfront::Terminal`, `terminal::Shell`,
+  `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`, `fs::ToolStore`, `fs::PackageFS`, their embedded
+  modules, the embedded xterm.js copy, `third_party/xterm` and `cmake/UpdateXterm.cmake`. The developer environment's
+  terminal and `webfront::Commands` replace them; `docs/UI_COMPONENTS.md` describes the migration. xterm.js is a
+  locked dependency of the environment archive. `fs::tools::safeRelativePath` becomes `fs::safeRelativePath`
+  (`<webfront/system/SafePath.hpp>`).
+
 ### Changed
 
 - **Breaking:** `BasicWF::getLink(id)`, whose reference could outlive a released connection, is replaced by
