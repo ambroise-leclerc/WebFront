@@ -31,7 +31,7 @@
 - Developer journey qualification (#316, epic #303): `Journey*` CTest cases run `wf create`, `init`, `install`, `check`, `test`, `build`
   and `embed` on one project in an empty directory from the local registry, compile the generated header into the Life application
   and run it from an empty directory, then check a script under denied permissions and an emptied cache offline and restored. The test
-  registry gains `@types/react`, `@types/react-dom` and `csstype`.
+  registry gains `@types/react`, `@types/react-dom` and `csstype`. ADR-013, ADR-014 and ADR-015 are accepted.
 - `third_party/` is removed (#319, epic #303): `fflate` 0.8.3, the last vendored source, is a locked package of the repository's
   `wf` project, imported by name from `js/developer/environment/embed.mjs`; its notice comes from the installed package.
   The environment archive stays byte for byte identical. The test registry downloads it at configure time, and

@@ -8,13 +8,14 @@
 | 1.1 | 2026-10-23 | Acceptée | Ambroise Leclerc | Garde-fou `MinimalCoreAssets` (#314) : la liste est vérifiée par CTest, budget de 150 Kio d'octets décodés ; le favicon devient `FaviconData`, généré par CMake pur depuis `js/core/favicon.ico`. | [c0ee031](https://github.com/ambroise-leclerc/WebFront/commit/c0ee03131d3104721f8a24224533e753a5f6ad13) |
 | 1.2 | 2026-10-23 | Acceptée | Ambroise Leclerc | Auto-hébergement (#315) : le dépôt est un projet `wf` dont les scripts construisent l'environnement, le site et la vérification du pin avec l'environnement d'amorçage épinglé ; octets identiques à la construction de l'époque, preuve de reconstruction du bundle bootstrap. | — |
 | 1.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | Tests, régénération et CI sans Node.js ni npm (#318) : les en-têtes du cœur sont produits et vérifiés par un générateur CMake pur (`js/core/EmbedAsset.cmake`), qui remplace `wf run embed-core` et le générateur Node.js ; les paquets du registre de test sont téléchargés et vérifiés au configure ; les tests JavaScript deviennent des specs Jasmine exécutées par `wf test` ; garde-fou global `NoNodeDependency`. | — |
+| 1.4 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification du parcours (#316) : ADR-013, ADR-014 et ADR-015 passent à « Acceptée ». | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 
 ## Statut et date
 
 **Acceptée le 2026-10-22** (épique #303, issue #304). Cette décision fixe la direction
-architecturale et les règles que les issues suivantes de l'épique doivent respecter. Elle ne
-déclare **pas** les mécanismes déjà proposés (ADR-013, ADR-014, ADR-015) comme acceptés : leur
-passage à « Acceptée » attend les preuves multiplateformes de #316. Aucun code n'est modifié par
+architecturale et les règles que les issues suivantes de l'épique doivent respecter. Les mécanismes
+déjà proposés (ADR-013, ADR-014, ADR-015) sont passés à « Acceptée » le 2026-10-24 avec les preuves
+multiplateformes de #316. Aucun code n'est modifié par
 cette décision ; les retraits qu'elle annonce sont réalisés par #311 à #319.
 
 ## Contexte
@@ -138,10 +139,9 @@ développeur ni outillage. L'outillage de construction n'est jamais embarqué da
   abonnements UI multiples et l'injection du navigateur appelant restent des contrats du cœur.
 - **[ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md),
   [ADR-014](ADR-014-construction-javascript-dans-le-browser.md),
-  [ADR-015](ADR-015-ressources-generees-par-application.md)** restent **Proposées**. Preuves
-  manquantes avant acceptation : validation CEF, WebKitGTK, WebView2 et WKWebView du parcours
-  complet, compatibilité d'un échantillon de paquets npm, restauration hors ligne, publication
-  vérifiée d'une release (#316).
+  [ADR-015](ADR-015-ressources-generees-par-application.md)** sont **Acceptées** (#316, 2026-10-24) :
+  parcours complet validé sous CEF, WebKitGTK, WebView2 et WKWebView, échantillon de paquets npm,
+  restauration hors ligne et release publiée et vérifiée.
 
 ### Trajectoire de dépréciation
 
