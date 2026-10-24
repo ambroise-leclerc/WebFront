@@ -1,6 +1,5 @@
 import './content-policy-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
-import './react-demo-specs.mjs';
 
 // The page of the application is covered by the lifecycle cases (path-encoding): these specs run in the frame of wf test.
 describe('Frontend page URL', () => {
@@ -10,6 +9,24 @@ describe('Frontend page URL', () => {
         const response = await fetch(url);
         expect(response.ok).toBeTrue();
         expect(await response.text()).toContain('<title>Plus in a path</title>');
+    });
+    it('injects a C++ script when the handshake completes before the body exists', () => {
+        const body = document.body;
+        const text = new TextEncoder().encode('globalThis.earlyInjectedScript = true;');
+        const packet = new DataView(new ArrayBuffer(4 + text.length));
+        packet.setUint8(0, 2); // TextCommand
+        packet.setUint8(1, 1); // injectScript
+        packet.setUint16(2, text.length);
+        new Uint8Array(packet.buffer, 4).set(text);
+        try {
+            body.remove();
+            expect(document.body).toBeNull();
+            expect(() => webFront.handleTextCommand(packet)).not.toThrow();
+            expect(globalThis.earlyInjectedScript).toBeTrue();
+        } finally {
+            document.documentElement.append(body);
+            delete globalThis.earlyInjectedScript;
+        }
     });
     it('runs in the frame of the test runner, served from the origin of the application', () => {
         expect(location.hostname).toBe('127.0.0.1');

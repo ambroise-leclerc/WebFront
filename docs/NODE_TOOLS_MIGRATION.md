@@ -39,3 +39,8 @@ tracked file; this note and the files of the guard are among its listed exceptio
 
 The specs run with `wf test` on the repository (`webfront.project.json`, `test.specs`); the CTest case `DeveloperSpecs` runs them
 on a copy of the sources, and the `wf-package` job on the checkout with its lock.
+
+The cancellation/listener/timer regression of #335 is in `testing-specs.mjs`, and its scoped-clock regression is in
+`timers-specs.mjs`, sharing `test/developer/timers.mjs` with the browser integration fixture. Both run with `wf test`.
+The bounded-snapshot and NodeNext/no-emit checks retain the real compiler already installed by the developer browser
+workflow; no separate host runner or fallback was restored when rebasing #335 over #344.

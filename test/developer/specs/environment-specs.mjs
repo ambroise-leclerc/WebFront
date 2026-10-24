@@ -106,8 +106,8 @@ describe('The environment', () => {
 
     it('generated gzip words decode to the exact resources and generation is reproducible', async () => {
         const files = new Map([['index.html', encode('<div>PI</div>')], ['app.js', encode('console.log("π")')]]);
-        const header = generateProvider(files, 'PiUI', 'MIT */ preserved');
-        expect(header).toBe(generateProvider(new Map([...files].reverse()), 'PiUI', 'MIT */ preserved'));
+        const header = generateProvider(files, 'AppUI', 'MIT */ preserved');
+        expect(header).toBe(generateProvider(new Map([...files].reverse()), 'AppUI', 'MIT */ preserved'));
         const blocks = [...header.matchAll(/dataSize\{(\d+)\};\s+static constexpr[\s\S]*?data\{([\s\S]*?)\n        \};/g)];
         expect(blocks.length).toBe(2);
         for (const [index, match] of blocks.entries()) {

@@ -10,12 +10,12 @@ describe('The developer distribution', () => {
     const encode = value => new TextEncoder().encode(typeof value === 'string' ? value : JSON.stringify(value));
     const decode = bytes => new TextDecoder().decode(bytes);
 
-    const recipe = (fields = {}) => ({format: 1, name: 'pi-starter', version: '0.1.0', dependencies: {react: '19.3.1'},
+    const recipe = (fields = {}) => ({format: 1, name: 'life-starter', version: '0.1.0', dependencies: {react: '19.3.1'},
         entries: {main: 'main.tsx'}, ...fields});
 
     function starter(overrides = {}) {
         return compress(tar(new Map(Object.entries({
-            'package/main.tsx': encode('export default function Pi() {}'),
+            'package/main.tsx': encode('export default function Life() {}'),
             'package/webfront.project.json': encode(recipe()),
             ...overrides,
         }))));
@@ -25,18 +25,18 @@ describe('The developer distribution', () => {
         const bytes = starter();
         const calls = [];
         const bridge = {cppFunction: name => async (...args) => { calls.push([name, ...args]); return 'transaction'; }};
-        const config = {starters: {pi: {url: 'https://pages.test/developer/0.1.0/pi-starter.tgz', integrity: await integrity(bytes)}}};
+        const config = {starters: {life: {url: 'https://pages.test/developer/0.1.0/life-starter.tgz', integrity: await integrity(bytes)}}};
         const fetchImpl = async () => new Response(bytes);
-        const help = await createStarter(bridge, config, ['pi', 'ui'], {fetchImpl});
+        const help = await createStarter(bridge, config, ['life', 'ui'], {fetchImpl});
         expect(help).toMatch(/wf init\nwf install react@19.3.1/);
         expect(help).toMatch(/wf preview ui\/main.tsx/);
         expect(calls[0][0]).toBe('webfront.developer.beginNew');
         expect(calls.at(-1)[0]).toBe('webfront.developer.commit');
         calls.length = 0;
-        await rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: await integrity(encode('bad'))}}}, ['pi', 'ui'], {fetchImpl}), /Integrity check/);
+        await rejects(createStarter(bridge, {starters: {life: {...config.starters.life, integrity: await integrity(encode('bad'))}}}, ['life', 'ui'], {fetchImpl}), /Integrity check/);
         expect(calls.length).toBe(0);
         for (const bytes of [starter({'package/../escape': encode('bad')}), starter({'package/webfront.project.json': encode(recipe({dependencies: {react: 'latest'}}))})]) {
-            await rejects(createStarter(bridge, {starters: {pi: {...config.starters.pi, integrity: await integrity(bytes)}}}, ['pi', 'ui'], {fetchImpl: async () => new Response(bytes)}));
+            await rejects(createStarter(bridge, {starters: {life: {...config.starters.life, integrity: await integrity(bytes)}}}, ['life', 'ui'], {fetchImpl: async () => new Response(bytes)}));
             expect(calls.length).toBe(0);
         }
     });
@@ -49,7 +49,7 @@ describe('The developer distribution', () => {
             if (name.endsWith('.commit')) throw new Error('Starter destination already exists');
             return 'transaction';
         }};
-        await rejects(createStarter(bridge, {starters: {pi: {url: '/starter.tgz', integrity: await integrity(bytes)}}}, ['pi', 'ui'], {fetchImpl: async () => new Response(bytes)}), /already exists/);
+        await rejects(createStarter(bridge, {starters: {life: {url: '/starter.tgz', integrity: await integrity(bytes)}}}, ['life', 'ui'], {fetchImpl: async () => new Response(bytes)}), /already exists/);
         expect(calls.at(-1)).toBe('webfront.developer.abort');
     });
 
@@ -76,13 +76,13 @@ describe('The developer distribution', () => {
     it('Pages staging retains older versions and refuses different bytes under an existing version', async () => {
         const project = memoryProject();
         const environment = encode('environment');
-        const pi = encode('starter');
+        const starterBytes = encode('starter');
         const write = async version => {
-            const manifest = {version, integrity: await integrity(environment), starters: {pi: {archive: 'pi-starter.tgz', integrity: await integrity(pi)},
-                ...(version !== '0.1.0' ? {life: {archive: 'life-starter.tgz', integrity: await integrity(pi)}} : {})}};
+            const manifest = {version, integrity: await integrity(environment), starters: {sample: {archive: 'sample-starter.tgz', integrity: await integrity(starterBytes)},
+                ...(version !== '0.1.0' ? {life: {archive: 'life-starter.tgz', integrity: await integrity(starterBytes)}} : {})}};
             await project.write('distribution/environment.tgz', environment);
-            await project.write('distribution/pi-starter.tgz', pi);
-            if (version !== '0.1.0') await project.write('distribution/life-starter.tgz', pi);
+            await project.write('distribution/sample-starter.tgz', starterBytes);
+            if (version !== '0.1.0') await project.write('distribution/life-starter.tgz', starterBytes);
             await project.write('distribution/provision.json', JSON.stringify(manifest));
             await project.write('distribution/DeveloperReleaseData.hpp', bootstrapHeader(version, 'https://owner.github.io/WebFront/', manifest.integrity));
         };

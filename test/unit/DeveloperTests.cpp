@@ -1,4 +1,3 @@
-#include "../fixtures/Pi.hpp"
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -36,24 +35,24 @@ SCENARIO("Developer publication preserves the installed files until commit") {
     TemporaryDirectory project;
     developer::Store   store{project.path()};
     GIVEN("an installed output") {
-        auto first = store.begin("generated/PiUI.hpp", false);
+        auto first = store.begin("generated/LifeUI.hpp", false);
         store.write(first, "output", 0, bytes("old"));
         store.commit(first);
         WHEN("the next output is interrupted") {
-            auto second = store.begin("generated/PiUI.hpp", false);
+            auto second = store.begin("generated/LifeUI.hpp", false);
             store.write(second, "output", 0, bytes("partial"));
-            REQUIRE(read(store, "generated/PiUI.hpp") == "old");
+            REQUIRE(read(store, "generated/LifeUI.hpp") == "old");
             store.abort(second);
             THEN("the installed output remains intact") {
-                REQUIRE(read(store, "generated/PiUI.hpp") == "old");
+                REQUIRE(read(store, "generated/LifeUI.hpp") == "old");
             }
         }
         WHEN("a complete replacement is committed") {
-            auto second = store.begin("generated/PiUI.hpp", false);
+            auto second = store.begin("generated/LifeUI.hpp", false);
             store.write(second, "output", 0, bytes("new"));
             store.commit(second);
             THEN("the new output replaces it") {
-                REQUIRE(read(store, "generated/PiUI.hpp") == "new");
+                REQUIRE(read(store, "generated/LifeUI.hpp") == "new");
             }
         }
     }
@@ -126,14 +125,6 @@ SCENARIO("Developer filesystem serves only published resources and protects the 
             REQUIRE(http::MimeType("wasm").toString() == "application/wasm");
         }
     }
-}
-
-SCENARIO("The PI demonstration returns exact decimal strings and rejects excessive work") {
-    REQUIRE(demo::pi(0) == "3");
-    REQUIRE(demo::pi(1) == "3.1");
-    REQUIRE(demo::pi(50) == "3.14159265358979323846264338327950288419716939937510");
-    REQUIRE(demo::pi(1000).size() == 1002);
-    REQUIRE_THROWS_AS(demo::pi(1001), std::invalid_argument);
 }
 
 SCENARIO("A downloaded starter never replaces a developer's existing project") {

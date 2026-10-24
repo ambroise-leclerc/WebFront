@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation de wf embed et du parcours hors ligne. | À renseigner après intégration. |
 | 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 0.3 | 2026-10-24 | Proposée | Ambroise Leclerc | Vérification recentrée sur Life après le retrait de PI : interface React, générations via le bridge et exécution hors projet. | [8368f59](https://github.com/ambroise-leclerc/WebFront/commit/8368f595af1534ea6670ee6d5582f245f9edc1f2) |
 
 ## Statut et date
 
@@ -60,7 +61,7 @@ trajectoire de retrait de l'ADR-016.
 Tester les octets décompressés, le padding, la stabilité à entrées identiques et les erreurs de
 publication. Compiler le header réellement produit par le navigateur dans un second exécutable,
 puis démarrer celui-ci depuis un répertoire vide, sans racine locale ni callbacks développeur.
-Le test vérifie l'interface React et le résultat PI via le bridge.
+Le test actuel vérifie l'interface React et les générations Life via le bridge ; il remplace la fixture PI retirée.
 
 ## Références
 

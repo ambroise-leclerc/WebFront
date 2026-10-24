@@ -35,8 +35,6 @@
   "js/developer/environment/peers.mjs",
   "js/developer/environment/resolve.mjs",
   "js/developer/environment/embed.mjs",
-  "js/developer/tools/starters/pi/main.tsx",
-  "js/developer/tools/starters/pi/style.css",
   "examples/life/ui/main.tsx",
   "examples/life/ui/style.css",
   "js/developer/tools/distribution.json",

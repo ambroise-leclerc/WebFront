@@ -21,8 +21,8 @@ The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.pro
 specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
 local registry built by `wf run test-registry` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
 pinned 0.6.1 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
-composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone; the Signal Studio page is a
-JSX module built by esbuild-wasm with the locked React and rendered in the runner frame by the specs. The specs now run
+composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone.
+The retired Signal Studio page is no longer part of the suite; Life covers React/TSX in the developer integration. The specs now run
 in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
 by the `path-encoding` lifecycle case, and `webtest` also checks that C++ observed every call the specs make. The Jasmine
 case needs no prepared fixtures: configure downloads the registry's packages (#318). The embedded Jasmine, React and Babel providers, their headers (~2.1 MB), `third_party/{babel,react,jasmine}`, `vendor/update.mjs` and `vendor/check.mjs`, their freshness tests and `EmbeddedGzipContents` were removed by #312 (migration: `wf install` and `wf embed`, see `docs/EMBEDDED_ASSETS.md`); the HTTP gzip and identity negotiation tests use a neutral fixture module.
@@ -48,7 +48,8 @@ building the environment, publishing it, and the CI.
   the configure; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace the downloads offline). `WEBFRONT_DEVELOPER_FIXTURES`
   is gone: the CTest chain builds the registry (`TestRegistry`: `wf run test-registry`), installs the build dependencies
   from it, builds the environment from the current sources (`SelfBuild*`) and assembles the fixtures of the browser tests
-  (`DeveloperFixtures`). The environment it builds is byte for byte the published 0.6.1.
+  (`DeveloperFixtures`). At the #344 merge, this rebuilt the published 0.6.1 byte for byte; #335 advances the
+  development sources to 0.6.2 while preserving the published 0.6.1 pins.
 - **Tests.** The pure JavaScript tests of the former runner became Jasmine specs in `test/developer/specs/`, run by the
   repository's own `wf test` (`DeveloperSpecs`, and the `wf-package` job on the real checkout and lock); 86 tests became 84
   specs because two moved to CMake: the checksums of the bundle inputs (`BundleInputsFresh`, `BundleInputsRejectsChange`) and
@@ -98,6 +99,21 @@ be checked on the corrected head before merging. See the
 (examples, README, assets layout) and streamlines CI; it adds no library functionality, see
 `docs/CHANGELOG.md`. The developer distribution 0.4.0 is published and archived as `developer-v0.4.0`;
 published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimental.
+
+## CI regression scope (2026-10-24)
+
+- Developer sources advance to 0.6.2; the release and test-bootstrap pins stay on the immutable published 0.6.1.
+- The retired PI starter, its sources and its distribution archive are removed. Life is the maintained starter and covers
+  React/TSX, preview, bitset calls, reproducible embedding and an offline executable without developer callbacks.
+  Retired Signal Studio application regressions are also removed.
+- Deadline, grace-period and dev-polling checks advance a scoped clock. Worker startup and bridge/UI operations stay
+  real. Native command cancellation uses a release handshake; repeated checks reuse immutable fixture package bytes.
+- Bounded-snapshot and NodeNext/no-emit compiler checks retain the real compiler in the browser workflow. New
+  cancellation and clock specs run with the repository's own `wf test`, preserving #344's self-hosted test pipeline.
+  Two identical self-builds demonstrate reproducibility; a separate build verifies bootstrap refresh.
+  An end-to-end packaged script verifies publication permissions.
+- Tests retain their original CTest grouping: total suite time remains visible. Compilation and complete browser
+  workflows are still longer than the two-second target; no timing claim is made by splitting the reporting units.
 
 ## Repository presentation for 0.4 (2026-10-21)
 
@@ -152,7 +168,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   the Linux sanitizers, WebKitGTK and macOS/WKWebView checks.
 
 
-## Browser-powered development (2026-10-20)
+## Historical browser-powered development (2026-10-20)
 
 - `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
   downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do
@@ -172,7 +188,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   its WKWebView job also passed. The later Windows and sanitizer results are in the validation above.
 - Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
-  configuration. `wf create life` and `wf create pi` create fresh editable projects without
+  configuration. At that time, `wf create life` and `wf create pi` created fresh editable projects without
   overwriting existing files. Maintainer preparation uses `wf` itself (#318); consumers install nothing.
   Version 0.2.0 was served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
   with the same archives retained in the `developer-v0.2.0` prerelease; 0.1.0 and later versions are preserved.

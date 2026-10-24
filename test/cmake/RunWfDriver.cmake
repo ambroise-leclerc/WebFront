@@ -2,6 +2,8 @@
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
 #   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
 #   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
+# SLEEP_ENVIRONMENT uses a tiny compatible archive whose command records its start before sleeping; EXPECT_FILE
+# requires that record after the watchdog exits. Real packaged-script execution is covered by the other driver cases.
 # PROVISION is the provision.json of ENVIRONMENT, from which an INTEGRITY left empty is read when the test runs.
 # PROFILE is a directory for the browser's own persistent state (WebKitGTK profile), emptied first: a browser reuses the
 # modules it loaded by URL, and the first page that loads another environment through the same profile fails with
@@ -33,6 +35,21 @@ endif()
 if(PROVISION AND ENVIRONMENT AND NOT INTEGRITY AND NOT FORGE)
     file(READ "${PROVISION}" provision)
     string(JSON INTEGRITY GET "${provision}" integrity)
+endif()
+
+if(SLEEP_ENVIRONMENT)
+    # The watchdog must interrupt an active command, independently of WASM compiler startup cost.
+    include("${ROOT}/cmake/WebFrontBootstrap.cmake")
+    file(REMOVE_RECURSE "${WORK}/sleep-environment")
+    file(MAKE_DIRECTORY "${WORK}/sleep-environment/package")
+    file(COPY "${ROOT}/test/fixtures/wf-sleep-environment/" DESTINATION "${WORK}/sleep-environment/package")
+    set(ENVIRONMENT "${WORK}/sleep-environment.tgz")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar czf "${ENVIRONMENT}" --format=gnutar package
+        WORKING_DIRECTORY "${WORK}/sleep-environment" RESULT_VARIABLE packed)
+    if(NOT packed EQUAL 0)
+        message(FATAL_ERROR "Cannot pack the watchdog environment")
+    endif()
+    webfront_file_sri("${ENVIRONMENT}" INTEGRITY)
 endif()
 
 if(FRESH_PROJECT)
@@ -78,6 +95,9 @@ if(EXPECT_REPORT)
     file(REMOVE "${report}")
     list(APPEND arguments --report "${report}")
 endif()
+if(EXPECT_FILE)
+    file(REMOVE "${PROJECT}/${EXPECT_FILE}")
+endif()
 string(REPLACE "|" ";" command "${COMMAND}")
 execute_process(COMMAND "${DRIVER}" ${arguments} -- ${command}
     RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE errors)
@@ -96,5 +116,15 @@ if(EXPECT_REPORT)
     file(READ "${report}" content)
     if(NOT content MATCHES "${EXPECT_REPORT}")
         message(FATAL_ERROR "The report does not match '${EXPECT_REPORT}': ${content}")
+    endif()
+endif()
+
+if(EXPECT_FILE)
+    if(NOT EXISTS "${PROJECT}/${EXPECT_FILE}")
+        message(FATAL_ERROR "The command did not start: ${EXPECT_FILE} is missing")
+    endif()
+    file(READ "${PROJECT}/${EXPECT_FILE}" started)
+    if(NOT started STREQUAL "running")
+        message(FATAL_ERROR "The command did not record its running state")
     endif()
 endif()

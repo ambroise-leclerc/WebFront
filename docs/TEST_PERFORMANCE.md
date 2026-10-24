@@ -11,13 +11,15 @@ manual dispatch still runs only the extended checks.
 ## Starting point
 
 The [21 October 2026 run](https://github.com/ambroise-leclerc/WebFront/actions/runs/39640036175)
-reported these elapsed CTest durations, rather than timeout limits:
+reported these elapsed CTest durations, rather than timeout limits. These are historical test names:
+`DeveloperEmbeddedBuild` and `DeveloperEmbeddedIntegration` were removed with the PI starter;
+`LifeEmbeddedBuild` and `LifeEmbeddedIntegration` are the current embedded application checks.
 
 | Test | Windows MSVC / WebView2 |
 | --- | ---: |
 | BabelAssetFresh | 120.68 s |
 | LifeEmbeddedBuild | 39.59 s |
-| DeveloperEmbeddedBuild | 39.20 s |
+| DeveloperEmbeddedBuild (retired PI fixture) | 39.20 s |
 | AddSubdirectoryConsumer | 26.33 s |
 | DeveloperBrowserIntegration | 26.01 s |
 | CEFTestingState | 25.06 s |
@@ -41,7 +43,7 @@ their totals should not be compared as a compiler benchmark.
   generation time, instead of depending on a configure-time variable or
   independently discovering a different cache. It still configures,
   cleans, compiles and links the real consumer on every invocation.
-- Independent tests overlap under CTest. The two embedded builds retain
+- Independent tests overlap under CTest. The remaining Life embedded build retains
   `RUN_SERIAL` so a CMake regeneration or shared relink cannot race a running
   binary in the same tree, including on Windows. A build-only resource lock was
   insufficient for that guarantee.
@@ -60,6 +62,11 @@ their totals should not be compared as a compiler benchmark.
   [macOS job](https://github.com/ambroise-leclerc/WebFront/actions/runs/39674764032/job/119481980751)
   (61.46 seconds before CTest stopped it).
 
+The four-second `WfDriverTimeout` case intentionally exercises the real driver watchdog. A tiny compatible
+environment starts a sleeping command and publishes a readiness marker; the test requires that marker as well as
+exit status 71. Compiler startup is covered by the other real-script driver cases and does not consume this watchdog's
+budget. This case retains a real elapsed-time check rather than advancing a test clock.
+
 ## Resource audit
 
 | Tests | Scheduling constraint |
@@ -71,13 +78,12 @@ their totals should not be compared as a compiler benchmark.
 | CEF option scope | Its own `cef-testing-state` directory; each state still configures separately. |
 | Consumer | Separate `consumer-build` tree; no browser is opened. |
 | Browser integration and lifecycle | Keep `RESOURCE_LOCK webfront_port_9002`, including the shared CEF profile and generated browser resources. |
-| Developer/Life embedded builds | Keep `FIXTURES_REQUIRED DeveloperGenerated`, then their individual build/run fixture dependencies. `RUN_SERIAL TRUE` excludes every other test while either build runs, protecting running executables from regeneration/relinking. `PROCESSORS 2` records the nested build's two workers. |
+| Life embedded build | Keep `FIXTURES_REQUIRED DeveloperGenerated`, then the build/run fixture dependencies. `RUN_SERIAL TRUE` excludes every other test while it runs, protecting running executables from regeneration/relinking. `PROCESSORS 2` records the nested build's two workers. |
 
-The browser setup must finish generating headers before either embedded build
-starts. Browser tests remain mutually exclusive; embedded builds remain mutually
-exclusive. No test runs alongside a nested build. The consumer has a different
-build tree; ordinary independent tests can overlap when neither embedded build
-is running.
+The browser setup must finish generating headers before the Life embedded build
+starts. Browser tests remain mutually exclusive. No test runs alongside the nested build. The consumer has a different
+build tree; ordinary independent tests can overlap when the embedded build
+is not running.
 
 Linux coverage processes still write GCC's normal `.gcda` files on the runner's
 local filesystem, using libgcov's file locking. Do not copy this parallel coverage

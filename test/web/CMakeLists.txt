@@ -138,21 +138,24 @@ if(_browser_tests_available)
         set_tests_properties(WfDriverProject PROPERTIES FIXTURES_SETUP WfDriverProject LABELS "web-integration" TIMEOUT 30)
 
         # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
-        #     [OUTPUT <regex>] [REPORT <regex>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
-        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [PINNED] [REQUIRES <fixture>] [PROVIDES <fixture>])
+        #     [OUTPUT <regex>] [REPORT <regex>] [EXPECT_FILE <relative path>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
+        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [PINNED] [SLEEP_ENVIRONMENT] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
-            cmake_parse_arguments(ARG "PINNED" "OUTPUT;REPORT;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
+            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
             set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
                     list(APPEND options "-DEXPECT_${option}=${ARG_${option}}")
                 endif()
             endforeach()
-            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY)
+            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY EXPECT_FILE)
                 if(ARG_${option})
                     list(APPEND options "-D${option}=${ARG_${option}}")
                 endif()
             endforeach()
+            if(ARG_SLEEP_ENVIRONMENT)
+                list(APPEND options -DSLEEP_ENVIRONMENT=ON)
+            endif()
             if(ARG_PINNED)
                 # No environment passed: the driver runs the pinned bootstrap environment provisioned at configure time.
                 list(APPEND options -DENVIRONMENT= -DINTEGRITY= -DREGISTRY=)
@@ -174,7 +177,7 @@ if(_browser_tests_available)
         # A failing command: its status, its output and the structured report reach CTest.
         webfront_add_driver_test(WfDriverTestFails 1 "test|fails" OUTPUT "FAILED: 1 spec, 1 failure" REPORT "\"failed\":1" REQUIRES WfDriverInstalled)
         # The starters pinned by the environment are served next to its archive.
-        webfront_add_driver_test(WfDriverCreateStarter 0 "create|pi" OUTPUT "Created"
+        webfront_add_driver_test(WfDriverCreateStarter 0 "create|life" OUTPUT "Created"
             FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-starter")
         # The entry module is the one environment.json declares, not a fixed name.
         webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
@@ -183,7 +186,8 @@ if(_browser_tests_available)
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
         # What a script writes to its console before it ends reaches the result of the command.
         webfront_add_driver_test(WfDriverScriptOutput 0 "run|echo|one|two" OUTPUT "echo says one two")
-        webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4)
+        # Isolate the driver's deadline from compiler startup, and prove the command actually began.
+        webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4 EXPECT_FILE sleep.started SLEEP_ENVIRONMENT)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
             INTEGRITY "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
         webfront_add_driver_test(WfDriverMissingArchive 70 "list" OUTPUT "archive not found"
@@ -260,29 +264,28 @@ if(_browser_tests_available)
             REQUIRES SelfBuildProject TestRegistry PROVIDES SelfBuildInstalled)
         webfront_add_self_build_test(SelfBuild 0 "run|build|build-distribution" OUTPUT "Script build completed"
             REQUIRES SelfBuildInstalled PROVIDES SelfBuilt)
-        # The specs of the developer environment (packages, manifest, restore, scripts, wf dev, wf test, distribution): the
-        # project's own `wf test`, in the browser, under the jasmine-core of its lock. They read the sources of the copy.
+        # Developer specs migrated by #344 remain in the browser under the repository's locked Jasmine.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)
         webfront_add_self_build_test(SelfBuildRepeat 0 "run|build|build-distribution-repeat" OUTPUT "Script build completed"
             REQUIRES SelfBuilt PROVIDES SelfBuiltTwice)
-        # The permissions of webfront.project.json frame where a script writes.
+        # The packaged environment must enforce the actual project's publication permissions.
         webfront_add_self_build_test(SelfBuildOutsidePermissions 1 "run|build|elsewhere" OUTPUT "Permission denied: writing elsewhere"
             REQUIRES SelfBuilt)
         # Reproducible: two builds give the very same bytes.
         set(_self_outputs environment.tgz environment.json provision.json DeveloperReleaseData.hpp runtime.mjs compiler.mjs
-            script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json pi-starter.tgz life-starter.tgz)
+            script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json life-starter.tgz)
         webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfBuiltTwice
             -DLEFT=${_self_project}/build-distribution -DRIGHT=${_self_project}/build-distribution-repeat "-DFILES=${_self_outputs}")
-        # The fixtures of the tests that run the environment under test: its outputs, the registry and the pages of the tests.
+        set_tests_properties(SelfBuildReproducible PROPERTIES FIXTURES_SETUP SelfReproducible)
+        # Assemble fixtures from the self-built environment, retaining #344's dependency chain.
         add_test(NAME DeveloperFixtures COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
             -DOUTPUT=${_fixtures} -P ${PROJECT_SOURCE_DIR}/test/cmake/AssembleDeveloperFixtures.cmake)
         set_tests_properties(DeveloperFixtures PROPERTIES FIXTURES_REQUIRED SelfBuilt FIXTURES_SETUP DeveloperFixtures
             RESOURCE_LOCK self-build-project LABELS "web-integration" TIMEOUT 60)
-        # The checked-in bootstrap bundles and checksums are rebuilt from the sources by wf, and the core headers that embed
-        # them by CMake: all of them are the checked-in ones.
+        # Refresh is validated separately from the two identical reproducibility builds.
         webfront_add_self_build_test(SelfBuildRefresh 0 "run|build|build-distribution|--refresh-bootstrap" OUTPUT "Script build completed"
-            REQUIRES SelfBuilt PROVIDES SelfRefreshed)
+            REQUIRES SelfReproducible PROVIDES SelfRefreshed)
         webfront_add_self_build_check(SelfBuildRefreshMatchesSources CheckSelfBuildRefresh.cmake SelfRefreshed
             -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project} -DOUTPUT=build-distribution)
         # The Pages site keeps every version and refuses to change a published one.
@@ -296,26 +299,7 @@ if(_browser_tests_available)
         webfront_add_self_build_test(SelfBuildSiteRefusesChange 1 "run|site|build-distribution|build-site" OUTPUT "differs; increment the distribution version"
             REQUIRES SelfTampered)
     endif()
-    # Build the actual browser-generated header only after the setup test has produced it.
-    add_executable(developer_embedded EXCLUDE_FROM_ALL DeveloperEmbeddedTest.cpp)
-    target_link_libraries(developer_embedded PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
-    target_compile_definitions(developer_embedded PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
-        WEBFRONT_PI_ASSETS_HEADER="${CMAKE_CURRENT_BINARY_DIR}/developer-generated/PiUI.hpp")
-    webfront_setup_frontends_for_target(developer_embedded)
-    add_test(NAME DeveloperEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
-        --config $<CONFIG> --target developer_embedded --parallel 2)
-    # A nested build can regenerate CMake or relink shared outputs. Exclude every
-    # running test in this tree, not only the other nested build (Windows locks executables).
-    set_tests_properties(DeveloperEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
-        FIXTURES_SETUP DeveloperEmbedded LABELS "web-integration" TIMEOUT 180
-        RUN_SERIAL TRUE PROCESSORS 2)
-    set(_embedded_command "$<TARGET_FILE:developer_embedded>")
-    if(_developer_xvfb)
-        set(_embedded_command "${_developer_xvfb}" -a ${_embedded_command})
-    endif()
-    add_test(NAME DeveloperEmbeddedIntegration COMMAND ${_embedded_command})
-    webfront_set_browser_test_properties(DeveloperEmbeddedIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 60)
-    set_tests_properties(DeveloperEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED DeveloperEmbedded)
+    # Compile the maintained application's actual browser-generated header, then run it without a project root.
     add_executable(life_embedded EXCLUDE_FROM_ALL LifeEmbeddedTest.cpp)
     target_link_libraries(life_embedded PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
     target_compile_definitions(life_embedded PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
@@ -323,7 +307,7 @@ if(_browser_tests_available)
     webfront_setup_frontends_for_target(life_embedded)
     add_test(NAME LifeEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
         --config $<CONFIG> --target life_embedded --parallel 2)
-    # Keep the same whole-tree exclusion as DeveloperEmbeddedBuild.
+    # The nested build must exclude other tests, especially on Windows where running executables are locked.
     set_tests_properties(LifeEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
         FIXTURES_SETUP LifeEmbedded LABELS "web-integration" TIMEOUT 180
         RUN_SERIAL TRUE PROCESSORS 2)
@@ -336,7 +320,7 @@ if(_browser_tests_available)
     set_tests_properties(LifeEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED LifeEmbedded)
     if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WKWebView")
         get_filename_component(_developer_wk_plist "${PROJECT_SOURCE_DIR}/test/cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
-        foreach(target developer_integration developer_embedded life_embedded)
+        foreach(target developer_integration life_embedded)
             string(REPLACE "_" "-" identifier "${target}")
             set_target_properties(${target} PROPERTIES
                 MACOSX_BUNDLE TRUE

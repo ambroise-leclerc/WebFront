@@ -13,10 +13,21 @@ export GIT_COMMITTER_NAME='Alice Example' GIT_COMMITTER_EMAIL='alice@example.org
 git init -q "$work"
 cd -- "$work"
 
+# These checks inspect Git metadata, not the index/worktree or the porcelain commit command.
+# commit-tree creates the same real commit chain without scanning the index or updating reflogs.
+tree="$(git mktree </dev/null)"
 commit() {
-    git -c core.hooksPath=/dev/null -c commit.gpgSign=false commit -q --allow-empty -m "$1"
-    git rev-parse HEAD
+    local parent='' sha
+    local arguments=(commit-tree "$tree" -m "$1")
+    if [ -f "$work/parent" ]; then
+        read -r parent <"$work/parent"
+        arguments+=(-p "$parent")
+    fi
+    sha="$(git -c commit.gpgSign=false "${arguments[@]}")"
+    printf '%s\n' "$sha" >"$work/parent"
+    printf '%s\n' "$sha"
 }
+
 expect() {
     local expected="$1" label="$2" actual=0
     shift 2
@@ -34,6 +45,43 @@ expect 1 'root included in full history' '' "$clean"
 expect 0 'base excluded from range' "$root" "$clean"
 expect 0 'empty range' "$clean" "$clean"
 expect 1 'invalid revision fails' "$clean" missing-revision
+
+# Signed commits must have exactly the same record framing under user log settings.
+# A fixture verifier exercises Git's signature display without keys or network access.
+signed() {
+    printf 'tree %s\nparent %s\nauthor Alice Example <alice@example.org> 1700000000 +0000\ncommitter Alice Example <alice@example.org> 1700000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n invalid\n -----END PGP SIGNATURE-----\n\n%s\n' "$tree" "$1" "$2" |
+        git hash-object -t commit -w --stdin
+}
+cat >"$work/verify-signature" <<'VERIFY'
+#!/usr/bin/env bash
+: >"${0%/*}/signature-checked"
+cat >/dev/null
+printf 'gpg: Good signature from "Alice Example"\n' >&2
+printf '[GNUPG:] GOODSIG 0123456789ABCDEF Alice Example\n'
+printf '[GNUPG:] VALIDSIG 0123456789ABCDEF0123456789ABCDEF01234567 2023-11-14 1700000000 0 4 0 1 10 00 0123456789ABCDEF0123456789ABCDEF01234567\n'
+VERIFY
+chmod +x "$work/verify-signature"
+git config gpg.program "$work/verify-signature"
+git config log.showSignature true
+git config log.decorate full
+git config log.showNotes true
+git config format.pretty oneline
+signed_clean="$(signed "$clean" 'Ordinary signed change')"
+expect 0 'signed clean commit with user log settings' "$clean" "$signed_clean"
+signed_dirty="$(signed "$signed_clean" 'Generated-by: Codex <codex@openai.com>')"
+expect 1 'signed attribution with user log settings' "$clean" "$signed_dirty"
+# A second signed record verifies that the parser stays aligned across the range.
+signed_after="$(signed "$signed_dirty" 'Another ordinary signed change')"
+expect 1 'signed attribution before a clean commit' "$clean" "$signed_after"
+if [ -e "$work/signature-checked" ]; then
+    echo 'FAIL: user signature display invoked the verifier during metadata parsing'
+    exit 1
+fi
+git config --unset gpg.program
+git config --unset log.showSignature
+git config --unset log.decorate
+git config --unset log.showNotes
+git config --unset format.pretty
 
 for name in 'Claude Martin' 'Jules Dupont' 'Gemini Rossi' 'Vibe Hansen' 'Copilot Smith'; do
     sha="$(GIT_AUTHOR_NAME="$name" GIT_COMMITTER_NAME="$name" commit 'Ordinary change')"
