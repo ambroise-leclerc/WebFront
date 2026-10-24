@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Local CI matrix, step 1 of 3 (#346): `cmake/local-ci/lanes.json` describes the ten lanes of `BuildAndTest.yml` and `MddlogIntegration.yml` (machine, toolchain, CMake, options, targets, CTest labels), `docs/LOCAL_CI.md` documents them and their differences with GitHub, and the offline CTest cases `LocalCiLanesMatchWorkflows` and `LocalCiLanesRejectDrift` fail when the lanes and the workflows diverge. Command options are compared in both directions for each matrix variant; extra matrix axes and exclusions are rejected explicitly. The orchestrator, the Linux containers and the Windows and macOS sessions follow in steps 2 and 3.
+
 - The README animation draws the C++ application inside the image, beside the WebFront window (#359): it is no longer cropped by the table column on narrow screens and in the GitHub app, and weighs 0.4 MB instead of 1.2 MB. The code stays in the README as text, in a collapsed block; `docs/tools/render-life-bootstrap.py` reads it from there.
 
 - The manifest and the lock of the repository move to `js/developer/` (#354): the driver and the CI select them with `--manifest-dir js/developer`, and the closed list of the root loses two entries (9 left).
