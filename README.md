@@ -107,6 +107,7 @@ Then, on macOS, from the repository root, build and start the example on a new p
 ```bash
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-native --target WebFrontLifeDeveloper --parallel 2
+mkdir -p life-project
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 
@@ -138,17 +139,36 @@ const next = await step(cells);
 
 `cells` and `next` are 128-byte `Uint8Array` grids mapped to C++ `std::bitset<1024>`, least-significant bit first in each byte. JavaScript calls always return a Promise: await them or handle rejection. No Life rules run in JavaScript.
 
-### 4. Check types and run the tests
+### 4. Run the tests and check the types
 
-The builds remove TypeScript types without checking them. `wf check` runs the TypeScript compiler that your lock pins, in the browser. `wf test` runs your [Jasmine](https://jasmine.github.io/) specs in the application's window, under the `jasmine-core` your lock pins:
+`wf test` runs your [Jasmine](https://jasmine.github.io/) specs in the application's window, under the `jasmine-core` your lock pins. Install it, create `life-project/tests/life.spec.js` and list it in `webfront.project.json` (`wf init` does not copy the starter's recipe, so the manifest only holds what you add):
+
+```js
+describe('the Life grid', () => {
+    it('packs 32 by 32 cells into 128 bytes, least significant bit first', () => {
+        const cells = new Uint8Array(32 * 32 / 8);
+        for (const i of [330, 331, 332]) cells[i >> 3] |= 1 << (i & 7);
+        expect(cells.length).toBe(128);
+        expect(cells[41]).toBe(0b00011100);
+    });
+});
+```
 
 ```text
-wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0 jasmine-core@7.0.2
-wf check
+wf install jasmine-core@7.0.2
+```
+
+```json
+"test": {"specs": ["tests/life.spec.js"]}
+```
+
+```text
 wf test
 ```
 
-`wf check` reads `tsconfig.json` (a strict one with `"jsx": "react-jsx"` and `"include": ["ui"]` suits the starter) and the `.d.ts` files of the locked packages. `wf test` runs the files listed in `"test": {"specs": ["tests/life.spec.js"]}` in the manifest and ends with a nonzero code when a spec fails. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
+The command ends with a nonzero code when a spec fails.
+
+The builds remove TypeScript types without checking them; `wf check` runs the TypeScript compiler that your lock pins, in the browser. It needs a `tsconfig.json` (for the starter, `"strict": true`, `"jsx": "react-jsx"`, `"moduleResolution": "Bundler"`, `"noEmit": true` and `"include": ["ui"]`) and the type packages of your imports. Installing `@types/react` and `@types/react-dom` needs an environment from the sources (0.6.2, not yet published: the pinned 0.6.1 refuses their archives), which you can [build and pass to the example](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). With it, `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
 
 ### 5. Try the result
 

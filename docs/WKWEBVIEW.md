@@ -9,6 +9,7 @@ To run the Game of Life developer example on the pinned developer environment, f
 cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-wkwebview --target WebFrontLifeDeveloper --parallel 2
+mkdir -p life-project
 ./build-wkwebview/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 

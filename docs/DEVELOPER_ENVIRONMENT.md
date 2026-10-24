@@ -92,6 +92,7 @@ with a plain console application.
 `build-native` with the native frontend option above and start with a fresh project directory:
 
 ```sh
+mkdir -p life-project
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 
@@ -103,13 +104,14 @@ wf create life
 wf init
 wf install react@19.3.1 react-dom@19.3.1
 wf dev ui/main.tsx
-wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0 jasmine-core@7.0.2
-wf check
-wf test
+wf install jasmine-core@7.0.2
+wf test   # after declaring test.specs in the manifest
+wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0   # needs an environment of 0.6.2 or later
+wf check  # needs a tsconfig.json
 wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
-The starter contains editable TSX/CSS and a recipe of exact versions that `wf init` takes into the manifest.
+The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories
 are never replaced. React DOM pulls scheduler transitively and checks its React peer.
 Edit the local files in your normal editor and use `wf dev` for automatic rebuilds, or run `wf preview` again. Ctrl+C interrupts
