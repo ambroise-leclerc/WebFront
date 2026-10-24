@@ -61,7 +61,7 @@ The animation shows the Game of Life example, with terminal output and timing co
 
 ## Game of Life: from console to native application
 
-The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler. Initial CMake configuration, bootstrap and dependency installation require internet access.
+The example starts with a C++ simulation, adds a React interface, then embeds that interface in the executable. You need Git, CMake **3.31+** and a C++23 compiler. The initial CMake configuration, the first bootstrap and the first `wf install` need internet access; afterwards the downloaded environment and packages are cached and can be verified offline.
 
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
@@ -69,8 +69,6 @@ cd WebFront
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 ```
-
-The developer package for this 0.4 development branch is prepared but not yet published. For local review, use [local archive provisioning](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
 ### 1. Start with the C++ simulation
 
@@ -94,7 +92,7 @@ app.bootstrap("developer");
 app.show();
 ```
 
-The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned UI tools, checking their SHA-512 integrity. Downloads are cached. Use `wf` commands there to create, install, preview and embed your interface.
+The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned developer environment, checking its SHA-512 integrity. Downloads are cached, so later launches work offline. The terminal runs `wf` commands; no system shell is exposed and nothing is installed on your machine.
 
 Enable **one** engine for your platform:
 
@@ -104,43 +102,34 @@ Enable **one** engine for your platform:
 | macOS 13.3+ | `-DWEBFRONT_EMBED_WKWEBVIEW=ON` | System Cocoa / WebKit |
 | Linux | `-DWEBFRONT_EMBED_WEBKITGTK=ON` | WebKitGTK 6.0; [installation](docs/WEBKITGTK.md) |
 
-For local review of this unpublished branch, first [build the local archive](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). That preparation is a maintainer task done with `wf` itself. Then, on macOS, from the repository root:
+Then, on macOS, from the repository root, build and start the example on a new project directory:
 
 ```bash
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-native --target WebFrontLifeDeveloper --parallel 2
-mkdir -p life-project/.webfront/developer/preview/provision
-cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
-./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
-  /webfront/developer/preview/provision/environment.tgz "$integrity"
+mkdir -p life-project
+./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 
-Replace the engine option on Linux or Windows. With Visual Studio, add `--config Release` when building. After preparing the local archive, launch from PowerShell with:
+Replace the engine option on Linux or Windows. With Visual Studio, add `--config Release` when building and start it with the project directory, `build-native\examples\Release\WebFrontLifeDeveloper.exe life-project` (after `mkdir life-project`). The example reports startup failures with a nonzero exit status. Two extra arguments, `<environment-url> <sha512-integrity>`, select another environment archive, for instance one [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
-```powershell
-New-Item -ItemType Directory -Force life-project/.webfront/developer/preview/provision | Out-Null
-Copy-Item build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-$integrity = (Get-Content build-developer-environment/provision.json -Raw | ConvertFrom-Json).integrity
-.\build-native\examples\Release\WebFrontLifeDeveloper.exe "$PWD/life-project" `
-  /webfront/developer/preview/provision/environment.tgz "$integrity"
-```
+### 3. Create the project and install its dependencies
 
-The example reports startup failures with a nonzero exit status. Use a fresh project directory for this walkthrough. Once developer distribution 0.4.0 is published, the archive URL and integrity arguments can be omitted to use the pinned defaults.
-
-### 3. Install dependencies in the application's terminal
-
-In the downloaded terminal, run:
+In the application's terminal, run:
 
 ```text
 wf create life
+wf init
 wf install react@19.3.1 react-dom@19.3.1
-wf preview ui/main.tsx
+wf dev ui/main.tsx
 ```
 
-`wf create life` writes the editable [TSX and CSS starter](examples/life/ui), without overwriting an existing project. `wf install` fetches the browser packages and their dependencies, verifies their integrity and records exact versions in `webfront-packages.lock.json`. It does not run the installation scripts of packages. `wf preview` compiles TSX with WebAssembly and opens the interface inside the application.
+- `wf create life` writes the editable [TSX and CSS starter](examples/life/ui) into `ui/`; it never overwrites an existing directory.
+- `wf init` writes `webfront.project.json`, the manifest every other command reads: dependencies, entries, providers, scripts and permissions.
+- `wf install` resolves the packages and their dependencies from the registry, verifies their integrity and records exact versions in `webfront-packages.lock.json`. It does not run the installation scripts of packages. `wf restore` rebuilds the cache from the lock on another machine, and `wf restore --offline` verifies it without any network.
+- `wf dev` compiles the TSX with esbuild-wasm, opens the interface inside the application and rebuilds it whenever you save a source. A build error appears in the terminal and over the preview, which keeps its last good version. Ctrl+C stops it; `wf build` compiles once without opening anything.
 
-Edit `life-project/ui/main.tsx` and `style.css` with your usual editor, then run `wf preview` again. React renders the field and controls; each generation awaits the C++ callback:
+Edit `life-project/ui/main.tsx` and `style.css` with your usual editor. React renders the field and controls; each generation awaits the C++ callback:
 
 ```js
 await webFront.ready;
@@ -150,15 +139,63 @@ const next = await step(cells);
 
 `cells` and `next` are 128-byte `Uint8Array` grids mapped to C++ `std::bitset<1024>`, least-significant bit first in each byte. JavaScript calls always return a Promise: await them or handle rejection. No Life rules run in JavaScript.
 
-### 4. Try the result
+### 4. Run the tests and check the types
+
+`wf test` runs your [Jasmine](https://jasmine.github.io/) specs in the application's window, under the `jasmine-core` your lock pins. Install it, create `life-project/tests/life.spec.js` and list it in `webfront.project.json` (`wf init` does not copy the starter's recipe, so the manifest only holds what you add):
+
+```js
+describe('the Life grid', () => {
+    it('packs 32 by 32 cells into 128 bytes, least significant bit first', () => {
+        const cells = new Uint8Array(32 * 32 / 8);
+        for (const i of [330, 331, 332]) cells[i >> 3] |= 1 << (i & 7);
+        expect(cells.length).toBe(128);
+        expect(cells[41]).toBe(0b00011100);
+    });
+});
+```
+
+```text
+wf install jasmine-core@7.0.2
+```
+
+```json
+"test": {"specs": ["tests/life.spec.js"]}
+```
+
+```text
+wf test
+```
+
+The command ends with a nonzero code when a spec fails.
+
+The builds remove TypeScript types without checking them; `wf check` runs the TypeScript compiler that your lock pins, in the browser. It needs a `tsconfig.json` and the type packages of your imports. A complete one for the starter, the same as the journey tests use, is:
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true
+  },
+  "include": ["ui"]
+}
+```
+
+The type packages come next: installing `@types/react` and `@types/react-dom` needs an environment from the sources (0.6.2, not yet published: the pinned 0.6.1 refuses their archives), which you can [build and pass to the example](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). With it, `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
+
+### 5. Try the result
 
 ![Game of Life running in a native window](docs/images/life-preview.jpg)
 
 Play or pause, advance one generation, paint cells, switch patterns, change speed or select a plan view. Generation and population counters reflect the C++ simulation. Only one generation request is outstanding at a time; failures stop playback and appear in the interface.
 
-### 5. Embed the interface for distribution
+### 6. Embed the interface for distribution
 
-In the application's terminal:
+Declare the entry and the provider in `webfront.project.json` (`"entries": {"main": "ui/main.tsx"}` and `"providers": {"LifeUI": {"entry": "main", "output": "generated/LifeUI.hpp"}}`), or pass them explicitly. In the application's terminal:
 
 ```text
 wf embed ui/main.tsx --output generated/LifeUI.hpp
@@ -220,7 +257,7 @@ CI runs one combined C++ / native-browser job per desktop platform on each code 
 - WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there; avoid blocking it. Native windows must be created and shown on the main thread. Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
 - JavaScript calls to C++ always return Promises. C++ `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns `std::future<R>`. Missing functions, exceptions, malformed replies and disconnects fail the typed call.
 - The binary bridge supports scalars, strings, tuples, numeric typed arrays and packed bitsets. Arbitrary objects do not cross it. Strings have a 16-bit encoded length limit.
-- Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority. Package installation scripts, native add-ons and the APIs of server-side JavaScript runtimes are unsupported. Previews transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
+- Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority, and script permissions frame only the `context` API: neither is a sandbox. Only packages that run in a browser are supported; installation scripts and native add-ons are not executed. Builds transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - Packaging, accessibility and native-engine deployment still need application-specific work. General DOM abstractions remain future work. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
 [Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [UI components](docs/UI_COMPONENTS.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)

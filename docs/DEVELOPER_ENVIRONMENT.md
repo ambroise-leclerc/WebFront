@@ -1,21 +1,39 @@
 # Browser-powered development
 
-The developer environment downloads its terminal, npm resolver and WebAssembly compiler at
-runtime. The application's C++ executable initially contains the bridge and a small bootstrap;
-it does not embed React, Babel, xterm or esbuild. No separate JavaScript runtime is **required on the
-application developer's machine**. A C++ compiler, CMake and the selected native webview remain
-necessary. TypeScript/JSX is transformed in the browser without type checking; `wf check` type-checks the project
-with the TypeScript compiler it locks.
+# The WebFront developer environment
 
-This is an experimental, explicit development facility. The downloaded environment runs with
-the application's bridge authority and may read/write the selected project. It exposes no shell.
-Do not ship developer mode as the distribution configuration.
+The developer environment is the tooling of WebFront: a terminal, a package installer, a TypeScript/TSX compiler, a type
+checker, a test runner and an asset generator, all running in the browser of your application. The C++ executable holds the
+bridge and a small bootstrap loader; at the first launch the loader downloads the environment, verifies its SHA-512 and
+caches it, so later launches work offline. Nothing else has to be installed: a C++ compiler, CMake and the selected native
+webview are enough.
 
-The 0.4 presentation update prepares developer distribution **0.4.0** with the revised Life text.
-It is not published as part of the repository cleanup. Before releasing this branch, publish the
-prepared archives using [the package release procedure](../js/developer/tools/PUBLISHING.md).
-For local review, provision the generated archive as described below and pass its URL/integrity
-to `WebFrontLifeDeveloper`. Existing published versions remain unchanged.
+A project is a directory with a manifest, `webfront.project.json`, and a lock, `webfront-packages.lock.json`. The `wf`
+commands of the terminal operate on it:
+
+| Command | Purpose |
+| --- | --- |
+| `wf init`, `wf create <starter>` | write the manifest; copy the Life starter into a new directory |
+| `wf install`, `wf restore` | resolve, download and lock packages; rebuild or verify the cache from the lock |
+| `wf dev`, `wf build`, `wf preview` | rebuild and reload the preview on every change; build once; preview once |
+| `wf check` | type-check with the locked TypeScript compiler |
+| `wf test` | run Jasmine specs in the application's window |
+| `wf run`, `wf exec` | run a manifest script or a package's executable entry |
+| `wf embed` | generate the C++ provider of the application's resources |
+
+**Limits, stated directly.** The downloaded environment and the scripts you authorize run with the application's bridge
+authority and may read and write the selected project: there is **no sandbox**, and the manifest's permissions frame only the
+`context` API given to scripts. Only packages that run in a browser are installed; their installation scripts and native
+add-ons are not executed, and the APIs of server-side JavaScript runtimes are not available. No shell is exposed. Do not
+ship developer mode as the distribution configuration: `wf embed` produces the application that you distribute.
+
+**TypeScript** is supported throughout. TS and TSX are compiled by esbuild-wasm in the browser, which removes the types;
+`wf check` verifies them with the TypeScript 5.x or 6.x compiler that your lock pins, using your `tsconfig.json`, the
+`.d.ts` files and the type packages (`@types/*`, `types` and `typings` fields) of the locked graph. No external compiler is
+installed or required (see [Type checking](#type-checking-wf-check)).
+
+The current environment is **0.6.1**, published as `developer-v0.6.1` and pinned by the release data. Earlier published
+versions stay immutable; the sources advance to 0.6.2, which is not published yet.
 
 ## Minimal C++ application
 
@@ -38,17 +56,12 @@ int main() {
 ```
 
 The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
-Version 0.3.0 provides the packed-bitset Life starter and requires the bridge support from #289.
-Version 0.3.1 makes `wf install` keep the versions of the installed lock and reject an archive whose integrity differs from it.
-Published versions 0.1.0 to 0.3.0 remain immutable; 0.2.0 used string-based Life grids.
-On 2026-10-20, the 0.3.0 public download/WASM/React/PI/Life path passed in WKWebView, including
-128-byte grid exchange, painting cells across an octet boundary, playback/reset and deterministic
-header generation. Both resulting headers were compiled and the applications passed offline
-native tests from empty working directories, with developer callbacks absent. Pages returned
-HTTP 200, CORS `*` and the pinned archive bytes. These checks supplement offline CTest fixtures.
+Each published version is immutable: 0.3.0 introduced the packed-bitset Life starter (bridge support from #289), 0.3.1 made
+`wf install` keep the versions of the installed lock, 0.4.1 changed the include of the generated provider, 0.5.0 added the
+manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.6.1/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.1`. Published 0.6.0, 0.5.0, 0.4.1 and 0.4.0 stay immutable; 0.4.0 targets the former include layout. The configuration pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.6.1/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.1`. Published 0.6.0, 0.5.0 and 0.4.1 stay immutable; 0.4.0 and earlier target the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install no JavaScript tooling.
@@ -76,27 +89,29 @@ with cell `i` in bit `i % 8` of byte `i / 8`. The bridge validates the exact uns
 with a plain console application.
 
 `examples/life/LifeDeveloper.cpp` adds the native window and downloaded developer bootstrap. Configure
-`build-native` with the native frontend option above, then [prepare the local archive](#environment-distribution-and-offline-tests-maintainers) and start with a fresh project directory:
+`build-native` with the native frontend option above and start with a fresh project directory:
 
 ```sh
-mkdir -p life-project/.webfront/developer/preview/provision
-cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
-./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project" \
-  /webfront/developer/preview/provision/environment.tgz "$integrity"
+mkdir -p life-project
+./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 
-Optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default.
-In the downloaded terminal:
+Optional extra arguments `<environment-url> <sha512-integrity>` override the pinned default (for instance with the local
+archive of [the maintainers' section](#environment-distribution-and-offline-tests-maintainers)). In the downloaded terminal:
 
 ```text
 wf create life
+wf init
 wf install react@19.3.1 react-dom@19.3.1
-wf preview ui/main.tsx
+wf dev ui/main.tsx
+wf install jasmine-core@7.0.2
+wf test
 wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
-The starter contains editable TSX/CSS and an exact-version `webfront.project.json` recipe.
+`wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; type checking is a separate step that the pinned 0.6.1 cannot complete: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` need an environment of 0.6.2 or later (start the example with a [local archive](#environment-distribution-and-offline-tests-maintainers)) and a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
+
+The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories
 are never replaced. React DOM pulls scheduler transitively and checks its React peer.
 Edit the local files in your normal editor and use `wf dev` for automatic rebuilds, or run `wf preview` again. Ctrl+C interrupts
@@ -141,8 +156,8 @@ The former embedded React/Babel providers have been removed; use the generated a
 
 ## Project manifest (`webfront.project.json`)
 
-Available from developer distribution 0.5.0, which the default configuration pins; the 0.4.1 environment predates the manifest.
-A project has one manifest, the equivalent of `package.json`, which every `wf` command reads:
+Available from developer distribution 0.5.0.
+A project has one manifest, which every `wf` command reads:
 
 ```json
 {
@@ -540,9 +555,9 @@ blocks the public network after the configure step.
 - `wf install` accepts exact versions, registry tags and semver ranges, resolves ordinary
   transitive dependencies, and retains separate nodes for different versions. Required peers must
   be satisfied by compatible explicitly installed roots or direct dependencies; conflicts fail.
-- Package installation scripts, native add-ons and Node.js APIs are unsupported. Packages must be
-  usable in a browser. Optional dependencies are not installed in this first version; imports of
-  missing dependencies fail during the build. This is not a replacement for the complete npm CLI.
+- Package installation scripts and native add-ons are not executed, and the APIs of server-side JavaScript runtimes are
+  not available. Packages must run in a browser. Optional dependencies are not installed; imports of missing
+  dependencies fail during the build. `wf` installs from npm registries and mirrors; it is not the complete npm client.
 - Browser/production exports, ESM, CommonJS, TS/TSX, JSX, CSS and imported resource files are supported.
   Private package exports, network imports and unavailable Node built-ins fail. Package-specific
   build pipelines and automatic polyfills are not supplied.

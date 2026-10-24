@@ -8,6 +8,8 @@ WebFront is a C++23 header-only library for serving a browser UI from a C++ appl
 - C++ calls browser functions with `ui.jsFunction(name)(arguments...)`, which is fire-and-forget and ignores the result, or with `ui.jsFunction<R>(name)(arguments...)`, which returns a `std::future<R>`. Only the untyped C++ form is fire-and-forget.
 - `webFront.ready` resolves after the WebSocket handshake acknowledgement and rejects if the initial connection fails or closes.
 
+WebFront also ships a standalone developer environment (`NativeApp::bootstrap("developer")`): a terminal whose `wf` commands (`init`, `install`, `restore`, `dev`, `build`, `check`, `test`, `run`, `exec`, `embed`) manage a project manifest and lock, compile TS/TSX, type-check, run Jasmine specs and generate the application's embedded provider, with no JavaScript runtime or package manager on the developer's machine. It is not a sandbox. See `docs/DEVELOPER_ENVIRONMENT.md`.
+
 The README introduces WebFront through the Game of Life walkthrough, demonstrating the developer bootstrap, reactive TypeScript UI and embedded distribution. The minimal `HelloWorld` example remains available under `examples/hello-world/`. Native modules and the bridge are covered by the Jasmine browser integration test. General DOM abstractions remain future work. Application coroutines use `webfront::Task` and `app.spawn(task)`/`ui.spawn(task)`; retain a `TaskHandle` to request individual cancellation. WebFront owns and drains these tasks. Spawn is callable from any thread while the application lives; a call rejected during shutdown returns a stopped handle. Destructors wait for outstanding operations; explicit shutdown reports a stalled join. Typed C++ sender calls support local cancellation; futures and JavaScript Promises do not expose cancellation.
 
 ## Repository map
@@ -25,8 +27,9 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
+- `docs/DEVELOPER_ENVIRONMENT.md`: the reference of the developer environment (`wf` commands, manifest and lock, TypeScript and `wf check`, tests, limits, distribution); `docs/EMBEDDED_ASSETS.md`: the core's embedded resources and their regeneration; `docs/NODE_TOOLS_MIGRATION.md`: where each former Node.js tool went (historical record).
 - `docs/UI_COMPONENTS.md`: what replaced the removed terminal component and `wf` tool manager, with the migration to `webfront::Commands`.
-- `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
+- `docs/ISSUE_AUDIT.md`: recommendations for the GitHub backlog (dated audit; the epic #303 reshaped the scope afterwards).
 
 The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
 
