@@ -180,9 +180,16 @@ unknown permission are errors printed in the terminal, never silently ignored. `
 used by `wf run` and `wf exec` (below); `test.specs` lists the spec files of `wf test`. Permissions only frame
 the operations of the `context` API of scripts; they are not a sandbox.
 
-- `wf init [name]` writes `webfront.project.json` at the project root, the manifest every `wf` command
-  reads; it never replaces an existing one. When a lock already exists (a project installed before
+- `wf init [name]` writes `webfront.project.json` at the project root (or in the application's manifest directory, below),
+  the manifest every `wf` command reads; it never replaces an existing one. When a lock already exists (a project installed before
   0.5.0), the manifest takes its roots as dependencies (`^version`, or the range they were installed with).
+- The application may keep the manifest and its lock in a directory of the project instead of its root, from environment
+  0.6.2: `DeveloperBootstrapOptions::manifestDirectory = "js/developer"` (or `--manifest-dir js/developer` for the test driver).
+  The directory is relative to the project, `/`-separated, without `..`; a refused value stops the bootstrap. The choice is the
+  application's, never the manifest's, so that a manifest cannot widen the project. Only the two files move: every path
+  inside the manifest (entries, scripts, specs, permissions) and the cache `.webfront/` stay relative to the project root,
+  and the manifest and the lock remain files that scripts never write. An earlier environment ignores the option and looks
+  in the project root.
 - `wf install <package>[@range]` resolves, downloads and verifies into the cache, then publishes the
   manifest (the requested range, or `^version` when none was given) and the lock in a single transaction.
 - `wf install` without argument installs exactly the locked graph when the lock agrees
@@ -516,7 +523,7 @@ one `wf` command through `runNonInteractive`, prints its output and exits with i
 
 ```sh
 webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512-...>] [--registry-dir <dir>] \
-            [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]
+            [--manifest-dir <dir>] [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]
 ```
 
 - Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
@@ -525,7 +532,8 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
   digest; a wrong digest or an unreachable URL stops the configure. On a machine without network access, pass
   `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the same way.
 - `--environment` and `--integrity` run an archive built elsewhere, such as the one built from the current sources (the
-  environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it.
+  environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it. `--manifest-dir` keeps the manifest and
+  the lock in that directory of the project (usage error 64 when it is absolute, has an empty or dot component or leaves the project).
   The project is the directory `wf` reads and writes; run `wf install` once, then the other commands, on the same project.
 - Exit status: the command's own (`wf test`: 0, 1, 124, 130); **64** usage; **70** bootstrap failure (archive absent, wrong
   integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's `--timeout` (default 600 s) elapsed,

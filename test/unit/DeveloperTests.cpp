@@ -342,6 +342,35 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
                 REQUIRE_THROWS_AS(app.bootstrap("developer", options), std::invalid_argument);
             }
         }
+        THEN("a manifest directory that is absolute, has an empty or dot component, or leaves the project is refused") {
+            for (const auto* directory : {"/etc", "a//b", "a/", "../outside", "a/../b", "a\\b", "C:/wf", "./wf"}) {
+                auto options              = trusted;
+                options.manifestDirectory = directory;
+                REQUIRE_THROWS_AS(app.bootstrap("developer", options), std::invalid_argument);
+            }
+        }
+        THEN("a relative manifest directory is accepted") {
+            auto options              = trusted;
+            options.manifestDirectory = "js/developer";
+            REQUIRE_NOTHROW(app.bootstrap("developer", options));
+        }
+    }
+}
+
+SCENARIO("The environment learns where the application keeps the manifest") {
+    const DeveloperBootstrapOptions trusted{.environment = "https://example.test/env.tgz", .integrity = "sha512-abc"};
+    GIVEN("no manifest directory") {
+        THEN("the configuration does not mention it, so the manifest is in the project directory") {
+            REQUIRE_THAT(developer::bootstrapConfig(trusted), !Catch::Matchers::ContainsSubstring("manifestDirectory"));
+        }
+    }
+    GIVEN("a manifest directory chosen by the application") {
+        auto options              = trusted;
+        options.manifestDirectory = "js/developer";
+        THEN("it is passed, before the supported versions") {
+            REQUIRE_THAT(developer::bootstrapConfig(options),
+                         Catch::Matchers::EndsWith(R"("registryExplicit":false,"manifestDirectory":"js/developer","supported":{"protocol":[1],"api":[1]}})"));
+        }
     }
 }
 

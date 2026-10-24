@@ -2,6 +2,8 @@
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
 #   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
 #   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
+# MANIFEST_DIR is passed as --manifest-dir; EXPECT_PRESENT and EXPECT_ABSENT are project paths (separated by |) that must
+# exist, or not, once the command ended.
 # SLEEP_ENVIRONMENT uses a tiny compatible archive whose command records its start before sleeping; EXPECT_FILE
 # requires that record after the watchdog exits. Real packaged-script execution is covered by the other driver cases.
 # PROVISION is the provision.json of ENVIRONMENT, from which an INTEGRITY left empty is read when the test runs.
@@ -87,6 +89,9 @@ endif()
 if(REGISTRY)
     list(APPEND arguments --registry-dir "${REGISTRY}")
 endif()
+if(MANIFEST_DIR)
+    list(APPEND arguments --manifest-dir "${MANIFEST_DIR}")
+endif()
 if(TIMEOUT)
     list(APPEND arguments --timeout "${TIMEOUT}")
 endif()
@@ -128,3 +133,16 @@ if(EXPECT_FILE)
         message(FATAL_ERROR "The command did not record its running state")
     endif()
 endif()
+
+string(REPLACE "|" ";" present "${EXPECT_PRESENT}")
+foreach(path IN LISTS present)
+    if(NOT EXISTS "${PROJECT}/${path}")
+        message(FATAL_ERROR "The command did not write ${path}")
+    endif()
+endforeach()
+string(REPLACE "|" ";" absent "${EXPECT_ABSENT}")
+foreach(path IN LISTS absent)
+    if(EXISTS "${PROJECT}/${path}")
+        message(FATAL_ERROR "The command wrote ${path}, which belongs elsewhere")
+    endif()
+endforeach()

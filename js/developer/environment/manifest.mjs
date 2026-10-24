@@ -1,10 +1,29 @@
 // webfront.project.json, the project manifest every wf command reads: intent (roots and ranges), entries,
 // providers and permissions. The lock records the exact resolution.
-import {safePackagePath} from './paths.mjs';
+import {isUnsafe, safePackagePath} from './paths.mjs';
 import {isPlainObject} from './entry.mjs';
 
-export const manifestPath = 'webfront.project.json';
-export const lockPath = 'webfront-packages.lock.json';
+export const manifestFileName = 'webfront.project.json';
+export const lockFileName = 'webfront-packages.lock.json';
+// Project paths of the manifest and of the lock. The application chooses the directory that holds them (the project
+// root unless it says otherwise); the paths inside the manifest stay relative to the project root.
+export let manifestPath = manifestFileName;
+export let lockPath = lockFileName;
+
+/** The directory of the manifest and the lock, relative to the project root: "" (the root) or a safe relative path. */
+export function checkManifestDirectory(directory) {
+    if (directory === undefined || directory === '') return '';
+    if (typeof directory !== 'string' || directory.endsWith('/') || isUnsafe(directory))
+        throw new Error(`Unsafe manifest directory: ${directory}`);
+    return directory;
+}
+
+/** Applies the application's choice of directory; wf commands then read and write the manifest and the lock there. */
+export function setManifestDirectory(directory) {
+    const checked = checkManifestDirectory(directory);
+    manifestPath = checked ? `${checked}/${manifestFileName}` : manifestFileName;
+    lockPath = checked ? `${checked}/${lockFileName}` : lockFileName;
+}
 export const manifestFormat = 1;
 
 const npmName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
