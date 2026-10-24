@@ -7,7 +7,7 @@ if(NOT ROOT OR NOT GIT_EXECUTABLE OR NOT WORK_DIR)
 endif()
 file(REMOVE_RECURSE "${WORK_DIR}")
 file(MAKE_DIRECTORY "${WORK_DIR}/include/webfront")
-foreach(entry .clang-format .clang-tidy .devcontainer .gitattributes .github .gitignore AGENTS.md CMakeLists.txt README.md
+foreach(entry .clang-format .clang-tidy .gitattributes .github .gitignore AGENTS.md CMakeLists.txt README.md
         webfront-packages.lock.json webfront.project.json cmake docs examples js test)
     file(WRITE "${WORK_DIR}/${entry}/placeholder" "")
 endforeach()

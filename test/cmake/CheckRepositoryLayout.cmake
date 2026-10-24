@@ -1,6 +1,9 @@
 # The tracked root of the repository is a closed list, so that the README stays visible on the
 # GitHub page, and no third-party source is vendored: libraries are locked npm packages (#319). webfront.project.json and
 # its lock make the repository a wf project: the environment builds itself with wf run (#315).
+# Each entry has to stay at the root (#352): .clang-format and .clang-tidy are found from the parents of a file and the C++ is
+# in include/, test/ and examples/; wf only grants files under the project root, which must contain js/, test/, examples/ and
+# include/; Git, GitHub, CMake and the agents require the others. There is no .devcontainer: the CI is the toolchain reference.
 #   cmake -DROOT=<checkout> [-DGIT_EXECUTABLE=<git>] -P test/cmake/CheckRepositoryLayout.cmake
 cmake_minimum_required(VERSION 3.31)
 
@@ -9,7 +12,7 @@ if(NOT ROOT)
 endif()
 
 set(expected
-    .clang-format .clang-tidy .devcontainer .gitattributes .github .gitignore
+    .clang-format .clang-tidy .gitattributes .github .gitignore
     AGENTS.md CMakeLists.txt README.md webfront-packages.lock.json webfront.project.json
     cmake docs examples include js test)
 
