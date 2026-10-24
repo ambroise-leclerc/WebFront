@@ -9,6 +9,7 @@
 | 1.2 | 2026-10-23 | Acceptée | Ambroise Leclerc | Auto-hébergement (#315) : le dépôt est un projet `wf` dont les scripts construisent l'environnement, le site et la vérification du pin avec l'environnement d'amorçage épinglé ; octets identiques à la construction de l'époque, preuve de reconstruction du bundle bootstrap. | — |
 | 1.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | Tests, régénération et CI sans Node.js ni npm (#318) : les en-têtes du cœur sont produits et vérifiés par un générateur CMake pur (`js/core/EmbedAsset.cmake`), qui remplace `wf run embed-core` et le générateur Node.js ; les paquets du registre de test sont téléchargés et vérifiés au configure ; les tests JavaScript deviennent des specs Jasmine exécutées par `wf test` ; garde-fou global `NoNodeDependency`. | — |
 | 1.4 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification du parcours (#316) : ADR-013, ADR-014 et ADR-015 passent à « Acceptée ». | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
+| 1.5 | 2026-10-24 | Acceptée | Ambroise Leclerc | Documentation consolidée (#317) : la formulation courante décrit directement l'environnement et ses commandes (`wf init`, `install`, `dev`, `check`, `test`, `embed`), sans comparaison avec d'autres outils ; les versions et décisions antérieures de ce tableau et de l'historique Git restent l'historique de la décision. | [#317](https://github.com/ambroise-leclerc/WebFront/issues/317) |
 
 ## Statut et date
 
@@ -22,8 +23,8 @@ cette décision ; les retraits qu'elle annonce sont réalisés par #311 à #319.
 
 L'étape développeur du jeu de la vie (`examples/life/LifeDeveloper.cpp`) montre le modèle visé :
 `NativeApp::bootstrap("developer")` sert une petite page embarquée, télécharge une archive
-d'environnement vérifiée SHA-512, monte un terminal dans le navigateur, installe des paquets npm
-sans Node (`wf install`), compile TS/TSX dans un Worker (`wf preview`) et génère un provider
+d'environnement vérifiée SHA-512, monte un terminal dans le navigateur, installe des paquets du registre npm
+(`wf install`), compile TS/TSX dans un Worker (`wf dev`, `wf build`), vérifie les types (`wf check`), exécute les specs (`wf test`) et génère un provider
 propre à l'application (`wf embed`), compilé ensuite dans un exécutable de distribution.
 
 Le dépôt livre encore en parallèle environ 2,5 Mo d'en-têtes pré-générés sous

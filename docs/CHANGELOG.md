@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Documentation of the standalone developer environment (#317, epic #303): the README walkthrough uses `wf create`, `init`, `install`, `dev`, `check`, `test` and `embed` on the pinned environment; `DEVELOPER_ENVIRONMENT.md` opens with the commands, the direct statement of its limits (no sandbox, browser packages only, installation scripts not run) and the maintenance of TypeScript through `wf check`; the 0.4.0 "prepared, not published" text is removed; PROJECT_STATUS starts with the current state; ADR-016 is 1.5.
+
 - Remove the retired PI starter from source distributions and `wf create`; Life remains the maintained React/C++ starter.
   Preserve real-time fallbacks in scoped test clocks, release preparation cancellation before the test frame runs,
   and retain independent reproducibility, bootstrap-refresh and packaged permission checks. The attribution audit

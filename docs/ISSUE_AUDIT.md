@@ -1,5 +1,7 @@
 # GitHub issue and branch audit
 
+Scope note (#317, 2026-10-24): after epic #303 the core is minimal and the tooling is the standalone developer environment ([project status](PROJECT_STATUS.md), [environment reference](DEVELOPER_ENVIRONMENT.md)). Issues about the removed embedded providers, terminal or tool manager are superseded by it. The dated audit below is kept as a record.
+
 Audit applied: 2026-07-19. The backlog was reduced to work that has concrete interfaces, acceptance criteria, and a place in the current WebFront roadmap.
 
 ## Active issues

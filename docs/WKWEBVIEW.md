@@ -3,12 +3,18 @@
 `WKWebViewFrontend` opens a native AppKit window with the WebKit engine supplied by macOS.
 It is optional and never changes `webfront::WebFront`'s system-browser default.
 
-For this unpublished 0.4 branch, first [build the local developer archive](DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers), then run from the repository root:
+To run the Game of Life developer example on the pinned developer environment, from the repository root:
 
 ```bash
 cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON
 cmake --build build-wkwebview --target WebFrontLifeDeveloper --parallel 2
+./build-wkwebview/examples/WebFrontLifeDeveloper "$PWD/life-project"
+```
+
+To run an environment built from the sources instead, [build the local archive](DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers) and pass it:
+
+```bash
 mkdir -p life-project/.webfront/developer/preview/provision
 cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
 integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
