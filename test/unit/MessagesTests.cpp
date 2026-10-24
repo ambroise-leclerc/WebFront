@@ -6,6 +6,7 @@
 #include <webfront/weblink/Messages.hpp>
 
 #include <limits>
+#include <memory>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -647,21 +648,23 @@ SCENARIO("Encoding bridge messages writes nothing to the standard output") {
         ostringstream captured;
         auto*         previous = cout.rdbuf(captured.rdbuf());
         try {
-            // The frame refers to the encoded strings, which therefore outlive it.
-            const string                                 name("echo"), small(16, 'x'), large(1024, 'x');
-            msg::FunctionCall<>                          call;
-            websocket::Frame<networking::NetworkingMock> callFrame{span(reinterpret_cast<const byte*>(call.header().data()), call.header().size())};
-            call.encodeParameter(name, callFrame);
-            call.encodeParameter(small, callFrame);
-            call.encodeParameter(large, callFrame);
-            call.encodeParameter(true, callFrame);
-            call.encodeParameter(42.5, callFrame);
-            const runtime_error                          failure("failure");
-            const tuple<int, string>                     pair{1, "tuple"};
-            msg::FunctionReturn<>                        result;
-            websocket::Frame<networking::NetworkingMock> resultFrame{span(reinterpret_cast<const byte*>(result.header().data()), result.header().size())};
-            result.encodeParameter(failure, resultFrame);
-            result.encodeParameter(pair, resultFrame);
+            // The frame refers to the encoded strings, which therefore outlive it. Messages and frames own their buffers
+            // inline: on the heap, since MSVC rejects a test function of 66 KB of stack (C6262).
+            using Frame = websocket::Frame<networking::NetworkingMock>;
+            const string             name("echo"), small(16, 'x'), large(1024, 'x');
+            const runtime_error      failure("failure");
+            const tuple<int, string> pair{1, "tuple"};
+            const auto               call      = make_unique<msg::FunctionCall<>>();
+            const auto               callFrame = make_unique<Frame>(span(reinterpret_cast<const byte*>(call->header().data()), call->header().size()));
+            call->encodeParameter(name, *callFrame);
+            call->encodeParameter(small, *callFrame);
+            call->encodeParameter(large, *callFrame);
+            call->encodeParameter(true, *callFrame);
+            call->encodeParameter(42.5, *callFrame);
+            const auto result      = make_unique<msg::FunctionReturn<>>();
+            const auto resultFrame = make_unique<Frame>(span(reinterpret_cast<const byte*>(result->header().data()), result->header().size()));
+            result->encodeParameter(failure, *resultFrame);
+            result->encodeParameter(pair, *resultFrame);
         } catch (...) {
             cout.rdbuf(previous);
             throw;

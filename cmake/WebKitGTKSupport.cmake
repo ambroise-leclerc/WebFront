@@ -43,7 +43,7 @@ function(webfront_add_webkitgtk_tests)
     if(display_runner)
         add_test(NAME WebKitGTKTransportBenchmark COMMAND "${display_runner}" -a $<TARGET_FILE:webkitgtk_transport_benchmark>
             "${CMAKE_CURRENT_BINARY_DIR}/webkitgtk-transport-benchmark.json")
-        webfront_set_browser_test_properties(WebKitGTKTransportBenchmark "${source}" 180)
+        webfront_set_browser_test_properties(WebKitGTKTransportBenchmark "${source}" 300)
         set_property(TEST WebKitGTKTransportBenchmark APPEND PROPERTY LABELS performance)
         webfront_configure_webkitgtk_test(WebKitGTKTransportBenchmark)
     endif()

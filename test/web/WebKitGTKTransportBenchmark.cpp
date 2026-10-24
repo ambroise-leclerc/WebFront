@@ -1,19 +1,12 @@
 // ADR-017 (#363): measures the HTML bridge (WebSocket to the embedded server) against WebKitGTK's own message channel,
-// in the same window and with the same echo calls (transport-benchmark.html). The direct channel is registered here,
-// through the C ABI the adapter already loaded: script message handlers with a reply for JS to C++, and
+// in the same window and with the same echo calls (transport-benchmark.html, TransportBenchmark.hpp). The direct channel is
+// registered here, through the C ABI the adapter already loaded: script message handlers with a reply for JS to C++, and
 // webkit_web_view_evaluate_javascript for C++ to JS. It fails on a wrong echo, never on a timing.
 //   webkitgtk_transport_benchmark [<report.json>]    (working directory: test/web, needs a display)
-#include <webfront/system/NativeFS.hpp>
-#include <webfront/WebFront.hpp>
+#include "TransportBenchmark.hpp"
 
-#include <chrono>
 #include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <stdexcept>
-#include <string>
+#include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -23,7 +16,7 @@
 namespace {
 namespace gtk = webfront::frontend::detail::webkitgtk;
 using Object  = gtk::Api::Object;
-using Clock   = std::chrono::steady_clock;
+using transport_benchmark::Clock;
 
 // The entry points of the direct channel, resolved from the WebKitGTK module the adapter keeps loaded (WebKitGTK 2.40+).
 class DirectApi {
@@ -55,12 +48,20 @@ public:
     Object (*ref)(Object)                                       = symbol<decltype(ref)>("g_object_ref");
     void (*free)(void*)                                         = symbol<decltype(free)>("g_free");
     void (*errorFree)(gtk::Api::Error*)                         = symbol<decltype(errorFree)>("g_error_free");
+    void (*unref)(Object)                                       = symbol<decltype(unref)>("g_object_unref");
+
+    // One table for the process: an evaluation that completes after its channel needs it to release its result.
+    static const DirectApi& shared() {
+        static const DirectApi table;
+        return table;
+    }
 };
 
-// Lives inside the session's scope and disconnects its handlers before the view goes away.
-class DirectChannel {
+// Lives inside the session's scope and disconnects its handlers before the view goes away. An evaluation still pending
+// when the window closes completes later, after the channel: it holds a weak reference and does nothing then.
+class DirectChannel : public std::enable_shared_from_this<DirectChannel> {
     gtk::Session&              session;
-    DirectApi                  api;
+    const DirectApi&           api     = DirectApi::shared();
     Object                     manager = api.contentManager(session.view);
     std::vector<unsigned long> handlers;
 
@@ -85,28 +86,39 @@ class DirectChannel {
         handlers.push_back(session.a.connect(manager, signal.c_str(), reinterpret_cast<gtk::Api::Callback>(callback), this, nullptr, 0));
     }
 
+    // Handlers run in the main loop and must not throw: an allocation failure leaves the message unhandled, and the page's
+    // call rejects.
     static int onEcho(Object, Object value, Object message, DirectChannel* self) noexcept {
-        auto& api    = self->api;
-        auto  answer = api.newString(api.valueContext(value), self->text(value).c_str());
-        api.replyValue(message, answer);
-        self->session.a.unref(answer);
-        return 1;
+        try {
+            auto& api    = self->api;
+            auto  answer = api.newString(api.valueContext(value), self->text(value).c_str());
+            api.replyValue(message, answer);
+            self->session.a.unref(answer);
+            return 1;
+        } catch (...) {
+            return 0;
+        }
     }
     static int onRun(Object, Object value, Object message, DirectChannel* self) noexcept {
-        auto& api  = self->api;
-        int   size = 0, count = 0;
-        if (std::sscanf(self->text(value).c_str(), "%d %d", &size, &count) != 2 || size < 0 || count <= 0 || self->reply)
-            return 0;  // Unhandled: the page receives no duration and its run fails.
-        self->reply     = api.replyRef(message);
-        self->context   = api.ref(api.valueContext(value));
-        self->payload   = std::string(static_cast<std::size_t>(size), 'x');
-        self->script    = "benchmark.echo(\"" + self->payload + "\")";
-        self->remaining = count;
-        self->start     = Clock::now();
-        self->evaluateNext();
-        return 1;
+        try {
+            auto& api  = self->api;
+            int   size = 0, count = 0;
+            if (std::sscanf(self->text(value).c_str(), "%d %d", &size, &count) != 2 || size < 0 || count <= 0 || self->reply)
+                return 0;  // Unhandled: the page receives no duration and its run fails.
+            self->payload   = std::string(static_cast<std::size_t>(size), 'x');
+            self->script    = "benchmark.echo(\"" + self->payload + "\")";
+            self->reply     = api.replyRef(message);
+            self->context   = api.ref(api.valueContext(value));
+            self->remaining = count;
+            self->start     = Clock::now();
+            self->evaluateNext();
+            return 1;
+        } catch (...) {
+            return 0;
+        }
     }
     void evaluateNext() {
+        auto* pending = new std::weak_ptr<DirectChannel>(weak_from_this());
         session.a.evaluate(session.view,
                            script.c_str(),
                            static_cast<long>(script.size()),
@@ -114,22 +126,38 @@ class DirectChannel {
                            nullptr,
                            nullptr,
                            reinterpret_cast<gtk::Api::Callback>(onEvaluated),
-                           this);
+                           pending);
     }
-    static void onEvaluated(Object view, Object result, DirectChannel* self) noexcept {
-        gtk::Api::Error* error  = nullptr;
-        auto             value  = self->api.evaluateFinish(view, result, &error);
-        const bool       echoed = value && self->text(value) == self->payload;
+    // Always called once per evaluation, with an error when the view is destroyed first.
+    static void onEvaluated(Object view, Object result, std::weak_ptr<DirectChannel>* pending) noexcept {
+        const std::unique_ptr<std::weak_ptr<DirectChannel>> owned(pending);
+        const auto&                                          api   = DirectApi::shared();
+        gtk::Api::Error*                                     error = nullptr;
+        const auto                                           value = api.evaluateFinish(view, result, &error);
+        if (const auto self = owned->lock())
+            return self->completed(value, error);
+        // The window closed first: the channel and its session are gone, the result is only released.
         if (value)
-            self->session.a.unref(value);
+            api.unref(value);
         if (error)
-            self->api.errorFree(error);
+            api.errorFree(error);
+    }
+    void completed(Object value, gtk::Api::Error* error) noexcept {
+        bool echoed = false;
+        try {
+            echoed = value && text(value) == payload;
+        } catch (...) {
+        }
+        if (value)
+            session.a.unref(value);
+        if (error)
+            api.errorFree(error);
         if (!echoed)
-            self->finish(-1);
-        else if (--self->remaining == 0)
-            self->finish(static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - self->start).count()));
+            finish(-1);
+        else if (--remaining == 0)
+            finish(static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()));
         else
-            self->evaluateNext();
+            evaluateNext();
     }
     void finish(double nanoseconds) {
         auto answer = api.newNumber(context, nanoseconds);
@@ -140,7 +168,8 @@ class DirectChannel {
     }
 
 public:
-    explicit DirectChannel(gtk::Session& live) : session(live) {
+    explicit DirectChannel(gtk::Session& live) : session(live) { }
+    void attach() {
         listen("wfecho", onEcho);
         listen("wfrun", onRun);
     }
@@ -165,69 +194,13 @@ struct BenchmarkFrontend : webfront::frontend::WebKitGTKFrontend {
         gtk::initialize();
         gtk::Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy});
         session.create();
-        DirectChannel channel(session);
+        const auto channel = std::make_shared<DirectChannel>(session);
+        channel->attach();
         session.run(webfront::frontend::detail::applicationUrl(address, port, page));
     }
-};
-
-using TestFS = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
-using App    = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, BenchmarkFrontend>;
-
-// Each call awaits the previous result, as the direct run does; the page receives the elapsed nanoseconds, or -1.
-webfront::Task cppToJs(App::UI ui, int size, int count) {
-    const std::string payload(static_cast<std::size_t>(size), 'x');
-    double            elapsed = -1;
-    try {
-        const auto start = Clock::now();
-        for (int i = 0; i < count; ++i)
-            if (co_await ui.jsFunctionSender<std::string>("benchmark.echo")(payload) != payload)
-                throw std::runtime_error("wrong echo");
-        elapsed = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count());
-    } catch (const std::exception& error) {
-        std::cerr << "C++ to JS bridge echo failed: " << error.what() << '\n';
-    }
-    ui.jsFunction("benchmark.cppPhaseDone")(elapsed);
-}
-
-struct Report {
-    bool        received = false;
-    bool        passed   = false;
-    std::string json;
-    std::string text;
 };
 }  // namespace
 
 int main(int argc, char** argv) {
-    try {
-        if (argc > 2)
-            throw std::runtime_error("usage: webkitgtk_transport_benchmark [<report.json>]");
-        Report report;
-        App    app("9002", std::filesystem::current_path());
-        app.cppFunction<std::string, std::string>("echo", [](const std::string& value) {
-            return value;
-        });
-        app.cppFunction("cppToJs", [&app](App::UI ui, int size, int count) {
-            app.spawn(cppToJs(ui, size, count));
-        });
-        app.cppFunction<void, bool, std::string, std::string>("report", [&report](bool passed, const std::string& json, const std::string& text) {
-            report = {true, passed, json, text};
-        });
-        // show() returns once the window is closed and the server joined: the report is no longer written to.
-        app.show("transport-benchmark.html");
-        if (!report.received)
-            throw std::runtime_error("the benchmark page closed without a report");
-        std::cout << report.text << '\n';
-        if (!report.passed)
-            return 1;
-        if (argc == 2) {
-            std::ofstream output(argv[1], std::ios::binary);
-            output << report.json << '\n';
-            if (!output)
-                throw std::runtime_error(std::string("cannot write ") + argv[1]);
-        }
-        return 0;
-    } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
+    return transport_benchmark::run<BenchmarkFrontend>(argc, argv, "usage: webkitgtk_transport_benchmark [<report.json>]");
 }

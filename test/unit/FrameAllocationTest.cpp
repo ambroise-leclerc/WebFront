@@ -21,6 +21,10 @@ std::atomic<std::size_t> allocated{0};
     // GCC pairs the inlined replacement new with free() and reports a mismatch the replacement makes consistent.
     #pragma GCC diagnostic ignored "-Wmismatched-new-delete"
 #endif
+#if defined(_MSC_VER)
+    // The replacement carries none of the SAL annotations of the declaration in <new>.
+    #pragma warning(disable : 28251)
+#endif
 
 void* operator new(std::size_t size) {
     allocated += size;
@@ -44,8 +48,8 @@ int main() {
     const auto                                   before = allocated.load();
     frame.addBuffer(std::span(payload));
     const auto used = allocated.load() - before;
-    // Recording a span needs a few pointers; a dump of 1 MiB needs megabytes.
-    if (used >= payload.size()) {
+    // Recording a span needs a few pointers (a vector growth, hundreds of bytes); a dump of 1 MiB needs megabytes.
+    if (used >= payload.size() / 1024) {
         std::cerr << "Frame::addBuffer allocated " << used << " bytes for a 1 MiB buffer with Debug disabled\n";
         return 1;
     }
