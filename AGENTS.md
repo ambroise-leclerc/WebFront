@@ -107,7 +107,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 
 ## Coding and testing conventions
 
-- Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `.github/CONTRIBUTING.md`.
+- Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
 - Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.

@@ -82,7 +82,7 @@ This workflow ensures that `master` always reflects the latest deployable versio
 
 ## Tooling
 
-To ensure consistency, we use `.clang-format` and `.clang-tidy` to enforce our coding style. These configuration files are included in the root of the repository.
+To ensure consistency, we use `.clang-format` and `clang-tidy` to enforce our coding style. `.clang-format` is next to the C++ it formats (`include/webfront/`, `test/` and `examples/` each have their own copy, so their styles may diverge); the clang-tidy configuration is `cmake/clang-tidy.yaml`, applied by `-DENABLE_CLANG_TIDY=ON` (or `clang-tidy --config-file=cmake/clang-tidy.yaml`).
 
 - **Clang-Format:** Automatically formats your code to match our style guidelines.
 - **Clang-Tidy:** Detects and warns about style violations, bugs, and non-modern C++ practices.
