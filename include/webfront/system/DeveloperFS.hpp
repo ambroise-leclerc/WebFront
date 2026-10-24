@@ -20,7 +20,7 @@ class DeveloperFS {
 public:
     explicit DeveloperFS(std::filesystem::path project) {
         if (!project.empty())
-            root = std::filesystem::canonical(project);
+            root = developer::canonicalDirectory(project);
     }
 
     std::optional<File> open(std::filesystem::path file) const {

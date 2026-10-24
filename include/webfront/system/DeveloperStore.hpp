@@ -35,7 +35,7 @@ public:
     /// and recoveryFailure() describes it meanwhile. The hook is for tests only.
     explicit Store(std::filesystem::path project, std::chrono::steady_clock::duration abandoned = defaultAbandonedAfter,
                    StepHook stepHook = {})
-        : root(std::filesystem::canonical(project)), abandonedAfter(abandoned), hook(std::move(stepHook)) {
+        : root(canonicalDirectory(project)), abandonedAfter(abandoned), hook(std::move(stepHook)) {
         if (!std::filesystem::is_directory(root))
             throw std::invalid_argument("Developer project must be a directory");
         removeStaleStaging(root);

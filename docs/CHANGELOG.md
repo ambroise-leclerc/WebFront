@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- The developer store reads and writes project paths beyond MAX_PATH on Windows (#349): `projectPath` takes the extended-length form from 200 characters, containment is checked on the ordinary spelling, and staged files get the same treatment. The MSVC option is now `/analyze:stacksize65536`, one argument: with a space, sccache read `65536` as a second source file and refused to cache 48 compilations of the Windows CI build (about 9 minutes against 25 seconds on Linux).
+- The developer store reads and writes project paths beyond MAX_PATH on Windows (#349): `projectPath` takes the extended-length form from 200 characters, as does a project root longer than MAX_PATH (`canonicalDirectory`), containment is checked on the ordinary spelling, and staged files get the same treatment. The MSVC option is now `/analyze:stacksize65536`, one argument: with a space, sccache read `65536` as a second source file and refused to cache 48 compilations of the Windows CI build (about 9 minutes against 25 seconds on Linux).
 - The installer of the developer environment reads npm archives rooted at any single directory, as npm does (#316): the archives of
   `@types/*` are rooted at the package name and were refused as "Invalid npm tarball root". A mixed or escaping root is still refused.
 - The Life starter type-checks under TypeScript `strict` (`useState<Uint8Array>`), which `wf check` now proves.

@@ -49,6 +49,12 @@ inline std::filesystem::path plainPath(const std::filesystem::path& path) {
     return path;
 }
 
+/// The canonical absolute path of an existing project directory, in the extended-length form when it is long:
+/// canonical() of the system functions refuses the ordinary spelling beyond MAX_PATH.
+inline std::filesystem::path canonicalDirectory(const std::filesystem::path& directory) {
+    return extendedPath(plainPath(std::filesystem::canonical(extendedPath(std::filesystem::absolute(directory)))));
+}
+
 // Resolve existing parents too: a symlink must never turn a relative project path into an escape.
 inline std::filesystem::path projectPath(const std::filesystem::path& root, std::string_view relative) {
     const auto path      = extendedPath(root / fs::safeRelativePath(relative));

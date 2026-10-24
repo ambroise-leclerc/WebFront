@@ -845,3 +845,33 @@ SCENARIO("A group of files beyond the 260 characters of Windows is published tog
         }
     }
 }
+
+SCENARIO("A project whose own directory exceeds the 260 characters of Windows can be opened") {
+    TemporaryDirectory outer;
+    auto               root = outer.path();
+    while (root.native().size() < 302)
+        root /= std::string(40, 'r');
+    std::filesystem::create_directories(developer::extendedPath(root));
+    GIVEN("a store on that directory") {
+        developer::Store store{root};
+        WHEN("a file is published and a group is committed") {
+            publishFile(store, "file.txt", "root");
+            const std::vector<std::string> paths{"sub/a.txt", "sub/b.txt"};
+            const auto                     first  = store.begin(paths[0], false);
+            const auto                     second = store.begin(paths[1], false);
+            store.write(first, "output", 0, bytes("one"));
+            store.write(second, "output", 0, bytes("two"));
+            store.commitGroup({first, second}, paths, store.state(paths));
+            THEN("everything is readable and the project stays confined") {
+                REQUIRE(read(store, "file.txt") == "root");
+                REQUIRE(read(store, "sub/b.txt") == "two");
+                REQUIRE_THROWS_AS(store.read("../outside", 0), std::invalid_argument);
+            }
+        }
+    }
+    GIVEN("a developer filesystem on that directory") {
+        THEN("it opens") {
+            REQUIRE_NOTHROW(fs::DeveloperFS{root});
+        }
+    }
+}
