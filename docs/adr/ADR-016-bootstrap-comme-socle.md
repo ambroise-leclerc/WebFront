@@ -108,9 +108,9 @@ reconstruction (#315). Toute autre exception exige une révision de cette ADR.
 
 ### Auto-hébergement de l'environnement (#315)
 
-Le dépôt est lui-même un projet `wf` : `webfront.project.json` (dépendances de construction exactes, scripts, permissions) et
-`webfront-packages.lock.json` (intégrités SHA-512) sont à la racine, qui reste une liste fermée où ces deux fichiers
-s'ajoutent. Les scripts `js/developer/scripts/` (`build.mjs`, `site.mjs`, `pin.mjs`) s'exécutent dans l'environnement
+Le dépôt est lui-même un projet `wf` : `js/developer/webfront.project.json` (dépendances de construction exactes, scripts, permissions) et
+`js/developer/webfront-packages.lock.json` (intégrités SHA-512) sont dans `js/developer/`, désignés par `--manifest-dir`
+(#354) ; la racine reste une liste fermée. Les scripts `js/developer/scripts/` (`build.mjs`, `site.mjs`, `pin.mjs`) s'exécutent dans l'environnement
 d'amorçage épinglé (`cmake/WebFrontBootstrap.cmake`) par le pilote `webfront-wf`, avec l'esbuild-wasm verrouillé dans le
 Worker du script : ils lisent les sources du projet et les paquets verrouillés, n'écrivent que sous `permissions.publish`
 (répertoires `build-*` et sorties versionnées nommées) et n'ont ni shell ni API Node. Ils produisent `environment.tgz`,

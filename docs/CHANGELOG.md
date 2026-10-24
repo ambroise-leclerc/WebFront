@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The manifest and the lock of the repository move to `js/developer/` (#354): the driver and the CI select them with `--manifest-dir js/developer`, and the closed list of the root loses two entries (9 left).
+
 - The test bootstrap environment is the published 0.6.2 (#354), which installs the archives of `@types` packages and honours a manifest directory; the README walkthrough no longer needs a local archive for `wf check`.
 
 - The manifest and the lock of a project may live in a directory of the project (#354): `DeveloperBootstrapOptions::manifestDirectory` (validated, passed in the bootstrap configuration only when set) and `webfront-wf --manifest-dir`; the environment derives `manifestPath` and `lockPath` from it, and a script still never writes them. Paths inside the manifest stay relative to the project root. Environment 0.6.2, not yet published; an earlier environment ignores the option.

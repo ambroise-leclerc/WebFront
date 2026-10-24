@@ -20,7 +20,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `include/webfront/system/`: layered virtual filesystems and the embedded web resources, a closed list guarded by the `MinimalCoreAssets` CTest case (normative list and 150 KiB decoded budget in ADR-016; changing it means amending the ADR and `test/cmake/CheckMinimalCoreAssets.cmake` together).
 - `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
-- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and vendoring tools. The repository is itself a `wf` project (`webfront.project.json` and its lock at the root): the environment builds itself, and its pure JavaScript specs (`test/developer/`) run with `wf test`. `docs/NODE_TOOLS_MIGRATION.md` records where each former Node.js tool went. Production C++ remains header-only in `include/webfront/`.
+- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and vendoring tools. The repository is itself a `wf` project (`js/developer/webfront.project.json` and its lock, selected with `--manifest-dir js/developer`): the environment builds itself, and its pure JavaScript specs (`test/developer/`) run with `wf test`. `docs/NODE_TOOLS_MIGRATION.md` records where each former Node.js tool went. Production C++ remains header-only in `include/webfront/`.
 - `test/fixtures/`, `test/web/fixtures/`: retained regression fixtures, not public example applications.
 - `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
@@ -67,7 +67,7 @@ Build the developer environment with wf (the driver comes from any build with `E
 `js/developer/tools/PUBLISHING.md` describes:
 
 ```bash
-wf() { build/test/web/webfront-wf --project "$PWD" -- "$@"; }
+wf() { build/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer -- "$@"; }
 wf restore && wf run build build-distribution
 ```
 

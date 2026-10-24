@@ -301,7 +301,7 @@ if(_browser_tests_available)
         function(webfront_add_self_build_test name status command)
             cmake_parse_arguments(ARG "NO_REGISTRY" "OUTPUT;PROVIDES;TIMEOUT" "REQUIRES" ${ARGN})
             set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROJECT=${_self_project} -DENVIRONMENT= -DINTEGRITY=
-                -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
+                -DMANIFEST_DIR=js/developer -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
             if(ARG_OUTPUT)
                 list(APPEND options "-DEXPECT_OUTPUT=${ARG_OUTPUT}")
             endif()

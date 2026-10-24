@@ -34,7 +34,7 @@ runs:
         #!/usr/bin/env bash
         # Messages.hpp prints its encoding trace to the standard output: it is not part of a command's result.
         export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-        xvfb-run -a "$GITHUB_WORKSPACE/build-driver/test/web/webfront-wf" --project "$GITHUB_WORKSPACE" "\$@" 2>&1 \\
+        xvfb-run -a "$GITHUB_WORKSPACE/build-driver/test/web/webfront-wf" --project "$GITHUB_WORKSPACE" --manifest-dir js/developer "\$@" 2>&1 \\
           | grep --line-buffered -v -e '^-> encoded to string of size' -e '^bufferIndex = '
         exit "\${PIPESTATUS[0]}"
         SCRIPT

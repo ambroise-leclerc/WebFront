@@ -10,8 +10,8 @@ on:
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
       - 'test/developer/**'
-      - 'webfront.project.json'
-      - 'webfront-packages.lock.json'
+      - 'js/developer/webfront.project.json'
+      - 'js/developer/webfront-packages.lock.json'
       - 'cmake/WebFrontBootstrap.cmake'
       - 'include/webfront/system/DeveloperReleaseData.hpp'
       - '.github/actions/wf-driver/**'
@@ -26,8 +26,8 @@ on:
       - 'examples/life/ui/**'
       - 'js/developer/tools/**'
       - 'test/developer/**'
-      - 'webfront.project.json'
-      - 'webfront-packages.lock.json'
+      - 'js/developer/webfront.project.json'
+      - 'js/developer/webfront-packages.lock.json'
       - 'cmake/WebFrontBootstrap.cmake'
       - 'include/webfront/system/DeveloperReleaseData.hpp'
       - '.github/actions/wf-driver/**'
@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          # In the workspace, since the wf script writes inside the project (permissions.publish of webfront.project.json).
+          # In the workspace, since the wf script writes inside the project (permissions.publish of js/developer/webfront.project.json).
           site=build-site
           git init --initial-branch=gh-pages "$site"
           git -C "$site" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
