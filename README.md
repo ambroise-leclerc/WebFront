@@ -14,9 +14,10 @@ Keep application logic in C++ and create reactive interfaces with TypeScript, Re
 
 Register your simulation, bootstrap the tools, then build the interface in the application's terminal. `life-project` is the working directory for the UI sources:
 
-<table>
-<tr><th align="left">C++ application</th><th align="left">Create, install, preview</th></tr>
-<tr><td valign="top" width="34%">
+<a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="100%" alt="Game of Life walkthrough: the C++ application beside the WebFront window, where wf create life, dependency installation and wf preview bring the React interface up below the terminal"></a>
+
+<details>
+<summary>The C++ application of the animation, as text</summary>
 
 ```cpp
 #include <webfront/WebFront.hpp>
@@ -52,12 +53,9 @@ int main() {
 }
 ```
 
-</td><td valign="top" width="55%">
-<a href="#game-of-life-from-console-to-native-application"><img src="docs/images/life-bootstrap.gif" width="560" alt="Game of Life walkthrough: an empty application, wf create life, dependency installation, then the React interface running below the terminal"></a>
-</td></tr>
-</table>
+</details>
 
-The animation shows the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
+The animation shows the C++ application and the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
 
 ## Game of Life: from console to native application
 

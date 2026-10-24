@@ -70,7 +70,7 @@ foreach(command "wf create life" "wf init" "wf install react@19.3.1 react-dom@19
     _require("${readme}" "${command}" "developer-terminal walkthrough")
 endforeach()
 _require("${readme}" "-DWEBFRONT_LIFE_ASSETS=\"$PWD/life-project/generated/LifeUI.hpp\"" "generated-header build")
-_require("${readme}" "src=\"docs/images/life-bootstrap.gif\" width=\"560\"" "early Life animation")
+_require("${readme}" "src=\"docs/images/life-bootstrap.gif\" width=\"100%\"" "early Life animation")
 foreach(path examples/hello-world/HelloWorld.cpp examples/life/Life.hpp examples/life/ui/main.tsx docs/images/life-preview.jpg docs/images/life-bootstrap.gif)
     if(NOT EXISTS "${ROOT}/${path}")
         list(APPEND failures "missing walkthrough asset ${path}")
