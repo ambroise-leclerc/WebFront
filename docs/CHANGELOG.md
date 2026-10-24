@@ -25,6 +25,10 @@
 
 ### Added
 
+- `third_party/` is removed (#319, epic #303): `fflate` 0.8.3, the last vendored source, is a locked package of the repository's
+  `wf` project, imported by name from `js/developer/environment/embed.mjs`; its notice comes from the installed package.
+  The environment archive stays byte for byte identical. The test registry downloads it at configure time, and
+  `RepositoryLayout` now rejects `third_party`, `vendor` and `node_modules` paths as well as any unlisted root entry.
 - Tests, regeneration and CI without a JavaScript runtime or package manager (#318, epic #303). Configuring with `ENABLE_TESTING=ON` downloads, and
   verifies against their SHA-512, the pinned bootstrap environment and the real packages of the tests' npm registry
   (`test/web/registry-packages.json`; `-DWEBFRONT_REGISTRY_DIR` for a machine without network access); `wf run test-registry`

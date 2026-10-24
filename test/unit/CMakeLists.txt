@@ -76,6 +76,10 @@ endif()
 add_test(NAME RepositoryLayout
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayout.cmake)
+add_test(NAME RepositoryLayoutRejectsVendoredSources
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/layout-negative
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 add_test(NAME FrontendSelection

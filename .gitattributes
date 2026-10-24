@@ -161,8 +161,7 @@ include/webfront/system/FallbackModuleData.hpp       text eol=lf
 # Fuzzer seeds retain exact protocol bytes, including HTTP CRLF.
 test/fuzz/corpus/** binary
 
-# Pinned third-party sources and generated dependency data keep exact bytes on Windows.
-third_party/fflate/*                       text eol=lf
+# Generated dependency data keeps exact bytes on Windows.
 include/webfront/system/*Data.hpp                   text eol=lf
 
 # Browser-powered developer bootstrap sources and generated payloads.

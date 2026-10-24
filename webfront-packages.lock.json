@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "manifestDigest": "189c5d492e1fd24af283f48702a79bcd3e411a63fbe669cafa37927545be698e",
+  "manifestDigest": "45184fd39426a231356fa5448e94c1bbb15599c384b37bb87ee92b355175b775",
   "registry": "https://registry.npmjs.org/",
   "roots": {
     "@xterm/addon-fit": {
@@ -30,6 +30,10 @@
     "semver": {
       "requested": "7.7.3",
       "id": "semver@7.7.3"
+    },
+    "fflate": {
+      "requested": "0.8.3",
+      "id": "fflate@0.8.3"
     }
   },
   "packages": {
@@ -939,6 +943,160 @@
         "ranges/subset.js",
         "ranges/to-comparators.js",
         "ranges/valid.js"
+      ],
+      "dependencies": {}
+    },
+    "fflate@0.8.3": {
+      "name": "fflate",
+      "version": "0.8.3",
+      "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==",
+      "key": "fflate@0.8.3-tbZNuJrLwGUp3zshBtdy4W-ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA",
+      "manifest": {
+        "name": "fflate",
+        "version": "0.8.3",
+        "description": "High performance (de)compression in an 8kB package",
+        "main": "./lib/index.cjs",
+        "module": "./esm/browser.js",
+        "types": "./lib/index.d.ts",
+        "unpkg": "./umd/index.js",
+        "jsdelivr": "./umd/index.js",
+        "browser": {
+          "./lib/node-worker.cjs": "./lib/worker.cjs"
+        },
+        "exports": {
+          ".": {
+            "node": {
+              "import": {
+                "types": "./esm/index.d.mts",
+                "default": "./esm/index.mjs"
+              },
+              "require": {
+                "types": "./lib/node.d.cts",
+                "default": "./lib/node.cjs"
+              }
+            },
+            "import": {
+              "types": "./esm/browser.d.ts",
+              "default": "./esm/browser.js"
+            },
+            "require": {
+              "types": "./lib/browser.d.cts",
+              "default": "./lib/browser.cjs"
+            }
+          },
+          "./node": {
+            "import": {
+              "types": "./esm/index.d.mts",
+              "default": "./esm/index.mjs"
+            },
+            "require": {
+              "types": "./lib/node.d.cts",
+              "default": "./lib/node.cjs"
+            }
+          },
+          "./browser": {
+            "import": {
+              "types": "./esm/browser.d.ts",
+              "default": "./esm/browser.js"
+            },
+            "require": {
+              "types": "./lib/browser.d.cts",
+              "default": "./lib/browser.cjs"
+            }
+          },
+          "./package.json": "./package.json"
+        },
+        "targets": {
+          "main": false,
+          "module": false,
+          "browser": false,
+          "types": false
+        },
+        "sideEffects": false,
+        "homepage": "https://101arrowz.github.io/fflate",
+        "repository": "https://github.com/101arrowz/fflate",
+        "bugs": {
+          "email": "arjunbarrett@gmail.com",
+          "url": "https://github.com/101arrowz/fflate/issues"
+        },
+        "author": "Arjun Barrett <arjunbarrett@gmail.com>",
+        "license": "MIT",
+        "keywords": [
+          "gzip",
+          "gunzip",
+          "deflate",
+          "inflate",
+          "compression",
+          "decompression",
+          "zlib",
+          "pako",
+          "jszip",
+          "browser",
+          "node.js",
+          "tiny",
+          "fast",
+          "zip",
+          "unzip",
+          "non-blocking"
+        ],
+        "scripts": {
+          "build": "npm run build:lib && npm run build:docs && npm run build:demo",
+          "script": "node -r ts-node/register scripts/$SC.ts",
+          "build:lib": "tsc && tsc --project tsconfig.esm.json && npm run build:rewrite && npm run build:umd",
+          "build:umd": "SC=buildUMD npm run script",
+          "build:rewrite": "SC=rewriteBuilds npm run script",
+          "build:demo": "tsc --project tsconfig.demo.json && parcel build demo/index.html --no-cache --public-url \"./\" && SC=cpGHPages npm run script",
+          "build:docs": "typedoc --plugin typedoc-plugin-markdown --hideBreadcrumbs --readme none --disableSources --excludePrivate --excludeProtected --expandParameters --githubPages false --out docs/ src/index.ts",
+          "test": "TS_NODE_PROJECT=test/tsconfig.json uvu -b -r ts-node/register test",
+          "prepack": "npm run build && npm run test"
+        },
+        "devDependencies": {
+          "@parcel/service-worker": "^2.9.3",
+          "@types/node": "^25.8.0",
+          "@types/pako": "*",
+          "@types/react": "^18.2.21",
+          "@types/react-dom": "^18.2.7",
+          "jszip": "^3.10.1",
+          "pako": "*",
+          "parcel": "^2.9.3",
+          "preact": "^10.17.1",
+          "react": "^18.2.0",
+          "react-dom": "^18.2.0",
+          "simple-git": "^3.19.1",
+          "terser": "^5.47.1",
+          "tiny-inflate": "*",
+          "ts-node": "^10.9.2",
+          "typedoc": "^0.28.19",
+          "typedoc-plugin-markdown": "^4.11.0",
+          "typescript": "^6.0.3",
+          "uvu": "^0.5.6",
+          "uzip": "*"
+        },
+        "alias": {
+          "react": "preact/compat",
+          "react-dom": "preact/compat",
+          "buffer": false,
+          "process": false
+        }
+      },
+      "files": [
+        "CHANGELOG.md",
+        "LICENSE",
+        "README.md",
+        "esm/browser.d.ts",
+        "esm/browser.js",
+        "esm/index.d.mts",
+        "esm/index.mjs",
+        "lib/browser.cjs",
+        "lib/browser.d.cts",
+        "lib/index.cjs",
+        "lib/index.d.ts",
+        "lib/node-worker.cjs",
+        "lib/node.cjs",
+        "lib/node.d.cts",
+        "lib/worker.cjs",
+        "package.json",
+        "umd/index.js"
       ],
       "dependencies": {}
     }

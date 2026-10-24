@@ -1,4 +1,4 @@
-import {gzipSync} from '../../../third_party/fflate/browser.mjs';
+import {gzipSync} from 'fflate';
 
 export function compress(bytes) {
     return gzipSync(bytes, {level: 9, mem: 8, mtime: 0});

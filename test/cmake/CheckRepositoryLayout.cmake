@@ -1,6 +1,6 @@
 # The tracked root of the repository is a closed list, so that the README stays visible on the
-# GitHub page. third_party/ is a temporary exception removed by #319. webfront.project.json and its lock make the
-# repository a wf project: the environment builds itself with wf run (#315).
+# GitHub page, and no third-party source is vendored: libraries are locked npm packages (#319). webfront.project.json and
+# its lock make the repository a wf project: the environment builds itself with wf run (#315).
 #   cmake -DROOT=<checkout> [-DGIT_EXECUTABLE=<git>] -P test/cmake/CheckRepositoryLayout.cmake
 cmake_minimum_required(VERSION 3.31)
 
@@ -11,7 +11,7 @@ endif()
 set(expected
     .clang-format .clang-tidy .devcontainer .gitattributes .github .gitignore
     AGENTS.md CMakeLists.txt README.md webfront-packages.lock.json webfront.project.json
-    cmake docs examples include js test third_party)
+    cmake docs examples include js test)
 
 set(actual "")
 set(from_git OFF)
@@ -27,6 +27,9 @@ if(GIT_EXECUTABLE AND EXISTS "${ROOT}/.git")
         foreach(path IN LISTS tracked)
             string(REGEX REPLACE "/.*$" "" top "${path}")
             list(APPEND actual "${top}")
+            if(path MATCHES "(^|/)(third_party|vendor|node_modules)/")
+                message(FATAL_ERROR "Third-party sources are not vendored; lock the library as a package instead: ${path}")
+            endif()
         endforeach()
     endif()
 endif()
@@ -36,6 +39,15 @@ if(NOT from_git)
     file(GLOB entries LIST_DIRECTORIES true RELATIVE "${ROOT}" "${ROOT}/*" "${ROOT}/.[!.]*")
     list(FILTER entries EXCLUDE REGEX "^(build|\\.git$)")
     set(actual ${entries})
+    file(GLOB_RECURSE nested LIST_DIRECTORIES false RELATIVE "${ROOT}" "${ROOT}/*")
+    foreach(path IN LISTS nested)
+        if(path MATCHES "^(build|\\.git/)")
+            continue()
+        endif()
+        if(path MATCHES "(^|/)(third_party|vendor|node_modules)/")
+            message(FATAL_ERROR "Third-party sources are not vendored; lock the library as a package instead: ${path}")
+        endif()
+    endforeach()
 endif()
 # .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
 set(archive_optional .gitattributes .gitignore)
