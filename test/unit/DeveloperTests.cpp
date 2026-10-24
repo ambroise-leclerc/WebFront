@@ -796,3 +796,82 @@ SCENARIO("A project directory is listed without leaving the project") {
         }
     }
 }
+
+SCENARIO("A project path beyond the 260 characters of Windows is published and read like any other") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a destination whose absolute path exceeds MAX_PATH") {
+        std::string directory = "deep";
+        while (project.path().native().size() + directory.size() < 300)
+            directory += "/" + std::string(40, 'd');
+        const auto destination = directory + "/file.txt";
+        WHEN("a file is published there") {
+            const auto id = store.begin(destination, false);
+            store.write(id, "output", 0, bytes("long"));
+            store.commit(id);
+            THEN("it can be read back and replaced") {
+                REQUIRE(read(store, destination) == "long");
+                const auto second = store.begin(destination, false);
+                store.write(second, "output", 0, bytes("longer"));
+                store.commit(second);
+                REQUIRE(read(store, destination) == "longer");
+            }
+            THEN("a path escaping the project is still refused") {
+                REQUIRE_THROWS_AS(store.read(directory + "/../../../../../../../../../../../../../../../../../outside", 0), std::invalid_argument);
+            }
+        }
+    }
+}
+
+SCENARIO("A group of files beyond the 260 characters of Windows is published together") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("two destinations in directories that do not exist yet, with absolute paths beyond MAX_PATH") {
+        std::string directory = "deep";
+        while (project.path().native().size() + directory.size() < 300)
+            directory += "/" + std::string(40, 'd');
+        const std::vector<std::string> paths{directory + "/a.txt", directory + "/b.txt"};
+        WHEN("they are published as one group") {
+            const auto first  = store.begin(paths[0], false);
+            const auto second = store.begin(paths[1], false);
+            store.write(first, "output", 0, bytes("one"));
+            store.write(second, "output", 0, bytes("two"));
+            store.commitGroup({first, second}, paths, store.state(paths));
+            THEN("both are readable and no journal remains") {
+                REQUIRE(read(store, paths[0]) == "one");
+                REQUIRE(read(store, paths[1]) == "two");
+                REQUIRE_FALSE(journalsRemain(project.path() / ".webfront/developer/journal"));
+            }
+        }
+    }
+}
+
+SCENARIO("A project whose own directory exceeds the 260 characters of Windows can be opened") {
+    TemporaryDirectory outer;
+    auto               root = outer.path();
+    while (root.native().size() < 302)
+        root /= std::string(40, 'r');
+    std::filesystem::create_directories(developer::extendedPath(root));
+    GIVEN("a store on that directory") {
+        developer::Store store{root};
+        WHEN("a file is published and a group is committed") {
+            publishFile(store, "file.txt", "root");
+            const std::vector<std::string> paths{"sub/a.txt", "sub/b.txt"};
+            const auto                     first  = store.begin(paths[0], false);
+            const auto                     second = store.begin(paths[1], false);
+            store.write(first, "output", 0, bytes("one"));
+            store.write(second, "output", 0, bytes("two"));
+            store.commitGroup({first, second}, paths, store.state(paths));
+            THEN("everything is readable and the project stays confined") {
+                REQUIRE(read(store, "file.txt") == "root");
+                REQUIRE(read(store, "sub/b.txt") == "two");
+                REQUIRE_THROWS_AS(store.read("../outside", 0), std::invalid_argument);
+            }
+        }
+    }
+    GIVEN("a developer filesystem on that directory") {
+        THEN("it opens") {
+            REQUIRE_NOTHROW(fs::DeveloperFS{root});
+        }
+    }
+}
