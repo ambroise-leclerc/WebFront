@@ -1,6 +1,7 @@
 // webfront-wf: runs one wf command of the browser developer environment without interaction and exits with its status.
 //
 //   webfront-wf --project <dir> [--environment <archive> --integrity <sha512-...>] [--registry-dir <dir>]
+//               [--manifest-dir <dir>]
 //               [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]
 //
 // The environment defaults to the provisioned bootstrap archive (cmake/WebFrontBootstrap.cmake); the project is the

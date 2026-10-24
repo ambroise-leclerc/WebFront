@@ -1,7 +1,7 @@
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
 import {LineEditor, tokenize, wordAtEnd, unicodeProvider, clearScreen, historyLimit} from './terminal.mjs';
-import {manifestPath} from './manifest.mjs';
+import {manifestPath, setManifestDirectory} from './manifest.mjs';
 import {discoverCommands, runCommand, reservedNames} from './commands.mjs';
 export {discoverCommands, reservedNames};
 import {validateLock} from './packages.mjs';
@@ -280,6 +280,7 @@ export async function runNonInteractive(argv, {reporter, onExit = code => global
     let exitCode = 0, output = '', report = null;
     const collect = text => { output += text; write(text); };
     try {
+        setManifestDirectory(context.config?.manifestDirectory);
         // Not `output += await ...`: the left side is read before the command runs, which would drop what it wrote.
         const summary = await execute(argv, {...context, write: collect, onReport: value => { report = value; }});
         output += summary;
@@ -470,6 +471,7 @@ export async function complete(line, {bridge, cppCommands = new Map()}) {
  * `fitToElement: false` keeps the terminal's size as set by terminal.resize() instead of following the element's.
  */
 export async function mount({bridge, config, terminal: element, preview, onExit, fitToElement = true}) {
+    setManifestDirectory(config?.manifestDirectory);
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = new URL('./xterm.css', import.meta.url).href;

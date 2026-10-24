@@ -139,16 +139,16 @@ if(_browser_tests_available)
 
         # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
         #     [OUTPUT <regex>] [REPORT <regex>] [EXPECT_FILE <relative path>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
-        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [PROJECT_DIR <dir>] [RENAME_ENTRY <module>] [PINNED] [SLEEP_ENVIRONMENT] [REQUIRES <fixture>] [PROVIDES <fixture>])
+        #     [MANIFEST_DIR <dir>] [EXPECT_PRESENT <paths>] [EXPECT_ABSENT <paths>] [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [PROJECT_DIR <dir>] [RENAME_ENTRY <module>] [PINNED] [SLEEP_ENVIRONMENT] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
-            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;PROJECT_DIR;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
+            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;PROJECT_DIR;MANIFEST_DIR;EXPECT_PRESENT;EXPECT_ABSENT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
             set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
                     list(APPEND options "-DEXPECT_${option}=${ARG_${option}}")
                 endif()
             endforeach()
-            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY EXPECT_FILE)
+            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY EXPECT_FILE MANIFEST_DIR EXPECT_PRESENT EXPECT_ABSENT)
                 if(ARG_${option})
                     list(APPEND options "-D${option}=${ARG_${option}}")
                 endif()
@@ -187,6 +187,15 @@ if(_browser_tests_available)
         webfront_add_driver_test(WfDriverRenamedEntry 0 "list" RENAME_ENTRY runner.mjs)
         # The pinned bootstrap environment, downloaded and verified at configure time, runs a command by itself.
         webfront_add_driver_test(WfDriverPinned 0 "init" PINNED OUTPUT "Created webfront.project.json" FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-pinned")
+        # The application may keep the manifest and the lock in a directory of the project: wf init, then wf install, write there
+        # and leave the project root alone. An unsafe directory is a usage error.
+        webfront_add_driver_test(WfDriverManifestDirectory 0 "init" MANIFEST_DIR config/wf OUTPUT "Created config/wf/webfront.project.json"
+            FRESH_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-manifest-dir" EXPECT_PRESENT "config/wf/webfront.project.json"
+            EXPECT_ABSENT "webfront.project.json" PROVIDES WfDriverManifestDirectoryInitialized)
+        webfront_add_driver_test(WfDriverManifestDirectoryInstall 0 "install|jasmine-core" MANIFEST_DIR config/wf OUTPUT "Installed 1 packages"
+            PROJECT_DIR "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-manifest-dir" REQUIRES WfDriverManifestDirectoryInitialized
+            EXPECT_PRESENT "config/wf/webfront-packages.lock.json" EXPECT_ABSENT "webfront-packages.lock.json|webfront.project.json")
+        webfront_add_driver_test(WfDriverManifestDirectoryUnsafe 64 "list" MANIFEST_DIR ../outside OUTPUT "--manifest-dir expects a relative")
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
         # What a script writes to its console before it ends reaches the result of the command.
         webfront_add_driver_test(WfDriverScriptOutput 0 "run|echo|one|two" OUTPUT "echo says one two")

@@ -3,6 +3,7 @@
 
 #include "system/DeveloperFS.hpp"
 #include "system/DeveloperReleaseData.hpp"
+#include "system/SafePath.hpp"
 #include "WebFront.hpp"
 
 #include <optional>
@@ -18,6 +19,10 @@ struct DeveloperBootstrapOptions {
     /// local mirror. It takes precedence over the project manifest's "registry"; unset, the manifest's
     /// registry applies, else registry.npmjs.org.
     std::optional<std::string> registry{};
+    /// Directory of webfront.project.json and of its lock, relative to the project directory ('/'-separated, no ".."):
+    /// empty for the project directory itself. The paths the manifest contains stay relative to the project directory.
+    /// Needs an environment that reads "manifestDirectory" (0.6.2 or later); an earlier one looks in the project directory.
+    std::string manifestDirectory{};
 };
 
 namespace developer {
@@ -43,6 +48,11 @@ inline void validateBootstrap(std::string_view mode, const std::filesystem::path
         throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
     if (options.registry && !options.registry->starts_with("https://") && !developer::sameOriginPath(*options.registry))
         throw std::invalid_argument("The developer registry must be an HTTPS URL or a same-origin path");
+    if (!options.manifestDirectory.empty()) {
+        // .webfront/ belongs to wf (cache, packages, preview), which replaces whole directories there.
+        if (*fs::safeRelativePath(options.manifestDirectory).begin() == ".webfront")
+            throw std::invalid_argument("The manifest directory cannot be inside .webfront");
+    }
 }
 
 /// The environment contract this C++ implements. An environment's environment.json declares the "protocol" it
@@ -59,6 +69,7 @@ inline std::string bootstrapConfig(const DeveloperBootstrapOptions& options) {
     return "{\"environment\":" + json::quote(options.environment) + ",\"integrity\":" + json::quote(options.integrity)
          + ",\"registry\":" + json::quote(options.registry.value_or(std::string(defaultRegistry)))
          + ",\"registryExplicit\":" + (options.registry ? "true" : "false")
+         + (options.manifestDirectory.empty() ? std::string{} : ",\"manifestDirectory\":" + json::quote(options.manifestDirectory))
          + ",\"supported\":{\"protocol\":[" + std::to_string(protocolVersion) + "],\"api\":[" + std::to_string(apiVersion) + "]}}";
 }
 }  // namespace developer

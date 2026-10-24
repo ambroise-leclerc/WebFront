@@ -5,7 +5,7 @@ import {safePackagePath} from './paths.mjs';
 import {manifestPath, lockPath} from './manifest.mjs';
 
 // wf keeps these consistent itself: a script never writes them, whatever the manifest grants.
-const reserved = [manifestPath, lockPath, '.webfront'];
+const reserved = () => [manifestPath, lockPath, '.webfront'];
 
 const within = (path, root) => path === root || path.startsWith(root + '/');
 
@@ -41,7 +41,7 @@ export function listable(permissions, directory) {
 /** A path the context may publish: under permissions.publish, never the manifest, the lock or .webfront/. */
 export function checkWrite(permissions, path) {
     const checked = projectPath(path);
-    if (reserved.some(root => within(checked, root))) throw new Error(`Permission denied: ${path} is managed by wf and never written by a script`);
+    if (reserved().some(root => within(checked, root))) throw new Error(`Permission denied: ${path} is managed by wf and never written by a script`);
     if (!(permissions?.publish ?? []).some(root => within(checked, root))) throw denied('writing', path, 'publish');
     return checked;
 }

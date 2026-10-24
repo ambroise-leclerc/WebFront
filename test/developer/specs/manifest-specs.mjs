@@ -1,6 +1,6 @@
 // Specs of the project manifest, its agreement with the lock and the joint publication of both.
 import {validateManifest, parseManifest, serializeManifest, manifestName, dependenciesDigest} from '../../../js/developer/environment/manifest.mjs';
-import {install, initProject, loadProject, syncNotice, resolveEntry, embedTarget, lockPath, manifestPath} from '../../../js/developer/environment/packages.bundle.mjs';
+import {install, initProject, loadProject, syncNotice, resolveEntry, embedTarget, lockPath, manifestPath, setManifestDirectory, checkWrite} from '../../../js/developer/environment/packages.bundle.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
 import {tar} from '../../../js/developer/tools/archive.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
@@ -292,5 +292,59 @@ describe('The project manifest', () => {
         expect(Object.keys(json(storage, lockPath).packages).sort()).withContext('the tag moved but the lock did not').toEqual(['a@1.2.0', 'b@2.0.0']);
         await install(bridge, ['--update'], beta({beta: '1.3.0'}));
         expect(Object.keys(json(storage, lockPath).packages).sort()).toEqual(['a@1.3.0', 'b@2.0.0']);
+    });
+
+    describe('kept in a directory of the project', () => {
+        const directory = 'config/wf';
+        afterEach(() => setManifestDirectory(''));
+
+        it('the manifest and the lock are the files of that directory, and the root is the default', () => {
+            expect(manifestPath).toBe('webfront.project.json');
+            setManifestDirectory(directory);
+            expect(manifestPath).toBe('config/wf/webfront.project.json');
+            expect(lockPath).toBe('config/wf/webfront-packages.lock.json');
+            setManifestDirectory(undefined);
+            expect(manifestPath).toBe('webfront.project.json');
+            setManifestDirectory('js');
+            setManifestDirectory('');
+            expect(lockPath).toBe('webfront-packages.lock.json');
+        });
+
+        it('a directory that is absolute, has an empty or dot component or leaves the project is refused and changes nothing', () => {
+            for (const unsafe of ['/etc', 'a//b', 'a/', '../outside', 'a/../b', './wf', 'a\\b', 'C:/wf', '.webfront', '.webfront/developer/preview', 7])
+                throws(() => setManifestDirectory(unsafe), /Unsafe manifest directory/);
+            expect(manifestPath).toBe('webfront.project.json');
+        });
+
+        it('wf init and wf install write and read there, and leave the project root alone', async () => {
+            setManifestDirectory(directory);
+            const {bridge, storage} = memoryBridge();
+            expect(await initProject(bridge, [], {})).toMatch(/Created config\/wf\/webfront.project.json/);
+            expect(await loadProject(bridge)).toEqual(jasmine.objectContaining({status: 'unlocked'}));
+            await install(bridge, ['a'], options(registry(source()).fetchImpl));
+            expect([...storage.keys()].filter(path => !path.startsWith('.webfront/')).sort())
+                .toEqual(['config/wf/webfront-packages.lock.json', 'config/wf/webfront.project.json']);
+            expect(json(storage, manifestPath).dependencies).toEqual({a: '^1.2.0'});
+            const loaded = await loadProject(bridge);
+            expect(loaded.status).toBe('consistent');
+            expect(Object.keys(loaded.lock.packages)).toEqual(['a@1.2.0']);
+            await rejects(initProject(bridge, [], {}), /already exists/);
+        });
+
+        it('a project without manifest in that directory has none, even with one at the root', async () => {
+            const {bridge, storage} = memoryBridge();
+            await initProject(bridge, [], {});
+            expect([...storage.keys()]).toEqual(['webfront.project.json']);
+            setManifestDirectory(directory);
+            expect((await loadProject(bridge)).status).toBe('no-manifest');
+        });
+
+        it('a script may not write the manifest or the lock there, whatever it is granted', () => {
+            setManifestDirectory(directory);
+            const permissions = {publish: ['config']};
+            expect(checkWrite(permissions, 'config/other.json')).toBe('config/other.json');
+            for (const reserved of ['config/wf/webfront.project.json', 'config/wf/webfront-packages.lock.json'])
+                throws(() => checkWrite(permissions, reserved), /managed by wf/);
+        });
     });
 });

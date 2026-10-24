@@ -7,6 +7,7 @@
 #pragma once
 
 #include <webfront/WebFront.hpp>
+#include <webfront/system/SafePath.hpp>
 
 
 #include <charconv>
@@ -38,6 +39,7 @@ struct Options {
     std::optional<std::filesystem::path> environment;
     std::optional<std::string>           integrity;
     std::optional<std::filesystem::path> registryDirectory;
+    std::string                          manifestDirectory;
     std::optional<std::filesystem::path> report;
     std::chrono::seconds                 timeout{600};
     std::vector<std::string>             command;
@@ -69,6 +71,8 @@ inline Options parse(int argc, char** argv) {
             options.integrity = value();
         else if (argument == "--registry-dir")
             options.registryDirectory = value();
+        else if (argument == "--manifest-dir")
+            options.manifestDirectory = value();
         else if (argument == "--report")
             options.report = value();
         else if (argument == "--timeout") {
@@ -87,6 +91,13 @@ inline Options parse(int argc, char** argv) {
     }
     if (options.project.empty())
         throw UsageError("--project is required");
+    if (!options.manifestDirectory.empty()) {
+        try {
+            fs::safeRelativePath(options.manifestDirectory);
+        } catch (const std::invalid_argument&) {
+            throw UsageError("--manifest-dir expects a relative '/'-separated directory without '..'");
+        }
+    }
     if (options.command.empty())
         throw UsageError("A wf command is required");
     if (options.environment.has_value() != options.integrity.has_value())
@@ -337,7 +348,8 @@ int run(const Options& options, Setup&& setup = {}) {
     app.bootstrap("developer",
                   {.environment = "/driver/environment.tgz",
                    .integrity   = *options.integrity,
-                   .registry    = options.registryDirectory ? std::optional<std::string>{"/driver/registry/"} : std::nullopt});
+                   .registry    = options.registryDirectory ? std::optional<std::string>{"/driver/registry/"} : std::nullopt,
+                   .manifestDirectory = options.manifestDirectory});
 
     DriverBrowser<typename App::UI> browser;
     auto subscription = app.subscribeUIStarted([&](typename App::UI ui) {
