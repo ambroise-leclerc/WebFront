@@ -356,7 +356,6 @@ protected:
             encodeTypeHeader(msg::CodedType::string, static_cast<uint16_t>(size), frame);
         frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
         incrementPayloadSize(size);
-        std::cout << "-> encoded to string of size " << size << " in a span.\n";
     }
 
     template <typename WebSocketFrame>
@@ -367,7 +366,6 @@ protected:
         frame.addBuffer(span(&buffer[encodeBufferIndex], 1));
         buffer[encodeBufferIndex++] = static_cast<std::byte>(value ? msg::CodedType::booleanTrue : msg::CodedType::booleanFalse);
         incrementPayloadSize(1);
-        std::cout << "-> encoded to bool of size 1 in a span.";
     }
 
     template <typename WebSocketFrame>
@@ -380,13 +378,11 @@ protected:
         copy_n(reinterpret_cast<const std::byte*>(&number), sizeof(number), &buffer[encodeBufferIndex]);
         encodeBufferIndex += sizeof(number);
         incrementPayloadSize(1 + sizeof(number));
-        std::cout << "-> encoded to number of size " << sizeof(number) << " in a span.";
     }
 
     template <typename WebSocketFrame>
     void encodeException(const std::exception& e, WebSocketFrame& frame) {
         using namespace std;
-        std::cout << "Exception : " << e.what() << '\n';
         const auto text = fitStringLength(e.what());
         encodeTypeHeader(msg::CodedType::exception, static_cast<uint16_t>(text.size()), frame);
         frame.addBuffer(span(reinterpret_cast<const std::byte*>(text.data()), text.size()));
@@ -510,8 +506,6 @@ public:
         else if constexpr (is_base_of_v<std::exception, ParamType>)
             encodeException(t, frame);
         setParametersCount(static_cast<uint8_t>(parametersCountBefore + 1));
-
-        std::cout << "bufferIndex = " << encodeBufferIndex << " ,payloadSize = " << getPayloadSize() << "\n";
     }
 
     template <typename T>

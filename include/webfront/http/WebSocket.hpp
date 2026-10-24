@@ -169,7 +169,8 @@ struct Frame : public Header {
 
     /// @return size of added buffer
     size_t addBuffer(std::span<const std::byte> buffer) {
-        log::debug("frame::addBuffer {}", utils::hexDump(buffer));
+        if (log::is(log::Debug))  // The dump is formatted before log::debug() tests the level.
+            log::debug("frame::addBuffer {}", utils::hexDump(buffer));
         setPayloadSize(payloadSize() + buffer.size());
         borrowedBuffers.emplace_back(buffer);
         return buffer.size();

@@ -64,6 +64,12 @@ if(ENABLE_COVERAGE)
   target_link_options(tests PUBLIC -fprofile-arcs -ftest-coverage)
 endif()
 
+# Replaces the global operator new to count allocations: kept out of the Catch2 executable.
+add_executable(frame_allocation FrameAllocationTest.cpp)
+target_link_libraries(frame_allocation PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+add_test(NAME FrameBufferNotFormattedWhenDebugDisabled COMMAND frame_allocation)
+set_tests_properties(FrameBufferNotFormattedWhenDebugDisabled PROPERTIES TIMEOUT 30)
+
 if(WEBFRONT_USE_MDDLOG)
   # This consumer includes only the public header and links only the facade target.
   add_executable(mddlog_header_consumer MddlogHeaderConsumer.cpp)
