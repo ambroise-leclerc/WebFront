@@ -1,8 +1,8 @@
 # Publishing the developer packages
 
-The version and canonical HTTPS base URL are in `distribution.json`. The environment and Life/PI starters
+The version and canonical HTTPS base URL are in `distribution.json`. The environment and the Life starter
 are published under `developer/<version>/`. React, React DOM and scheduler stay on npm; this site
-hosts only WebFront's development environment, its pinned Life/PI starters and provisioning metadata.
+hosts only WebFront's development environment, its pinned Life starter and provisioning metadata.
 The package names in their manifests are identifiers, not a requirement to own or publish npm scopes.
 
 The environment builds itself: the pinned bootstrap environment (`cmake/WebFrontBootstrap.cmake`) runs the scripts of
@@ -122,7 +122,7 @@ ctest --test-dir build-native -R '^DeveloperFixtures$' --output-on-failure
   "$PWD/build-native/test/web/developer-fixtures" "$PWD/build-native/test/web/public-generated" --public
 ```
 
-This mode downloads the pinned environment and both starters from Pages, fetches exact React/React DOM
-versions and scheduler from npm, executes esbuild/WASM, creates in-window PI and Life previews and generates
-both application providers. A mismatch, download failure, browser error or failed assertion returns
+This mode downloads the pinned environment and the starter from Pages, fetches exact React/React DOM
+versions and scheduler from npm, executes esbuild/WASM, creates the in-window Life preview and generates
+the application provider. A mismatch, download failure, browser error or failed assertion returns
 nonzero. Keep the issue open until this real-engine check and the normal offline regression suite pass.

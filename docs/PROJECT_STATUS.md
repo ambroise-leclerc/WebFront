@@ -1,5 +1,30 @@
 # WebFront project status
 
+## Current state (#317, epic #303, 2026-10-24)
+
+WebFront is a minimal header-only C++23 core plus a standalone developer environment.
+
+- **Core.** `include/webfront/` holds the C++ library and a closed list of embedded resources (the bridge, the fallback page and
+  module, the favicon, the bootstrap page and loader, and the release data), guarded at 150 KiB decoded by `MinimalCoreAssets`
+  ([ADR-016](adr/ADR-016-bootstrap-comme-socle.md)). No third-party source is vendored.
+- **Developer environment.** Downloaded and verified by `NativeApp::bootstrap("developer")` (0.6.1 published and pinned; the sources
+  advance to 0.6.2). `wf init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview` and
+  `embed` work on a manifest (`webfront.project.json`) and a lock; TypeScript and TSX are compiled by esbuild-wasm and type-checked
+  by `wf check` with the project's locked compiler. The application's own commands join the terminal through `webfront::Commands`.
+  See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) and [UI_COMPONENTS](UI_COMPONENTS.md).
+- **No JavaScript runtime or package manager** is needed to use, build, test, regenerate, publish or run the CI of WebFront
+  ([migration record](NODE_TOOLS_MIGRATION.md)); `NoNodeDependency` audits every tracked file.
+- **Proofs.** The `Journey*` chain (create, init, install, check, test, build, embed, compile, run, permission denied, offline cache)
+  passes on CEF, WebKitGTK, WKWebView and WebView2 (see below).
+- **Limitations.** There is no sandbox: the downloaded environment and the authorized scripts have the authority of the bridge and
+  of the project, and the permissions frame only the `context` API of scripts. Only browser packages install; installation scripts
+  and native add-ons are not executed. A synchronous infinite loop in a spec blocks the page hosting `wf test`. File reads fail beyond 260 characters
+  on Windows (#349). General DOM abstractions, packaging, accessibility and native-engine deployment remain application work.
+  The README walkthrough (Game of Life: console, developer, embedded) uses exactly these commands, and `NewcomerDocsMatchExamples`
+  keeps it aligned with the examples.
+
+The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
+
 ## Repository layout (#320, epic #303)
 
 The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js` and `test`, plus tool configuration files
@@ -151,8 +176,8 @@ published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimenta
 - Public examples now live in `examples/`: Hello World and the three stages of Game of Life.
   Browser bridge/component/bootstrap sources live in `js/`; the library remains header-only.
   PI and Signal Studio resources required by regression tests remain fixtures, without public demo targets.
-- The README starts with Hello World and a linked Life thumbnail, then walks through the native
-  bootstrap, dependency installation, preview and offline embedding. No library feature is added.
+- The README starts with the Life application and its animation, then walks through the native
+  bootstrap, dependency installation, development, checks, tests and offline embedding. No library feature is added.
 - Per-change CI combines unit tests and native browser coverage into three desktop jobs, with
   npm, CPM and compiler caches. The Linux job prints GCC line coverage on every PR (no external upload). Sanitizers, fuzzing,
   both CEF compiler variants and optional mddlog qualification run weekly or manually. Superseded runs are cancelled.
