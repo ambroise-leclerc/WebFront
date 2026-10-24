@@ -6,8 +6,17 @@ if(NOT ROOT OR NOT WORK_DIR)
     message(FATAL_ERROR "ROOT and WORK_DIR are required")
 endif()
 
+function(crlf_workflows dir)
+    foreach(workflow BuildAndTest.yml MddlogIntegration.yml)
+        file(READ "${dir}/workflows/${workflow}" text)
+        string(REPLACE "\n" "\r\n" text "${text}")
+        file(WRITE "${dir}/workflows/${workflow}" "${text}")
+    endforeach()
+endfunction()
+
 # Mutate copies by replacing `from` with `to`. A nonempty `expect` requires failure
-# with that diagnostic; an empty one requires success.
+# with that diagnostic; an empty one requires success. An optional CRLF argument
+# exercises both the mutation reader and the checker with Windows line endings.
 function(check_mutation name file from to expect)
     set(dir "${WORK_DIR}/${name}")
     file(REMOVE_RECURSE "${dir}")
@@ -20,6 +29,10 @@ function(check_mutation name file from to expect)
     else()
         set(target "${dir}/workflows/${file}")
     endif()
+    if(ARGV5 STREQUAL "CRLF")
+        crlf_workflows("${dir}")
+    endif()
+    # file(READ) already normalizes CRLF, including in the minimum CMake 3.31.
     file(READ "${target}" text)
     string(FIND "${text}" "${from}" found)
     if(found EQUAL -1)
@@ -27,6 +40,9 @@ function(check_mutation name file from to expect)
     endif()
     string(REPLACE "${from}" "${to}" text "${text}")
     file(WRITE "${target}" "${text}")
+    if(ARGV5 STREQUAL "CRLF")
+        crlf_workflows("${dir}")
+    endif()
     execute_process(COMMAND "${CMAKE_COMMAND}" -DROOT=${ROOT} -DWORKFLOWS_DIR=${dir}/workflows
             -DLANES_FILE=${dir}/lanes.json -DDOC_FILE=${dir}/LOCAL_CI.md -P "${CMAKE_CURRENT_LIST_DIR}/CheckLocalCi.cmake"
         RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
@@ -52,7 +68,10 @@ check_mutation(mddlog-ref MddlogIntegration.yml "ref: 5b43265664d83c3b7135d328f6
 check_mutation(compiler BuildAndTest.yml "clang-23" "clang-24" "clang-23")
 check_mutation(option BuildAndTest.yml "-DENABLE_COVERAGE=ON" "-DENABLE_COVERAGE=OFF" "-DENABLE_COVERAGE=ON")
 check_mutation(ctest-label BuildAndTest.yml "-L web-integration" "-L web" "-L web-integration")
-check_mutation(lane-removed lanes.json "\"id\": \"web-integration-gcc\"" "\"id\": \"web-integration-gcc-2\"" "web-integration-gcc-2")
+check_mutation(lane-removed lanes.json
+    "\"job\": \"web-integration\", \"matrix\": \"gcc\""
+    "\"job\": \"web-integration\", \"matrix\": \"gcc-old\""
+    "no lane for BuildAndTest.yml|web-integration|gcc")
 check_mutation(undocumented-lane LOCAL_CI.md "`sanitizers-thread`" "`sanitizers-tsan`" "sanitizers-thread")
 
 # Compare both directions: additions and removal from either side are drift too.
@@ -116,3 +135,5 @@ check_mutation(quoted-cmake-option BuildAndTest.yml
 check_mutation(reordered-matrix-rows MddlogIntegration.yml
     "- name: address-undefined\n          flags: -fsanitize=address,undefined -fno-sanitize-recover=undefined\n        - name: thread\n          flags: -fsanitize=thread"
     "- name: thread\n          flags: -fsanitize=thread\n        - name: address-undefined\n          flags: -fsanitize=address,undefined -fno-sanitize-recover=undefined" "")
+check_mutation(crlf-workflows BuildAndTest.yml
+    "matrix:\n        compiler: [gcc, clang]" "matrix:\n        compiler: [gcc, clang]" "" CRLF)

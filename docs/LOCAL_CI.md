@@ -61,6 +61,7 @@ textual check.
 
 `LocalCiLanesRejectDrift` mutates copies of the workflows and of the lanes, checking additions, removals, swapped sanitizer rows,
 new axes and lost test invocations. It also checks that harmless argument and matrix-row reordering passes.
+Workflows with CRLF line endings exercise both the mutation reader and the checker; CMake's `file(READ)` already normalizes them.
 
 The command metadata in `lanes.json` uses these fields:
 
