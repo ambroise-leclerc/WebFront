@@ -106,12 +106,10 @@ wf install react@19.3.1 react-dom@19.3.1
 wf dev ui/main.tsx
 wf install jasmine-core@7.0.2
 wf test
-wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0
-wf check
 wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
-`wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; the `@types` packages need an environment of 0.6.2 or later; `wf check` needs a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
+`wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; type checking is a separate step that the pinned 0.6.1 cannot complete: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` need an environment of 0.6.2 or later (start the example with a [local archive](#environment-distribution-and-offline-tests-maintainers)) and a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
 
 The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories

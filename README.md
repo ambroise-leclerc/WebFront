@@ -111,7 +111,7 @@ mkdir -p life-project
 ./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
 ```
 
-Replace the engine option on Linux or Windows. With Visual Studio, add `--config Release` when building and start `build-native\examples\Release\WebFrontLifeDeveloper.exe`. The example reports startup failures with a nonzero exit status. Two extra arguments, `<environment-url> <sha512-integrity>`, select another environment archive, for instance one [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
+Replace the engine option on Linux or Windows. With Visual Studio, add `--config Release` when building and start it with the project directory, `build-native\examples\Release\WebFrontLifeDeveloper.exe life-project` (after `mkdir life-project`). The example reports startup failures with a nonzero exit status. Two extra arguments, `<environment-url> <sha512-integrity>`, select another environment archive, for instance one [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
 ### 3. Create the project and install its dependencies
 
