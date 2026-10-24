@@ -32,7 +32,7 @@ ship developer mode as the distribution configuration: `wf embed` produces the a
 `.d.ts` files and the type packages (`@types/*`, `types` and `typings` fields) of the locked graph. No external compiler is
 installed or required (see [Type checking](#type-checking-wf-check)).
 
-The current environment is **0.6.1**, published as `developer-v0.6.1` and pinned by the release data. Earlier published
+The current environment is **0.6.2**, published as `developer-v0.6.2` and pinned by the release data. Earlier published
 versions stay immutable; the sources advance to 0.6.2, which is not published yet.
 
 ## Minimal C++ application
@@ -61,7 +61,7 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.6.1/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.1`. Published 0.6.0, 0.5.0 and 0.4.1 stay immutable; 0.4.0 and earlier target the former include layout. The configuration pins one version and
+`https://ambroise-leclerc.github.io/WebFront/developer/0.6.2/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.2`; it also installs the archives of `@types` packages and honours a manifest directory. Published 0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable; 0.4.0 and earlier target the former include layout. The configuration pins one version and
 its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install no JavaScript tooling.
@@ -109,7 +109,7 @@ wf test
 wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
-`wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; type checking is a separate step that the pinned 0.6.1 cannot complete: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` need an environment of 0.6.2 or later (start the example with a [local archive](#environment-distribution-and-offline-tests-maintainers)) and a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
+`wf test` needs `test.specs` declared in the manifest and `jasmine-core` installed; type checking is a separate step: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` need a `tsconfig.json` (see the README for a complete one). The terminal does not read `#` comments, so type the commands only.
 
 The starter contains editable TSX/CSS and a recipe of exact versions; `wf init` does not copy it, so list the dependencies with `wf install` and declare `test.specs`, `entries` and `providers` in the manifest yourself.
 `wf create life another-directory` selects a different new destination; existing directories
@@ -456,7 +456,7 @@ the Worker, cancels polling and aborts staged publication; a publication already
 the preview before stopping.
 The last successful preview stays available. Browser disconnection also stops the loop.
 
-`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0 and later; `DeveloperReleaseData.hpp` pins 0.6.1 (published as `developer-v0.6.1`).
+`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0 and later; `DeveloperReleaseData.hpp` pins 0.6.2 (published as `developer-v0.6.2`).
 
 ## Tests (`wf test`)
 
@@ -551,7 +551,7 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 `Incompatible WebFront developer environment: api version 2, this application supports 1`; it never falls back. A change
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
-The pin, for the release and for the bootstrap of the tests (`cmake/WebFrontBootstrap.cmake`), is 0.6.1: 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), and 0.6.1 fixes `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary. The other `WfDriver*` cases run the environment built from the current sources
+The pin, for the release and for the bootstrap of the tests (`cmake/WebFrontBootstrap.cmake`), is 0.6.2: 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), 0.6.1 fixed `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary, and 0.6.2 reads the archives of `@types` packages and the manifest directory. The other `WfDriver*` cases run the environment built from the current sources
 (the `SelfBuild` cases, assembled by the fixture `DeveloperFixtures`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
 report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the

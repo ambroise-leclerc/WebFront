@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The test bootstrap environment is the published 0.6.2 (#354), which installs the archives of `@types` packages and honours a manifest directory; the README walkthrough no longer needs a local archive for `wf check`.
+
 - The manifest and the lock of a project may live in a directory of the project (#354): `DeveloperBootstrapOptions::manifestDirectory` (validated, passed in the bootstrap configuration only when set) and `webfront-wf --manifest-dir`; the environment derives `manifestPath` and `lockPath` from it, and a script still never writes them. Paths inside the manifest stay relative to the project root. Environment 0.6.2, not yet published; an earlier environment ignores the option.
 
 - Simpler repository root (#352): `.devcontainer/` is removed (nothing used it, and its Dockerfile duplicated the toolchain of the CI by hand); `.gitattributes` drops its generic Visual Studio and document rules (177 to 69 lines, the attributes of every tracked file are unchanged); `.clang-tidy` becomes `cmake/clang-tidy.yaml`, passed to clang-tidy by `cmake/StaticAnalyzers.cmake`, and `.clang-format` moves next to the C++ it formats, with a copy in `include/webfront/`, `test/` and `examples/` so that their styles may diverge; the layout guard records why every other root entry stays.
