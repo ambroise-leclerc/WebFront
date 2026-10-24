@@ -13,12 +13,13 @@
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Négociation gzip/identity, décodage validé et budget de sortie. | [4be7358](https://github.com/ambroise-leclerc/WebFront/commit/4be73581ee6b9f569cb6e50aced73e27562aa38c) |
 | 2.0 | 2026-10-19 | Acceptée | Ambroise Leclerc | Génération gzip reproductible avec compresseur intégré ; distributions actualisées et runtime React ESM local. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
 | 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 2.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | `third_party/` est supprimé (#319) : `fflate` provient du paquet verrouillé du projet `wf`, aucune source tierce n'est vendorisée. | [1824271](https://github.com/ambroise-leclerc/WebFront/commit/18242715f14711e7871ea29aeccf661d5bef760f) |
 | 2.2 | 2026-10-24 | Acceptée | Ambroise Leclerc | Les retraits annoncés sont réalisés (#312, #313, #318) : les en-têtes du cœur sont rendus et vérifiés par CMake seul (`js/core/EmbedAsset.cmake`), sans compression ni Node.js ; la compression gzip reproductible est celle de `wf embed`. | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-24** (version 2.2).
+Dernière révision : **2026-10-24** (version 2.3).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
