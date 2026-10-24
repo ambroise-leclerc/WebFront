@@ -94,13 +94,17 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 
 Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)
 (proposed) describes how an adapter may later add its engine's native resource scheme and message channel without replacing that
-path. `WebKitGTKTransportBenchmark` (label `performance`, WebKitGTK builds with Xvfb) compares the two in the same window:
+path. `WebKitGTKTransportBenchmark` (label `performance`, WebKitGTK builds with Xvfb) and `WebView2TransportBenchmark`
+(label `performance`, WebView2 builds on Windows) compare the two in the same window:
 
 ```bash
-ctest --test-dir <build> -R WebKitGTKTransportBenchmark --output-on-failure
+ctest --test-dir <build> -R "WebKitGTKTransportBenchmark|WebView2TransportBenchmark" --output-on-failure
 ```
 
-It prints a table, writes `webkitgtk-transport-benchmark.json` in the build directory of `test/web`, and fails only on a wrong echo.
+Each prints a table, writes `webkitgtk-transport-benchmark.json` or `webview2-transport-benchmark.json` in the build directory
+of `test/web`, and fails only on a wrong echo. WebView2 also measures a shared buffer, which is the only WebView2 direct path
+that beats the HTML bridge at every size; its string messages do not. The ADR gives the figures and the recommended default
+per platform.
 
 ## Build options
 

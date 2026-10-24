@@ -2,16 +2,66 @@
 <meta charset="utf-8">
 <title>WebFront transport benchmark</title>
 <script>
-    // ADR-017 (#363): the same echo calls through the HTML bridge (WebSocket to the embedded server) and through
-    // WebKitGTK's own message channel, which the benchmark registers before navigation. The native channel exists at
-    // document start, the bridge after its handshake: both first calls are timed from the navigation start.
-    const firstDirectCall = window.webkit.messageHandlers.wfecho.postMessage("first").then(() => performance.now());
+    // ADR-017 (#363): the same echo calls through the HTML bridge (WebSocket to the embedded server) and through the
+    // engine's own message channel, which the benchmark registers before navigation as the handlers wfecho and wfrun.
+    // The native channel exists at document start, the bridge after its handshake: both first calls are timed from the
+    // navigation start.
+    //   WebKitGTK: window.webkit.messageHandlers[name].postMessage(text) answers a Promise (message handler with reply).
+    //   WebView2:  window.chrome.webview.postMessage(text) has no reply: the call carries an identifier
+    //              ("id\nname\ntext") and the answer is a message ("id\ntext").
+    // Every byte of [offset, offset + size) is 'x' (offset and size are multiples of 4).
+    function allBytes(bytes, offset, size) {
+        const words = new Uint32Array(bytes.buffer, bytes.byteOffset + offset, size / 4);
+        for (let i = 0; i < words.length; ++i)
+            if (words[i] !== 0x78787878)
+                return false;
+        return true;
+    }
+    let nativeChannel = null, firstDirectCall = null, nativeChannelError = null;
+    try {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.wfecho) {
+            nativeChannel = {engine: "WebKitGTK", call: (name, text) => window.webkit.messageHandlers[name].postMessage(text)};
+        } else if (window.chrome && window.chrome.webview) {
+            const pending = new Map();
+            let next = 0;
+            window.chrome.webview.addEventListener("message", event => {
+                const separator = event.data.indexOf("\n");
+                const id = event.data.slice(0, separator);
+                if (id === "c") {  // a call of C++ through the shared buffer: "c\n<size>"
+                    nativeChannel.sharedCppCall(Number(event.data.slice(separator + 1)));
+                    return;
+                }
+                const resolve = pending.get(id);
+                pending.delete(id);
+                if (resolve)
+                    resolve(event.data.slice(separator + 1));
+            });
+            nativeChannel = {engine: "WebView2", call: (name, text) => new Promise(resolve => {
+                const id = String(++next);
+                pending.set(id, resolve);
+                window.chrome.webview.postMessage(id + "\n" + name + "\n" + text);
+            }), sharedBytes: null};
+            // The shared buffer of WebView2 carries bytes without a copy through a string: [0, capacity) is written by JS,
+            // [capacity, 2 * capacity) by C++. The messages only say that a region is ready.
+            nativeChannel.sharedCppCall = size => {
+                const bytes = nativeChannel.sharedBytes;
+                const ok = allBytes(bytes, bytes.length / 2, size);
+                bytes.fill(120, 0, size);
+                window.chrome.webview.postMessage("0\nwfsharedreply\n" + (ok ? "ok" : "bad"));
+            };
+        } else {
+            throw new Error("no native message channel in this engine");
+        }
+        firstDirectCall = nativeChannel.call("wfecho", "first").then(() => performance.now());
+    } catch (error) {
+        nativeChannelError = error;  // reported by the run below
+    }
 </script>
 <script src="WebFront.js"></script>
 <script>
     "use strict";
     const sizes = [16, 1024, 32768];
-    const iterations = {16: 1000, 1024: 1000, 32768: 200};
+    const iterations = {16: 8000, 1024: 8000, 32768: 800};
     const runs = 5;
     const inFlight = 64;
 
@@ -22,7 +72,7 @@
     };
 
     const bridgeEcho = webFront.cppFunction("echo");
-    const directEcho = payload => window.webkit.messageHandlers.wfecho.postMessage(payload);
+    const directEcho = payload => nativeChannel.call("wfecho", payload);  // used once the channel exists
 
     const checked = (path, payload) => async value => {
         const result = await path(value);
@@ -59,20 +109,50 @@
         });
     }
     async function directCppToJs(size, count) {
-        const nanoseconds = await window.webkit.messageHandlers.wfrun.postMessage(`${size} ${count}`);
+        const nanoseconds = Number(await nativeChannel.call("wfrun", `${size} ${count}`));
         if (!(nanoseconds >= 0))
             throw new Error("C++ to JS direct echo failed");
         return nanoseconds;
     }
 
+    // WebView2 only: the same echo through a buffer shared with C++, sequential (the buffer has one owner at a time).
+    const sharedCapacity = 65536;
+    async function sharedEcho(payload) {
+        const channel = nativeChannel;
+        if (!channel.sharedBytes) {
+            const received = new Promise(resolve => window.chrome.webview.addEventListener(
+                "sharedbufferreceived", event => resolve(new Uint8Array(event.getBuffer())), {once: true}));
+            await channel.call("wfshared", String(2 * sharedCapacity));
+            channel.sharedBytes = await received;
+        }
+        channel.sharedBytes.fill(120, 0, payload.length);
+        if (await channel.call("wfsharedecho", String(payload.length)) !== "ok")
+            throw new Error("C++ rejected the shared buffer");
+        if (!allBytes(channel.sharedBytes, sharedCapacity, payload.length))
+            throw new Error("the shared buffer echo is wrong");
+        return payload;
+    }
+    async function sharedCppToJs(size, count) {
+        await sharedEcho("x".repeat(4));  // makes sure the buffer exists
+        const nanoseconds = Number(await nativeChannel.call("wfsharedrun", `${size} ${count}`));
+        if (!(nanoseconds >= 0))
+            throw new Error("C++ to JS shared echo failed");
+        return nanoseconds;
+    }
+    const sharedAvailable = () => nativeChannel.engine === "WebView2";
+
     const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
-    // One warm-up run, then the median of the per-call means of `runs` runs.
-    async function measure(runOnce) {
+    // One warm-up run, then the median of the per-call means of `runs` runs. The shortest batch is reported: the timer
+    // resolution of the engine must be a small fraction of it.
+    let shortestBatch = Infinity;
+    async function measure(runOnce, count) {
         await runOnce();
         const means = [];
-        for (let run = 0; run < runs; ++run)
+        for (let run = 0; run < runs; ++run) {
             means.push(await runOnce());
+            shortestBatch = Math.min(shortestBatch, means[run] * count / 1000);
+        }
         return median(means);
     }
 
@@ -81,22 +161,26 @@
         return measure(async () => {
             const start = performance.now();
             return (await scheduler(path, payload, count) - start) * 1000 / count;
-        });
+        }, count);
     }
     function cppToJs(path, size, count) {
-        return measure(async () => await path(size, count) / 1000 / count);
+        return measure(async () => await path(size, count) / 1000 / count, count);
     }
 
     function table(results) {
-        const lines = ["direction  mode        bytes   calls   html µs/call   direct µs/call   html/direct"];
+        const lines = ["direction  mode        bytes   calls   html µs/call   direct µs/call   html/direct   shared µs/call   html/shared"];
         for (const row of results)
             lines.push([row.direction.padEnd(10), row.mode.padEnd(10), String(row.bytes).padStart(6),
                         String(row.calls).padStart(7), row.html.toFixed(1).padStart(14),
-                        row.direct.toFixed(1).padStart(16), (row.html / row.direct).toFixed(2).padStart(13)].join(" "));
+                        row.direct.toFixed(1).padStart(16), (row.html / row.direct).toFixed(2).padStart(13),
+                        row.shared === undefined ? "" : row.shared.toFixed(1).padStart(16),
+                        row.shared === undefined ? "" : (row.html / row.shared).toFixed(2).padStart(13)].join(" ").trimEnd());
         return lines.join("\n");
     }
 
     async function benchmarkAll() {
+        if (nativeChannelError)
+            throw nativeChannelError;
         await webFront.ready;
         const bridgeReady = performance.now();
         await bridgeEcho("first");
@@ -106,17 +190,20 @@
             const calls = iterations[size];
             results.push({direction: "js->cpp", mode: "sequential", bytes: size, calls,
                           html: await jsToCpp(sequential, bridgeEcho, size, calls),
-                          direct: await jsToCpp(sequential, directEcho, size, calls)});
+                          direct: await jsToCpp(sequential, directEcho, size, calls),
+                          ...(sharedAvailable() ? {shared: await jsToCpp(sequential, sharedEcho, size, calls)} : {})});
             results.push({direction: "js->cpp", mode: "concurrent", bytes: size, calls,
                           html: await jsToCpp(concurrent, bridgeEcho, size, calls),
                           direct: await jsToCpp(concurrent, directEcho, size, calls)});
             results.push({direction: "cpp->js", mode: "sequential", bytes: size, calls,
                           html: await cppToJs(bridgeCppToJs, size, calls),
-                          direct: await cppToJs(directCppToJs, size, calls)});
+                          direct: await cppToJs(directCppToJs, size, calls),
+                          ...(sharedAvailable() ? {shared: await cppToJs(sharedCppToJs, size, calls)} : {})});
         }
+        const batch = `shortest batch ${shortestBatch.toFixed(1)} ms`;
         const firstCallText = `first call after navigation start: html ${firstCall.html.toFixed(1)} ms ` +
-                              `(bridge ready ${firstCall.bridgeReady.toFixed(1)} ms), direct ${firstCall.direct.toFixed(1)} ms`;
-        const report = {engine: navigator.userAgent, runs, inFlight, unit: "microseconds per call, median of run means",
+                              `(bridge ready ${firstCall.bridgeReady.toFixed(1)} ms), direct ${firstCall.direct.toFixed(1)} ms; ${batch}`;
+        const report = {engine: navigator.userAgent, channel: nativeChannel.engine, runs, shortestBatchMilliseconds: shortestBatch, inFlight, unit: "microseconds per call, median of run means",
                         firstCallMilliseconds: firstCall, results};
         return [JSON.stringify(report, null, 2), `${firstCallText}\n${table(results)}`];
     }

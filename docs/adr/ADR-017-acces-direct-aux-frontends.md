@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-24 | Proposée | Ambroise Leclerc | Décision initiale (#363) : transport direct facultatif par adaptateur, format de l'ADR-003 inchangé, HTML normatif ; premières mesures WebKitGTK et correction de deux coûts du chemin chaud du bridge. | À renseigner après intégration. |
+| 1.0 | 2026-10-24 | Proposée | Ambroise Leclerc | Décision initiale (#363) : transport direct facultatif par adaptateur, format de l'ADR-003 inchangé, HTML normatif ; premières mesures WebKitGTK et WebView2 (dont un tampon partagé), évaluation du défaut par plateforme et correction de deux coûts du chemin chaud du bridge. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -47,7 +47,7 @@ Sur mobile, un serveur local n'est pas aisé :
   l'[ADR-008](ADR-008-contenu-de-confiance-et-origines.md) filtre les navigateurs, pas un processus natif qui forge
   l'en-tête `Origin` : sur un appareil partagé entre applications, un canal propre à la vue réduit cette exposition.
 
-## Mesures (WebKitGTK, 2026-10-24)
+## Mesures (WebKitGTK et WebView2, 2026-10-24)
 
 Le benchmark `test/web/WebKitGTKTransportBenchmark.cpp` (CTest `WebKitGTKTransportBenchmark`, labels
 `web-integration` et `performance`) ouvre une seule fenêtre WebKitGTK servie par WebFront et exécute les mêmes
@@ -60,9 +60,13 @@ Le benchmark `test/web/WebKitGTKTransportBenchmark.cpp` (CTest `WebKitGTKTranspo
 - « concurrent » : 64 appels JavaScript → C++ en vol, ce qui mesure le débit plutôt qu'un aller-retour.
 
 Chaque valeur est la médiane, sur 5 exécutions précédées d'un échauffement, du temps moyen par appel, puis la médiane
-de trois lancements du programme. Machine : AMD Ryzen 9 3900X (24 threads), Linux 7.0, GCC 15.2 en Release,
-WebKitGTK 2.52.6, Xvfb avec rendu logiciel (`GSK_RENDERER=cairo`), comme en CI. La résolution de `performance.now()`
-de WebKit est d'environ une milliseconde ; chaque lot dure au moins 80 ms.
+de trois lancements du programme (`ctest -R WebKitGTKTransportBenchmark` trois fois, en conservant chaque rapport JSON).
+Machine : AMD Ryzen 9 3900X (24 threads), Linux 7.0, GCC 15.2 en Release, WebKitGTK 2.52.6, Xvfb avec rendu logiciel
+(`GSK_RENDERER=cairo`), comme en CI. La résolution de `performance.now()` de WebKit est d'environ une milliseconde.
+Ce tableau a été mesuré avec 1000 appels par lot (200 à 32 Kio) : les lots concurrents de 16 et 1024 octets duraient donc
+12 à 17 ms, soit une incertitude de 6 à 8 % sur ces deux lignes. Le benchmark fait désormais 8000 appels (800 à 32 Kio)
+et son rapport donne la durée du lot le plus court (`shortestBatchMilliseconds`) ; les mesures Linux sont à refaire avec
+ces nombres sur la machine de référence avant l'acceptation de l'ADR.
 
 | Sens | Mode | Octets | Appels | HTML (µs/appel) | Direct (µs/appel) | HTML/direct |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -95,8 +99,71 @@ Lecture :
   hexadécimal de chaque tampon envoyé avant que `log::debug()` ne teste le niveau (21,7 Mo alloués pour un tampon de
   1 Mio). Avant correction, l'écho de 32 Kio coûtait 2380 µs (JS → C++) et 2528 µs (C++ → JS) par le chemin HTML,
   soit 6 fois le chemin direct.
-- Non mesurés : CEF, WebView2, WKWebView, Android et iOS. Aucune extrapolation n'est faite ; ces mesures font partie
-  des critères d'acceptation.
+- Non mesurés : CEF, WKWebView, Android et iOS. Aucune extrapolation n'est faite ; ces mesures font partie des
+  critères d'acceptation. Les mesures WebView2 ci-dessous montrent qu'on ne peut pas extrapoler d'un moteur à l'autre.
+
+### Mesures WebView2 (Windows)
+
+`test/web/WebView2TransportBenchmark.cpp` (CTest `WebView2TransportBenchmark`, label `performance`) exécute la même page
+dans une fenêtre WebView2, avec les mêmes échos. Le canal direct est enregistré sur le navigateur de l'adaptateur avant la
+navigation (observateur interne `Session::viewReady`) :
+
+- **direct** (chaînes) : `chrome.webview.postMessage` / `WebMessageReceived` / `PostWebMessageAsString` pour
+  JavaScript → C++ (WebView2 n'a pas de réponse par appel : l'appel porte un identifiant) et `ExecuteScript` pour C++ → JavaScript ;
+- **partagé** (octets) : un `ICoreWebView2SharedBuffer` de 128 Kio partagé avec la page (`PostSharedBufferToScript`),
+  une moitié écrite par JavaScript, l'autre par C++ ; les messages ne disent que quelle moitié est prête. Séquentiel
+  seulement : le tampon n'a qu'un propriétaire à la fois. Chaque côté vérifie tous les octets reçus.
+
+Machine : CurmudgeonWindows, Windows 11 (10.0.22631), MSVC, Release, WebView2 Evergreen 155.0.4283.62, SDK 1.0.3537.50.
+Même méthode : médiane de 5 exécutions, puis médiane de trois lancements du programme ; le lot le plus court a duré
+82 à 86 ms.
+
+| Sens | Mode | Octets | Appels | HTML (µs/appel) | Direct, chaînes | HTML/direct | Partagé | HTML/partagé |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JS → C++ | séquentiel | 16 | 8000 | 180 | 91 | 2,0 | 92 | 2,0 |
+| JS → C++ | concurrent | 16 | 8000 | 51 | 12 | 4,3 | — | — |
+| C++ → JS | séquentiel | 16 | 8000 | 178 | 225 | 0,8 | 87 | 2,0 |
+| JS → C++ | séquentiel | 1024 | 8000 | 192 | 106 | 1,8 | 94 | 2,0 |
+| JS → C++ | concurrent | 1024 | 8000 | 52 | 21 | 2,5 | — | — |
+| C++ → JS | séquentiel | 1024 | 8000 | 191 | 246 | 0,8 | 87 | 2,2 |
+| JS → C++ | séquentiel | 32768 | 800 | 651 | 953 | 0,7 | 112 | 5,8 |
+| JS → C++ | concurrent | 32768 | 800 | 344 | 484 | 0,7 | — | — |
+| C++ → JS | séquentiel | 32768 | 800 | 672 | 1210 | 0,6 | 106 | 6,3 |
+
+Le premier appel possible survient 90 à 109 ms après le début de la navigation par le bridge (connexion prête à 89 à
+108 ms), 83 à 98 ms par le canal direct : ici encore la page vient du serveur HTTP.
+
+Lecture :
+
+- Sous WebView2, le canal de messages en chaînes **n'est pas plus rapide que le HTML** dès que les messages grossissent
+  (JSON/UTF-16 aux deux extrémités, 1,4 à 1,8 fois plus lent à 32 Kio) ni pour C++ → JavaScript
+  (`ExecuteScript` réanalyse un script à chaque appel). Il ne gagne que pour les petits appels JavaScript → C++
+  (un facteur 2) et en débit concurrent de petits messages (2,5 à 4,3).
+- Seul le tampon partagé, qui évite toute conversion par une chaîne, est partout plus rapide et presque indépendant de
+  la taille (de 87 à 112 µs de 16 octets à 32 Kio), soit 2 fois le HTML pour les petits messages et 6 fois à 32 Kio. Un
+  transport direct WebView2 doit donc être conçu autour de lui, pas autour de `PostWebMessageAsString`. Ce
+  benchmark mesure l'échange d'octets, pas encore le codec ni le changement de thread (voir la lecture WebKitGTK).
+- À l'inverse, WebKitGTK gagne même avec des chaînes. Le gain d'un canal direct dépend donc du moteur, de la
+  forme du canal et de la taille, et se mesure par adaptateur.
+
+## Autres possibilités des API natives
+
+Hors des canaux de messages mesurés ci-dessus, les API des moteurs offrent des possibilités que le HTML sur boucle
+locale n'a pas. Seule la première (WebView2) est mesurée ici ; les autres sont lues dans la documentation des moteurs et
+restent à qualifier par un test avant d'être retenues :
+
+| Possibilité | Moteurs | Intérêt pour WebFront | État |
+| --- | --- | --- | --- |
+| Mémoire partagée sans copie | WebView2 (`CreateSharedBuffer`, `PostSharedBufferToScript`) ; CEF (messages de processus à région de mémoire partagée, à confirmer pour la version épinglée) | Messages binaires sans chaîne intermédiaire : 6 fois le HTML à 32 Kio sous WebView2 | WebView2 mesuré |
+| Messages `ArrayBuffer` | Android (`WebMessageCompat` de type `TYPE_ARRAY_BUFFER`, androidx.webkit 1.8.0 et `WEB_MESSAGE_ARRAY_BUFFER`) ; CEF (`CefV8Value::CreateArrayBuffer`) | Porte les octets de l'ADR-003 sans base64 | à qualifier |
+| Script injecté au début du document | WebView2 (`AddScriptToExecuteOnDocumentCreated`), WebKitGTK (`WebKitUserScript`), WKWebView (`WKUserScript`) | Fournit l'objet de canal avant tout script de la page, comme l'exige la décision plus bas | à qualifier |
+| Réponse par appel | WebKitGTK 2.40+ et WKWebView (message handler avec réponse) | Un appel JavaScript → C++ n'a pas à gérer lui-même ses identifiants ; WebView2 n'en a pas (mesuré avec un identifiant) | WebKitGTK mesuré |
+| Réponses de ressources calculées | `WebResourceRequested` (WebView2), `WKURLSchemeHandler`, `CefSchemeHandlerFactory`, `webkit_web_context_register_uri_scheme`, `shouldInterceptRequest` | Sert `fs::Multi` sans socket, avec les mêmes règles de premier fournisseur | à qualifier |
+| Hôte virtuel sur dossier | WebView2 (`SetVirtualHostNameToFolderMapping`) | Plus simple, mais contourne `fs::Multi` : réservé au développement | écarté pour la production |
+| Objets hôtes synchrones | WebView2 (`AddHostObjectToScript`) | Aucun : contredit l'asynchronisme de l'[ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | écarté |
+
+Conclusion de cette comparaison : les gains durables viennent des canaux binaires (tampon partagé, `ArrayBuffer`) et des
+ressources servies sans socket, pas du simple remplacement du WebSocket par un canal de chaînes.
 
 ## Décision
 
@@ -152,6 +219,35 @@ Les futurs frontends Android et iOS seront d'abord directs (ressources et messag
 disponible sur option, pour le débogage par un navigateur ou l'accès distant. Ils satisfont `FrontendType` et
 héritent des scénarios de cycle de vie partagés.
 
+### L'accès direct par défaut des frontends natifs ?
+
+Question posée : puisqu'un frontend natif n'a pas besoin d'un serveur, l'accès direct ne devrait-il pas être son défaut,
+ce qui éviterait les autorisations réseau ? Évaluation, d'après les mesures ci-dessus et la documentation :
+
+- **Autorisations évitées.** Un socket d'écoute, même sur la boucle locale, demande `android.permission.INTERNET` à une
+  application Android, l'exception de trafic en clair (`network_security_config`) à partir de l'API 28 et, sur iOS,
+  l'exception `NSAllowsLocalNetworking` ; l'application est en outre suspendue en arrière-plan. Sur poste de travail,
+  un écouteur lié à `127.0.0.1` ne déclenche en pratique pas l'invite du pare-feu Windows (qui concerne les écouteurs
+  ouverts à toutes les interfaces), mais un antivirus, une stratégie d'entreprise ou un autre processus de l'utilisateur
+  peuvent encore le voir ; le port par défaut `9002` entre aussi en conflit entre deux applications. Ces points sont à
+  vérifier sur chaque plateforme cible et non démontrés par ce benchmark.
+- **Performance.** Elle ne tranche pas : le canal de chaînes de WebView2 est plus lent que le HTML, celui de WebKitGTK plus
+  rapide. Elle ne justifie un défaut direct que si le transport est conçu autour des canaux binaires.
+- **Outils.** L'environnement de développement (terminal, chargement des modules, navigateur système) a besoin du
+  serveur HTTP ; le chemin HTML ne peut donc pas disparaître d'un projet de bureau, et un défaut direct ne vaut que pour
+  la version distribuée.
+
+Recommandation, sans modifier l'état « Proposée » :
+
+| Cible | Défaut recommandé | Condition |
+| --- | --- | --- |
+| Android, iOS | direct | Contrainte de plateforme, pas de choix de performance. |
+| WebView2, WKWebView, WebKitGTK, CEF (distribution embarquée) | HTML jusqu'à preuve, puis direct | Critères 1 à 3 ci-dessous remplis, mesures codec et changement de thread comprises, sans régression de la suite Jasmine ; sous WebView2 seulement avec le tampon partagé. |
+| Navigateur système, clients distants, micro-contrôleurs | HTML | Seul chemin existant. |
+
+Dans tous les cas, le chemin HTML reste disponible par une option explicite, et le choix du défaut est une décision
+d'adaptateur qui ne change ni l'API applicative ni le format.
+
 ## Critères d'acceptation
 
 Chacun fera l'objet d'une issue dédiée :
@@ -160,7 +256,8 @@ Chacun fera l'objet d'une issue dédiée :
    les suites existantes passent sans modification de leurs attentes.
 2. Un premier transport direct (WebKitGTK ou WKWebView) passe la suite Jasmine partagée par le canal direct, et le
    benchmark mesure ce transport complet (codec et changement de thread compris) face au chemin HTML.
-3. Les mesures CEF, WebView2 et WKWebView sont ajoutées à cette ADR avec leur configuration.
+3. Les mesures CEF et WKWebView sont ajoutées à cette ADR avec leur configuration (WebKitGTK et WebView2 sont mesurés,
+   les chiffres Linux à refaire avec les nombres d'appels actuels), et le défaut de chaque adaptateur est arrêté d'après elles.
 4. Un prototype Android ou iOS charge ses ressources et échange ses messages sans serveur local.
 
 ## Options écartées et motifs
@@ -206,7 +303,11 @@ Chacun fera l'objet d'une issue dédiée :
   [WebKitGTKSupport.cmake](../../cmake/WebKitGTKSupport.cmake) ; exécution :
   `ctest --test-dir <build> -R WebKitGTKTransportBenchmark --output-on-failure` dans une configuration
   `-DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON` ; le rapport JSON est écrit dans le répertoire de build de
-  `test/web`.
+  `test/web`. La partie commune est dans [TransportBenchmark.hpp](../../test/web/TransportBenchmark.hpp).
+- Benchmark WebView2 : [WebView2TransportBenchmark.cpp](../../test/web/WebView2TransportBenchmark.cpp), enregistrement
+  dans [WebView2Support.cmake](../../cmake/WebView2Support.cmake) ; exécution :
+  `ctest --test-dir <build> -R WebView2TransportBenchmark --output-on-failure` dans une configuration
+  `-DWEBFRONT_EMBED_WEBVIEW2=ON -DENABLE_TESTING=ON` sous Windows, avec le runtime Evergreen.
 - Régressions du chemin chaud : `Encoding bridge messages writes nothing to the standard output`
   ([MessagesTests](../../test/unit/MessagesTests.cpp)) et `FrameBufferNotFormattedWhenDebugDisabled`
   ([FrameAllocationTest](../../test/unit/FrameAllocationTest.cpp)).

@@ -7,6 +7,12 @@
   microcontroller targets. The binary format of ADR-003 is carried unchanged; no API or wire change is made. The new
   `WebKitGTKTransportBenchmark` CTest case (labels `web-integration` and `performance`) compares the bridge with WebKitGTK's
   message handlers and `evaluate_javascript` in one window; it fails on a wrong echo, never on a timing, and writes a JSON report.
+  `WebView2TransportBenchmark` does the same on Windows with `WebMessageReceived`, `ExecuteScript` and a shared buffer
+  (`ICoreWebView2SharedBuffer`): WebView2 string messages are slower than the HTML bridge from 32 KiB and for C++ to JS, the
+  shared buffer is 2 to 6 times faster. The figures leave out the codec and the thread hop a real transport adds, so they
+  overstate the gain of a direct path. The benchmark exposed two per-message costs of the bridge, fixed with regression tests:
+  `Messages.hpp` wrote to the standard output for every encoded parameter, and `Frame::addBuffer` formatted a hex dump of
+  every buffer before the log level was tested.
 
 - Local CI matrix, step 1 of 3 (#346): `cmake/local-ci/lanes.json` describes the ten lanes of `BuildAndTest.yml` and `MddlogIntegration.yml` (machine, toolchain, CMake, options, targets, CTest labels), `docs/LOCAL_CI.md` documents them and their differences with GitHub, and the offline CTest cases `LocalCiLanesMatchWorkflows` and `LocalCiLanesRejectDrift` fail when the lanes and the workflows diverge. Command options are compared in both directions for each matrix variant; extra matrix axes and exclusions are rejected explicitly. The orchestrator, the Linux containers and the Windows and macOS sessions follow in steps 2 and 3.
 

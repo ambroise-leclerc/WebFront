@@ -32,8 +32,11 @@ is awkward), while HTTP/WebSocket remains the normative path of every frontend, 
 microcontroller targets. Nothing of this transport is implemented yet; the ADR lists its acceptance criteria.
 
 `WebKitGTKTransportBenchmark` measures both paths in one WebKitGTK window. On the reference machine (Ryzen 9 3900X, Xvfb, Release),
-the HTML bridge adds 50 to 115 µs per sequential round trip up to 1 KiB and divides concurrent throughput by 3.8 to 5.3; the direct
-figures exclude the codec and the thread hop a real transport adds. CEF, WebView2, WKWebView and mobile engines are not measured.
+the HTML bridge adds 50 to 115 µs per sequential round trip up to 1 KiB and divides concurrent throughput by 3.8 to 5.3 on WebKitGTK; the direct
+figures exclude the codec and the thread hop a real transport adds. On WebView2 (Windows 11, Evergreen 155) string messages are slower
+than the HTML bridge from 32 KiB and for C++ to JS, while a shared buffer is 2 to 6 times faster. The Linux figures predate the current
+call counts and are to be measured again. CEF, WKWebView and mobile engines are not measured; the ADR recommends a direct default for
+Android and iOS and HTML until proven for the desktop engines.
 The benchmark exposed two per-message diagnostics costs in the bridge, now fixed with regression tests (32 KiB echo: 2.4 ms to 0.7 ms).
 
 ## Repository layout (#320, epic #303)
