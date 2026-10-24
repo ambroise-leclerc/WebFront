@@ -31,7 +31,7 @@ function(set_project_warnings project_name)
       /wd4714 # '__forceinline' function not inlined: stdexec's coroutine helpers, which are not ours to change
       /analyze # Enable Code Analysis
       /analyze:external- # Disable Code Analysis for external headers
-      /analyze:stacksize 65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB)
+      /analyze:stacksize65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB); one argument, as sccache reads a separate "65536" as a second source file and refuses to cache the compilation
       /permissive- # standards conformance mode for MSVC compiler.
   )
 

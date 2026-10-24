@@ -71,7 +71,7 @@ public:
     /// An explicit project is required before enabling development file operations.
     explicit BasicDeveloperApp(std::filesystem::path projectDirectory = {}, WebFrontConfig config = {})
         : Base(developer::projectConfig(std::move(config), projectDirectory)),
-          project(projectDirectory.empty() ? std::filesystem::path{} : std::filesystem::canonical(projectDirectory)) { }
+          project(projectDirectory.empty() ? std::filesystem::path{} : developer::canonicalDirectory(projectDirectory)) { }
 
     void bootstrap(std::string_view          mode,
                    DeveloperBootstrapOptions options = {.environment = std::string(developer::release::environment),

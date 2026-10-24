@@ -63,7 +63,7 @@ permissions (`JourneyPermissionDenied`), an emptied cache checked offline then r
 Green on CEF (GCC and Clang, public network cut), WebKitGTK, WKWebView and WebView2 in the
 [pull request run](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) and the
 [dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204); the durations are in `docs/TEST_PERFORMANCE.md`.
-ADR-013, ADR-014 and ADR-015 are accepted on these proofs. Known limit: file reads fail beyond 260 characters on Windows (#349).
+ADR-013, ADR-014 and ADR-015 are accepted on these proofs. The developer store reads and writes project paths beyond 260 characters on Windows through the extended-length form (#349).
 
 The journey found two defects, now fixed with regression specs: the installer refused every archive whose root is not
 `package/` (all of `@types/*`, whose root is the package name; `npm` strips the first component whatever it is), and the Life starter

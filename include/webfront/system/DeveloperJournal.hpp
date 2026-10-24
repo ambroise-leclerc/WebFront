@@ -83,14 +83,16 @@ inline void syncDirectory(const std::filesystem::path& directory) {
 /// of each one it creates: the entry of a new directory is only durable once its parent is.
 inline void createDirectoriesDurably(const std::filesystem::path& root, const std::filesystem::path& directory,
                                      const std::function<void(const std::filesystem::path&)>& sync = syncDirectory) {
-    auto current = root;
-    for (const auto& part : directory.lexically_relative(root)) {
+    // The ordinary spellings are compared; each directory takes the extended form once its path is long.
+    auto current = plainPath(root);
+    for (const auto& part : plainPath(directory).lexically_relative(current)) {
         if (part == ".")
             continue;
         current /= part;
-        if (!std::filesystem::exists(current)) {
-            std::filesystem::create_directory(current);
-            sync(current.parent_path());
+        const auto path = extendedPath(current);
+        if (!std::filesystem::exists(path)) {
+            std::filesystem::create_directory(path);
+            sync(path.parent_path());
         }
     }
 }
