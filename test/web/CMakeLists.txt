@@ -207,7 +207,8 @@ if(_browser_tests_available)
         # empty directory: wf create, init, install, check, test, build, embed; the embedded application is then compiled
         # and run from an empty directory. wf preview and wf dev need the page of the terminal: DeveloperBrowserIntegration
         # runs them, on the same engine. Each step is a case of its own, in the order of the fixtures.
-        set(_journey "${CMAKE_CURRENT_BINARY_DIR}/journey-project")
+        # Short: on Windows the cache of jasmine-core holds a path of 262 characters under test/web/journey-project, beyond MAX_PATH.
+        set(_journey "${CMAKE_BINARY_DIR}/jp")
         function(webfront_add_journey_step name status command)
             cmake_parse_arguments(ARG "" "OUTPUT;REQUIRES;PROVIDES" "" ${ARGN})
             webfront_add_driver_test(${name} ${status} "${command}" PROJECT_DIR "${_journey}" OUTPUT "${ARG_OUTPUT}"
