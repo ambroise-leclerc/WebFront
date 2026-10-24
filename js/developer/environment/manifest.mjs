@@ -13,7 +13,8 @@ export let lockPath = lockFileName;
 /** The directory of the manifest and the lock, relative to the project root: "" (the root) or a safe relative path. */
 export function checkManifestDirectory(directory) {
     if (directory === undefined || directory === '') return '';
-    if (typeof directory !== 'string' || directory.endsWith('/') || isUnsafe(directory))
+    // .webfront/ belongs to wf (cache, packages, preview), which replaces whole directories there.
+    if (typeof directory !== 'string' || directory.endsWith('/') || isUnsafe(directory) || directory === '.webfront' || directory.startsWith('.webfront/'))
         throw new Error(`Unsafe manifest directory: ${directory}`);
     return directory;
 }

@@ -311,7 +311,7 @@ describe('The project manifest', () => {
         });
 
         it('a directory that is absolute, has an empty or dot component or leaves the project is refused and changes nothing', () => {
-            for (const unsafe of ['/etc', 'a//b', 'a/', '../outside', 'a/../b', './wf', 'a\\b', 'C:/wf', 7])
+            for (const unsafe of ['/etc', 'a//b', 'a/', '../outside', 'a/../b', './wf', 'a\\b', 'C:/wf', '.webfront', '.webfront/developer/preview', 7])
                 throws(() => setManifestDirectory(unsafe), /Unsafe manifest directory/);
             expect(manifestPath).toBe('webfront.project.json');
         });

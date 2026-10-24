@@ -185,7 +185,7 @@ the operations of the `context` API of scripts; they are not a sandbox.
   0.5.0), the manifest takes its roots as dependencies (`^version`, or the range they were installed with).
 - The application may keep the manifest and its lock in a directory of the project instead of its root, from environment
   0.6.2: `DeveloperBootstrapOptions::manifestDirectory = "js/developer"` (or `--manifest-dir js/developer` for the test driver).
-  The directory is relative to the project, `/`-separated, without `..`; a refused value stops the bootstrap. The choice is the
+  The directory is relative to the project, `/`-separated, without `..` and outside `.webfront/` (which `wf` manages); a refused value stops the bootstrap. The choice is the
   application's, never the manifest's, so that a manifest cannot widen the project. Only the two files move: every path
   inside the manifest (entries, scripts, specs, permissions) and the cache `.webfront/` stay relative to the project root,
   and the manifest and the lock remain files that scripts never write. An earlier environment ignores the option and looks

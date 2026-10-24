@@ -343,7 +343,7 @@ SCENARIO("The developer application needs an explicit project and a trusted envi
             }
         }
         THEN("a manifest directory that is absolute, has an empty or dot component, or leaves the project is refused") {
-            for (const auto* directory : {"/etc", "a//b", "a/", "../outside", "a/../b", "a\\b", "C:/wf", "./wf"}) {
+            for (const auto* directory : {"/etc", "a//b", "a/", "../outside", "a/../b", "a\\b", "C:/wf", "./wf", ".webfront", ".webfront/developer/preview"}) {
                 auto options              = trusted;
                 options.manifestDirectory = directory;
                 REQUIRE_THROWS_AS(app.bootstrap("developer", options), std::invalid_argument);

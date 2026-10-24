@@ -48,8 +48,11 @@ inline void validateBootstrap(std::string_view mode, const std::filesystem::path
         throw std::invalid_argument("Developer bootstrap requires an environment URL and trusted SHA-512 integrity");
     if (options.registry && !options.registry->starts_with("https://") && !developer::sameOriginPath(*options.registry))
         throw std::invalid_argument("The developer registry must be an HTTPS URL or a same-origin path");
-    if (!options.manifestDirectory.empty())
-        fs::safeRelativePath(options.manifestDirectory);  // throws std::invalid_argument
+    if (!options.manifestDirectory.empty()) {
+        // .webfront/ belongs to wf (cache, packages, preview), which replaces whole directories there.
+        if (*fs::safeRelativePath(options.manifestDirectory).begin() == ".webfront")
+            throw std::invalid_argument("The manifest directory cannot be inside .webfront");
+    }
 }
 
 /// The environment contract this C++ implements. An environment's environment.json declares the "protocol" it

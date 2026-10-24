@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.31)
 if(NOT ROOT OR NOT GIT_EXECUTABLE OR NOT WORK_DIR)
     message(FATAL_ERROR "ROOT, GIT_EXECUTABLE and WORK_DIR are required")
 endif()
-file(REMOVE_RECURSE "${WORK_DIR}")
+file(REMOVE_RECURSE "${WORK_DIR}" "${WORK_DIR}-archive")
 file(MAKE_DIRECTORY "${WORK_DIR}/include/webfront")
 foreach(entry .gitattributes .github .gitignore AGENTS.md CMakeLists.txt README.md
         webfront-packages.lock.json webfront.project.json cmake docs examples js test)
