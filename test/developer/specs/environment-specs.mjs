@@ -92,6 +92,21 @@ describe('The environment', () => {
         await rejects(downloadPackage('pkg', '1.0.0', {registry: 'https://registry.test/', fetchImpl}), /Integrity check failed/);
     });
 
+    it('reads the archives of DefinitelyTyped, rooted at the package name, and refuses any other mixed root (#316)', async () => {
+        // npm strips the first path component whatever it is: @types/* archives are rooted at "react/", not "package/".
+        const rooted = root => compress(tar(new Map([[`${root}/package.json`, encode({name: '@types/react', version: '19.3.0'})], [`${root}/index.d.ts`, encode('export {};')]])));
+        const download = bytes => downloadPackage('@types/react', '19.3.0', {registry: 'https://registry.test/', fetchImpl: async url =>
+            String(url).endsWith('.tgz') ? new Response(bytes) : Response.json({versions: {'19.3.0': {dist: {tarball: 'https://registry.test/types-react.tgz', integrity: await integrity(bytes)}}}})});
+        for (const root of ['react', 'package']) {
+            const {files} = await download(rooted(root));
+            expect([...files.keys()].sort()).toEqual(['index.d.ts', 'package.json']);
+        }
+        const mixed = compress(tar(new Map([['react/package.json', encode({name: '@types/react', version: '19.3.0'})], ['other/index.d.ts', encode('')]])));
+        await rejects(download(mixed), /Invalid npm tarball root/);
+        await rejects(download(rooted('..')), /Invalid npm tarball root/);
+        await rejects(download(compress(tar(new Map([['package.json', encode({name: '@types/react', version: '19.3.0'})]])))), /Invalid npm tarball root/);
+    });
+
     it('resolves browser conditional exports and rejects private and Node imports', async () => {
         expect(packageEntry({exports: {'.': {browser: './browser.js', default: './node.js'}, './*': './src/*.mjs'}}, '')).toBe('browser.js');
         expect(packageEntry({exports: {'./*': './src/*.mjs'}}, 'sub')).toBe('src/sub.mjs');

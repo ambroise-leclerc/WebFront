@@ -8,12 +8,11 @@
 | 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 | 0.3 | 2026-10-22 | Proposée | Ambroise Leclerc | Provisioning local des paquets (#306) : `wf restore [--offline]`, priorité du registre de l'application sur celui du manifeste. | À renseigner après intégration. |
 | 0.4 | 2026-10-24 | Proposée | Ambroise Leclerc | Retrait du starter PI ; Life reste le seul starter distribué, créé avec `wf create life`. | [8368f59](https://github.com/ambroise-leclerc/WebFront/commit/8368f595af1534ea6670ee6d5582f245f9edc1f2) |
+| 1.0 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification multiplateforme du parcours développeur (#316) : la proposition est acceptée. | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 
 ## Statut et date
 
-**Proposée le 2026-10-20.** L'implémentation expérimentale est soumise à validation ; la
-distribution publique de l'environnement et la qualification des autres moteurs restent ouvertes.
-La date est celle de la proposition, pas une origine historique reconstituée.
+**Acceptée le 2026-10-24** (proposée le 2026-10-20). Preuves (#316) : le parcours `Journey*` (create, init, install, check, test, build, embed, compilation et exécution de l'application embarquée depuis un répertoire vide, permission refusée, cache hors ligne puis restauré) est vert sous CEF (GCC et Clang, réseau public coupé), WebKitGTK, WKWebView et WebView2 ([exécution de la PR](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) et [dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204)) ; un échantillon de treize paquets npm réels (React, TypeScript, `@types/*`, jasmine-core…) est installé depuis le registre local ; la release 0.6.0 est publiée et vérifiée.
 
 ## Contexte
 
@@ -50,9 +49,7 @@ publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi
 ## Alignement sur l'ADR-016
 
 [ADR-016](ADR-016-bootstrap-comme-socle.md) retient cette proposition comme base de l'architecture.
-Elle reste **Proposée** jusqu'aux preuves de #316 : parcours complet validé sous CEF, WebKitGTK,
-WebView2 et WKWebView, compatibilité d'un échantillon de paquets npm, restauration hors ligne et
-publication vérifiée d'une release. Les providers et composants historiques évoqués ici suivent la
+Elle est **Acceptée** depuis les preuves de #316 (voir le statut). Les providers et composants historiques évoqués ici suivent la
 trajectoire de retrait de l'ADR-016.
 
 ## Alternatives et conséquences

@@ -135,7 +135,7 @@ function usePlayback(playing: boolean, run: Flag<boolean>, rate: Flag<number>, s
 }
 
 function Life() {
-    const [cells, setCells] = useState(() => seed('Galaxy'));
+    const [cells, setCells] = useState<Uint8Array>(() => seed('Galaxy'));
     const [generation, setGeneration] = useState(0);
     const [playing, setPlaying] = useState(false);
     const [speed, setSpeed] = useState(8);

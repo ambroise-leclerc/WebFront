@@ -139,9 +139,9 @@ if(_browser_tests_available)
 
         # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
         #     [OUTPUT <regex>] [REPORT <regex>] [EXPECT_FILE <relative path>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
-        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [RENAME_ENTRY <module>] [PINNED] [SLEEP_ENVIRONMENT] [REQUIRES <fixture>] [PROVIDES <fixture>])
+        #     [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [PROJECT_DIR <dir>] [RENAME_ENTRY <module>] [PINNED] [SLEEP_ENVIRONMENT] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
-            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
+            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;PROJECT_DIR;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
             set(options -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
@@ -153,6 +153,10 @@ if(_browser_tests_available)
                     list(APPEND options "-D${option}=${ARG_${option}}")
                 endif()
             endforeach()
+            if(ARG_PROJECT_DIR)
+                # Appended after the default project of _wf_run, which it replaces.
+                list(APPEND options "-DPROJECT=${ARG_PROJECT_DIR}")
+            endif()
             if(ARG_SLEEP_ENVIRONMENT)
                 list(APPEND options -DSLEEP_ENVIRONMENT=ON)
             endif()
@@ -198,6 +202,67 @@ if(_browser_tests_available)
         add_test(NAME WfDriverBadTimeout COMMAND ${_developer_xvfb_prefix} $<TARGET_FILE:webfront-wf> --project "${_wf_project}" --timeout abc -- list)
         set_tests_properties(WfDriverBadTimeout PROPERTIES PASS_REGULAR_EXPRESSION "--timeout expects whole seconds" LABELS "web-integration" TIMEOUT 30)
         set_tests_properties(WfDriverUsage PROPERTIES PASS_REGULAR_EXPRESSION "A wf command is required" LABELS "web-integration" TIMEOUT 30)
+
+        # The developer journey (#316), from the environment built from the sources and the local registry, on one project in an
+        # empty directory: wf create, init, install, check, test, build, embed; the embedded application is then compiled
+        # and run from an empty directory. wf preview and wf dev need the page of the terminal: DeveloperBrowserIntegration
+        # runs them, on the same engine. Each step is a case of its own, in the order of the fixtures.
+        # Short: on Windows the cache of jasmine-core holds a path of 262 characters under test/web/journey-project, beyond MAX_PATH.
+        set(_journey "${CMAKE_BINARY_DIR}/jp")
+        function(webfront_add_journey_step name status command)
+            cmake_parse_arguments(ARG "" "OUTPUT;REQUIRES;PROVIDES" "" ${ARGN})
+            webfront_add_driver_test(${name} ${status} "${command}" PROJECT_DIR "${_journey}" OUTPUT "${ARG_OUTPUT}"
+                REQUIRES "${ARG_REQUIRES}" PROVIDES "${ARG_PROVIDES}")
+        endfunction()
+        # webfront_add_journey_files(<name> <fixture it requires> <fixture it provides>): the files the starter lacks.
+        function(webfront_add_journey_files name requires provides)
+            add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR}/test/fixtures/journey
+                -DPROJECT=${_journey} -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareJourney.cmake)
+            set_tests_properties(${name} PROPERTIES FIXTURES_REQUIRED "${requires}" FIXTURES_SETUP "${provides}"
+                LABELS "web-integration" TIMEOUT 30)
+        endfunction()
+        webfront_add_driver_test(JourneyCreate 0 "create|life" OUTPUT "Created ui\\." FRESH_PROJECT "${_journey}" PROVIDES JourneyCreated)
+        webfront_add_journey_step(JourneyInit 0 "init" OUTPUT "Created webfront.project.json" REQUIRES JourneyCreated PROVIDES JourneyInitialized)
+        # The packages of the starter: the application, its types, the type checker and the specs' runner. @types archives are
+        # rooted at the package name, not at package/.
+        webfront_add_journey_step(JourneyInstall 0
+            "install|react@19.3.1|react-dom@19.3.1|typescript@5.9.3|@types/react@19.3.0|@types/react-dom@19.3.0|jasmine-core@7.0.2"
+            OUTPUT "Installed 8 packages" REQUIRES JourneyInitialized PROVIDES JourneyInstalled)
+        webfront_add_journey_files(JourneyFiles JourneyInstalled JourneyConfigured)
+        webfront_add_journey_step(JourneyCheck 0 "check" OUTPUT "No type errors in 1 project file \\(TypeScript 5\\.9\\.3\\)"
+            REQUIRES JourneyConfigured PROVIDES JourneyChecked)
+        webfront_add_journey_step(JourneyTest 0 "test" OUTPUT "PASSED: 2 specs" REQUIRES JourneyChecked PROVIDES JourneyTested)
+        webfront_add_journey_step(JourneyBuild 0 "build" OUTPUT "Build ready" REQUIRES JourneyTested PROVIDES JourneyBuilt)
+        webfront_add_journey_step(JourneyEmbed 0 "embed|LifeUI" OUTPUT "Generated generated/LifeUI.hpp" REQUIRES JourneyBuilt PROVIDES JourneyEmbedded)
+        # Errors of the same project: a script outside its permissions, a cache that is not there, a lock that is out of date.
+        webfront_add_journey_step(JourneyPermissionDenied 1 "run|denied" OUTPUT "Permission denied: writing ui/main\\.tsx" REQUIRES JourneyEmbedded)
+        add_test(NAME JourneyEmptyCache COMMAND ${CMAKE_COMMAND} -E remove_directory "${_journey}/.webfront/developer/packages")
+        set_tests_properties(JourneyEmptyCache PROPERTIES FIXTURES_REQUIRED JourneyEmbedded FIXTURES_SETUP JourneyCacheEmptied
+            LABELS "web-integration" TIMEOUT 30)
+        webfront_add_journey_step(JourneyOfflineMissing 1 "restore|--offline" OUTPUT "react@19\\.3\\.1 \\(missing\\)" REQUIRES JourneyCacheEmptied PROVIDES JourneyCacheChecked)
+        webfront_add_journey_step(JourneyRestore 0 "restore" OUTPUT "Restored 8 of 8 packages" REQUIRES JourneyCacheChecked PROVIDES JourneyRestored)
+        webfront_add_journey_step(JourneyOfflineVerified 0 "restore|--offline" OUTPUT "Cache verified offline: 8 packages" REQUIRES JourneyRestored)
+
+        # The application of the journey: the header that wf embed generated is compiled into the maintained Life application,
+        # which then runs from an empty directory, without a project root, a bootstrap or a network.
+        add_executable(life_journey EXCLUDE_FROM_ALL LifeEmbeddedTest.cpp)
+        target_link_libraries(life_journey PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+        target_compile_definitions(life_journey PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE}
+            WEBFRONT_LIFE_ASSETS_HEADER="${_journey}/generated/LifeUI.hpp")
+        webfront_setup_frontends_for_target(life_journey)
+        add_test(NAME JourneyEmbeddedBuild COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+            --config $<CONFIG> --target life_journey --parallel 2)
+        # The nested build excludes the other tests, like LifeEmbeddedBuild.
+        set_tests_properties(JourneyEmbeddedBuild PROPERTIES FIXTURES_REQUIRED JourneyEmbedded
+            FIXTURES_SETUP JourneyApplication LABELS "web-integration" TIMEOUT 180 RUN_SERIAL TRUE PROCESSORS 2)
+        set(_journey_command "$<TARGET_FILE:life_journey>")
+        if(_developer_xvfb)
+            set(_journey_command "${_developer_xvfb}" -a ${_journey_command})
+        endif()
+        add_test(NAME JourneyEmbeddedRun COMMAND ${_journey_command})
+        webfront_set_browser_test_properties(JourneyEmbeddedRun "${CMAKE_CURRENT_SOURCE_DIR}" 60)
+        set_tests_properties(JourneyEmbeddedRun PROPERTIES FIXTURES_REQUIRED JourneyApplication)
+        set(_journey_targets life_journey)
 
         # The Jasmine suite of webtest: a fresh copy of the project, its dependencies installed from the local registry,
         # then `wf test` (the WebFront*Integration case) in the pinned bootstrap environment.
@@ -320,7 +385,7 @@ if(_browser_tests_available)
     set_tests_properties(LifeEmbeddedIntegration PROPERTIES FIXTURES_REQUIRED LifeEmbedded)
     if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WKWebView")
         get_filename_component(_developer_wk_plist "${PROJECT_SOURCE_DIR}/test/cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
-        foreach(target developer_integration life_embedded)
+        foreach(target developer_integration life_embedded ${_journey_targets})
             string(REPLACE "_" "-" identifier "${target}")
             set_target_properties(${target} PROPERTIES
                 MACOSX_BUNDLE TRUE

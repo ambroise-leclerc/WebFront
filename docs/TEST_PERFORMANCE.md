@@ -67,6 +67,25 @@ environment starts a sleeping command and publishes a readiness marker; the test
 exit status 71. Compiler startup is covered by the other real-script driver cases and does not consume this watchdog's
 budget. This case retains a real elapsed-time check rather than advancing a test clock.
 
+## Developer journey (#316)
+
+The 15 `Journey*` cases (create, init, install, check, test, build, embed, build and run of the embedded application, and the
+error cases) run one after the other on a single project. Their summed CTest durations in the
+[pull request run](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) and the
+[CEF dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204), and the whole suite in the same run:
+
+| Job | Journey cases | Whole suite |
+| --- | ---: | ---: |
+| Linux GCC / WebKitGTK | 64.1 s | 248.7 s |
+| macOS Clang / WKWebView | 60.8 s | 254.5 s |
+| Windows MSVC / WebView2 | 73.3 s | 269.4 s |
+| Linux GCC / CEF | 44.8 s | 172.7 s |
+| Linux Clang / CEF | 44.9 s | 170.4 s |
+
+The cases run under the same lock as the other browser tests, so the added time is about one minute per job, of which the
+compilation of the embedded application (`JourneyEmbeddedBuild`, serial like `LifeEmbeddedBuild`) is the largest part. The project of the
+journey sits under `<build>/jp`: on Windows the cache of `jasmine-core` holds a path beyond 260 characters in a longer root (#349).
+
 ## Resource audit
 
 | Tests | Scheduling constraint |
@@ -77,6 +96,7 @@ budget. This case retains a real elapsed-time check rather than advancing a test
 | Frontend selection | Its own `frontend-tests` directory; multi-config tests have a separate working directory. Each configure starts with a fresh fixture cache. |
 | CEF option scope | Its own `cef-testing-state` directory; each state still configures separately. |
 | Consumer | Separate `consumer-build` tree; no browser is opened. |
+| Journey | One project directory (`<build>/jp`) chained by CTest fixtures; the browser lock; the nested build is `RUN_SERIAL`. |
 | Browser integration and lifecycle | Keep `RESOURCE_LOCK webfront_port_9002`, including the shared CEF profile and generated browser resources. |
 | Life embedded build | Keep `FIXTURES_REQUIRED DeveloperGenerated`, then the build/run fixture dependencies. `RUN_SERIAL TRUE` excludes every other test while it runs, protecting running executables from regeneration/relinking. `PROCESSORS 2` records the nested build's two workers. |
 
