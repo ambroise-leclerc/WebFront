@@ -91,7 +91,7 @@ let initialized;
  */
 export function esbuild() {
     initialized ??= (async () => {
-        const lock = JSON.parse(await projectText('webfront-packages.lock.json'));
+        const lock = JSON.parse(await projectText('js/developer/webfront-packages.lock.json'));
         const key = lock.packages[lock.roots['esbuild-wasm'].id].key;
         const wasmModule = await WebAssembly.compile(await projectBytes(`.webfront/developer/packages/${key}/esbuild.wasm`));
         await esbuildWasm.initialize({wasmModule, worker: false});

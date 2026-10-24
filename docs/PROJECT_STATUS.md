@@ -53,8 +53,8 @@ case needs no prepared fixtures: configure downloads the registry's packages (#3
 
 ## Self-hosted developer environment (#315, epic #303)
 
-The repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json` at the root, the only files added
-to the closed root list). The pinned 0.6.2 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
+The repository is a `wf` project (`js/developer/webfront.project.json` and `js/developer/webfront-packages.lock.json`, selected by the driver's
+`--manifest-dir js/developer`, so that the root stays short). The pinned 0.6.2 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
 the locked esbuild-wasm bundles the environment in the script's Worker, and `environment.tgz`, the starters,
 `provision.json`, the pinned header and (with `--refresh-bootstrap`) the bootstrap bundles and their checksums come out
 the same twice in a row, and byte for byte as the 0.6.2 that is published (`sha512-SYnS6iRd...`). `site.mjs` stages the Pages

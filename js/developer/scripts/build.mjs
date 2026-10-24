@@ -13,7 +13,8 @@ import {packageRoot} from '../environment/paths.mjs';
 import {tar} from '../tools/archive.mjs';
 import {baseUrl, versionPath, bootstrapHeader, sriOf} from '../tools/distribution.mjs';
 
-const lockPath = 'webfront-packages.lock.json';
+const manifestPath = 'js/developer/webfront.project.json';
+const lockPath = 'js/developer/webfront-packages.lock.json';
 const encoder = new TextEncoder();
 const hexOf = bytes => Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
 
@@ -60,7 +61,7 @@ export default async function (context) {
     const version = distribution.version;
     const publicBase = baseUrl(distribution.baseUrl);
     versionPath(version);
-    const dependencies = JSON.parse(await project.readText('webfront.project.json')).dependencies;
+    const dependencies = JSON.parse(await project.readText(manifestPath)).dependencies;
     const licenses = [
         ['esbuild-wasm', lockedFile(lock, 'esbuild-wasm', 'LICENSE.md')],
         ['semver', lockedFile(lock, 'semver', 'LICENSE')],

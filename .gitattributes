@@ -65,5 +65,5 @@ js/developer/tools/*                           text eol=lf
 
 # The wf project of the repository: its scripts, manifest and lock are hashed inputs of the self-build.
 js/developer/scripts/*                      text eol=lf
-webfront.project.json                       text eol=lf
-webfront-packages.lock.json                 text eol=lf
+js/developer/webfront.project.json          text eol=lf
+js/developer/webfront-packages.lock.json    text eol=lf

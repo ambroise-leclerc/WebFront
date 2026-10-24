@@ -6,7 +6,7 @@ hosts only WebFront's development environment, its pinned Life starter and provi
 The package names in their manifests are identifiers, not a requirement to own or publish npm scopes.
 
 The environment builds itself: the pinned bootstrap environment (`cmake/WebFrontBootstrap.cmake`) runs the scripts of
-`js/developer/scripts/` on the sources of this repository, which is a `wf` project (`webfront.project.json` and its
+`js/developer/scripts/` on the sources of this repository, which is a `wf` project (`js/developer/webfront.project.json` and its
 lock). Building, reviewing and publishing need a C++23 compiler, CMake, the engine of the driver's frontend and `gh`
 and `jq` for the host operations.
 
@@ -19,7 +19,7 @@ works; WebKitGTK on Linux is the one CI uses.
 cmake -S . -B build-driver -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
   -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
 cmake --build build-driver --target webfront-wf
-wf() { xvfb-run -a build-driver/test/web/webfront-wf --project "$PWD" -- "$@"; }
+wf() { xvfb-run -a build-driver/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer -- "$@"; }
 
 wf restore                                    # the locked build dependencies, verified against their SHA-512
 wf run build build-distribution               # environment, starters, provision.json, pinned header
@@ -32,7 +32,7 @@ cmp build-distribution/environment.tgz build-distribution-repeat/environment.tgz
 (`js/developer/environment/bundles.json`, over the inputs of `js/developer/tools/bundle-inputs.json`) and the pinned
 header. The core headers that embed the bootstrap bundle (`DeveloperIndexHtmlData.hpp`, `DeveloperBootstrapData.hpp`) are
 rendered from their sources by CMake, like the others: `cmake --build <dir> --target webfront-embedded-assets`. A script may only write where `permissions.publish`
-of `webfront.project.json` allows: the `build-*` directories and these checked-in outputs.
+of `js/developer/webfront.project.json` allows: the `build-*` directories and these checked-in outputs.
 
 The output of a script reaches the terminal of an environment 0.6.1 or later; with 0.6.0 the command prints
 only its summary. The integrity of an archive is `openssl dgst -sha512 -binary build-distribution/environment.tgz | base64 -w0`,

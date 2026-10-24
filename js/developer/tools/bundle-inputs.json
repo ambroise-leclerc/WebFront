@@ -41,7 +41,7 @@
   "js/developer/tools/archive.mjs",
   "js/developer/tools/distribution.mjs",
   "js/developer/scripts/build.mjs",
-  "webfront.project.json",
+  "js/developer/webfront.project.json",
   "js/core/bootstrap/bootstrap.bundle.mjs",
   "js/developer/environment/packages.bundle.mjs",
   "include/webfront/system/DeveloperReleaseData.hpp"

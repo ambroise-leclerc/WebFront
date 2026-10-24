@@ -589,9 +589,9 @@ blocks the public network after the configure step.
 
 ## Environment distribution and offline tests (maintainers)
 
-The environment builds itself (#315). The repository is a `wf` project: `webfront.project.json` declares the build
+The environment builds itself (#315). The repository is a `wf` project, with its manifest and lock in `js/developer/` (the driver is given `--manifest-dir js/developer` and the project is the repository): `js/developer/webfront.project.json` declares the build
 dependencies (esbuild-wasm, semver, xterm and its fit addon, and the React versions the starters pin), the scripts
-and the permissions (`files` it reads, `publish` where it writes), and `webfront-packages.lock.json` locks them by
+and the permissions (`files` it reads, `publish` where it writes), and `js/developer/webfront-packages.lock.json` locks them by
 SHA-512. The scripts of `js/developer/scripts/` run in the pinned bootstrap environment with the driver `webfront-wf`
 (see [the test driver](#the-test-driver-webfront-wf-and-the-bootstrap-environment)). They prepare
 a tarball that application developers can download. No command publishes anything to a registry automatically.
