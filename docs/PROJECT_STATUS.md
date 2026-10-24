@@ -7,8 +7,7 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 - **Core.** `include/webfront/` holds the C++ library and a closed list of embedded resources (the bridge, the fallback page and
   module, the favicon, the bootstrap page and loader, and the release data), guarded at 150 KiB decoded by `MinimalCoreAssets`
   ([ADR-016](adr/ADR-016-bootstrap-comme-socle.md)). No third-party source is vendored.
-- **Developer environment.** Downloaded and verified by `NativeApp::bootstrap("developer")` (0.6.1 published and pinned; the sources
-  advance to 0.6.2). `wf init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview` and
+- **Developer environment.** Downloaded and verified by `NativeApp::bootstrap("developer")` (0.6.2 published and pinned). `wf init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview` and
   `embed` work on a manifest (`webfront.project.json`) and a lock; TypeScript and TSX are compiled by esbuild-wasm and type-checked
   by `wf check` with the project's locked compiler. The application's own commands join the terminal through `webfront::Commands`.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) and [UI_COMPONENTS](UI_COMPONENTS.md).
@@ -45,7 +44,7 @@ The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.pro
 `react-dom`, `test.specs`). `webtest` is the `webfront-wf` driver (`test/driver/WfDriver.hpp`) plus the C++ callbacks the
 specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
 local registry built by `wf run test-registry` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
-pinned 0.6.1 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
+pinned 0.6.2 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
 composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone.
 The retired Signal Studio page is no longer part of the suite; Life covers React/TSX in the developer integration. The specs now run
 in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
@@ -55,10 +54,10 @@ case needs no prepared fixtures: configure downloads the registry's packages (#3
 ## Self-hosted developer environment (#315, epic #303)
 
 The repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json` at the root, the only files added
-to the closed root list). The pinned 0.6.1 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
+to the closed root list). The pinned 0.6.2 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
 the locked esbuild-wasm bundles the environment in the script's Worker, and `environment.tgz`, the starters,
 `provision.json`, the pinned header and (with `--refresh-bootstrap`) the bootstrap bundles and their checksums come out
-the same twice in a row, and byte for byte as the 0.6.1 that is published (`sha512-wBYPxKJQ...`). `site.mjs` stages the Pages
+the same twice in a row, and byte for byte as the 0.6.2 that is published (`sha512-SYnS6iRd...`). `site.mjs` stages the Pages
 site and refuses to change a published version; `pin.mjs` checks the pin against the published archive; `pages.sh` and
 `archive-release.sh` do the host operations with `gh`. The `DeveloperDistribution.yml` jobs `wf-package` and `publish`, and
 the actions `wf-driver` and `remove-node`, run only on GitHub.
@@ -158,7 +157,7 @@ published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimenta
 
 ## CI regression scope (2026-10-24)
 
-- Developer sources advance to 0.6.2; the release and test-bootstrap pins stay on the immutable published 0.6.1.
+- Developer environment 0.6.2 is published (`developer-v0.6.2`); the release and test-bootstrap pins name it.
 - The retired PI starter, its sources and its distribution archive are removed. Life is the maintained starter and covers
   React/TSX, preview, bitset calls, reproducible embedding and an offline executable without developer callbacks.
   Retired Signal Studio application regressions are also removed.

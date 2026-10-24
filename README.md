@@ -185,7 +185,7 @@ The builds remove TypeScript types without checking them; `wf check` runs the Ty
 }
 ```
 
-The type packages come next: installing `@types/react` and `@types/react-dom` needs an environment from the sources (0.6.2, not yet published: the pinned 0.6.1 refuses their archives), which you can [build and pass to the example](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers). With it, `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
+The type packages come next: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
 
 ### 5. Try the result
 
