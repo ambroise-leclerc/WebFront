@@ -130,7 +130,7 @@ public:
         auto& size = tx.files[relative.generic_string()];
         if (offset != size)
             throw std::invalid_argument("Non-sequential developer write");
-        const auto target = tx.staging / relative;
+        const auto target = extendedPath(tx.staging / relative);
         std::filesystem::create_directories(target.parent_path());
         std::ofstream file(target, std::ios::binary | std::ios::app);
         file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
@@ -398,7 +398,7 @@ private:
 
     // The staging area and the destinations of unfinished transactions are off limits.
     void requireFreeDestination(const std::filesystem::path& resolved, const std::filesystem::path& staging) const {
-        if (resolved == root || related(resolved, staging))
+        if (plainPath(resolved) == plainPath(root) || related(resolved, staging))
             throw std::invalid_argument("Invalid publication destination");
         requireNoOverlap(resolved);
     }

@@ -796,3 +796,29 @@ SCENARIO("A project directory is listed without leaving the project") {
         }
     }
 }
+
+SCENARIO("A project path beyond the 260 characters of Windows is published and read like any other") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("a destination whose absolute path exceeds MAX_PATH") {
+        std::string directory = "deep";
+        while (project.path().native().size() + directory.size() < 300)
+            directory += "/" + std::string(40, 'd');
+        const auto destination = directory + "/file.txt";
+        WHEN("a file is published there") {
+            const auto id = store.begin(destination, false);
+            store.write(id, "output", 0, bytes("long"));
+            store.commit(id);
+            THEN("it can be read back and replaced") {
+                REQUIRE(read(store, destination) == "long");
+                const auto second = store.begin(destination, false);
+                store.write(second, "output", 0, bytes("longer"));
+                store.commit(second);
+                REQUIRE(read(store, destination) == "longer");
+            }
+            THEN("a path escaping the project is still refused") {
+                REQUIRE_THROWS_AS(store.read(directory + "/../../../../../../../../../../../../../../../../../outside", 0), std::invalid_argument);
+            }
+        }
+    }
+}

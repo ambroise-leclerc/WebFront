@@ -84,7 +84,7 @@ error cases) run one after the other on a single project. Their summed CTest dur
 
 The cases run under the same lock as the other browser tests, so the added time is about one minute per job, of which the
 compilation of the embedded application (`JourneyEmbeddedBuild`, serial like `LifeEmbeddedBuild`) is the largest part. The project of the
-journey sits under `<build>/jp`: on Windows the cache of `jasmine-core` holds a path beyond 260 characters in a longer root (#349).
+journey sits under `<build>/jp`, a short root kept from before the developer store handled paths beyond 260 characters on Windows (#349).
 
 ## Resource audit
 
