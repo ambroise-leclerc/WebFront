@@ -822,3 +822,26 @@ SCENARIO("A project path beyond the 260 characters of Windows is published and r
         }
     }
 }
+
+SCENARIO("A group of files beyond the 260 characters of Windows is published together") {
+    TemporaryDirectory project;
+    developer::Store   store{project.path()};
+    GIVEN("two destinations in directories that do not exist yet, with absolute paths beyond MAX_PATH") {
+        std::string directory = "deep";
+        while (project.path().native().size() + directory.size() < 300)
+            directory += "/" + std::string(40, 'd');
+        const std::vector<std::string> paths{directory + "/a.txt", directory + "/b.txt"};
+        WHEN("they are published as one group") {
+            const auto first  = store.begin(paths[0], false);
+            const auto second = store.begin(paths[1], false);
+            store.write(first, "output", 0, bytes("one"));
+            store.write(second, "output", 0, bytes("two"));
+            store.commitGroup({first, second}, paths, store.state(paths));
+            THEN("both are readable and no journal remains") {
+                REQUIRE(read(store, paths[0]) == "one");
+                REQUIRE(read(store, paths[1]) == "two");
+                REQUIRE_FALSE(journalsRemain(project.path() / ".webfront/developer/journal"));
+            }
+        }
+    }
+}
