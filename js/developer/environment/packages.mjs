@@ -26,7 +26,7 @@ async function resolveRoots(specifications, visit) {
     return roots;
 }
 
-// A distinct node per exact version; edges are retained instead of flattening node_modules.
+// A distinct node per exact version; edges are retained instead of flattening the graph into one directory.
 export async function resolvePackages(specifications, options = {}) {
     const fetchPackage = pinnedDownloader(options);
     const state = {nodes: {}, downloads: new Map(), total: 0};

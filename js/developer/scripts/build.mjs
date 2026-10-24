@@ -3,15 +3,15 @@
 //   wf run js/developer/scripts/build.mjs [<output directory>] [--refresh-bootstrap]
 //
 // The compiler is the locked esbuild-wasm of webfront.project.json, run in the script's Worker; the files it reads are
-// the project's and the locked packages'. With --refresh-bootstrap, the checked-in bootstrap bundles, their checksums
-// and the core headers that embed them are regenerated too.
+// the project's and the locked packages'. With --refresh-bootstrap, the checked-in bootstrap bundles, their checksums and
+// the pinned header are regenerated too; the core headers that embed the bundles come from the CMake target
+// webfront-embedded-assets (js/core/EmbedAsset.cmake).
 import * as esbuild from 'esbuild-wasm';
 import {virtualPlugin} from '../environment/bundler.mjs';
 import {compress} from '../environment/embed.mjs';
 import {packageRoot} from '../environment/paths.mjs';
 import {tar} from '../tools/archive.mjs';
 import {baseUrl, versionPath, bootstrapHeader, sriOf} from '../tools/distribution.mjs';
-import {renderAsset} from '../tools/asset-header.mjs';
 
 const lockPath = 'webfront-packages.lock.json';
 const encoder = new TextEncoder();
@@ -111,8 +111,6 @@ export default async function (context) {
         for (const path of JSON.parse(await project.readText('js/developer/tools/bundle-inputs.json')))
             inputs[path] = hexOf(await crypto.subtle.digest('SHA-256', await read(path)));
         await write('js/developer/environment/bundles.json', JSON.stringify(inputs, null, 2) + '\n');
-        for (const [source, name] of [['js/core/bootstrap/index.html', 'DeveloperIndexHtmlData'], ['js/core/bootstrap/bootstrap.bundle.mjs', 'DeveloperBootstrapData']])
-            await write(`include/webfront/system/${name}.hpp`, renderAsset(await read(source), name));
     }
     context.console.log(`Environment: ${output}/environment.tgz\nIntegrity: ${integrity}\nStarters: ${Object.keys(starters).join(', ')}`);
 }

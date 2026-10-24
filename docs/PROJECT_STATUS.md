@@ -19,42 +19,61 @@ fetched React from npm, ran the PI and Life previews and generated both provider
 The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.project.json`: `jasmine-core`, `react`,
 `react-dom`, `test.specs`). `webtest` is the `webfront-wf` driver (`test/driver/WfDriver.hpp`) plus the C++ callbacks the
 specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
-local registry of `WEBFRONT_DEVELOPER_FIXTURES` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
+local registry built by `wf run test-registry` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
 pinned 0.6.1 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
 composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone; the Signal Studio page is a
 JSX module built by esbuild-wasm with the locked React and rendered in the runner frame by the specs. The specs now run
 in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
 by the `path-encoding` lifecycle case, and `webtest` also checks that C++ observed every call the specs make. The Jasmine
-case is registered only with `WEBFRONT_DEVELOPER_FIXTURES`; the registry fixtures are still produced by the Node tools
-(#318, #319). The embedded Jasmine, React and Babel providers, their headers (~2.1 MB), `third_party/{babel,react,jasmine}`, `vendor/update.mjs` and `vendor/check.mjs`, their freshness tests and `EmbeddedGzipContents` were removed by #312 (migration: `wf install` and `wf embed`, see `docs/EMBEDDED_ASSETS.md`); the HTTP gzip and identity negotiation tests use a neutral fixture module.
+case needs no prepared fixtures: configure downloads the registry's packages (#318). The embedded Jasmine, React and Babel providers, their headers (~2.1 MB), `third_party/{babel,react,jasmine}`, `vendor/update.mjs` and `vendor/check.mjs`, their freshness tests and `EmbeddedGzipContents` were removed by #312 (migration: `wf install` and `wf embed`, see `docs/EMBEDDED_ASSETS.md`); the HTTP gzip and identity negotiation tests use a neutral fixture module.
 
 ## Self-hosted developer environment (#315, epic #303)
 
 The repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json` at the root, the only files added
 to the closed root list). The pinned 0.6.1 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
 the locked esbuild-wasm bundles the environment in the script's Worker, and `environment.tgz`, the starters,
-`provision.json`, the pinned header and (with `--refresh-bootstrap`) the bootstrap bundles, their checksums and the core
-headers come out byte for byte as from the Node.js build, twice in a row. `site.mjs` stages the Pages site and refuses to
-change a published version; `pin.mjs` checks the pin against the published archive; `embed-core.mjs` regenerates the six core headers (the same bytes as the
-CMake target `webfront-embedded-assets`); `pages.sh` and `archive-release.sh` do the host operations with `gh`. Verified locally (WebKitGTK, GCC 15) with `node`, `nodejs`, `npm`, `npx` and `corepack`
-absent from `PATH`: configure and build of the driver with `-DWEBFRONT_REQUIRE_NODE=OFF`, `wf restore` of the lock from the
-public registry, two builds with the same bytes as the Node.js build, the refresh, the staging of the site and the pin
-check; CTest `SelfBuild*` (15 cases) covers the same offline, and the whole suite passes locally (299 cases, WebKitGTK). The sources build 0.6.1, which fixes `runNonInteractive`
-dropping what a command wrote; it is published as 0.6.1, which `DeveloperReleaseData.hpp` and the bootstrap of the tests pin.
+`provision.json`, the pinned header and (with `--refresh-bootstrap`) the bootstrap bundles and their checksums come out
+the same twice in a row, and byte for byte as the 0.6.1 that is published (`sha512-wBYPxKJQ...`). `site.mjs` stages the Pages
+site and refuses to change a published version; `pin.mjs` checks the pin against the published archive; `pages.sh` and
+`archive-release.sh` do the host operations with `gh`. The `DeveloperDistribution.yml` jobs `wf-package` and `publish`, and
+the actions `wf-driver` and `remove-node`, run only on GitHub.
 
-Not done here, by design: publishing 0.6.1 (a maintainer operation with the `developer-v0.6.1` tag), deleting the Node.js
-tools and the comparison job (#318, after the proof from an empty cache with the pinned environment), the registry of real
-tarballs downloaded by CMake that lets `wf restore` replace `wf install` in the tests (#319), and the `BuildAndTest.yml`
-fixtures, which are still provisioned with Node.js. The inventory is `docs/NODE_TOOLS_MIGRATION.md`. The workflow changes
-(`DeveloperDistribution.yml`: `wf-package`, `publish`; the actions `wf-driver` and `remove-node`) run only on
-GitHub: they were checked by running their shell steps locally, not by a workflow run.
+## Tests, regeneration and CI without Node.js (#318, epic #303)
+
+No path of WebFront depends on a JavaScript runtime or package manager any more: configuring, building, testing, regenerating the embedded assets,
+building the environment, publishing it, and the CI.
+
+- **Provisioning.** With `ENABLE_TESTING=ON`, configure downloads the pinned bootstrap environment and the real packages of the
+  tests' npm registry (`test/web/registry-packages.json`: ten archives, verified against their SHA-512; a wrong digest stops
+  the configure; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace the downloads offline). `WEBFRONT_DEVELOPER_FIXTURES`
+  is gone: the CTest chain builds the registry (`TestRegistry`: `wf run test-registry`), installs the build dependencies
+  from it, builds the environment from the current sources (`SelfBuild*`) and assembles the fixtures of the browser tests
+  (`DeveloperFixtures`). The environment it builds is byte for byte the published 0.6.1.
+- **Tests.** The pure JavaScript tests of the former runner became Jasmine specs in `test/developer/specs/`, run by the
+  repository's own `wf test` (`DeveloperSpecs`, and the `wf-package` job on the real checkout and lock); 86 tests became 84
+  specs because two moved to CMake: the checksums of the bundle inputs (`BundleInputsFresh`, `BundleInputsRejectsChange`) and
+  the command names reserved by the terminal and by `webfront::Commands` (`CommandNamesAgree`). The tests of the asset
+  generator became `EmbeddedAssetGenerator` (CMake, exit status and format), a Catch2 scenario that decodes every core
+  header and compares it with its source, and the per-asset `*AssetFresh` cases. The mapping is in `docs/NODE_TOOLS_MIGRATION.md`.
+- **Regeneration.** The headers of the core are rendered, and checked, by `js/core/EmbedAsset.cmake`, in pure CMake (ADR-016):
+  they must be checkable by a build that has no browser. `wf run embed-core` is gone.
+- **Guard.** `NoNodeDependency` audits every tracked file for imports and APIs of Node, commands of its tools and package
+  managers, their configuration, their requirement in current documentation and the "like node.js" positioning; the exceptions are listed,
+  with their reason, in `test/cmake/NodeGuardExceptions.cmake`. `NoNodeDependencyRejectsInjections` proves it fails on an
+  import of a Node module, a package installation command in a workflow, `engines.node` in a manifest, a Node script nobody calls, an old command in a
+  guide and the other injections, and passes on a registry URL and on a test that checks the rejection of a Node import.
+- **CI.** The Node.js setup steps, the package installation, the npm cache and the `package` job are gone; the desktop, sanitizer and CEF jobs and
+  `wf-package` run `remove-node` (also on Windows and macOS) before anything else.
+
+Verified locally (WebKitGTK, GCC 15) with every JavaScript runtime and package manager absent from `PATH`; see the pull
+request for the figures. The workflow changes were checked by running their shell steps locally, not by a workflow run before
+the pull request.
 
 ## CI test duration (#298, 2026-10-21)
 
-The maintenance asset renderer generates and compares headers in Node, preserving
-all versioned bytes and pinned gzip parameters. Local Babel freshness drops from
-14.75 s to 0.30 s. Tests and asset regeneration require Node; ordinary C++ builds do
-not. CI uses up to four CTest workers, retains timing reports, locks browser ports
+The maintenance asset renderer assembles bounded lines and joins them once, preserving
+all versioned bytes. Local Babel freshness dropped from
+14.75 s to 0.30 s (the renderer is CMake since #318; Babel is gone). CI uses up to four CTest workers, retains timing reports, locks browser ports
 and serializes nested embedded builds against every running test in the same tree.
 Frontend fixtures reuse the parent generator, and the consumer inherits the actual
 test target's compiler cache launcher at generation time.
@@ -137,7 +156,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 
 - `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
   downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do
-  not require Node/npm on application developers' machines.
+  need no JavaScript tooling on application developers' machines.
 - The Game of Life demo (`WebFrontLifeDeveloper`, `wf create life`) uses a compact C++23
   bitset simulation and a spatial React/canvas interface with translucent panels, interactive
   patterns, playback, single step and tempo. The original PI demo remains available. Both cover
@@ -154,7 +173,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 - Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
   configuration. `wf create life` and `wf create pi` create fresh editable projects without
-  overwriting existing files. Maintainer preparation requires Node/npm; consumers do not.
+  overwriting existing files. Maintainer preparation uses `wf` itself (#318); consumers install nothing.
   Version 0.2.0 was served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
   with the same archives retained in the `developer-v0.2.0` prerelease; 0.1.0 and later versions are preserved.
   The live WKWebView smoke test downloaded both starters and the environment from Pages, fetched
@@ -176,10 +195,10 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 - React and React DOM 19.3.1, Babel standalone 8.0.7 and Jasmine 7.0.2 replace the older embedded
   versions; xterm 6.0.0 and Fit 0.11.0 remain current. React now uses a local ESM bundle and the
   automatic JSX transform; Jasmine uses its new single boot script. Editable examples still need
-  no npm install, CDN or JavaScript build step.
+  no package installation, CDN or JavaScript build step.
 - Dependency JavaScript/CSS uses deterministic gzip generated with vendored fflate 0.8.3;
   sources, licenses, pinned maintenance tooling and offline freshness/decode checks are checked in.
-  Node.js is required for tests/asset maintenance only. Identity fallback from #274 also applies to the updated gzip payloads.
+  Identity fallback from #274 also applies to the updated gzip payloads.
 - The CEF-off Release build passes all 239 CTest cases after integrating #274. All 20 WKWebView browser/lifecycle cases
   pass locally, including the actual React page, C++ callback recovery and xterm/Fit resizing.
   Linux CEF/Xvfb and Windows WebView2 coverage runs through their existing CI jobs.

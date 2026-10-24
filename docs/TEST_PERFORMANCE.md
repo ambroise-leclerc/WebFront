@@ -29,7 +29,7 @@ their totals should not be compared as a compiler benchmark.
 
 ## Changes
 
-- The asset renderer assembles bounded lines in Node and joins them once. The
+- The asset renderer assembles bounded lines (in CMake since #318) and joins them once. The
   former CMake loop repeatedly processed a growing string for every 64-bit word.
   All checked-in headers, compression settings and full byte comparisons remain
   the same. No intermediate gzip file is needed. The independent zlib decode
@@ -86,8 +86,8 @@ the profiles. Sanitizer test processes retain their existing runtime settings.
 
 ## Local measurements
 
-Measured on the same Linux workstation with GCC 16.1, CMake 4.2.3, Node 22.22.1
-and Release builds. These are local measurements, not predicted hosted-runner
+Measured on the same Linux workstation with GCC 16.1, CMake 4.2.3 and Release builds. (The Node.js
+renderer measured here has since been replaced by the CMake one.) These are local measurements, not predicted hosted-runner
 results. CEF compilation was also active during these measurements.
 
 | Scope | Before | After |

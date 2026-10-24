@@ -11,7 +11,7 @@ cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release \
 cmake --build build-wkwebview --target WebFrontLifeDeveloper --parallel 2
 mkdir -p life-project/.webfront/developer/preview/provision
 cp build-developer-environment/*.tgz life-project/.webfront/developer/preview/provision/
-integrity=$(node -p "require('./build-developer-environment/provision.json').integrity")
+integrity=$(sed -n 's/^  "integrity": "\(.*\)",$/\1/p' build-developer-environment/provision.json)
 ./build-wkwebview/examples/WebFrontLifeDeveloper "$PWD/life-project" \
   /webfront/developer/preview/provision/environment.tgz "$integrity"
 ```

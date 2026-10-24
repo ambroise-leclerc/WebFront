@@ -4,6 +4,18 @@
 
 ### Added
 
+- Tests, regeneration and CI without a JavaScript runtime or package manager (#318, epic #303). Configuring with `ENABLE_TESTING=ON` downloads, and
+  verifies against their SHA-512, the pinned bootstrap environment and the real packages of the tests' npm registry
+  (`test/web/registry-packages.json`; `-DWEBFRONT_REGISTRY_DIR` for a machine without network access); `wf run test-registry`
+  builds the registry, the environment is built from the current sources and the fixtures are assembled by CTest itself, so
+  `WEBFRONT_DEVELOPER_FIXTURES` and `WEBFRONT_REQUIRE_NODE` are gone. The 86 JavaScript tests became 84 Jasmine specs
+  (`test/developer/specs/`) run by the repository's own `wf test`, plus CMake tests for the bundle checksums and the reserved
+  command names. The headers of the core are rendered and checked by `js/core/EmbedAsset.cmake` in pure CMake (ADR-016
+  v1.3), with a Catch2 scenario that decodes each of them. `NoNodeDependency` audits every file and
+  `NoNodeDependencyRejectsInjections` proves the guard. The Node.js tools, `vendor/package*.json` and the comparison job
+  of *Developer packages* are deleted; every CI job removes the JavaScript runtimes from the runner first. The record of
+  each former tool and test is `docs/NODE_TOOLS_MIGRATION.md`.
+
 - The developer environment builds itself (#315, distribution 0.6.1, published as `developer-v0.6.1` and pinned by `DeveloperReleaseData.hpp`, and by the bootstrap of the tests): the
   repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json`) and the scripts of
   `js/developer/scripts/` run in the pinned bootstrap environment with `webfront-wf`. `build.mjs` bundles the environment

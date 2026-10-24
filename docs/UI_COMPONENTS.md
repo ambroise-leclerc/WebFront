@@ -13,7 +13,7 @@ They are replaced by the developer environment, downloaded and verified by
 | `webfront::Terminal` page and its line editor | The environment's terminal: streaming, Ctrl+C for every command, per-browser sessions, multi-row redraw, CJK and emoji widths, history, completion |
 | `terminal::Shell` and `Terminal::command` | `webfront::Commands` (`<webfront/Commands.hpp>`): coroutine commands, discovered by the environment |
 | `Terminal::extension` browser commands | `wf run` scripts and `wf exec` package entries |
-| `ToolManager`, `wf install/list/remove/open` of tools | `wf install` and `wf restore` of npm packages, locked by `webfront-packages.lock.json` |
+| `ToolManager`, `wf install/list/remove/open` of tools | `wf install` and `wf restore` of browser packages, locked by `webfront-packages.lock.json` |
 
 ## Migrating `terminal::Shell` commands
 

@@ -13,11 +13,12 @@
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Négociation gzip/identity, décodage validé et budget de sortie. | [4be7358](https://github.com/ambroise-leclerc/WebFront/commit/4be73581ee6b9f569cb6e50aced73e27562aa38c) |
 | 2.0 | 2026-10-19 | Acceptée | Ambroise Leclerc | Génération gzip reproductible avec compresseur intégré ; distributions actualisées et runtime React ESM local. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
 | 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 2.2 | 2026-10-24 | Acceptée | Ambroise Leclerc | Les retraits annoncés sont réalisés (#312, #313, #318) : les en-têtes du cœur sont rendus et vérifiés par CMake seul (`js/core/EmbedAsset.cmake`), sans compression ni Node.js ; la compression gzip reproductible est celle de `wf embed`. | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-22** (version 2.1).
+Dernière révision : **2026-10-24** (version 2.2).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -62,16 +63,17 @@ un échec de décodage ou dépassement du budget donne 500.
 
 Les assets embarqués dans `include/webfront/` se limitent à la liste normative de
 [ADR-016](ADR-016-bootstrap-comme-socle.md). `BabelFS`, `ReactFS`, `JasmineFS`, leurs en-têtes
-générés et `third_party/` sont voués au retrait (#312, #319) ; les bibliothèques deviennent des
-paquets npm verrouillés fournis par l'environnement. Jusqu'à ce retrait, les règles de génération
-ci-dessous restent en vigueur et ne doivent pas être étendues à de nouvelles bibliothèques.
+générés ont été retirés (#312) et `third_party/` l'est par #319 ; les bibliothèques sont des
+paquets npm verrouillés fournis par l'environnement. Les en-têtes de la liste normative sont rendus par
+`js/core/EmbedAsset.cmake` (#318), sans compression : les règles de génération gzip ci-dessous décrivent l'historique de la
+décision et ne s'appliquent plus qu'aux providers produits par `wf embed`.
 
 ## Prescriptions d’implémentation et de génération de code
 
 - Que les sources soient modifiées avant régénération ; préserver les fins de ligne LF et les
   licences d’origine.
-- Rafraîchir xterm uniquement avec `cmake/UpdateXterm.cmake` ; suivre `EMBEDDED_ASSETS.md` pour
-  les versions, lockfile et autres distributions.
+- Régénérer les en-têtes du cœur avec la cible `webfront-embedded-assets` ; suivre `EMBEDDED_ASSETS.md`
+  pour les bundles de l'environnement et leurs sommes de contrôle.
 - Que le lancement du programme C++ n’exige ni npm ni connexion réseau.
 - Pour un nouvel asset, tester route, MIME, encodage, taille, lectures partielles et fraîcheur.
 - Pour modifier la négociation, tester gzip, identity, exclusions et flux corrompus ; ne pas

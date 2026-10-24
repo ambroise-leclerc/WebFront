@@ -1,24 +1,17 @@
-// The local npm registry of the tests: packuments and tarballs as plain files, generated reproducibly from pinned
-// versions (the maintainer's npm ci installation) and from synthetic packages for the edge cases. The test
-// application serves the directory from its own origin, so no test reaches the public registry.
-// registryFiles() and syntheticPackages() use only browser APIs, so that wf can generate the fixture itself;
-// reading node_modules and writing the directory are the Node-only part.
-import {tar} from './archive.mjs';
-import {compress} from '../environment/embed.mjs';
-
-/**
- * Pinned packages copied from js/developer/vendor/node_modules, at the versions of its package-lock.json; typescript5
- * is the npm alias of the typescript 5.x that wf check is also tested with. The others are the build dependencies of
- * the environment, which the project at the root of the repository installs to build itself with wf run.
- */
-export const pinnedPackages = ['jasmine-core', 'react', 'react-dom', 'scheduler', 'typescript', 'typescript5',
-    'esbuild-wasm', 'semver', '@xterm/xterm', '@xterm/addon-fit'];
+// The local npm registry of the tests: packuments and tarballs as plain files, generated reproducibly from the pinned real
+// archives (test/web/registry-packages.json, downloaded and verified at configure time) and from synthetic packages for
+// the edge cases. The test application serves the directory from its own origin, so no test reaches the public registry.
+// Everything here uses only browser APIs: build.mjs runs it with wf.
+import {tar} from '../../../js/developer/tools/archive.mjs';
+import {compress} from '../../../js/developer/environment/embed.mjs';
+import {gunzip, readTar} from '../../../js/developer/environment/tarball.mjs';
 
 const encoder = new TextEncoder();
 async function integrity(bytes) {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-512', bytes));
     return 'sha512-' + btoa(String.fromCharCode(...digest));
 }
+const decoder = new TextDecoder();
 const archive = files => compress(tar(new Map([...files].map(([path, bytes]) => [`package/${path}`, bytes]))));
 // The fixture's versions are plain major.minor.patch numbers.
 function compareVersions(a, b) {
@@ -27,6 +20,13 @@ function compareVersions(a, b) {
     return 0;
 }
 const newest = versions => versions.toSorted(compareVersions).at(-1);
+
+/** A real archive, kept byte for byte: its manifest is the package.json inside it. */
+export async function realPackage(bytes) {
+    const entry = readTar(await gunzip(bytes)).find(file => file.path === 'package/package.json');
+    if (!entry) throw new Error('An archive of the registry has no package/package.json');
+    return {manifest: JSON.parse(decoder.decode(entry.bytes)), bytes};
+}
 
 function synthetic(name, version, fields = {}, extra = {}) {
     const manifest = {name, version, type: 'module', main: 'index.js', ...fields};
@@ -90,9 +90,9 @@ export async function registryFiles(packages) {
     const integrities = {};
     for (const [name, versions] of byName(packages)) {
         const described = {};
-        for (const {manifest, files: contents, tampered} of versions) {
+        for (const {manifest, files: contents, bytes: real, tampered} of versions) {
             const file = `${name.replace(/^@/, '').replace('/', '-')}-${manifest.version}.tgz`;
-            const bytes = archive(contents);
+            const bytes = real ?? archive(contents);
             files.set(file, tampered ? archive(new Map([...contents, ['TAMPERED', encoder.encode('changed')]])) : bytes);
             integrities[`${name}@${manifest.version}`] = await integrity(bytes);
             described[manifest.version] = {...manifest, dist: {tarball: `./${file}`, integrity: integrities[`${name}@${manifest.version}`]}};

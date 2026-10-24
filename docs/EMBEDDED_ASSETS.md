@@ -6,7 +6,7 @@ pinned release data (`Developer*Data.hpp`). Each is generated from a readable so
 (including the default favicon, `js/core/favicon.ico`) into a header under `include/webfront/system/`. Libraries such as React, Babel and Jasmine are not
 embedded: they are npm packages that `wf install` locks and downloads (see
 [DEVELOPER_ENVIRONMENT.md](DEVELOPER_ENVIRONMENT.md)), and the tests obtain them from a local registry.
-Normal C++ consumer builds use the checked-in headers and need neither Node.js nor npm.
+Normal C++ consumer builds use the checked-in headers and need nothing but the compiler: the headers are generated, and checked, in pure CMake.
 
 ## Migration
 
@@ -28,30 +28,35 @@ and is 188 KB now.
 
 ## Maintenance
 
-Use Node.js 22.18 or newer (Node 24 in CI) and CMake 3.31 or newer. These tools are needed for
-regeneration and `ENABLE_TESTING=ON` asset checks, not for normal library consumers. From the
-repository root:
+CMake 3.31 or newer is the only tool: regeneration and the asset checks of `ENABLE_TESTING=ON` are CMake scripts, and
+normal library consumers need neither. From the repository root:
 
 ```sh
 # Regenerate the headers from their sources, then verify them offline.
 cmake --build build --target webfront-embedded-assets
-ctest --test-dir build -R 'Asset.*Fresh|EmbeddedAssetGenerator' --output-on-failure --parallel 4
+ctest --test-dir build -R 'Asset.*Fresh|EmbeddedAssetGenerator|BundleInputs|embedded assets of the core' --output-on-failure --parallel 4
 ```
 
-`js/core/EmbedTextAsset.cmake` delegates rendering and exact byte comparison to
-`js/developer/vendor/embed.mjs`. It assembles bounded lines of five 64-bit words and joins them
-once, avoiding the growing-string CMake loop. Generation and checking use the same renderer, without
-intermediate files. `EmbeddedAssetGenerator` covers empty and binary inputs, word boundaries, padding,
-line wrapping and a nonzero status for stale or missing files; a per-asset `*AssetFresh` test attributes
-each stale header. `.gitattributes` keeps sources and headers at LF.
+`js/core/EmbedAsset.cmake` renders a header (identity encoded, five 64-bit words per line, big-endian, the last word padded
+with zeros, `dataSize` excluding the padding) and compares its exact bytes with a checked-in one (`-DCHECK`, so that a header
+with CRLF line ends is stale). It assembles bounded lines and joins them once, avoiding a growing-string CMake loop: the six
+core assets, about 35 KB, take a fraction of a second. Generation and checking share one renderer, without intermediate files.
+`EmbeddedAssetGenerator` (`test/cmake/CheckEmbedAsset.cmake`) covers the exact format, empty and binary inputs, word
+boundaries, padding, a path with spaces, a checkout reached through a symbolic link and a nonzero status for stale or missing
+files; a per-asset `*AssetFresh` test attributes each stale header, and a Catch2 scenario decodes every header with the C++
+data it declares and compares it with the source file. `.gitattributes` keeps sources and headers at LF. The choice of CMake
+over a script run by `wf` is recorded in [ADR-016](adr/ADR-016-bootstrap-comme-socle.md): the headers must be checkable by a
+build that has no browser.
 
-The favicon is binary and small, so `js/core/EmbedBinaryAsset.cmake` renders it (identity encoded, same header format)
-with CMake alone: no Node.js and no compressor. `FaviconAssetFresh` compares the checked-in `FaviconData.hpp` with it.
+The bundles of the environment (`js/core/bootstrap/bootstrap.bundle.mjs`, `js/developer/environment/packages.bundle.mjs`) are
+built by `wf run build <directory> --refresh-bootstrap`. `js/developer/environment/bundles.json` records the SHA-256 of
+each of their inputs (`js/developer/tools/bundle-inputs.json`) and of the bundles themselves; `BundleInputsFresh` fails
+when a source changed without rebuilding them, and `BundleInputsRejectsChange` proves that it does. After a refresh, run the
+`webfront-embedded-assets` target for the headers that embed the bootstrap bundle.
 
-The renderer can pack gzip-compressed bytes (`encoding = "gzip"`, `dataSize` excluding the trailing word
-padding) with the vendored fflate `gzipSync` (level 9, mem 8, mtime 0, no filename, fixed OS byte), so
-the streams are identical across platforms. The current assets are identity encoded because they are
-small. Catch2 covers the serving of gzip assets with a neutral fixture module: clients accepting gzip
+Applications that embed gzip-compressed resources use `wf embed`, which compresses in the environment with the locked
+`fflate` (level 9, mem 8, mtime 0, no filename, fixed OS byte), so the streams are identical across platforms. Catch2 covers the serving of
+gzip assets with a neutral fixture module: clients accepting gzip
 receive the stored representation, other clients accepting identity receive decoded bytes with their
 decoded `Content-Length`. See [HTTP asset encoding](HTTP_ASSETS.md) for negotiation, decoding limits
 and failure responses.
