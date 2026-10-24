@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Simpler repository root (#352): `.devcontainer/` is removed (nothing used it, and its Dockerfile duplicated the toolchain of the CI by hand); `.gitattributes` drops its generic Visual Studio and document rules (177 to 69 lines, the attributes of every tracked file are unchanged); `.clang-tidy` becomes `cmake/clang-tidy.yaml`, passed to clang-tidy by `cmake/StaticAnalyzers.cmake`, and `.clang-format` moves next to the C++ it formats, with a copy in `include/webfront/`, `test/` and `examples/` so that their styles may diverge; the layout guard records why every other root entry stays.
+
 - Documentation of the standalone developer environment (#317, epic #303): the README walkthrough uses `wf create`, `init`, `install`, `dev`, `check`, `test` and `embed` on the pinned environment; `DEVELOPER_ENVIRONMENT.md` opens with the commands, the direct statement of its limits (no sandbox, browser packages only, installation scripts not run) and the maintenance of TypeScript through `wf check`; the 0.4.0 "prepared, not published" text is removed; PROJECT_STATUS starts with the current state; ADR-016 is 1.5.
 
 - Remove the retired PI starter from source distributions and `wf create`; Life remains the maintained React/C++ starter.

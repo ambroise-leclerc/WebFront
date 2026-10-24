@@ -1,6 +1,9 @@
 # The tracked root of the repository is a closed list, so that the README stays visible on the
 # GitHub page, and no third-party source is vendored: libraries are locked npm packages (#319). webfront.project.json and
 # its lock make the repository a wf project: the environment builds itself with wf run (#315).
+# Each entry has to stay at the root (#352): .clang-format sits next to the C++ it formats (include/webfront/, test/, examples/) and
+# .clang-tidy is cmake/clang-tidy.yaml, passed by cmake/StaticAnalyzers.cmake; wf only grants files under the project root, which must contain js/, test/, examples/ and
+# include/; Git, GitHub, CMake and the agents require the others. There is no .devcontainer: the CI is the toolchain reference.
 #   cmake -DROOT=<checkout> [-DGIT_EXECUTABLE=<git>] -P test/cmake/CheckRepositoryLayout.cmake
 cmake_minimum_required(VERSION 3.31)
 
@@ -9,7 +12,7 @@ if(NOT ROOT)
 endif()
 
 set(expected
-    .clang-format .clang-tidy .devcontainer .gitattributes .github .gitignore
+    .gitattributes .github .gitignore
     AGENTS.md CMakeLists.txt README.md webfront-packages.lock.json webfront.project.json
     cmake docs examples include js test)
 
@@ -67,14 +70,14 @@ if(NOT actual STREQUAL expected)
 endif()
 
 # include/ exposes a single namespace directory, which holds headers only (no JavaScript, so that
-# installers need no filter).
+# installers need no filter). Its .clang-format is the only other file: the style of the library, kept next to the headers.
 file(GLOB include_entries LIST_DIRECTORIES true RELATIVE "${ROOT}/include" "${ROOT}/include/*")
 if(NOT include_entries STREQUAL "webfront")
     message(FATAL_ERROR "include/ must contain only webfront/, found: ${include_entries}")
 endif()
 file(GLOB_RECURSE include_files LIST_DIRECTORIES false RELATIVE "${ROOT}/include/webfront" "${ROOT}/include/webfront/*")
 foreach(file IN LISTS include_files)
-    if(NOT file MATCHES "\\.(hpp|h)$")
+    if(NOT file MATCHES "\\.(hpp|h)$" AND NOT file STREQUAL ".clang-format")
         message(FATAL_ERROR "include/webfront must hold headers only: ${file}")
     endif()
 endforeach()

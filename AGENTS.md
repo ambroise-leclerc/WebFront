@@ -24,7 +24,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 - `test/fixtures/`, `test/web/fixtures/`: retained regression fixtures, not public example applications.
 - `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
 - `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
-- `.devcontainer/`: devcontainer and its Dockerfile; `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
+- `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
 - `docs/DEVELOPER_ENVIRONMENT.md`: the reference of the developer environment (`wf` commands, manifest and lock, TypeScript and `wf check`, tests, limits, distribution); `docs/EMBEDDED_ASSETS.md`: the core's embedded resources and their regeneration; `docs/NODE_TOOLS_MIGRATION.md`: where each former Node.js tool went (historical record).
@@ -107,7 +107,7 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 
 ## Coding and testing conventions
 
-- Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `.github/CONTRIBUTING.md`.
+- Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
 - Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
