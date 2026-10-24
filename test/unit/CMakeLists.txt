@@ -80,6 +80,12 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/layout-negative
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
+# The local CI matrix (#346) has to keep describing the lanes of the GitHub workflows.
+add_test(NAME LocalCiLanesMatchWorkflows
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckLocalCi.cmake)
+add_test(NAME LocalCiLanesRejectDrift
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/local-ci-negative
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckLocalCiNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 add_test(NAME FrontendSelection
