@@ -31,6 +31,8 @@ set(NODE_GUARD_EXCEPTIONS
     "docs/CHANGELOG.md|node-config|history of the releases, which names the options that existed"
     # Diagnostics and tests of the rejection of Node APIs.
     "js/developer/environment/typecheck-snapshot.mjs|node-config|the layout of /project/node_modules that the TypeScript module resolver reads: wf check cannot resolve a package without it"
+    "test/cmake/CheckRepositoryLayout.cmake|node-config|names the directory whose tracked presence it rejects, as a vendored source"
+    "test/cmake/CheckRepositoryLayoutNegative.cmake|node-config|tracks such a directory in a scratch repository to prove that the layout guard rejects it"
     "docs/DEVELOPER_ENVIRONMENT.md|node-config|states which directories wf check never lists, the TypeScript layout among them"
     # Data of dependencies.
     "webfront-packages.lock.json|node-command|the lock records the package.json scripts of its dependencies verbatim, and nothing runs them"

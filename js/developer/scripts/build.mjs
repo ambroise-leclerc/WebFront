@@ -66,7 +66,7 @@ export default async function (context) {
         ['semver', lockedFile(lock, 'semver', 'LICENSE')],
         ['xterm', lockedFile(lock, '@xterm/xterm', 'LICENSE')],
         ['xterm Fit addon', lockedFile(lock, '@xterm/addon-fit', 'LICENSE')],
-        ['fflate', 'third_party/fflate/LICENSE'],
+        ['fflate', lockedFile(lock, 'fflate', 'LICENSE')],
     ];
     const notices = [];
     for (const [name, path] of licenses) notices.push(`${name}\n${await project.readText(path)}`);

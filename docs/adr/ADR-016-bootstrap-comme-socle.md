@@ -93,7 +93,7 @@ en-tête par CMake. Le pilote C++ non interactif exécute les scripts d'assembla
 version et intégrité SHA-512 (`test/web/registry-packages.json`), puis servis hors ligne par un registre que `wf run
 test-registry` construit ; aucun test ne dépend du réseau public ensuite. Un garde-fou global (`NoNodeDependency`) audite
 tous les fichiers suivis, ses exceptions étant listées et motivées dans `test/cmake/NodeGuardExceptions.cmake`. Aucune
-source tierce n'est vendorisée et `third_party/` disparaît (#319) ; les bibliothèques sont des paquets npm verrouillés, jamais
+source tierce n'est vendorisée et `third_party/` a disparu (#319) ; les bibliothèques sont des paquets npm verrouillés, jamais
 committés.
 
 ### Sources vendorisées et artefacts générés

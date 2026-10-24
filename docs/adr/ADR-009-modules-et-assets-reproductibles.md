@@ -33,9 +33,9 @@ Que les modules ES natifs demeurent la démonstration de référence et que les 
 locaux servent les ressources. React, Babel, Jasmine et xterm sont distribués avec des versions
 et licences traçables ; React partage un environnement ESM local pour DOM, hooks et JSX.
 
-Les sources lisibles résident dans `src/` et `third_party/` ; les en-têtes générés sont versionnés.
-La maintenance utilise `js/developer/vendor/`, les versions exactes et le lockfile. Les distributions
-JS/CSS volumineuses sont compressées avec le fflate vendored, paramètres fixes dont `mtime=0`.
+Les sources lisibles résident dans `js/` ; les en-têtes générés sont versionnés.
+La maintenance utilise les versions exactes et le lockfile. Les distributions
+JS/CSS volumineuses sont compressées avec le `fflate` verrouillé, paramètres fixes dont `mtime=0`.
 Les petits scripts du bridge et des composants restent en identity. Les contrôles CTest
 régénèrent et comparent hors ligne après configuration des dépendances.
 
@@ -63,7 +63,7 @@ un échec de décodage ou dépassement du budget donne 500.
 
 Les assets embarqués dans `include/webfront/` se limitent à la liste normative de
 [ADR-016](ADR-016-bootstrap-comme-socle.md). `BabelFS`, `ReactFS`, `JasmineFS`, leurs en-têtes
-générés ont été retirés (#312) et `third_party/` l'est par #319 ; les bibliothèques sont des
+générés ont été retirés (#312) et `third_party/` l'a été par #319 ; les bibliothèques sont des
 paquets npm verrouillés fournis par l'environnement. Les en-têtes de la liste normative sont rendus par
 `js/core/EmbedAsset.cmake` (#318), sans compression : les règles de génération gzip ci-dessous décrivent l'historique de la
 décision et ne s'appliquent plus qu'aux providers produits par `wf embed`.

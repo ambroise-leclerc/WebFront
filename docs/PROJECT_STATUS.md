@@ -2,8 +2,8 @@
 
 ## Repository layout (#320, epic #303)
 
-The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js`, `test` and `third_party`
-(reduced to fflate, removed by #319), plus tool configuration files. Headers moved to `include/webfront/` and are included
+The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js` and `test`, plus tool configuration files
+(`third_party/` was removed by #319: no third-party source is vendored). Headers moved to `include/webfront/` and are included
 as `<webfront/WebFront.hpp>`; the former `<WebFront.hpp>`, `<http/...>` or `<system/...>` spellings are
 removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live in `js/core/`
 (bridge, fallback, bootstrap loader and embedding modules) and `js/developer/` (environment, terminal
@@ -212,7 +212,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   versions; xterm 6.0.0 and Fit 0.11.0 remain current. React now uses a local ESM bundle and the
   automatic JSX transform; Jasmine uses its new single boot script. Editable examples still need
   no package installation, CDN or JavaScript build step.
-- Dependency JavaScript/CSS uses deterministic gzip generated with vendored fflate 0.8.3;
+- Dependency JavaScript/CSS uses deterministic gzip generated with the locked fflate 0.8.3;
   sources, licenses, pinned maintenance tooling and offline freshness/decode checks are checked in.
   Identity fallback from #274 also applies to the updated gzip payloads.
 - The CEF-off Release build passes all 239 CTest cases after integrating #274. All 20 WKWebView browser/lifecycle cases

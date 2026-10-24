@@ -63,5 +63,5 @@ and failure responses.
 
 ## Licenses
 
-fflate (MIT, `third_party/fflate/`) and esbuild are maintenance tools; fflate is not embedded in C++
-applications. Package notices travel with the packages that `wf install` downloads.
+fflate (MIT) and esbuild are locked packages of the developer environment (`webfront-packages.lock.json`), not vendored
+sources; fflate is not embedded in C++ applications. Package notices travel with the packages that `wf install` downloads.
