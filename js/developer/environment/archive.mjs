@@ -7,9 +7,13 @@ const installScripts = ['preinstall', 'install', 'postinstall'];
 
 export async function readArchive(bytes) {
     const files = new Map();
+    let root;
     for (const entry of readTar(await gunzip(bytes))) {
-        if (!entry.path.startsWith('package/')) throw new Error('Invalid npm tarball root');
-        const path = safePackagePath(entry.path.slice(8));
+        // npm strips the first path component, whatever its name: the archives of @types/* are rooted at the package name.
+        const slash = entry.path.indexOf('/');
+        const top = entry.path.slice(0, slash);
+        if (slash < 1 || top === '.' || top === '..' || (root ??= top) !== top) throw new Error('Invalid npm tarball root');
+        const path = safePackagePath(entry.path.slice(slash + 1));
         if (files.has(path)) throw new Error(`Duplicate package path: ${path}`);
         files.set(path, entry.bytes);
     }

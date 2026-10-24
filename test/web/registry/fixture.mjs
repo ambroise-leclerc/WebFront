@@ -50,8 +50,9 @@ const newest = versions => versions.toSorted(compareVersions).at(-1);
 
 /** A real archive, kept byte for byte: its manifest is the package.json inside it. */
 export async function realPackage(bytes) {
-    const entry = readTar(await gunzip(bytes)).find(file => file.path === 'package/package.json');
-    if (!entry) throw new Error('An archive of the registry has no package/package.json');
+    // The root is "package/" for npm, the package name for the archives of DefinitelyTyped.
+    const entry = readTar(await gunzip(bytes)).find(file => /^[^/]+\/package\.json$/.test(file.path));
+    if (!entry) throw new Error('An archive of the registry has no <root>/package.json');
     return {manifest: JSON.parse(decoder.decode(entry.bytes)), bytes};
 }
 

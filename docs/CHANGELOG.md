@@ -9,6 +9,9 @@
 
 ### Fixed
 
+- The installer of the developer environment reads npm archives rooted at any single directory, as npm does (#316): the archives of
+  `@types/*` are rooted at the package name and were refused as "Invalid npm tarball root". A mixed or escaping root is still refused.
+- The Life starter type-checks under TypeScript `strict` (`useState<Uint8Array>`), which `wf check` now proves.
 - Script injection works before the page body exists, including a driver handshake completed during HTML parsing.
 
 - `wf test` supports WebKit engines without `AbortSignal.any()` (#335), preserving cancellation/deadline reports and
@@ -25,6 +28,10 @@
 
 ### Added
 
+- Developer journey qualification (#316, epic #303): `Journey*` CTest cases run `wf create`, `init`, `install`, `check`, `test`, `build`
+  and `embed` on one project in an empty directory from the local registry, compile the generated header into the Life application
+  and run it from an empty directory, then check a script under denied permissions and an emptied cache offline and restored. The test
+  registry gains `@types/react`, `@types/react-dom` and `csstype`.
 - `third_party/` is removed (#319, epic #303): `fflate` 0.8.3, the last vendored source, is a locked package of the repository's
   `wf` project, imported by name from `js/developer/environment/embed.mjs`; its notice comes from the installed package.
   The environment archive stays byte for byte identical. The test registry downloads it at configure time, and

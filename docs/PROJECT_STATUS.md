@@ -38,13 +38,39 @@ site and refuses to change a published version; `pin.mjs` checks the pin against
 `archive-release.sh` do the host operations with `gh`. The `DeveloperDistribution.yml` jobs `wf-package` and `publish`, and
 the actions `wf-driver` and `remove-node`, run only on GitHub.
 
+## Developer journey qualification (#316, epic #303)
+
+The whole journey of a developer is a chain of CTest cases (`Journey*`, label `web-integration`) on one project in an empty
+directory, from the environment built from the sources and the local registry, without Node.js, npm or public network after configure
+(the CEF job cuts it):
+
+| Step | Case | Proof |
+| --- | --- | --- |
+| `wf create life` | `JourneyCreate` | the pinned starter is verified and written to `ui/` |
+| `wf init` | `JourneyInit` | the manifest |
+| `wf install` | `JourneyInstall` | eight packages from the registry, among them `@types/react` (archive rooted at `react/`, not `package/`) |
+| `wf check` | `JourneyCheck` | the real Life starter type-checks under TypeScript 5.9 strict |
+| `wf test` | `JourneyTest` | two Jasmine specs in the real engine |
+| `wf build`, `wf embed` | `JourneyBuild`, `JourneyEmbed` | the header `generated/LifeUI.hpp` |
+| compile and run | `JourneyEmbeddedBuild`, `JourneyEmbeddedRun` | the header is compiled into the Life application, which runs from an empty directory |
+| `wf preview`, `wf dev` | `DeveloperBrowserIntegration` | they need the page of the terminal: run in the same engine, with Ctrl+C and the cache |
+
+Error cases: wrong integrity, missing archive, unknown protocol or API version and watchdog (`WfDriverWrongIntegrity`,
+`WfDriverMissingArchive`, `WfDriverIncompatibleProtocol`, `WfDriverIncompatibleApi`, `WfDriverTimeout`), a script outside its
+permissions (`JourneyPermissionDenied`), an emptied cache checked offline then restored (`JourneyOfflineMissing`, `JourneyRestore`,
+`JourneyOfflineVerified`), Ctrl+C on dev, scripts and native commands (`DeveloperBrowserIntegration`).
+
+The journey found two defects, now fixed with regression specs: the installer refused every archive whose root is not
+`package/` (all of `@types/*`, whose root is the package name; `npm` strips the first component whatever it is), and the Life starter
+did not type-check under `strict` with the current declarations (`useState<Uint8Array>`).
+
 ## Tests, regeneration and CI without Node.js (#318, epic #303)
 
 No path of WebFront depends on a JavaScript runtime or package manager any more: configuring, building, testing, regenerating the embedded assets,
 building the environment, publishing it, and the CI.
 
 - **Provisioning.** With `ENABLE_TESTING=ON`, configure downloads the pinned bootstrap environment and the real packages of the
-  tests' npm registry (`test/web/registry-packages.json`: ten archives, verified against their SHA-512; a wrong digest stops
+  tests' npm registry (`test/web/registry-packages.json`: thirteen archives, verified against their SHA-512; a wrong digest stops
   the configure; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace the downloads offline). `WEBFRONT_DEVELOPER_FIXTURES`
   is gone: the CTest chain builds the registry (`TestRegistry`: `wf run test-registry`), installs the build dependencies
   from it, builds the environment from the current sources (`SelfBuild*`) and assembles the fixtures of the browser tests
