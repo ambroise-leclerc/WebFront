@@ -86,6 +86,15 @@ add_test(NAME LocalCiLanesMatchWorkflows
 add_test(NAME LocalCiLanesRejectDrift
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/local-ci-negative
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckLocalCiNegative.cmake)
+# Python is a local-CI driver dependency, not a library/build dependency.
+find_package(Python3 3.10 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME LocalCiOrchestrator
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/cmake/TestLocalCi.py")
+    set_tests_properties(LocalCiOrchestrator PROPERTIES TIMEOUT 60)
+else()
+    message(STATUS "Skipping LocalCiOrchestrator: Python 3.10+ was not found")
+endif()
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 add_test(NAME FrontendSelection
