@@ -90,6 +90,18 @@ their own CTest timeouts.
 WKWebView adds native main-thread, Quit/closure, repeated-opening, initial HTTP failure, stalled-loading
 deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEBVIEW.md#unattended-verification).
 
+## Direct engine access
+
+Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)
+(proposed) describes how an adapter may later add its engine's native resource scheme and message channel without replacing that
+path. `WebKitGTKTransportBenchmark` (label `performance`, WebKitGTK builds with Xvfb) compares the two in the same window:
+
+```bash
+ctest --test-dir <build> -R WebKitGTKTransportBenchmark --output-on-failure
+```
+
+It prints a table, writes `webkitgtk-transport-benchmark.json` in the build directory of `test/web`, and fails only on a wrong echo.
+
 ## Build options
 
 Enabling an engine makes its adapter available; select it explicitly in your application.

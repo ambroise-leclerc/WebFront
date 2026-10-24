@@ -24,6 +24,18 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 
 The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
 
+## Direct frontend access proposal (#363, 2026-10-24)
+
+[ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) is **proposed**: an embedded frontend may later carry the ADR-003 messages and
+serve the composed filesystem through its engine's own API (for Android, iOS and other mobile platforms where a loopback server
+is awkward), while HTTP/WebSocket remains the normative path of every frontend, of the system browser and of future
+microcontroller targets. Nothing of this transport is implemented yet; the ADR lists its acceptance criteria.
+
+`WebKitGTKTransportBenchmark` measures both paths in one WebKitGTK window. On the reference machine (Ryzen 9 3900X, Xvfb, Release),
+the HTML bridge adds 50 to 115 µs per sequential round trip up to 1 KiB and divides concurrent throughput by 3.8 to 5.3; the direct
+figures exclude the codec and the thread hop a real transport adds. CEF, WebView2, WKWebView and mobile engines are not measured.
+The benchmark exposed two per-message diagnostics costs in the bridge, now fixed with regression tests (32 KiB echo: 2.4 ms to 0.7 ms).
+
 ## Repository layout (#320, epic #303)
 
 The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js` and `test`, plus tool configuration files

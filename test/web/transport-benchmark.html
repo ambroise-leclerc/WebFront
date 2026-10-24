@@ -1,0 +1,128 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebFront transport benchmark</title>
+<script>
+    // ADR-017 (#363): the same echo calls through the HTML bridge (WebSocket to the embedded server) and through
+    // WebKitGTK's own message channel, which the benchmark registers before navigation. The native channel exists at
+    // document start, the bridge after its handshake: both first calls are timed from the navigation start.
+    const firstDirectCall = window.webkit.messageHandlers.wfecho.postMessage("first").then(() => performance.now());
+</script>
+<script src="WebFront.js"></script>
+<script>
+    "use strict";
+    const sizes = [16, 1024, 32768];
+    const iterations = {16: 1000, 1024: 1000, 32768: 200};
+    const runs = 5;
+    const inFlight = 64;
+
+    let cppPhaseDone = null;
+    window.benchmark = {
+        echo: value => value,
+        cppPhaseDone: nanoseconds => cppPhaseDone(nanoseconds),
+    };
+
+    const bridgeEcho = webFront.cppFunction("echo");
+    const directEcho = payload => window.webkit.messageHandlers.wfecho.postMessage(payload);
+
+    const checked = (path, payload) => async value => {
+        const result = await path(value);
+        if (result !== payload)
+            throw new Error(`echo of ${payload.length} bytes returned ${String(result).length} bytes`);
+    };
+
+    async function sequential(path, payload, count) {
+        const call = checked(path, payload);
+        for (let i = 0; i < count; ++i)
+            await call(payload);
+        return performance.now();
+    }
+
+    // `count` calls with at most `inFlight` outstanding: measures pipelining rather than one round trip.
+    async function concurrent(path, payload, count) {
+        const call = checked(path, payload);
+        let issued = 0;
+        const worker = async () => {
+            while (issued < count) {
+                ++issued;
+                await call(payload);
+            }
+        };
+        await Promise.all(Array.from({length: inFlight}, worker));
+        return performance.now();
+    }
+
+    // C++ measures these itself, each call awaiting the previous result, and answers the elapsed nanoseconds.
+    function bridgeCppToJs(size, count) {
+        return new Promise((resolve, reject) => {
+            cppPhaseDone = nanoseconds => !(nanoseconds >= 0) ? reject(new Error("C++ to JS bridge echo failed")) : resolve(nanoseconds);
+            webFront.cppFunction("cppToJs")(size, count).catch(reject);
+        });
+    }
+    async function directCppToJs(size, count) {
+        const nanoseconds = await window.webkit.messageHandlers.wfrun.postMessage(`${size} ${count}`);
+        if (!(nanoseconds >= 0))
+            throw new Error("C++ to JS direct echo failed");
+        return nanoseconds;
+    }
+
+    const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+
+    // One warm-up run, then the median of the per-call means of `runs` runs.
+    async function measure(runOnce) {
+        await runOnce();
+        const means = [];
+        for (let run = 0; run < runs; ++run)
+            means.push(await runOnce());
+        return median(means);
+    }
+
+    function jsToCpp(scheduler, path, size, count) {
+        const payload = "x".repeat(size);
+        return measure(async () => {
+            const start = performance.now();
+            return (await scheduler(path, payload, count) - start) * 1000 / count;
+        });
+    }
+    function cppToJs(path, size, count) {
+        return measure(async () => await path(size, count) / 1000 / count);
+    }
+
+    function table(results) {
+        const lines = ["direction  mode        bytes   calls   html µs/call   direct µs/call   html/direct"];
+        for (const row of results)
+            lines.push([row.direction.padEnd(10), row.mode.padEnd(10), String(row.bytes).padStart(6),
+                        String(row.calls).padStart(7), row.html.toFixed(1).padStart(14),
+                        row.direct.toFixed(1).padStart(16), (row.html / row.direct).toFixed(2).padStart(13)].join(" "));
+        return lines.join("\n");
+    }
+
+    async function benchmarkAll() {
+        await webFront.ready;
+        const bridgeReady = performance.now();
+        await bridgeEcho("first");
+        const firstCall = {html: performance.now(), direct: await firstDirectCall, bridgeReady};
+        const results = [];
+        for (const size of sizes) {
+            const calls = iterations[size];
+            results.push({direction: "js->cpp", mode: "sequential", bytes: size, calls,
+                          html: await jsToCpp(sequential, bridgeEcho, size, calls),
+                          direct: await jsToCpp(sequential, directEcho, size, calls)});
+            results.push({direction: "js->cpp", mode: "concurrent", bytes: size, calls,
+                          html: await jsToCpp(concurrent, bridgeEcho, size, calls),
+                          direct: await jsToCpp(concurrent, directEcho, size, calls)});
+            results.push({direction: "cpp->js", mode: "sequential", bytes: size, calls,
+                          html: await cppToJs(bridgeCppToJs, size, calls),
+                          direct: await cppToJs(directCppToJs, size, calls)});
+        }
+        const firstCallText = `first call after navigation start: html ${firstCall.html.toFixed(1)} ms ` +
+                              `(bridge ready ${firstCall.bridgeReady.toFixed(1)} ms), direct ${firstCall.direct.toFixed(1)} ms`;
+        const report = {engine: navigator.userAgent, runs, inFlight, unit: "microseconds per call, median of run means",
+                        firstCallMilliseconds: firstCall, results};
+        return [JSON.stringify(report, null, 2), `${firstCallText}\n${table(results)}`];
+    }
+
+    benchmarkAll()
+        .then(([json, text]) => webFront.cppFunction("report")(true, json, text))
+        .catch(error => webFront.cppFunction("report")(false, "", String(error && error.message || error)))
+        .finally(() => window.close());
+</script>
