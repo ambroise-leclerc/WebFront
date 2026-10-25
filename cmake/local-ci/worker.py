@@ -10,7 +10,7 @@ import sys
 import tarfile
 
 sys.dont_write_bytecode = True
-from orchestrator import command, digest, extract, verifyKit, runProcess, STOP
+from orchestrator import command, digest, extract, verifyKit, runProcess, STOP, validateMatrix
 
 ROOT = Path(__file__).resolve().parent
 
@@ -258,6 +258,9 @@ def main():
         signal.signal(signal.SIGHUP, lambda *_: STOP.set())
     matrix = json.loads((ROOT / "lanes.json").read_text())
     try:
+        validateMatrix(matrix)
+        if args.lane and not any(row["id"] == args.lane for row in matrix["lanes"]):
+            raise ValueError("Unknown lane")
         if os.name == "nt":
             import windows_worker
             return windows_worker.dispatch(args, matrix, ROOT)

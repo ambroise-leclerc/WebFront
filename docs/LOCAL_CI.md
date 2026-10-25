@@ -114,6 +114,10 @@ bundle using a temporary private reference, so detached or unpushed commits work
 side pushes or fetches a remote repository. The remote clone mirrors the private reference before creating independent detached checkouts. Their standalone `.git`
 metadata remains usable at `/workspace` inside a container, without absolute paths into the host clone.
 The orchestration code itself comes from the driver's installation.
+Before any SSH probe or result-file creation, all lane machines must be one of `RyzenLinux`, `CurmudgeonWindows` or `Mac`,
+and lane IDs must be unique lowercase alphanumeric/hyphen names of at most 64 characters, beginning with a letter or digit.
+Workers validate the same metadata and reject unknown requested lanes before using them in paths. SSH also ends its option
+list explicitly before the machine name.
 
 Each run has a unique ID. Logs, `results.json` and per-lane artifact tar files land under
 `build-local-ci/<full-sha>/<run-id>/`, which the existing `build*/` ignore covers. Artifacts include CTest JUnit files,
@@ -238,6 +242,11 @@ Every top-level entry requires provenance. `pack` adds `kit.json`, containing a 
 modifying the input directory. The remote worker checks the outer archive hash before extracting, rejects paths escaping the
 run directory and checks every extracted file (including missing and unexpected files) before loading images. Docker loads the
 supplied archives, verifies the declared image IDs exist, then uses `--pull=never`.
+Windows extraction additionally rejects reserved device names (such as `aux.h` and `nul.c`), alternate data streams,
+trailing dots/spaces and case-insensitive path collisions. Linux workers retain case-sensitive POSIX names, so `Foo`/`foo`
+and ordinary files named `aux.h` remain valid in Linux kits. Absolute paths, drive paths, parent traversal, backslash paths,
+links and exact duplicate archive entries remain forbidden for every target. Extraction onto a Windows filesystem always
+applies the stricter Windows rules, regardless of the kit's target.
 
 ### Linux images and execution
 
@@ -288,6 +297,10 @@ The Windows lane uses the same commit bundle, verified kit inventory, command me
 It runs natively, with Ninja and the latest installed x64 MSVC toolset selected by `vswhere`, in the dedicated account's
 graphical session. It prints the effective compiler banner, CMake and WebView2 versions. CMake must match the lane's pinned
 version exactly; `latest` MSVC is reported, without claiming equality with the current GitHub runner image.
+MSVC deliberately follows the latest installed x64 toolset and WebView2 follows the installed Evergreen runtime, matching the
+workflow's unpinned toolset/runtime policy. Unlike CMake, their versions are recorded rather than compared with an expected
+version: divergence from GitHub requires reviewing those logs. Runtime discovery establishes that a versioned executable
+exists; the browser tests establish actual compatibility. No automatic toolset or Evergreen-version parity is claimed.
 Compilation is capped at four jobs, even when `--jobs` requests more. CTest retains the metadata's full test selection,
 Release configuration, parallelism and `--no-tests=error`, and writes JUnit output.
 
@@ -307,6 +320,16 @@ second SSH channel; the native worker also enforces its deadline and the schedul
 Task stop is confirmed before unregistering and deleting the run. Cancellation failure preserves files for inspection.
 Normal completion unregisters the task, collects the session log, JUnit, `LastTest.log` and CMake diagnostics, then removes
 the checkout (including read-only Git objects). `--keep` preserves files after stopping the task.
+If stop fails, the worker still attempts an artifact snapshot and prints the session log, retains the checkout, and reports
+the stop failure without replacing the original execution error. A collection failure also retains the source diagnostics.
+Snapshots taken while stop is unconfirmed may be incomplete because the task could still be writing files.
+
+Task start/finalization, recovery stop, artifact streaming and run cleanup use a shared per-run cross-process lock. Recovery
+stop collects diagnostics too. A late execution channel cannot overwrite an already collected archive after checkout removal,
+or recreate a run removed by cleanup. Lock files live outside the removable run under `.webfront-local-ci/locks/`; the small
+files are deliberately retained so late channels always lock the same file. Recovery SSH commands allow 90 seconds for
+serialization and cancellation. Actual OpenSSH-for-Windows process behavior on a lost channel remains a host qualification
+item; correctness of collection/cleanup does not depend on receiving SIGTERM at disconnect.
 
 Windows needs its own kit: use `"platform": "windows"`, `"images": {}` in `provision.json`, the same provenance mapping,
 CPM module, exported stdnet/stdexec/Catch2, bootstrap/registry archives, and the pinned WebView2 SDK exported as
@@ -338,6 +361,10 @@ python.exe cmake/local-ci/windows_worker.py --print-firewall-setup
 Apply those commands once as administrator on the dedicated host, after reviewing them. They affect all host users/programs.
 The block deliberately exempts RFC1918 IPv4, loopback, link-local and IPv6 unique-local addresses, preserving private-LAN SSH
 and browser loopback. Consequently **LAN access remains possible**; this is weaker isolation than Linux `--network=none`.
+The complement also deliberately blocks IPv4 multicast (`224.0.0.0/4`), limited broadcast (`255.255.255.255`) and IPv6
+multicast (`ff00::/8`). This may affect DHCP renewal, mDNS, LLMNR and IPv6 neighbor discovery. Qualify those services and SSH
+reachability across lease renewal on the dedicated host before enabling the policy; no multicast/broadcast exception has
+been validated or added. Existing allowance of `fc00::/7` does not imply multicast traffic is allowed.
 Do not expose a public-network proxy on the permitted LAN or loopback. The worker checks the active policy during preparation
 and again in the interactive task, before configure/build/tests. Rule absence, disabled profiles or narrower coverage fails.
 The policy must remain enforced by the owner throughout the run; this native account is not a sandbox for hostile commits.
@@ -361,3 +388,8 @@ uses an SSH/native-session stand-in with real bundles/checkouts and artifacts. O
 binary transport and a real Job Object's child-process termination. These tests do not register real tasks or change firewall
 policy. Running the whole lane over SSH with the dedicated graphical account, cold/warm caches and comparison against GitHub
 remain qualification work; implementation tests are not evidence that the remote host has been provisioned correctly.
+In particular, verify from the actual **non-elevated SSH account** that `Get-NetFirewallProfile` and
+`Get-NetFirewallRule -PolicyStore ActiveStore`, plus every `Get-NetFirewall*Filter` used by `checkNetwork`, can read the
+effective policy. These permissions have not been tested on the dedicated host: denial fails preparation before any build,
+and the worker does not elevate or bypass the check. Also qualify public egress blocking, multicast/broadcast effects,
+MSVC/Evergreen version differences, and a real SSH disconnect followed by recovery collection and cleanup.

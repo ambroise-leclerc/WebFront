@@ -19,7 +19,7 @@ import tarfile
 import threading
 import time
 
-from orchestrator import command, digest, extract, verifyKit, psQuote, STOP, runProcess
+from orchestrator import command, digest, extract, verifyKit, psQuote, STOP, runProcess, validateMatrix
 from worker import ctestCommand
 
 
@@ -206,7 +206,7 @@ def prepare(root, expected):
         raise ValueError("Transferred Windows kit SHA-256 mismatch")
     dependencies = root / "dependencies"
     dependencies.mkdir()
-    extract(root / "kit.tgz", dependencies)
+    extract(root / "kit.tgz", dependencies, windows=True)
     manifest = verifyKit(dependencies)
     if manifest.get("platform") != "windows" or manifest["images"]:
         raise ValueError("Windows needs a platform=windows kit without Docker images")
@@ -313,7 +313,13 @@ def session(root, args, lane):
 
 def collect(root, lane):
     workspace = root / lane
-    with tarfile.open(root / (lane + "-artifacts.tar"), "w") as archive:
+    destination = root / (lane + "-artifacts.tar")
+    # A recovery stop may arrive after the original channel archived and removed
+    # its checkout. Preserve that complete archive rather than replacing it with just a log.
+    if destination.exists() and not workspace.exists():
+        return
+    temporary = destination.with_suffix(".tmp")
+    with tarfile.open(temporary, "w") as archive:
         log = root / (lane + ".session.log")
         if log.is_file():
             archive.add(log, arcname=log.name)
@@ -321,6 +327,7 @@ def collect(root, lane):
             for path in workspace.glob(pattern):
                 if path.is_file() and not path.is_symlink():
                     archive.add(path, arcname=path.relative_to(workspace), recursive=False)
+    temporary.replace(destination)
 
 
 def cleanTree(root, target):
@@ -336,17 +343,89 @@ def cleanTree(root, target):
             os.chmod(path, stat.S_IWRITE)
             function(path)
         else:
-            raise error[1]
-    shutil.rmtree(target, onerror=readonly)
+            raise error
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(target, onexc=readonly)
+    else:
+        shutil.rmtree(target, onerror=lambda function, path, error: readonly(function, path, error[1]))
+
+
+@contextlib.contextmanager
+def runLock(root, timeout=60):
+    """Serialize finalization and recovery SSH channels, including run-directory removal."""
+    root = root.resolve()
+    if root.parent.name != "runs" or root.parent.parent.name != ".webfront-local-ci":
+        raise ValueError("Refusing lock outside a local CI run")
+    # Outside the removable run: every channel must keep opening the same lock file.
+    locks = root.parent.parent / "locks"
+    locks.mkdir(exist_ok=True)
+    with open(locks / (root.name + ".lock"), "a+b") as lock:
+        if lock.tell() == 0:
+            lock.write(b"\0")
+            lock.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                lock.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Another Windows CI channel is still finalizing this run")
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def finishLane(root, args):
+    """Return secondary errors; always try both diagnostic paths, never delete a live checkout."""
+    errors = []
+    stopped = False
+    try:
+        stopTask(root, args.lane)
+        stopped = True
+    except Exception as error:
+        errors.append(("Task stop", error))
+    try:
+        collect(root, args.lane)
+    except Exception as error:
+        errors.append(("Artifact collection", error))
+    try:
+        log = root / (args.lane + ".session.log")
+        if log.exists():
+            print(log.read_text(encoding="utf-8", errors="replace"), flush=True)
+    except Exception as error:
+        errors.append(("Session log", error))
+    # If collecting diagnostics failed, retain the source files for manual recovery too.
+    if stopped and not errors and not args.keep and (root / args.lane).exists():
+        try:
+            cleanTree(root, root / args.lane)
+        except Exception as error:
+            errors.append(("Checkout cleanup", error))
+    return errors
 
 
 def runLane(root, args):
     try:
-        startTask(root, args)
+        with runLock(root):
+            if not root.exists() or (root / (args.lane + ".cancel")).exists():
+                raise InterruptedError("Windows run was already stopped or removed")
+            startTask(root, args)
         deadline = time.monotonic() + args.timeout
         result = root / (args.lane + ".result.json")
         while not result.exists():
-            if STOP.wait(0.1):
+            if STOP.wait(0.1) or (root / (args.lane + ".cancel")).exists() or not root.exists():
                 raise InterruptedError("Windows lane interrupted")
             if time.monotonic() >= deadline:
                 raise TimeoutError("Windows lane deadline expired (check the interactive account/session)")
@@ -359,17 +438,21 @@ def runLane(root, args):
         if code:
             raise subprocess.CalledProcessError(code, "Windows graphical session")
     finally:
-        # The task's Job kills descendants even if the SSH execution channel disappears.
-        stopTask(root, args.lane)
-        collect(root, args.lane)
-        log = root / (args.lane + ".session.log")
-        if log.exists():
-            print(log.read_text(encoding="utf-8", errors="replace"), flush=True)
-        if not args.keep and (root / args.lane).exists():
-            cleanTree(root, root / args.lane)
+        original = sys.exc_info()[1]
+        try:
+            with runLock(root):
+                # A recovery channel may have collected/removed the run already.
+                errors = finishLane(root, args) if root.exists() else []
+        except Exception as error:
+            errors = [("Finalization lock", error)]
+        for stage, error in errors:
+            print(f"{stage} failed: {error}", file=sys.stderr, flush=True)
+        if errors and original is None:
+            raise errors[0][1]
 
 
 def dispatch(args, matrix, root):
+    validateMatrix(matrix)
     lane = None
     if args.lane:
         lane = next(row for row in matrix["lanes"] if row["id"] == args.lane)
@@ -382,22 +465,33 @@ def dispatch(args, matrix, root):
     elif args.action == "session":
         return session(root, args, lane)
     elif args.action == "stop":
-        stopTask(root, args.lane)
+        with runLock(root):
+            if root.exists():
+                # Recover artifacts before a late execution channel can finalize/remove its checkout.
+                args.keep = True
+                errors = finishLane(root, args)
+                for stage, error in errors:
+                    print(f"{stage} failed: {error}", file=sys.stderr, flush=True)
+                if errors:
+                    raise errors[0][1]
     elif args.action == "artifacts":
         # Windows text-mode stdout translates LF bytes; the SSH artifact stream must be binary.
         if os.name == "nt":
             import msvcrt
             msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-        with open(root / (args.lane + "-artifacts.tar"), "rb") as source:
-            shutil.copyfileobj(source, sys.stdout.buffer)
+        with runLock(root):
+            with open(root / (args.lane + "-artifacts.tar"), "rb") as source:
+                shutil.copyfileobj(source, sys.stdout.buffer)
     elif args.action == "cleanup":
         if root.parent.name != "runs" or root.parent.parent.name != ".webfront-local-ci":
             raise ValueError("Refusing cleanup outside a local CI run")
-        # A failed cancellation must never turn cleanup into deletion of a live task's files.
-        for row in matrix["lanes"]:
-            if row["runtime"] == "native:msvc":
-                stopTask(root, row["id"])
-        cleanTree(root, root)
+        with runLock(root):
+            if root.exists():
+                # A failed cancellation must never turn cleanup into deletion of a live task's files.
+                for row in matrix["lanes"]:
+                    if row["runtime"] == "native:msvc":
+                        stopTask(root, row["id"])
+                cleanTree(root, root)
     else:
         raise ValueError("Unsupported Windows action")
     return 0

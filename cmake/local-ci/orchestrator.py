@@ -5,7 +5,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shlex
 import signal
@@ -18,6 +18,8 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 STOP = threading.Event()
+MACHINES = {"RyzenLinux", "CurmudgeonWindows", "Mac"}
+LANE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 
 def command(args, **kwargs):
@@ -32,26 +34,28 @@ def digest(path):
     return result.hexdigest()
 
 
-def safeName(name):
+def safeName(name, windows=False):
     path = PurePosixPath(name)
-    # Reject Windows drive/ADS names, aliases and device files on every caller OS.
     reserved = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
     if (path.is_absolute() or ".." in path.parts or "\\" in name or not path.parts
-            or any(":" in part or part.endswith((".", " ")) or
-                   part.split(".")[0].upper() in reserved for part in path.parts)):
+            or PureWindowsPath(name).drive
+            or (windows and any(":" in part or part.endswith((".", " ")) or
+                                part.split(".")[0].upper() in reserved for part in path.parts))):
         raise ValueError(f"Unsafe archive path: {name}")
     return path
 
 
-def extract(archive, destination):
+def extract(archive, destination, windows=False):
     # No links, devices or duplicate paths: never let an archive write outside its run directory.
+    windows = windows or os.name == "nt"
     with tarfile.open(archive) as source:
         names = set()
         for member in source:
-            name = safeName(member.name).as_posix()
-            if name.casefold() in names or not (member.isfile() or member.isdir()):
+            name = safeName(member.name, windows=windows).as_posix()
+            identity = name.casefold() if windows else name
+            if identity in names or not (member.isfile() or member.isdir()):
                 raise ValueError(f"Unsupported archive member: {member.name}")
-            names.add(name.casefold())
+            names.add(identity)
             target = destination / name
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -125,7 +129,19 @@ def pack(args):
     return 0
 
 
+def validateMatrix(matrix):
+    ids = set()
+    for lane in matrix["lanes"]:
+        machine, laneId = lane.get("machine"), lane.get("id")
+        if (not isinstance(machine, str) or machine not in MACHINES or not isinstance(laneId, str)
+                or not LANE_ID.fullmatch(laneId) or laneId in ids):
+            raise ValueError(f"Unsupported or duplicate lane metadata: {laneId!r}")
+        safeName(laneId, windows=True)
+        ids.add(laneId)
+
+
 def selectedLanes(matrix, machines, lanes):
+    validateMatrix(matrix)
     def names(value):
         return set(value.split(",")) if value else set()
     machineNames, laneNames = names(machines), names(lanes)
@@ -150,18 +166,30 @@ def exitCode(results, requireAll):
 
 
 def ssh(machine, script):
+    if machine not in MACHINES:
+        raise ValueError(f"Unsupported SSH machine: {machine!r}")
     return ["ssh", "-oBatchMode=yes", "-oConnectTimeout=5", "-oServerAliveInterval=10",
-            "-oServerAliveCountMax=2", machine, script]
+            "-oServerAliveCountMax=2", "--", machine, script]
 
 
-def remote(machine, args):
+def remote(machine, args, forward_stdin=False):
     if machine == "CurmudgeonWindows":
-        # EncodedCommand survives both cmd.exe and PowerShell OpenSSH default shells.
-        # Quoted PS literals preserve spaces, apostrophes and shell metacharacters.
-        # Windows PowerShell 5.1 strips embedded double quotes when forming a native
-        # command line. Escape them for the target's CommandLineToArgvW parser.
-        values = [str(arg).replace('"', '\\"') for arg in args]
-        script = "Set-Location $HOME; & " + " ".join(psQuote(arg) for arg in values) + "; exit $LASTEXITCODE"
+        # Pass an explicit Windows command line through .NET, avoiding PowerShell
+        # 5.1's additional native-argument rewriting. list2cmdline handles runs of
+        # backslashes before quotes and at the end of quoted arguments.
+        inputCopy = "[Console]::OpenStandardInput().CopyTo($process.StandardInput.BaseStream); " if forward_stdin else ""
+        script = ("$ErrorActionPreference='Stop'; "
+                  "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); "
+                  "[Console]::SetOut([System.IO.StreamWriter]::new([Console]::OpenStandardOutput(), "
+                  "[System.Text.UTF8Encoding]::new($false))); "
+                  "$start = New-Object System.Diagnostics.ProcessStartInfo; "
+                  f"$start.FileName = {psQuote(args[0])}; "
+                  f"$start.Arguments = {psQuote(subprocess.list2cmdline([str(arg) for arg in args[1:]]))}; "
+                  "$start.WorkingDirectory = $HOME; $start.UseShellExecute = $false; $start.CreateNoWindow = $true; "
+                  "$start.RedirectStandardInput = $true; "
+                  "$process = [System.Diagnostics.Process]::Start($start); "
+                  + inputCopy + "$process.StandardInput.Close(); "
+                  "$process.WaitForExit(); exit $process.ExitCode")
         return ssh(machine, powershell(script))
     # All values are shell quoted once, at the SSH command-string boundary.
     return ssh(machine, shlex.join(args))
@@ -293,7 +321,7 @@ def execute(args):
                         bootstrap = BOOTSTRAP if machine == "RyzenLinux" else (
                             "import base64;exec(base64.b64decode(" + repr(base64.b64encode(BOOTSTRAP.encode()).decode()) + "))")
                         with open(payloads[machine], "rb") as stream:
-                            runProcess(remote(machine, [python, "-c", bootstrap, runId]), log,
+                            runProcess(remote(machine, [python, "-c", bootstrap, runId], forward_stdin=True), log,
                                        args.transfer_timeout, stream)
                         runProcess(workerCommand(machine, "prepare", "--kit-sha256", kits[machine][1]), log,
                                    args.transfer_timeout)
@@ -332,13 +360,13 @@ def execute(args):
                             # A second SSH channel stops the container even if the execution channel was lost.
                             try:
                                 command(workerCommand(machine, "stop", "--lane", laneId), stdout=log,
-                                        stderr=subprocess.STDOUT, timeout=15)
+                                        stderr=subprocess.STDOUT, timeout=90 if machine == "CurmudgeonWindows" else 15)
                             except (subprocess.SubprocessError, OSError):
                                 log.write(b"Remote cancellation could not be confirmed; inspect the container.\n")
                         try:
                             with open(output / (laneId + "-artifacts.tar"), "wb") as artifacts:
                                 command(workerCommand(machine, "artifacts", "--lane", laneId), stdout=artifacts,
-                                        stderr=log, timeout=60)
+                                        stderr=log, timeout=90 if machine == "CurmudgeonWindows" else 60)
                         except (subprocess.SubprocessError, OSError):
                             log.write(b"Artifact collection failed.\n")
                             if status == "passed":
@@ -357,7 +385,8 @@ def execute(args):
                     if machine in payloads and status != "unreachable":
                         with open(output / (machine + "-cleanup.log"), "wb") as log:
                             try:
-                                command(workerCommand(machine, "cleanup"), stdout=log, stderr=subprocess.STDOUT, timeout=30)
+                                command(workerCommand(machine, "cleanup"), stdout=log, stderr=subprocess.STDOUT,
+                                        timeout=90 if machine == "CurmudgeonWindows" else 30)
                             except (subprocess.SubprocessError, OSError):
                                 print(f"Cleanup not confirmed on {machine}; run {runId} retained")
     finally:

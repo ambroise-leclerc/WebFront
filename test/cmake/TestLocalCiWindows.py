@@ -39,9 +39,9 @@ class WindowsCiTests(unittest.TestCase):
         invocation = ci.remote("CurmudgeonWindows", values)
         encoded = invocation[-1].split()[-1]
         script = base64.b64decode(encoded).decode("utf-16-le")
-        self.assertIn("Set-Location $HOME; & 'python.exe'", script)
-        self.assertIn("'O''Brien;$HOME&|%'", script)
-        self.assertTrue(script.endswith("exit $LASTEXITCODE"))
+        self.assertIn("$start.FileName = 'python.exe'", script)
+        self.assertIn("O''Brien;$HOME&|%", script)
+        self.assertTrue(script.endswith("exit $process.ExitCode"))
         self.assertIn("-EncodedCommand", invocation[-1])
 
     def test_windows_plan_preserves_metadata_and_caps_compilations(self):
@@ -110,6 +110,16 @@ class WindowsCiTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 windows.checkNetwork()
 
+    def test_network_policy_deliberately_blocks_multicast_and_broadcast(self):
+        import ipaddress
+        networks = [ipaddress.ip_network(value) for value in windows.publicNetworks()]
+        for address in ("224.0.0.251", "224.0.0.252", "255.255.255.255", "ff02::1", "ff02::fb"):
+            address = ipaddress.ip_address(address)
+            self.assertTrue(any(address.version == net.version and address in net for net in networks))
+        for address in ("127.0.0.1", "192.168.1.1", "::1", "fc00::1", "fe80::1"):
+            address = ipaddress.ip_address(address)
+            self.assertFalse(any(address.version == net.version and address in net for net in networks))
+
     def test_failed_session_collects_diagnostics_and_removes_task(self):
         workspace = self.root / self.args.lane
         workspace.mkdir()
@@ -136,6 +146,116 @@ class WindowsCiTests(unittest.TestCase):
             windows.runLane(self.root, self.args)
             stop.assert_called_once()
         self.assertTrue(workspace.exists())
+
+    def test_stop_failure_preserves_original_error_and_collects_diagnostics(self):
+        workspace = self.root / self.args.lane
+        workspace.mkdir()
+        (workspace / "test-results.xml").write_text("<testsuite failures='1'/>")
+        (self.root / (self.args.lane + ".session.log")).write_text("original test failure")
+        failure = subprocess.CalledProcessError(7, "build")
+        with patch.object(windows, "startTask", side_effect=failure), \
+             patch.object(windows, "stopTask", side_effect=ValueError("Scheduled task cancellation was not confirmed")), \
+             patch.object(windows, "cleanTree") as clean, patch("sys.stdout", new_callable=io.StringIO) as log, \
+             patch("sys.stderr", new_callable=io.StringIO) as errors:
+            with self.assertRaises(subprocess.CalledProcessError) as raised:
+                windows.runLane(self.root, self.args)
+            self.assertIs(raised.exception, failure)
+            self.assertIn("original test failure", log.getvalue())
+            self.assertIn("cancellation was not confirmed", errors.getvalue())
+            clean.assert_not_called()
+        with tarfile.open(self.root / (self.args.lane + "-artifacts.tar")) as archive:
+            self.assertIn("test-results.xml", archive.getnames())
+
+    def test_stop_failure_after_success_is_nonzero_and_keeps_checkout(self):
+        (self.root / self.args.lane).mkdir()
+        (self.root / (self.args.lane + ".result.json")).write_text('{"code":0}')
+        with patch.object(windows, "startTask"), \
+             patch.object(windows, "stopTask", side_effect=ValueError("stop not confirmed")), \
+             patch("sys.stderr", new_callable=io.StringIO):
+            with self.assertRaisesRegex(ValueError, "stop not confirmed"):
+                windows.runLane(self.root, self.args)
+        self.assertTrue((self.root / self.args.lane).exists())
+        self.assertTrue((self.root / (self.args.lane + "-artifacts.tar")).exists())
+
+    def test_collection_failure_still_prints_log_and_preserves_execution_error(self):
+        (self.root / (self.args.lane + ".session.log")).write_text("diagnosis survives collection")
+        failure = TimeoutError("execution expired")
+        with patch.object(windows, "startTask", side_effect=failure), patch.object(windows, "stopTask"), \
+             patch.object(windows, "collect", side_effect=OSError("archive full")), \
+             patch("sys.stdout", new_callable=io.StringIO) as log, patch("sys.stderr", new_callable=io.StringIO) as errors:
+            with self.assertRaises(TimeoutError) as raised:
+                windows.runLane(self.root, self.args)
+            self.assertIs(raised.exception, failure)
+            self.assertIn("diagnosis survives collection", log.getvalue())
+            self.assertIn("archive full", errors.getvalue())
+
+    def test_late_lane_does_not_recreate_a_removed_run(self):
+        with patch.object(windows, "startTask") as start, patch.object(windows, "stopTask") as stop, \
+             patch.object(windows, "collect") as collect:
+            windows.cleanTree(self.root, self.root)
+            with self.assertRaises(InterruptedError):
+                windows.runLane(self.root, self.args)
+            start.assert_not_called()
+            stop.assert_not_called()
+            collect.assert_not_called()
+        self.assertFalse(self.root.exists())
+
+    def test_late_stop_preserves_archive_after_checkout_was_cleaned(self):
+        workspace = self.root / self.args.lane
+        workspace.mkdir()
+        (workspace / "test-results.xml").write_text("<testsuite/>")
+        windows.collect(self.root, self.args.lane)
+        archive = self.root / (self.args.lane + "-artifacts.tar")
+        before = archive.read_bytes()
+        windows.cleanTree(self.root, workspace)
+        self.args.action = "stop"
+        with patch.object(windows, "stopTask"):
+            windows.dispatch(self.args, self.matrix, self.root)
+        self.assertEqual(archive.read_bytes(), before)
+
+    def test_recovery_cleanup_waits_for_another_channels_lock(self):
+        # A separate process models the old SSH worker still reading/collecting artifacts.
+        script = ("import sys,time;sys.dont_write_bytecode=True;sys.path.insert(0," + repr(str(ci.HERE)) + ");"
+                  "import windows_worker as w;from pathlib import Path; "
+                  "lock=w.runLock(Path(sys.argv[1]));lock.__enter__();print('locked',flush=True);"
+                  "sys.stdin.readline();lock.__exit__(None,None,None)")
+        holder = subprocess.Popen([sys.executable, "-c", script, str(self.root)],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "locked")
+            self.args.action = "cleanup"
+            self.args.lane = None
+            lock = windows.runLock
+            with patch.object(windows, "runLock", side_effect=lambda root: lock(root, timeout=0.01)), \
+                 patch.object(windows, "stopTask") as stop:
+                with self.assertRaises(TimeoutError):
+                    windows.dispatch(self.args, self.matrix, self.root)
+                stop.assert_not_called()
+            self.assertTrue(self.root.exists())
+            holder.communicate("release\n", timeout=10)
+            self.assertEqual(holder.returncode, 0)
+            with patch.object(windows, "stopTask"):
+                windows.dispatch(self.args, self.matrix, self.root)
+            self.assertFalse(self.root.exists())
+        finally:
+            if holder.poll() is None:
+                holder.kill()
+                holder.communicate(timeout=10)
+
+    def test_cleanup_failure_keeps_run_for_inspection(self):
+        self.args.action = "cleanup"
+        self.args.lane = None
+        with patch.object(windows, "stopTask", side_effect=ValueError("not stopped")), \
+             patch.object(windows, "cleanTree") as clean:
+            with self.assertRaises(ValueError):
+                windows.dispatch(self.args, self.matrix, self.root)
+            clean.assert_not_called()
+
+    def test_rmtree_uses_onexc_on_modern_python(self):
+        with patch.object(sys, "version_info", (3, 12)), patch.object(windows.shutil, "rmtree") as remove:
+            windows.cleanTree(self.root, self.root)
+        self.assertIn("onexc", remove.call_args.kwargs)
+        self.assertNotIn("onerror", remove.call_args.kwargs)
 
     def test_timeout_interruption_and_missing_session_stop_the_task(self):
         for interrupted in (False, True):
@@ -238,12 +358,46 @@ endif()
     def test_real_powershell_preserves_binary_stdin_stdout_and_arguments(self):
         invocation = ci.remote("CurmudgeonWindows", [sys.executable, "-c",
                                "import sys;sys.stdout.buffer.write(sys.stdin.buffer.read());"
-                               "assert sys.argv[1] == \"O'Brien & space\"", "O'Brien & space"])
+                               "assert sys.argv[1] == \"O'Brien & space\"", "O'Brien & space"], forward_stdin=True)
         encoded = invocation[-1].split()[-1]
-        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-                                input=bytes(range(256)), capture_output=True, timeout=20)
+        script = base64.b64decode(encoded).decode("utf-16-le")
+        for prefix in ("", "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ",
+                       "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; "):
+            with self.subTest(prefix=prefix):
+                encoded = base64.b64encode((prefix + script).encode("utf-16-le")).decode()
+                result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                                        input=bytes(range(256)), capture_output=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, bytes(range(256)))
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows argument parsing")
+    def test_real_powershell_roundtrips_backslashes_quotes_and_empty_arguments(self):
+        values = ["", "plain", "a b", 'backslash\\"quote', 'two\\\\"quotes', 'trailing space \\',
+                  'C:\\path with spaces\\', "'apostrophe'", '"', "&|%$", "caf\u00e9"]
+        args = [sys.executable, "-c", "import json,sys;print(json.dumps(sys.argv[1:]))", *values]
+        invocation = ci.remote("CurmudgeonWindows", args)
+        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                                 invocation[-1].split()[-1]], capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, bytes(range(256)))
+        self.assertEqual(json.loads(result.stdout), values)
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows stdin lifecycle")
+    def test_remote_command_does_not_wait_for_unused_open_stdin(self):
+        invocation = ci.remote("CurmudgeonWindows", [sys.executable, "-c", "print('done')"])
+        child = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                                    invocation[-1].split()[-1]], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+        try:
+            child.wait(timeout=10)  # Keep stdin open, as an interactive SSH client would.
+            self.assertEqual(child.returncode, 0, child.stderr.read())
+            self.assertEqual(child.stdout.read().strip(), b"done")
+        finally:
+            child.stdin.close()
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=10)
+            child.stdout.close()
+            child.stderr.close()
 
     def test_full_windows_transport_with_native_session_standin(self):
         repository = Path(self.temporary.name) / "repository"
@@ -301,7 +455,7 @@ else:
     except (ValueError,OSError,subprocess.SubprocessError): code=1
     raise SystemExit(code)
 ''', encoding="utf-8")
-        def remote(machine, arguments):
+        def remote(machine, arguments, **kwargs):
             self.assertEqual(machine, "CurmudgeonWindows")
             return [sys.executable, str(shim), str(remoteRoot), *arguments]
         args = argparse.Namespace(allow_dirty=False, commit="HEAD", machines="CurmudgeonWindows", lanes=None,
