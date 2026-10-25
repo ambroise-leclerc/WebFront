@@ -90,27 +90,6 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/layout-negative
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
-# The local CI matrix (#346) has to keep describing the lanes of the GitHub workflows.
-add_test(NAME LocalCiLanesMatchWorkflows
-    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckLocalCi.cmake)
-add_test(NAME LocalCiLanesRejectDrift
-    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/local-ci-negative
-        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckLocalCiNegative.cmake)
-# Python is a local-CI driver dependency, not a library/build dependency.
-find_package(Python3 3.10 QUIET COMPONENTS Interpreter)
-if(Python3_Interpreter_FOUND)
-    add_test(NAME LocalCiOrchestrator
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/cmake/TestLocalCi.py")
-    set_tests_properties(LocalCiOrchestrator PROPERTIES TIMEOUT 60)
-    add_test(NAME LocalCiWindows
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/cmake/TestLocalCiWindows.py")
-    set_tests_properties(LocalCiWindows PROPERTIES TIMEOUT 60)
-    add_test(NAME LocalCiMacOS
-        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/cmake/TestLocalCiMacOS.py")
-    set_tests_properties(LocalCiMacOS PROPERTIES TIMEOUT 60)
-else()
-    message(STATUS "Skipping LocalCiOrchestrator: Python 3.10+ was not found")
-endif()
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
 add_test(NAME FrontendSelection

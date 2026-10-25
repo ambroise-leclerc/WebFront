@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Remove the local SSH CI orchestrator, container definitions, native session workers and matrix drift checks.
+  The GitHub-hosted workflows remain the CI execution path.
+
 - The allocation-counting regression is omitted from ThreadSanitizer builds, whose C++ runtime
   defines the same global `new`/`delete` operators; ordinary and ASan/UBSan builds retain it. macOS adds
   `WKWebViewTransportBenchmark` (HTML bridge, native strings, `callAsyncJavaScript` and base64 bytes) and separate native
@@ -22,8 +25,6 @@
   overstate the gain of a direct path. The benchmark exposed two per-message costs of the bridge, fixed with regression tests:
   `Messages.hpp` wrote to the standard output for every encoded parameter, and `Frame::addBuffer` formatted a hex dump of
   every buffer before the log level was tested.
-
-- Local CI matrix, step 1 of 3 (#346): `cmake/local-ci/lanes.json` describes the ten lanes of `BuildAndTest.yml` and `MddlogIntegration.yml` (machine, toolchain, CMake, options, targets, CTest labels), `docs/LOCAL_CI.md` documents them and their differences with GitHub, and the offline CTest cases `LocalCiLanesMatchWorkflows` and `LocalCiLanesRejectDrift` fail when the lanes and the workflows diverge. Command options are compared in both directions for each matrix variant; extra matrix axes and exclusions are rejected explicitly. The orchestrator, the Linux containers and the Windows and macOS sessions follow in steps 2 and 3.
 
 - The README animation draws the C++ application inside the image, beside the WebFront window (#359): it is no longer cropped by the table column on narrow screens and in the GitHub app, and weighs 0.4 MB instead of 1.2 MB. The code stays in the README as text, in a collapsed block; `docs/tools/render-life-bootstrap.py` reads it from there.
 
