@@ -62,8 +62,11 @@ the decoded output budget is read for every fallback request. Zero retention dis
 caching, including HEAD metadata. Policies without this member inherit 8 MiB.
 For the synchronous API, `RequestHandler::fallbackCacheStatistics()` exposes decode attempts, hits (including budget-rejected hits), entries and accounted retained bytes; read it
 on the server context. The LRU lookup compares compressed bytes linearly across retained
-entries; gzip pass-through remains independent of this cost. Decoder throughput and buffered
-bit reads remain [#282](https://github.com/ambroise-leclerc/WebFront/issues/282).
+entries; gzip pass-through remains independent of this cost. Cold decoding uses bounded buffered
+bit reads and a 256-entry short-code Huffman lookup, with the canonical decoder for longer codes.
+See [decoder measurements and differential validation](GZIP_DECODER_MEASUREMENTS.md) for the
+Release comparison, allocation accounting and test-only zlib tools. Validation, budgets and
+strict member/trailer boundaries are unchanged.
 
 See [gzip cache measurements](GZIP_CACHE_MEASUREMENTS.md) for cold/repeated GET and HEAD data
 and the optional benchmark target.
@@ -142,7 +145,8 @@ never closes a socket from its thread. An active non-interruptible decode can de
 queued jobs are stopped without decoding. `fallbackDecodeStatistics()` exposes atomic counters
 for jobs, response leases, charged bytes, decode attempts and whether a worker has been created.
 `Server::fallbackCacheStatistics()` combines I/O-context cache counters with worker decode attempts;
-read cache statistics on the I/O context. Decoder throughput remains #282.
+read cache statistics on the I/O context. Buffered decoding reduces cold CPU work; see
+[decoder measurements](GZIP_DECODER_MEASUREMENTS.md).
 
 ## Fallback budget
 

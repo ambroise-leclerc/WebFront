@@ -28,3 +28,12 @@ foreach(_decoder IN ITEMS Messages HTTP WebSocket Gzip)
     # A writable copy lets libFuzzer evolve its corpus without touching the checkout.
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/corpus/${_corpus}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/corpus")
 endforeach()
+
+if(WEBFRONT_GZIP_DIFFERENTIAL)
+    find_package(ZLIB REQUIRED)
+    add_executable(fuzz_gzip_differential GzipDifferentialFuzz.cpp)
+    target_link_libraries(fuzz_gzip_differential PRIVATE WebFront WebFront_test_hardening ZLIB::ZLIB)
+    target_compile_options(fuzz_gzip_differential PRIVATE -g -fno-omit-frame-pointer
+        -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all)
+    target_link_options(fuzz_gzip_differential PRIVATE -fsanitize=fuzzer,address,undefined)
+endif()

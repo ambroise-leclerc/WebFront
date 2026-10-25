@@ -182,7 +182,7 @@ jobs:
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y clang-23 libclang-rt-23-dev libc++-23-dev libc++abi-23-dev
+          sudo apt-get install -y clang-23 libclang-rt-23-dev libc++-23-dev libc++abi-23-dev zlib1g-dev
       - name: Restrict address-space randomization for ThreadSanitizer
         if: matrix.sanitizer == 'thread'
         run: sudo sysctl vm.mmap_rnd_bits=28
@@ -191,13 +191,19 @@ jobs:
         run: >-
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
-          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON' }}
+          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
       - name: Run full CEF-off suite
         run: >-
           ctest --test-dir build-sanitizers --output-on-failure --no-tests=error --parallel 4
           --output-junit "${{ github.workspace }}/build-sanitizers/test-results.xml"
+      - name: Compare generated gzip streams against zlib
+        timeout-minutes: 5
+        if: matrix.sanitizer == 'address-undefined'
+        run: |
+          python3 test/fuzz/GenerateGzipCorpus.py build-sanitizers/gzip-corpus
+          build-sanitizers/test/unit/gzip_differential build-sanitizers/gzip-corpus
       - name: Retain test timings and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -218,6 +224,9 @@ jobs:
               -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
               -artifact_prefix=build-sanitizers/test/fuzz/artifacts/$decoder-
           done
+          build-sanitizers/test/fuzz/fuzz_gzip_differential build-sanitizers/test/fuzz/corpus/gzip \
+            -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
+            -artifact_prefix=build-sanitizers/test/fuzz/artifacts/gzip-differential-
       - name: Upload fuzz findings
         if: failure() && matrix.sanitizer == 'address-undefined'
         uses: actions/upload-artifact@v4
