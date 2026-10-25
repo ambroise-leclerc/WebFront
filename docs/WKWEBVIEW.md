@@ -172,17 +172,20 @@ Tests require a logged-in WindowServer session. The dedicated `macos-26` CI job 
 session before running the suite, with CTest timeouts and a job deadline. It does not require
 user interaction or an existing browser session.
 
-`WKWebViewTransportBenchmark` (labels `web-integration;performance`) uses that same window adapter to compare the
+The manual target `wkwebview_transport_benchmark` uses that same window adapter to compare the
 HTTP/WebSocket bridge with `WKScriptMessageHandlerWithReply`, `evaluateJavaScript`, `callAsyncJavaScript`, and a base64
 byte envelope at 16 B, 1 KiB and 32 KiB. It checks each echo, reports medians without timing thresholds, and writes
 `test/web/wkwebview-transport-benchmark.json` in the build tree. Run it alone, without a concurrent build, for measurements:
 
 ```bash
-ctest --test-dir build-wkwebview -R '^WKWebViewTransportBenchmark$' --output-on-failure
+cmake --build build-wkwebview --target wkwebview_transport_benchmark --parallel 2
+cd test/web
+../../build-wkwebview/test/web/wkwebview_transport_benchmark.app/Contents/MacOS/wkwebview_transport_benchmark /tmp/wkwebview-transport-benchmark.json
 ```
 
 `WKWebViewTransportContracts` verifies native rejections, abandoned replies, Unicode/NUL strings, binary base64
 round trips, Promise results, JavaScript errors, incorrect echoes and refusal of same-origin and opaque subframes.
-These channels exist only in the benchmark executable. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) records
+These channels exist only in the manual benchmark and the contracts-only test executable.
+Timed measurements are excluded from CTest and CI. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) records
 their measurements and the consequences of Apple's public APIs for a future direct transport, including the
 Foundation type boundary, handler lifetime, origins and custom resource schemes. iOS remains unverified.

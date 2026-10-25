@@ -16,11 +16,12 @@
 | 2.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | `third_party/` est supprimé (#319) : `fflate` provient du paquet verrouillé du projet `wf`, aucune source tierce n'est vendorisée. | [1824271](https://github.com/ambroise-leclerc/WebFront/commit/18242715f14711e7871ea29aeccf661d5bef760f) |
 | 2.2 | 2026-10-24 | Acceptée | Ambroise Leclerc | Les retraits annoncés sont réalisés (#312, #313, #318) : les en-têtes du cœur sont rendus et vérifiés par CMake seul (`js/core/EmbedAsset.cmake`), sans compression ni Node.js ; la compression gzip reproductible est celle de `wf embed`. | — |
 | 2.4 | 2026-10-25 | Acceptée | Ambroise Leclerc | Cache LRU possédé par le serveur, clés par contenu gzip complet, contenu GET et longueur HEAD validés partagés, budgets et éviction bornés (#281). | — |
+| 2.5 | 2026-10-25 | Acceptée | Ambroise Leclerc | Décodage à froid dans un worker possédé et borné, coalescence des révisions en vol, retour I/O et drainage avant destruction (#283). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-25** (version 2.4).
+Dernière révision : **2026-10-25** (version 2.5).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -58,9 +59,10 @@ un échec de décodage ou dépassement du budget donne 500.
 
 - **Bénéfice :** exécution locale et contrôle de fraîcheur des ressources réellement distribuées.
 - **Coût accepté :** distributions et en-têtes volumineux versionnés, outils de maintenance dédiés.
-- **Risque :** gzip→identity décode synchroniquement sur le thread I/O, sans
-  cache pour les révisions absentes ou trop grandes. Le budget borne la sortie, pas le temps ;
-  le déplacement du travail reste futur (#283). Voir le cache validé ci-dessous (#281).
+- **Coût accepté :** gzip→identity utilise un worker CPU créé au premier miss ; sa file, ses
+  consommateurs et ses buffers sont bornés. Une saturation répond 503. Le décodage actif
+  n’est pas interruptible et doit terminer avant le drainage (#283). Les lectures du provider
+  restent synchrones sur I/O. Voir les contrats ci-dessous et `HTTP_ASSETS.md`.
 
 ### Révision de l'ADR-016
 
@@ -94,6 +96,21 @@ reste servie sans rétention ; les erreurs ne deviennent jamais des entrées val
 Le contexte serveur sérialise les accès et validations ; aucune tâche de cache ne survit
 au drainage. Les copies de handlers démarrent avec un cache vide. Les limites de rétention,
 allocations temporaires et règles des providers sont précisées dans [HTTP_ASSETS](../HTTP_ASSETS.md).
+
+### Exécution bornée du décodage à froid (#283)
+
+Un serveur possède un worker CPU créé paresseusement et joint avant le drainage du scope
+réseau. Le worker reçoit exclusivement des octets possédés ; providers, cache et sockets
+restent sur le contexte I/O. La continuation revient explicitement par son scheduler réseau.
+Les révisions gzip identiques et le même budget de sortie partagent le travail en vol.
+Les valeurs par défaut sont quatre jobs, seize réponses en attente d'envoi, 64 MiB de
+capacités de buffers réservées et 4 MiB d'entrée compressée. Ces bornes se configurent par
+la policy ; les réservations persistent après le calcul jusqu'à la fin des envois. La
+limite d'entrée compressée donne 500 avant consultation du cache ; la
+saturation des jobs, consommateurs ou buffers donne 503 sans file illimitée ni retour au décodage synchrone. Une annulation
+locale ne retire pas le travail d'un autre consommateur ; un décodage actif termine avant
+la fermeture. Déconnexion détectée à l'envoi, mémoire temporaire de préparation, métadonnées
+bornées et coûts de réservation sont explicités dans [HTTP_ASSETS](../HTTP_ASSETS.md).
 
 ## Sources et vérification
 

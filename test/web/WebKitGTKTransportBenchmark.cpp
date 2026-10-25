@@ -202,5 +202,10 @@ struct BenchmarkFrontend : webfront::frontend::WebKitGTKFrontend {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef WEBFRONT_TRANSPORT_CONTRACTS_ONLY
+    (void)argc;
+    return transport_benchmark::run<BenchmarkFrontend>(1, argv, "", "transport-contracts.html");
+#else
     return transport_benchmark::run<BenchmarkFrontend>(argc, argv, "usage: webkitgtk_transport_benchmark [<report.json>]");
+#endif
 }

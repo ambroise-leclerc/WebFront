@@ -71,7 +71,7 @@ private:
 #ifndef WEBFRONT_TEST_FRONTEND
     #define WEBFRONT_TEST_FRONTEND webfront::frontend::CEFFrontend
 #endif
-using TestWF = BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, testdriver::DriverFS, TestPages>;
+using TestWF = BasicDeveloperApp<testdriver::DriverFrontend<WEBFRONT_TEST_FRONTEND>, testdriver::DriverFS, TestPages>;
 
 class BrowserIntegrationTest {
 public:

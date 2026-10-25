@@ -219,7 +219,11 @@ struct BenchmarkFrontend : webfront::frontend::WKWebViewFrontend {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef WEBFRONT_TRANSPORT_CONTRACTS_ONLY
+    const bool contracts = true;
+#else
     const bool contracts = argc == 2 && std::string_view(argv[1]) == "--contracts";
+#endif
     return transport_benchmark::run<BenchmarkFrontend>(contracts ? 1 : argc,
                                                        argv,
                                                        "usage: wkwebview_transport_benchmark [<report.json>|--contracts]",

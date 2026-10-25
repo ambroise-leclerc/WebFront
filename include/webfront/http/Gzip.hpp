@@ -379,20 +379,28 @@ inline void readTrailer(GzipReader& input, const InflateContext& context) {
 }
 
 /** @brief Validates bounded gzip members; rejects malformed/truncated input and all trailing padding, including zeros. */
-inline std::optional<std::string> decodeGzip(std::string_view bytes, std::size_t limit = defaultMaxDecodedAssetSize) {
+inline bool decodeGzipInto(std::string_view bytes, std::string& output, std::size_t limit) {
+    output.clear();
     try {
-        GzipReader  input(bytes);
-        std::string output;
+        GzipReader input(bytes);
         do {
             parseHeader(input, bytes);
             InflateContext context{output, output.size(), limit};
             inflateMember(input, context);
             readTrailer(input, context);
         } while (!input.done());
-        return output;
+        return true;
     } catch (const InvalidGzip&) {
-        return std::nullopt;
+        output.clear();
+        return false;
     }
+}
+
+inline std::optional<std::string> decodeGzip(std::string_view bytes, std::size_t limit = defaultMaxDecodedAssetSize) {
+    std::string output;
+    if (!decodeGzipInto(bytes, output, limit))
+        return std::nullopt;
+    return output;
 }
 
 }  // namespace webfront::http::gzip

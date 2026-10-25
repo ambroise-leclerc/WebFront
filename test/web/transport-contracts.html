@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Direct transport contracts</title>
+<script src="WebFront.js"></script>
+<script>
+    "use strict";
+    function require(value, message) {
+        if (!value) throw new Error(message);
+    }
+    async function verify() {
+        await webFront.ready;
+        let call;
+        const webview = window.chrome && window.chrome.webview;
+        let sharedBytes;
+        if (webview) {
+            const pending = new Map();
+            let next = 0;
+            webview.addEventListener("message", event => {
+                const separator = event.data.indexOf("\n");
+                const id = event.data.slice(0, separator);
+                const value = event.data.slice(separator + 1);
+                if (id === "c") {
+                    const size = Number(value), half = sharedBytes.length / 2;
+                    const valid = sharedBytes.subarray(half, half + size).every(byte => byte === 120);
+                    sharedBytes.fill(120, 0, size);
+                    webview.postMessage("0\nwfsharedreply\n" + (valid ? "ok" : "bad"));
+                } else {
+                    const resolve = pending.get(id);
+                    pending.delete(id);
+                    if (resolve) resolve(value);
+                }
+            });
+            call = (name, value) => new Promise(resolve => {
+                const id = String(++next);
+                pending.set(id, resolve);
+                webview.postMessage(`${id}\n${name}\n${value}`);
+            });
+        } else {
+            call = (name, value) => window.webkit.messageHandlers[name].postMessage(value);
+        }
+        const payload = 'quote " slash \\ café 🦊';
+        require(await call("wfecho", payload) === payload, "native string echo changed");
+        window.benchmark = {echo: value => value};
+        for (const size of [0, 16, 32768]) {
+            require(await call("wfecho", "x".repeat(size)) === "x".repeat(size), "native echo changed");
+            require(Number(await call("wfrun", `${size} 2`)) >= 0, "native evaluation echo failed");
+        }
+        window.benchmark.echo = () => "wrong";
+        require(Number(await call("wfrun", "16 1")) === -1, "wrong echo accepted");
+        window.benchmark.echo = () => { throw new Error("probe failure"); };
+        require(Number(await call("wfrun", "16 1")) === -1, "evaluation exception accepted");
+        if (webview) {
+            const received = new Promise(resolve => webview.addEventListener("sharedbufferreceived",
+                event => resolve(new Uint8Array(event.getBuffer())), {once: true}));
+            await call("wfshared", "131072");
+            sharedBytes = await received;
+            for (const size of [16, 32768]) {
+                sharedBytes.fill(120, 0, size);
+                require(await call("wfsharedecho", String(size)) === "ok", "shared input rejected");
+                require(sharedBytes.subarray(65536, 65536 + size).every(byte => byte === 120), "shared echo changed");
+                require(Number(await call("wfsharedrun", `${size} 2`)) >= 0, "shared native call failed");
+            }
+        }
+    }
+    verify()
+        .then(() => webFront.cppFunction("report")(true, "{}", "Direct transport contracts passed"))
+        .catch(error => webFront.cppFunction("report")(false, "", String(error)))
+        .finally(() => window.close());
+</script>
