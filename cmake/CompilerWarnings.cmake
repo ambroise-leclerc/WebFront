@@ -70,6 +70,12 @@ function(set_project_warnings project_name)
       -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
   )
   
+  # GCC 16 at -O2/-O3 reports a stringop-overflow inside stdexec's task_scheduler (std::optional of a type-erased
+  # scheduler) for every coroutine awaiting continues_on. The code is not ours: keep the warning, never fail on it.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    list(APPEND GCC_WARNINGS -Wno-error=stringop-overflow)
+  endif()
+
   # Vérifier si -Wdangling-reference est supporté (GCC 13+ ou certaines versions de GCC 12)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("-Wdangling-reference" COMPILER_SUPPORTS_DANGLING_REF)
