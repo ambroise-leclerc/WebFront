@@ -48,8 +48,8 @@ passes native replies/errors, abandoned replies, Unicode/NUL and binary bytes, P
 rejection. ADR-017 documents the Foundation value boundary and the changes needed for custom-scheme origins and loading;
 the benchmark itself still serves its page over HTTP. The allocation-counting test is excluded only from TSan builds
 because its global operator replacements conflict with Clang's TSan runtime; ordinary and ASan/UBSan builds keep it.
-On the Apple M2 reference host, median 32 KiB sequential echoes through the HTML bridge take 338 Âµs (JS to C++) and
-334 Âµs (C++ to JS), versus 388 and 393 Âµs with the base64 byte envelope. Native strings alone hide that cost. The three
+On the Apple M2 reference host, median 32 KiB sequential echoes through the HTML bridge take 338 µs (JS to C++) and
+334 µs (C++ to JS), versus 388 and 393 µs with the base64 byte envelope. Native strings alone hide that cost. The three
 reports are retained with their dispersion (the first launch was much slower); macOS keeps the HTML default pending
 measurements of a complete transport under controlled load. These figures do not establish iOS performance.
 
@@ -517,7 +517,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
   Verified 2026-10-19 on Linux for #274: the CEF-off build/CTest suite, CEF/Xvfb integration and
   WebKitGTK integration passed. The macOS results above describe earlier platform validation.
-- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression â€” either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` â€” is tracked as a follow-up. The fallback HTML and module have readable sources under `js/core/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
+- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `js/core/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
 - The fallback page awaits `webFront.ready` to display the initial bridge connection result. This promise resolves after the handshake acknowledgement and rejects if the initial connection fails or closes; it does not track later disconnects. Jasmine exercises failure against a test-owned HTTP server on an OS-assigned loopback port that rejects WebSocket upgrades, including the case where the application never consumes `ready`.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
 - The HTTP server looks files up by the request path without its query string (`/app.js?v=2` serves `app.js`); the path is cut at the first `?` before percent-decoding, so an encoded `%3F` stays part of the file name, and the `..` check applies to the decoded path only. The query is not passed to filesystems.
@@ -617,7 +617,7 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 
 ## Local CI over SSH (#346)
 
-The ten-lane description and workflow drift checks now have a Python standard-library orchestrator, commit bundles, verified
+The eleven-lane description and workflow drift checks now have a Python standard-library orchestrator, commit bundles, verified
 offline dependency/image kits, per-lane Linux containers without network access, persistent CPM/ccache directories, log and
 artifact collection, bounded execution and explicit incomplete/failure statuses. The offline protocol regression uses SSH/Docker
 stand-ins. Native Windows execution now launches a limited interactive scheduled task, initializes MSVC, checks WebView2 and

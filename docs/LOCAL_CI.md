@@ -102,7 +102,7 @@ python3 cmake/local-ci/run run --commit HEAD --machines RyzenLinux \
   --kit /path/to/kit.tgz --kit-sha256 <sha256> --parallel-lanes 2 --jobs 4 --require-all
 ```
 
-`--machines` and `--lanes` take comma-separated names; both filters apply when both are present. Without filters, all ten lanes
+`--machines` and `--lanes` take comma-separated names; both filters apply when both are present. Without filters, all lanes in the selected commit
 are selected. `--require-all` requires every **selected** lane to pass; a filtered run still reports `INCOMPLETE` for the full
 matrix. `--keep` retains remote worktrees and builds. `--timeout` bounds each lane (default 3600 seconds), and
 `--transfer-timeout` bounds preparation (default 1800 seconds). Limits must be positive. SSH probes have a five-second connection
@@ -204,7 +204,9 @@ set(FETCHCONTENT_SOURCE_DIR_STDEXEC /deps/sources/stdexec CACHE PATH "")
 
 Do not set `WEBFRONT_MDDLOG_SOURCE_DIR` globally in the preload: the installed-mddlog variant must use its installed package.
 The worker supplies the source path only for the source variant. It also supplies the bootstrap/registry directories, ccache,
-CPM cache and `FETCHCONTENT_FULLY_DISCONNECTED=ON`. For CEF it copies `cef-binaries` to the lane's private
+CPM cache and `FETCHCONTENT_FULLY_DISCONNECTED=ON`. It also exports `CPM_SOURCE_CACHE=/cache/cpm` so independent CMake
+configurations launched by CTest, including `AddSubdirectoryConsumer`, reuse the prepared CPM module without downloading it.
+For CEF it copies `cef-binaries` to the lane's private
 `build-local-0/_deps/cef_binaries-src` and sets the matching FetchContent override. This preserves the paths used by
 `CEFSupport.cmake` and lets its resource-copy rules write into a private SDK instead of a shared or read-only source tree.
 
@@ -274,9 +276,9 @@ transport, failing tests, unreachable machines, dirty trees, timeouts, interrupt
 arguments. Its protocol test substitutes local SSH/Docker executables; it does **not** qualify actual toolchain images or GUI
 sessions. `LocalCiLanesMatchWorkflows` and its negative suite still check the workflows independently.
 
-Actual Linux image builds, the eight lanes on RyzenLinux, warm-cache timings and comparison with GitHub on the same commit
+Actual Linux image builds, the nine lanes on RyzenLinux, warm-cache timings and comparison with GitHub on the same commit
 remain to be qualified. The Windows implementation below still needs qualification on CurmudgeonWindows with its dedicated
-account and network policy. Delivery step 3 also needs the macOS graphical session and Xcode reporting, and the ten-lane run.
+account and network policy. Delivery step 3 also needs the macOS graphical session and Xcode reporting, and the eleven-lane run.
 A reachable Mac reports `skipped (native session support pending step 3)`; an unreachable machine reports `unreachable`.
 Neither counts as passed, and `--require-all` fails when either is selected. The story remains open.
 

@@ -374,7 +374,7 @@ def main(argv=None):
     packParser = sub.add_parser("pack", help="Seal a prepared offline dependency/image directory")
     packParser.add_argument("--dependencies", type=Path, required=True)
     packParser.add_argument("--output", type=Path, required=True)
-    run = sub.add_parser("run", help="Test a commit (default: all ten lanes)")
+    run = sub.add_parser("run", help="Test a commit (default: all lanes in the selected commit)")
     run.add_argument("--commit", default="HEAD")
     run.add_argument("--allow-dirty", action="store_true")
     run.add_argument("--machines")
