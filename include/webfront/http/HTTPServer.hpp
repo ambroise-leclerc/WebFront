@@ -12,7 +12,7 @@
 #include "AcceptEncoding.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
-#include "Gzip.hpp"
+#include "GzipCache.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
 
@@ -290,6 +290,9 @@ public:
     RequestHandler& operator=(const RequestHandler&) = default;
     RequestHandler& operator=(RequestHandler&&) = default;
 
+    /** @brief Per-handler gzip cache counters and retained storage; read on the server context. */
+    [[nodiscard]] gzip::ValidatedCache::Statistics fallbackCacheStatistics() const { return fallbackCache.statistics(); }
+
     Response handleRequest(Request request) {
         auto requestPath = filePath(request.uri);
         if (!requestPath) return Response::getStatusResponse(Response::badRequest);
@@ -312,7 +315,8 @@ private:
         if (auto error = readFile(request, path, response))
             return *error;
         response.statusCode = Response::ok;
-        response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
+        if (!response.getHeaderValue("Content-Length"))
+            response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
         response.headers.emplace_back("Content-Type", MimeType(path.extension().string()).toString());
         if (request.method == Request::Method::Head)
             response.content.clear();
@@ -383,7 +387,7 @@ private:
         return error;
     }
 
-    static std::optional<Response> negotiateEncoding(const Request& request, std::string_view coding, Response& response) {
+    std::optional<Response> negotiateEncoding(const Request& request, std::string_view coding, Response& response) {
         response.headers.emplace_back("Vary", "Accept-Encoding");
         if (request.acceptsEncoding(coding)) {
             response.headers.emplace_back("Content-Encoding", coding);
@@ -391,15 +395,16 @@ private:
         }
         if (!request.acceptsEncoding("identity") || !encoding::isGzip(coding))
             return encodingError(Response::notAcceptable);
-        auto decoded = gzip::decodeGzip(response.content, maxDecodedAssetSize<Policy>());
+        auto decoded = fallbackCache.resolve(response.content, maxDecodedAssetSize<Policy>(), request.method == Request::Method::Head);
         if (!decoded)
             return encodingError(Response::internalServerError);
-        response.content = std::move(*decoded);
+        response.headers.emplace_back("Content-Length", std::to_string(*decoded));
         return {};
     }
 
     FS fs;
     detail::BoundContentPolicy contentPolicy;
+    gzip::ValidatedCache fallbackCache{maxDecodedAssetCacheSize<Policy>()};
 };
 
 template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>

@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 using namespace webfront;
@@ -269,5 +270,144 @@ SCENARIO("HTTP treats stored x-gzip assets as gzip for fallback and pass-through
             REQUIRE(response.getHeaderValue("Content-Encoding") == "x-gzip");
             REQUIRE(response.content == gzipfixtures::fixed);
         }
+    }
+}
+
+SCENARIO("HTTP GET and HEAD reuse validated gzip revisions across paths and aliases") {
+    RequestHandler<Net, EncodedAssetFS> handler{"."};
+    auto                                request = assetRequest();
+    GIVEN("a cold HEAD followed by GET, another path and the x-gzip alias") {
+        request.method = Request::Method::Head;
+        REQUIRE(handler.handleRequest(request).content.empty());
+        request.method = Request::Method::Get;
+        REQUIRE(handler.handleRequest(request).content.size() == 23768);
+        request.uri = "/other.js";
+        REQUIRE(handler.handleRequest(request).content.size() == 23768);
+        request.uri = "/legacy.js";
+        REQUIRE(handler.handleRequest(request).content.size() == 23768);
+        THEN("identical compressed bytes require a single decode") {
+            REQUIRE(handler.fallbackCacheStatistics().decodes == 1);
+            REQUIRE(handler.fallbackCacheStatistics().hits == 3);
+        }
+        THEN("gzip pass-through leaves the fallback cache untouched") {
+            request.headers.emplace_back("Accept-Encoding", "gzip");
+            REQUIRE(handler.handleRequest(request).content == gzipfixtures::fixed);
+            REQUIRE(handler.fallbackCacheStatistics().hits == 3);
+        }
+    }
+}
+
+namespace {
+struct MutableAssetFS : EncodedAssetFS {
+    using EncodedAssetFS::EncodedAssetFS;
+    static inline std::string revision;
+    std::optional<fs::File>   open(std::filesystem::path) {
+        words.assign((revision.size() + 7) / 8, 0);
+        for (std::size_t index = 0; index < revision.size(); ++index)
+            words[index / 8] |= static_cast<std::uint64_t>(static_cast<unsigned char>(revision[index])) << ((7 - index % 8) * 8);
+        return fs::File(words, revision.size(), "gzip");
+    }
+};
+}  // namespace
+
+SCENARIO("HTTP mutable providers cannot reuse stale identity content or HEAD lengths") {
+    RequestHandler<Net, MutableAssetFS> handler{"."};
+    auto                                request = assetRequest();
+    MutableAssetFS::revision                    = gzipfixtures::fixed;
+    REQUIRE(handler.handleRequest(request).content.size() == 23768);
+    GIVEN("the provider replaces the same path with two concatenated members") {
+        MutableAssetFS::revision += gzipfixtures::fixed;
+        request.method            = Request::Method::Head;
+        const auto head           = handler.handleRequest(request);
+        REQUIRE(head.getHeaderValue("Content-Length") == "47536");
+        REQUIRE(head.content.empty());
+        request.method = Request::Method::Get;
+        REQUIRE(handler.handleRequest(request).content.size() == 47536);
+        REQUIRE(handler.fallbackCacheStatistics().decodes == 2);
+        REQUIRE(handler.fallbackCacheStatistics().hits == 1);
+    }
+    GIVEN("the provider replaces it with corrupt content having the same ISIZE") {
+        MutableAssetFS::revision[MutableAssetFS::revision.size() - 8] ^= 1;
+        for (const auto method : {Request::Method::Get, Request::Method::Head}) {
+            request.method = method;
+            REQUIRE(handler.handleRequest(request).statusCode == Response::internalServerError);
+        }
+        REQUIRE(handler.fallbackCacheStatistics().decodes == 3);
+        REQUIRE(handler.fallbackCacheStatistics().entries == 1);
+    }
+}
+
+SCENARIO("HTTP cache ownership and policy remain local to the application") {
+    using Disabled = CustomBuffersPolicy<8192, 8192, 32768, defaultMaxMessageSize, defaultMaxDecodedAssetSize, 0>;
+    RequestHandler<Net, EncodedAssetFS, Disabled> handler{"."};
+    const auto                                    request = assetRequest();
+    GIVEN("a policy disabling cache retention") {
+        REQUIRE(handler.handleRequest(request).statusCode == Response::ok);
+        REQUIRE(handler.handleRequest(request).statusCode == Response::ok);
+        REQUIRE(handler.fallbackCacheStatistics().decodes == 2);
+        REQUIRE(handler.fallbackCacheStatistics().retainedBytes == 0);
+    }
+    THEN("legacy policies retain the default cache budget") {
+        REQUIRE(maxDecodedAssetCacheSize<LegacyPolicy>() == defaultMaxDecodedAssetCacheSize);
+    }
+    GIVEN("two independent handlers") {
+        RequestHandler<Net, EncodedAssetFS> first{"."}, second{"."};
+        REQUIRE(first.handleRequest(request).statusCode == Response::ok);
+        REQUIRE(second.fallbackCacheStatistics().entries == 0);
+        REQUIRE(second.handleRequest(request).statusCode == Response::ok);
+        REQUIRE(second.fallbackCacheStatistics().decodes == 1);
+    }
+}
+
+SCENARIO("HTTP server drains and destroys a populated fallback cache") {
+    GIVEN("successive applications serving an identity fallback") {
+        for (unsigned instance = 0; instance < 2; ++instance) {
+            AssetServerNet::accepts = 0;
+            AssetServerNet::statusLine.clear();
+            {
+                Server<AssetServerNet, EncodedAssetFS> server("127.0.0.1", "0");
+                REQUIRE(AssetServerNet::statusLine == "HTTP/1.1 200 OK\r\n");
+                server.stop();
+                server.drain();
+            }
+            THEN("shutdown completes with no cache work outstanding") {
+                REQUIRE(AssetServerNet::accepts >= 1);
+            }
+        }
+    }
+}
+
+namespace {
+struct ActiveAssetBudget : DefaultBuffersPolicy {
+    static inline thread_local std::size_t maxDecodedAssetSize = defaultMaxDecodedAssetSize;
+
+    explicit ActiveAssetBudget(std::size_t limit) : previous(std::exchange(maxDecodedAssetSize, limit)) {}
+    ~ActiveAssetBudget() {
+        maxDecodedAssetSize = previous;
+    }
+
+private:
+    std::size_t previous;
+};
+}  // namespace
+
+SCENARIO("HTTP cached GET and HEAD recheck the active application output budget") {
+    const ActiveAssetBudget                                initialBudget{23768};
+    RequestHandler<Net, EncodedAssetFS, ActiveAssetBudget> handler{"."};
+    auto                                                   request = assetRequest();
+    REQUIRE(handler.handleRequest(request).statusCode == Response::ok);
+    GIVEN("the application lowers its budget after validating this revision") {
+        {
+            const ActiveAssetBudget smallerBudget{23767};
+            for (const auto method : {Request::Method::Get, Request::Method::Head}) {
+                request.method      = method;
+                const auto response = handler.handleRequest(request);
+                REQUIRE(response.statusCode == Response::internalServerError);
+                REQUIRE(response.getHeaderValue("Vary") == "Accept-Encoding");
+            }
+            REQUIRE(handler.fallbackCacheStatistics().decodes == 1);
+            REQUIRE(handler.fallbackCacheStatistics().hits == 2);
+        }
+        REQUIRE(handler.handleRequest(request).getHeaderValue("Content-Length") == "23768");
     }
 }

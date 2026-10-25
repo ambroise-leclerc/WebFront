@@ -511,10 +511,16 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - Encoded HTTP assets (#274): accepted gzip is served unchanged; otherwise the server decodes
   gzip to identity with the decoded length, no `Content-Encoding` and `Vary: Accept-Encoding`.
   The default decoded-byte budget is 4 MiB and applications can override it through their buffer
-  policy. Other codings remain pass-through only. Fallback runs synchronously per request,
-  including HEAD; caching and byte-wise decoding remain follow-ups. See [HTTP asset encoding](HTTP_ASSETS.md)
+  policy. Other codings remain pass-through only. A server-owned 8 MiB LRU (#281) retains
+  validated identity bytes and HEAD lengths, keyed by complete compressed content and bounded
+  across keys and decoded storage. Each hit rechecks the active output budget; oversized
+  entries are served without retention. Cold fallback remains synchronous on the I/O thread
+  (#283); decoder throughput remains #282. See [HTTP asset encoding](HTTP_ASSETS.md)
   for negotiation rules, errors, strict stream validation and budget configuration.
   Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
+  Verified 2026-10-25 on Linux for #281: 275 CEF-off CTest cases and all 64 CEF/Xvfb
+  web-integration cases passed; cold/repeated GET/HEAD measurements are recorded in
+  [Gzip cache measurements](GZIP_CACHE_MEASUREMENTS.md).
   Verified 2026-10-19 on Linux for #274: the CEF-off build/CTest suite, CEF/Xvfb integration and
   WebKitGTK integration passed. The macOS results above describe earlier platform validation.
 - First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `js/core/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
