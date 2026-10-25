@@ -252,7 +252,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   the Linux sanitizers, WebKitGTK and macOS/WKWebView checks.
 
 
-## Historical browser-powered development (2026-10-20)
+## Historical developer environment proposals (2026-10-20)
 
 - `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
   downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do

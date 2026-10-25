@@ -130,6 +130,13 @@ do not change the production HTTP/WebSocket transport.
 Enabling an engine makes its adapter available; select it explicitly in your application.
 `webfront::NativeApp` chooses the native engine for the current platform.
 
+The options default to `OFF`. In a top-level build with examples and without `ENABLE_TESTING` or `ENABLE_FUZZING`, configuration first
+probes the native engine of the platform (registered with `NATIVE`: WebKitGTK through `pkg-config webkitgtk-6.0`, WKWebView on Clang with
+macOS 13.3+, WebView2 with an MSVC-compatible compiler) and stores `ON` or `OFF` in the cache, so `cmake ..` is enough to build the Life
+example with a native window. An option set on the command line or edited afterwards is never replaced; a value the detection chose is probed
+again at the next configuration. A missing engine only prints a status; the Life examples then use the default browser and CMake explains what to install. `-DWEBFRONT_AUTODETECT_NATIVE=OFF`
+turns the detection off. CEF is never detected.
+
 | Option | Default | Description |
 | --- | --- | --- |
 | `WEBFRONT_EMBED_WEBVIEW2` | OFF | Download the pinned WebView2 SDK and link its static loader (Windows only) |

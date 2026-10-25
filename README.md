@@ -64,20 +64,23 @@ The example starts with a C++ simulation, adds a React interface, then embeds th
 ```bash
 git clone https://github.com/ambroise-leclerc/WebFront.git
 cd WebFront
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 2
+mkdir build
+cd build
+cmake ..
+cmake --build .
 ```
+
+No option is needed: the build enables this platform's native window engine when its dependencies are found (see [step 2](#2-add-a-window-and-bootstrap-the-tools)). The commands below start from this `build` directory. With a multi-configuration generator such as Visual Studio, executables are in `examples\Debug\` (`--config Release` selects `examples\Release\`).
 
 ### 1. Start with the C++ simulation
 
 [Life.hpp](examples/life/Life.hpp) implements Conway's B3/S23 rules on a wrapping 32 × 32 grid. Each step creates a new `std::bitset<1024>`. [LifeConsole.cpp](examples/life/LifeConsole.cpp) runs it without a GUI:
 
 ```bash
-# From the repository root:
-./build/examples/WebFrontLifeConsole
+examples/WebFrontLifeConsole
 ```
 
-On Windows the executable is `build\examples\Release\WebFrontLifeConsole.exe`.
+On Windows with Visual Studio run `examples\Debug\WebFrontLifeConsole.exe`.
 
 ### 2. Add a window and bootstrap the tools
 
@@ -92,24 +95,30 @@ app.show();
 
 The project directory gives the application access to its development files. `bootstrap("developer")` opens the integrated terminal and loads the version-pinned developer environment, checking its SHA-512 integrity. Downloads are cached, so later launches work offline. The terminal runs `wf` commands; no system shell is exposed and nothing is installed on your machine.
 
-Enable **one** engine for your platform:
-
-| Platform | CMake option | Runtime |
-| --- | --- | --- |
-| Windows | `-DWEBFRONT_EMBED_WEBVIEW2=ON` | Microsoft Edge WebView2 Evergreen |
-| macOS 13.3+ | `-DWEBFRONT_EMBED_WKWEBVIEW=ON` | System Cocoa / WebKit |
-| Linux | `-DWEBFRONT_EMBED_WEBKITGTK=ON` | WebKitGTK 6.0; [installation](docs/WEBKITGTK.md) |
-
-Then, on macOS, from the repository root, build and start the example on a new project directory:
+The build you made above is enough. Start the example from the `build` directory:
 
 ```bash
-cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_WKWEBVIEW=ON
-cmake --build build-native --target WebFrontLifeDeveloper --parallel 2
-mkdir -p life-project
-./build-native/examples/WebFrontLifeDeveloper "$PWD/life-project"
+examples/WebFrontLifeDeveloper
 ```
 
-Replace the engine option on Linux or Windows. With Visual Studio, add `--config Release` when building and start it with the project directory, `build-native\examples\Release\WebFrontLifeDeveloper.exe life-project` (after `mkdir life-project`). The example reports startup failures with a nonzero exit status. Two extra arguments, `<environment-url> <sha512-integrity>`, select another environment archive, for instance one [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
+On Windows with Visual Studio run `examples\Debug\WebFrontLifeDeveloper.exe`. Without argument, the example uses `life-project` in the current directory (`build/life-project`), creates it when it is missing and reuses an existing one without touching its files; every `life-project/...` path below is relative to it. The pinned environment is used.
+
+**Native window.** At configuration, CMake enables the native engine of your platform when it finds its dependencies, with no option to pass:
+
+| Platform | Engine | Detected when |
+| --- | --- | --- |
+| Windows | Microsoft Edge WebView2 Evergreen | an MSVC-compatible compiler is used (the SDK is downloaded; the Evergreen runtime is checked at start) |
+| macOS 13.3+ | System Cocoa / WebKit | Clang and a deployment target of at least 13.3 |
+| Linux | WebKitGTK 6.0 | `pkg-config webkitgtk-6.0` succeeds; [installation](docs/WEBKITGTK.md) |
+
+When the engine is missing, configuration still succeeds. CMake prints a `Native window: no native engine will be built` notice that says what to install, and `WebFrontLifeDeveloper` is compiled for the default browser: at start it prints that notice, serves the same application and opens it in your system browser. Install the dependency and run `cmake ..` again to get the native window. CEF (`-DWEBFRONT_EMBED_CEF=ON`) makes `CEFFrontend` available to your own applications; the examples do not select it.
+
+**Advanced options.**
+
+- Choose the engine yourself with `-DWEBFRONT_EMBED_WEBVIEW2=ON|OFF`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON|OFF` or `-DWEBFRONT_EMBED_WEBKITGTK=ON|OFF`; an explicit value is never replaced by the detection. `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it. Test builds (`-DENABLE_TESTING=ON`) keep the explicit selection.
+- Another project directory, and another environment archive, can be passed: `examples/WebFrontLifeDeveloper <project> [<environment-url> <sha512-integrity>]`, for instance an environment [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
+
+The example reports startup failures with a nonzero exit status.
 
 ### 3. Create the project and install its dependencies
 
@@ -199,16 +208,15 @@ Declare the entry and the provider in `webfront.project.json` (`"entries": {"mai
 wf embed ui/main.tsx --output generated/LifeUI.hpp
 ```
 
-This builds the interface and packages its resources and dependency notices into a compressed C++ header. Close the development window, then reconfigure with the **same engine option** used above. On macOS:
+This builds the interface and packages its resources and dependency notices into a compressed C++ header. Close the development window, then reconfigure the same `build` directory (the engine is kept):
 
 ```bash
-cmake -S . -B build-native -DWEBFRONT_EMBED_WKWEBVIEW=ON \
-  -DWEBFRONT_LIFE_ASSETS="$PWD/life-project/generated/LifeUI.hpp"
-cmake --build build-native --target WebFrontLifeEmbedded --parallel 2
-./build-native/examples/WebFrontLifeEmbedded
+cmake .. -DWEBFRONT_LIFE_ASSETS="$PWD/life-project/generated/LifeUI.hpp"
+cmake --build . --target WebFrontLifeEmbedded
+examples/WebFrontLifeEmbedded
 ```
 
-For Visual Studio add `--config Release` and launch `build-native\examples\Release\WebFrontLifeEmbedded.exe`.
+For Visual Studio launch `examples\Debug\WebFrontLifeEmbedded.exe`.
 
 [LifeEmbedded.cpp](examples/life/LifeEmbedded.cpp) replaces the development project and bootstrap with the generated provider:
 
@@ -232,7 +240,7 @@ target_link_libraries(MyApp PRIVATE WebFront::WebFront)
 
 As a subproject, examples and tests are off by default and compiler settings do not leak into your targets. `WEBFRONT_BUILD_EXAMPLES=OFF` disables examples in a standalone build too.
 
-`webfront::WebFront` always uses the system browser. Native adapters are explicit choices and remain optional; CEF is available when you need an embedded Chromium distribution. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
+`webfront::WebFront` always uses the system browser. Native adapters remain optional: the examples enable the one of your platform when its dependencies are found, while your own application selects its frontend explicitly; CEF is available when you need an embedded Chromium distribution. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
 
 ## Build and test
 
