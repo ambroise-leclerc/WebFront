@@ -162,3 +162,16 @@ target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFr
 
 add_test(NAME TransportBenchmarksAreManual COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckManualTransportBenchmarks.cmake)
+
+if(NOT ENABLE_SANITIZER_THREAD)
+  add_executable(gzip_decoder_benchmark EXCLUDE_FROM_ALL GzipDecoderBenchmark.cpp)
+  target_link_libraries(gzip_decoder_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+endif()
+
+if(WEBFRONT_GZIP_DIFFERENTIAL)
+  find_package(ZLIB REQUIRED)
+  add_executable(gzip_differential ../fuzz/GzipDifferential.cpp)
+  target_link_libraries(gzip_differential PRIVATE WebFront_test_hardening WebFront_options WebFront ZLIB::ZLIB)
+  add_test(NAME GzipZlibDifferential COMMAND gzip_differential)
+  set_tests_properties(GzipZlibDifferential PROPERTIES TIMEOUT 60)
+endif()

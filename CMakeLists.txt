@@ -12,6 +12,7 @@ option(ENABLE_TESTING "Enable Test Builds" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
+option(WEBFRONT_GZIP_DIFFERENTIAL "Build test-only gzip/zlib differential checks" OFF)
 option(WEBFRONT_USE_MDDLOG "Use the compiled mddlog diagnostic adapter" OFF)
 # The experimental gate must be selected before project() probes the compiler.
 if(WEBFRONT_USE_MDDLOG)

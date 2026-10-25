@@ -362,3 +362,118 @@ SCENARIO("Gzip decoding fills a preallocated bounded worker buffer without growi
         REQUIRE(output.empty());
     }
 }
+
+SCENARIO("Gzip buffered reads preserve logical byte offsets and exact member boundaries") {
+    using webfront::http::gzip::GzipReader;
+    using webfront::http::gzip::InvalidGzip;
+    GIVEN("a binary stream read with every supported width and initial bit alignment") {
+        const std::string bytes("\x81\x72\xe3\x54\xa5\x96", 6);
+        THEN("every value and offset counts consumed bits without consuming later bytes") {
+            for (unsigned alignment = 0; alignment < 8; ++alignment) {
+                for (unsigned width = 0; width <= 32; ++width) {
+                    GzipReader reader(bytes);
+                    reader.bits(alignment);
+                    std::uint32_t expected = 0;
+                    for (unsigned bit = 0; bit < width; ++bit) {
+                        const auto offset = alignment + bit;
+                        expected         |= ((static_cast<unsigned char>(bytes[offset / 8]) >> (offset % 8)) & 1u) << bit;
+                    }
+                    INFO(alignment << ", " << width);
+                    REQUIRE(reader.bits(width) == expected);
+                    REQUIRE(reader.offset() == (alignment + width) / 8);
+                    REQUIRE_FALSE(reader.done());
+                    reader.align();
+                    const auto consumed = (alignment + width + 7) / 8;
+                    REQUIRE(reader.offset() == consumed);
+                    REQUIRE(reader.readBytes(bytes.size() - consumed) == std::string_view(bytes).substr(consumed));
+                    REQUIRE(reader.done());
+                    REQUIRE(reader.bits(0) == 0);
+                    REQUIRE_THROWS_AS(reader.bits(1), InvalidGzip);
+                }
+            }
+        }
+    }
+    GIVEN("a one-byte input and a partially consumed final byte") {
+        GzipReader reader(std::string_view("\xff", 1));
+        REQUIRE(reader.bits(1) == 1);
+        REQUIRE(reader.offset() == 0);
+        REQUIRE_FALSE(reader.done());
+        REQUIRE(reader.bits(7) == 127);
+        REQUIRE(reader.offset() == 1);
+        REQUIRE(reader.done());
+        REQUIRE_THROWS_AS(reader.bits(1), InvalidGzip);
+        REQUIRE_THROWS_AS(reader.bits(33), InvalidGzip);
+    }
+    GIVEN("optional header checksums and empty members between Huffman members") {
+        const auto bytes = std::string(gzipfixtures::optional) + std::string(gzipfixtures::empty) + std::string(gzipfixtures::fixed);
+        THEN("header CRC ranges and every member trailer stay exact") {
+            REQUIRE(decodeGzip(bytes) == payload() + payload());
+            for (std::size_t size = bytes.size() - 8; size < bytes.size(); ++size)
+                REQUIRE_FALSE(decodeGzip(std::string_view(bytes).substr(0, size)));
+            REQUIRE_FALSE(decodeGzip(bytes + std::string(1, '\0')));
+        }
+    }
+}
+
+SCENARIO("Gzip lookahead retains prefetched bytes through alignment and bulk reads") {
+    using webfront::http::gzip::GzipReader;
+    using webfront::http::gzip::InvalidGzip;
+    GzipReader reader("abcdef");
+    unsigned   prefix;
+    GIVEN("lookahead across four bytes without consuming them") {
+        REQUIRE(reader.peek(32, prefix));
+        REQUIRE(prefix == 0x64636261u);
+        REQUIRE(reader.offset() == 0);
+        REQUIRE(reader.readBytes(2) == "ab");
+        REQUIRE(reader.bits(8) == 'c');
+        REQUIRE(reader.peek(16, prefix));
+        REQUIRE(prefix == 0x6564u);
+        THEN("alignment keeps complete prefetched bytes") {
+            reader.bits(1);
+            reader.align();
+            REQUIRE(reader.offset() == 4);
+            REQUIRE(reader.readBytes(2) == "ef");
+            REQUIRE(reader.done());
+        }
+    }
+    GIVEN("lookahead beyond the end of an exact input span") {
+        REQUIRE(reader.readBytes(5) == "abcde");
+        REQUIRE_FALSE(reader.peek(16, prefix));
+        THEN("a failed probe preserves the last byte for a shorter code") {
+            REQUIRE(reader.offset() == 5);
+            REQUIRE(reader.bits(8) == 'f');
+            REQUIRE(reader.done());
+            REQUIRE_THROWS_AS(reader.consume(1), InvalidGzip);
+        }
+    }
+}
+
+SCENARIO("Gzip Huffman lookup preserves short tails, long codes and empty distance trees") {
+    using namespace webfront::http::gzip;
+    GIVEN("a single-symbol incomplete alphabet at the very last input bit") {
+        const std::array<unsigned, 1> lengths{1};
+        DeflateTree                   tree(lengths);
+        GzipReader                    reader(std::string_view("\x7f", 1));
+        reader.bits(7);
+        REQUIRE(tree.decode(reader) == 0);
+        REQUIRE(reader.done());
+    }
+    GIVEN("a complete tree with codes longer than the direct table") {
+        std::array<unsigned, 512> tooMany{};
+        REQUIRE_THROWS_AS(DeflateTree(tooMany), InvalidGzip);
+        // One code at each length 1..8 and two at length 9 make a complete alphabet.
+        const std::array<unsigned, 10> lengths{1, 2, 3, 4, 5, 6, 7, 8, 9, 9};
+        DeflateTree                    tree(lengths);
+        GzipReader                     reader(std::string_view("\xff\x01", 2));
+        REQUIRE(tree.decode(reader) == 9);
+        REQUIRE(reader.offset() == 1);
+        REQUIRE(reader.bits(7) == 0);
+        REQUIRE(reader.done());
+    }
+    GIVEN("an empty distance alphabet and a full input byte") {
+        const std::array<unsigned, 1> lengths{0};
+        DeflateTree                   tree(lengths);
+        GzipReader                    reader(std::string_view("\0\0", 2));
+        REQUIRE_THROWS_AS(tree.decode(reader), InvalidGzip);
+    }
+}

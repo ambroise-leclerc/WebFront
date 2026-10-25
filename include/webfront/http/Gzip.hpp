@@ -21,48 +21,65 @@ class GzipReader {
 public:
     explicit GzipReader(std::string_view bytes) : input(bytes) {}
 
-    unsigned bits(unsigned count) {
-        unsigned value = 0;
-        for (unsigned index = 0; index < count; ++index) {
-            if (position == input.size())
-                throw InvalidGzip{};
-            value |= ((static_cast<unsigned char>(input[position]) >> bit) & 1u) << index;
-            if (++bit == 8) {
-                bit = 0;
-                ++position;
-            }
+    // The reservoir contains at most 39 bits (a 32-bit read plus seven unused bits).
+    // Refill is byte-bounded even when a lookup probes the final short code.
+    bool peek(unsigned count, unsigned& value) {
+        if (count > 32)
+            throw InvalidGzip{};
+        while (available < count && position < input.size()) {
+            buffer    |= static_cast<std::uint64_t>(static_cast<unsigned char>(input[position++])) << available;
+            available += 8;
         }
+        if (available < count)
+            return false;
+        value = static_cast<unsigned>(buffer & ((std::uint64_t{1} << count) - 1));
+        return true;
+    }
+
+    void consume(unsigned count) {
+        if (count > available)
+            throw InvalidGzip{};
+        buffer   >>= count;
+        available -= count;
+    }
+
+    unsigned bits(unsigned count) {
+        unsigned value;
+        if (!peek(count, value))
+            throw InvalidGzip{};
+        consume(count);
         return value;
     }
 
     std::string_view readBytes(std::size_t count) {
-        if (bit != 0)
+        if (available % 8 != 0)
             throw InvalidGzip{};
-        if (count > input.size() - position)
+        // Return any whole prefetched bytes to the byte-oriented view.
+        const auto start = offset();
+        if (count > input.size() - start)
             throw InvalidGzip{};
-        const auto bytes = input.substr(position, count);
-        position        += count;
-        return bytes;
+        position  = start + count;
+        buffer    = 0;
+        available = 0;
+        return input.substr(start, count);
     }
 
     void align() {
-        if (bit != 0) {
-            bit = 0;
-            ++position;
-        }
+        consume(available % 8);
     }
 
     std::size_t offset() const {
-        return position;
+        return position - (available + 7) / 8;
     }
     bool done() const {
-        return position == input.size();
+        return offset() == input.size();
     }
 
 private:
     std::string_view input;
-    std::size_t      position = 0;
-    unsigned         bit      = 0;
+    std::size_t      position  = 0;
+    std::uint64_t    buffer    = 0;
+    unsigned         available = 0;
 };
 
 class DeflateTree {
@@ -71,9 +88,18 @@ public:
         countLengths(lengths);
         validate(lengths.size(), requireComplete);
         buildTable(lengths);
+        buildLookup();
     }
 
     unsigned decode(GzipReader& input) const {
+        unsigned prefix;
+        if (input.peek(lookupBits, prefix)) {
+            const auto entry = lookup[prefix];
+            if (entry != 0) {
+                input.consume(entry & 15);
+                return entry >> 4;
+            }
+        }
         unsigned code = 0, first = 0, index = 0;
         for (unsigned length = 1; length <= 15; ++length) {
             code |= input.bits(1);
@@ -135,8 +161,31 @@ private:
                 sorted[offsets[lengths[symbol]]++] = symbol;
     }
 
-    std::array<unsigned, 16>  counts{};
-    std::array<unsigned, 288> sorted{};
+    void buildLookup() {
+        unsigned code = 0, index = 0;
+        for (unsigned length = 1; length <= lookupBits; ++length) {
+            for (unsigned symbol = 0; symbol < counts[length]; ++symbol) {
+                addLookup(code + symbol, length, sorted[index + symbol]);
+            }
+            index += counts[length];
+            code   = (code + counts[length]) << 1;
+        }
+    }
+
+    void addLookup(unsigned code, unsigned length, unsigned symbol) {
+        unsigned reversed = 0;
+        for (unsigned bit = 0; bit < length; ++bit)
+            reversed = (reversed << 1) | ((code >> bit) & 1u);
+        const auto entry = static_cast<std::uint16_t>((symbol << 4) | length);
+        for (unsigned prefix = reversed; prefix < lookup.size(); prefix += 1u << length)
+            lookup[prefix] = entry;
+    }
+
+    // Short codes use a small direct table; longer codes retain the canonical decoder.
+    static constexpr unsigned                   lookupBits = 8;
+    std::array<std::uint16_t, 1u << lookupBits> lookup{};
+    std::array<unsigned, 16>                    counts{};
+    std::array<unsigned, 288>                   sorted{};
 };
 
 inline std::uint32_t gzipCrc(std::string_view bytes) {

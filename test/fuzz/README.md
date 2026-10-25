@@ -24,9 +24,44 @@ Run against that copy, since libFuzzer adds and minimizes inputs in its corpus:
 
 Repeat for `http`, `websocket` and `gzip`. Gzip seeds cover stored, fixed/dynamic Huffman
 blocks, optional header fields, empty members, corruption and truncation. The gzip harness
-caps total decoded output at 1 MiB; the HTTP server uses 64 MiB. Input errors caught by the harness are limited
+caps total decoded output at 1 MiB; the HTTP server defaults to 4 MiB. Input errors caught by the harness are limited
 to the decoder's documented rejection exceptions; allocation failures, sanitizer
 findings and hardening assertion failures must stop the process. WebSocket
 payload budgets exercise rejection before allocation of attacker-supplied lengths.
 CI retains reproducer artifacts on failure. Reproduce a finding by passing its
 file to the same executable, then add a unit regression before fixing it.
+
+
+## Gzip/zlib differential checks
+
+Opt in with `-DWEBFRONT_GZIP_DIFFERENTIAL=ON`: tests link zlib, production headers do not.
+With `ENABLE_TESTING=ON`, `gzip_differential` compares the neutral fixtures in CTest;
+with `ENABLE_FUZZING=ON`, `fuzz_gzip_differential` additionally checks arbitrary accepted
+streams against zlib under ASan/UBSan:
+
+```sh
+python3 test/fuzz/GenerateGzipCorpus.py build-test/gzip-corpus
+build-test/test/unit/gzip_differential build-test/gzip-corpus
+build-test/test/fuzz/fuzz_gzip_differential build-test/test/fuzz/corpus/gzip \
+  -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024
+```
+
+The corpus directory must be new. An optional second generator argument supplies an application
+bundle to compress. Generated supported streams check acceptance and content in both directions;
+the fuzz target checks every WebFront-accepted stream, allowing intentional rejections of
+unsupported declarations. The oracle handles concatenated members and requires exact consumption,
+normalizing zlib consumers' permissive treatment of trailing padding. See
+[decoder measurements](../../docs/GZIP_DECODER_MEASUREMENTS.md) for sizes, limits and reproduction.
+
+On macOS with Apple Clang and an external libFuzzer archive, the standalone equivalent is:
+
+```sh
+clang++ -std=c++23 -O1 -g -fsanitize=fuzzer-no-link,address,undefined \
+  -fno-sanitize-recover=all -Iinclude test/fuzz/GzipDifferentialFuzz.cpp \
+  /path/to/libclang_rt.fuzzer_osx.a -lz -o build-test/fuzz_gzip_differential
+```
+
+Use `GzipFuzz.cpp` in the same command without `-lz` for the bounded non-differential harness.
+This allows the compiler and its ASan runtime to remain paired when a different toolchain supplies
+libFuzzer. A standalone differential runner uses `GzipDifferential.cpp` with
+`-fsanitize=address,undefined -lz` and no libFuzzer archive.

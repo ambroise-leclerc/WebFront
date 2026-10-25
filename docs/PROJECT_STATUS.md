@@ -521,8 +521,13 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   across keys and decoded storage. Each hit rechecks the active output budget; oversized
   entries are served without retention. Cold fallback runs on a lazy, owned CPU worker (#283),
   with bounded jobs, consumer slots and buffer reservations; results return to the I/O context.
-  Job, consumer and buffer saturation returns 503; the compressed-input cap (4 MiB by default) returns 500 before cache lookup. Active decoding finishes before shutdown joins; decoder throughput remains #282. See [HTTP asset encoding](HTTP_ASSETS.md)
-  for negotiation rules, errors, strict stream validation and budget configuration.
+  Job, consumer and buffer saturation returns 503; the compressed-input cap (4 MiB by default)
+  returns 500 before cache lookup. Active decoding finishes before shutdown joins. Bounded
+  buffered bit reads and a 256-entry
+  short-code Huffman table reduce cold decoding work (#282); allocation counts are unchanged.
+  See [Release decoder measurements and zlib differential validation](GZIP_DECODER_MEASUREMENTS.md)
+  and [HTTP asset encoding](HTTP_ASSETS.md) for negotiation rules, errors, strict stream validation
+  and budget configuration.
   Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
   Verified 2026-10-25 on Linux for #281: 275 CEF-off CTest cases and all 64 CEF/Xvfb
   web-integration cases passed; cold/repeated GET/HEAD measurements are recorded in
