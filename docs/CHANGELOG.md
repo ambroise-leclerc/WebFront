@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-26
+
+- Gzip identity fallback reuses a bounded validated-representation cache for GET and HEAD (#281).
+  Cold decoding uses buffered bit reads and a small Huffman lookup (#282), with unchanged
+  allocation behavior, strict stream validation and output budgets. Release benchmarks and
+  test-only zlib differential/sanitizer validation are recorded in `docs/GZIP_DECODER_MEASUREMENTS.md`.
+
 - `WebFrontLifeDeveloper` starts without argument on `./life-project` (created when missing, reused untouched otherwise) and the
   pinned environment; the explicit `<project> [<environment-url> <sha512-integrity>]` form remains. At configuration, the
   native window engine of the platform is enabled automatically when its dependencies are found (top-level builds with examples,

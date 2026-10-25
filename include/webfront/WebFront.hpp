@@ -34,7 +34,7 @@
 
 namespace webfront {
 
-inline constexpr std::string_view version = "0.4.0";
+inline constexpr std::string_view version = "0.5.0";
 
 using NetProvider     = networking::TCPStdnet;
 using ConnectionError = std::runtime_error;

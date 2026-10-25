@@ -178,6 +178,16 @@ be checked on the corrected head before merging. See the
 
 
 
+## Release 0.5.0 (2026-10-26)
+
+`webfront::version` and the CMake project version are 0.5.0. This version integrates the
+manifest-driven, self-building developer environment, the reduced identity-only embedded core,
+and bounded cached/worker gzip fallback with buffered decoding. Includes move to
+`<webfront/...>`; removed terminal/tool-manager APIs migrate to the developer terminal and
+`webfront::Commands`. See `docs/CHANGELOG.md` and `docs/UI_COMPONENTS.md` for migration details.
+The published developer environment pin is 0.6.2; environment sources at 0.6.3 are not yet
+published. Library APIs and packaging remain experimental.
+
 ## Release 0.4.0 (#200, 2026-10-21)
 
 `webfront::version` and the CMake project version are 0.4.0. The release presents the repository
