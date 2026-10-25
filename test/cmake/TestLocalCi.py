@@ -186,14 +186,13 @@ if(NOT WF_CPM_LOADED)
     message(FATAL_ERROR "The prepared CPM module was not loaded")
 endif()
 ''')
-        (self.root / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.31)
-project(OfflineCPM NONE)
-enable_testing()
-add_test(NAME ChildConfiguration COMMAND "${{CMAKE_COMMAND}}" -P "{child.as_posix()}")
-''')
         build = self.root / "build"
-        subprocess.run(["cmake", "-S", str(self.root), "-B", str(build)],
-                       check=True, capture_output=True, text=True, timeout=20)
+        build.mkdir()
+        # A script-only CTest directory needs no generator discovery. On Windows,
+        # selecting Visual Studio can run slow host/SDK probes even with project(NONE).
+        cmake = Path(shutil.which("cmake")).as_posix()
+        (build / "CTestTestfile.cmake").write_text(
+            f'add_test(ChildConfiguration "{cmake}" "-P" "{child.as_posix()}")\n')
         lane = dict(self.lane("web-integration-gcc"), options=["-DWEBFRONT_EMBED_CEF=OFF"])
 
         def execute(invocation, **kwargs):
@@ -207,8 +206,6 @@ add_test(NAME ChildConfiguration COMMAND "${{CMAKE_COMMAND}}" -P "{child.as_posi
                 return result
             return subprocess.CompletedProcess(invocation, 0, "cmake version " + lane["cmake_version"])
 
-        # The fixture uses the host's default generator, including multi-config Visual Studio.
-        # CTest needs a configuration there even though this project builds no compiler targets.
         plan = [["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure", "--no-tests=error"]]
         with patch.dict(os.environ), patch.object(worker.os, "umask"), \
              patch.object(worker, "command", side_effect=execute), \
