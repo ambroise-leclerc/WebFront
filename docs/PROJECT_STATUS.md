@@ -620,5 +620,8 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 The eleven-lane description and workflow drift checks now have a Python standard-library orchestrator, commit bundles, verified
 offline dependency/image kits, per-lane Linux containers without network access, persistent CPM/ccache directories, log and
 artifact collection, bounded execution and explicit incomplete/failure statuses. The offline protocol regression uses SSH/Docker
-stand-ins. Real Linux image/host qualification, native Windows/macOS sessions and comparison with GitHub timings remain open;
+stand-ins. Native Windows execution now launches a limited interactive scheduled task, initializes MSVC, checks WebView2 and
+the owner-prepared public egress firewall policy, caps compilation at four jobs, owns descendants through a Windows Job Object,
+and collects diagnostics before cleanup. Offline Windows regressions include real PowerShell binary transport and Job cleanup.
+Real Linux image/host and Windows account/task qualification, native macOS sessions and comparison with GitHub timings remain open;
 this is not yet a qualified replacement for running any of the GitHub jobs. See [LOCAL_CI](LOCAL_CI.md).

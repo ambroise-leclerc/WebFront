@@ -10,7 +10,7 @@ import sys
 import tarfile
 
 sys.dont_write_bytecode = True
-from orchestrator import command, digest, extract, verifyKit, runProcess, STOP
+from orchestrator import command, digest, extract, verifyKit, runProcess, STOP, validateMatrix
 
 ROOT = Path(__file__).resolve().parent
 
@@ -168,7 +168,7 @@ def executeInside(lane, jobs):
     # Apply the WebKit sandbox exception only to test commands, as in the workflow.
     env = lane.get("env", {})
     os.environ.update({key: value for key, value in env.items() if key != "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"})
-    # CTest launches independent CMake configurations, which do not inherit -D cache entries.
+    # CTest subconfigurations must reuse the prepared CPM module too.
     os.environ.update(CPM_SOURCE_CACHE="/cache/cpm", CCACHE_DIR="/cache/ccache", CCACHE_BASEDIR="/workspace")
     if "-DWEBFRONT_EMBED_CEF=ON" in lane["options"]:
         # CEFSupport copies runtime resources into this SDK tree during the build.
@@ -245,7 +245,7 @@ def runLane(args, matrix):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "lane", "inside", "stop", "cleanup", "artifacts"])
+    parser.add_argument("action", choices=["prepare", "lane", "inside", "stop", "cleanup", "artifacts", "session"])
     parser.add_argument("--kit-sha256")
     parser.add_argument("--lane")
     parser.add_argument("--sha")
@@ -254,9 +254,16 @@ def main():
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
-    signal.signal(signal.SIGHUP, lambda *_: STOP.set())
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, lambda *_: STOP.set())
     matrix = json.loads((ROOT / "lanes.json").read_text())
     try:
+        validateMatrix(matrix)
+        if args.lane and not any(row["id"] == args.lane for row in matrix["lanes"]):
+            raise ValueError("Unknown lane")
+        if os.name == "nt":
+            import windows_worker
+            return windows_worker.dispatch(args, matrix, ROOT)
         if args.action == "prepare":
             prepare(args.kit_sha256)
         elif args.action == "lane":

@@ -1,10 +1,11 @@
-"""Transfer a chosen commit and an offline dependency kit, then run Linux lanes over SSH."""
+"""Transfer a commit and verified offline kits, then run Linux/Windows lanes over SSH."""
 import argparse
+import base64
 import concurrent.futures
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shlex
 import signal
@@ -17,6 +18,8 @@ import uuid
 
 HERE = Path(__file__).resolve().parent
 STOP = threading.Event()
+MACHINES = {"RyzenLinux", "CurmudgeonWindows", "Mac"}
+LANE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 
 
 def command(args, **kwargs):
@@ -31,22 +34,28 @@ def digest(path):
     return result.hexdigest()
 
 
-def safeName(name):
+def safeName(name, windows=False):
     path = PurePosixPath(name)
-    if path.is_absolute() or ".." in path.parts or "\\" in name or not path.parts:
+    reserved = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
+    if (path.is_absolute() or ".." in path.parts or "\\" in name or not path.parts
+            or PureWindowsPath(name).drive
+            or (windows and any(":" in part or part.endswith((".", " ")) or
+                                part.split(".")[0].upper() in reserved for part in path.parts))):
         raise ValueError(f"Unsafe archive path: {name}")
     return path
 
 
-def extract(archive, destination):
+def extract(archive, destination, windows=False):
     # No links, devices or duplicate paths: never let an archive write outside its run directory.
+    windows = windows or os.name == "nt"
     with tarfile.open(archive) as source:
         names = set()
         for member in source:
-            name = safeName(member.name).as_posix()
-            if name in names or not (member.isfile() or member.isdir()):
+            name = safeName(member.name, windows=windows).as_posix()
+            identity = name.casefold() if windows else name
+            if identity in names or not (member.isfile() or member.isdir()):
                 raise ValueError(f"Unsupported archive member: {member.name}")
-            names.add(name)
+            names.add(identity)
             target = destination / name
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
@@ -94,8 +103,9 @@ def pack(args):
     if args.output.resolve().is_relative_to(root):
         raise ValueError("The output archive must be outside the dependency directory")
     config = json.loads((root / "provision.json").read_text())
-    if not config.get("sources") or not config.get("images"):
-        raise ValueError("provision.json must describe images and source provenance")
+    if not config.get("sources") or not (config.get("images") or config.get("platform") == "windows"):
+        raise ValueError("provision.json must describe images or platform=windows, and source provenance")
+    config.setdefault("images", {})
     # Require provenance for every top-level tree (archives retain their upstream checksums).
     for path in root.iterdir():
         if path.name not in {"provision.json", "kit.json"} and path.name not in config["sources"]:
@@ -119,7 +129,19 @@ def pack(args):
     return 0
 
 
+def validateMatrix(matrix):
+    ids = set()
+    for lane in matrix["lanes"]:
+        machine, laneId = lane.get("machine"), lane.get("id")
+        if (not isinstance(machine, str) or machine not in MACHINES or not isinstance(laneId, str)
+                or not LANE_ID.fullmatch(laneId) or laneId in ids):
+            raise ValueError(f"Unsupported or duplicate lane metadata: {laneId!r}")
+        safeName(laneId, windows=True)
+        ids.add(laneId)
+
+
 def selectedLanes(matrix, machines, lanes):
+    validateMatrix(matrix)
     def names(value):
         return set(value.split(",")) if value else set()
     machineNames, laneNames = names(machines), names(lanes)
@@ -144,13 +166,42 @@ def exitCode(results, requireAll):
 
 
 def ssh(machine, script):
+    if machine not in MACHINES:
+        raise ValueError(f"Unsupported SSH machine: {machine!r}")
     return ["ssh", "-oBatchMode=yes", "-oConnectTimeout=5", "-oServerAliveInterval=10",
-            "-oServerAliveCountMax=2", machine, script]
+            "-oServerAliveCountMax=2", "--", machine, script]
 
 
-def remote(machine, args):
+def remote(machine, args, forward_stdin=False):
+    if machine == "CurmudgeonWindows":
+        # Pass an explicit Windows command line through .NET, avoiding PowerShell
+        # 5.1's additional native-argument rewriting. list2cmdline handles runs of
+        # backslashes before quotes and at the end of quoted arguments.
+        inputCopy = "[Console]::OpenStandardInput().CopyTo($process.StandardInput.BaseStream); " if forward_stdin else ""
+        script = ("$ErrorActionPreference='Stop'; "
+                  "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); "
+                  "[Console]::SetOut([System.IO.StreamWriter]::new([Console]::OpenStandardOutput(), "
+                  "[System.Text.UTF8Encoding]::new($false))); "
+                  "$start = New-Object System.Diagnostics.ProcessStartInfo; "
+                  f"$start.FileName = {psQuote(args[0])}; "
+                  f"$start.Arguments = {psQuote(subprocess.list2cmdline([str(arg) for arg in args[1:]]))}; "
+                  "$start.WorkingDirectory = $HOME; $start.UseShellExecute = $false; $start.CreateNoWindow = $true; "
+                  "$start.RedirectStandardInput = $true; "
+                  "$process = [System.Diagnostics.Process]::Start($start); "
+                  + inputCopy + "$process.StandardInput.Close(); "
+                  "$process.WaitForExit(); exit $process.ExitCode")
+        return ssh(machine, powershell(script))
     # All values are shell quoted once, at the SSH command-string boundary.
     return ssh(machine, shlex.join(args))
+
+
+def psQuote(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def powershell(script):
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + encoded
 
 
 def runProcess(args, log, timeout, stdin=None):
@@ -167,7 +218,11 @@ def runProcess(args, log, timeout, stdin=None):
             raise subprocess.CalledProcessError(process.returncode, args)
     finally:
         if process.poll() is None:
-            process.terminate()
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            else:
+                process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -183,7 +238,7 @@ root.mkdir(parents=True,exist_ok=False)
 with tarfile.open(fileobj=sys.stdin.buffer,mode="r|*") as archive:
  for item in archive:
   p=pathlib.PurePosixPath(item.name)
-  if p.is_absolute() or ".." in p.parts or "\\\\" in item.name or not item.isfile(): raise ValueError("Unsafe payload")
+  if p.is_absolute() or ".." in p.parts or "\\\\" in item.name or ":" in item.name or not item.isfile(): raise ValueError("Unsafe payload")
   target=root/p
   target.parent.mkdir(parents=True,exist_ok=True)
   with archive.extractfile(item) as src,open(target,"xb") as dst:
@@ -213,11 +268,16 @@ def execute(args):
     try:
         with tempfile.TemporaryDirectory(prefix="webfront-local-ci-") as scratch:
             scratch = Path(scratch)
-            kit = None
+            kits = {}
             if args.kit:
                 if digest(args.kit) != args.kit_sha256:
                     raise ValueError("Offline kit SHA-256 mismatch")
-                kit = args.kit.resolve()
+                kits["RyzenLinux"] = (args.kit.resolve(), args.kit_sha256)
+            windowsKit = getattr(args, "windows_kit", None)
+            if windowsKit:
+                if digest(windowsKit) != args.windows_kit_sha256:
+                    raise ValueError("Windows offline kit SHA-256 mismatch")
+                kits["CurmudgeonWindows"] = (windowsKit.resolve(), args.windows_kit_sha256)
             bundle = scratch / "commit.bundle"
             # A temporary private ref lets git bundle include detached and unpushed commits.
             ref = "refs/local-ci/" + runId
@@ -226,17 +286,22 @@ def execute(args):
                 command(["git", "bundle", "create", str(bundle), ref], cwd=repository)
             finally:
                 command(["git", "update-ref", "-d", ref], cwd=repository)
-            payload = scratch / "payload.tar"
             selectedMatrix = scratch / "lanes.json"
             selectedMatrix.write_text(json.dumps(matrix))
-            with tarfile.open(payload, "w") as archive:
-                for path, name in [(bundle, "commit.bundle"), (HERE / "worker.py", "worker.py"),
-                                   (HERE / "orchestrator.py", "orchestrator.py"),
-                                   (selectedMatrix, "lanes.json")]:
-                    archive.add(path, arcname=name)
-                if kit:
-                    archive.add(kit, arcname="kit.tgz")
             machines = {lane["machine"] for lane in lanes}
+            payloads = {}
+            for machine in machines & kits.keys():
+                payload = scratch / (machine + ".tar")
+                with tarfile.open(payload, "w") as archive:
+                    for path, name in [(bundle, "commit.bundle"), (HERE / "worker.py", "worker.py"),
+                                       (HERE / "windows_worker.py", "windows_worker.py"),
+                                       (HERE / "orchestrator.py", "orchestrator.py"),
+                                       (selectedMatrix, "lanes.json"), (kits[machine][0], "kit.tgz")]:
+                        archive.add(path, arcname=name)
+                payloads[machine] = payload
+            def workerCommand(machine, *arguments):
+                python = "python.exe" if machine == "CurmudgeonWindows" else "python3"
+                return remote(machine, [python, f".webfront-local-ci/runs/{runId}/worker.py", *arguments])
             ready = {}
             def prepare(machine):
                 with open(output / (machine + "-prepare.log"), "wb") as log:
@@ -246,17 +311,19 @@ def execute(args):
                         return "interrupted"
                     except (subprocess.SubprocessError, TimeoutError, OSError):
                         return "unreachable"
-                    if machine != "RyzenLinux":
+                    if machine not in {"RyzenLinux", "CurmudgeonWindows"}:
                         return "skipped (native session support pending step 3)"
-                    if not kit:
-                        log.write(b"Linux lanes require --kit and --kit-sha256; prepare an offline kit first.\n")
+                    if machine not in kits:
+                        log.write(b"Missing offline kit and SHA-256 for this machine.\n")
                         return "failed"
                     try:
-                        with open(payload, "rb") as stream:
-                            runProcess(remote(machine, ["python3", "-c", BOOTSTRAP, runId]), log,
+                        python = "python.exe" if machine == "CurmudgeonWindows" else "python3"
+                        bootstrap = BOOTSTRAP if machine == "RyzenLinux" else (
+                            "import base64;exec(base64.b64decode(" + repr(base64.b64encode(BOOTSTRAP.encode()).decode()) + "))")
+                        with open(payloads[machine], "rb") as stream:
+                            runProcess(remote(machine, [python, "-c", bootstrap, runId], forward_stdin=True), log,
                                        args.transfer_timeout, stream)
-                        runProcess(remote(machine, ["python3", f".webfront-local-ci/runs/{runId}/worker.py",
-                                                   "prepare", "--kit-sha256", args.kit_sha256]), log,
+                        runProcess(workerCommand(machine, "prepare", "--kit-sha256", kits[machine][1]), log,
                                    args.transfer_timeout)
                         return "ready"
                     except InterruptedError:
@@ -276,9 +343,9 @@ def execute(args):
                 with open(output / (laneId + ".log"), "wb") as log:
                     if status == "ready":
                         try:
-                            runProcess(remote(machine, ["python3", f".webfront-local-ci/runs/{runId}/worker.py",
+                            runProcess(workerCommand(machine, *([
                                 "lane", "--lane", laneId, "--sha", sha, "--jobs", str(args.jobs),
-                                "--timeout", str(args.timeout)] + (["--keep"] if args.keep else [])),
+                                "--timeout", str(args.timeout)] + (["--keep"] if args.keep else []))),
                                 log, args.timeout + 60)
                             status = "passed"
                         except InterruptedError:
@@ -292,16 +359,14 @@ def execute(args):
                         if status in {"interrupted", "timeout", "failed"}:
                             # A second SSH channel stops the container even if the execution channel was lost.
                             try:
-                                command(remote(machine, ["python3", f".webfront-local-ci/runs/{runId}/worker.py",
-                                                         "stop", "--lane", laneId]), stdout=log,
-                                        stderr=subprocess.STDOUT, timeout=15)
+                                command(workerCommand(machine, "stop", "--lane", laneId), stdout=log,
+                                        stderr=subprocess.STDOUT, timeout=90 if machine == "CurmudgeonWindows" else 15)
                             except (subprocess.SubprocessError, OSError):
                                 log.write(b"Remote cancellation could not be confirmed; inspect the container.\n")
                         try:
                             with open(output / (laneId + "-artifacts.tar"), "wb") as artifacts:
-                                command(remote(machine, ["python3", f".webfront-local-ci/runs/{runId}/worker.py",
-                                                         "artifacts", "--lane", laneId]), stdout=artifacts,
-                                        stderr=log, timeout=60)
+                                command(workerCommand(machine, "artifacts", "--lane", laneId), stdout=artifacts,
+                                        stderr=log, timeout=90 if machine == "CurmudgeonWindows" else 60)
                         except (subprocess.SubprocessError, OSError):
                             log.write(b"Artifact collection failed.\n")
                             if status == "passed":
@@ -317,11 +382,11 @@ def execute(args):
             # Retain only explicit --keep runs; caches are outside the per-run directory.
             if not args.keep:
                 for machine, status in ready.items():
-                    if machine == "RyzenLinux" and status != "unreachable":
+                    if machine in payloads and status != "unreachable":
                         with open(output / (machine + "-cleanup.log"), "wb") as log:
                             try:
-                                command(remote(machine, ["python3", f".webfront-local-ci/runs/{runId}/worker.py",
-                                                         "cleanup"]), stdout=log, stderr=subprocess.STDOUT, timeout=30)
+                                command(workerCommand(machine, "cleanup"), stdout=log, stderr=subprocess.STDOUT,
+                                        timeout=90 if machine == "CurmudgeonWindows" else 30)
                             except (subprocess.SubprocessError, OSError):
                                 print(f"Cleanup not confirmed on {machine}; run {runId} retained")
     finally:
@@ -347,6 +412,8 @@ def main(argv=None):
     run.add_argument("--keep", action="store_true")
     run.add_argument("--kit", type=Path)
     run.add_argument("--kit-sha256")
+    run.add_argument("--windows-kit", type=Path)
+    run.add_argument("--windows-kit-sha256")
     run.add_argument("--parallel-lanes", type=int, default=2)
     run.add_argument("--jobs", type=int, default=4)
     run.add_argument("--timeout", type=int, default=3600)
@@ -359,6 +426,8 @@ def main(argv=None):
             raise ValueError("Concurrency and timeout values must be positive")
         if bool(args.kit) != bool(args.kit_sha256):
             raise ValueError("--kit and --kit-sha256 must be supplied together")
+        if bool(args.windows_kit) != bool(args.windows_kit_sha256):
+            raise ValueError("--windows-kit and --windows-kit-sha256 must be supplied together")
         return execute(args)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"local-ci: {error}", file=__import__('sys').stderr)

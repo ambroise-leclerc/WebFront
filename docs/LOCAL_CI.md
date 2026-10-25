@@ -13,7 +13,7 @@ The story is delivered in three verifiable steps; a partial step does not close 
 | --- | --- | --- |
 | 1 | The eleven lanes in `cmake/local-ci/lanes.json` and the offline drift check `LocalCiLanesMatchWorkflows` | delivered |
 | 2 | Commit transport, offline-kit verification, Linux containers and the orchestrator | implemented; real-host/image qualification pending |
-| 3 | Native Windows and macOS sessions, result collection, full qualification and timings | not started |
+| 3 | Native Windows and macOS sessions, result collection, full qualification and timings | Windows implementation delivered; host qualification and macOS pending |
 
 ## The lanes
 
@@ -102,7 +102,7 @@ python3 cmake/local-ci/run run --commit HEAD --machines RyzenLinux \
   --kit /path/to/kit.tgz --kit-sha256 <sha256> --parallel-lanes 2 --jobs 4 --require-all
 ```
 
-`--machines` and `--lanes` take comma-separated names; both filters apply when both are present. Without filters, all eleven lanes
+`--machines` and `--lanes` take comma-separated names; both filters apply when both are present. Without filters, all lanes in the selected commit
 are selected. `--require-all` requires every **selected** lane to pass; a filtered run still reports `INCOMPLETE` for the full
 matrix. `--keep` retains remote worktrees and builds. `--timeout` bounds each lane (default 3600 seconds), and
 `--transfer-timeout` bounds preparation (default 1800 seconds). Limits must be positive. SSH probes have a five-second connection
@@ -114,6 +114,10 @@ bundle using a temporary private reference, so detached or unpushed commits work
 side pushes or fetches a remote repository. The remote clone mirrors the private reference before creating independent detached checkouts. Their standalone `.git`
 metadata remains usable at `/workspace` inside a container, without absolute paths into the host clone.
 The orchestration code itself comes from the driver's installation.
+Before any SSH probe or result-file creation, all lane machines must be one of `RyzenLinux`, `CurmudgeonWindows` or `Mac`,
+and lane IDs must be unique lowercase alphanumeric/hyphen names of at most 64 characters, beginning with a letter or digit.
+Workers validate the same metadata and reject unknown requested lanes before using them in paths. SSH also ends its option
+list explicitly before the machine name.
 
 Each run has a unique ID. Logs, `results.json` and per-lane artifact tar files land under
 `build-local-ci/<full-sha>/<run-id>/`, which the existing `build*/` ignore covers. Artifacts include CTest JUnit files,
@@ -238,6 +242,11 @@ Every top-level entry requires provenance. `pack` adds `kit.json`, containing a 
 modifying the input directory. The remote worker checks the outer archive hash before extracting, rejects paths escaping the
 run directory and checks every extracted file (including missing and unexpected files) before loading images. Docker loads the
 supplied archives, verifies the declared image IDs exist, then uses `--pull=never`.
+Windows extraction additionally rejects reserved device names (such as `aux.h` and `nul.c`), alternate data streams,
+trailing dots/spaces and case-insensitive path collisions. Linux workers retain case-sensitive POSIX names, so `Foo`/`foo`
+and ordinary files named `aux.h` remain valid in Linux kits. Absolute paths, drive paths, parent traversal, backslash paths,
+links and exact duplicate archive entries remain forbidden for every target. Extraction onto a Windows filesystem always
+applies the stricter Windows rules, regardless of the kit's target.
 
 ### Linux images and execution
 
@@ -277,7 +286,110 @@ arguments. Its protocol test substitutes local SSH/Docker executables; it does *
 sessions. `LocalCiLanesMatchWorkflows` and its negative suite still check the workflows independently.
 
 Actual Linux image builds, the nine lanes on RyzenLinux, warm-cache timings and comparison with GitHub on the same commit
-remain to be qualified. Delivery step 3 still needs the Windows interactive scheduled task (MSVC environment, at most four
-compilations and WebView2 runtime), the macOS graphical session and Xcode reporting, and the eleven-lane run. For now a reachable
-Windows/Mac machine reports `skipped (native session support pending step 3)`; an unreachable one reports `unreachable`.
+remain to be qualified. The Windows implementation below still needs qualification on CurmudgeonWindows with its dedicated
+account and network policy. Delivery step 3 also needs the macOS graphical session and Xcode reporting, and the eleven-lane run.
+A reachable Mac reports `skipped (native session support pending step 3)`; an unreachable machine reports `unreachable`.
 Neither counts as passed, and `--require-all` fails when either is selected. The story remains open.
+
+### Native Windows execution
+
+The Windows lane uses the same commit bundle, verified kit inventory, command metadata and result collection as Linux.
+It runs natively, with Ninja and the latest installed x64 MSVC toolset selected by `vswhere`, in the dedicated account's
+graphical session. It prints the effective compiler banner, CMake and WebView2 versions. CMake must match the lane's pinned
+version exactly; `latest` MSVC is reported, without claiming equality with the current GitHub runner image.
+MSVC deliberately follows the latest installed x64 toolset and WebView2 follows the installed Evergreen runtime, matching the
+workflow's unpinned toolset/runtime policy. Unlike CMake, their versions are recorded rather than compared with an expected
+version: divergence from GitHub requires reviewing those logs. Runtime discovery establishes that a versioned executable
+exists; the browser tests establish actual compatibility. No automatic toolset or Evergreen-version parity is claimed.
+Compilation is capped at four jobs, even when `--jobs` requests more. CTest retains the metadata's full test selection,
+Release configuration, parallelism and `--no-tests=error`, and writes JUnit output.
+
+Prepare a dedicated **standard**, non-administrator Windows account with Git, Python 3.10+ (`python.exe` on its SSH PATH,
+not the Store alias), Ninja, sccache, the pinned CMake, Visual Studio C++ x64 tools/Windows SDK and `vswhere` installed.
+Install WebView2 Evergreen separately while provisioning. Execution never installs or updates the runtime.
+Enable key-only OpenSSH access and verify its host key. Log that same account on locally (or in an active RDP session),
+and keep its desktop unlocked during tests. A service/SSH session or a disconnected graphical session is insufficient.
+
+For each run the SSH worker registers a uniquely named `WebFrontCI-<run>-<lane>` task for the current account with
+`LogonType Interactive`, `RunLevel Limited`, no password, no elevation and an execution deadline. It starts that task on demand.
+The task checks its active session/input desktop before configuring; failure is a failed lane, never a pass. If no session
+worker starts within 15 seconds, execution fails with an account/session diagnostic. The task obtains its MSVC environment
+from `VsDevCmd.bat`, uses a private checkout and writes a session log plus an atomic result file. A Windows Job Object with
+`KILL_ON_JOB_CLOSE` owns the task process and descendants. A timeout, Ctrl+C or failed SSH run requests task stop through a
+second SSH channel; the native worker also enforces its deadline and the scheduled task has a backup time limit.
+Task stop is confirmed before unregistering and deleting the run. Cancellation failure preserves files for inspection.
+Normal completion unregisters the task, collects the session log, JUnit, `LastTest.log` and CMake diagnostics, then removes
+the checkout (including read-only Git objects). `--keep` preserves files after stopping the task.
+If stop fails, the worker still attempts an artifact snapshot and prints the session log, retains the checkout, and reports
+the stop failure without replacing the original execution error. A collection failure also retains the source diagnostics.
+Snapshots taken while stop is unconfirmed may be incomplete because the task could still be writing files.
+
+Task start/finalization, recovery stop, artifact streaming and run cleanup use a shared per-run cross-process lock. Recovery
+stop collects diagnostics too. A late execution channel cannot overwrite an already collected archive after checkout removal,
+or recreate a run removed by cleanup. Lock files live outside the removable run under `.webfront-local-ci/locks/`; the small
+files are deliberately retained so late channels always lock the same file. Recovery SSH commands allow 90 seconds for
+serialization and cancellation. Actual OpenSSH-for-Windows process behavior on a lost channel remains a host qualification
+item; correctness of collection/cleanup does not depend on receiving SIGTERM at disconnect.
+
+Windows needs its own kit: use `"platform": "windows"`, `"images": {}` in `provision.json`, the same provenance mapping,
+CPM module, exported stdnet/stdexec/Catch2, bootstrap/registry archives, and the pinned WebView2 SDK exported as
+`sources/WebView2SDK`. Its URL, version and SHA-256 are in `cmake/WebView2Support.cmake`. Neither Docker nor Linux SDKs
+are needed. A portable preload uses paths relative to itself:
+
+```cmake
+set(CPM_stdnet_SOURCE "${CMAKE_CURRENT_LIST_DIR}/sources/stdnet" CACHE PATH "")
+set(CPM_Catch2_SOURCE "${CMAKE_CURRENT_LIST_DIR}/sources/Catch2" CACHE PATH "")
+set(CPM_WebView2SDK_SOURCE "${CMAKE_CURRENT_LIST_DIR}/sources/WebView2SDK" CACHE PATH "")
+set(FETCHCONTENT_SOURCE_DIR_STDEXEC "${CMAKE_CURRENT_LIST_DIR}/sources/stdexec" CACHE PATH "")
+```
+
+CPM's module and the sccache data persist under the dedicated account's `.webfront-local-ci/cache/`.
+The worker exports `CPM_SOURCE_CACHE` to the graphical session, so independent configurations launched by CTest reuse the
+verified module as well; supplying only the top-level `-DCPM_SOURCE_CACHE` would let those configurations attempt a download.
+Each lane uses a separate sccache server port; stopping its Job does not stop a concurrent run's server.
+The verified dependency sources remain private to the run. FetchContent is disconnected; missing CPM/transitive dependencies
+also fail under the public egress policy rather than downloading. The packer seals prepared files; it does not resolve them.
+
+Windows network policy must be prepared by the owner on a **dedicated CI host or VM**. The worker never changes firewall
+rules. It requires all Windows Firewall profiles enabled and the effective outbound block rule `WebFrontLocalCI-BlockPublic`
+covering every program, protocol and interface and the complete public IPv4/IPv6 address space. To review the setup commands:
+
+```powershell
+python.exe cmake/local-ci/windows_worker.py --print-firewall-setup
+```
+
+Apply those commands once as administrator on the dedicated host, after reviewing them. They affect all host users/programs.
+The block deliberately exempts RFC1918 IPv4, loopback, link-local and IPv6 unique-local addresses, preserving private-LAN SSH
+and browser loopback. Consequently **LAN access remains possible**; this is weaker isolation than Linux `--network=none`.
+The complement also deliberately blocks IPv4 multicast (`224.0.0.0/4`), limited broadcast (`255.255.255.255`) and IPv6
+multicast (`ff00::/8`). This may affect DHCP renewal, mDNS, LLMNR and IPv6 neighbor discovery. Qualify those services and SSH
+reachability across lease renewal on the dedicated host before enabling the policy; no multicast/broadcast exception has
+been validated or added. Existing allowance of `fc00::/7` does not imply multicast traffic is allowed.
+Do not expose a public-network proxy on the permitted LAN or loopback. The worker checks the active policy during preparation
+and again in the interactive task, before configure/build/tests. Rule absence, disabled profiles or narrower coverage fails.
+The policy must remain enforced by the owner throughout the run; this native account is not a sandbox for hostile commits.
+
+Seal the kit on a prepared workstation and run the Windows lane from any supported orchestrator host:
+
+```powershell
+python.exe cmake/local-ci/run pack --dependencies C:/kits/windows-prepared --output C:/kits/windows.tgz
+python.exe cmake/local-ci/run run --machines CurmudgeonWindows --commit HEAD `
+  --windows-kit C:/kits/windows.tgz --windows-kit-sha256 <sha256> --jobs 4 --require-all
+```
+
+`--windows-kit` and `--windows-kit-sha256` must be supplied together. They are independent of Linux's `--kit` and
+`--kit-sha256`, so one invocation can select both machines and send the appropriate kit to each. The SSH transport uses
+encoded PowerShell commands and preserves spaces, apostrophes and binary streams with either cmd.exe or PowerShell as the
+OpenSSH default shell. No account, scheduled task or firewall needs to be changed on the orchestrator host.
+
+`LocalCiWindows` adds offline regressions for native command generation, task policy, kit integrity, network preconditions,
+failed/successful sessions, missing desktops, deadlines, cancellation, artifact retention and cleanup. Its full protocol test
+uses an SSH/native-session stand-in with real bundles/checkouts and artifacts. On Windows it also exercises real PowerShell
+binary transport and a real Job Object's child-process termination. These tests do not register real tasks or change firewall
+policy. Running the whole lane over SSH with the dedicated graphical account, cold/warm caches and comparison against GitHub
+remain qualification work; implementation tests are not evidence that the remote host has been provisioned correctly.
+In particular, verify from the actual **non-elevated SSH account** that `Get-NetFirewallProfile` and
+`Get-NetFirewallRule -PolicyStore ActiveStore`, plus every `Get-NetFirewall*Filter` used by `checkNetwork`, can read the
+effective policy. These permissions have not been tested on the dedicated host: denial fails preparation before any build,
+and the worker does not elevate or bypass the check. Also qualify public egress blocking, multicast/broadcast effects,
+MSVC/Evergreen version differences, and a real SSH disconnect followed by recovery collection and cleanup.

@@ -65,7 +65,9 @@ class LocalCiTests(unittest.TestCase):
     def test_archive_rejects_escape_links_and_duplicate_files(self):
         for name, kind in [("../escape", tarfile.REGTYPE), ("/escape", tarfile.REGTYPE),
                            ("link", tarfile.SYMTYPE), ("device", tarfile.CHRTYPE),
-                           ("a\\b", tarfile.REGTYPE), ("duplicate", tarfile.REGTYPE)]:
+                           ("a\\b", tarfile.REGTYPE), ("duplicate", tarfile.REGTYPE),
+                           ("C:/escape", tarfile.REGTYPE), ("file:stream", tarfile.REGTYPE),
+                           ("NUL.txt", tarfile.REGTYPE), ("alias.", tarfile.REGTYPE)]:
             with self.subTest(name=name):
                 archive = self.root / "bad.tar"
                 with tarfile.open(archive, "w") as stream:
@@ -75,7 +77,50 @@ class LocalCiTests(unittest.TestCase):
                     if name == "duplicate":
                         stream.addfile(member)
                 with self.assertRaises(ValueError):
-                    ci.extract(archive, self.root / "out")
+                    ci.extract(archive, self.root / "out", windows=True)
+
+    def test_metadata_rejects_ssh_options_path_traversal_and_duplicate_ids(self):
+        import copy
+        for field, value in [("machine", "-oProxyCommand=bad"), ("machine", "user@host"),
+                             ("id", "../escape"), ("id", "C:/escape"), ("id", "-option"),
+                             ("id", "bad name"), ("id", "con"), ("id", "x" * 65)]:
+            with self.subTest(field=field, value=value):
+                matrix = copy.deepcopy(self.matrix)
+                matrix["lanes"][0][field] = value
+                with self.assertRaises(ValueError):
+                    ci.selectedLanes(matrix, "CurmudgeonWindows", None)
+        duplicate = dict(self.matrix, lanes=[self.matrix["lanes"][0]] * 2)
+        with self.assertRaises(ValueError):
+            ci.selectedLanes(duplicate, None, None)
+        with self.assertRaises(ValueError):
+            ci.ssh("-oProxyCommand=bad", "echo test")
+        command = ci.ssh("RyzenLinux", "echo test")
+        self.assertEqual(command[command.index("--") + 1], "RyzenLinux")
+
+    def test_worker_rejects_unknown_lane_before_external_actions(self):
+        result = subprocess.run([sys.executable, str(ci.HERE / "worker.py"), "stop", "--lane", "../escape"],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Unknown lane", result.stderr)
+
+    def test_project_status_is_valid_utf8(self):
+        self.assertNotIn("\ufffd", (ROOT / "docs/PROJECT_STATUS.md").read_text(encoding="utf-8"))
+
+    def test_linux_names_do_not_inherit_windows_alias_restrictions(self):
+        for name in ("aux.h", "nul.c", "con.txt", "ending.", "ending ", "Foo", "foo"):
+            self.assertEqual(ci.safeName(name).as_posix(), name)
+        for name in ("aux.h", "nul.c", "con.txt", "ending.", "ending "):
+            with self.assertRaises(ValueError):
+                ci.safeName(name, windows=True)
+        archive = self.root / "case.tar"
+        with tarfile.open(archive, "w") as stream:
+            for name in ("Foo", "foo"):
+                stream.addfile(tarfile.TarInfo(name))
+        with self.assertRaises(ValueError):
+            ci.extract(archive, self.root / "windows-case", windows=True)
+        if sys.platform == "linux":
+            ci.extract(archive, self.root / "linux-case")
+            self.assertEqual({path.name for path in (self.root / "linux-case").iterdir()}, {"Foo", "foo"})
 
     def makeKit(self):
         dependencies = self.root / "deps"
