@@ -207,7 +207,9 @@ add_test(NAME ChildConfiguration COMMAND "${{CMAKE_COMMAND}}" -P "{child.as_posi
                 return result
             return subprocess.CompletedProcess(invocation, 0, "cmake version " + lane["cmake_version"])
 
-        plan = [["ctest", "--test-dir", str(build), "--output-on-failure", "--no-tests=error"]]
+        # The fixture uses the host's default generator, including multi-config Visual Studio.
+        # CTest needs a configuration there even though this project builds no compiler targets.
+        plan = [["ctest", "--test-dir", str(build), "-C", "Release", "--output-on-failure", "--no-tests=error"]]
         with patch.dict(os.environ), patch.object(worker.os, "umask"), \
              patch.object(worker, "command", side_effect=execute), \
              patch.object(worker, "buildCommands", return_value=plan):
