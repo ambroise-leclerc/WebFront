@@ -214,13 +214,11 @@ if(NOT WF_CPM_LOADED)
     message(FATAL_ERROR "Prepared CPM module was not loaded")
 endif()
 ''')
-        (fixture / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.31)
-project(NativeOfflineCPM NONE)
-enable_testing()
-add_test(NAME ChildConfiguration COMMAND "${{CMAKE_COMMAND}}" -P "{child.as_posix()}")
-''')
         build = fixture / "build"
-        subprocess.run(["cmake", "-S", str(fixture), "-B", str(build)], check=True, capture_output=True, timeout=20)
+        build.mkdir()
+        cmake = Path(shutil.which("cmake")).as_posix()
+        (build / "CTestTestfile.cmake").write_text(
+            f'add_test(ChildConfiguration "{cmake}" "-P" "{child.as_posix()}")\n')
         def invoke(arguments, log, timeout):
             if arguments[0] == "ctest":
                 result = subprocess.run(["ctest", "--test-dir", str(build), "-C", "Release", "--no-tests=error",
