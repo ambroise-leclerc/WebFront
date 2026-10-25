@@ -29,7 +29,7 @@ env:
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
   desktop:
-    # Manual runs add extended checks and Linux performance; stability checks opt into desktops.
+    # Manual runs add extended checks; stability checks opt into desktops.
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     # No `name:` expression: a skipped matrix job would display it unevaluated.
     timeout-minutes: 25
@@ -150,62 +150,7 @@ jobs:
           path: |
             build/test-results.xml
             build/Testing/Temporary/LastTest.log
-            build/test/web/*-transport-benchmark.json
           if-no-files-found: ignore
-
-  performance-linux:
-    # Keep the Debug/coverage desktop lane; measure Linux with the optimized build used on Windows and macOS.
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/remove-node
-      - uses: ./.github/actions/setup-cmake
-        with:
-          version: '4.4.4'
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-      - uses: actions/cache@v4
-        with:
-          path: .cache/CPM
-          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/unit/CMakeLists.txt') }}
-          restore-keys: cpm-${{ runner.os }}-
-      - name: Install GCC 16 and WebKitGTK
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-16 g++-16 libwebkitgtk-6.0-dev xvfb
-          echo "CC=gcc-16" >> "$GITHUB_ENV"
-          echo "CXX=g++-16" >> "$GITHUB_ENV"
-      - name: Verify compiler cache launcher
-        run: sccache --version
-      - name: Configure Release performance build
-        run: >-
-          cmake -S . -B build-performance -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
-          -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
-          -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
-      - name: Build transport benchmark
-        run: cmake --build build-performance --target webkitgtk_transport_benchmark --parallel 2
-      - name: Record measurement environment
-        run: |
-          { uname -a; lscpu; g++-16 --version; pkg-config --modversion webkitgtk-6.0; } > build-performance/environment.txt
-      - name: Measure Linux transport three times
-        # The timings are evidence, never a pass/fail threshold. Only trusted local fixtures use this opt-out.
-        env:
-          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
-        run: >-
-          ctest --test-dir build-performance -C Release -L performance --output-on-failure --no-tests=error
-          --repeat until-fail:3 --output-junit "${{ github.workspace }}/build-performance/test-results.xml"
-      - name: Retain performance report and diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: performance-linux-webkitgtk
-          path: |
-            build-performance/environment.txt
-            build-performance/test-results.xml
-            build-performance/Testing/Temporary/LastTest.log
-            build-performance/test/web/webkitgtk-transport-benchmark.json
-          if-no-files-found: error
 
   sanitizers:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

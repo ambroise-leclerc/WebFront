@@ -12,7 +12,7 @@ find_package(Threads)
 include(CTest)
 
 set(TESTS_LIST)
-list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
+list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
@@ -154,3 +154,6 @@ set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)
 # Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
 add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)
 target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+
+add_test(NAME TransportBenchmarksAreManual COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckManualTransportBenchmarks.cmake)

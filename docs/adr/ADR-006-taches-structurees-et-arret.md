@@ -7,11 +7,12 @@
 | 1.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | Décision initiale : drainage des opérations asynchrones avant destruction du serveur. | [8f09ba5](https://github.com/ambroise-leclerc/WebFront/commit/8f09ba53bacc9468c5dfdaa3576c3d89d2d16ccc) |
 | 1.1 | 2026-10-13 | Acceptée | Ambroise Leclerc | Fermeture des WebSockets et terminaison des opérations avant destruction de WebFront. | [b4fa321](https://github.com/ambroise-leclerc/WebFront/commit/b4fa321e6c10c296a0807d56b007f4cd9ec5635c) |
 | 2.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Portée structurée commune, tâches applicatives possédées, TaskHandle et annulation locale des appels sender. | [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) |
+| 2.1 | 2026-10-25 | Acceptée | Ambroise Leclerc | Worker gzip possédé, admission bornée et jointure avant drainage des continuations réseau (#283). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2026-10-13** (version 1.0).
-Dernière révision : **2026-10-18** (version 2.0).
+Dernière révision : **2026-10-25** (version 2.1).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -70,6 +71,15 @@ prévaut entre résultat, arrêt et déconnexion.
 - Ne pas ajouter de threads détachés, délais de réponse implicites ou abandon de coroutine à
   la destruction. Synchroniser les états partagés et la destruction avec les appelants externes.
 - Tester les courses arrêt/résultat, spawn/arrêt, double terminaison et réponse tardive.
+
+### Worker gzip possédé (#283)
+
+Le serveur joint son worker CPU avant de pomper et joindre le scope réseau, une fois les
+appelants externes de run terminés. Le décodage déjà commencé n'est pas interrompu ; le
+travail en file est arrêté sans décoder quand ses consommateurs sont stoppés. Les
+continuations restent associées au scope jusqu'à leur terminaison sur I/O. Aucun thread
+ni buffer de réponse n'est détaché de son propriétaire. Les slots et réservations de
+réponses sont conservés jusqu'à la fin de leur envoi, y compris sur un cache hit.
 
 ## Sources et vérification
 

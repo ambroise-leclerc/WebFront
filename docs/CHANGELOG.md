@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Cold gzip identity fallback uses one server-owned worker with bounded jobs, consumers and
+  buffer capacities (#283). The new compressed-input cap defaults to 4 MiB and returns 500
+  before cache lookup when exceeded, including HEAD; configure `maxGzipEncodedAssetSize`
+  for larger assets. Queue/memory saturation and preparation allocation failures return 503.
+  Cancelled work skipped before decoding and decoder exceptions cannot poison later consumers.
+- Transport benchmarks are manual targets, excluded from CI, CTest and default builds (#283).
+  Short direct-channel correctness contracts remain in CTest for WebKitGTK, WebView2 and WKWebView.
+
 - Remove the local SSH CI orchestrator, container definitions, native session workers and matrix drift checks.
   The GitHub-hosted workflows remain the CI execution path.
 

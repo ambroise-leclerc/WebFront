@@ -15,8 +15,8 @@ namespace webfront::http::gzip {
 
 /**
  * @brief Serial-context cache keyed by complete compressed bytes, independent of filesystem paths.
- * @note Like RequestHandler, calls require serialization on the server context. A cold decode
- * finishes before another request runs, so queued misses for the same bytes reuse its result.
+ * @note Calls require serialization on the server context. Server worker results are published
+ * here only after resuming on that context; workers never mutate the cache.
  * Copies start empty; no cache storage is implicitly shared between applications.
  */
 class ValidatedCache {
@@ -50,22 +50,8 @@ public:
 
     /** @brief Replaces compressed content with identity (or clears it for HEAD), returning validated length. */
     std::optional<std::size_t> resolve(std::string& content, std::size_t outputLimit, bool head = false) {
-        auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
-            return entry.encoded == content;
-        });
-        if (found != entries.end()) {
-            ++stats.hits;
-            // Re-check the current policy even when a larger budget validated this revision earlier.
-            if (found->decoded.size() > outputLimit)
-                return {};
-            entries.splice(entries.begin(), entries, found);
-            const auto length = found->decoded.size();
-            if (head)
-                content.clear();
-            else
-                content = found->decoded;
-            return length;
-        }
+        if (auto cached = lookup(content, outputLimit, head))
+            return cached->allowed ? std::optional{cached->length} : std::nullopt;
         ++stats.decodes;
         auto decoded = decodeGzip(content, outputLimit);
         if (!decoded)
@@ -77,6 +63,41 @@ public:
         else
             content = std::move(*decoded);
         return length;
+    }
+
+    struct Lookup {
+        std::size_t length;
+        bool        allowed;
+    };
+
+    /** @brief IO-context lookup only; a miss never decodes. */
+    std::optional<Lookup> lookup(std::string& content, std::size_t outputLimit, bool head) {
+        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
+            return entry.encoded == content;
+        });
+        if (found == entries.end())
+            return {};
+        ++stats.hits;
+        const auto length = found->decoded.size();
+        if (length > outputLimit)
+            return Lookup{length, false};
+        entries.splice(entries.begin(), entries, found);
+        if (head)
+            content.clear();
+        else
+            content = found->decoded;
+        return Lookup{length, true};
+    }
+
+    /** @brief Publish an already validated worker result on the IO context. */
+    void remember(std::string_view encoded, std::string_view decoded) {
+        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
+            return entry.encoded == encoded;
+        });
+        if (found != entries.end())
+            entries.splice(entries.begin(), entries, found);
+        else
+            retain(encoded, decoded);
     }
 
     [[nodiscard]] Statistics statistics() const {

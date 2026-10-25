@@ -94,27 +94,29 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 
 Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)
 (proposed) describes how an adapter may later add its engine's native resource scheme and message channel without replacing that
-path. `WebKitGTKTransportBenchmark` (label `performance`, WebKitGTK builds with Xvfb) and `WebView2TransportBenchmark`
-(label `performance`, WebView2 builds on Windows) and `WKWebViewTransportBenchmark`
-(label `performance`, WKWebView builds on macOS) compare the two in the same window:
+path. Transport benchmarks are **manual measurement tools**, excluded from the default build,
+CTest and every CI workflow. The targets are `webkitgtk_transport_benchmark`,
+`webview2_transport_benchmark` and `wkwebview_transport_benchmark` for their respective engines.
+Build one explicitly, then launch its executable (the macOS executable is inside its `.app` bundle).
 
-```bash
-ctest --test-dir <build> -R "WebKitGTKTransportBenchmark|WebView2TransportBenchmark|WKWebViewTransportBenchmark" --output-on-failure
-```
-
-For comparable Linux timings, use Release without coverage (the regular Linux desktop CI uses Debug with coverage):
+For comparable Linux timings, use Release without coverage:
 
 ```bash
 cmake -S . -B build-performance -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
 cmake --build build-performance --target webkitgtk_transport_benchmark --parallel 2
-ctest --test-dir build-performance -L performance --output-on-failure --no-tests=error --repeat until-fail:3
+cd test/web
+xvfb-run -a ../../build-performance/test/web/webkitgtk_transport_benchmark /tmp/webkitgtk-transport-benchmark.json
 ```
 
-The `performance-linux` CI job runs this optimized benchmark three times on every PR, push to the release/integration branches,
-manual dispatch and weekly run. Its artifact `performance-linux-webkitgtk` retains the final JSON report, CTest diagnostics,
-JUnit results and the CPU, OS, compiler and WebKitGTK versions. The shared page uses the same sizes, call counts, warm-up,
-five samples and 64 concurrent calls as Windows and macOS. This measures correctness and records timings; it has no speed threshold.
+The former `performance-linux` CI job and timed transport CTest cases have been removed (#283).
+The shared page still uses the same sizes, call counts, warm-up, five samples and concurrent
+calls when launched manually. `WebKitGTKTransportContracts` and `WebView2TransportContracts`
+exercise native string replies, C++ evaluation, wrong echoes and evaluation exceptions with
+at most two calls per size; WebView2 also checks shared-buffer calls in both directions.
+They use a separate page without timing batches or performance reports.
+`WKWebViewTransportContracts` runs a separate contracts-only
+executable in CTest; it does not execute measurement batches.
 
 Each prints a table, writes `webkitgtk-transport-benchmark.json`, `webview2-transport-benchmark.json` or
 `wkwebview-transport-benchmark.json` in the build directory

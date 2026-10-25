@@ -30,9 +30,8 @@ can still be served directly to accepting clients.
 Each server owns a bounded LRU cache through its `RequestHandler`. It is destroyed after
 server tasks have drained, with no global state, background work or extra shutdown join.
 A copied handler starts with an empty cache; applications never implicitly share entries.
-The server context serializes requests: a cold synchronous decode completes before another
-request can miss on the same revision. There is no concurrent decode worker or in-flight table.
-Moving cold decoding off the I/O thread remains [#283](https://github.com/ambroise-leclerc/WebFront/issues/283).
+The server context serializes filesystem access and cache access; worker threads receive owned
+compressed bytes and never call a provider or touch an I/O object.
 
 Keys contain the **complete compressed bytes**, rather than a pathname, borrowed pointer,
 modification time, checksum alone or unvalidated ISIZE trailer. Every request still opens
@@ -61,7 +60,7 @@ Set `maxDecodedAssetCacheSize` on the buffer policy (or the sixth `CustomBuffers
 argument) to change retention. The retention budget is captured at handler construction;
 the decoded output budget is read for every fallback request. Zero retention disables
 caching, including HEAD metadata. Policies without this member inherit 8 MiB.
-`RequestHandler::fallbackCacheStatistics()` exposes decode attempts, hits (including budget-rejected hits), entries and accounted retained bytes; read it
+For the synchronous API, `RequestHandler::fallbackCacheStatistics()` exposes decode attempts, hits (including budget-rejected hits), entries and accounted retained bytes; read it
 on the server context. The LRU lookup compares compressed bytes linearly across retained
 entries; gzip pass-through remains independent of this cost. Decoder throughput and buffered
 bit reads remain [#282](https://github.com/ambroise-leclerc/WebFront/issues/282).
@@ -69,11 +68,87 @@ bit reads remain [#282](https://github.com/ambroise-leclerc/WebFront/issues/282)
 See [gzip cache measurements](GZIP_CACHE_MEASUREMENTS.md) for cold/repeated GET and HEAD data
 and the optional benchmark target.
 
+## Cold decoding, admission and shutdown (#283)
+
+`http::Server` sends cache misses to a single CPU worker, created lazily on the first admitted
+miss. Plain files, gzip/x-gzip pass-through and warm cache hits create no worker. A server
+which never needs cold fallback pays for the small executor state, with no thread or reserved
+payload buffers. The explicit low-level `RequestHandler::handleRequest` API remains synchronous;
+server connections use `prepareRequest`, the executor sender and `finish` instead.
+
+Filesystem opens/reads, negotiation, cache lookup/publication and response construction run
+on the server I/O context. The worker only validates/decodes owned bytes. The sender explicitly
+resumes through the connection's network scheduler. Identical in-flight compressed bytes with
+the same captured output limit share one job, including GET/HEAD consumers and oversized cache
+entries. Different output limits use separate jobs, so a failed smaller decode cannot poison a
+larger one. The output budget is checked again on completion. Completed worker data can serve
+followers until its last response lease is released. Work skipped after cancellation or interrupted
+by a decoder exception is excluded from coalescing; a later request retries validation.
+Failures never become valid cache entries.
+
+Defaults, captured at server construction, are optional buffer-policy members:
+
+| Member | Default | Meaning |
+| --- | ---: | --- |
+| `maxGzipDecodeJobs` | 4 | distinct active, queued or completed revisions whose responses still hold a lease |
+| `maxGzipDecodeWaiters` | 16 | accepted identity responses, including coalesced requests and cache hits, until send completion |
+| `maxGzipDecodeBytes` | 64 MiB | reserved compressed, decoded and response string capacities including terminators |
+| `maxGzipEncodedAssetSize` | 4 MiB | compressed bytes read for a gzip identity fallback request |
+
+A new job reserves a decoded string up to its captured output limit; every GET also reserves a
+response buffer up to that limit, regardless of the actual asset size. With the default 4 MiB
+output limit, one cold GET reserves at least 8 MiB plus its compressed key and terminators;
+each coalesced GET reserves another 4 MiB. Raising the output limit to 32 MiB prevents a
+cold GET from fitting the default 64 MiB budget even for a tiny asset. Tune the output and
+worker byte limits together. HEAD reserves no decoded response body. Reservation happens
+on the I/O thread before submission, so the worker fills preallocated storage without growing
+it. Actual string capacities are charged, including compressed revision keys. Cache hits reserve
+the actual response capacity. Completed jobs and slow sends keep their reservations; completing
+CPU work does not free budget that a response still owns. Cache retention has its separate
+8 MiB budget. Fixed executor state, bounded queue/waiter metadata, decoder stack and allocator
+bookkeeping are outside the payload budget. One serial I/O preparation/admission buffer is also
+outside it; the compressed-input limit and decoded/cache limits bound that temporary buffer.
+Provider-owned storage and ordinary HTTP/pass-through connection buffers retain their existing
+contracts; these settings do not impose a global HTTP connection limit.
+
+Exceeding the jobs, waiters or byte admission limits, or an allocation failure during
+request preparation/admission, returns **503 Service Unavailable**, with `Vary: Accept-Encoding`;
+there is no unbounded waiting queue or silent synchronous fallback. Rejected or cancelled
+compressed input is released before posting its I/O completion. Zero jobs disables cold
+admission; zero waiters/bytes disables gzip identity-fallback admission. Gzip pass-through is unchanged.
+The compressed-input cap is deterministic: exceeding `maxGzipEncodedAssetSize` returns
+**500 Internal Server Error**, including HEAD and assets previously validated through the
+synchronous handler. The cap is enforced while reading, before cache lookup, so retention
+cannot bypass it. This introduces a default 4 MiB compressed-input ceiling for server identity
+fallback; raise the policy limit for larger assets. Gzip pass-through remains unrestricted by
+this cap.
+For admitted work, malformed streams and exceeded decoded output budgets return **500**; incompatible negotiation
+still returns **406**. Limits are also checked for HEAD. The worker count is fixed at one per
+server; applications tune queued work and memory through the policy, without creating detached
+threads or a process-global pool.
+
+Cancellation is local and observed before starting a queued job and at completion. Cancelling
+one consumer does not cancel other consumers. A queued job whose consumers have all requested local cancellation is skipped.
+Queued cancellation completes when that job is serviced; an active decode ahead of it can
+delay cancellation delivery and slot release. An active decode is **not interruptible** and must finish; the byte limit is not a
+wall-clock deadline. A disconnected peer is detected by the eventual send, rather than a parallel
+socket read while decoding; its work remains owned and bounded until completion. Slow peers can
+exhaust the bounded response slots and cause 503 responses to later identity requests.
+
+`stop()` closes admission and requests task cancellation from any thread. After external
+`run()` callers return, `drain()`/destruction joins the worker first, then pumps the I/O context
+and joins the task scope, retaining all connection/response dependencies until then. The executor
+never closes a socket from its thread. An active non-interruptible decode can delay this join;
+queued jobs are stopped without decoding. `fallbackDecodeStatistics()` exposes atomic counters
+for jobs, response leases, charged bytes, decode attempts and whether a worker has been created.
+`Server::fallbackCacheStatistics()` combines I/O-context cache counters with worker decode attempts;
+read cache statistics on the I/O context. Decoder throughput remains #282.
+
 ## Fallback budget
 
 The limit applies to the sum of decoded bytes across all gzip members, for GET and HEAD.
 Gzip pass-through to an accepting client does not use this budget. A smaller budget reduces
-the work and memory a fallback request can consume, but it is not an I/O-thread time limit.
+the work and memory a fallback request can consume, but it is not a wall-clock deadline.
 Applications can override decoding and retention through their buffer policy:
 
 ```cpp
@@ -90,4 +165,5 @@ using App = webfront::BasicWF<webfront::NetProvider, webfront::fs::DefaultFS, Ap
 `CustomBuffersPolicy` also accepts the limit as its fifth template argument. Policies without
 `maxDecodedAssetSize` inherit the default. Zero permits only empty decoded assets. An asset
 exceeding a smaller custom budget returns 500 when identity is needed; gzip pass-through is
-unchanged. Caching avoids repeated decoding; it does not bound cold decode time or provider read time.
+unchanged. Caching avoids repeated decoding; the worker keeps cold decoding off the I/O context.
+Filesystem reads remain synchronous on that context.

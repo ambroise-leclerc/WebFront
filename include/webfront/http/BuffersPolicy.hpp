@@ -26,7 +26,7 @@ concept BuffersPolicyType = requires {
 /// Largest WebSocket message received when a policy has no maxMessageSize.
 inline constexpr size_t defaultMaxMessageSize = 64 * 1024 * 1024;
 
-/// Largest identity response decoded synchronously from a gzip asset by default.
+/// Largest identity response decoded from a gzip asset by default.
 inline constexpr size_t defaultMaxDecodedAssetSize = 4 * 1024 * 1024;
 
 /// Retained compressed keys, decoded data and entry storage per server.
@@ -40,6 +40,11 @@ struct DefaultBuffersPolicy {
     static constexpr size_t maxMessageSize         = defaultMaxMessageSize;
     static constexpr size_t maxDecodedAssetSize    = defaultMaxDecodedAssetSize;
     static constexpr size_t maxDecodedAssetCacheSize = defaultMaxDecodedAssetCacheSize;
+    /// Optional gzip worker limits; legacy policies use these defaults too.
+    static constexpr size_t maxGzipDecodeJobs = 4;
+    static constexpr size_t maxGzipDecodeWaiters = 16;
+    static constexpr size_t maxGzipDecodeBytes = 64 * 1024 * 1024;
+    static constexpr size_t maxGzipEncodedAssetSize = 4 * 1024 * 1024;
 };
 
 /// Custom policy template for user-defined buffer sizes
