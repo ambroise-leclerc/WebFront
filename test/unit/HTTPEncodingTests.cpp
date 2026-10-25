@@ -4,8 +4,10 @@
 #include <webfront/networking/NetworkingMock.hpp>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -43,8 +45,17 @@ struct EncodedAssetFS {
     }
 };
 struct AssetServerNet : Net {
-    static inline unsigned    accepts = 0;
-    static inline std::string statusLine;
+    static inline unsigned                accepts = 0;
+    static inline std::string             statusLine;
+    static inline std::mutex              mutex;
+    static inline std::condition_variable sent;
+    static std::string                    waitForResponse() {
+        std::unique_lock lock(mutex);
+        sent.wait(lock, [] {
+            return !statusLine.empty();
+        });
+        return statusLine;
+    }
 
     static auto Accept(Acceptor&) {
         return networking::ex::then(networking::ex::just(), []() -> Socket {
@@ -64,7 +75,11 @@ struct AssetServerNet : Net {
 
     static auto Send(Socket&, const auto& buffers) {
         const auto& first = buffers.front();
-        statusLine.assign(static_cast<const char*>(first.data()), first.size());
+        {
+            std::lock_guard lock(mutex);
+            statusLine.assign(static_cast<const char*>(first.data()), first.size());
+        }
+        sent.notify_all();
         return networking::ex::just(std::size_t{0});
     }
 };
@@ -245,7 +260,7 @@ SCENARIO("HTTP Server forwards the application policy to gzip fallback") {
     GIVEN("an application policy below the requested asset size") {
         Server<AssetServerNet, EncodedAssetFS, Limited> server("127.0.0.1", "0");
         THEN("the connection receives the bounded fallback error") {
-            REQUIRE(AssetServerNet::statusLine == "HTTP/1.1 500 Internal Server Error\r\n");
+            REQUIRE(AssetServerNet::waitForResponse() == "HTTP/1.1 500 Internal Server Error\r\n");
         }
     }
 }
@@ -366,7 +381,7 @@ SCENARIO("HTTP server drains and destroys a populated fallback cache") {
             AssetServerNet::statusLine.clear();
             {
                 Server<AssetServerNet, EncodedAssetFS> server("127.0.0.1", "0");
-                REQUIRE(AssetServerNet::statusLine == "HTTP/1.1 200 OK\r\n");
+                REQUIRE(AssetServerNet::waitForResponse() == "HTTP/1.1 200 OK\r\n");
                 server.stop();
                 server.drain();
             }

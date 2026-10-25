@@ -55,8 +55,8 @@ Sur mobile, un serveur local n'est pas aisé :
 
 ## Mesures (WebKitGTK, WebView2 et WKWebView, 2026-10-24/25)
 
-Le benchmark `test/web/WebKitGTKTransportBenchmark.cpp` (CTest `WebKitGTKTransportBenchmark`, labels
-`web-integration` et `performance`) ouvre une seule fenêtre WebKitGTK servie par WebFront et exécute les mêmes
+Le benchmark `test/web/WebKitGTKTransportBenchmark.cpp`, cible manuelle
+`webkitgtk_transport_benchmark`, ouvre une seule fenêtre WebKitGTK servie par WebFront et exécute les mêmes
 échos de chaînes par les deux chemins (`test/web/transport-benchmark.html`) :
 
 - **HTML** : `webFront.cppFunction("echo")` pour JavaScript → C++, `ui.jsFunctionSender<std::string>` pour
@@ -111,7 +111,7 @@ Lecture :
 
 ### Mesures WebView2 (Windows)
 
-`test/web/WebView2TransportBenchmark.cpp` (CTest `WebView2TransportBenchmark`, label `performance`) exécute la même page
+`test/web/WebView2TransportBenchmark.cpp` (cible manuelle `webview2_transport_benchmark`) exécute la même page
 dans une fenêtre WebView2, avec les mêmes échos. Le canal direct est enregistré sur le navigateur de l'adaptateur avant la
 navigation (observateur interne `Session::viewReady`) :
 
@@ -399,18 +399,18 @@ Chacun fera l'objet d'une issue dédiée :
   et [exceptions ATS par adresse IP](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsexceptiondomains)
   (consultés le 2026-10-25). Les permissions d'écoute, ATS et la politique du trafic en clair sont des règles distinctes.
 
-- Benchmark : [WebKitGTKTransportBenchmark.cpp](../../test/web/WebKitGTKTransportBenchmark.cpp),
-  [transport-benchmark.html](../../test/web/transport-benchmark.html), enregistrement dans
-  [WebKitGTKSupport.cmake](../../cmake/WebKitGTKSupport.cmake) ; exécution :
-  `ctest --test-dir <build> -R WebKitGTKTransportBenchmark --output-on-failure` dans une configuration
-  `-DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON` ; le rapport JSON est écrit dans le répertoire de build de
-  `test/web`. La passe CI `performance-linux` utilise Release sans couverture et répète ce test trois fois ;
-  son artefact conserve le dernier rapport JSON, les diagnostics CTest et la configuration de la machine.
+- Benchmarks manuels : [WebKitGTKTransportBenchmark.cpp](../../test/web/WebKitGTKTransportBenchmark.cpp),
+  [WebView2TransportBenchmark.cpp](../../test/web/WebView2TransportBenchmark.cpp),
+  [transport-benchmark.html](../../test/web/transport-benchmark.html). Construire explicitement
+  `webkitgtk_transport_benchmark` ou `webview2_transport_benchmark`, puis lancer l'exécutable
+  depuis `test/web` avec le chemin du rapport JSON en argument. WebKitGTK demande Xvfb sans
+  affichage ; WebView2 demande Windows et Evergreen. Ces outils utilisent Release sans
+  couverture pour les mesures. Les cas chronométrés CTest et la passe CI `performance-linux`
+  ont été retirés par #283 ; [FRONTENDS](../FRONTENDS.md) donne les commandes manuelles.
+  Les tests courts `WebKitGTKTransportContracts` et `WebView2TransportContracts` conservent
+  les vérifications des réponses natives et des erreurs via `transport-contracts.html`, sans
+  lots de mesure ni rapport de performance ; WebView2 conserve aussi les appels par buffer partagé.
   La partie commune est dans [TransportBenchmark.hpp](../../test/web/TransportBenchmark.hpp).
-- Benchmark WebView2 : [WebView2TransportBenchmark.cpp](../../test/web/WebView2TransportBenchmark.cpp), enregistrement
-  dans [WebView2Support.cmake](../../cmake/WebView2Support.cmake) ; exécution :
-  `ctest --test-dir <build> -R WebView2TransportBenchmark --output-on-failure` dans une configuration
-  `-DWEBFRONT_EMBED_WEBVIEW2=ON -DENABLE_TESTING=ON` sous Windows, avec le runtime Evergreen.
 - Régressions du chemin chaud : `Encoding bridge messages writes nothing to the standard output`
   ([MessagesTests](../../test/unit/MessagesTests.cpp)) et `FrameBufferNotFormattedWhenDebugDisabled`
   ([FrameAllocationTest](../../test/unit/FrameAllocationTest.cpp)).

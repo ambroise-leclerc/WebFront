@@ -35,8 +35,9 @@ microcontroller targets. Nothing of this transport is implemented yet; the ADR l
 (Ryzen 9 3900X, GCC 16.1, Release without coverage, WebKitGTK 2.52.6, Xvfb) use the same 8000 calls (800 at 32 KiB),
 warm-up and five samples as Windows, with the median of three launches; [raw reports](benchmarks/linux-webkitgtk-2026-10-25.json)
 are retained. Concurrent throughput is 2.0 to 2.3 times higher through the direct channel; the figures exclude the codec
-and thread hop a real transport adds. A dedicated `performance-linux` CI lane repeats the optimized benchmark three times
-and retains JSON, CTest and machine reports, alongside the existing Debug/coverage desktop lane.
+and thread hop a real transport adds. Transport measurements are now manual only (#283): their targets are excluded from the default build,
+timed cases are absent from CTest and the `performance-linux` CI lane has been removed.
+The short WebKitGTK, WebView2 (including shared buffers) and WKWebView direct transport contract checks remain in CTest.
 On WebView2 (Windows 11, Evergreen 155) string messages are slower than the HTML bridge from 32 KiB and for C++ to JS,
 while a shared buffer is 2 to 6 times faster. CEF and mobile engines are not measured; the ADR recommends a
 direct default for Android and iOS (with version-dependent network rules) and HTML until proven for desktop engines.
@@ -399,6 +400,10 @@ pre-run failures remain observable. Native callbacks and policy handling use
 separate named functions.
 See [WebKitGTK notes](WEBKITGTK.md).
 
+The non-interactive test driver uses fresh WebView2 profiles for each CTest invocation,
+including repetitions, so environment revisions served at the same URLs do not share browser
+caches or a lingering browser process. Application WebView2 profiles remain persistent.
+
 ## Input decoder hardening (#267, 2026-10-18)
 
 - Catch2 and browser test targets enable the standard library's vendor hardening mode
@@ -514,8 +519,9 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   policy. Other codings remain pass-through only. A server-owned 8 MiB LRU (#281) retains
   validated identity bytes and HEAD lengths, keyed by complete compressed content and bounded
   across keys and decoded storage. Each hit rechecks the active output budget; oversized
-  entries are served without retention. Cold fallback remains synchronous on the I/O thread
-  (#283); decoder throughput remains #282. See [HTTP asset encoding](HTTP_ASSETS.md)
+  entries are served without retention. Cold fallback runs on a lazy, owned CPU worker (#283),
+  with bounded jobs, consumer slots and buffer reservations; results return to the I/O context.
+  Job, consumer and buffer saturation returns 503; the compressed-input cap (4 MiB by default) returns 500 before cache lookup. Active decoding finishes before shutdown joins; decoder throughput remains #282. See [HTTP asset encoding](HTTP_ASSETS.md)
   for negotiation rules, errors, strict stream validation and budget configuration.
   Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
   Verified 2026-10-25 on Linux for #281: 275 CEF-off CTest cases and all 64 CEF/Xvfb

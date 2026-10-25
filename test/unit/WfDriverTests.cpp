@@ -36,3 +36,16 @@ SCENARIO("The driver deadline closes both connected and late browsers without lo
         }
     }
 }
+
+SCENARIO("Driver WebView2 profiles isolate environments served at identical URLs") {
+    using namespace webfront;
+    STATIC_REQUIRE(
+        std::is_same_v<testdriver::DriverFrontend<frontend::WebView2Frontend>, frontend::WebView2FrontendWithOptions<testdriver::DriverWebView2Options>>);
+    STATIC_REQUIRE(std::is_same_v<testdriver::DriverFrontend<frontend::CEFFrontend>, frontend::CEFFrontend>);
+    const auto first  = testdriver::DriverWebView2Options::get("first-session");
+    const auto second = testdriver::DriverWebView2Options::get("second-session");
+    REQUIRE(first.userDataFolder == std::filesystem::path("first-session"));
+    REQUIRE(second.userDataFolder != first.userDataFolder);
+    REQUIRE(testdriver::DriverWebView2Options::get(nullptr).userDataFolder.empty());
+    REQUIRE(testdriver::DriverWebView2Options::get("").userDataFolder.empty());
+}

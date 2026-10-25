@@ -55,8 +55,9 @@ budget, content replacement, invalid streams, admission limits, eviction and shu
 | application | HEAD | 907.11 | 31.15 | 894.37 | 913.72 |
 
 The improvement comes from eliminating repeat validation, including CRC32 and DEFLATE.
-Cold application decoding remains about 0.9 ms here, on the I/O thread; #283 must address
-that occupancy. The warm application cost still includes reading and comparing 22.9 KiB of
+These cache-only measurements predate #283 and use the explicit synchronous RequestHandler
+API. Cold application decoding took about 0.9 ms here. The current HTTP server runs that cold
+work on its owned CPU executor; this harness remains a manual codec/cache baseline. The warm application cost still includes reading and comparing 22.9 KiB of
 compressed bytes; #282 can use the cold rows as a decoder baseline. Small timing differences
 between cold before/after runs include allocation and host scheduling noise.
 

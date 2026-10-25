@@ -7,7 +7,7 @@
 # SLEEP_ENVIRONMENT uses a tiny compatible archive whose command records its start before sleeping; EXPECT_FILE
 # requires that record after the watchdog exits. Real packaged-script execution is covered by the other driver cases.
 # PROVISION is the provision.json of ENVIRONMENT, from which an INTEGRITY left empty is read when the test runs.
-# PROFILE is a directory for the browser's own persistent state (WebKitGTK profile), emptied first: a browser reuses the
+# PROFILE is a directory for the browser's own persistent state (WebKitGTK/WebView2 profiles), emptied first: a browser reuses the
 # modules it loaded by URL, and the first page that loads another environment through the same profile fails with
 # "Importing a module script failed". Every case then starts from nothing.
 # FORGE replaces ENVIRONMENT with an archive whose environment.json declares the given protocol and API versions.
@@ -15,6 +15,10 @@ if(PROFILE)
     file(REMOVE_RECURSE "${PROFILE}")
     set(ENV{XDG_DATA_HOME} "${PROFILE}/data")
     set(ENV{XDG_CACHE_HOME} "${PROFILE}/cache")
+    # A fresh native profile also isolates WebView2 HTTP/module caches and lingering
+    # browser processes. Repeated invocations of the same case get distinct profiles.
+    string(RANDOM LENGTH 16 ALPHABET 0123456789abcdef webview2_session)
+    set(ENV{WEBFRONT_TEST_WEBVIEW2_PROFILE} "${PROFILE}/webview2-${webview2_session}")
 endif()
 if(FORGE)
     include("${ROOT}/cmake/WebFrontBootstrap.cmake")

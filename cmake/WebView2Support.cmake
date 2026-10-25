@@ -69,11 +69,14 @@ function(webfront_add_webview2_tests)
         add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
         webfront_set_browser_test_properties("WebView2Lifecycle-${mode}" "${webtest_source_dir}" 45)
     endforeach()
-    # ADR-017: the HTML bridge against WebView2's direct message channel; fails on a wrong echo, never on a timing.
-    add_executable(webview2_transport_benchmark "${webtest_source_dir}/WebView2TransportBenchmark.cpp")
+    # Short direct-channel correctness checks; no measurement batches or reports.
+    add_executable(webview2_transport_contracts "${webtest_source_dir}/WebView2TransportBenchmark.cpp")
+    target_compile_definitions(webview2_transport_contracts PRIVATE WEBFRONT_TRANSPORT_CONTRACTS_ONLY)
+    target_link_libraries(webview2_transport_contracts PRIVATE WebFront WebFront_warnings WebFront_options)
+    add_dependencies(webtest webview2_transport_contracts)
+    add_test(NAME WebView2TransportContracts COMMAND webview2_transport_contracts)
+    webfront_set_browser_test_properties(WebView2TransportContracts "${webtest_source_dir}" 60)
+    # Manual measurement only: never built or run by CTest/CI.
+    add_executable(webview2_transport_benchmark EXCLUDE_FROM_ALL "${webtest_source_dir}/WebView2TransportBenchmark.cpp")
     target_link_libraries(webview2_transport_benchmark PRIVATE WebFront WebFront_warnings WebFront_options)
-    add_test(NAME WebView2TransportBenchmark COMMAND webview2_transport_benchmark
-        "${CMAKE_CURRENT_BINARY_DIR}/webview2-transport-benchmark.json")
-    webfront_set_browser_test_properties(WebView2TransportBenchmark "${webtest_source_dir}" 300)
-    set_tests_properties(WebView2TransportBenchmark PROPERTIES LABELS "web-integration;performance" WORKING_DIRECTORY "${webtest_source_dir}")
 endfunction()

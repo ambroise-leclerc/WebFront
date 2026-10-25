@@ -349,3 +349,16 @@ SCENARIO("Validated gzip cache permits empty streams under a zero output budget"
         REQUIRE(cache.statistics().retainedBytes <= 1000);
     }
 }
+
+SCENARIO("Gzip decoding fills a preallocated bounded worker buffer without growing it") {
+    std::string output;
+    output.reserve(23768);
+    const auto capacity = output.capacity();
+    for (const auto bytes : {gzipfixtures::fixed, gzipfixtures::dynamic, gzipfixtures::optional}) {
+        REQUIRE(webfront::http::gzip::decodeGzipInto(bytes, output, 23768));
+        REQUIRE(output == payload());
+        REQUIRE(output.capacity() == capacity);
+        REQUIRE_FALSE(webfront::http::gzip::decodeGzipInto(bytes, output, 23767));
+        REQUIRE(output.empty());
+    }
+}

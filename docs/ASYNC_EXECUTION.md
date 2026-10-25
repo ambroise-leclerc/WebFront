@@ -163,3 +163,18 @@ already-stopped token also completes safely, without dispatching.
 cancellation API. The untyped `ui.jsFunction(name)` remains fire-and-forget.
 JavaScript-to-C++ calls still always return Promises. None of these changes adds
 richer bridge result types or remote Promise cancellation.
+
+## HTTP gzip CPU work
+
+Cold gzip identity fallback is a sender backed by one lazy, owned worker per HTTP server.
+The worker reads owned compressed bytes and fills preallocated output; it never calls filesystem
+providers or manipulates network objects. Completion resumes on the connection's I/O scheduler,
+where validation results enter the cache and HTTP headers/body are finalized. Bounded response
+leases survive through the network send, including cache-hit responses and HEAD consumers.
+
+Stop closes admission; queued work without live consumers is skipped. An active decode runs
+to completion before cancellation is delivered locally. Peer disconnects are discovered at the
+subsequent write. After external run callers return, server drain joins CPU work before pumping
+and joining its existing task scope. No CPU task or encoded/decoded buffer is detached from its
+owner. See [HTTP asset encoding](HTTP_ASSETS.md) for 503 backpressure, memory reservations and
+remaining synchronous provider-read and non-interruptible-decode limits.

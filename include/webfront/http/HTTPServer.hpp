@@ -13,6 +13,7 @@
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "GzipCache.hpp"
+#include "GzipExecutor.hpp"
 #include "MimeType.hpp"
 #include "WebSocket.hpp"
 
@@ -222,6 +223,7 @@ struct Response : Headers {
         notAcceptable         = 406,
         internalServerError   = 500,
         notImplemented        = 501,
+        serviceUnavailable    = 503,
         variantAlsoNegotiates = 506
     };
     StatusCode statusCode;
@@ -261,7 +263,7 @@ struct Response : Headers {
 
 private:
     [[nodiscard]] static std::string toString(StatusCode code) {
-        static constexpr std::array<std::pair<StatusCode, std::string_view>, 9> names{
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 10> names{
             {{switchingProtocols, "Switching Protocols"},
              {ok, "OK"},
              {badRequest, "Bad Request"},
@@ -270,6 +272,7 @@ private:
              {notAcceptable, "Not Acceptable"},
              {internalServerError, "Internal Server Error"},
              {notImplemented, "Not Implemented"},
+             {serviceUnavailable, "Service Unavailable"},
              {variantAlsoNegotiates, "Variant Also Negotiates"}}
         };
         for (const auto& [status, name] : names)
@@ -293,34 +296,58 @@ public:
     /** @brief Per-handler gzip cache counters and retained storage; read on the server context. */
     [[nodiscard]] gzip::ValidatedCache::Statistics fallbackCacheStatistics() const { return fallbackCache.statistics(); }
 
-    Response handleRequest(Request request) {
-        auto requestPath = filePath(request.uri);
-        if (!requestPath) return Response::getStatusResponse(Response::badRequest);
+    struct Prepared {
+        Response response;
+        bool needsDecode = false;
+        bool head = false;
+        bool identityFallback = false;
+        std::size_t limit = maxDecodedAssetSize<Policy>();
+    };
 
-        switch (request.method) {
-            case Request::Method::Get:
-                if (auto upgrade = webSocketUpgrade(request))
-                    return *upgrade;
-                [[fallthrough]];
-            case Request::Method::Head:
-                return fileResponse(request, *requestPath);
-            default:
-                return Response::getStatusResponse(Response::notImplemented);
-        }
+    // Explicit synchronous low-level API; Server always uses prepareRequest and the owned worker.
+    Response handleRequest(Request request) { return prepare(std::move(request), false).response; }
+    Prepared prepareRequest(Request request) { return prepare(std::move(request), true); }
+
+    template <typename Lease>
+    Response finish(Prepared prepared, Lease& lease) {
+        if (!lease) return encodingError(Response::serviceUnavailable);
+        if (!lease.valid() || lease.decoded().size() > maxDecodedAssetSize<Policy>())
+            return encodingError(Response::internalServerError);
+        fallbackCache.remember(lease.encoded(), lease.decoded());
+        prepared.response.content = lease.takeBody();
+        prepared.response.headers.emplace_back("Content-Length", std::to_string(lease.decoded().size()));
+        return std::move(prepared.response);
     }
 
 private:
-    Response fileResponse(const Request& request, const std::filesystem::path& path) {
-        Response response;
-        if (auto error = readFile(request, path, response))
-            return *error;
+    Prepared prepare(Request request, bool asynchronous) {
+        auto requestPath = filePath(request.uri);
+        if (!requestPath) return {Response::getStatusResponse(Response::badRequest)};
+        switch (request.method) {
+            case Request::Method::Get:
+                if (auto upgrade = webSocketUpgrade(request)) return {std::move(*upgrade)};
+                [[fallthrough]];
+            case Request::Method::Head:
+                break;
+            default:
+                return {Response::getStatusResponse(Response::notImplemented)};
+        }
+        Prepared result;
+        result.head = request.method == Request::Method::Head;
+        auto& response = result.response;
+        if (auto error = readFile(request, *requestPath, result, asynchronous)) {
+            response = std::move(*error);
+            result.needsDecode = false;
+            return result;
+        }
         response.statusCode = Response::ok;
-        if (!response.getHeaderValue("Content-Length"))
-            response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
-        response.headers.emplace_back("Content-Type", MimeType(path.extension().string()).toString());
-        if (request.method == Request::Method::Head)
-            response.content.clear();
-        return response;
+        response.headers.emplace_back("Content-Type", MimeType(requestPath->extension().string()).toString());
+        if (!result.needsDecode) {
+            if (!response.getHeaderValue("Content-Length"))
+                response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
+            if (result.head) response.content.clear();
+        }
+        return result;
     }
 
     // The file a request URI names, or nothing when the URI is not a safe absolute path.
@@ -370,15 +397,21 @@ private:
     }
 
     // Reads the file into the response content, or returns the error response.
-    std::optional<Response> readFile(const Request& request, const std::filesystem::path& requestPath, Response& response) {
+    std::optional<Response> readFile(const Request& request, const std::filesystem::path& requestPath, Prepared& prepared, bool asynchronous) {
         auto file = fs.open(requestPath);
-        if (!file)
-            return Response::getStatusResponse(Response::notFound);
-        std::array<char, 512> buffer{0, 0};
-        while (auto bytesRead = file->read(buffer)) response.content.append(buffer.data(), bytesRead);
-        if (!file->isEncoded())
-            return {};
-        return negotiateEncoding(request, file->getEncoding(), response);
+        if (!file) return Response::getStatusResponse(Response::notFound);
+        auto& response = prepared.response;
+        const bool fallback = file->isEncoded() && encoding::isGzip(file->getEncoding()) &&
+            !request.acceptsEncoding(file->getEncoding()) && request.acceptsEncoding("identity");
+        prepared.identityFallback = fallback;
+        const auto inputLimit = asynchronous && fallback ? maxEncodedAssetSize : std::numeric_limits<std::size_t>::max();
+        std::array<char, 512> buffer{};
+        while (auto bytesRead = file->read(buffer)) {
+            if (bytesRead > inputLimit - response.content.size()) return encodingError(Response::internalServerError);
+            response.content.append(buffer.data(), bytesRead);
+        }
+        if (!file->isEncoded()) return {};
+        return negotiateEncoding(request, file->getEncoding(), prepared, asynchronous);
     }
 
     static Response encodingError(Response::StatusCode code) {
@@ -387,7 +420,8 @@ private:
         return error;
     }
 
-    std::optional<Response> negotiateEncoding(const Request& request, std::string_view coding, Response& response) {
+    std::optional<Response> negotiateEncoding(const Request& request, std::string_view coding, Prepared& prepared, bool asynchronous) {
+        auto& response = prepared.response;
         response.headers.emplace_back("Vary", "Accept-Encoding");
         if (request.acceptsEncoding(coding)) {
             response.headers.emplace_back("Content-Encoding", coding);
@@ -395,6 +429,15 @@ private:
         }
         if (!request.acceptsEncoding("identity") || !encoding::isGzip(coding))
             return encodingError(Response::notAcceptable);
+        if (asynchronous) {
+            if (auto cached = fallbackCache.lookup(response.content, prepared.limit, prepared.head)) {
+                if (!cached->allowed) return encodingError(Response::internalServerError);
+                response.headers.emplace_back("Content-Length", std::to_string(cached->length));
+            } else {
+                prepared.needsDecode = true;
+            }
+            return {};
+        }
         auto decoded = fallbackCache.resolve(response.content, maxDecodedAssetSize<Policy>(), request.method == Request::Method::Head);
         if (!decoded)
             return encodingError(Response::internalServerError);
@@ -405,13 +448,15 @@ private:
     FS fs;
     detail::BoundContentPolicy contentPolicy;
     gzip::ValidatedCache fallbackCache{maxDecodedAssetCacheSize<Policy>()};
+    std::size_t maxEncodedAssetSize{gzip::decodeLimits<Policy>().encoded};
 };
 
-template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
+template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy, typename Decode = gzip::Decoder>
 class Server {
 public:
-    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {})
-        : acceptor(ioContext), requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, port), std::move(policy)}) {
+    Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {})
+        : acceptor(ioContext), requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, port), std::move(policy)}),
+          decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {
         const auto endpoint = Net::Resolve(address, port);
         acceptor.open(endpoint.protocol());
         acceptor.set_option(typename Net::Acceptor::reuse_address(true));
@@ -434,17 +479,22 @@ public:
     void stop() {
         log::info("Stopping HTTP server...");
         tasks.requestStop();
+        decodeExecutor.stop();
         ioContext.stop();
     }
 
     /// Runs the cancelled tasks to completion, so that no connection outlives the objects its handlers use.
     /// To be called from the thread owning the context, once nothing else runs it.
     void drain() {
+        decodeExecutor.stop();
+        decodeExecutor.join();
         tasks.drain(ioContext);
     }
 
     /** @brief Destructor-safe join, retaining ownership until every task has finished. */
     void drainUntilJoined() noexcept {
+        decodeExecutor.stop();
+        decodeExecutor.join();
         tasks.drainUntilJoined(ioContext);
     }
 
@@ -474,11 +524,19 @@ public:
         upgradeHandler = std::move(handler);
     }
 
+    [[nodiscard]] auto fallbackDecodeStatistics() const { return decodeExecutor.statistics(); }
+    [[nodiscard]] auto fallbackCacheStatistics() const {
+        auto result = requestHandler.fallbackCacheStatistics();
+        result.decodes = decodeExecutor.statistics().decodes;
+        return result;
+    }
+
 private:
     typename Net::IoContext                     ioContext;
     typename Net::Acceptor                      acceptor;
     networking::TaskScope                       tasks;
     RequestHandler<Net, FS, Policy>             requestHandler;
+    gzip::DecodeExecutor<Decode> decodeExecutor;
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
     void spawn(networking::Task task) {
@@ -500,6 +558,7 @@ private:
 
     networking::Task serve(typename Net::Socket socket) {
         Request request;
+        std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
@@ -509,11 +568,33 @@ private:
                 request.parseSomeData(buffer.data(), buffer.data() + received);
             }
             log::info("Received request {} on {}", request.getMethodName(), request.uri);
-            response = requestHandler.handleRequest(request);
+            auto prepared = requestHandler.prepareRequest(std::move(request));
+            if (prepared.needsDecode) {
+                lease.emplace(co_await networking::ex::continues_on(
+                    decodeExecutor.submit(std::move(prepared.response.content), prepared.limit, prepared.head), Net::Scheduler(socket)));
+                response = requestHandler.finish(std::move(prepared), *lease);
+            } else {
+                if (prepared.identityFallback && prepared.response.statusCode == Response::ok) {
+                    lease.emplace(decodeExecutor.reserveResponse(prepared.response.content.capacity()));
+                    if (!*lease) {
+                        prepared.response = Response::getStatusResponse(Response::serviceUnavailable);
+                        prepared.response.headers.emplace_back("Vary", "Accept-Encoding");
+                    }
+                }
+                response = std::move(prepared.response);
+            }
             log::info("  responding http {}", static_cast<int>(response.statusCode));
         }
         catch (const BadRequestException&) {
             response = Response::getStatusResponse(Response::badRequest);
+        }
+        catch (const std::bad_alloc&) {
+            response = Response::getStatusResponse(Response::serviceUnavailable);
+            response.headers.emplace_back("Vary", "Accept-Encoding");
+        }
+        catch (const std::exception& error) {
+            log::warn("HTTP asset request failed: {}", error.what());
+            response = Response::getStatusResponse(Response::internalServerError);
         }
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())

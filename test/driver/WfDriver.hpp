@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -27,6 +28,34 @@
 #include <vector>
 
 namespace webfront::testdriver {
+
+// Browser tests switch environment revisions at identical URLs. Never share WebView2's
+// persistent HTTP/module cache or background browser process between those cases.
+struct DriverWebView2Options {
+    static frontend::WebView2Options get() {
+#ifdef _MSC_VER
+        char* raw = nullptr;
+        std::size_t length = 0;
+        const auto status = _dupenv_s(&raw, &length, "WEBFRONT_TEST_WEBVIEW2_PROFILE");
+        const std::unique_ptr<char, decltype(&std::free)> profile(raw, std::free);
+        if (status != 0)
+            throw std::runtime_error("Cannot read the WebView2 test profile");
+        return get(profile.get());
+#else
+        return get(std::getenv("WEBFRONT_TEST_WEBVIEW2_PROFILE"));
+#endif
+    }
+    static frontend::WebView2Options get(const char* profile) {
+        frontend::WebView2Options options;
+        if (profile && *profile)
+            options.userDataFolder = std::filesystem::path(profile);
+        return options;
+    }
+};
+
+template <typename Frontend>
+using DriverFrontend = std::conditional_t<std::is_same_v<Frontend, frontend::WebView2Frontend>,
+                                          frontend::WebView2FrontendWithOptions<DriverWebView2Options>, Frontend>;
 using namespace std::chrono_literals;
 
 inline constexpr int usageStatus     = 64;
@@ -320,7 +349,7 @@ struct PlainSetup {
 /// what C++ observed).
 template <typename Frontend, typename Setup = PlainSetup>
 int run(const Options& options, Setup&& setup = {}) {
-    using App = webfront::BasicDeveloperApp<Frontend, DriverFS, typename std::remove_reference_t<Setup>::Pages>;
+    using App = webfront::BasicDeveloperApp<DriverFrontend<Frontend>, DriverFS, typename std::remove_reference_t<Setup>::Pages>;
     if (!std::filesystem::is_regular_file(*options.environment)) {
         std::cerr << "Bootstrap environment archive not found: " << *options.environment << '\n';
         return bootstrapStatus;
