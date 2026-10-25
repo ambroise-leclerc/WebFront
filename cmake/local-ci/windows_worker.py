@@ -23,10 +23,19 @@ from native_worker import collect, cleanTree, runLock
 
 
 def ps(script, **kwargs):
-    encoded = base64.b64encode(("$ErrorActionPreference='Stop'; " + script).encode("utf-16-le")).decode()
+    # Windows PowerShell's redirected output need not use Python's locale encoding.
+    # Keep captured probes and their saved diagnostics readable on localized hosts.
+    prefix = ("$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
+              "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ")
+    # -EncodedCommand serializes uncaught errors as CLIXML even with Text output.
+    # Format ErrorRecord inside PowerShell before the host can serialize it.
+    wrapped = prefix + "try {\n" + script + "\n} catch { [Console]::Error.WriteLine(($_ | Out-String)); exit 1 }"
+    encoded = base64.b64encode(wrapped.encode("utf-16-le")).decode()
+    if kwargs.get("text"):
+        kwargs["encoding"] = "utf-8"
     try:
         return command(["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-                        "-EncodedCommand", encoded], **kwargs)
+                        "-OutputFormat", "Text", "-EncodedCommand", encoded], **kwargs)
     except subprocess.CalledProcessError as error:
         # Probes capture output for parsing; preserve their actual diagnosis in the lane log.
         for output in (error.stdout, error.stderr):

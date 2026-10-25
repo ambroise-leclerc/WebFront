@@ -637,3 +637,15 @@ benchmark and developer tests (195.54 seconds). Those browser tests run in the p
 policy. This is not the pinned AppleClang/Xcode lane: the development host has only selected Command Line
 Tools, CMake differs from the lane's 4.4.4, SSH to `Mac` is refused, and no dedicated standard CI account is provisioned.
 The exact-lane run, cold/warm timings, SSH recovery and WebKit XPC egress qualification remain pending.
+
+The Windows investigation for #368 (2026-10-25, Windows 11 build 22631, MSVC 19.44.35229) passes all 342 CTest cases in a
+CEF-off/WebView2 Release build, including 73 browser integration cases, and 29 native-worker regressions. A real preflight
+exposed localized PowerShell output corruption and CLIXML error logs; an explicit UTF-8/text diagnostic fix has a failing-then-
+passing native regression. A second CMake 4.4.4/sccache 0.18.0 Release build using the packed, extracted and verified Windows
+kit also passes all 342 CTest cases (341.33 seconds), with FetchContent disconnected and zero JUnit failures/skips.
+Cleaning and rebuilding the same tree reuses 155/155 sccache entries and succeeds in 22.5 seconds; this is local cache reuse,
+not a second SSH lane run. The development account has a non-elevated administrator token, not the required standard-account
+boundary; no dedicated CI account or SSH server is
+provisioned, and the required egress rule is absent. The real session worker correctly rejects that host before configure.
+Dedicated-account SSH/task/network qualification, cold/warm timings and disconnect recovery remain pending. See the
+[Windows qualification record and setup commands](LOCAL_CI_WINDOWS_QUALIFICATION.md).

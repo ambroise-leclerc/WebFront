@@ -297,6 +297,10 @@ Although GitHub currently marks #346 closed, the full acceptance evidence remain
 
 ### Native Windows execution
 
+The [Windows qualification record](LOCAL_CI_WINDOWS_QUALIFICATION.md) records PR #368's host observations,
+prepared kit, localized PowerShell diagnostic fix, and owner setup commands. It distinguishes local validation from
+qualification of the dedicated SSH/graphical account.
+
 The Windows lane uses the same commit bundle, verified kit inventory, command metadata and result collection as Linux.
 It runs natively, with Ninja and the latest installed x64 MSVC toolset selected by `vswhere`, in the dedicated account's
 graphical session. It prints the effective compiler banner, CMake and WebView2 versions. CMake must match the lane's pinned

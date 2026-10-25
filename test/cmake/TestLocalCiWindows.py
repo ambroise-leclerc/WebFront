@@ -355,6 +355,16 @@ endif()
             self.assertEqual(windows.session(self.root, self.args, self.lane), 0)
 
     @unittest.skipUnless(os.name == "nt", "Native Windows transport")
+    def test_real_powershell_probes_preserve_unicode_and_plain_error_diagnostics(self):
+        result = windows.ps("Write-Output 'caf\u00e9 \u6f22\u5b57'", capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.stdout.strip(), "caf\u00e9 \u6f22\u5b57")
+        with self.assertRaises(subprocess.CalledProcessError) as failure, \
+             patch.object(sys, "stderr"):
+            windows.ps("Write-Error 'caf\u00e9 \u6f22\u5b57'", capture_output=True, text=True, timeout=20)
+        self.assertIn("caf\u00e9 \u6f22\u5b57", failure.exception.stderr)
+        self.assertNotIn("CLIXML", failure.exception.stderr)
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows transport")
     def test_real_powershell_preserves_binary_stdin_stdout_and_arguments(self):
         invocation = ci.remote("CurmudgeonWindows", [sys.executable, "-c",
                                "import sys;sys.stdout.buffer.write(sys.stdin.buffer.read());"
