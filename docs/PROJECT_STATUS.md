@@ -31,12 +31,15 @@ serve the composed filesystem through its engine's own API (for Android, iOS and
 is awkward), while HTTP/WebSocket remains the normative path of every frontend, of the system browser and of future
 microcontroller targets. Nothing of this transport is implemented yet; the ADR lists its acceptance criteria.
 
-`WebKitGTKTransportBenchmark` measures both paths in one WebKitGTK window. On the reference machine (Ryzen 9 3900X, Xvfb, Release),
-the HTML bridge adds 50 to 115 µs per sequential round trip up to 1 KiB and divides concurrent throughput by 3.8 to 5.3 on WebKitGTK; the direct
-figures exclude the codec and the thread hop a real transport adds. On WebView2 (Windows 11, Evergreen 155) string messages are slower
-than the HTML bridge from 32 KiB and for C++ to JS, while a shared buffer is 2 to 6 times faster. The Linux figures predate the current
-call counts and are to be measured again. WKWebView is measured separately in the ADR; CEF and mobile engines are not measured. The ADR recommends a direct default for
-Android and iOS and HTML until proven for the desktop engines.
+`WebKitGTKTransportBenchmark` measures both paths in one WebKitGTK window. The 2026-10-25 Linux measurements
+(Ryzen 9 3900X, GCC 16.1, Release without coverage, WebKitGTK 2.52.6, Xvfb) use the same 8000 calls (800 at 32 KiB),
+warm-up and five samples as Windows, with the median of three launches; [raw reports](benchmarks/linux-webkitgtk-2026-10-25.json)
+are retained. Concurrent throughput is 2.0 to 2.3 times higher through the direct channel; the figures exclude the codec
+and thread hop a real transport adds. A dedicated `performance-linux` CI lane repeats the optimized benchmark three times
+and retains JSON, CTest and machine reports, alongside the existing Debug/coverage desktop lane.
+On WebView2 (Windows 11, Evergreen 155) string messages are slower than the HTML bridge from 32 KiB and for C++ to JS,
+while a shared buffer is 2 to 6 times faster. CEF and mobile engines are not measured; the ADR recommends a
+direct default for Android and iOS (with version-dependent network rules) and HTML until proven for desktop engines.
 The benchmark exposed two per-message diagnostics costs in the bridge, now fixed with regression tests (32 KiB echo: 2.4 ms to 0.7 ms).
 
 The macOS follow-up (2026-10-25) adds `WKWebViewTransportBenchmark`: the same echoes through the HTML bridge, public

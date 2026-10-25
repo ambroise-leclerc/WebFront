@@ -102,6 +102,20 @@ path. `WebKitGTKTransportBenchmark` (label `performance`, WebKitGTK builds with 
 ctest --test-dir <build> -R "WebKitGTKTransportBenchmark|WebView2TransportBenchmark|WKWebViewTransportBenchmark" --output-on-failure
 ```
 
+For comparable Linux timings, use Release without coverage (the regular Linux desktop CI uses Debug with coverage):
+
+```bash
+cmake -S . -B build-performance -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+cmake --build build-performance --target webkitgtk_transport_benchmark --parallel 2
+ctest --test-dir build-performance -L performance --output-on-failure --no-tests=error --repeat until-fail:3
+```
+
+The `performance-linux` CI job runs this optimized benchmark three times on every PR, push to the release/integration branches,
+manual dispatch and weekly run. Its artifact `performance-linux-webkitgtk` retains the final JSON report, CTest diagnostics,
+JUnit results and the CPU, OS, compiler and WebKitGTK versions. The shared page uses the same sizes, call counts, warm-up,
+five samples and 64 concurrent calls as Windows and macOS. This measures correctness and records timings; it has no speed threshold.
+
 Each prints a table, writes `webkitgtk-transport-benchmark.json`, `webview2-transport-benchmark.json` or
 `wkwebview-transport-benchmark.json` in the build directory
 of `test/web`, and fails only on a wrong echo. WebView2 also measures a shared buffer, which is the only WebView2 direct path
