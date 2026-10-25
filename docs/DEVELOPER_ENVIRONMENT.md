@@ -32,8 +32,8 @@ ship developer mode as the distribution configuration: `wf embed` produces the a
 `.d.ts` files and the type packages (`@types/*`, `types` and `typings` fields) of the locked graph. No external compiler is
 installed or required (see [Type checking](#type-checking-wf-check)).
 
-The current environment is **0.6.2**, published as `developer-v0.6.2` and pinned by the release data. Earlier published
-versions stay immutable; the sources advance to 0.6.2, which is not published yet.
+The latest published environment is **0.6.2**, published as `developer-v0.6.2` and pinned by the release data. Earlier published
+versions stay immutable; the sources advance to 0.6.3 (the terminal no longer prints its banner line), which is not published yet.
 
 ## Minimal C++ application
 

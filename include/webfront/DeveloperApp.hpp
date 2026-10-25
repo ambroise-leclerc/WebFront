@@ -1,4 +1,4 @@
-/// @brief Opt-in browser-powered developer environment. Downloaded code has project/bridge authority.
+/// @brief Opt-in developer environment (terminal and wf commands) running in the application window. Downloaded code has project/bridge authority.
 #pragma once
 
 #include "system/DeveloperFS.hpp"

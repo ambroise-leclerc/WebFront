@@ -488,7 +488,6 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.open(element);
     fit.fit();
     const write = text => terminal.write(text);
-    write('WebFront browser-powered developer environment. Type help.\r\n');
     // Keys typed while the commands and the history load are applied once the editor is ready.
     const early = [];
     const earlyInput = terminal.onData(data => early.push(data));

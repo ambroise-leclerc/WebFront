@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `WebFrontLifeDeveloper` starts without argument on `./life-project` (created when missing, reused untouched otherwise) and the
+  pinned environment; the explicit `<project> [<environment-url> <sha512-integrity>]` form remains. At configuration, the
+  native window engine of the platform is enabled automatically when its dependencies are found (top-level builds with examples,
+  without `ENABLE_TESTING`; `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it, an explicit `WEBFRONT_EMBED_*` value always wins).
+  A missing engine does not fail the configuration: CMake explains how to install it and the Life examples are built for the default browser instead. The README Game of Life walkthrough builds with `mkdir build`, `cd build`,
+  `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (unpublished, the pin stays on 0.6.2).
+  Automatic engine values stay outside the cache so an explicit choice equal to the previous detection is still respected;
+  removing an explicit engine cache entry resumes detection. Platforms without a registered engine configure the browser fallback.
+
 - Cold gzip identity fallback uses one server-owned worker with bounded jobs, consumers and
   buffer capacities (#283). The new compressed-input cap defaults to 4 MiB and returns 500
   before cache lookup when exceeded, including HEAD; configure `maxGzipEncodedAssetSize`
@@ -262,7 +271,7 @@
 ### Added
 
 - `std::bitset<N>` callback arguments and results, C++ call arguments and typed future/sender results cross the bridge as packed `Uint8Array` bytes (bit `i` in byte `i / 8`, least-significant first), with exact-length and zero-padding validation. A packed Life demonstration exchanges 128 bytes per generation.
-- Opt-in browser-powered developer environment: `NativeApp::bootstrap("developer")` downloads a SHA-512-pinned environment (distribution 0.3.1 on GitHub Pages) whose terminal offers `wf create|install|list|preview|embed`. It resolves npm packages in the browser, locks and re-verifies them, compiles with esbuild-WASM, previews in an iframe and generates a gzip-compressed C++ resource header. The bridge callbacks `webfront.developer.*` publish files through staged, bounded, transactional writes confined to the explicit project directory; abandoned transactions expire and stale staging is purged at startup. WebSocket clients without an `Origin` are refused.
+- Opt-in developer environment: `NativeApp::bootstrap("developer")` downloads a SHA-512-pinned environment (distribution 0.3.1 on GitHub Pages) whose terminal offers `wf create|install|list|preview|embed`. It resolves npm packages in the browser, locks and re-verifies them, compiles with esbuild-WASM, previews in an iframe and generates a gzip-compressed C++ resource header. The bridge callbacks `webfront.developer.*` publish files through staged, bounded, transactional writes confined to the explicit project directory; abandoned transactions expire and stale staging is purged at startup. WebSocket clients without an `Origin` are refused.
 
 - `webfront::Task`, `app.spawn(task)` and `ui.spawn(task)` launch application-owned coroutines without execution plumbing; a returned `TaskHandle` cancels an individual task. `app.shutdown()` joins owned work explicitly. Spawning during stop/shutdown returns a stopped handle when rejected; destructor joins log and wait for stalled external work instead of propagating drain errors. `jsFunctionSender(name)` defaults to `void`. `WebFrontAwaitBrowser` is a compiled example matching the README.
 

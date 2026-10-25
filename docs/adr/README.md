@@ -3,7 +3,7 @@
 This directory describes WebFront’s architectural choices and the constraints to preserve
 when making changes or generating code. It contains **17 ADRs**, with unique numbers (16 accepted decisions and 1 proposal).
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
-the browser-powered development proposals are dated **2026-10-20**, and the direct frontend access proposal **2026-10-24**. Each ADR is versioned
+the developer environment proposals are dated **2026-10-20**, and the direct frontend access proposal **2026-10-24**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
 The ADRs themselves are written in French.
 
