@@ -277,6 +277,8 @@ def session(root, args, lane):
             os.environ.update(lane.get("env", {}))
             cache = root.parent.parent / "cache"
             (cache / "sccache").mkdir(parents=True, exist_ok=True)
+            # CTest's independent CMake projects do not inherit configure's -D entries.
+            os.environ["CPM_SOURCE_CACHE"] = (cache / "cpm").as_posix()
             os.environ["SCCACHE_DIR"] = str(cache / "sccache")
             # A lane owns its server so cancel/timeout cannot kill another run's cache server.
             with socket.socket() as listener:

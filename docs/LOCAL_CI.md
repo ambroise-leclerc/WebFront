@@ -321,6 +321,8 @@ set(FETCHCONTENT_SOURCE_DIR_STDEXEC "${CMAKE_CURRENT_LIST_DIR}/sources/stdexec" 
 ```
 
 CPM's module and the sccache data persist under the dedicated account's `.webfront-local-ci/cache/`.
+The worker exports `CPM_SOURCE_CACHE` to the graphical session, so independent configurations launched by CTest reuse the
+verified module as well; supplying only the top-level `-DCPM_SOURCE_CACHE` would let those configurations attempt a download.
 Each lane uses a separate sccache server port; stopping its Job does not stop a concurrent run's server.
 The verified dependency sources remain private to the run. FetchContent is disconnected; missing CPM/transitive dependencies
 also fail under the public egress policy rather than downloading. The packer seals prepared files; it does not resolve them.

@@ -65,7 +65,9 @@ class LocalCiTests(unittest.TestCase):
     def test_archive_rejects_escape_links_and_duplicate_files(self):
         for name, kind in [("../escape", tarfile.REGTYPE), ("/escape", tarfile.REGTYPE),
                            ("link", tarfile.SYMTYPE), ("device", tarfile.CHRTYPE),
-                           ("a\\b", tarfile.REGTYPE), ("duplicate", tarfile.REGTYPE)]:
+                           ("a\\b", tarfile.REGTYPE), ("duplicate", tarfile.REGTYPE),
+                           ("C:/escape", tarfile.REGTYPE), ("file:stream", tarfile.REGTYPE),
+                           ("NUL.txt", tarfile.REGTYPE), ("alias.", tarfile.REGTYPE)]:
             with self.subTest(name=name):
                 archive = self.root / "bad.tar"
                 with tarfile.open(archive, "w") as stream:

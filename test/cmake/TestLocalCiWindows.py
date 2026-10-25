@@ -194,6 +194,48 @@ class WindowsCiTests(unittest.TestCase):
                 result = json.loads((self.root / (self.args.lane + ".result.json")).read_text())
                 self.assertEqual(result["code"], int(failed))
 
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("ctest"), "CMake and CTest required")
+    def test_native_ctest_subconfiguration_reuses_offline_cpm(self):
+        cache = self.root.parent.parent / "cache/cpm/cpm"
+        cache.mkdir(parents=True)
+        version = (ROOT / "cmake/CPM.cmake").read_text().split("set(CPM_DOWNLOAD_VERSION ", 1)[1].split(")", 1)[0]
+        (cache / f"CPM_{version}.cmake").write_text("set(WF_CPM_LOADED TRUE)\n")
+        fixture = self.root / "fixture"
+        fixture.mkdir()
+        child = fixture / "child.cmake"
+        child.write_text('''macro(file operation)
+    if("${operation}" STREQUAL "DOWNLOAD")
+        message(FATAL_ERROR "Native CTest subconfiguration attempted a CPM download")
+    endif()
+    _file(${ARGV})
+endmacro()
+''' + f'''include("{(ROOT / 'cmake/CPM.cmake').as_posix()}")
+if(NOT WF_CPM_LOADED)
+    message(FATAL_ERROR "Prepared CPM module was not loaded")
+endif()
+''')
+        (fixture / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.31)
+project(NativeOfflineCPM NONE)
+enable_testing()
+add_test(NAME ChildConfiguration COMMAND "${{CMAKE_COMMAND}}" -P "{child.as_posix()}")
+''')
+        build = fixture / "build"
+        subprocess.run(["cmake", "-S", str(fixture), "-B", str(build)], check=True, capture_output=True, timeout=20)
+        def invoke(arguments, log, timeout):
+            if arguments[0] == "ctest":
+                result = subprocess.run(["ctest", "--test-dir", str(build), "-C", "Release", "--no-tests=error",
+                                         "--output-on-failure"], capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with patch.object(windows, "ownProcessTree"), patch.object(windows, "checkDesktop"), \
+             patch.object(windows, "checkNetwork"), patch.object(windows, "checkRuntime"), \
+             patch.object(windows, "msvcEnvironment", return_value={}), patch.dict(os.environ), \
+             patch.object(windows, "command", return_value=subprocess.CompletedProcess([], 0,
+                          "cmake version " + self.lane["cmake_version"])), \
+             patch.object(windows, "runProcess", side_effect=invoke):
+            os.environ.pop("CPM_SOURCE_CACHE", None)
+            self.args.timeout = 30
+            self.assertEqual(windows.session(self.root, self.args, self.lane), 0)
+
     @unittest.skipUnless(os.name == "nt", "Native Windows transport")
     def test_real_powershell_preserves_binary_stdin_stdout_and_arguments(self):
         invocation = ci.remote("CurmudgeonWindows", [sys.executable, "-c",
