@@ -158,9 +158,12 @@ Host Mac
     IdentitiesOnly yes
 ```
 
-For both TSan lanes the **owner** must provision `vm.mmap_rnd_bits=28` on RyzenLinux. The worker checks `sysctl -n` before any
+For both TSan lanes the **owner** must provision `vm.mmap_rnd_bits=28` on RyzenLinux. The worker checks it before any
 container starts and fails with the actual value and required setting when they differ. This is a host setting, not a Docker
-namespace setting. The orchestrator never changes it.
+namespace setting. The orchestrator never changes it. The kernel keeps the file root-only (mode 0600), so the dedicated
+unprivileged account cannot run `sysctl -n` on it. The worker then measures the effective entropy of `mmap` over 96 fresh
+processes and treats the span of their base addresses, minus the one bit that the base address subtraction's borrow adds, as the
+value. The estimate is not an attestation of the sysctl; the owner remains responsible for provisioning it.
 
 ### Preparing the offline kit on the workstation
 
@@ -255,7 +258,7 @@ provisioning workstation. Its context must contain the unpacked, checksum-verifi
 image with `LLVM_VERSION=21 CMAKE_VERSION=4.3.1` and the matching CMake archive for mddlog, and a desktop image with
 `BASE_IMAGE=ubuntu@sha256:<verified-26.04-digest> GCC_VERSION=16` and CMake 4.4.4. Pin any overridden base **by digest**, never a tag.
 Both the default `gcc`/`g++` metapackages and the requested versioned compiler packages are installed and probed during image
-construction. The LLVM archive key fingerprint is checked before enabling the apt repository. Package repositories are used only at image
+construction. The versioned `llvm-N` package supplies `llvm-ar` and `llvm-ranlib`, which mddlog's `linux-clang21-libcxx` toolchain requires. The LLVM archive key fingerprint is checked before enabling the apt repository. Package repositories are used only at image
 build time; the saved image ID seals the resulting toolchain. Record each image's base, arguments and CMake archive checksum in
 `provision.json`. Save the images on the workstation with `docker save --output <kit>/images/<name>.tar <image>`.
 

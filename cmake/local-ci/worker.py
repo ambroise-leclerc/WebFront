@@ -186,12 +186,33 @@ def executeInside(lane, jobs):
     command(["ccache", "--show-stats"])
 
 
+def mmapRandomBits(samples=96):
+    """Estimate vm.mmap_rnd_bits from the address span of fresh processes (the kernel file is root-only, mode 0600).
+    The borrow of the base address subtraction makes the span exceed the configured bits by exactly one."""
+    code = "import mmap,ctypes;m=mmap.mmap(-1,4096);print(ctypes.addressof(ctypes.c_char.from_buffer(m)))"
+    addresses = [int(command([sys.executable, "-c", code], capture_output=True, text=True).stdout) for _ in range(samples)]
+    spread = 0
+    for address in addresses:
+        spread |= address ^ addresses[0]
+    return spread.bit_length() - 12 - 1
+
+
+def hostSysctl(key):
+    try:
+        return command(["sysctl", "-n", key], capture_output=True, text=True).stdout.strip()
+    except subprocess.CalledProcessError:
+        if key != "vm.mmap_rnd_bits":
+            raise
+        # An unprivileged account cannot read it: measure the effective entropy instead.
+        return str(mmapRandomBits())
+
+
 def runLane(args, matrix):
     lane = next(row for row in matrix["lanes"] if row["id"] == args.lane)
     if not lane["runtime"].startswith("container:"):
         raise ValueError("Native lanes are not implemented in delivery step 2")
     for key, expected in lane.get("host_requirements", {}).get("sysctl", {}).items():
-        actual = command(["sysctl", "-n", key], capture_output=True, text=True).stdout.strip()
+        actual = hostSysctl(key)
         if actual != expected:
             raise ValueError(f"Host requires {key}={expected}; found {actual}. Ask its owner to configure it.")
     manifest = json.loads((ROOT / "dependencies/kit.json").read_text())

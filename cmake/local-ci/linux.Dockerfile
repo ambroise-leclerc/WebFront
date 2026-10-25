@@ -25,7 +25,7 @@ RUN curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /tmp/llvm.asc \
     && . /etc/os-release \
     && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-${LLVM_VERSION} main" > /etc/apt/sources.list.d/llvm.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends clang-${LLVM_VERSION} clang-tidy-${LLVM_VERSION} lld-${LLVM_VERSION} \
+    && apt-get install -y --no-install-recommends clang-${LLVM_VERSION} clang-tidy-${LLVM_VERSION} lld-${LLVM_VERSION} llvm-${LLVM_VERSION} \
        libclang-rt-${LLVM_VERSION}-dev libc++-${LLVM_VERSION}-dev libc++abi-${LLVM_VERSION}-dev \
     && rm -rf /var/lib/apt/lists/* /tmp/llvm.asc
 # Host UID/GID override this default in docker run; no privileged runtime is used.

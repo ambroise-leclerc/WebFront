@@ -324,6 +324,32 @@ endif()
                 worker.runLane(args, self.matrix)
             cmd.assert_called_once_with(["sysctl", "-n", "vm.mmap_rnd_bits"], capture_output=True, text=True)
 
+    def test_unreadable_tsan_sysctl_is_measured_instead(self):
+        # The kernel keeps vm.mmap_rnd_bits root-only (mode 0600): an unprivileged account cannot read it.
+        denied = subprocess.CalledProcessError(1, "sysctl")
+        with patch.object(worker, "command", side_effect=denied), \
+             patch.object(worker, "mmapRandomBits", return_value=32):
+            self.assertEqual(worker.hostSysctl("vm.mmap_rnd_bits"), "32")
+            with self.assertRaises(subprocess.CalledProcessError):
+                worker.hostSysctl("vm.other")
+        lane = self.lane("sanitizers-thread")
+        with patch.object(worker, "command", side_effect=denied), \
+             patch.object(worker, "mmapRandomBits", return_value=32):
+            with self.assertRaisesRegex(ValueError, r"vm.mmap_rnd_bits=28; found 32"):
+                worker.runLane(argparse.Namespace(lane=lane["id"]), self.matrix)
+
+    def test_measured_entropy_discounts_the_base_address_borrow(self):
+        # 28 configured bits randomize page numbers below bit 40; the subtraction's borrow reaches bit 40.
+        base = 0x7f0000000000
+        addresses = [base, base ^ (1 << 12), base ^ (1 << 40)] + [base ^ (1 << 20)] * 93
+        with patch.object(worker, "command", side_effect=[subprocess.CompletedProcess([], 0, f"{a}\n") for a in addresses]):
+            self.assertEqual(worker.mmapRandomBits(), 28)
+
+    def test_llvm_image_provides_binutils_for_the_mddlog_toolchain(self):
+        # mddlog's linux-clang21-libcxx toolchain requires llvm-ar and llvm-ranlib from the versioned LLVM root.
+        dockerfile = (ci.HERE / "linux.Dockerfile").read_text()
+        self.assertIn("llvm-${LLVM_VERSION}", dockerfile)
+
     def test_failure_timeout_and_interruption_are_nonzero(self):
         with tempfile.TemporaryFile() as log:
             with self.assertRaises(subprocess.CalledProcessError):

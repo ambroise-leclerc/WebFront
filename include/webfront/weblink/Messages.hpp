@@ -5,6 +5,7 @@
 
 #include "../http/BuffersPolicy.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <bitset>
