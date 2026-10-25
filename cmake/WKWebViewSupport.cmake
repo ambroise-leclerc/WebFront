@@ -22,6 +22,15 @@ function(webfront_add_wkwebview_tests)
         add_test(NAME WKWebViewLifecycle-${mode} COMMAND wkwebview_lifecycle ${mode})
         webfront_set_browser_test_properties("WKWebViewLifecycle-${mode}" "${webtest_source_dir}" 90)
     endforeach()
+    add_executable(wkwebview_transport_benchmark "${webtest_source_dir}/WKWebViewTransportBenchmark.cpp")
+    target_link_libraries(wkwebview_transport_benchmark PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    add_dependencies(webtest wkwebview_transport_benchmark)
+    add_test(NAME WKWebViewTransportBenchmark COMMAND wkwebview_transport_benchmark
+        "${CMAKE_CURRENT_BINARY_DIR}/wkwebview-transport-benchmark.json")
+    webfront_set_browser_test_properties(WKWebViewTransportBenchmark "${webtest_source_dir}" 300)
+    set_property(TEST WKWebViewTransportBenchmark APPEND PROPERTY LABELS performance)
+    add_test(NAME WKWebViewTransportContracts COMMAND wkwebview_transport_benchmark --contracts)
+    webfront_set_browser_test_properties(WKWebViewTransportContracts "${webtest_source_dir}" 60)
 
     add_library(wkwebview_class_module SHARED "${webtest_source_dir}/WKWebViewClassModule.cpp")
     add_executable(wkwebview_class_images "${webtest_source_dir}/WKWebViewClassImages.cpp")
@@ -40,7 +49,7 @@ function(webfront_add_wkwebview_tests)
     # Stable agent bundles avoid one anonymous executable tile per test process in the Dock.
     # The path is normalized: a second spelling of the template would be a duplicate Ninja output.
     get_filename_component(_wk_plist "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
-    foreach(target webtest frontend_lifecycle wkwebview_lifecycle wkwebview_class_images)
+    foreach(target webtest frontend_lifecycle wkwebview_lifecycle wkwebview_class_images wkwebview_transport_benchmark)
         string(REPLACE "_" "-" identifier "${target}")
         set_target_properties(${target} PROPERTIES
             MACOSX_BUNDLE TRUE

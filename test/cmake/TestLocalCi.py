@@ -34,8 +34,8 @@ class LocalCiTests(unittest.TestCase):
         return next(lane for lane in self.matrix["lanes"] if lane["id"] == name)
 
     def test_selection_and_partial_exit_status(self):
-        self.assertEqual(len(ci.selectedLanes(self.matrix, None, None)), 10)
-        self.assertEqual(len(ci.selectedLanes(self.matrix, "RyzenLinux", None)), 8)
+        self.assertEqual(len(ci.selectedLanes(self.matrix, None, None)), 11)
+        self.assertEqual(len(ci.selectedLanes(self.matrix, "RyzenLinux", None)), 9)
         for machines, lanes in [("Typo", None), (None, "typo"), ("Mac", "web-integration-gcc")]:
             with self.assertRaises(ValueError):
                 ci.selectedLanes(self.matrix, machines, lanes)

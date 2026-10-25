@@ -1,9 +1,9 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **16 ADRs**, with unique numbers (13 accepted decisions and 3 proposals).
+when making changes or generating code. It contains **17 ADRs**, with unique numbers (16 accepted decisions and 1 proposal).
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
-the browser-powered development proposals are dated **2026-10-20**. Each ADR is versioned
+the browser-powered development proposals are dated **2026-10-20**, and the direct frontend access proposal **2026-10-24**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
 The ADRs themselves are written in French.
 
@@ -56,6 +56,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-014](ADR-014-construction-javascript-dans-le-browser.md) | Resolving npm dependencies and building inside the browser | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.5 — 2026-10-24 |
+| [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -78,6 +79,7 @@ the chronology, which does not follow the numerical order.
 | Files, resources and modules | 009, 010 |
 | A new engine or changes to window lifecycle | 006, 007, 008 |
 | Components, the terminal or installed tools | 004, 006, 008, 010 |
+| A direct transport, a mobile frontend or a microcontroller target | 003, 004, 006, 007, 008, 017 |
 | Diagnostics and log transport | 006, 011 |
 | Downloaded development environment, npm libraries and generated application assets | 008, 009, 010, 013, 014, 015, 016 |
 
@@ -97,7 +99,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-017**. Retain historical numbers and files.
+  is **ADR-018**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

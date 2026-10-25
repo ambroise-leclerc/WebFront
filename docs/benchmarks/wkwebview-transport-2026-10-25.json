@@ -1,0 +1,544 @@
+{
+  "date": "2026-10-25",
+  "environment": {
+    "cpu": "Apple M2",
+    "memoryGiB": 16,
+    "os": "macOS 27.0.1 (26A434)",
+    "webkitFramework": "22625.1.29.11.28",
+    "sdk": "27.0",
+    "compiler": "Homebrew Clang 21.1.8",
+    "buildType": "Release",
+    "frontend": "WKWebView",
+    "note": "Desktop background workload was not controlled; no concurrent compilation or other CTest suite. The user agent is a compatibility string, not the actual CPU/OS version."
+  },
+  "method": "Median of three process launches, each reporting the median of five run means after one warm-up. Fixed path order. Echo correctness is checked, without timing thresholds. Native paths omit the ADR-003 codec and server-thread hop; the base64 path includes its byte envelope.",
+  "unit": "microseconds per call",
+  "processSeconds": [
+    157.32,
+    76.04,
+    80.88
+  ],
+  "medianResults": [
+    {
+      "direction": "js->cpp",
+      "mode": "sequential",
+      "bytes": 16,
+      "calls": 8000,
+      "html": 134.125,
+      "direct": 61.75,
+      "base64": 62.625,
+      "betweenLaunches": {
+        "html": {
+          "min": 134,
+          "max": 155.625
+        },
+        "direct": {
+          "min": 61,
+          "max": 61.75
+        },
+        "base64": {
+          "min": 62.25,
+          "max": 208.875
+        }
+      }
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "concurrent",
+      "bytes": 16,
+      "calls": 8000,
+      "html": 34.375,
+      "direct": 6,
+      "base64": 6.625,
+      "betweenLaunches": {
+        "html": {
+          "min": 34.25,
+          "max": 327.5
+        },
+        "direct": {
+          "min": 5.875,
+          "max": 26.125
+        },
+        "base64": {
+          "min": 6.5,
+          "max": 8
+        }
+      }
+    },
+    {
+      "direction": "cpp->js",
+      "mode": "sequential",
+      "bytes": 16,
+      "calls": 8000,
+      "html": 135.299073,
+      "direct": 45.25515625,
+      "callAsync": 61.522390625,
+      "base64": 66.091989625,
+      "betweenLaunches": {
+        "html": {
+          "min": 135.17959375,
+          "max": 790.79260425
+        },
+        "direct": {
+          "min": 45.244229125,
+          "max": 46.029208375
+        },
+        "callAsync": {
+          "min": 61.44500525,
+          "max": 72.66597925
+        },
+        "base64": {
+          "min": 65.91646875,
+          "max": 73.737421875
+        }
+      }
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "sequential",
+      "bytes": 1024,
+      "calls": 8000,
+      "html": 155.25,
+      "direct": 72.75,
+      "base64": 86.375,
+      "betweenLaunches": {
+        "html": {
+          "min": 151.5,
+          "max": 195
+        },
+        "direct": {
+          "min": 72.375,
+          "max": 75.125
+        },
+        "base64": {
+          "min": 85.25,
+          "max": 87.125
+        }
+      }
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "concurrent",
+      "bytes": 1024,
+      "calls": 8000,
+      "html": 38.125,
+      "direct": 8.125,
+      "base64": 16.375,
+      "betweenLaunches": {
+        "html": {
+          "min": 38,
+          "max": 42.5
+        },
+        "direct": {
+          "min": 8,
+          "max": 8.625
+        },
+        "base64": {
+          "min": 16.375,
+          "max": 17
+        }
+      }
+    },
+    {
+      "direction": "cpp->js",
+      "mode": "sequential",
+      "bytes": 1024,
+      "calls": 8000,
+      "html": 151.69766149999998,
+      "direct": 54.904390625,
+      "callAsync": 72.97934375,
+      "base64": 86.34635425,
+      "betweenLaunches": {
+        "html": {
+          "min": 151.637947875,
+          "max": 152.08121350000002
+        },
+        "direct": {
+          "min": 54.79381775,
+          "max": 55.438026
+        },
+        "callAsync": {
+          "min": 72.460166625,
+          "max": 73.23690625
+        },
+        "base64": {
+          "min": 85.61925,
+          "max": 103.1854375
+        }
+      }
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "sequential",
+      "bytes": 32768,
+      "calls": 800,
+      "html": 337.5,
+      "direct": 106.25,
+      "base64": 387.5,
+      "betweenLaunches": {
+        "html": {
+          "min": 336.25,
+          "max": 340
+        },
+        "direct": {
+          "min": 106.25,
+          "max": 527.5
+        },
+        "base64": {
+          "min": 387.5,
+          "max": 1617.5
+        }
+      }
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "concurrent",
+      "bytes": 32768,
+      "calls": 800,
+      "html": 108.75,
+      "direct": 23.75,
+      "base64": 226.25,
+      "betweenLaunches": {
+        "html": {
+          "min": 107.5,
+          "max": 967.5
+        },
+        "direct": {
+          "min": 21.25,
+          "max": 117.5
+        },
+        "base64": {
+          "min": 225,
+          "max": 548.75
+        }
+      }
+    },
+    {
+      "direction": "cpp->js",
+      "mode": "sequential",
+      "bytes": 32768,
+      "calls": 800,
+      "html": 334.0931775,
+      "direct": 85.53401,
+      "callAsync": 103.49479124999999,
+      "base64": 392.72442750000005,
+      "betweenLaunches": {
+        "html": {
+          "min": 333.47989625,
+          "max": 2018.7975
+        },
+        "direct": {
+          "min": 84.6438025,
+          "max": 146.38145875
+        },
+        "callAsync": {
+          "min": 102.13390625,
+          "max": 255.0475
+        },
+        "base64": {
+          "min": 391.30849,
+          "max": 565.54765625
+        }
+      }
+    }
+  ],
+  "reports": [
+    {
+      "engine": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+      "channel": "WKWebView",
+      "runs": 5,
+      "shortestBatchMilliseconds": 59,
+      "inFlight": 64,
+      "unit": "microseconds per call, median of run means",
+      "firstCallMilliseconds": {
+        "html": 19,
+        "direct": 14,
+        "bridgeReady": 18
+      },
+      "results": [
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 134,
+          "direct": 61.75,
+          "base64": 208.875
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 327.5,
+          "direct": 26.125,
+          "base64": 8
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 790.79260425,
+          "direct": 46.029208375,
+          "callAsync": 72.66597925,
+          "base64": 73.737421875
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 195,
+          "direct": 72.75,
+          "base64": 87.125
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 42.5,
+          "direct": 8,
+          "base64": 17
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 151.69766149999998,
+          "direct": 54.79381775,
+          "callAsync": 72.97934375,
+          "base64": 103.1854375
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 337.5,
+          "direct": 527.5,
+          "base64": 1617.5
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 967.5,
+          "direct": 117.5,
+          "base64": 548.75
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 2018.7975,
+          "direct": 146.38145875,
+          "callAsync": 255.0475,
+          "base64": 565.54765625
+        }
+      ]
+    },
+    {
+      "engine": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+      "channel": "WKWebView",
+      "runs": 5,
+      "shortestBatchMilliseconds": 17,
+      "inFlight": 64,
+      "unit": "microseconds per call, median of run means",
+      "firstCallMilliseconds": {
+        "html": 17,
+        "direct": 8,
+        "bridgeReady": 17
+      },
+      "results": [
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 134.125,
+          "direct": 61.75,
+          "base64": 62.25
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 34.375,
+          "direct": 6,
+          "base64": 6.625
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 135.17959375,
+          "direct": 45.244229125,
+          "callAsync": 61.522390625,
+          "base64": 65.91646875
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 151.5,
+          "direct": 72.375,
+          "base64": 85.25
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 38,
+          "direct": 8.625,
+          "base64": 16.375
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 151.637947875,
+          "direct": 55.438026,
+          "callAsync": 73.23690625,
+          "base64": 86.34635425
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 340,
+          "direct": 106.25,
+          "base64": 387.5
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 107.5,
+          "direct": 21.25,
+          "base64": 226.25
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 333.47989625,
+          "direct": 84.6438025,
+          "callAsync": 102.13390625,
+          "base64": 391.30849
+        }
+      ]
+    },
+    {
+      "engine": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+      "channel": "WKWebView",
+      "runs": 5,
+      "shortestBatchMilliseconds": 17,
+      "inFlight": 64,
+      "unit": "microseconds per call, median of run means",
+      "firstCallMilliseconds": {
+        "html": 18,
+        "direct": 7,
+        "bridgeReady": 17
+      },
+      "results": [
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 155.625,
+          "direct": 61,
+          "base64": 62.625
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 34.25,
+          "direct": 5.875,
+          "base64": 6.5
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 135.299073,
+          "direct": 45.25515625,
+          "callAsync": 61.44500525,
+          "base64": 66.091989625
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 155.25,
+          "direct": 75.125,
+          "base64": 86.375
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 38.125,
+          "direct": 8.125,
+          "base64": 16.375
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 152.08121350000002,
+          "direct": 54.904390625,
+          "callAsync": 72.460166625,
+          "base64": 85.61925
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 336.25,
+          "direct": 106.25,
+          "base64": 387.5
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 108.75,
+          "direct": 23.75,
+          "base64": 225
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 334.0931775,
+          "direct": 85.53401,
+          "callAsync": 103.49479124999999,
+          "base64": 392.72442750000005
+        }
+      ]
+    }
+  ]
+}

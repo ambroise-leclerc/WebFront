@@ -11,17 +11,18 @@ The story is delivered in three verifiable steps; a partial step does not close 
 
 | Step | Content | State |
 | --- | --- | --- |
-| 1 | The ten lanes in `cmake/local-ci/lanes.json` and the offline drift check `LocalCiLanesMatchWorkflows` | delivered |
+| 1 | The eleven lanes in `cmake/local-ci/lanes.json` and the offline drift check `LocalCiLanesMatchWorkflows` | delivered |
 | 2 | Commit transport, offline-kit verification, Linux containers and the orchestrator | implemented; real-host/image qualification pending |
 | 3 | Native Windows and macOS sessions, result collection, full qualification and timings | not started |
 
 ## The lanes
 
-`BuildAndTest.yml` expands to seven lanes and `MddlogIntegration.yml` to three. The workflows' trigger conditions (push, schedule,
-manual dispatch) do not exempt the local matrix from the extended lanes: a full run selects all ten.
+`BuildAndTest.yml` expands to eight lanes and `MddlogIntegration.yml` to three. The workflows' trigger conditions (push, schedule,
+manual dispatch) do not exempt the local matrix from the extended lanes: a full run selects all eleven.
 
 | Lane | GitHub job | Machine | Toolchain | CMake |
 | --- | --- | --- | --- | --- |
+| `performance-linux-gcc-webkitgtk` | `performance-linux` | `RyzenLinux` (container) | GCC 16, Release, WebKitGTK, three performance runs | 4.4.4 |
 | `desktop-linux-gcc-webkitgtk` | `desktop` / `linux-gcc-webkitgtk` | `RyzenLinux` (container) | GCC 16, Debug, coverage, WebKitGTK | 4.4.4 |
 | `desktop-windows-msvc-webview2` | `desktop` / `windows-msvc-webview2` | `CurmudgeonWindows` (native) | MSVC, Release, WebView2 | 4.4.4 |
 | `desktop-macos-clang-wkwebview` | `desktop` / `macos-clang-wkwebview` | `Mac` (native) | AppleClang (latest Xcode), Release, WKWebView | 4.4.4 |
@@ -101,7 +102,7 @@ python3 cmake/local-ci/run run --commit HEAD --machines RyzenLinux \
   --kit /path/to/kit.tgz --kit-sha256 <sha256> --parallel-lanes 2 --jobs 4 --require-all
 ```
 
-`--machines` and `--lanes` take comma-separated names; both filters apply when both are present. Without filters, all ten lanes
+`--machines` and `--lanes` take comma-separated names; both filters apply when both are present. Without filters, all eleven lanes
 are selected. `--require-all` requires every **selected** lane to pass; a filtered run still reports `INCOMPLETE` for the full
 matrix. `--keep` retains remote worktrees and builds. `--timeout` bounds each lane (default 3600 seconds), and
 `--transfer-timeout` bounds preparation (default 1800 seconds). Limits must be positive. SSH probes have a five-second connection
@@ -275,8 +276,8 @@ transport, failing tests, unreachable machines, dirty trees, timeouts, interrupt
 arguments. Its protocol test substitutes local SSH/Docker executables; it does **not** qualify actual toolchain images or GUI
 sessions. `LocalCiLanesMatchWorkflows` and its negative suite still check the workflows independently.
 
-Actual Linux image builds, the eight lanes on RyzenLinux, warm-cache timings and comparison with GitHub on the same commit
+Actual Linux image builds, the nine lanes on RyzenLinux, warm-cache timings and comparison with GitHub on the same commit
 remain to be qualified. Delivery step 3 still needs the Windows interactive scheduled task (MSVC environment, at most four
-compilations and WebView2 runtime), the macOS graphical session and Xcode reporting, and the ten-lane run. For now a reachable
+compilations and WebView2 runtime), the macOS graphical session and Xcode reporting, and the eleven-lane run. For now a reachable
 Windows/Mac machine reports `skipped (native session support pending step 3)`; an unreachable one reports `unreachable`.
 Neither counts as passed, and `--require-all` fails when either is selected. The story remains open.

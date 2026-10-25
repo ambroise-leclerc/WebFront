@@ -150,6 +150,9 @@ public:
     webfront::detail::BoundContentPolicy             contentPolicy;
     // Internal adapter observer, used by lifecycle probes after a successful native cancellation.
     std::function<void()>                            navigationCancelled;
+    // Internal adapter observer: the browser exists and nothing is loaded yet (the transport benchmark of ADR-017 registers
+    // its message channel here).
+    std::function<void()>                            viewReady;
     bool                                             closed       = false;
     UINT_PTR                                         startupTimer = 0;
 
@@ -584,11 +587,17 @@ private:
             restoreFocus();
         // Runtime creation is complete. Slow page resources must not consume its watchdog budget.
         stopStartupTimer();
+        if (viewReady)
+            viewReady();
         check(view->Navigate(url.c_str()), "navigating to application");
     }
 };
 
-inline void open(std::string_view address, std::string_view port, std::string_view file, const WebView2Options& options) {
+inline void open(std::string_view address,
+                 std::string_view port,
+                 std::string_view file,
+                 const WebView2Options& options,
+                 const std::function<void(Session&)>& prepare = {}) {
     auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, ""), options.contentPolicy};
     Apartment                                                apartment;
     LPWSTR                                                   rawVersion = nullptr;
@@ -600,6 +609,8 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     auto session       = std::make_shared<Session>(options.startupTimeout);
     session->contentPolicy = std::move(contentPolicy);
     session->url       = applicationUrl(address, port, file);
+    if (prepare)
+        prepare(*session);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
     std::filesystem::create_directories(profile);
     session->createWindow();
