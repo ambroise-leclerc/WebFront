@@ -7,7 +7,7 @@
   native window engine of the platform is enabled automatically when its dependencies are found (top-level builds with examples,
   without `ENABLE_TESTING`; `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it, an explicit `WEBFRONT_EMBED_*` value always wins).
   A missing engine does not fail the configuration: CMake explains how to install it and the Life examples are built for the default browser instead. The README Game of Life walkthrough builds with `mkdir build`, `cd build`,
-  `cmake ..` and `cmake --build .` (#366).
+  `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (unpublished, the pin stays on 0.6.2).
 
 - Remove the local SSH CI orchestrator, container definitions, native session workers and matrix drift checks.
   The GitHub-hosted workflows remain the CI execution path.

@@ -37,7 +37,7 @@
   "js/developer/environment/embed.mjs": "3e6bc10200939fa30d5f60a96f01eb33ddf3da87661390ad433a18366bf52547",
   "examples/life/ui/main.tsx": "7b1ff285d2a6b8f897ef12df872886e61ef4b24e2358a9423b76b38ab75c85d3",
   "examples/life/ui/style.css": "9bb55eb0f0a3287e5b7dc78af9d69608b87ff42c4d9c8a653bc83a52fe293c44",
-  "js/developer/tools/distribution.json": "a40253717a5a0f2107ad9b96ada3d0487ee35b27a382e19b3b8a2d20388573af",
+  "js/developer/tools/distribution.json": "7029cf3e2e64e5ea44b595fddcc0151fca4cc210d2ef1258cee7bb8d75e7cd2f",
   "js/developer/tools/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
   "js/developer/tools/distribution.mjs": "1108b61bc659dd945ba1417aa84337bca03039842d342c95815b5463d87a136e",
   "js/developer/scripts/build.mjs": "df91efbc9bb19559c36440f0be7ec2b2af406209146a0d8eb88d688803a74c68",
