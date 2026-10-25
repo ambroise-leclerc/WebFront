@@ -15,11 +15,12 @@
 | 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 | 2.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | `third_party/` est supprimé (#319) : `fflate` provient du paquet verrouillé du projet `wf`, aucune source tierce n'est vendorisée. | [1824271](https://github.com/ambroise-leclerc/WebFront/commit/18242715f14711e7871ea29aeccf661d5bef760f) |
 | 2.2 | 2026-10-24 | Acceptée | Ambroise Leclerc | Les retraits annoncés sont réalisés (#312, #313, #318) : les en-têtes du cœur sont rendus et vérifiés par CMake seul (`js/core/EmbedAsset.cmake`), sans compression ni Node.js ; la compression gzip reproductible est celle de `wf embed`. | — |
+| 2.4 | 2026-10-25 | Acceptée | Ambroise Leclerc | Cache LRU possédé par le serveur, clés par contenu gzip complet, contenu GET et longueur HEAD validés partagés, budgets et éviction bornés (#281). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-24** (version 2.3).
+Dernière révision : **2026-10-25** (version 2.4).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -57,8 +58,9 @@ un échec de décodage ou dépassement du budget donne 500.
 
 - **Bénéfice :** exécution locale et contrôle de fraîcheur des ressources réellement distribuées.
 - **Coût accepté :** distributions et en-têtes volumineux versionnés, outils de maintenance dédiés.
-- **Risque :** gzip→identity décode synchroniquement sur le thread I/O, à chaque requête, sans
-  cache. Le budget borne la sortie, pas le temps ; cache et déplacement du travail restent futurs.
+- **Risque :** gzip→identity décode synchroniquement sur le thread I/O, sans
+  cache pour les révisions absentes ou trop grandes. Le budget borne la sortie, pas le temps ;
+  le déplacement du travail reste futur (#283). Voir le cache validé ci-dessous (#281).
 
 ### Révision de l'ADR-016
 
@@ -78,7 +80,20 @@ décision et ne s'appliquent plus qu'aux providers produits par `wf embed`.
 - Que le lancement du programme C++ n’exige ni npm ni connexion réseau.
 - Pour un nouvel asset, tester route, MIME, encodage, taille, lectures partielles et fraîcheur.
 - Pour modifier la négociation, tester gzip, identity, exclusions et flux corrompus ; ne pas
-  affirmer que HEAD ou les ressources décodées sont déjà mis en cache.
+  contourner la validation complète du flux pour remplir le cache ou déduire HEAD d’ISIZE seul.
+
+### Cache des représentations validées (#281)
+
+Le serveur possède, via son `RequestHandler`, un LRU dont le budget par défaut de 8 MiB
+compte clés compressées, contenu décodé et stockage des entrées. La clé est le contenu
+compressé complet, indépendant du chemin et de la durée de vie du provider. Les lectures
+restent nécessaires ; un changement des octets invalide implicitement la réutilisation.
+GET et HEAD partagent une validation complète ; HEAD réutilise la longueur sans recopier
+le corps. Le budget de sortie actif s'applique aussi aux hits. Une entrée trop grande
+reste servie sans rétention ; les erreurs ne deviennent jamais des entrées valides.
+Le contexte serveur sérialise les accès et validations ; aucune tâche de cache ne survit
+au drainage. Les copies de handlers démarrent avec un cache vide. Les limites de rétention,
+allocations temporaires et règles des providers sont précisées dans [HTTP_ASSETS](../HTTP_ASSETS.md).
 
 ## Sources et vérification
 

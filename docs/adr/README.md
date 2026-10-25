@@ -48,7 +48,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-006](ADR-006-taches-structurees-et-arret.md) | Owning, cancelling and joining every task | Accepted | 2026-10-13 | 2.0 — 2026-10-18 |
 | [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.10 — 2026-10-20 |
 | [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) | Restricting bridge origins without promising a sandbox | Accepted | 2026-10-18 | 1.0 — 2026-10-18 |
-| [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.3 — 2026-10-24 |
+| [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.4 — 2026-10-25 |
 | [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.7 — 2026-10-23 |
 | [ADR-011](ADR-011-diagnostics-optionnels.md) | Confining mddlog behind an optional diagnostics façade | Accepted | 2026-10-01 | 1.2 — 2026-10-02 |
 | [ADR-012](ADR-012-preuves-et-tests.md) | Demonstrating contracts through deterministic tests and browser integration | Accepted | 2020-04-19 | 1.6 — 2026-10-19 |
@@ -108,7 +108,8 @@ Keep previous rows and update the current version in the index.
   in both directions and identify exactly which part changes. A compatible clarification
   may extend an existing ADR’s history without erasing its previous state.
 - A future possibility mentioned here is not an accepted decision: general DOM abstractions,
-  tool isolation, response deadlines and a decoding cache require their own decisions.
+  tool isolation and response deadlines require their own decisions. The validated decoding
+  cache is specified in ADR-009 and `HTTP_ASSETS.md`.
 
 ## Chemins depuis la version 0.4
 

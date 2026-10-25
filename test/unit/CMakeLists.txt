@@ -171,3 +171,7 @@ add_test(NAME AddSubdirectoryConsumer
             -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
             -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)
+
+# Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
+add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)
+target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)

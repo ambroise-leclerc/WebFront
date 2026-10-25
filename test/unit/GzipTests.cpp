@@ -1,6 +1,7 @@
 #include "GzipFixtures.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <webfront/http/Gzip.hpp>
+#include <webfront/http/GzipCache.hpp>
 
 #include <string>
 
@@ -192,5 +193,159 @@ SCENARIO("Gzip CRC32 matches standard and binary reference vectors") {
         THEN("the result matches the independent zlib reference") {
             REQUIRE(gzipCrc(bytes) == 0x29058c73u);
         }
+    }
+}
+
+SCENARIO("Validated gzip cache shares GET content and HEAD metadata within the current output budget") {
+    using webfront::http::gzip::ValidatedCache;
+    ValidatedCache cache(100000);
+    auto           bytes = std::string(gzipfixtures::fixed);
+    GIVEN("HEAD validates a revision before GET") {
+        REQUIRE(cache.resolve(bytes, 23768, true) == 23768);
+        REQUIRE(bytes.empty());
+        bytes = gzipfixtures::fixed;
+        REQUIRE(cache.resolve(bytes, 23768) == 23768);
+        REQUIRE(bytes == payload());
+        THEN("GET reuses the validated bytes and length") {
+            REQUIRE(cache.statistics().decodes == 1);
+            REQUIRE(cache.statistics().hits == 1);
+        }
+        THEN("a smaller active output budget cannot reuse the larger result") {
+            for (const bool head : {false, true}) {
+                bytes = gzipfixtures::fixed;
+                REQUIRE_FALSE(cache.resolve(bytes, 23767, head));
+            }
+            REQUIRE(cache.statistics().decodes == 1);
+            bytes = gzipfixtures::fixed;
+            REQUIRE(cache.resolve(bytes, 23768, true) == 23768);
+        }
+    }
+}
+
+SCENARIO("Validated gzip cache bounds keys and data and evicts the least recently used revision") {
+    using webfront::http::gzip::ValidatedCache;
+    auto first  = std::string(gzipfixtures::fixed);
+    auto second = first;
+    auto third  = first;
+    // MTIME changes the compressed revision without changing the validated payload.
+    second[4] = 1;
+    third[4]  = 2;
+    ValidatedCache probe(100000);
+    auto           bytes = first;
+    REQUIRE(probe.resolve(bytes, 23768));
+    const auto charge = probe.statistics().retainedBytes;
+    REQUIRE(charge >= first.size() + 23768);
+    GIVEN("room for exactly two revisions") {
+        ValidatedCache cache(2 * charge);
+        for (const auto& revision : {first, second, first, third, first}) {
+            bytes = revision;
+            REQUIRE(cache.resolve(bytes, 23768));
+            REQUIRE(cache.statistics().retainedBytes <= 2 * charge);
+        }
+        THEN("the touched first revision survives while the second is evicted") {
+            REQUIRE(cache.statistics().decodes == 3);
+            REQUIRE(cache.statistics().hits == 2);
+            REQUIRE(cache.statistics().entries == 2);
+            bytes = second;
+            REQUIRE(cache.resolve(bytes, 23768));
+            REQUIRE(cache.statistics().decodes == 4);
+        }
+    }
+    GIVEN("a budget one byte below a complete entry, or disabled caching") {
+        for (const auto budget : {std::size_t{0}, charge - 1}) {
+            ValidatedCache cache(budget);
+            for (const bool head : {false, true}) {
+                bytes = first;
+                REQUIRE(cache.resolve(bytes, 23768, head));
+            }
+            THEN("both requests succeed without retaining partial keys or metadata") {
+                REQUIRE(cache.statistics().retainedBytes == 0);
+                REQUIRE(cache.statistics().entries == 0);
+                REQUIRE(cache.statistics().decodes == 2);
+            }
+        }
+    }
+    GIVEN("an oversized revision alongside a retained asset") {
+        ValidatedCache cache(charge);
+        bytes = first;
+        REQUIRE(cache.resolve(bytes, 23768));
+        bytes = first + first;
+        REQUIRE(cache.resolve(bytes, 47536));
+        bytes = first;
+        REQUIRE(cache.resolve(bytes, 23768));
+        REQUIRE(cache.statistics().decodes == 2);
+        REQUIRE(cache.statistics().hits == 1);
+    }
+}
+
+SCENARIO("Validated gzip cache never promotes invalid streams or trusts ISIZE alone") {
+    webfront::http::gzip::ValidatedCache cache(100000);
+    GIVEN("corrupt CRC, invalid trailer, truncated and concatenated invalid members") {
+        auto corrupt                 = std::string(gzipfixtures::fixed);
+        corrupt[corrupt.size() - 8] ^= 1;
+        auto wrongSize               = std::string(gzipfixtures::fixed);
+        wrongSize.back()             = 1;
+        for (const auto& invalid : {corrupt, wrongSize, std::string(gzipfixtures::fixed.substr(0, 498)), std::string(gzipfixtures::fixed) + corrupt}) {
+            for (const bool head : {false, true}) {
+                auto bytes = invalid;
+                REQUIRE_FALSE(cache.resolve(bytes, 100000, head));
+            }
+        }
+        THEN("every attempt validates again and nothing is retained") {
+            REQUIRE(cache.statistics().decodes == 8);
+            REQUIRE(cache.statistics().entries == 0);
+            REQUIRE(cache.statistics().retainedBytes == 0);
+        }
+    }
+    GIVEN("an initial decode failing its output budget") {
+        auto bytes = std::string(gzipfixtures::fixed);
+        REQUIRE_FALSE(cache.resolve(bytes, 1));
+        bytes = gzipfixtures::fixed;
+        REQUIRE(cache.resolve(bytes, 23768));
+        REQUIRE(cache.statistics().decodes == 2);
+        REQUIRE(cache.statistics().entries == 1);
+    }
+}
+
+SCENARIO("Validated gzip cache lifetime is owned and copies do not share application state") {
+    using webfront::http::gzip::ValidatedCache;
+    std::string response(gzipfixtures::fixed);
+    GIVEN("a populated cache") {
+        {
+            ValidatedCache cache(100000);
+            REQUIRE(cache.resolve(response, 23768));
+            auto copy = cache;
+            REQUIRE(copy.statistics().entries == 0);
+            auto bytes = std::string(gzipfixtures::fixed);
+            REQUIRE(copy.resolve(bytes, 23768));
+            REQUIRE(copy.statistics().decodes == 1);
+        }
+        THEN("the response survives destruction and a new application starts cold") {
+            REQUIRE(response == payload());
+            ValidatedCache next(100000);
+            response = gzipfixtures::fixed;
+            REQUIRE(next.resolve(response, 23768, true));
+            REQUIRE(next.statistics().decodes == 1);
+            REQUIRE(next.statistics().hits == 0);
+        }
+    }
+}
+
+SCENARIO("Validated gzip cache permits empty streams under a zero output budget") {
+    // Empty stored block, with a validated CRC32 and ISIZE of zero.
+    const std::string                    empty("\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x03"
+                                               "\x01\x00\x00\xff\xff"
+                                               "\x00\x00\x00\x00\x00\x00\x00\x00",
+                            23);
+    webfront::http::gzip::ValidatedCache cache(1000);
+    GIVEN("GET then HEAD of a valid empty asset") {
+        for (const bool head : {false, true}) {
+            auto bytes = empty;
+            REQUIRE(cache.resolve(bytes, 0, head) == 0);
+            REQUIRE(bytes.empty());
+        }
+        REQUIRE(cache.statistics().decodes == 1);
+        REQUIRE(cache.statistics().hits == 1);
+        REQUIRE(cache.statistics().retainedBytes <= 1000);
     }
 }
