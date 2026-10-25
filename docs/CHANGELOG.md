@@ -8,6 +8,8 @@
   without `ENABLE_TESTING`; `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it, an explicit `WEBFRONT_EMBED_*` value always wins).
   A missing engine does not fail the configuration: CMake explains how to install it and the Life examples are built for the default browser instead. The README Game of Life walkthrough builds with `mkdir build`, `cd build`,
   `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (unpublished, the pin stays on 0.6.2).
+  Automatic engine values stay outside the cache so an explicit choice equal to the previous detection is still respected;
+  removing an explicit engine cache entry resumes detection. Platforms without a registered engine configure the browser fallback.
 
 - Remove the local SSH CI orchestrator, container definitions, native session workers and matrix drift checks.
   The GitHub-hosted workflows remain the CI execution path.

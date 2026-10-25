@@ -87,7 +87,9 @@ On Windows with Visual Studio run `examples\Debug\WebFrontLifeConsole.exe`.
 The essential change in [LifeDeveloper.cpp](examples/life/LifeDeveloper.cpp) is:
 
 ```cpp
-webfront::NativeApp app{"life-project"};
+#include "LifeFrontend.hpp"
+
+webfront::demo::LifeApp app{"life-project"};
 app.cppFunction("life.step", &webfront::demo::nextLife);
 app.bootstrap("developer");
 app.show();
@@ -111,11 +113,17 @@ On Windows with Visual Studio run `examples\Debug\WebFrontLifeDeveloper.exe`. Wi
 | macOS 13.3+ | System Cocoa / WebKit | Clang and a deployment target of at least 13.3 |
 | Linux | WebKitGTK 6.0 | `pkg-config webkitgtk-6.0` succeeds; [installation](docs/WEBKITGTK.md) |
 
+On macOS, this opens a WKWebView window using the system Cocoa and WebKit frameworks, with no engine download.
+The example constructs the application and calls `show()` on the main thread; the HTTP/WebSocket server runs on its own thread.
+Closing the window stops the server and exits the example. An explicit deployment target below 13.3 disables automatic detection;
+explicitly enabling WKWebView with such a target fails configuration. See [the macOS guide](docs/WKWEBVIEW.md).
+
 When the engine is missing, configuration still succeeds. CMake prints a `Native window: no native engine will be built` notice that says what to install, and `WebFrontLifeDeveloper` is compiled for the default browser: at start it prints that notice, serves the same application and opens it in your system browser. Install the dependency and run `cmake ..` again to get the native window. CEF (`-DWEBFRONT_EMBED_CEF=ON`) makes `CEFFrontend` available to your own applications; the examples do not select it.
 
 **Advanced options.**
 
 - Choose the engine yourself with `-DWEBFRONT_EMBED_WEBVIEW2=ON|OFF`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON|OFF` or `-DWEBFRONT_EMBED_WEBKITGTK=ON|OFF`; an explicit value is never replaced by the detection. `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it. Test builds (`-DENABLE_TESTING=ON`) keep the explicit selection.
+- Automatic engine choices are recalculated on each configuration and do not create an engine option in the cache. To return from an explicit macOS choice to automatic detection, run `cmake .. -UWEBFRONT_EMBED_WKWEBVIEW` (or remove the corresponding engine option on another platform).
 - Another project directory, and another environment archive, can be passed: `examples/WebFrontLifeDeveloper <project> [<environment-url> <sha512-integrity>]`, for instance an environment [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
 The example reports startup failures with a nonzero exit status.
@@ -221,12 +229,17 @@ For Visual Studio launch `examples\Debug\WebFrontLifeEmbedded.exe`.
 [LifeEmbedded.cpp](examples/life/LifeEmbedded.cpp) replaces the development project and bootstrap with the generated provider:
 
 ```cpp
-webfront::NativeAppWithAssets<webfront::fs::LifeUI> app;
+#include "LifeFrontend.hpp"
+
+webfront::demo::LifeAppWithAssets<webfront::fs::LifeUI> app;
 app.cppFunction("life.step", &webfront::demo::nextLife);
 app.show();
 ```
 
 Recompilation is explicit. The resulting application runs offline without the project directory, developer callbacks or downloaded tool cache. The selected native engine's deployment requirements still apply; this is not an application installer.
+
+The examples' [LifeFrontend.hpp](examples/life/LifeFrontend.hpp) selects the native engine or the default browser for both stages.
+Your own application can select `webfront::NativeApp` or `webfront::NativeAppWithAssets` explicitly when it requires a native window.
 
 ## Use WebFront in your project
 

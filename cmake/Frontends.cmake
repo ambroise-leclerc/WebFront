@@ -170,9 +170,9 @@ function(webfront_probe_native_frontend name out reason)
     set(${reason} "${why}" PARENT_SCOPE)
 endfunction()
 
-# Enables, for this platform's native engine, an option the user has not set. The result is stored in
-# the cache with a marker recording the automatic value: a later configure probes again as long as the
-# value is still the automatic one, while an explicit -D<OPTION>=ON/OFF wins and is never overwritten.
+# Enables, for this platform's native engine, an option the user has not set. Automatic values stay
+# in normal variables: option() honors them (CMP0077), without creating a cache entry. A later
+# configure probes again, while an explicit normal or cached value always wins, even when unchanged.
 # A missing engine only produces a status message; the application reports it at run time.
 function(webfront_autodetect_native_frontends)
     foreach(name IN LISTS WEBFRONT_FRONTEND_REGISTRY)
@@ -184,15 +184,11 @@ function(webfront_autodetect_native_frontends)
         if(NOT supported)
             continue()
         endif()
-        set(marker "WEBFRONT_AUTODETECTED_${option}")
         if(DEFINED ${option})
-            if(NOT DEFINED CACHE{${marker}} OR NOT "$CACHE{${option}}" STREQUAL "$CACHE{${marker}}")
-                continue()
-            endif()
+            continue()
         endif()
         webfront_probe_native_frontend("${name}" available reason)
-        set(${option} "${available}" CACHE BOOL "${WEBFRONT_FRONTEND_${name}_DESCRIPTION}" FORCE)
-        set(${marker} "${available}" CACHE INTERNAL "Automatic value of ${option}")
+        set(${option} "${available}" PARENT_SCOPE)
         if(available)
             message(STATUS "Native window: ${name} detected, ${option}=ON")
         else()
