@@ -137,3 +137,13 @@ check_mutation(reordered-matrix-rows MddlogIntegration.yml
     "- name: thread\n          flags: -fsanitize=thread\n        - name: address-undefined\n          flags: -fsanitize=address,undefined -fno-sanitize-recover=undefined" "")
 check_mutation(crlf-workflows BuildAndTest.yml
     "matrix:\n        compiler: [gcc, clang]" "matrix:\n        compiler: [gcc, clang]" "" CRLF)
+
+# The dedicated Linux performance lane must stay optimized, exercise the benchmark and repeat it.
+check_mutation(performance-release BuildAndTest.yml
+    "build-performance -G Ninja -DCMAKE_BUILD_TYPE=Release" "build-performance -G Ninja -DCMAKE_BUILD_TYPE=Debug" "configure options")
+check_mutation(performance-target BuildAndTest.yml
+    "--target webkitgtk_transport_benchmark" "--target webkitgtk_lifecycle" "build targets")
+check_mutation(performance-label BuildAndTest.yml
+    "-C Release -L performance" "-C Release -L web-integration" "CTest arguments")
+check_mutation(performance-repeat BuildAndTest.yml
+    "--repeat until-fail:3" "--repeat until-fail:1" "CTest arguments")

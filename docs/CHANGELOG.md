@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- The allocation-counting regression is omitted from ThreadSanitizer builds, whose C++ runtime
+  defines the same global `new`/`delete` operators; ordinary and ASan/UBSan builds retain it. macOS adds
+  `WKWebViewTransportBenchmark` (HTML bridge, native strings, `callAsyncJavaScript` and base64 bytes) and separate native
+  API contract tests. ADR-017 records the measurements and the public Cocoa API constraints on a future direct transport.
+
+- Linux transport performance now has a dedicated Release CI lane without coverage, repeated three times with retained
+  JSON, environment and CTest reports; the Debug/coverage desktop lane stays in place. ADR-017 distinguishes mandatory HTML
+  availability from the selected default transport and qualifies mobile network rules by OS version.
+
+- ADR-017 (Proposed, #363) prepares direct access to embedded frontends (native resource schemes and message channels) for
+  future Android, iOS and other mobile frontends, while HTTP/WebSocket stays the normative path of every frontend and of future
+  microcontroller targets. The binary format of ADR-003 is carried unchanged; no API or wire change is made. The new
+  `WebKitGTKTransportBenchmark` CTest case (labels `web-integration` and `performance`) compares the bridge with WebKitGTK's
+  message handlers and `evaluate_javascript` in one window; it fails on a wrong echo, never on a timing, and writes a JSON report.
+  `WebView2TransportBenchmark` does the same on Windows with `WebMessageReceived`, `ExecuteScript` and a shared buffer
+  (`ICoreWebView2SharedBuffer`): WebView2 string messages are slower than the HTML bridge from 32 KiB and for C++ to JS, the
+  shared buffer is 2 to 6 times faster. The figures leave out the codec and the thread hop a real transport adds, so they
+  overstate the gain of a direct path. The benchmark exposed two per-message costs of the bridge, fixed with regression tests:
+  `Messages.hpp` wrote to the standard output for every encoded parameter, and `Frame::addBuffer` formatted a hex dump of
+  every buffer before the log level was tested.
+
 - Local CI matrix, step 1 of 3 (#346): `cmake/local-ci/lanes.json` describes the ten lanes of `BuildAndTest.yml` and `MddlogIntegration.yml` (machine, toolchain, CMake, options, targets, CTest labels), `docs/LOCAL_CI.md` documents them and their differences with GitHub, and the offline CTest cases `LocalCiLanesMatchWorkflows` and `LocalCiLanesRejectDrift` fail when the lanes and the workflows diverge. Command options are compared in both directions for each matrix variant; extra matrix axes and exclusions are rejected explicitly. The orchestrator, the Linux containers and the Windows and macOS sessions follow in steps 2 and 3.
 
 - The README animation draws the C++ application inside the image, beside the WebFront window (#359): it is no longer cropped by the table column on narrow screens and in the GitHub app, and weighs 0.4 MB instead of 1.2 MB. The code stays in the README as text, in a collapsed block; `docs/tools/render-life-bootstrap.py` reads it from there.
@@ -23,6 +44,10 @@
 
 ### Fixed
 
+- The bridge no longer pays for diagnostics on every message (#363): the encoder of `Messages.hpp` wrote to `std::cout` for
+  each parameter, and `Frame::addBuffer` formatted a hex dump of each sent buffer before `log::debug()` tested the level (21.7 MB
+  allocated for a 1 MiB buffer). A 32 KiB echo over the HTML bridge drops from about 2.4 ms to 0.7 ms on WebKitGTK. Regressions:
+  `Encoding bridge messages writes nothing to the standard output` and `FrameBufferNotFormattedWhenDebugDisabled`.
 - The developer store reads and writes project paths beyond MAX_PATH on Windows (#349): `projectPath` takes the extended-length form from 200 characters, as does a project root longer than MAX_PATH (`canonicalDirectory`), containment is checked on the ordinary spelling, and staged files get the same treatment. The MSVC option is now `/analyze:stacksize65536`, one argument: with a space, sccache read `65536` as a second source file and refused to cache 48 compilations of the Windows CI build (about 9 minutes against 25 seconds on Linux).
 - The installer of the developer environment reads npm archives rooted at any single directory, as npm does (#316): the archives of
   `@types/*` are rooted at the package name and were refused as "Invalid npm tarball root". A mixed or escaping root is still refused.

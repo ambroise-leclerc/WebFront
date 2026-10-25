@@ -8,7 +8,7 @@
   },
   "workflows": {
     "BuildAndTest.yml": {
-      "jobs": ["desktop", "sanitizers", "web-integration"],
+      "jobs": ["desktop", "performance-linux", "sanitizers", "web-integration"],
       "matrices": {
         "desktop": {"key": "platform", "values": ["linux-gcc-webkitgtk", "windows-msvc-webview2", "macos-clang-wkwebview"]},
         "sanitizers": {"key": "sanitizer", "values": ["address-undefined", "thread"]},
@@ -36,6 +36,21 @@
     ]
   },
   "lanes": [
+    {
+      "id": "performance-linux-gcc-webkitgtk",
+      "workflow": "BuildAndTest.yml", "job": "performance-linux", "matrix": "",
+      "machine": "RyzenLinux", "runtime": "container:linux-ubuntu26",
+      "compiler": {"family": "gcc", "version": "16", "marker": "gcc-16"},
+      "cmake_version": "4.4.4", "build_type": "Release",
+      "options": ["-DWEBFRONT_EMBED_WEBKITGTK=ON", "-DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK", "-DWEBFRONT_BUILD_EXAMPLES=OFF"],
+      "common_options": ["-DWEBFRONT_EMBED_CEF=OFF", "-DENABLE_TESTING=ON", "-DCMAKE_CXX_SCAN_FOR_MODULES=OFF"],
+      "workflow_options": ["-DENABLE_CACHE=OFF", "-DCMAKE_CXX_COMPILER_LAUNCHER=sccache"],
+      "targets": ["webkitgtk_transport_benchmark"],
+      "ctest": {"labels": ["performance"], "exclude_labels": [], "args": ["--no-tests=error", "--output-on-failure", "--repeat", "until-fail:3"], "workflow_args": ["--output-junit", "@workspace@/build-performance/test-results.xml"]},
+      "env": {"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS": "1"},
+      "extra_steps": ["measurement-environment", "performance-artifact"],
+      "evidence": ["Record measurement environment", "Retain performance report and diagnostics", "libwebkitgtk-6.0-dev"]
+    },
     {
       "id": "desktop-linux-gcc-webkitgtk",
       "workflow": "BuildAndTest.yml", "job": "desktop", "matrix": "linux-gcc-webkitgtk",
