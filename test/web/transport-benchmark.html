@@ -6,7 +6,7 @@
     // engine's own message channel, which the benchmark registers before navigation as the handlers wfecho and wfrun.
     // The native channel exists at document start, the bridge after its handshake: both first calls are timed from the
     // navigation start.
-    //   WebKitGTK: window.webkit.messageHandlers[name].postMessage(text) answers a Promise (message handler with reply).
+    //   WebKitGTK/WKWebView: messageHandlers[name].postMessage(text) answers a Promise (message handler with reply).
     //   WebView2:  window.chrome.webview.postMessage(text) has no reply: the call carries an identifier
     //              ("id\nname\ntext") and the answer is a message ("id\ntext").
     // Every byte of [offset, offset + size) is 'x' (offset and size are multiples of 4).
@@ -20,7 +20,8 @@
     let nativeChannel = null, firstDirectCall = null, nativeChannelError = null;
     try {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.wfecho) {
-            nativeChannel = {engine: "WebKitGTK", call: (name, text) => window.webkit.messageHandlers[name].postMessage(text)};
+            nativeChannel = {engine: window.webkit.messageHandlers.wfasync ? "WKWebView" : "WebKitGTK",
+                             call: (name, text) => window.webkit.messageHandlers[name].postMessage(text)};
         } else if (window.chrome && window.chrome.webview) {
             const pending = new Map();
             let next = 0;
@@ -114,6 +115,20 @@
             throw new Error("C++ to JS direct echo failed");
         return nanoseconds;
     }
+    async function asyncCppToJs(size, count) {
+        const nanoseconds = Number(await nativeChannel.call("wfasync", `${size} ${count}`));
+        if (!(nanoseconds >= 0))
+            throw new Error("C++ to JS callAsyncJavaScript echo failed");
+        return nanoseconds;
+    }
+    // WKWebView's documented public messages carry Foundation values, so binary bytes need a string envelope.
+    const base64Echo = async payload => atob(await nativeChannel.call("wfbytes", btoa(payload)));
+    async function base64CppToJs(size, count) {
+        const nanoseconds = Number(await nativeChannel.call("wfbytesrun", `${size} ${count}`));
+        if (!(nanoseconds >= 0))
+            throw new Error("C++ to JS base64 echo failed");
+        return nanoseconds;
+    }
 
     // WebView2 only: the same echo through a buffer shared with C++, sequential (the buffer has one owner at a time).
     const sharedCapacity = 65536;
@@ -168,13 +183,24 @@
     }
 
     function table(results) {
-        const lines = ["direction  mode        bytes   calls   html µs/call   direct µs/call   html/direct   shared µs/call   html/shared"];
-        for (const row of results)
-            lines.push([row.direction.padEnd(10), row.mode.padEnd(10), String(row.bytes).padStart(6),
-                        String(row.calls).padStart(7), row.html.toFixed(1).padStart(14),
-                        row.direct.toFixed(1).padStart(16), (row.html / row.direct).toFixed(2).padStart(13),
-                        row.shared === undefined ? "" : row.shared.toFixed(1).padStart(16),
-                        row.shared === undefined ? "" : (row.html / row.shared).toFixed(2).padStart(13)].join(" ").trimEnd());
+        const shared = results.some(row => row.shared !== undefined);
+        const callAsync = results.some(row => row.callAsync !== undefined);
+        const base64 = results.some(row => row.base64 !== undefined);
+        const header = ["direction  mode        bytes   calls   html µs/call   direct µs/call   html/direct"];
+        if (shared) header.push("shared µs/call   html/shared");
+        if (callAsync) header.push("callAsync µs/call");
+        if (base64) header.push("base64 µs/call");
+        const lines = [header.join("   ")];
+        const cell = (value, width) => value === undefined ? "".padStart(width) : value.toFixed(1).padStart(width);
+        for (const row of results) {
+            const cells = [row.direction.padEnd(10), row.mode.padEnd(10), String(row.bytes).padStart(6),
+                           String(row.calls).padStart(7), cell(row.html, 14), cell(row.direct, 16),
+                           (row.html / row.direct).toFixed(2).padStart(13)];
+            if (shared) cells.push(cell(row.shared, 16), row.shared === undefined ? "".padStart(13) : (row.html / row.shared).toFixed(2).padStart(13));
+            if (callAsync) cells.push(cell(row.callAsync, 20));
+            if (base64) cells.push(cell(row.base64, 17));
+            lines.push(cells.join(" ").trimEnd());
+        }
         return lines.join("\n");
     }
 
@@ -191,14 +217,18 @@
             results.push({direction: "js->cpp", mode: "sequential", bytes: size, calls,
                           html: await jsToCpp(sequential, bridgeEcho, size, calls),
                           direct: await jsToCpp(sequential, directEcho, size, calls),
+                          ...(nativeChannel.engine === "WKWebView" ? {base64: await jsToCpp(sequential, base64Echo, size, calls)} : {}),
                           ...(sharedAvailable() ? {shared: await jsToCpp(sequential, sharedEcho, size, calls)} : {})});
             results.push({direction: "js->cpp", mode: "concurrent", bytes: size, calls,
                           html: await jsToCpp(concurrent, bridgeEcho, size, calls),
-                          direct: await jsToCpp(concurrent, directEcho, size, calls)});
+                          direct: await jsToCpp(concurrent, directEcho, size, calls),
+                          ...(nativeChannel.engine === "WKWebView" ? {base64: await jsToCpp(concurrent, base64Echo, size, calls)} : {})});
             results.push({direction: "cpp->js", mode: "sequential", bytes: size, calls,
                           html: await cppToJs(bridgeCppToJs, size, calls),
                           direct: await cppToJs(directCppToJs, size, calls),
-                          ...(sharedAvailable() ? {shared: await cppToJs(sharedCppToJs, size, calls)} : {})});
+                          ...(sharedAvailable() ? {shared: await cppToJs(sharedCppToJs, size, calls)} : {}),
+                          ...(nativeChannel.engine === "WKWebView" ? {callAsync: await cppToJs(asyncCppToJs, size, calls),
+                              base64: await cppToJs(base64CppToJs, size, calls)} : {})});
         }
         const batch = `shortest batch ${shortestBatch.toFixed(1)} ms`;
         const firstCallText = `first call after navigation start: html ${firstCall.html.toFixed(1)} ms ` +

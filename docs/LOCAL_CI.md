@@ -11,17 +11,18 @@ The story is delivered in three verifiable steps; a partial step does not close 
 
 | Step | Content | State |
 | --- | --- | --- |
-| 1 | The ten lanes in `cmake/local-ci/lanes.json` and the offline drift check `LocalCiLanesMatchWorkflows` | delivered |
+| 1 | The eleven lanes in `cmake/local-ci/lanes.json` and the offline drift check `LocalCiLanesMatchWorkflows` | delivered |
 | 2 | Commit transport, offline-kit verification, Linux containers and the orchestrator | implemented; real-host/image qualification pending |
 | 3 | Native Windows and macOS sessions, result collection, full qualification and timings | Windows implementation delivered; host qualification and macOS pending |
 
 ## The lanes
 
-`BuildAndTest.yml` expands to seven lanes and `MddlogIntegration.yml` to three. The workflows' trigger conditions (push, schedule,
-manual dispatch) do not exempt the local matrix from the extended lanes: a full run selects all ten.
+`BuildAndTest.yml` expands to eight lanes and `MddlogIntegration.yml` to three. The workflows' trigger conditions (push, schedule,
+manual dispatch) do not exempt the local matrix from the extended lanes: a full run selects all eleven.
 
 | Lane | GitHub job | Machine | Toolchain | CMake |
 | --- | --- | --- | --- | --- |
+| `performance-linux-gcc-webkitgtk` | `performance-linux` | `RyzenLinux` (container) | GCC 16, Release, WebKitGTK, three performance runs | 4.4.4 |
 | `desktop-linux-gcc-webkitgtk` | `desktop` / `linux-gcc-webkitgtk` | `RyzenLinux` (container) | GCC 16, Debug, coverage, WebKitGTK | 4.4.4 |
 | `desktop-windows-msvc-webview2` | `desktop` / `windows-msvc-webview2` | `CurmudgeonWindows` (native) | MSVC, Release, WebView2 | 4.4.4 |
 | `desktop-macos-clang-wkwebview` | `desktop` / `macos-clang-wkwebview` | `Mac` (native) | AppleClang (latest Xcode), Release, WKWebView | 4.4.4 |

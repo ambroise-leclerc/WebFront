@@ -49,7 +49,7 @@ struct Report {
 
 /// Serves the page from the working directory (test/web) in the frontend's window; the frontend registers its direct channel.
 template <typename Frontend>
-int run(int argc, char** argv, const char* usage) {
+int run(int argc, char** argv, const char* usage, const char* page = "transport-benchmark.html") {
     try {
         if (argc > 2)
             throw std::runtime_error(usage);
@@ -65,7 +65,7 @@ int run(int argc, char** argv, const char* usage) {
             report = {true, passed, json, text};
         });
         // show() returns once the window is closed and the server joined: the report is no longer written to.
-        app.show("transport-benchmark.html");
+        app.show(page);
         if (!report.received)
             throw std::runtime_error("the benchmark page closed without a report");
         std::cout << report.text << '\n';

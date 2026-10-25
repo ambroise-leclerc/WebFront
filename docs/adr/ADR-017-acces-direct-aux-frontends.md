@@ -4,11 +4,12 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-24 | Proposée | Ambroise Leclerc | Décision initiale (#363) : transport direct facultatif par adaptateur, format de l'ADR-003 inchangé, HTML normatif ; premières mesures WebKitGTK et WebView2 (dont un tampon partagé), évaluation du défaut par plateforme et correction de deux coûts du chemin chaud du bridge. | À renseigner après intégration. |
+| 1.0 | 2026-10-25 | Proposée | Ambroise Leclerc | Décision initiale (#363) : transport direct facultatif par adaptateur, format de l'ADR-003 inchangé, HTML normatif ; mesures WebKitGTK, WebView2 (tampon partagé) et WKWebView, contraintes des API publiques Cocoa, évaluation du défaut par plateforme et correction de deux coûts du chemin chaud du bridge. | À renseigner après intégration. |
+| 1.1 | 2026-10-25 | Proposée | Ambroise Leclerc | Distingue disponibilité du chemin HTML et défaut par plateforme, précise les règles réseau mobiles par version et renouvelle les mesures Linux avec la passe CI Release dédiée. | À renseigner après intégration. |
 
 ## État et chronologie
 
-**Proposée** le **2026-10-24** (issue #363). Cette décision prépare l'ajout de nouveaux frontends, notamment Android,
+**Proposée** le **2026-10-24**, mise à jour le **2026-10-25** (issue #363). Cette décision prépare l'ajout de nouveaux frontends, notamment Android,
 iOS et d'autres plateformes mobiles. Elle ne modifie ni l'API publique ni le format binaire : le seul code livré est
 un benchmark et la correction de deux coûts qu'il a révélés dans le chemin HTML. Elle passera à « Acceptée » quand
 les critères de la section dédiée seront démontrés.
@@ -39,15 +40,20 @@ Les moteurs embarqués offrent pourtant tous une API directe, qui ne passe ni pa
 
 Sur mobile, un serveur local n'est pas aisé :
 
-- Android refuse par défaut le trafic HTTP en clair aux applications qui ciblent l'API 28 ou plus ; il faut une `network_security_config` qui
-  l'autorise pour la boucle locale. iOS impose une exception App Transport Security (`NSAllowsLocalNetworking`).
+- Les règles de HTTP en clair dépendent de la version du système et de la cible : Android désactive ce trafic par
+  défaut pour les applications ciblant l'API 28 ou plus, mais Android 17 (API 37) ajoute une configuration implicite
+  autorisant la boucle locale lorsqu'aucune configuration ne la vise explicitement. Sur iOS 10 à 16, ATS autorise les
+  connexions aux adresses IP sans exception ; à partir d'iOS 17, une exception ATS est nécessaire pour ces adresses
+  (`NSAllowsLocalNetworking` ou une exception ciblée dans `NSExceptionDomains`). Ce n'est donc pas une interdiction
+  universelle du serveur local ; le prototype devra qualifier les versions prises en charge (sources en fin d'ADR).
+  Voir aussi [WKWEBVIEW](../WKWEBVIEW.md#bundles-and-local-networking) ; ces mesures macOS ne prouvent pas le comportement iOS.
 - Le système suspend l'application en arrière-plan : les sockets d'écoute et les connexions ne survivent pas
   forcément au retour au premier plan, et le cycle de vie du serveur se distingue alors de celui de la vue.
 - Un port de la boucle locale est accessible à toute autre application du même appareil. Le contrôle d'origine de
   l'[ADR-008](ADR-008-contenu-de-confiance-et-origines.md) filtre les navigateurs, pas un processus natif qui forge
   l'en-tête `Origin` : sur un appareil partagé entre applications, un canal propre à la vue réduit cette exposition.
 
-## Mesures (WebKitGTK et WebView2, 2026-10-24)
+## Mesures (WebKitGTK, WebView2 et WKWebView, 2026-10-24/25)
 
 Le benchmark `test/web/WebKitGTKTransportBenchmark.cpp` (CTest `WebKitGTKTransportBenchmark`, labels
 `web-integration` et `performance`) ouvre une seule fenêtre WebKitGTK servie par WebFront et exécute les mêmes
@@ -61,33 +67,33 @@ Le benchmark `test/web/WebKitGTKTransportBenchmark.cpp` (CTest `WebKitGTKTranspo
 
 Chaque valeur est la médiane, sur 5 exécutions précédées d'un échauffement, du temps moyen par appel, puis la médiane
 de trois lancements du programme (`ctest -R WebKitGTKTransportBenchmark` trois fois, en conservant chaque rapport JSON).
-Machine : AMD Ryzen 9 3900X (24 threads), Linux 7.0, GCC 15.2 en Release, WebKitGTK 2.52.6, Xvfb avec rendu logiciel
-(`GSK_RENDERER=cairo`), comme en CI. La résolution de `performance.now()` de WebKit est d'environ une milliseconde.
-Ce tableau a été mesuré avec 1000 appels par lot (200 à 32 Kio) : les lots concurrents de 16 et 1024 octets duraient donc
-12 à 17 ms, soit une incertitude de 6 à 8 % sur ces deux lignes. Le benchmark fait désormais 8000 appels (800 à 32 Kio)
-et son rapport donne la durée du lot le plus court (`shortestBatchMilliseconds`) ; les mesures Linux sont à refaire avec
-ces nombres sur la machine de référence avant l'acceptation de l'ADR.
+Machine : AMD Ryzen 9 3900X (24 threads), Ubuntu 26.04.1 LTS, Linux 7.0.0-38-generic, GCC 16.1 en Release
+sans couverture, WebKitGTK 2.52.6, Xvfb avec rendu logiciel (`GSK_RENDERER=cairo`). La page partagée utilise les mêmes
+8000 appels par lot (800 à 32 Kio) que Windows. La résolution de `performance.now()` de WebKit est d'environ une
+milliseconde ; le lot le plus court de chaque lancement a duré de 86 à 96 ms.
+Les [trois rapports bruts et leur médiane](../benchmarks/linux-webkitgtk-2026-10-25.json) sont conservés avec la configuration.
+Ces mesures remplacent celles du 2026-10-24, réalisées avec 1000 appels (200 à 32 Kio) et des lots trop courts de 12 à 17 ms.
 
 | Sens | Mode | Octets | Appels | HTML (µs/appel) | Direct (µs/appel) | HTML/direct |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| JS → C++ | séquentiel | 16 | 1000 | 128 | 81 | 1,6 |
-| JS → C++ | concurrent | 16 | 1000 | 63 | 12 | 5,3 |
-| C++ → JS | séquentiel | 16 | 1000 | 178 | 69 | 2,6 |
-| JS → C++ | séquentiel | 1024 | 1000 | 145 | 97 | 1,5 |
-| JS → C++ | concurrent | 1024 | 1000 | 72 | 17 | 4,2 |
-| C++ → JS | séquentiel | 1024 | 1000 | 189 | 75 | 2,5 |
-| JS → C++ | séquentiel | 32768 | 200 | 705 | 420 | 1,7 |
-| JS → C++ | concurrent | 32768 | 200 | 460 | 120 | 3,8 |
-| C++ → JS | séquentiel | 32768 | 200 | 860 | 370 | 2,3 |
+| JS → C++ | séquentiel | 16 | 8000 | 125,8 | 86,9 | 1,4 |
+| JS → C++ | concurrent | 16 | 8000 | 26,5 | 12,0 | 2,2 |
+| C++ → JS | séquentiel | 16 | 8000 | 131,6 | 69,8 | 1,9 |
+| JS → C++ | séquentiel | 1024 | 8000 | 139,5 | 92,5 | 1,5 |
+| JS → C++ | concurrent | 1024 | 8000 | 33,6 | 17,0 | 2,0 |
+| C++ → JS | séquentiel | 1024 | 8000 | 153,6 | 74,8 | 2,1 |
+| JS → C++ | séquentiel | 32768 | 800 | 703,8 | 401,2 | 1,8 |
+| JS → C++ | concurrent | 32768 | 800 | 293,8 | 126,2 | 2,3 |
+| C++ → JS | séquentiel | 32768 | 800 | 731,5 | 367,5 | 2,0 |
 
-Le premier appel possible survient 8 à 9 ms après le début de la navigation par le bridge (connexion WebSocket
-établie à 7 ou 8 ms), 6 à 7 ms par le canal direct. Dans les deux cas la page elle-même vient du serveur HTTP : ce
+Le premier appel possible survient de 7 à 8 ms après le début de la navigation par le bridge (connexion WebSocket
+établie à 7 ms), de 6 à 7 ms par le canal direct. Dans les deux cas la page elle-même vient du serveur HTTP : ce
 chiffre ne mesure pas un démarrage sans serveur, que seul un schéma de ressources natif permettrait.
 
 Lecture :
 
-- Le chemin HTML ajoute de 50 à 115 µs par aller-retour séquentiel jusqu'à 1 Kio (300 à 500 µs à 32 Kio) et divise
-  le débit concurrent par 3,8 à 5,3. Pour une
+- Le chemin HTML ajoute de 39 à 79 µs par aller-retour séquentiel jusqu'à 1 Kio (302 à 364 µs à 32 Kio) et divise
+  le débit concurrent par 2,0 à 2,3. Pour une
   interface (une image à 60 Hz dure 16,7 ms), les deux chemins tiennent largement le budget : **la performance seule
   ne justifie pas d'abandonner le HTML sur poste de travail**. Le canal direct se justifie par les contraintes de
   plateforme et d'exposition ci-dessus, et pour des flux à haut débit.
@@ -97,9 +103,10 @@ Lecture :
 - Le benchmark a révélé deux coûts dans le chemin chaud du bridge, corrigés avec des tests de régression : chaque
   encodage de paramètre écrivait sur `std::cout` (`Messages.hpp`), et `Frame::addBuffer` formatait un dump
   hexadécimal de chaque tampon envoyé avant que `log::debug()` ne teste le niveau (21,7 Mo alloués pour un tampon de
-  1 Mio). Avant correction, l'écho de 32 Kio coûtait 2380 µs (JS → C++) et 2528 µs (C++ → JS) par le chemin HTML,
+  1 Mio). Lors des mesures initiales du 2026-10-24, avant correction, l'écho de 32 Kio coûtait 2380 µs (JS → C++) et 2528 µs (C++ → JS) par le chemin HTML,
   soit 6 fois le chemin direct.
-- Non mesurés : CEF, WKWebView, Android et iOS. Aucune extrapolation n'est faite ; ces mesures font partie des
+- Non mesurés dans ce tableau : CEF, WKWebView, Android et iOS. Aucune extrapolation n'est faite ; les mesures WKWebView
+  sont présentées séparément ci-dessous, les autres font partie des
   critères d'acceptation. Les mesures WebView2 ci-dessous montrent qu'on ne peut pas extrapoler d'un moteur à l'autre.
 
 ### Mesures WebView2 (Windows)
@@ -146,6 +153,90 @@ Lecture :
 - À l'inverse, WebKitGTK gagne même avec des chaînes. Le gain d'un canal direct dépend donc du moteur, de la
   forme du canal et de la taille, et se mesure par adaptateur.
 
+### Mesures WKWebView (macOS, 2026-10-25)
+
+`WKWebViewTransportBenchmark` ouvre la même page et le même adaptateur AppKit que la suite Jasmine, dans un bundle
+agent. Machine : Apple M2, 16 Gio, macOS 27.0.1 (26A434), WebKit système 22625.1.29.11.28, SDK 27.0, Clang 21.1.8,
+Release. La charge des autres applications du poste n'est pas contrôlée ; aucune compilation ni autre suite CTest ne
+tourne pendant les mesures. Ce n'est pas une comparaison de machines avec les chiffres Linux ou Windows.
+
+Les appels et tailles sont ceux de la page commune (8000 appels à 16 octets et 1 Kio, 800 à 32 Kio, concurrence 64).
+Chaque chiffre est la médiane de trois lancements, chacun prenant la médiane de cinq séries après échauffement :
+
+- **direct** : `WKScriptMessageHandlerWithReply` pour JavaScript → C++, `evaluateJavaScript` pour C++ → JavaScript ;
+- **callAsync** : C++ → JavaScript avec arguments Foundation séparés du corps de fonction, dans `pageWorld` ;
+- **base64** : les mêmes octets codés/décodés à chaque appel dans les deux sens (`btoa`/`atob` côté JS,
+  `NSData` côté C++), transportés par un handler avec réponse ou par `callAsyncJavaScript`.
+
+Les rapports JSON bruts et leurs médianes sont conservés dans
+[wkwebview-transport-2026-10-25.json](../benchmarks/wkwebview-transport-2026-10-25.json).
+La base64 est donc incluse dans sa colonne, mais le codec de l'ADR-003 et le changement de thread restent exclus des
+trois chemins natifs. Les échos de chaînes sont ASCII ; la sonde séparée vérifie aussi les 256 valeurs d'octet en base64.
+
+| Sens | Mode | Octets | Appels | HTML (µs/appel) | Direct | callAsync | Base64 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| JS → C++ | séquentiel | 16 | 8000 | 134,1 | 61,8 | — | 62,6 |
+| JS → C++ | concurrent | 16 | 8000 | 34,4 | 6,0 | — | 6,6 |
+| C++ → JS | séquentiel | 16 | 8000 | 135,3 | 45,3 | 61,5 | 66,1 |
+| JS → C++ | séquentiel | 1024 | 8000 | 155,2 | 72,8 | — | 86,4 |
+| JS → C++ | concurrent | 1024 | 8000 | 38,1 | 8,1 | — | 16,4 |
+| C++ → JS | séquentiel | 1024 | 8000 | 151,7 | 54,9 | 73,0 | 86,3 |
+| JS → C++ | séquentiel | 32768 | 800 | 337,5 | 106,2 | — | 387,5 |
+| JS → C++ | concurrent | 32768 | 800 | 108,8 | 23,8 | — | 226,2 |
+| C++ → JS | séquentiel | 32768 | 800 | 334,1 | 85,5 | 103,5 | 392,7 |
+
+Les lots les plus courts durent 17 à 59 ms : avec une horloge JS d'environ 1 ms, l'incertitude de quantification peut
+atteindre 6 % sur les lots concurrents de 32 Kio. Le premier lancement a duré 157 s, les suivants 76 et 81 s ; certains
+chemins ont fortement varié (C++ → JS HTML à 16 octets : 135 à 791 µs). Les trois rapports et les minima/maxima par
+chemin sont conservés, sans écarter le premier. Ces médianes sont indicatives ; une décision de transport exige des
+mesures du transport complet sur un poste à charge contrôlée.
+
+Lecture :
+
+- Les chaînes natives gagnent dans les deux sens sur cette machine. `callAsyncJavaScript` est ici plus lent
+  qu'`evaluateJavaScript` ; son intérêt est le passage d'arguments et l'attente des Promises, pas un gain garanti.
+- La base64 conserve un gain pour les petits messages, mais l'efface à 32 Kio : environ 15 % de plus que le HTML
+  en JavaScript → C++ séquentiel, 18 % en C++ → JavaScript et 2,1 fois le temps par appel en concurrent. Comparer
+  seulement les chaînes natives ferait donc recommander à tort un défaut direct pour les flux binaires importants.
+- La première réponse intervient en médiane 18 ms après le début de navigation par le HTML (bridge prêt à 17 ms)
+  et 8 ms par le handler natif. La page est toujours servie en HTTP : aucun démarrage sans serveur n'est mesuré.
+- **macOS reste par défaut en HTTP/WebSocket.** Un transport direct WKWebView peut servir les besoins mobiles ou de
+  petits messages, mais doit d'abord porter le format existant, traiter l'enveloppe d'octets et passer la suite entière.
+  Ces chiffres ne prouvent ni le fonctionnement ni les performances d'iOS.
+
+### Contraintes des API publiques WKWebView (macOS et iOS)
+
+`WKWebViewTransportContracts` vérifie les réponses Unicode (y compris NUL), les rejets natifs, le rejet d'une réponse
+abandonnée, les exceptions et échos incorrects côté JavaScript, l'attente d'une Promise par `callAsyncJavaScript`,
+et le refus des appels depuis des sous-cadres de même origine ou d'origine opaque. Ce sont des sondes d'API,
+pas encore une implémentation du transport de l'ADR-003. L'examen des API Apple impose les précisions suivantes :
+
+- **Porteur de messages.** Les types documentés pour le corps d'un `WKScriptMessage`, ses réponses et les arguments de
+  `callAsyncJavaScript` sont des valeurs Foundation (chaînes, nombres, dates, tableaux, dictionnaires et null).
+  `NSData`/`ArrayBuffer` et un tampon partagé analogue à WebView2 ne font pas partie de ce contrat public. Le premier
+  transport WKWebView doit donc porter les octets de l'ADR-003 en **base64**, dans les deux sens, et mesurer ce coût ;
+  un tableau de nombres constituerait une autre enveloppe à mesurer, pas un type filaire supplémentaire.
+- **Asynchronisme.** `callAsyncJavaScript` accepte des arguments séparés du corps de fonction et attend la Promise
+  retournée. `evaluateJavaScript` ne fournit pas cette attente : la sonde renvoie un échec lorsqu'un écho renvoie une
+  Promise. Un vrai transport remet les octets au codec JS, qui garde la gestion des appels, erreurs et identifiants de
+  l'ADR-003 ; les Promises natives ne remplacent ni ce protocole ni `webFront.ready`. Un reply block conservé doit être
+  copié, terminé une seule fois, puis libéré, y compris à la fermeture ; les callbacks tardifs ne gardent pas la session en vie.
+- **Cadres et mondes.** Un handler enregistré dans `WKContentWorld.pageWorld` est exposé aux sous-cadres. Le monde
+  de contenu n'est pas un contrôle d'origine : vérifier `frameInfo.isMainFrame` et `frameInfo.securityOrigin` pour
+  chaque message. La sonde applique ces deux contrôles ; une navigation autorisée reste distincte d'un accès au bridge.
+- **Ressources.** `WKURLSchemeHandler` ne peut pas remplacer un schéma que WebKit gère déjà, tel que HTTP(S). Il faut
+  un schéma applicatif. Le normaliseur actuel de `ContentPolicy` n'accepte que HTTP(S), et la session WKWebView attend
+  une réponse HTTP réussie pour achever son démarrage : ces deux points doivent être adaptés explicitement, sans
+  désactiver leurs contrôles pour le chemin HTTP. MIME, modules, origines, stockage, CORS et contexte sécurisé du nouveau
+  schéma restent à prouver par la suite partagée ; ce benchmark charge toujours sa page en HTTP.
+- **Annulation des ressources.** Après `stopURLSchemeTask`, Apple interdit les callbacks de progression ou de fin sur
+  la tâche arrêtée. Le fournisseur doit retirer la tâche de ses opérations vivantes et écarter toute réponse tardive,
+  conformément à l'ADR-006. Une ressource directe n'est donc pas un simple alias de `NativeDebugFS` ou d'une réponse HTTP.
+
+Ces API sont disponibles dès macOS 11/iOS 14 pour les messages avec réponse et `callAsyncJavaScript` ; elles ne relèvent
+pas le minimum macOS 13.3 du frontend. Elles ne prouvent pas le fonctionnement sur iOS, qui reste à prototyper. Le défaut
+macOS reste HTTP tant que le transport complet et les ressources directes ne passent pas les critères d'acceptation.
+
 ## Autres possibilités des API natives
 
 Hors des canaux de messages mesurés ci-dessus, les API des moteurs offrent des possibilités que le HTML sur boucle
@@ -157,7 +248,7 @@ restent à qualifier par un test avant d'être retenues :
 | Mémoire partagée sans copie | WebView2 (`CreateSharedBuffer`, `PostSharedBufferToScript`) ; CEF (messages de processus à région de mémoire partagée, à confirmer pour la version épinglée) | Messages binaires sans chaîne intermédiaire : 6 fois le HTML à 32 Kio sous WebView2 | WebView2 mesuré |
 | Messages `ArrayBuffer` | Android (`WebMessageCompat` de type `TYPE_ARRAY_BUFFER`, androidx.webkit 1.8.0 et `WEB_MESSAGE_ARRAY_BUFFER`) ; CEF (`CefV8Value::CreateArrayBuffer`) | Porte les octets de l'ADR-003 sans base64 | à qualifier |
 | Script injecté au début du document | WebView2 (`AddScriptToExecuteOnDocumentCreated`), WebKitGTK (`WebKitUserScript`), WKWebView (`WKUserScript`) | Fournit l'objet de canal avant tout script de la page, comme l'exige la décision plus bas | à qualifier |
-| Réponse par appel | WebKitGTK 2.40+ et WKWebView (message handler avec réponse) | Un appel JavaScript → C++ n'a pas à gérer lui-même ses identifiants ; WebView2 n'en a pas (mesuré avec un identifiant) | WebKitGTK mesuré |
+| Réponse par appel | WebKitGTK 2.40+ et WKWebView (message handler avec réponse) | Un appel JavaScript → C++ n'a pas à gérer lui-même ses identifiants ; WebView2 n'en a pas (mesuré avec un identifiant) | WebKitGTK et WKWebView mesurés |
 | Réponses de ressources calculées | `WebResourceRequested` (WebView2), `WKURLSchemeHandler`, `CefSchemeHandlerFactory`, `webkit_web_context_register_uri_scheme`, `shouldInterceptRequest` | Sert `fs::Multi` sans socket, avec les mêmes règles de premier fournisseur | à qualifier |
 | Hôte virtuel sur dossier | WebView2 (`SetVirtualHostNameToFolderMapping`) | Plus simple, mais contourne `fs::Multi` : réservé au développement | écarté pour la production |
 | Objets hôtes synchrones | WebView2 (`AddHostObjectToScript`) | Aucun : contredit l'asynchronisme de l'[ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | écarté |
@@ -169,9 +260,12 @@ ressources servies sans socket, pas du simple remplacement du WebSocket par un c
 
 ### Le chemin HTML reste normatif
 
-HTTP pour les ressources et WebSocket pour les messages restent le chemin par défaut, complet et testé de tous les
-frontends, y compris d'un frontend qui offre un accès direct. Le navigateur système, les clients distants et les
-futures cibles micro-contrôleurs n'utilisent que lui. Le cœur (`include/webfront/` hors `frontend/`) n'acquiert
+HTTP pour les ressources et WebSocket pour les messages restent le chemin de référence, complet, disponible et testé
+pour tous les frontends, y compris ceux qui offrent un accès direct. Sa disponibilité est obligatoire ; son activation
+au démarrage dépend du transport choisi. Aujourd'hui, il est le seul chemin implémenté et le défaut de tous les frontends.
+Les futurs défauts par plateforme sont proposés plus bas : un défaut direct n'impose pas de démarrer le serveur HTTP.
+Le navigateur système, les clients distants et les futures cibles micro-contrôleurs n'utilisent que lui.
+Le cœur (`include/webfront/` hors `frontend/`) n'acquiert
 aucune dépendance à un transport direct, et le budget de ressources de l'[ADR-016](ADR-016-bootstrap-comme-socle.md)
 ne grossit pas pour lui.
 
@@ -225,8 +319,9 @@ Question posée : puisqu'un frontend natif n'a pas besoin d'un serveur, l'accès
 ce qui éviterait les autorisations réseau ? Évaluation, d'après les mesures ci-dessus et la documentation :
 
 - **Autorisations évitées.** Un socket d'écoute, même sur la boucle locale, demande `android.permission.INTERNET` à une
-  application Android, l'exception de trafic en clair (`network_security_config`) à partir de l'API 28 et, sur iOS,
-  l'exception `NSAllowsLocalNetworking` ; l'application est en outre suspendue en arrière-plan. Sur poste de travail,
+  application Android. Les éventuelles exceptions de HTTP en clair et d'ATS dépendent des versions et de la
+  configuration décrites plus haut ; leur suppression ne constitue pas à elle seule une justification universelle du
+  défaut direct. L'application peut en outre être suspendue en arrière-plan. Sur poste de travail,
   un écouteur lié à `127.0.0.1` ne déclenche en pratique pas l'invite du pare-feu Windows (qui concerne les écouteurs
   ouverts à toutes les interfaces), mais un antivirus, une stratégie d'entreprise ou un autre processus de l'utilisateur
   peuvent encore le voir ; le port par défaut `9002` entre aussi en conflit entre deux applications. Ces points sont à
@@ -241,7 +336,7 @@ Recommandation, sans modifier l'état « Proposée » :
 
 | Cible | Défaut recommandé | Condition |
 | --- | --- | --- |
-| Android, iOS | direct | Contrainte de plateforme, pas de choix de performance. |
+| Android, iOS | direct | Cycle de vie et exposition du port ; règles réseau à qualifier selon les versions prises en charge, sans présumer d'une exception obligatoire partout. |
 | WebView2, WKWebView, WebKitGTK, CEF (distribution embarquée) | HTML jusqu'à preuve, puis direct | Critères 1 à 3 ci-dessous remplis, mesures codec et changement de thread comprises, sans régression de la suite Jasmine ; sous WebView2 seulement avec le tampon partagé. |
 | Navigateur système, clients distants, micro-contrôleurs | HTML | Seul chemin existant. |
 
@@ -256,15 +351,15 @@ Chacun fera l'objet d'une issue dédiée :
    les suites existantes passent sans modification de leurs attentes.
 2. Un premier transport direct (WebKitGTK ou WKWebView) passe la suite Jasmine partagée par le canal direct, et le
    benchmark mesure ce transport complet (codec et changement de thread compris) face au chemin HTML.
-3. Les mesures CEF et WKWebView sont ajoutées à cette ADR avec leur configuration (WebKitGTK et WebView2 sont mesurés,
-   les chiffres Linux à refaire avec les nombres d'appels actuels), et le défaut de chaque adaptateur est arrêté d'après elles.
+3. Les mesures CEF sont ajoutées à cette ADR avec leur configuration (WebKitGTK, WebView2 et WKWebView sont mesurés).
+   Sous WKWebView, le coût base64 et les règles du schéma applicatif sont vérifiés sur macOS et iOS ; le défaut de chaque adaptateur est arrêté d'après le transport complet.
 4. Un prototype Android ou iOS charge ses ressources et échange ses messages sans serveur local.
 
 ## Options écartées et motifs
 
 - **Remplacer le HTML par l'accès direct.** Perd le navigateur système, les clients distants et les micro-contrôleurs,
   et ferait dépendre le cœur de chaque moteur.
-- **Garder le serveur local comme seule voie sur mobile.** Exige des exceptions de sécurité réseau, subit la
+- **Garder le serveur local comme seule voie sur mobile.** Peut exiger des exceptions réseau selon les versions, subit la
   suspension en arrière-plan et expose un port aux autres applications de l'appareil.
 - **Un format propre au canal direct (JSON, objets natifs).** Crée un second codec par moteur, diverge de l'ADR-003
   et perd les tableaux typés et les bitsets compacts ; les mesures ne montrent aucun besoin qui le justifie.
@@ -276,8 +371,8 @@ Chacun fera l'objet d'une issue dédiée :
 ## Conséquences
 
 - **Bénéfice :** des frontends mobiles sans serveur local, un canal non exposé aux autres processus et un débit
-  concurrent de 3,8 à 5,3 fois supérieur (mesuré sur WebKitGTK), sans changer le code applicatif ni le protocole.
-- **Bénéfice immédiat :** le chemin HTML, qui reste celui de tous, est plus rapide (32 Kio : de 2380 à 705 µs).
+  concurrent de 2,0 à 2,3 fois supérieur (mesuré sur WebKitGTK), sans changer le code applicatif ni le protocole.
+- **Bénéfice immédiat :** le chemin HTML, qui reste celui de tous, est plus rapide (mesure historique du 2026-10-24, 32 Kio : de 2380 à 705 µs).
 - **Coût accepté :** deux transports à tester pour chaque moteur direct ; la suite Jasmine et les scénarios de cycle
   de vie devront s'exécuter sur chacun.
 - **Risque :** divergence de comportement entre transports (ordre des messages, déconnexion, taille maximale des
@@ -286,7 +381,8 @@ Chacun fera l'objet d'une issue dédiée :
 
 ## Prescriptions d'implémentation et de génération de code
 
-- Ne jamais rendre le chemin HTML facultatif, ni faire dépendre le cœur d'un moteur ou d'un transport direct.
+- Garder le chemin HTML disponible et testé sur chaque plateforme ; permettre de désactiver son serveur au démarrage
+  lorsqu'un transport direct est choisi. Ne pas faire dépendre le cœur d'un moteur ou d'un transport direct.
 - Ne pas introduire de codec, de type filaire ni de sémantique d'appel propre à un transport ; toute évolution du
   format suit l'ADR-003 sur tous les transports à la fois.
 - Remettre les messages directs au contexte d'exécution du serveur ; ne pas exécuter de callback applicatif sur le
@@ -298,12 +394,19 @@ Chacun fera l'objet d'une issue dédiée :
 
 ## Sources et vérification
 
+- Règles réseau mobiles : [Android, configuration de localhost](https://developer.android.com/privacy-and-security/security-config#localhost),
+  [Apple, NSAllowsLocalNetworking](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking)
+  et [exceptions ATS par adresse IP](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsexceptiondomains)
+  (consultés le 2026-10-25). Les permissions d'écoute, ATS et la politique du trafic en clair sont des règles distinctes.
+
 - Benchmark : [WebKitGTKTransportBenchmark.cpp](../../test/web/WebKitGTKTransportBenchmark.cpp),
   [transport-benchmark.html](../../test/web/transport-benchmark.html), enregistrement dans
   [WebKitGTKSupport.cmake](../../cmake/WebKitGTKSupport.cmake) ; exécution :
   `ctest --test-dir <build> -R WebKitGTKTransportBenchmark --output-on-failure` dans une configuration
   `-DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON` ; le rapport JSON est écrit dans le répertoire de build de
-  `test/web`. La partie commune est dans [TransportBenchmark.hpp](../../test/web/TransportBenchmark.hpp).
+  `test/web`. La passe CI `performance-linux` utilise Release sans couverture et répète ce test trois fois ;
+  son artefact conserve le dernier rapport JSON, les diagnostics CTest et la configuration de la machine.
+  La partie commune est dans [TransportBenchmark.hpp](../../test/web/TransportBenchmark.hpp).
 - Benchmark WebView2 : [WebView2TransportBenchmark.cpp](../../test/web/WebView2TransportBenchmark.cpp), enregistrement
   dans [WebView2Support.cmake](../../cmake/WebView2Support.cmake) ; exécution :
   `ctest --test-dir <build> -R WebView2TransportBenchmark --output-on-failure` dans une configuration
@@ -311,4 +414,19 @@ Chacun fera l'objet d'une issue dédiée :
 - Régressions du chemin chaud : `Encoding bridge messages writes nothing to the standard output`
   ([MessagesTests](../../test/unit/MessagesTests.cpp)) et `FrameBufferNotFormattedWhenDebugDisabled`
   ([FrameAllocationTest](../../test/unit/FrameAllocationTest.cpp)).
+- Benchmark WKWebView : [WKWebViewTransportBenchmark.cpp](../../test/web/WKWebViewTransportBenchmark.cpp),
+  [sondes d'API](../../test/web/wkwebview-transport-contracts.html), enregistrement dans
+  [WKWebViewSupport.cmake](../../cmake/WKWebViewSupport.cmake). Configuration macOS :
+  `-DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DENABLE_TESTING=ON` ;
+  `ctest --test-dir <build> -R '^WKWebViewTransport(Benchmark|Contracts)$' --output-on-failure`.
+- API publiques Apple (documentation et en-têtes du SDK macOS, vérifiés le 2026-10-25) :
+  [corps des messages](https://developer.apple.com/documentation/webkit/wkscriptmessage/body),
+  [réponses natives](https://developer.apple.com/documentation/webkit/wkscriptmessagehandlerwithreply/usercontentcontroller(_:didreceive:replyhandler:)),
+  [arguments et Promises de callAsyncJavaScript](https://developer.apple.com/documentation/webkit/wkwebview/callasyncjavascript(_:arguments:in:in:completionhandler:)),
+  [exposition aux cadres](https://developer.apple.com/documentation/webkit/wkusercontentcontroller/addscriptmessagehandler(_:contentworld:name:)),
+  [frameInfo et securityOrigin](https://developer.apple.com/documentation/webkit/wkframeinfo),
+  [schémas personnalisés](https://developer.apple.com/documentation/webkit/wkwebviewconfiguration/seturlschemehandler(_:forurlscheme:)),
+  [arrêt d'une tâche de ressource](https://developer.apple.com/documentation/webkit/wkurlschemehandler/webview(_:stop:)).
+- Autorisations réseau : [règles Android, dont localhost à l'API 37](https://developer.android.com/privacy-and-security/security-config#localhost-configuration),
+  [ATS et versions d'iOS/macOS](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking).
 - Voir [FRONTENDS](../FRONTENDS.md), l'ADR-003, l'ADR-004, l'ADR-007 et l'ADR-008.
