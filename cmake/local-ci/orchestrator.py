@@ -1,4 +1,4 @@
-"""Transfer a commit and verified offline kits, then run Linux/Windows lanes over SSH."""
+"""Transfer a commit and verified offline kits, then run Linux/Windows/macOS lanes over SSH."""
 import argparse
 import base64
 import concurrent.futures
@@ -103,8 +103,8 @@ def pack(args):
     if args.output.resolve().is_relative_to(root):
         raise ValueError("The output archive must be outside the dependency directory")
     config = json.loads((root / "provision.json").read_text())
-    if not config.get("sources") or not (config.get("images") or config.get("platform") == "windows"):
-        raise ValueError("provision.json must describe images or platform=windows, and source provenance")
+    if not config.get("sources") or not (config.get("images") or config.get("platform") in {"windows", "macos"}):
+        raise ValueError("provision.json must describe images or platform=windows/macos, and source provenance")
     config.setdefault("images", {})
     # Require provenance for every top-level tree (archives retain their upstream checksums).
     for path in root.iterdir():
@@ -278,6 +278,11 @@ def execute(args):
                 if digest(windowsKit) != args.windows_kit_sha256:
                     raise ValueError("Windows offline kit SHA-256 mismatch")
                 kits["CurmudgeonWindows"] = (windowsKit.resolve(), args.windows_kit_sha256)
+            macosKit = getattr(args, "macos_kit", None)
+            if macosKit:
+                if digest(macosKit) != args.macos_kit_sha256:
+                    raise ValueError("macOS offline kit SHA-256 mismatch")
+                kits["Mac"] = (macosKit.resolve(), args.macos_kit_sha256)
             bundle = scratch / "commit.bundle"
             # A temporary private ref lets git bundle include detached and unpushed commits.
             ref = "refs/local-ci/" + runId
@@ -295,6 +300,8 @@ def execute(args):
                 with tarfile.open(payload, "w") as archive:
                     for path, name in [(bundle, "commit.bundle"), (HERE / "worker.py", "worker.py"),
                                        (HERE / "windows_worker.py", "windows_worker.py"),
+                                       (HERE / "macos_worker.py", "macos_worker.py"),
+                                       (HERE / "native_worker.py", "native_worker.py"),
                                        (HERE / "orchestrator.py", "orchestrator.py"),
                                        (selectedMatrix, "lanes.json"), (kits[machine][0], "kit.tgz")]:
                         archive.add(path, arcname=name)
@@ -311,8 +318,6 @@ def execute(args):
                         return "interrupted"
                     except (subprocess.SubprocessError, TimeoutError, OSError):
                         return "unreachable"
-                    if machine not in {"RyzenLinux", "CurmudgeonWindows"}:
-                        return "skipped (native session support pending step 3)"
                     if machine not in kits:
                         log.write(b"Missing offline kit and SHA-256 for this machine.\n")
                         return "failed"
@@ -353,20 +358,21 @@ def execute(args):
                         except TimeoutError:
                             status = "timeout"
                         except subprocess.CalledProcessError as error:
-                            status = "timeout" if error.returncode == 124 else "failed"
+                            status = ("timeout" if error.returncode == 124 else
+                                      "skipped (no interactive session)" if machine == "Mac" and error.returncode == 125 else "failed")
                         except (subprocess.SubprocessError, OSError):
                             status = "failed"
                         if status in {"interrupted", "timeout", "failed"}:
                             # A second SSH channel stops the container even if the execution channel was lost.
                             try:
                                 command(workerCommand(machine, "stop", "--lane", laneId), stdout=log,
-                                        stderr=subprocess.STDOUT, timeout=90 if machine == "CurmudgeonWindows" else 15)
+                                        stderr=subprocess.STDOUT, timeout=90 if machine in {"CurmudgeonWindows", "Mac"} else 15)
                             except (subprocess.SubprocessError, OSError):
-                                log.write(b"Remote cancellation could not be confirmed; inspect the container.\n")
+                                log.write(b"Remote cancellation could not be confirmed; inspect the remote run.\n")
                         try:
                             with open(output / (laneId + "-artifacts.tar"), "wb") as artifacts:
                                 command(workerCommand(machine, "artifacts", "--lane", laneId), stdout=artifacts,
-                                        stderr=log, timeout=90 if machine == "CurmudgeonWindows" else 60)
+                                        stderr=log, timeout=90 if machine in {"CurmudgeonWindows", "Mac"} else 60)
                         except (subprocess.SubprocessError, OSError):
                             log.write(b"Artifact collection failed.\n")
                             if status == "passed":
@@ -386,7 +392,7 @@ def execute(args):
                         with open(output / (machine + "-cleanup.log"), "wb") as log:
                             try:
                                 command(workerCommand(machine, "cleanup"), stdout=log, stderr=subprocess.STDOUT,
-                                        timeout=90 if machine == "CurmudgeonWindows" else 30)
+                                        timeout=90 if machine in {"CurmudgeonWindows", "Mac"} else 30)
                             except (subprocess.SubprocessError, OSError):
                                 print(f"Cleanup not confirmed on {machine}; run {runId} retained")
     finally:
@@ -414,6 +420,8 @@ def main(argv=None):
     run.add_argument("--kit-sha256")
     run.add_argument("--windows-kit", type=Path)
     run.add_argument("--windows-kit-sha256")
+    run.add_argument("--macos-kit", type=Path)
+    run.add_argument("--macos-kit-sha256")
     run.add_argument("--parallel-lanes", type=int, default=2)
     run.add_argument("--jobs", type=int, default=4)
     run.add_argument("--timeout", type=int, default=3600)
@@ -428,6 +436,8 @@ def main(argv=None):
             raise ValueError("--kit and --kit-sha256 must be supplied together")
         if bool(args.windows_kit) != bool(args.windows_kit_sha256):
             raise ValueError("--windows-kit and --windows-kit-sha256 must be supplied together")
+        if bool(args.macos_kit) != bool(args.macos_kit_sha256):
+            raise ValueError("--macos-kit and --macos-kit-sha256 must be supplied together")
         return execute(args)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"local-ci: {error}", file=__import__('sys').stderr)

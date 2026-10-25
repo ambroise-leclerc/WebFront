@@ -13,7 +13,7 @@ The story is delivered in three verifiable steps; a partial step does not close 
 | --- | --- | --- |
 | 1 | The eleven lanes in `cmake/local-ci/lanes.json` and the offline drift check `LocalCiLanesMatchWorkflows` | delivered |
 | 2 | Commit transport, offline-kit verification, Linux containers and the orchestrator | implemented; real-host/image qualification pending |
-| 3 | Native Windows and macOS sessions, result collection, full qualification and timings | Windows implementation delivered; host qualification and macOS pending |
+| 3 | Native Windows and macOS sessions, result collection, full qualification and timings | Windows and macOS implementations delivered; real-host qualification and timings pending |
 
 ## The lanes
 
@@ -287,9 +287,10 @@ sessions. `LocalCiLanesMatchWorkflows` and its negative suite still check the wo
 
 Actual Linux image builds, the nine lanes on RyzenLinux, warm-cache timings and comparison with GitHub on the same commit
 remain to be qualified. The Windows implementation below still needs qualification on CurmudgeonWindows with its dedicated
-account and network policy. Delivery step 3 also needs the macOS graphical session and Xcode reporting, and the eleven-lane run.
-A reachable Mac reports `skipped (native session support pending step 3)`; an unreachable machine reports `unreachable`.
-Neither counts as passed, and `--require-all` fails when either is selected. The story remains open.
+account and network policy. The macOS implementation below also needs qualification with its dedicated Aqua account and full Xcode installation,
+and all eleven lanes must still run together. Missing macOS graphical sessions report `skipped (no interactive session)`;
+unreachable machines report `unreachable`. Neither counts as passed, and `--require-all` fails when either is selected.
+Although GitHub currently marks #346 closed, the full acceptance evidence remains incomplete.
 
 ### Native Windows execution
 
@@ -393,3 +394,76 @@ In particular, verify from the actual **non-elevated SSH account** that `Get-Net
 effective policy. These permissions have not been tested on the dedicated host: denial fails preparation before any build,
 and the worker does not elevate or bypass the check. Also qualify public egress blocking, multicast/broadcast effects,
 MSVC/Evergreen version differences, and a real SSH disconnect followed by recovery collection and cleanup.
+
+
+### Native macOS execution
+
+The Mac lane now transfers an unpushed commit and a separate `platform=macos` kit over SSH, then runs the AppleClang/Release
+configuration with `WEBFRONT_EMBED_WKWEBVIEW=ON` and `WEBFRONT_WEBTEST_FRONTEND=WKWebView`. All metadata-selected CTest cases,
+including browser tests, run with `--no-tests=error`, the declared parallelism and JUnit output. Compilation is capped at four
+jobs. Local macOS uses ccache (without a background server) instead of GitHub's sccache; the verified CPM module and compiler
+cache persist under the dedicated account's `.webfront-local-ci/cache/`. CTest child configurations inherit `CPM_SOURCE_CACHE`.
+
+Prepare a dedicated **standard, non-administrator** macOS account without the principal user's files, credentials, keychain
+items or cloud sessions. Enable key-only Remote Login for that account, verify the host key, and configure the development
+workstation's `Mac` SSH alias to select it explicitly. Install Python 3.10+ (`python3` on the SSH PATH), Git, Ninja, ccache,
+the lane's exact CMake version and full Xcode before execution. Accept Xcode's license and complete its first-launch setup
+while provisioning; select it with `xcode-select` then. Command Line Tools alone are insufficient: `xcodebuild -version`
+must succeed. No installer, `sudo`, Xcode selection change or runtime update runs during a lane.
+
+Log the **same dedicated account** into an unlocked, active graphical console session. SSH alone and a background `user/UID`
+domain do not provide Aqua. A unique, one-shot LaunchAgent is bootstrapped into `gui/UID`, with its plist/profile/logs inside
+the disposable run directory (no installation in `~/Library/LaunchAgents`). It inherits an explicit tool PATH, HOME and locale,
+without forwarding the SSH environment, tokens or proxy variables. It checks console ownership, the Aqua domain and the
+CoreGraphics session's user, login and on-console state, plus IORegistry's lock state for that audit session (an omitted lock key means unlocked) before building. No graphical session or a locked/inactive
+session returns worker code 125 and `skipped (no interactive session)` in the summary; `--require-all` fails. Failure to start
+an agent despite a usable domain is a failed lane with a launch log, never a pass or a silent skip.
+
+The log records `xcode-select -p`, `xcodebuild -version`, `xcrun --find clang++`, the effective AppleClang banner and macOS
+version. CMake must match `lanes.json` exactly. GitHub's `xcode-version: latest` is mutable: compare these records against the
+same-commit GitHub run, recording any difference. There is no automatic claim that the host matches GitHub's Xcode or OS image.
+
+The agent starts under `/usr/bin/sandbox-exec` with an inherited network policy: ordinary worker/build/test descendants can
+use IPv4/IPv6 loopback and Unix sockets, but cannot connect directly to external IP addresses. A probe checks that IPv4 and
+IPv6 connects are denied before any CMake command executes. Missing sandbox support or an ineffective restriction fails closed.
+This keeps a CMake fallback download from reaching GitHub. The worker does not alter the host firewall. **This process policy
+does not constrain system XPC services started outside the agent's process tree**, including WebKit services. Unix sockets are also unrestricted: a tested process can contact a local service that performs
+network access on its behalf, so the policy does not prevent indirect Internet access through such services. It is not a
+complete network isolation boundary or a sandbox for hostile commits. The owner must qualify WebKit's actual network behavior
+and, where strict host-wide egress isolation is required, provision that isolation separately on the dedicated Mac or network.
+Do not expose a public-network proxy on loopback. Full acceptance of #346's no-public-network criterion remains pending this
+qualification; direct-socket regression tests alone do not establish it for XPC services. `sandbox-exec` is deprecated and may
+be unavailable on future macOS releases; such hosts fail rather than running unrestricted.
+
+The SSH coordinator passes one absolute host-monotonic deadline to the agent, which enforces it alongside a cancellation
+marker. After expiry, the coordinator allows five seconds for the agent to flush its log and publish code 124 before stopping
+it. A named 15-second startup warning threshold is capped by the lane timeout; it warns without aborting a slow bootstrap
+before the shared deadline. Preparation bounds its local bundle clone to 300 seconds. Launchd owns its process group (`AbandonProcessGroup=false`); finishing,
+timeout, interruption and SSH recovery boot out the service with `launchctl bootout --wait` under a bounded subprocess timeout.
+The host must support that option. Stop failures preserve files and fail the run. A per-run cross-process lock serializes
+start/finalization, recovery stop, artifact streaming and cleanup; late channels cannot recreate deleted runs. Logs (including
+sandbox/launch failures), JUnit, CTest and CMake diagnostics are archived before checkout removal. `--keep` retains the run after
+stopping it. Native process groups do not contain deliberately detached processes or system XPC services; only trusted commits
+are supported. Real disconnect and descendant cleanup behavior still needs qualification on the dedicated host.
+
+Prepare the same CPM/stdnet/stdexec/Catch2, bootstrap and registry exports as Windows, omitting WebView2SDK and all Docker/CEF
+files. Use `"platform": "macos", "images": {}` with provenance for every top-level entry. The Windows preload example above
+is portable after removing its WebView2SDK line. Extraction uses the portable Windows filename subset to reject case collisions
+on default APFS volumes. No filesystem case-sensitivity assumption is needed.
+
+```bash
+python3 cmake/local-ci/run pack --dependencies /kits/macos-prepared --output /kits/macos.tgz
+python3 cmake/local-ci/run run --machines Mac --commit HEAD \
+  --macos-kit /kits/macos.tgz --macos-kit-sha256 <sha256> --jobs 4 --require-all
+```
+
+`--macos-kit` and `--macos-kit-sha256` must be supplied together. A full invocation supplies all three kit/hash pairs (`--kit`,
+`--windows-kit`, `--macos-kit`) and omits `--machines`/`--lanes`. Each host receives its own kit; no host needs GitHub access.
+
+`LocalCiMacOS` covers command generation, LaunchAgent configuration, login/lock checks, version reporting, kit integrity,
+cache propagation, failure/timeout/cancellation, skipped sessions, cleanup retention and the full bundle/artifact protocol with
+a native-session stand-in. On macOS it also exercises the real inherited socket policy, loopback and a child process. It does
+not provision an account or register an actual LaunchAgent. Qualification still requires real SSH/Aqua/WKWebView execution,
+XPC network checks, disconnect recovery, cold/warm cache measurements, all eleven lanes across three hosts and comparison
+against GitHub on the same commit. The development Mac used for implementation has Command Line Tools rather than selected
+full Xcode, so it cannot qualify the advertised Xcode lane.

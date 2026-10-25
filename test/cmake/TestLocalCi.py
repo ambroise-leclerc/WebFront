@@ -361,6 +361,9 @@ args = shlex.split(sys.argv[-1])
 root = pathlib.Path(os.environ["WF_TEST_REMOTE"])
 if args[:2] == ["python3", "-c"]:
     args[2] = args[2].replace("pathlib.Path.home()", "pathlib.Path(" + repr(str(root)) + ")")
+if len(args) > 1 and args[1].endswith('/worker.py'):
+    # This fixture emulates RyzenLinux even when hosted on macOS.
+    args = [sys.executable, '-c', "import sys,pathlib;sys.argv=sys.argv[1:];sys.path.insert(0,str(pathlib.Path(sys.argv[0]).resolve().parent));import worker;raise SystemExit(worker.main(hostPlatform='linux'))", *args[1:]]
 raise SystemExit(subprocess.run(args, cwd=root).returncode)
 ''')
         (binaries / "docker").write_text("#!" + sys.executable + "\n" + r'''

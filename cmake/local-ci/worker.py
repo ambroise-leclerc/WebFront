@@ -243,7 +243,7 @@ def runLane(args, matrix):
             cleanWorkspace(workspace, image, args.lane)
 
 
-def main():
+def main(hostPlatform=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["prepare", "lane", "inside", "stop", "cleanup", "artifacts", "session"])
     parser.add_argument("--kit-sha256")
@@ -251,6 +251,7 @@ def main():
     parser.add_argument("--sha")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=3600)
+    parser.add_argument("--deadline", type=float)
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
@@ -261,6 +262,9 @@ def main():
         validateMatrix(matrix)
         if args.lane and not any(row["id"] == args.lane for row in matrix["lanes"]):
             raise ValueError("Unknown lane")
+        if (hostPlatform or sys.platform) == "darwin":
+            import macos_worker
+            return macos_worker.dispatch(args, matrix, ROOT)
         if os.name == "nt":
             import windows_worker
             return windows_worker.dispatch(args, matrix, ROOT)
