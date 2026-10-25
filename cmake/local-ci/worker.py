@@ -168,7 +168,8 @@ def executeInside(lane, jobs):
     # Apply the WebKit sandbox exception only to test commands, as in the workflow.
     env = lane.get("env", {})
     os.environ.update({key: value for key, value in env.items() if key != "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"})
-    os.environ.update(CCACHE_DIR="/cache/ccache", CCACHE_BASEDIR="/workspace")
+    # CTest launches independent CMake configurations, which do not inherit -D cache entries.
+    os.environ.update(CPM_SOURCE_CACHE="/cache/cpm", CCACHE_DIR="/cache/ccache", CCACHE_BASEDIR="/workspace")
     if "-DWEBFRONT_EMBED_CEF=ON" in lane["options"]:
         # CEFSupport copies runtime resources into this SDK tree during the build.
         # Keep that writable tree private to the lane, at the path CEFSupport uses.

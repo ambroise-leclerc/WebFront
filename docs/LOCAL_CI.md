@@ -203,7 +203,9 @@ set(FETCHCONTENT_SOURCE_DIR_STDEXEC /deps/sources/stdexec CACHE PATH "")
 
 Do not set `WEBFRONT_MDDLOG_SOURCE_DIR` globally in the preload: the installed-mddlog variant must use its installed package.
 The worker supplies the source path only for the source variant. It also supplies the bootstrap/registry directories, ccache,
-CPM cache and `FETCHCONTENT_FULLY_DISCONNECTED=ON`. For CEF it copies `cef-binaries` to the lane's private
+CPM cache and `FETCHCONTENT_FULLY_DISCONNECTED=ON`. It also exports `CPM_SOURCE_CACHE=/cache/cpm` so independent CMake
+configurations launched by CTest, including `AddSubdirectoryConsumer`, reuse the prepared CPM module without downloading it.
+For CEF it copies `cef-binaries` to the lane's private
 `build-local-0/_deps/cef_binaries-src` and sets the matching FetchContent override. This preserves the paths used by
 `CEFSupport.cmake` and lets its resource-copy rules write into a private SDK instead of a shared or read-only source tree.
 

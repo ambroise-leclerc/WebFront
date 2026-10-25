@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path, PureWindowsPath
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -165,6 +166,53 @@ class LocalCiTests(unittest.TestCase):
                     actual = worker.buildCommands(lane, 3)
                 self.assertEqual(actual, expected)
                 self.assertFalse(any("\\" in arg for cmd in actual for arg in cmd))
+
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("ctest"), "CMake and CTest required")
+    def test_ctest_subconfiguration_reuses_offline_cpm_module(self):
+        cache = self.root / "cache/cpm"
+        cache.mkdir(parents=True)
+        version = (ROOT / "cmake/CPM.cmake").read_text().split("set(CPM_DOWNLOAD_VERSION ", 1)[1].split(")", 1)[0]
+        (cache / f"CPM_{version}.cmake").write_text("set(WF_CPM_LOADED TRUE)\n")
+        child = self.root / "child.cmake"
+        child.write_text('''# A download attempt is a failure, without ever accessing the network.
+macro(file operation)
+    if("${operation}" STREQUAL "DOWNLOAD")
+        message(FATAL_ERROR "CPM download attempted in an offline subconfiguration")
+    endif()
+    _file(${ARGV})
+endmacro()
+''' + f'''include("{(ROOT / 'cmake/CPM.cmake').as_posix()}")
+if(NOT WF_CPM_LOADED)
+    message(FATAL_ERROR "The prepared CPM module was not loaded")
+endif()
+''')
+        (self.root / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.31)
+project(OfflineCPM NONE)
+enable_testing()
+add_test(NAME ChildConfiguration COMMAND "${{CMAKE_COMMAND}}" -P "{child.as_posix()}")
+''')
+        build = self.root / "build"
+        subprocess.run(["cmake", "-S", str(self.root), "-B", str(build)],
+                       check=True, capture_output=True, text=True, timeout=20)
+        lane = dict(self.lane("web-integration-gcc"), options=["-DWEBFRONT_EMBED_CEF=OFF"])
+
+        def execute(invocation, **kwargs):
+            if invocation[0] == "ctest":
+                env = dict(kwargs["env"])
+                # Map the container mount to this test's prepared host cache.
+                if env.get("CPM_SOURCE_CACHE") == "/cache/cpm":
+                    env["CPM_SOURCE_CACHE"] = str(cache.parent)
+                result = subprocess.run(invocation, env=env, capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return result
+            return subprocess.CompletedProcess(invocation, 0, "cmake version " + lane["cmake_version"])
+
+        plan = [["ctest", "--test-dir", str(build), "--output-on-failure", "--no-tests=error"]]
+        with patch.dict(os.environ), patch.object(worker.os, "umask"), \
+             patch.object(worker, "command", side_effect=execute), \
+             patch.object(worker, "buildCommands", return_value=plan):
+            os.environ.pop("CPM_SOURCE_CACHE", None)
+            worker.executeInside(lane, 1)
 
     @unittest.skipUnless(os.name == "posix", "Linux container worker")
     def test_linux_container_is_offline_unprivileged_and_stopped(self):
