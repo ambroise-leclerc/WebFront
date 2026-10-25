@@ -35,9 +35,20 @@ microcontroller targets. Nothing of this transport is implemented yet; the ADR l
 the HTML bridge adds 50 to 115 µs per sequential round trip up to 1 KiB and divides concurrent throughput by 3.8 to 5.3 on WebKitGTK; the direct
 figures exclude the codec and the thread hop a real transport adds. On WebView2 (Windows 11, Evergreen 155) string messages are slower
 than the HTML bridge from 32 KiB and for C++ to JS, while a shared buffer is 2 to 6 times faster. The Linux figures predate the current
-call counts and are to be measured again. CEF, WKWebView and mobile engines are not measured; the ADR recommends a direct default for
+call counts and are to be measured again. WKWebView is measured separately in the ADR; CEF and mobile engines are not measured. The ADR recommends a direct default for
 Android and iOS and HTML until proven for the desktop engines.
 The benchmark exposed two per-message diagnostics costs in the bridge, now fixed with regression tests (32 KiB echo: 2.4 ms to 0.7 ms).
+
+The macOS follow-up (2026-10-25) adds `WKWebViewTransportBenchmark`: the same echoes through the HTML bridge, public
+message handlers, `evaluateJavaScript`, `callAsyncJavaScript` and a base64 byte envelope. `WKWebViewTransportContracts`
+passes native replies/errors, abandoned replies, Unicode/NUL and binary bytes, Promise results, wrong echoes and subframe
+rejection. ADR-017 documents the Foundation value boundary and the changes needed for custom-scheme origins and loading;
+the benchmark itself still serves its page over HTTP. The allocation-counting test is excluded only from TSan builds
+because its global operator replacements conflict with Clang's TSan runtime; ordinary and ASan/UBSan builds keep it.
+On the Apple M2 reference host, median 32 KiB sequential echoes through the HTML bridge take 338 µs (JS to C++) and
+334 µs (C++ to JS), versus 388 and 393 µs with the base64 byte envelope. Native strings alone hide that cost. The three
+reports are retained with their dispersion (the first launch was much slower); macOS keeps the HTML default pending
+measurements of a complete transport under controlled load. These figures do not establish iOS performance.
 
 ## Repository layout (#320, epic #303)
 

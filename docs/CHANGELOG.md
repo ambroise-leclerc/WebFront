@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The allocation-counting regression is omitted from ThreadSanitizer builds, whose C++ runtime
+  defines the same global `new`/`delete` operators; ordinary and ASan/UBSan builds retain it. macOS adds
+  `WKWebViewTransportBenchmark` (HTML bridge, native strings, `callAsyncJavaScript` and base64 bytes) and separate native
+  API contract tests. ADR-017 records the measurements and the public Cocoa API constraints on a future direct transport.
+
 - ADR-017 (Proposed, #363) prepares direct access to embedded frontends (native resource schemes and message channels) for
   future Android, iOS and other mobile frontends, while HTTP/WebSocket stays the normative path of every frontend and of future
   microcontroller targets. The binary format of ADR-003 is carried unchanged; no API or wire change is made. The new

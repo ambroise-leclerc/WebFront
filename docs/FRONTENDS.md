@@ -95,16 +95,21 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)
 (proposed) describes how an adapter may later add its engine's native resource scheme and message channel without replacing that
 path. `WebKitGTKTransportBenchmark` (label `performance`, WebKitGTK builds with Xvfb) and `WebView2TransportBenchmark`
-(label `performance`, WebView2 builds on Windows) compare the two in the same window:
+(label `performance`, WebView2 builds on Windows) and `WKWebViewTransportBenchmark`
+(label `performance`, WKWebView builds on macOS) compare the two in the same window:
 
 ```bash
-ctest --test-dir <build> -R "WebKitGTKTransportBenchmark|WebView2TransportBenchmark" --output-on-failure
+ctest --test-dir <build> -R "WebKitGTKTransportBenchmark|WebView2TransportBenchmark|WKWebViewTransportBenchmark" --output-on-failure
 ```
 
-Each prints a table, writes `webkitgtk-transport-benchmark.json` or `webview2-transport-benchmark.json` in the build directory
+Each prints a table, writes `webkitgtk-transport-benchmark.json`, `webview2-transport-benchmark.json` or
+`wkwebview-transport-benchmark.json` in the build directory
 of `test/web`, and fails only on a wrong echo. WebView2 also measures a shared buffer, which is the only WebView2 direct path
 that beats the HTML bridge at every size; its string messages do not. The ADR gives the figures and the recommended default
-per platform.
+per platform. WKWebView measures `evaluateJavaScript`, `callAsyncJavaScript` and a base64 byte envelope; its public API
+documents Foundation values rather than a shared binary buffer. `WKWebViewTransportContracts` checks replies, errors,
+Promises, incorrect echoes, base64 bytes and subframe rejection separately from timings. These test-only native channels
+do not change the production HTTP/WebSocket transport.
 
 ## Build options
 
