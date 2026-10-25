@@ -105,6 +105,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME LocalCiWindows
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/cmake/TestLocalCiWindows.py")
     set_tests_properties(LocalCiWindows PROPERTIES TIMEOUT 60)
+    add_test(NAME LocalCiMacOS
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/cmake/TestLocalCiMacOS.py")
+    set_tests_properties(LocalCiMacOS PROPERTIES TIMEOUT 60)
 else()
     message(STATUS "Skipping LocalCiOrchestrator: Python 3.10+ was not found")
 endif()

@@ -623,5 +623,8 @@ artifact collection, bounded execution and explicit incomplete/failure statuses.
 stand-ins. Native Windows execution now launches a limited interactive scheduled task, initializes MSVC, checks WebView2 and
 the owner-prepared public egress firewall policy, caps compilation at four jobs, owns descendants through a Windows Job Object,
 and collects diagnostics before cleanup. Offline Windows regressions include real PowerShell binary transport and Job cleanup.
-Real Linux image/host and Windows account/task qualification, native macOS sessions and comparison with GitHub timings remain open;
+Native macOS execution now uses a temporary Aqua LaunchAgent, reports selected Xcode/AppleClang and OS versions, runs the
+WKWebView lane with a verified Mac kit and inherited process network restriction, and reports missing sessions as skipped.
+System WebKit XPC services are outside that process restriction. Real Linux/Windows/macOS host qualification, XPC egress
+isolation, the complete eleven-lane run and comparison with GitHub timings remain open;
 this is not yet a qualified replacement for running any of the GitHub jobs. See [LOCAL_CI](LOCAL_CI.md).
