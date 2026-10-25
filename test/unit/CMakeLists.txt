@@ -160,6 +160,11 @@ endif()
 if(DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
     list(APPEND _consumer_dependency_args -DCMAKE_CXX_SCAN_FOR_MODULES:BOOL=${CMAKE_CXX_SCAN_FOR_MODULES})
 endif()
+# Homebrew clang-scan-deps needs the same explicit SDK as the parent build.
+# A separate configure otherwise loses -isysroot and cannot find system headers.
+if(APPLE AND DEFINED CMAKE_OSX_SYSROOT)
+    list(APPEND _consumer_dependency_args "-DCMAKE_OSX_SYSROOT:STRING=${CMAKE_OSX_SYSROOT}")
+endif()
 # Read the actual target's launcher at generation time, including an explicitly
 # configured or auto-discovered cache. Do not depend on Cache.cmake's local variable.
 add_test(NAME AddSubdirectoryConsumer

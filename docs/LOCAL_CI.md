@@ -465,8 +465,52 @@ python3 cmake/local-ci/run run --machines Mac --commit HEAD \
 
 `LocalCiMacOS` covers command generation, LaunchAgent configuration, login/lock checks, version reporting, kit integrity,
 cache propagation, failure/timeout/cancellation, skipped sessions, cleanup retention and the full bundle/artifact protocol with
-a native-session stand-in. On macOS it also exercises the real inherited socket policy, loopback and a child process. It does
-not provision an account or register an actual LaunchAgent. Qualification still requires real SSH/Aqua/WKWebView execution,
+a native-session stand-in. On macOS it also exercises the real inherited socket policy, loopback and a child process. When
+the caller has an unlocked active Aqua session, a native lifecycle regression registers a uniquely named temporary LaunchAgent
+running a harmless Python fixture, checks its inherited network restriction, boots it out with `--wait`, verifies that its
+`sleep` descendant has terminated and repeats stop to check the missing-service diagnosis. It skips that lifecycle test when
+no usable graphical session exists; it never provisions an account. Qualification still requires real SSH/Aqua/WKWebView execution,
 XPC network checks, disconnect recovery, cold/warm cache measurements, all eleven lanes across three hosts and comparison
 against GitHub on the same commit. The development Mac used for implementation has Command Line Tools rather than selected
 full Xcode, so it cannot qualify the advertised Xcode lane.
+
+### macOS qualification attempt (#368, 2026-10-25)
+
+Tested from `346-linux-qualification`, starting at `1151dc4`, on macOS 27.0.1 (26A434), ARM64. The development account has
+an active Aqua session. This is a partial host investigation, not a passed `desktop-macos-clang-wkwebview` lane:
+
+- The 27 `TestLocalCiMacOS.py` tests pass, including the actual sandbox socket checks and the new LaunchAgent/descendant
+  lifecycle test. Real console ownership, CoreGraphics and IORegistry checks also accept the development session.
+- The CEF-off Release build with Homebrew Clang 21.1.8 and CMake 4.3.1 passes all 265 CTest cases. This compiler and CMake
+  are different from the lane's Xcode AppleClang and CMake 4.4.4. No offline or SSH execution is claimed for this build.
+- A separate Release build with the same Homebrew toolchain, `WEBFRONT_EMBED_WKWEBVIEW=ON` and
+  `WEBFRONT_WEBTEST_FRONTEND=WKWebView` passes all 340 CTest cases (195.54 seconds), including the Jasmine bridge suite,
+  native lifecycle cases, transport benchmark and developer environment. These browser tests ran in the principal account,
+  outside the worker's inherited network policy; they do not establish dedicated-account or WebKit XPC egress isolation.
+- Ninja's Homebrew `clang-scan-deps` initially could not find SDK headers. Configuring with
+  `-DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)"` fixes the main build but exposed a missing SDK propagation in
+  `AddSubdirectoryConsumer`: that separate configure still failed on `time.h`. The test now forwards the explicit SDK and
+  passes. Module scanning was enabled for this supplementary build; the advertised lane disables it.
+- `ssh -o BatchMode=yes -o ConnectTimeout=5 -- Mac true` returns 255 (`Connection refused`). The resolved SSH user is the
+  principal development account, and no dedicated standard CI account is provisioned on this host.
+- `xcode-select -p` returns `/Library/Developer/CommandLineTools`; `xcodebuild -version` fails because full Xcode is not
+  selected. `/usr/bin/clang++` reports AppleClang 21.0.0, but Command Line Tools do not satisfy the Xcode requirement.
+
+To reproduce the supplementary CEF-off build (requires provisioned dependencies or network access during configure):
+
+```bash
+cmake -S . -B build-macos-qualification -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON \
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \
+  -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)"
+cmake --build build-macos-qualification --parallel 4
+ctest --test-dir build-macos-qualification --output-on-failure --parallel 4 --output-junit test-results.xml
+```
+
+For the supplementary browser build, use a separate build directory with the same options plus
+`-DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView`, then build and run its full CTest suite.
+
+Full qualification remains blocked on provisioning key-only SSH to a dedicated standard account with an active Aqua session,
+full selected Xcode, CMake 4.4.4 and a verified macOS dependency kit. Then run the orchestrator command above, measure cold and
+warm caches, exercise SSH disconnect/recovery, and compare against GitHub on the same commit. WebKit XPC public egress and
+the combined eleven-lane matrix remain unqualified.

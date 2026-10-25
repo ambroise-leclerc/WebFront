@@ -1,4 +1,4 @@
-"""Offline macOS driver regressions; no real account/LaunchAgent changes."""
+"""macOS driver regressions, plus a temporary LaunchAgent in an available Aqua session."""
 import argparse
 import ctypes
 import errno
@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 from unittest.mock import MagicMock, patch
 
 sys.dont_write_bytecode = True
@@ -184,6 +185,45 @@ if len(sys.argv)==1:
         with patch.object(mac, 'command', return_value=subprocess.CompletedProcess([], 0, 'cmake version 1')):
             with self.assertRaisesRegex(ValueError, 'CMake version'):
                 mac.reportToolchain(self.lane, io.StringIO())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS LaunchAgent lifecycle')
+    def test_real_launchagent_applies_policy_and_stops_descendants(self):
+        self.uid.stop()  # The actual caller's gui domain, never the fixture UID.
+        try:
+            mac.checkDesktop()
+        except mac.NoDesktop as error:
+            self.skipTest(str(error))
+        self.root = self.root / ('native-' + uuid.uuid4().hex)
+        self.root.mkdir()
+        # This harmless worker needs neither Xcode nor an offline dependency kit.
+        # Keep the real start/stop path, sandbox, environment and process ownership.
+        (self.root / 'worker.py').write_text('''import json,pathlib,subprocess,sys,time
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[sys.argv.index('--sha') + 1])
+import macos_worker as mac
+mac.checkNetwork()
+child = subprocess.Popen(['/bin/sleep', '120'])
+pathlib.Path('started.tmp').write_text(json.dumps({'child': child.pid}))
+pathlib.Path('started.tmp').replace('started.json')
+time.sleep(120)
+''', encoding='utf-8')
+        self.args.sha = str(ci.HERE)
+        self.args.timeout = 30
+        marker = self.root / 'started.json'
+        try:
+            mac.startTask(self.root, self.args)
+            deadline = time.monotonic() + 15
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.1)
+            launchLog = self.root / (self.args.lane + '.launch.log')
+            self.assertTrue(marker.exists(), launchLog.read_text() if launchLog.exists() else 'No launch log')
+            pid = json.loads(marker.read_text())['child']
+            self.assertEqual(subprocess.run(['/bin/kill', '-0', str(pid)], capture_output=True).returncode, 0)
+        finally:
+            mac.stopTask(self.root, self.args.lane)
+        self.assertNotEqual(subprocess.run(['/bin/kill', '-0', str(pid)], capture_output=True).returncode, 0,
+                            'LaunchAgent descendant survived bootout --wait')
+        mac.stopTask(self.root, self.args.lane)  # Real missing-service diagnosis is idempotent.
 
     def test_session_exports_offline_cache_and_preserves_nonzero_test(self):
         def execute(invocation, log, timeout):

@@ -628,3 +628,12 @@ WKWebView lane with a verified Mac kit and inherited process network restriction
 System WebKit XPC services are outside that process restriction. Real Linux/Windows/macOS host qualification, XPC egress
 isolation, the complete eleven-lane run and comparison with GitHub timings remain open;
 this is not yet a qualified replacement for running any of the GitHub jobs. See [LOCAL_CI](LOCAL_CI.md).
+
+The macOS investigation for #368 (2026-10-25, macOS 27.0.1 ARM64) passes 27 worker regressions, including an actual temporary
+Aqua LaunchAgent, its inherited socket restriction, descendant termination and repeated stop. A supplementary Homebrew
+Clang 21.1.8/CMake 4.3.1 CEF-off Release build passes all 265 CTest cases after fixing explicit SDK propagation to
+`AddSubdirectoryConsumer`; the supplementary WKWebView Release build passes all 340 cases, including the bridge, lifecycle,
+benchmark and developer tests (195.54 seconds). Those browser tests run in the principal account outside the worker's network
+policy. This is not the pinned AppleClang/Xcode lane: the development host has only selected Command Line
+Tools, CMake differs from the lane's 4.4.4, SSH to `Mac` is refused, and no dedicated standard CI account is provisioned.
+The exact-lane run, cold/warm timings, SSH recovery and WebKit XPC egress qualification remain pending.
