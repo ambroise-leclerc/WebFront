@@ -28,6 +28,73 @@ env:
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
+  runner-selection:
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      windows: ${{ steps.select.outputs.windows }}
+    steps:
+      # No checkout before using the probe credential: PR code must never receive it.
+      - name: Select an idle local runner only for the owner
+        id: select
+        shell: pwsh
+        env:
+          STATUS_TOKEN: ${{ secrets.LOCAL_RUNNER_STATUS_TOKEN }}
+        run: |
+          function Select-WindowsRunner {
+            param($Context, $Event, [string]$Token)
+            $repository = 'ambroise-leclerc/WebFront'
+            $owner = 'ambroise-leclerc'
+            $pr = $Event.pull_request
+            $trusted = $Context.Repository -ceq $repository -and
+              $Context.Actor -ceq $owner -and $Context.ActorId -ceq '6860842' -and
+              [string]$Event.sender.id -ceq '6860842' -and
+              $Context.TriggeringActor -ceq $owner -and
+              $Context.EventName -cin @('push', 'pull_request', 'workflow_dispatch') -and
+              ($Context.EventName -cne 'pull_request' -or $null -ne $pr) -and
+              (-not $pr -or ([string]$pr.user.id -ceq '6860842' -and
+                $pr.head.repo.full_name -ceq $repository))
+            if (-not $trusted -or -not $Token) { return ,@('windows-2025') }
+            try {
+              $page = 1
+              do {
+                $response = Invoke-RestMethod -TimeoutSec 15 -Headers @{
+                  Authorization = "Bearer $Token"; Accept = 'application/vnd.github+json'
+                } -Uri "https://api.github.com/repos/$repository/actions/runners?per_page=100&page=$page"
+                $runner = $response.runners | Where-Object {
+                  $_.status -eq 'online' -and -not $_.busy -and
+                  'webfront-local-windows' -cin $_.labels.name -and
+                  $_.name -cin $_.labels.name
+                } | Select-Object -First 1
+                if ($runner) { return ,@('webfront-local-windows', $runner.name) }
+                $page++
+              } while (@($response.runners).Count -eq 100)
+            } catch {
+              Write-Host 'Runner status unavailable; using GitHub-hosted Windows.'
+            }
+            return ,@('windows-2025')
+          }
+          # End of selection function (also exercised by Test-Selection.ps1).
+          $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+          $labels = Select-WindowsRunner @{
+            Repository = $env:GITHUB_REPOSITORY; Actor = $env:GITHUB_ACTOR
+            ActorId = $env:GITHUB_ACTOR_ID; TriggeringActor = $env:GITHUB_TRIGGERING_ACTOR
+            EventName = $env:GITHUB_EVENT_NAME
+          } $event $env:STATUS_TOKEN
+          $json = ConvertTo-Json -InputObject $labels -Compress
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "windows=$json"
+          Write-Host "Windows runner labels: $json"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test local runner authorization
+        shell: pwsh
+        run: ./.github/runner/Test-Authorization.ps1
+      - name: Test runner selection and hosted fallback
+        shell: pwsh
+        run: ./.github/runner/Test-Selection.ps1
+
   # The Linux toolchain image is tagged with the hash of its Dockerfile and built only when that tag is missing from ghcr.io,
   # so a change of the Dockerfile is validated by the very run that carries it. A pull request from a fork cannot push it
   # (read-only token): its Linux job then fails at the pull, which a maintainer re-run on a branch of this repository fixes.
@@ -84,7 +151,12 @@ jobs:
     steps: &desktop-steps
       - uses: actions/checkout@v7
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
+      - name: Test local runner lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/runner/Test-Lifecycle.ps1
       - uses: ./.github/actions/remove-node
+        if: runner.environment == 'github-hosted'
       - uses: ./.github/actions/setup-cmake
         with:
           version: '4.4.4'
@@ -127,7 +199,7 @@ jobs:
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
       - name: Build
-        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 2
+        run: ${{ runner.os == 'Windows' && 'py -3' || 'python3' }} test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 2
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -166,7 +238,7 @@ jobs:
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
         run: >-
-          python3 test/tools/MeasureCommand.py --output build/suite-resources.json --
+          ${{ runner.os == 'Windows' && 'py -3' || 'python3' }} test/tools/MeasureCommand.py --output build/suite-resources.json --
           cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
           -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
@@ -174,7 +246,7 @@ jobs:
       - name: Analyze CTest timings
         if: always()
         shell: bash
-        run: python3 test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml --workers 4 --log build/Testing/Temporary/LastTest.log --ninja-log build/.ninja_log --output build/test-profile.txt
+        run: ${{ runner.os == 'Windows' && 'py -3' || 'python3' }} test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml --workers 4 --log build/Testing/Temporary/LastTest.log --ninja-log build/.ninja_log --output build/test-profile.txt
       - name: Probe compiler cache on the embedded builds
         # Diagnostic (#388): do the Life embedded translation units hit the compiler cache once the suite has warmed it?
         if: ${{ !cancelled() }}
@@ -256,6 +328,7 @@ jobs:
           if-no-files-found: ignore
 
   desktop-native:
+    needs: runner-selection
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     permissions:
       contents: read
@@ -267,15 +340,17 @@ jobs:
         include:
           - platform: windows-msvc-webview2
             os: windows-2025
+            use_image: false
             build_type: Release
             test_env: {}
             options: -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2
           - platform: macos-clang-wkwebview
             os: macos-26
+            use_image: false
             build_type: Release
             test_env: {}
             options: -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(matrix.platform == 'windows-msvc-webview2' && (needs.runner-selection.outputs.windows || '["windows-2025"]') || format('["{0}"]', matrix.os)) }}
     steps: *desktop-steps
 
   # Portability tier: the library consumed from another project, across generators and compilers, with a cold compiler cache.

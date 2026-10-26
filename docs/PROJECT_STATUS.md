@@ -52,6 +52,12 @@ The original WKWebView content-process termination was not reproduced locally, s
 remains unproven. Phase/spec progress, native watchdog failures and macOS crash/system logs
 are retained for investigation; diagnostics alone do not establish a correction.
 
+The Windows desktop lane can optionally use an online, idle local runner for owner-initiated
+events. Selection falls back to GitHub-hosted Windows for other actors, fork PRs, schedules,
+missing credentials and unavailable runners. A separately installed job-start hook also rejects
+unauthorized jobs before workflow steps. See [local runner setup](../.github/runner/README.md)
+for installation, the read-only status credential, manual start/stop and availability race limits.
+
 ## Contracts and limitations
 
 - Bridge calls from JavaScript always return Promises and reject on failure, including `void`
