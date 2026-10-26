@@ -5,7 +5,9 @@
 - Repository cleanup (#376): consolidate the gzip benchmark and differential-validation commands
   into [HTTP assets](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation); remove
   `GZIP_CACHE_MEASUREMENTS.md`, `GZIP_DECODER_MEASUREMENTS.md` and the one-off profiles under
-  `docs/test-performance/`. Their dated results remain in Git and new CI reports are workflow artifacts.
+  `docs/test-performance/`. The last revision containing these reports is
+  [cce1927](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs);
+  new CI reports are workflow artifacts.
   `PROJECT_STATUS.md` now describes supported paths, contracts and outstanding limitations;
   completed migration/qualification records remain in Git and this changelog. Remove the unreferenced
   Hello World and retired Signal Studio screenshots. Active build, test, publication and animation
@@ -21,7 +23,14 @@
   timings. Independent driver groups use OS-assigned ports; `WebFrontConfig::port = "0"` and `app.port()` expose this
   with TCPStdnet. Native `WebView2Options::visible` / `WKWebViewOptions::visible` default to true and allow quiet tests.
   Windows/macOS CI no longer wait for the Linux image, extended jobs use sccache, fuzzers have bounded concurrency,
-  and lcov verifies its fast JSON backend. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md).
+  and lcov verifies its fast JSON backend. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md). Local #388 measurements on Linux/GCC 16
+  Release/WebKitGTK (two build workers, four CTest workers) went from 172.43 s at baseline
+  [da0297f](https://github.com/ambroise-leclerc/WebFront/commit/da0297ff235642ccbe665a78e42873da9cde9c98)
+  (365 cases/97 specs, one pass) to a 93.41 s median (378 cases/97 specs, three passes), a 45.8%
+  reduction. These are local observations on a busy shared workstation, not a cross-platform guarantee;
+  [measurement details](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/TEST_PERFORMANCE.md#measurements) and
+  [raw profiles](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/test-performance)
+  are preserved at cce1927.
 
 - Accepted stdnet connections enable `TCP_NODELAY`, including after WebSocket upgrade (#379).
   This removes the Nagle/delayed-ACK interaction that could delay a callback's return

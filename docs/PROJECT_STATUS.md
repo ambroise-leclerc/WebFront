@@ -1,6 +1,6 @@
 # WebFront project status
 
-Current state on 2026-10-26. Release history belongs in the [changelog](CHANGELOG.md)
+Release history belongs in the [changelog](CHANGELOG.md)
 and Git; architecture decisions and their evidence are indexed in [the ADRs](adr/README.md).
 
 ## Supported paths

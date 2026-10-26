@@ -147,7 +147,10 @@ benefit from OS/filesystem and compiler caches. They are not measurements of a p
 Write profiles, resource samples, JUnit reports and dependency graphs under the build directory.
 CI uploads these as workflow artifacts; keep issue-specific before/after observations in the issue
 or pull request. Record the revision, platform, compiler, configuration, worker bounds, case/spec
-counts and cache state so another run can be interpreted. Historical local profiles remain in Git.
+counts and cache state so another run can be interpreted. Historical local profiles and
+[the #388 measurement summary](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/TEST_PERFORMANCE.md#measurements)
+remain available at cce1927, the last revision containing the
+[raw reports](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/test-performance).
 
 Consumer and embedded tests compile real C++ consumers of public headers. Frontend configuration
 checks need independent CMake scopes. Read slow cases with their phase transcripts and these

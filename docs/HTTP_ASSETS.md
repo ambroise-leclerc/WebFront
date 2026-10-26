@@ -175,7 +175,9 @@ Filesystem reads remain synchronous on that context.
 
 ## Manual benchmarks and differential validation
 
-With a CEF-off Release test build configured, build the optional tools explicitly:
+With a CEF-off Release test build configured, build the optional tools explicitly.
+`gzip_decoder_benchmark` is unavailable when `ENABLE_SANITIZER_THREAD=ON`; use a build
+with ThreadSanitizer disabled for the commands below:
 
 ```sh
 cmake --build build --target gzip_cache_benchmark gzip_decoder_benchmark --parallel 2
@@ -202,7 +204,10 @@ RSS; cache retention also excludes transient response/decoder storage and alloca
 
 These targets are excluded from normal builds and CTest and impose no timing threshold.
 For comparisons, use the same harness, compiler, hardening and corpus on both revisions;
-alternate run order and record host/cache conditions. Earlier #281/#282 measurements remain in Git.
+alternate run order and record host/cache conditions. Earlier
+[cache measurements (#281)](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/GZIP_CACHE_MEASUREMENTS.md) and
+[decoder measurements (#282)](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/GZIP_DECODER_MEASUREMENTS.md)
+remain available at cce1927, the last revision containing those reports.
 
 `-DWEBFRONT_GZIP_DIFFERENTIAL=ON` enables test-only zlib linkage; production stays header-only
 without a zlib dependency:
