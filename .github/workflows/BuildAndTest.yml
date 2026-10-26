@@ -180,7 +180,7 @@ jobs:
             for target in life_embedded life_journey; do
               sccache --zero-stats > /dev/null
               start=$(date +%s)
-              cmake --build build --config ${{ matrix.build_type }} --target "$target" --clean-first > /dev/null
+              cmake --build build --config ${{ matrix.build_type }} --target "$target" --clean-first > "build/probe-$target.log" 2>&1 || tail -n 20 "build/probe-$target.log"
               echo "$target clean rebuild: $(( $(date +%s) - start )) s"
               sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
             done
