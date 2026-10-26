@@ -75,9 +75,10 @@ lifecycle tests. Failed navigation, close, startup failures, watchdogs and cance
 The two macOS executable/dylib registration orders remain separate images and processes, with hidden native windows.
 
 The developer integration keeps its visible interactive terminal and Life preview. The macOS agent-application case
-keeps one visible window because its contract asserts visibility and the absence of a Dock icon. Linux's real windows
-are confined to Xvfb. This leaves one ordinary visible opening on Windows and two on macOS in the standard configuration;
-engine-specific manual benchmarks and diagnostic runs are outside this budget. Restore all diagnostic windows with
+keeps one visible window because its contract asserts visibility and the absence of a Dock icon. The automated direct
+transport contract harness retains one native window on each desktop. Linux's real windows are confined to Xvfb. This
+budgets **two visible openings on Windows and three on macOS** in the standard configuration; engine-specific manual
+benchmarks and diagnostic runs are outside this budget. Restore all diagnostic windows with
 `WEBFRONT_TEST_VISIBLE=1`. A hidden WKWebView requires macOS 14+ (public inactive scheduling preference) and a WindowServer session; this is not a headless-engine substitute.
 
 ## Profiling and interpreting the numbers
@@ -101,7 +102,9 @@ whole seconds; the command resource report has finer elapsed time. Sum of case d
 
 The resource sampler records sampled CPU, process count and peak summed RSS of the command's process family on all
 three desktop platforms. Short-lived children can be missed, and shared pages count in each process's RSS: these are
-sampled bounds, not precise unique-memory or process-creation counts. It preserves the measured command's failure status.
+sampled bounds, not precise unique-memory or process-creation counts. Pre-existing services such as a separately started
+sccache server and its compiler children can fall outside this process family; sccache's own statistics complement the
+sampled build report. It preserves the measured command's failure status.
 
 `DeveloperBrowserIntegration` emits begin/end timestamps for each major phase and every actual command, including
 expected failures. `DeveloperSpecs` reports both ends of each spec. The driver reports browser opening/return and shutdown,
