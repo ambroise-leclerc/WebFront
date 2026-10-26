@@ -1,4 +1,4 @@
-# Test performance and browser sessions (#388)
+# Test execution and profiling
 
 Run the complete fixture graph, resetting the projects and profiles on every pass:
 
@@ -55,8 +55,11 @@ build/test/web/webfront-wf --project /absolute/project --suite /absolute/cases.j
 both the per-case deadline and `--timeout` for the whole session; CTest groups sum their original case budgets and keep
 a 20-second outer grace. `expect` is a decimal status string; commands are argument arrays, never shell text. Case names must be unique and use
 letters, digits, `_` or `-`. The argument JSON is bounded to 60000 bytes by the bridge. Only the selected reports are
-rewritten; use a dedicated result directory for each invocation. Without `--suite`, the existing one-command interface
-and its exit statuses remain available.
+rewritten; use a dedicated result directory for each invocation. Without `--suite`, the one-command interface
+and its exit statuses remain available. Its optional `--command-timeout` starts after bootstrap,
+just before the command runs; `--timeout` still bounds the whole invocation. `WfDriverTimeout`
+uses a deliberately slow bootstrap and a four-second command limit, requiring the sleeping command's
+start marker as well as native watchdog status 71.
 
 Browser sessions and independent driver cases bind loopback port `0`; `TCPStdnet` atomically binds an OS-assigned port.
 `app.port()` and frontend navigation use that actual port, as does the HTTP/WebSocket content policy. Custom network
@@ -113,10 +116,9 @@ runner raises the CTest output cap to 2 MiB per case so JUnit retains these deta
 phase/spec durations. WASM compilation/initialization, command preparation, publication, navigation and execution can be
 located by the enclosing command and spec; these spans include waits and bridge traffic, not just CPU time.
 
-The esbuild helper used by pure developer specs now initializes its real WASM compiler in an esbuild Worker, matching
-the developer environment. In an off-screen WebKit frame, `worker:false` made a four-rebuild spec take 20.726 s locally;
-`worker:true` ran the same assertions in 0.423 s. The test still changes an imported file, checks a syntax error and checks
-recovery. Its inputs were already minimal; reducing assertions would not address the timer/scheduling cost.
+The esbuild helper used by developer specs initializes its WASM compiler in a Worker, matching
+the developer environment and avoiding off-screen frame timer throttling. Its rebuild spec changes
+an imported file, checks a syntax error and checks recovery.
 
 ## CI, caches, coverage and fuzzers
 
@@ -143,26 +145,19 @@ statistics. Qualification dispatches `BuildAndTest.yml` with `repeat_desktop_tes
 passes plus GCC/Clang CEF and sanitizers. First-pass fixtures/profiles are fresh; later passes reset them too but may
 benefit from OS/filesystem and compiler caches. They are not measurements of a physically cold OS page cache.
 
-## Measurements
+## Recording a run
 
-Durable ranked local profiles are under [test-performance](test-performance/). Measurements use wall time and retain
-case/spec counts; differences between machines and independent hosted runs are not controlled speedups. The local
-baseline is `da0297f` on Linux/GCC 16 Release/WebKitGTK, two build workers and four CTest workers, with a busy shared
-workstation. One baseline pass ran 365 cases/97 developer specs in 172.43 s. Its slowest cases were DeveloperSpecs
-(29.819 s), AddSubdirectoryConsumer (23.634 s), JourneyEmbeddedBuild (22.845 s), LifeEmbeddedBuild (22.093 s) and
-DeveloperBrowserIntegration (20.150 s). The two globally serial builds accounted for 44.938 s.
+Write profiles, resource samples, JUnit reports and dependency graphs under the build directory.
+CI uploads these as workflow artifacts; keep issue-specific before/after observations in the issue
+or pull request. Record the revision, platform, compiler, configuration, worker bounds, case/spec
+counts and cache state so another run can be interpreted. Historical local profiles and
+[the #388 measurement summary](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/TEST_PERFORMANCE.md#measurements)
+remain available at cce1927, the last revision containing the
+[raw reports](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/test-performance).
 
-The consumer and embedded tests intentionally compile real C++ consumers of the public headers; frontend configure
-checks intentionally keep independent CMake scopes. Their compilation cost cannot be removed by reusing a prebuilt
-application without losing the contract. Every case remaining over 20 s should be read with its phase transcript and
-these compilation constraints. The updated local passes ran 378 cases/97 developer specs in **92.93, 93.52 and 93.41 s** (median **93.41 s**, range
-0.59 s), a 45.8% reduction against the single baseline pass. They reset the fixtures each time. The dependency-only
-path of the third pass was 69.347 s; no globally serial test remained. Sampled process-family peak summed RSS across
-the three passes was 3.88 GiB, with up to 41 concurrent processes (including browser helpers) and 1179 sampled process
-IDs overall; see the sampling caveats above. The consumer and both embedded compilations remain around 22–24 s;
-the real developer integration remains around 26 s, including three TypeScript versions and terminal/native cancellation.
-Its longest phase is the real Life preview/bridge checks (roughly 8–9 s), followed by the TypeScript 6 install/check
-phase (roughly 4 s). Full before/after hosted desktop results and links follow qualification.
+Consumer and embedded tests compile real C++ consumers of public headers. Frontend configuration
+checks need independent CMake scopes. Read slow cases with their phase transcripts and these
+compilation constraints before changing their coverage.
 
-GCC parallel coverage still relies on libgcov's filesystem locking; filesystems without locking require isolated
-profiles and merging. macOS failures retain the existing WebKit system/crash diagnostics as well as the phase logs.
+GCC parallel coverage relies on libgcov's filesystem locking; filesystems without locking require
+isolated profiles and merging. macOS failures retain WebKit system/crash diagnostics and phase logs.

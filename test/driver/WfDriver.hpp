@@ -101,6 +101,7 @@ struct Options {
     std::string                          manifestDirectory;
     std::optional<std::filesystem::path> report;
     std::chrono::seconds                 timeout{600};
+    std::optional<std::chrono::seconds>  commandTimeout;
     std::vector<std::string>             command;
     std::optional<std::filesystem::path> suite;
     std::optional<std::filesystem::path> reportDirectory;
@@ -143,13 +144,16 @@ inline Options parse(int argc, char** argv) {
             options.filter = value();
         else if (argument == "--report")
             options.report = value();
-        else if (argument == "--timeout") {
+        else if (argument == "--timeout" || argument == "--command-timeout") {
             const auto& seconds     = value();
             long        parsed      = 0;
             const auto [end, error] = std::from_chars(seconds.data(), seconds.data() + seconds.size(), parsed);
             if (error != std::errc{} || end != seconds.data() + seconds.size() || parsed < 1)
-                throw UsageError("--timeout expects whole seconds");
-            options.timeout = std::chrono::seconds(parsed);
+                throw UsageError(argument + " expects whole seconds");
+            if (argument == "--command-timeout")
+                options.commandTimeout = std::chrono::seconds(parsed);
+            else
+                options.timeout = std::chrono::seconds(parsed);
         } else if (argument.starts_with("--"))
             throw UsageError("Unknown option " + argument);
         else {
@@ -170,6 +174,8 @@ inline Options parse(int argc, char** argv) {
         throw UsageError("A wf command is required");
     if (options.suite && (!options.command.empty() || options.report || !options.reportDirectory))
         throw UsageError("--suite requires --report-dir and replaces the command and --report");
+    if (options.suite && options.commandTimeout)
+        throw UsageError("--command-timeout is for a single command; suites use per-case timeouts");
     if (!options.suite && (options.reportDirectory || !options.filter.empty()))
         throw UsageError("--report-dir and --filter require --suite");
     if (options.environment.has_value() != options.integrity.has_value())
@@ -381,6 +387,7 @@ inline constexpr auto driverScript = R"JS(
             await report('wf.result', failed ? 1 : 0, JSON.stringify({exitCode: failed ? 1 : 0, output: 'Suite completed'}));
         } else {
             const argv = JSON.parse(await report('wf.arguments'));
+            await report('wf.commandStarted');
             await runtime.runNonInteractive(argv, {bridge: webFront, config, preview: document.getElementById('preview'),
                 signal: new AbortController().signal, write: () => {}, onExit: () => {},
                 reporter: json => report('wf.result', JSON.parse(json).exitCode, json)});
@@ -503,6 +510,14 @@ int run(const Options& options, Setup&& setup = {}) {
     DriverDeadline deadlines{options.timeout};
     Outcome        outcome;
     App            app{options.project, {.port = "0"}};
+    bool           commandStarted = false;
+    app.cppFunction("wf.commandStarted", [&] {
+        if (options.suite || std::exchange(commandStarted, true))
+            throw std::runtime_error("Unexpected single-command start");
+        if (options.commandTimeout)
+            deadlines.beginCase(*options.commandTimeout);
+        phase("begin command");
+    });
     app.cppFunction("wf.suite", [suiteJson] {
         return suiteJson;
     });
@@ -569,7 +584,7 @@ int run(const Options& options, Setup&& setup = {}) {
                                   return false;
                               })
             && !stop.stop_requested()) {
-            std::cerr << "The browser did not close after the time limit of " << options.timeout.count() << " s\n";
+            std::cerr << "The browser did not close after the driver deadline elapsed\n";
             std::cerr.flush();
             std::_Exit(timeoutStatus);
         }
@@ -620,7 +635,8 @@ int main(int argc, char** argv, std::string_view program, Setup&& setup = {}) {
         return run<Frontend>(parse(argc, argv), std::forward<Setup>(setup));
     } catch (const UsageError& error) {
         std::cerr << program << ": " << error.what() << "\nUsage: " << program << " --project <dir> [--environment <archive> --integrity <sha512-...>] "
-                  << "[--registry-dir <dir>] [--report <file>] [--timeout <seconds>] [--suite <json> --report-dir <dir> [--filter <name>]] [--] <wf command> "
+                  << "[--registry-dir <dir>] [--report <file>] [--timeout <seconds>] [--command-timeout <seconds>] [--suite <json> --report-dir <dir> "
+                     "[--filter <name>]] [--] <wf command> "
                      "[arguments...]\n";
         return usageStatus;
     } catch (const std::exception& error) {

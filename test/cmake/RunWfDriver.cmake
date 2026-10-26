@@ -1,6 +1,6 @@
 # Runs webfront-wf and checks its exit status and output.
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
-#   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
+#   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DCOMMAND_TIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
 #   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
 # MANIFEST_DIR is passed as --manifest-dir; EXPECT_PRESENT and EXPECT_ABSENT are project paths (separated by |) that must
 # exist, or not, once the command ended.
@@ -108,6 +108,9 @@ if(MANIFEST_DIR)
 endif()
 if(TIMEOUT)
     list(APPEND arguments --timeout "${TIMEOUT}")
+endif()
+if(COMMAND_TIMEOUT)
+    list(APPEND arguments --command-timeout "${COMMAND_TIMEOUT}")
 endif()
 if(EXPECT_REPORT)
     set(report "${PROJECT}/report.json")

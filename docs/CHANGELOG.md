@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
+  within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately
+  delays bootstrap beyond its command limit and requires the command's start marker before accepting
+  status 71; slow native browser startup can no longer satisfy the wrong timeout condition.
+
+- Repository cleanup (#376): consolidate the gzip benchmark and differential-validation commands
+  into [HTTP assets](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation); remove
+  `GZIP_CACHE_MEASUREMENTS.md`, `GZIP_DECODER_MEASUREMENTS.md` and the one-off profiles under
+  `docs/test-performance/`. The last revision containing these reports is
+  [cce1927](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs);
+  new CI reports are workflow artifacts.
+  `PROJECT_STATUS.md` now describes supported paths, contracts and outstanding limitations;
+  completed migration/qualification records remain in Git and this changelog. Remove the unreferenced
+  Hello World and retired Signal Studio screenshots. Active build, test, publication and animation
+  generation tools, plus the measurement evidence cited by proposed ADRs, are retained.
+
 - Tests are organized in tiers by CTest label: `fast` (unit tests, about one second), the standard tier and
   `portability` (the consumer project). CI runs the fast tier first, excludes `portability` from pull requests into
   `develop`, and runs the advanced tier (three suite repetitions, a portability matrix, sanitizers, fuzzers, CEF) weekly
@@ -12,7 +28,14 @@
   timings. Independent driver groups use OS-assigned ports; `WebFrontConfig::port = "0"` and `app.port()` expose this
   with TCPStdnet. Native `WebView2Options::visible` / `WKWebViewOptions::visible` default to true and allow quiet tests.
   Windows/macOS CI no longer wait for the Linux image, extended jobs use sccache, fuzzers have bounded concurrency,
-  and lcov verifies its fast JSON backend. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md).
+  and lcov verifies its fast JSON backend. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md). Local #388 measurements on Linux/GCC 16
+  Release/WebKitGTK (two build workers, four CTest workers) went from 172.43 s at baseline
+  [da0297f](https://github.com/ambroise-leclerc/WebFront/commit/da0297ff235642ccbe665a78e42873da9cde9c98)
+  (365 cases/97 specs, one pass) to a 93.41 s median (378 cases/97 specs, three passes), a 45.8%
+  reduction. These are local observations on a busy shared workstation, not a cross-platform guarantee;
+  [measurement details](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/TEST_PERFORMANCE.md#measurements) and
+  [raw profiles](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/test-performance)
+  are preserved at cce1927.
 
 - Accepted stdnet connections enable `TCP_NODELAY`, including after WebSocket upgrade (#379).
   This removes the Nagle/delayed-ACK interaction that could delay a callback's return
@@ -56,7 +79,7 @@
 - Gzip identity fallback reuses a bounded validated-representation cache for GET and HEAD (#281).
   Cold decoding uses buffered bit reads and a small Huffman lookup (#282), with unchanged
   allocation behavior, strict stream validation and output budgets. Release benchmarks and
-  test-only zlib differential/sanitizer validation are recorded in `docs/GZIP_DECODER_MEASUREMENTS.md`.
+  test-only zlib differential/sanitizer validation are recorded in [HTTP asset validation](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation).
 
 - `WebFrontLifeDeveloper` starts without argument on `./life-project` (created when missing, reused untouched otherwise) and the
   pinned environment; the explicit `<project> [<environment-url> <sha512-integrity>]` form remains. At configuration, the

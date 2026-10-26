@@ -8,6 +8,14 @@ struct DriverUI {
         scripts.emplace_back(script);
     }
 };
+webfront::testdriver::Options parseDriver(std::initializer_list<std::string> extra) {
+    std::vector<std::string> arguments{"webfront-wf", "--project", "project", "--environment", "environment.tgz", "--integrity", "sha512-test"};
+    arguments.insert(arguments.end(), extra.begin(), extra.end());
+    std::vector<char*> argv;
+    for (auto& argument : arguments)
+        argv.push_back(argument.data());
+    return webfront::testdriver::parse(static_cast<int>(argv.size()), argv.data());
+}
 }  // namespace
 
 SCENARIO("The driver deadline closes both connected and late browsers without losing the request") {
@@ -50,6 +58,26 @@ SCENARIO("Driver WebView2 profiles isolate environments served at identical URLs
     REQUIRE(testdriver::DriverWebView2Options::get("").userDataFolder.empty());
 }
 
+SCENARIO("A single-command watchdog has a separate budget after bootstrap") {
+    using namespace std::chrono_literals;
+    GIVEN("an overall deadline and a shorter command limit") {
+        const auto options = parseDriver({"--timeout", "100", "--command-timeout", "4", "--", "run", "sleep"});
+        THEN("both limits survive argument parsing independently") {
+            REQUIRE(options.timeout == 100s);
+            REQUIRE(options.commandTimeout == 4s);
+            REQUIRE(options.command == std::vector<std::string>{"run", "sleep"});
+        }
+    }
+    GIVEN("no separate command limit") {
+        REQUIRE_FALSE(parseDriver({"list"}).commandTimeout);
+    }
+    GIVEN("invalid or ambiguous limits") {
+        REQUIRE_THROWS_AS(parseDriver({"--command-timeout", "0", "list"}), webfront::testdriver::UsageError);
+        REQUIRE_THROWS_AS(parseDriver({"--command-timeout", "bad", "list"}), webfront::testdriver::UsageError);
+        REQUIRE_THROWS_AS(parseDriver({"--command-timeout", "4", "--suite", "cases.json", "--report-dir", "reports"}), webfront::testdriver::UsageError);
+    }
+}
+
 SCENARIO("Driver suites validate names, commands and filters before opening a browser") {
     using namespace webfront::testdriver;
     const auto source = R"([{"name":"install","command":["install","a b"]},{"name":"failure","expect":"1","command":["nosuchcommand"]}])";
@@ -89,6 +117,10 @@ SCENARIO("Suite watchdogs keep a native per-case limit inside the overall budget
             fallback.request_stop();
     });
     REQUIRE(deadline.expired(fallback.get_token()));
+    // Starting a command never extends an already expiring overall startup/session limit.
+    DriverDeadline overall{1ms};
+    overall.beginCase(1h);
+    REQUIRE(overall.expired(fallback.get_token()));
     cancelIfBroken.request_stop();
     deadline.endCase();
     std::stop_source cancelled;

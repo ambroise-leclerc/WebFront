@@ -1,3 +1,0 @@
-Runs: 1
-Wall median: 172.000 s
-Wall range: 172.000–172.000 s

@@ -522,7 +522,7 @@ one `wf` command through `runNonInteractive`, prints its output and exits with i
 
 ```sh
 webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512-...>] [--registry-dir <dir>] \
-            [--manifest-dir <dir>] [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]
+            [--manifest-dir <dir>] [--report <file>] [--timeout <seconds>] [--command-timeout <seconds>] [--] <wf command> [arguments...]
 ```
 
 - Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
@@ -534,8 +534,11 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
   environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it. `--manifest-dir` keeps the manifest and
   the lock in that directory of the project (usage error 64 when it is absolute, has an empty or dot component or leaves the project).
   The project is the directory `wf` reads and writes; run `wf install` once, then the other commands, on the same project.
+- `--timeout` bounds the whole invocation, including browser/bootstrap startup. For a single command,
+  `--command-timeout` optionally adds a shorter native watchdog starting after bootstrap, immediately before
+  `runNonInteractive`; it never extends the overall deadline. Suites use their per-case budgets instead.
 - Exit status: the command's own (`wf test`: 0, 1, 124, 130); **64** usage; **70** bootstrap failure (archive absent, wrong
-  integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's `--timeout` (default 600 s) elapsed,
+  integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's overall `--timeout` (default 600 s) or optional command deadline elapsed,
   after asking the page to close; **72** the browser closed without a result. `--report` writes the JSON result
   `{exitCode, output, report}` of the command, cut to fit a bridge string as described above.
 
