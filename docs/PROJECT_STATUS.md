@@ -18,11 +18,21 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 - **Limitations.** There is no sandbox: the downloaded environment and the authorized scripts have the authority of the bridge and
   of the project, and the permissions frame only the `context` API of scripts. Only browser packages install; installation scripts
   and native add-ons are not executed. A synchronous infinite loop in a spec blocks the page hosting `wf test`. File reads fail beyond 260 characters
-  on Windows (#349). General DOM abstractions, packaging, accessibility and native-engine deployment remain application work.
+  on Windows (#349). General DOM abstractions (proposed in ADR-018), packaging, accessibility and native-engine deployment remain application work.
   The README walkthrough (Game of Life: console, developer, embedded) uses exactly these commands, and `NewcomerDocsMatchExamples`
   keeps it aligned with the examples.
 
 The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
+
+## DOM access proposal (#378, 2026-10-26)
+
+[ADR-018](adr/ADR-018-acces-au-dom.md) is **proposed**: C++ would own DOM subtrees that the page lends it (islands)
+through a bounded, validated stream of batched mutations, while React and other UI libraries keep their own DOM and receive
+C++ values through an external store; C++26 reflection would stay an optional layer for generated interfaces. The measured
+throwaway prototypes are not in the repository (commit `ef2bb25` of PR #385 keeps them); there is no public DOM API and the
+wire format is unchanged. The prototypes found that the server does not set `TCP_NODELAY`: a bridge callback that calls
+`ui.jsFunction` before returning delays its result by about 40 ms on Linux (Nagle and delayed acknowledgements). The fix is
+tracked by #379; the behavior is unchanged in this release.
 
 ## CI reliability and repository cleanup (#376, 2026-10-26)
 
