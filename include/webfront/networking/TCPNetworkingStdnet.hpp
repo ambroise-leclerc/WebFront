@@ -33,7 +33,7 @@ public:
     /// Completes with the number of bytes read, zero at the end of the stream.
     static auto Receive(Socket& socket, MutableBuffer buffer) { return ::stdnet::async_receive(socket, buffer); }
     static auto Send(Socket& socket, const auto& buffers) { return ::stdnet::async_write(socket, buffers); }
-    /// Disable Nagle before handing the connection to HTTP, retaining the option after WebSocket upgrade.
+    /// Completes with an accepted socket whose Nagle algorithm is disabled; a failure to set the option completes with an error.
     static auto Accept(Acceptor& acceptor) {
         return ::stdnet::ex::then(::stdnet::async_accept(acceptor), [](Socket socket) {
             socket.set_option(::stdnet::ip::tcp_no_delay(true));
