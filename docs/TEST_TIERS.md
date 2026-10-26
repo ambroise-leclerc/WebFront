@@ -28,7 +28,7 @@ dispatch with `repeat_desktop_tests`:
   including the portability tests;
 - the `portability` job: the consumer project configured with Ninja (GCC on Linux, MSVC on Windows, Apple clang on macOS),
   with Unix Makefiles (Clang 23) and, reported but never blocking until it has run on a hosted runner, the Visual Studio
-  2022 generator. There is no compiler cache: a new user compiles everything;
+  2026 generator. There is no compiler cache: a new user compiles everything;
 - the address/undefined and thread sanitizers, the five fuzzers, and the GCC and Clang CEF browser integration.
 
 The portability matrix does not vary the CMake version: `setup-cmake` pins the SHA-256 of each archive it installs, so

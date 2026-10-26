@@ -293,7 +293,7 @@ jobs:
           - {name: windows-msvc-ninja, os: windows-2025, generator: Ninja}
           - {name: macos-appleclang-ninja, os: macos-26, generator: Ninja}
           # Not yet exercised on a hosted runner: reported, never blocking.
-          - {name: windows-msvc-visual-studio, os: windows-2025, generator: Visual Studio 17 2022, experimental: true}
+          - {name: windows-msvc-visual-studio, os: windows-2025, generator: Visual Studio 18 2026, experimental: true}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/remove-node
