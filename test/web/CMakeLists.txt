@@ -140,17 +140,17 @@ if(_browser_tests_available)
         set_tests_properties(WfDriverProject PROPERTIES FIXTURES_SETUP WfDriverProject LABELS "web-integration" TIMEOUT 30)
 
         # webfront_add_driver_test(<name> <expected status> <wf command words separated by |>
-        #     [OUTPUT <regex>] [REPORT <regex>] [EXPECT_FILE <relative path>] [DRIVER_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
+        #     [OUTPUT <regex>] [REPORT <regex>] [EXPECT_FILE <relative path>] [DRIVER_TIMEOUT <seconds>] [COMMAND_TIMEOUT <seconds>] [FORGE <protocol>:<api>]
         #     [MANIFEST_DIR <dir>] [EXPECT_PRESENT <paths>] [EXPECT_ABSENT <paths>] [ENVIRONMENT <archive> INTEGRITY <sri>] [FRESH_PROJECT <dir>] [PROJECT_DIR <dir>] [RENAME_ENTRY <module>] [PINNED] [SLEEP_ENVIRONMENT] [REQUIRES <fixture>] [PROVIDES <fixture>])
         function(webfront_add_driver_test name status command)
-            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;PROJECT_DIR;MANIFEST_DIR;EXPECT_PRESENT;EXPECT_ABSENT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
+            cmake_parse_arguments(ARG "PINNED;SLEEP_ENVIRONMENT" "OUTPUT;REPORT;EXPECT_FILE;DRIVER_TIMEOUT;COMMAND_TIMEOUT;FORGE;ENVIRONMENT;INTEGRITY;FRESH_PROJECT;PROJECT_DIR;MANIFEST_DIR;EXPECT_PRESENT;EXPECT_ABSENT;RENAME_ENTRY;REQUIRES;PROVIDES" "" ${ARGN})
             set(options -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work/${name} -DEXPECT_STATUS=${status} "-DCOMMAND=${command}" -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/${name})
             foreach(option OUTPUT REPORT)
                 if(ARG_${option})
                     list(APPEND options "-DEXPECT_${option}=${ARG_${option}}")
                 endif()
             endforeach()
-            foreach(option FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY EXPECT_FILE MANIFEST_DIR EXPECT_PRESENT EXPECT_ABSENT)
+            foreach(option COMMAND_TIMEOUT FORGE ENVIRONMENT INTEGRITY FRESH_PROJECT RENAME_ENTRY EXPECT_FILE MANIFEST_DIR EXPECT_PRESENT EXPECT_ABSENT)
                 if(ARG_${option})
                     list(APPEND options "-D${option}=${ARG_${option}}")
                 endif()
@@ -232,8 +232,9 @@ if(_browser_tests_available)
         webfront_add_driver_test(WfDriverUnknownCommand 1 "nosuchcommand" OUTPUT "nosuchcommand")
         # What a script writes to its console before it ends reaches the result of the command.
         webfront_add_driver_test(WfDriverScriptOutput 0 "run|echo|one|two" OUTPUT "echo says one two")
-        # Isolate the driver's deadline from compiler startup, and prove the command actually began.
-        webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 4 EXPECT_FILE sleep.started SLEEP_ENVIRONMENT)
+        # Bound browser/bootstrap startup separately from the four-second command watchdog.
+        # The fixture deliberately mounts slowly and records that the command actually began.
+        webfront_add_driver_test(WfDriverTimeout 71 "run|sleep" OUTPUT "time limit of the driver" DRIVER_TIMEOUT 100 COMMAND_TIMEOUT 4 EXPECT_FILE sleep.started SLEEP_ENVIRONMENT)
         webfront_add_driver_test(WfDriverWrongIntegrity 70 "list" OUTPUT "Integrity check failed"
             INTEGRITY "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
         webfront_add_driver_test(WfDriverMissingArchive 70 "list" OUTPUT "archive not found"

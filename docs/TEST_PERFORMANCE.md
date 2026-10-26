@@ -55,8 +55,11 @@ build/test/web/webfront-wf --project /absolute/project --suite /absolute/cases.j
 both the per-case deadline and `--timeout` for the whole session; CTest groups sum their original case budgets and keep
 a 20-second outer grace. `expect` is a decimal status string; commands are argument arrays, never shell text. Case names must be unique and use
 letters, digits, `_` or `-`. The argument JSON is bounded to 60000 bytes by the bridge. Only the selected reports are
-rewritten; use a dedicated result directory for each invocation. Without `--suite`, the existing one-command interface
-and its exit statuses remain available.
+rewritten; use a dedicated result directory for each invocation. Without `--suite`, the one-command interface
+and its exit statuses remain available. Its optional `--command-timeout` starts after bootstrap,
+just before the command runs; `--timeout` still bounds the whole invocation. `WfDriverTimeout`
+uses a deliberately slow bootstrap and a four-second command limit, requiring the sleeping command's
+start marker as well as native watchdog status 71.
 
 Browser sessions and independent driver cases bind loopback port `0`; `TCPStdnet` atomically binds an OS-assigned port.
 `app.port()` and frontend navigation use that actual port, as does the HTTP/WebSocket content policy. Custom network

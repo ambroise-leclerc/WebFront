@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
+  within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately
+  delays bootstrap beyond its command limit and requires the command's start marker before accepting
+  status 71; slow native browser startup can no longer satisfy the wrong timeout condition.
+
 - Repository cleanup (#376): consolidate the gzip benchmark and differential-validation commands
   into [HTTP assets](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation); remove
   `GZIP_CACHE_MEASUREMENTS.md`, `GZIP_DECODER_MEASUREMENTS.md` and the one-off profiles under
