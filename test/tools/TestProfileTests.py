@@ -39,6 +39,16 @@ class ProfileTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Cyclic'):
                 analyze(graph, report, 1)
 
+    def test_phase_names_carry_no_timestamp_or_status(self):
+        from ProfileTests import phase_durations
+        lines = ('11964.000ms end Life preview and bridge durationMs=8123.500\n'
+                 '12.5ms end suite spec status=passed durationMs=3.250\n'
+                 'wf spec: 7.0ms end command build durationMs=1.000')
+        self.assertEqual(phase_durations([lines, lines]),
+                         [(8123.5, 'pass 1: Life preview and bridge'), (3.25, 'pass 1: suite spec'),
+                          (1.0, 'pass 1: command build'), (8123.5, 'pass 2: Life preview and bridge'),
+                          (3.25, 'pass 2: suite spec'), (1.0, 'pass 2: command build')])
+
     def test_ninja_durations_rank_compile_and_link_jobs(self):
         from ProfileTests import compile_profile
         with tempfile.TemporaryDirectory() as directory:

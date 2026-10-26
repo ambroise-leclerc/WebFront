@@ -84,6 +84,20 @@ def write_report(result, output):
     output.with_suffix('.dot').write_text('\n'.join(dot + ['}']) + '\n', encoding='utf-8')
 
 
+PHASE = re.compile(r'(?:wf spec: |Developer integration: )?(?:[\d.]+ms )?end (.*?)(?: status=\S+)? durationMs=([\d.]+)')
+
+
+def phase_durations(transcripts):
+    """(duration ms, 'pass N: name') for every `<time>ms end <name> durationMs=<n>` line; the name carries no timestamp."""
+    phases = []
+    for index, transcript in enumerate(transcripts, 1):
+        for line in transcript.splitlines():
+            match = PHASE.search(line)
+            if match:
+                phases.append((float(match[2]), f'pass {index}: {match[1]}'))
+    return phases
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('graph', type=Path)
@@ -108,12 +122,7 @@ if __name__ == '__main__':
     if args.log and args.log.exists() and not any('durationMs=' in text for text in transcripts):
         transcripts.append(args.log.read_text(encoding='utf-8', errors='replace'))
     if transcripts:
-        phases = []
-        for index, transcript in enumerate(transcripts, 1):
-            for line in transcript.splitlines():
-                match = re.search(r'(?:wf spec: |Developer integration: )?(.*?end .*?) durationMs=([\d.]+)', line)
-                if match:
-                    phases.append((float(match[2]), f'pass {index}: {match[1]}'))
+        phases = phase_durations(transcripts)
         args.output.with_name(args.output.stem + '-phases.txt').write_text(
             '\n'.join(f'{duration:12.3f} ms {name}' for duration, name in sorted(phases, reverse=True)) + '\n', encoding='utf-8')
 

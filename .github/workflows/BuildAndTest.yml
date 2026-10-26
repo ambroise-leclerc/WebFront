@@ -182,6 +182,8 @@ jobs:
         shell: bash
         run: |
           {
+            echo "Before the probe (whole run):"
+            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
             for target in life_embedded life_journey; do
               sccache --zero-stats > /dev/null
               start=$(date +%s)

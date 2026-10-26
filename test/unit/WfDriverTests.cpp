@@ -81,7 +81,7 @@ SCENARIO("Suite watchdogs keep a native per-case limit inside the overall budget
         std::unique_lock            lock{mutex};
         if (!wake.wait_for(lock,
                            stop,
-                           100ms,
+                           10s,
                            [] {
                                return false;
                            })
