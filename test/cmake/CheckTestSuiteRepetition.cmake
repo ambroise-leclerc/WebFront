@@ -53,6 +53,21 @@ if(NOT result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${
     OR NOT EXISTS "${WORK}/build/test-results-manual.xml" OR NOT EXISTS "${WORK}/build/test-results-2-extra.xml")
     message(FATAL_ERROR "A shorter rerun must keep only its own numbered reports: ${output}${error}")
 endif()
+# A relative build directory (the container jobs of the CI pass "build") designates the same directory for the reports as for CTest.
+file(WRITE "${WORK}/build/test-results-3.xml" "stale")
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=build -DCONFIG=Release -DREPEAT=2 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
+    WORKING_DIRECTORY "${WORK}" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Repetition with a relative build directory failed: ${output}${error}")
+endif()
+foreach(pass RANGE 1 2)
+    if(NOT EXISTS "${WORK}/build/test-results-${pass}.xml")
+        message(FATAL_ERROR "A relative build directory must keep the JUnit report of pass ${pass} in it")
+    endif()
+endforeach()
+if(EXISTS "${WORK}/build/build" OR EXISTS "${WORK}/build/test-results-3.xml")
+    message(FATAL_ERROR "A relative build directory must not nest its reports nor keep a stale numbered report")
+endif()
 # Recreate the successful reports to exercise cleanup when the next invocation fails early.
 execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
