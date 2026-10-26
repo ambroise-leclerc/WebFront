@@ -18,7 +18,7 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 - **Limitations.** There is no sandbox: the downloaded environment and the authorized scripts have the authority of the bridge and
   of the project, and the permissions frame only the `context` API of scripts. Only browser packages install; installation scripts
   and native add-ons are not executed. A synchronous infinite loop in a spec blocks the page hosting `wf test`. File reads fail beyond 260 characters
-  on Windows (#349). General DOM abstractions, packaging, accessibility and native-engine deployment remain application work.
+  on Windows (#349). General DOM abstractions (proposed in ADR-018), packaging, accessibility and native-engine deployment remain application work.
   The README walkthrough (Game of Life: console, developer, embedded) uses exactly these commands, and `NewcomerDocsMatchExamples`
   keeps it aligned with the examples.
 
@@ -31,6 +31,16 @@ WebSocket upgrades retain it. This avoids Nagle holding a callback's return behi
 an earlier browser message while waiting for a delayed ACK. The real-socket test
 checks the option after upgrade without a timing threshold; the shared Jasmine
 suite exercises the message followed by a return value on every native frontend.
+
+## DOM access proposal (#378, 2026-10-26)
+
+[ADR-018](adr/ADR-018-acces-au-dom.md) is **proposed**: C++ would own DOM subtrees that the page lends it (islands)
+through a bounded, validated stream of batched mutations, while React and other UI libraries keep their own DOM and receive
+C++ values through an external store; C++26 reflection would stay an optional layer for generated interfaces. The measured
+throwaway prototypes are not in the repository (commit `ef2bb25` of PR #385 keeps them); there is no public DOM API and the
+wire format is unchanged. The prototypes identified a delay of about 40 ms on Linux when a bridge callback calls
+`ui.jsFunction` before returning (Nagle and delayed acknowledgements). The correction enables `TCP_NODELAY` in #379,
+as described above.
 
 ## CI reliability and repository cleanup (#376, 2026-10-26)
 
