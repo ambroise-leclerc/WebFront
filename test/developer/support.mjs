@@ -5,9 +5,18 @@
 // that the error satisfies `expected`: a RegExp tested against String(error), a function returning true for the error,
 // or nothing.
 // Keep the last started spec in the driver's output even if its page stops reporting.
+/** Optional driver diagnostics must never change a spec's result. */
+export async function reportSpecStarted(bridge, {fullName}) {
+    try {
+        await bridge.cppFunction('wf.progress')(fullName);
+    } catch {
+        // Ordinary developer applications have no driver callback; diagnostics are best effort.
+    }
+}
+
 if (globalThis.webFront) jasmine.getEnv().addReporter({
-    async specStarted({fullName}) {
-        await webFront.cppFunction('wf.progress')(fullName);
+    specStarted(result) {
+        return reportSpecStarted(webFront, result);
     },
 });
 

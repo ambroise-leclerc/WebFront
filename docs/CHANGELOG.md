@@ -10,6 +10,8 @@
   before CTest so a stalled page leaves useful output and a nonzero status (#376).
 - CI stability runs repeat the complete CTest fixture graph three times, retaining
   a separate JUnit report per pass and stopping on the first failure (#376).
+  Reruns remove old numbered reports before starting, and optional spec-progress
+  diagnostics cannot fail specs when the driver callback is absent or disconnected.
   Repeating each stateful journey step in isolation tried to initialize an already
   initialized project; an offline CMake regression demonstrates the failure and
   checks whole-suite repetition and failure propagation.

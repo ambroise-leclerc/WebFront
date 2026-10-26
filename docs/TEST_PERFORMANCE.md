@@ -9,6 +9,8 @@ so fixtures reset before their stateful dependents run. Repeating individual
 cases with `--repeat` cannot validate the create/init/install/restore journey.
 Each pass retains its own `test-results-<pass>.xml` report and the first failed
 suite stops the runner with a nonzero status.
+Numbered reports from earlier invocations are removed before the first pass,
+including when a rerun requests fewer passes or fails early.
 
 The developer integration prints phase markers before compilation, previews,
 scripts, type checks, Jasmine runs and terminal checks. Failed macOS desktop
@@ -18,6 +20,8 @@ frontend error. Missing crash reports do not change the test's failure status.
 The developer specs print each started spec through the driver's bridge, retaining
 the last name if the page stalls. Self-build drivers have a native watchdog that
 expires before CTest's timeout, including its forced-close grace period.
+The progress callback is optional: running the specs in an ordinary developer
+application or losing the diagnostic bridge does not change their results.
 
 ## Resource audit
 

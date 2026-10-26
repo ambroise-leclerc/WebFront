@@ -44,11 +44,26 @@ foreach(pass RANGE 1 3)
         message(FATAL_ERROR "Missing JUnit report for suite pass ${pass}")
     endif()
 endforeach()
-# Failures must stop the loop and propagate a nonzero process status.
-file(WRITE "${WORK}/source/mutate.cmake" "message(FATAL_ERROR \"Deliberate suite failure\")\n")
-file(REMOVE "${WORK}/build/test-results-2.xml" "${WORK}/build/test-results-3.xml")
+# A shorter successful rerun must discard old passes without touching unrelated reports.
+file(WRITE "${WORK}/build/test-results-manual.xml" "keep")
+file(WRITE "${WORK}/build/test-results-2-extra.xml" "keep")
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=1 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${WORK}/build/test-results-3.xml"
+    OR NOT EXISTS "${WORK}/build/test-results-manual.xml" OR NOT EXISTS "${WORK}/build/test-results-2-extra.xml")
+    message(FATAL_ERROR "A shorter rerun must keep only its own numbered reports: ${output}${error}")
+endif()
+# Recreate the successful reports to exercise cleanup when the next invocation fails early.
 execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
     RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
-if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR NOT "${output}${error}" MATCHES "Deliberate suite failure")
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Preparing reports for the failed rerun failed: ${output}${error}")
+endif()
+# Failures must stop the loop and propagate a nonzero process status.
+file(WRITE "${WORK}/source/mutate.cmake" "message(FATAL_ERROR \"Deliberate suite failure\")\n")
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${WORK}/build/test-results-3.xml"
+    OR NOT "${output}${error}" MATCHES "Deliberate suite failure")
     message(FATAL_ERROR "The runner must stop at the first failed suite: ${output}${error}")
 endif()

@@ -15,6 +15,14 @@ set(options --test-dir "${BUILD_DIR}" --output-on-failure --no-tests=error --par
 if(CONFIG)
     list(APPEND options -C "${CONFIG}")
 endif()
+# A reused build directory must only expose reports from this invocation.
+file(GLOB previous_reports LIST_DIRECTORIES FALSE "${BUILD_DIR}/test-results-*.xml")
+foreach(report IN LISTS previous_reports)
+    get_filename_component(report_name "${report}" NAME)
+    if(report_name MATCHES "^test-results-[1-9][0-9]*\\.xml$")
+        file(REMOVE "${report}")
+    endif()
+endforeach()
 foreach(pass RANGE 1 ${REPEAT})
     message(STATUS "CTest suite pass ${pass}/${REPEAT}")
     execute_process(COMMAND "${CTEST_EXECUTABLE}" ${options}
