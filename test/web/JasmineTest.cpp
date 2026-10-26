@@ -276,6 +276,7 @@ private:
         });
         webFront->cppFunction("callBackCaller", [](TestWF::UI caller, const string& token) {
             caller.jsFunction("webfrontTests.receiveFromCaller")(token);
+            return "cpp-result:" + token;
         });
         webFront->cppFunction("browserReady", [this](TestWF::UI ui) {
             // Raw origin probes create extra sessions; bind calls to the document reporting ready.

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Accepted stdnet connections enable `TCP_NODELAY`, including after WebSocket upgrade (#379).
+  This removes the Nagle/delayed-ACK interaction that could delay a callback's return
+  after it sent a browser message. A real-socket regression checks the option directly;
+  the shared browser suite checks a callback sending a message before returning a value.
+
 - HTTP status-line buffers belong to each response until its asynchronous send ends (#376).
   Ordinary responses announce `Connection: close`, matching the existing one-request-per-socket
   server behavior; WebSocket upgrades remain open. Unit and real-browser regressions cover

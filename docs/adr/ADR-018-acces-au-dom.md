@@ -131,13 +131,14 @@ forcée (`offsetHeight`). Chaque ligne compte cinq nœuds (`li`, `span`, texte, 
 ### Un délai de 40 ms dans le transport
 
 La première série a révélé un plancher de **40 ms** sur tout appel JavaScript → C++ dont le callback envoie lui-même
-un message avant de rendre son résultat (le lot, puis le `functionReturn`). Le serveur n'active pas `TCP_NODELAY` :
+un message avant de rendre son résultat (le lot, puis le `functionReturn`). Lors de ces mesures, le serveur n'activait pas `TCP_NODELAY` :
 la seconde petite trame attend, sous l'algorithme de Nagle, l'acquittement de la première, que la pile du navigateur
 retarde (« delayed ACK » de Linux). Une modification locale d'une ligne (option `stdnet::ip::tcp_no_delay` sur chaque
-socket acceptée, non livrée) fait disparaître ce plancher. Le défaut touche déjà les applications actuelles dès qu'un
-callback appelle `ui.jsFunction` avant de rendre ; il fait l'objet de #379. Les deux séries sont données.
+socket acceptée, non livrée lors des mesures) fait disparaître ce plancher. Le défaut touchait les applications dès qu'un
+callback appelait `ui.jsFunction` avant de rendre ; #379 active désormais cette option avec des régressions sur socket réelle
+et navigateur (voir [ADR-005, version 3.2](ADR-005-evolution-reseau-asio-stdnet.md)). Les deux séries historiques sont données.
 
-| Mesure | Cœur actuel | Avec `TCP_NODELAY` |
+| Mesure | Cœur lors des mesures | Avec `TCP_NODELAY` |
 | --- | ---: | ---: |
 | Construire 1 000 nœuds depuis C++ (14 513 octets, 2 404 opérations, encodage 0,05 ms) | 42 ms | 23 ms |
 | Même liste construite en JavaScript local | 18 ms | 19 ms |

@@ -24,15 +24,23 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 
 The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
 
+## Accepted TCP connections (#379, 2026-10-26)
+
+The stdnet provider enables `TCP_NODELAY` before handing accepted sockets to HTTP;
+WebSocket upgrades retain it. This avoids Nagle holding a callback's return behind
+an earlier browser message while waiting for a delayed ACK. The real-socket test
+checks the option after upgrade without a timing threshold; the shared Jasmine
+suite exercises the message followed by a return value on every native frontend.
+
 ## DOM access proposal (#378, 2026-10-26)
 
 [ADR-018](adr/ADR-018-acces-au-dom.md) is **proposed**: C++ would own DOM subtrees that the page lends it (islands)
 through a bounded, validated stream of batched mutations, while React and other UI libraries keep their own DOM and receive
 C++ values through an external store; C++26 reflection would stay an optional layer for generated interfaces. The measured
 throwaway prototypes are not in the repository (commit `ef2bb25` of PR #385 keeps them); there is no public DOM API and the
-wire format is unchanged. The prototypes found that the server does not set `TCP_NODELAY`: a bridge callback that calls
-`ui.jsFunction` before returning delays its result by about 40 ms on Linux (Nagle and delayed acknowledgements). The fix is
-tracked by #379; the behavior is unchanged in this release.
+wire format is unchanged. The prototypes identified a delay of about 40 ms on Linux when a bridge callback calls
+`ui.jsFunction` before returning (Nagle and delayed acknowledgements). The correction enables `TCP_NODELAY` in #379,
+as described above.
 
 ## CI reliability and repository cleanup (#376, 2026-10-26)
 

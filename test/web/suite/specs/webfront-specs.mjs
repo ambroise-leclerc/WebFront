@@ -262,8 +262,9 @@ describe('WebFront browser integration', () => {
             .toBeRejectedWithError(RangeError, 'WebFront strings cannot exceed 65535 UTF-8 bytes');
     });
 
-    it('lets a C++ callback call back the browser that called it', async () => {
-        await webFront.cppFunction('callBackCaller')('caller-token');
+    it('receives a callback message and then its return value on the same connection', async () => {
+        await expectAsync(webFront.cppFunction('callBackCaller')('caller-token'))
+            .toBeResolvedTo('cpp-result:caller-token');
         await expectAsync(callerCall).toBeResolvedTo('caller-token');
     });
 

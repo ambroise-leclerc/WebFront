@@ -33,7 +33,13 @@ public:
     /// Completes with the number of bytes read, zero at the end of the stream.
     static auto Receive(Socket& socket, MutableBuffer buffer) { return ::stdnet::async_receive(socket, buffer); }
     static auto Send(Socket& socket, const auto& buffers) { return ::stdnet::async_write(socket, buffers); }
-    static auto Accept(Acceptor& acceptor) { return ::stdnet::async_accept(acceptor); }
+    /// Completes with an accepted socket whose Nagle algorithm is disabled; a failure to set the option completes with an error.
+    static auto Accept(Acceptor& acceptor) {
+        return ::stdnet::ex::then(::stdnet::async_accept(acceptor), [](Socket socket) {
+            socket.set_option(::stdnet::ip::tcp_no_delay(true));
+            return socket;
+        });
+    }
     /// Completes on the context of a socket or an acceptor once the duration has elapsed, or stops first on a stop request.
     template <typename Rep, typename Period>
     static auto ResumeAfter(auto& ioObject, std::chrono::duration<Rep, Period> duration) {

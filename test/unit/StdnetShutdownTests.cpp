@@ -105,6 +105,31 @@ SCENARIO("The HTTP listener is ready before its event loop starts") {
     REQUIRE(client.is_open());
 }
 
+SCENARIO("Accepted connections retain TCP_NODELAY through WebSocket upgrade") {
+    GIVEN("A real stdnet HTTP server and a loopback client") {
+        const auto                          port = freePort();
+        http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
+        Stdnet::IoContext                   clientContext;
+        Stdnet::Socket                      client(clientContext);
+        bool                                upgraded = false;
+        bool                                noDelay  = false;
+        server.onUpgrade([&](Stdnet::Socket&& socket) {
+            ::stdnet::ip::tcp_no_delay option;
+            socket.get_option(option);
+            noDelay  = option.value();
+            upgraded = true;
+            server.stop();
+        });
+        connect(client, port);
+        client.send(std::as_bytes(std::span(upgradeRequest)));
+        server.run();
+        THEN("the socket passed to the bridge has Nagle disabled") {
+            REQUIRE(upgraded);
+            REQUIRE(noDelay);
+        }
+    }
+}
+
 SCENARIO("Stopping a running server releases its connections") {
     GIVEN("A running server with an idle client connection") {
         const auto port = freePort();
