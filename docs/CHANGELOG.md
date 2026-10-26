@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Tests are organized in tiers by CTest label: `fast` (unit tests, about one second), the standard tier and
+  `portability` (the consumer project). CI runs the fast tier first, excludes `portability` from pull requests into
+  `develop`, and runs the advanced tier (three suite repetitions, a portability matrix, sanitizers, fuzzers, CEF) weekly
+  and on pull requests into `master`. `RunTestSuite.cmake` accepts `LABEL_EXCLUDE`. See [TEST_TIERS](TEST_TIERS.md) (#388).
+
 - Compatible `wf` regression commands share browser sessions, with fresh command realms and individual CTest reports
   (#388). The suite runner reuses one Xvfb display on Linux, supports bounded `PARALLEL`, and records detailed phase/spec
   timings. Independent driver groups use OS-assigned ports; `WebFrontConfig::port = "0"` and `app.port()` expose this

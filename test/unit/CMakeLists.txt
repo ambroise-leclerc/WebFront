@@ -44,7 +44,8 @@ configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
-catch_discover_tests(tests PROPERTIES TIMEOUT 60)
+# Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
+catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
 
 add_test(NAME ReleaseVersionConsistency
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DEXPECTED_VERSION=${PROJECT_VERSION}
@@ -166,7 +167,7 @@ add_test(NAME AddSubdirectoryConsumer
         --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${_consumer_dependency_args}
             -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
             -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
-set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)
+set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600 LABELS portability)
 
 # Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
 add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)
@@ -192,9 +193,9 @@ find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     add_test(NAME TestPerformanceProfile COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestProfileTests.py")
     add_test(NAME FuzzerConcurrency COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/fuzz/TestRunFuzzers.py")
-    set_tests_properties(TestPerformanceProfile FuzzerConcurrency PROPERTIES TIMEOUT 15)
+    set_tests_properties(TestPerformanceProfile FuzzerConcurrency PROPERTIES TIMEOUT 15 LABELS fast)
 endif()
 if(Python3_Interpreter_FOUND)
     add_test(NAME TestResourceMeasurement COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestMeasurement.py")
-    set_tests_properties(TestResourceMeasurement PROPERTIES TIMEOUT 15)
+    set_tests_properties(TestResourceMeasurement PROPERTIES TIMEOUT 15 LABELS fast)
 endif()

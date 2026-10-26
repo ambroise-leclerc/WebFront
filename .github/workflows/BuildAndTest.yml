@@ -155,6 +155,10 @@ jobs:
             if (-not $version) { throw "WebView2 runtime version is missing: $($executable.FullName)" }
             Write-Host "WebView2 runtime $version at $($executable.FullName)"
           }
+      # The fast tier (docs/TEST_TIERS.md): unit tests only, so a plain regression is reported before the browser suite starts.
+      - name: Fast tests
+        shell: bash
+        run: ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
       - name: Capture CTest dependency graph
         shell: bash
         run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
@@ -164,7 +168,8 @@ jobs:
         run: >-
           python3 test/tools/MeasureCommand.py --output build/suite-resources.json --
           cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
-          -DREPEAT=${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && '3' || '1' }}
+          -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
+          -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
           -P test/cmake/RunTestSuite.cmake
       - name: Analyze CTest timings
         if: always()
@@ -271,8 +276,57 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps: *desktop-steps
 
+  # Portability tier: the library consumed from another project, across generators and compilers, with a cold compiler cache.
+  # It runs weekly and on pull requests into master, where it is a required check (docs/TEST_TIERS.md).
+  portability:
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)
+    name: portability (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-gcc-ninja, os: ubuntu-24.04, generator: Ninja}
+          - {name: linux-clang-makefiles, os: ubuntu-24.04, generator: Unix Makefiles, clang: true}
+          - {name: windows-msvc-ninja, os: windows-2025, generator: Ninja}
+          - {name: macos-appleclang-ninja, os: macos-26, generator: Ninja}
+          # Not yet exercised on a hosted runner: reported, never blocking.
+          - {name: windows-msvc-visual-studio, os: windows-2025, generator: Visual Studio 17 2022, experimental: true}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-
+      - name: Initialize MSVC environment
+        if: runner.os == 'Windows' && matrix.generator == 'Ninja'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Install Clang 23
+        if: matrix.clang
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 lld-23
+          echo "CC=clang-23" >> "$GITHUB_ENV"
+          echo "CXX=clang++-23" >> "$GITHUB_ENV"
+      # No compiler cache: a new user compiles everything.
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Portability tests
+        shell: bash
+        run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
+
   sanitizers:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -361,7 +415,7 @@ jobs:
 
   web-integration:
     timeout-minutes: 30
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
     strategy:
       fail-fast: false
       matrix:

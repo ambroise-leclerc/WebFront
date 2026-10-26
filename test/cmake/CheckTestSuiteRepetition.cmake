@@ -103,3 +103,29 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "A failed display launch must discard only numbered stale reports: ${output}${error}")
     endif()
 endif()
+
+# A label exclusion leaves out the tests carrying it, and only them.
+file(MAKE_DIRECTORY "${WORK}/labels/source")
+file(WRITE "${WORK}/labels/source/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.31)
+project(Labelled LANGUAGES NONE)
+enable_testing()
+add_test(NAME Standard COMMAND "${CMAKE_COMMAND}" -E true)
+add_test(NAME Portable COMMAND "${CMAKE_COMMAND}" -E false)
+set_tests_properties(Portable PROPERTIES LABELS portability)
+]=])
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/labels/source" -B "${WORK}/labels/build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Label fixture configure failed: ${output}${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release -DLABEL_EXCLUDE=portability
+    -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0 OR "${output}${error}" MATCHES "Portable")
+    message(FATAL_ERROR "The excluded label must not run: ${output}${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release
+    -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    message(FATAL_ERROR "Without an exclusion the portability test must run and fail: ${output}${error}")
+endif()

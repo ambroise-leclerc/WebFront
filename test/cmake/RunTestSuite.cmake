@@ -25,6 +25,10 @@ set(options --test-dir "${BUILD_DIR}" --output-on-failure --no-tests=error --par
 if(CONFIG)
     list(APPEND options -C "${CONFIG}")
 endif()
+# Labels (docs/TEST_TIERS.md): the standard tier excludes the portability tests that the weekly and master runs add back.
+if(LABEL_EXCLUDE)
+    list(APPEND options -LE "${LABEL_EXCLUDE}")
+endif()
 # A reused build directory must only expose reports from this invocation.
 file(GLOB previous_reports LIST_DIRECTORIES FALSE "${BUILD_DIR}/test-results-*.xml")
 foreach(report IN LISTS previous_reports)
@@ -47,7 +51,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT "$ENV{WEBFRONT_TEST_SHARED_DI
     if(XVFB_RUN)
         execute_process(COMMAND "${CMAKE_COMMAND}" -E env WEBFRONT_TEST_SHARED_DISPLAY=1
             "${XVFB_RUN}" -a "${CMAKE_COMMAND}" -DBUILD_DIR=${BUILD_DIR} -DCONFIG=${CONFIG}
-            -DREPEAT=${REPEAT} -DPARALLEL=${PARALLEL} -P "${CMAKE_CURRENT_LIST_FILE}" RESULT_VARIABLE status)
+            -DREPEAT=${REPEAT} -DPARALLEL=${PARALLEL} "-DLABEL_EXCLUDE=${LABEL_EXCLUDE}" -P "${CMAKE_CURRENT_LIST_FILE}" RESULT_VARIABLE status)
         if(NOT status EQUAL 0)
             message(FATAL_ERROR "CTest suite failed: ${status}")
         endif()
