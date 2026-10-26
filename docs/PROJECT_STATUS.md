@@ -24,6 +24,14 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 
 The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
 
+## Accepted TCP connections (#379, 2026-10-26)
+
+The stdnet provider enables `TCP_NODELAY` before handing accepted sockets to HTTP;
+WebSocket upgrades retain it. This avoids Nagle holding a callback's return behind
+an earlier browser message while waiting for a delayed ACK. The real-socket test
+checks the option after upgrade without a timing threshold; the shared Jasmine
+suite exercises the message followed by a return value on every native frontend.
+
 ## CI reliability and repository cleanup (#376, 2026-10-26)
 
 HTTP responses now own their status-line storage instead of sharing mutable static
