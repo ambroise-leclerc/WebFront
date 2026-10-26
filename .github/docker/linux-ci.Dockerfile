@@ -11,11 +11,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # sudo: the composite actions of the repository call it, as they do on a hosted runner. build-essential: the CTest
 # fixtures configure sub-projects with CMake's default generator and compiler, which a hosted runner also provides.
+# libjson-xs-perl: a recommendation of lcov, which falls back to a pure-Perl parser about eight times slower without it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
         ca-certificates curl git sudo tar xz-utils build-essential \
         ninja-build pkg-config python3 \
-        gcc-16 g++-16 libwebkitgtk-6.0-dev lcov \
+        gcc-16 g++-16 libwebkitgtk-6.0-dev lcov libjson-xs-perl \
         xvfb xauth \
     && rm -rf /var/lib/apt/lists/*
 
