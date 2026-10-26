@@ -11,7 +11,7 @@ class MeasurementTests(unittest.TestCase):
     def test_resources_and_failed_command_status_are_retained(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'resources.json'
-            self.assertEqual(measure([sys.executable, '-c', 'import time; time.sleep(0.4); raise SystemExit(7)'], output, 0.05), 7)
+            self.assertEqual(measure([sys.executable, '-c', 'import time; time.sleep(1.0); raise SystemExit(7)'], output, 0.05), 7)
             report = json.loads(output.read_text())
             self.assertEqual(report['exit_code'], 7)
             self.assertGreaterEqual(report['sampled_peak_processes'], 1)

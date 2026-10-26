@@ -17,7 +17,7 @@ def ps_seconds(text):
     return seconds + float(days or 0) * 86400
 
 
-def snapshot():
+def snapshot(root=None):
     """pid -> (parent, resident bytes, cumulative CPU seconds). Sampling can miss short-lived children."""
     result = {}
     if sys.platform.startswith('linux'):
@@ -57,17 +57,29 @@ def snapshot():
         psapi.GetProcessMemoryInfo.argtypes = [w.HANDLE, c.POINTER(Memory), w.DWORD]
         handle = kernel.CreateToolhelp32Snapshot(2, 0)
         entry = Entry(size=c.sizeof(Entry))
+        parents = {}
         more = kernel.Process32FirstW(handle, c.byref(entry))
         while more:
-            process = kernel.OpenProcess(0x1000 | 0x10, False, entry.pid)
+            parents[entry.pid] = entry.parent
+            more = kernel.Process32NextW(handle, c.byref(entry))
+        # Opening every process on a loaded runner can outlast a short command: only query the root's descendants.
+        wanted = set(parents)
+        if root is not None:
+            wanted = {root}
+            while True:
+                children = {pid for pid, parent in parents.items() if parent in wanted}
+                if children <= wanted:
+                    break
+                wanted |= children
+        for pid in wanted & set(parents):
+            process = kernel.OpenProcess(0x1000 | 0x10, False, pid)
             if process:
                 memory = Memory(size=c.sizeof(Memory))
                 times = [w.FILETIME() for _ in range(4)]
                 if psapi.GetProcessMemoryInfo(process, c.byref(memory), memory.size) and kernel.GetProcessTimes(process, *map(c.byref, times)):
                     cpu = sum((item.dwHighDateTime << 32) + item.dwLowDateTime for item in times[2:]) / 10_000_000
-                    result[entry.pid] = (entry.parent, memory.working, cpu)
+                    result[pid] = (parents[pid], memory.working, cpu)
                 kernel.CloseHandle(process)
-            more = kernel.Process32NextW(handle, c.byref(entry))
         kernel.CloseHandle(handle)
     else:
         raise RuntimeError('Unsupported resource sampler platform: ' + sys.platform)
@@ -80,7 +92,7 @@ def measure(command, output, interval=0.25):
     observed = {}
     peak_memory = peak_count = 0
     while process.poll() is None:
-        processes = snapshot()
+        processes = snapshot(process.pid)
         family = {process.pid}
         while True:
             children = {pid for pid, (parent, _, _) in processes.items() if parent in family}

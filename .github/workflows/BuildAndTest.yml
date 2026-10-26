@@ -172,7 +172,7 @@ jobs:
         run: python3 test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml --workers 4 --log build/Testing/Temporary/LastTest.log --ninja-log build/.ninja_log --output build/test-profile.txt
       - name: Probe compiler cache on the embedded builds
         # Diagnostic (#388): do the Life embedded translation units hit the compiler cache once the suite has warmed it?
-        if: success()
+        if: ${{ !cancelled() }}
         continue-on-error: true
         shell: bash
         run: |
