@@ -3,7 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
-from MeasureCommand import measure
+from MeasureCommand import measure, ps_seconds
 from CompareCoverage import hits
 
 
@@ -16,6 +16,11 @@ class MeasurementTests(unittest.TestCase):
             self.assertEqual(report['exit_code'], 7)
             self.assertGreaterEqual(report['sampled_peak_processes'], 1)
             self.assertGreater(report['sampled_peak_family_rss_bytes'], 0)
+
+    def test_ps_cpu_time_includes_days(self):
+        self.assertEqual(ps_seconds('12:03.50'), 723.5)
+        self.assertEqual(ps_seconds('1:02:03'), 3723)
+        self.assertEqual(ps_seconds('1-02:03:04.5'), 86400 + 7384.5)
 
     def test_coverage_checks_counters_not_just_percentages(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -34,7 +34,7 @@ profiles and URLs/ports. The normal suite resets both; never point the two revis
 
 Filter the familiar CTest names with `ctest --test-dir build -R WfDriverTestFails --output-on-failure`. CTest includes the
 session fixture and its prerequisite project setup. For a truly isolated process per case, configure
-`-DWEBFRONT_TEST_SESSIONS=OFF` and use the same filter. Repetition must repeat the complete fixture graph, rather than
+`-DWEBFRONT_TEST_SESSIONS=OFF` and use the same filter. A case that blocks consumes its session's remaining budget and the later cases then report "No result for the suite case": rerun with sessions off to find the cause. Repetition must repeat the complete fixture graph, rather than
 `ctest --repeat` on individual stateful commands.
 
 The driver's session interface also accepts an explicit list and a name substring filter:

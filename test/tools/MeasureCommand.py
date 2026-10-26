@@ -8,6 +8,15 @@ import sys
 import time
 
 
+def ps_seconds(text):
+    """Parse ps's [[dd-]hh:]mm:ss[.ss] cumulative CPU time."""
+    days, _, clock = text.rpartition('-')
+    seconds = 0.0
+    for part in clock.split(':'):
+        seconds = seconds * 60 + float(part)
+    return seconds + float(days or 0) * 86400
+
+
 def snapshot():
     """pid -> (parent, resident bytes, cumulative CPU seconds). Sampling can miss short-lived children."""
     result = {}
@@ -25,10 +34,7 @@ def snapshot():
         output = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,rss=,time='], text=True)
         for line in output.splitlines():
             pid, parent, rss, cpu = line.split()
-            parts = cpu.replace('-', ':').split(':')
-            seconds = 0
-            for part in parts:
-                seconds = seconds * 60 + float(part)
+            seconds = ps_seconds(cpu)
             result[int(pid)] = (int(parent), int(rss) * 1024, seconds)
     elif sys.platform == 'win32':
         import ctypes as c

@@ -113,7 +113,7 @@ struct PolicyLifecycleFrontend {
         } else
 #endif
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
-            if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
+        if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
             using namespace webfront::frontend::detail::wkwebview;
             initialize();
             Object  pool(send(type("NSAutoreleasePool"), "new"));

@@ -3,6 +3,10 @@
 option(WEBFRONT_TEST_SESSIONS "Run compatible wf commands in one browser with fresh frames" ON)
 
 function(webfront_record_suite_case group name status command timeout)
+    # Words travel through CMake lists and JSON: refuse what they cannot carry instead of corrupting them.
+    if(command MATCHES "[\r\n\t]" OR command MATCHES ";")
+        message(FATAL_ERROR "Suite case ${name}: a command word contains a control or list character")
+    endif()
     string(REPLACE "|" ";" words "${command}")
     set(arguments "[]")
     set(index 0)

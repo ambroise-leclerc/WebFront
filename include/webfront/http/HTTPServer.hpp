@@ -554,6 +554,7 @@ private:
         acceptor.set_option(typename Net::Acceptor::reuse_address(true));
         acceptor.bind(endpoint);
         acceptor.listen();
+        // Only the literal "0" asks for an OS-assigned port; any other value is already the port.
         if (requestedPort != "0")
             return std::string(requestedPort);
         if constexpr (requires { acceptor.local_endpoint().port(); })
