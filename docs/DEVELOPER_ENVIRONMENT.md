@@ -379,8 +379,7 @@ open, Enter starts a new session. No system shell is exposed.
 - **Output streams** while a command runs, for `wf` and C++ commands alike, without a size limit: C++ output is
   sent in pieces below the 65,535-byte limit of bridge strings.
 
-An application adds its own commands with `webfront::Commands` (`<webfront/Commands.hpp>`), which replaces
-`terminal::Shell` of the removed terminal component ([migration](UI_COMPONENTS.md)). A command is a coroutine:
+An application adds its own commands with `webfront::Commands` (`<webfront/Commands.hpp>`). A command is a coroutine:
 
 ```cpp
 #include <webfront/Commands.hpp>

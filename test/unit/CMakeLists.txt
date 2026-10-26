@@ -11,6 +11,18 @@ target_link_libraries(Catch2WithMain PRIVATE WebFront_test_hardening WebFront_te
 find_package(Threads)
 include(CTest)
 
+add_test(NAME TestSuiteRepetition COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/suite-repetition -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestSuiteRepetition.cmake)
+set_tests_properties(TestSuiteRepetition PROPERTIES TIMEOUT 30)
+
+# Optional maintainer tooling: the default C++ build must not require Doxygen.
+find_program(WEBFRONT_TEST_DOXYGEN doxygen)
+if(WEBFRONT_TEST_DOXYGEN)
+  add_test(NAME DoxygenDocumentation COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/doxygen-test -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDoxygen.cmake)
+  set_tests_properties(DoxygenDocumentation PROPERTIES TIMEOUT 60)
+endif()
+
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)

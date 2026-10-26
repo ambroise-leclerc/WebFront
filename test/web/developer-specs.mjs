@@ -2,6 +2,7 @@ import {withTimers, untilReady} from './timers.mjs';
 // Autonomous real-engine test: compiled WASM, npm graph, Life bridge, preview, cache and embedding.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const progress = message => webFront.cppFunction('test.progress')(message);
 const call = (name, ...args) => webFront.cppFunction(`webfront.developer.${name}`)(...args);
 async function readFile(path) {
     const chunks = [];
@@ -27,6 +28,18 @@ try {
         if (text.startsWith('Developer environment ready.')) break;
         if (attempt === 299) throw new Error('Bootstrap readiness timed out');
         await delay(100);
+    }
+    await progress('bootstrap ready');
+    const httpResponses = await Promise.all([
+        fetch('/fixtures/session.html', {cache: 'no-store'}),
+        fetch('/fixtures/session.html', {method: 'POST', cache: 'no-store'}),
+    ]);
+    assert(httpResponses[0].status === 200 && httpResponses[1].status === 501,
+        'Concurrent HTTP responses must retain their own status lines');
+    for (const response of httpResponses) {
+        assert(response.headers.get('Connection')?.toLowerCase() === 'close',
+            'HTTP responses must announce closure while the bridge WebSocket stays connected');
+        await response.arrayBuffer();
     }
     const runtime = await import('/webfront/developer/environment/runtime.mjs');
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
@@ -67,6 +80,7 @@ try {
         (await runtime.complete('wf dev m', context)).candidates.includes('main'), 'Build/dev completion must list manifest entries');
     const frameBeforeBuild = frame.contentDocument;
     const frameURLBeforeBuild = frame.contentWindow.location.href;
+    await progress('build and incremental preview');
     await runtime.execute(['build'], context);
     assert(frame.contentDocument === frameBeforeBuild && frame.contentWindow.location.href === frameURLBeforeBuild,
         'wf build must leave the preview alone');
@@ -133,6 +147,7 @@ try {
         new TextDecoder().decode(await readFile('.webfront/developer/build/two/app.js')) === secondEntryBuild, 'Failure in a later entry must preserve the entire previous build');
     await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
     await writeFile('webfront.project.json', JSON.stringify(manifest));
+    await progress('Life preview and bridge');
     // Exercise the maintained public application rather than the retired PI demo.
     await runtime.execute(['preview'], context);
     for (let attempt = 0; !frame.contentDocument?.querySelector('[data-testid="pattern-blinker"]'); ++attempt) {
@@ -258,6 +273,7 @@ try {
     const failed = await runtime.execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
     assert(failed, 'Missing packages must reject');
     assert(JSON.stringify(await runtime.readLock(webFront)) === JSON.stringify(lock), 'A failed install must preserve the lock');
+    await progress('scripts and cancellation');
     // wf run and wf exec: WebFront scripts in a dedicated Worker, under the manifest permissions.
     const scriptOutput = [];
     const runContext = (signal = new AbortController().signal) => ({...context, signal, write: text => { scriptOutput.push(text); console.log(text); }});
@@ -345,12 +361,15 @@ try {
     assert(/^webfront-fixture-lib@1\.\d+\.\d+ hello$/.test(new TextDecoder().decode(await readFile('generated/script/tool.txt'))), 'The entry must bundle its locked dependency');
     assert(/only declares an npm "bin"/.test((await failure(runtime.execute(['exec', 'webfront-fixture-nodebin'], runContext())))?.message), 'A package with only an npm bin must be refused');
     assert(/no WebFront executable entry/.test((await failure(runtime.execute(['exec', 'webfront-fixture-lib'], runContext())))?.message), 'A browser package without an entry must be refused');
+    await progress('TypeScript checks');
     // wf check: a real TypeScript type check in a Worker, with the typescript and the declarations of the lock, all
     // served by the local registry.
     const checkRequests = [];
-    globalThis.fetch = (input, init) => {
-        checkRequests.push(new URL(input instanceof Request ? input.url : input, location.href).href);
-        return pageFetch(input, init);
+    globalThis.fetch = async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input, location.href).href;
+        checkRequests.push(url);
+        try { return await pageFetch(input, init); }
+        catch (error) { throw new Error(`Registry request failed: ${url}: ${error.message}`, {cause: error}); }
     };
     const checkFiles = {
         'tsconfig.json': JSON.stringify({compilerOptions: {strict: true, target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', lib: ['ES2022']}, include: ['check']}),
@@ -385,12 +404,15 @@ try {
     };
     try {
         assert(/needs the typescript package: run wf install typescript@6/.test((await checked()).error?.message), 'wf check must ask for typescript');
+        await progress('install TypeScript 4.9.5');
         await runtime.execute(['install', 'typescript@4.9.5'], context);
         const old = await checked();
         assert(/supports typescript 5\.x and 6\.x .* not typescript@4\.9\.5/.test(old.error?.message), `An unsupported typescript must be refused: ${old.error}`);
+        await progress('install TypeScript 5.9.3 and declarations');
         await runtime.execute(['install', 'typescript@5.9.3', 'webfront-fixture-typed', 'webfront-fixture-legacy', 'webfront-fixture-untyped', '@types/webfront-fixture-untyped'], context);
         const five = await checked();
         assert(five.text && five.output.includes('No type errors in 2 project files (TypeScript 5.9.3).'), `TypeScript 5.9 must accept the project: ${five.error}\n${five.output}`);
+        await progress('install TypeScript 6.0.3');
         await runtime.execute(['install', 'typescript@6.0.3'], context);
         const six = await checked();
         assert(/Type check completed/.test(six.text) && six.output.includes('No type errors in 2 project files (TypeScript 6.0.3).'), `TypeScript 6.0 must accept the project: ${six.error}\n${six.output}`);
@@ -439,6 +461,7 @@ try {
     // wf test: the specs of the manifest under the locked jasmine-core, in a frame of this page.
     const testOutput = [];
     let testRun = 0;
+    await progress('Jasmine runs');
     const tested = async (args = [], extra = {}) => {
         const label = `wf test #${++testRun} ${args.join(' ')}`;
         await webFront.cppFunction('test.progress')(`${label}: starting`);
@@ -654,6 +677,7 @@ try {
     assert(exits[2] === 1, 'A command that fails and a result that cannot be sent must both end non-zero');
     await runtime.runNonInteractive(['list'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
     assert(exits[3] === 1, 'A result that cannot be sent must not end the session with 0');
+    await progress('terminal and sessions');
     // The terminal: the application's C++ commands, run in this browser's session.
     assert(JSON.stringify([...runtime.builtinNames].sort()) === JSON.stringify([...runtime.reservedNames].sort()),
         `The terminal's own commands must be the names reserved to it: ${runtime.builtinNames}`);

@@ -373,6 +373,9 @@ int run(const Options& options, Setup&& setup = {}) {
     app.cppFunction("wf.bootstrapFailed", [&outcome](std::string message) {
         outcome.bootstrapFailed(std::move(message));
     });
+    app.cppFunction("wf.progress", [](std::string message) {
+        std::cout << "wf spec: " << message << std::endl;
+    });
     setup.configure(app);
     app.bootstrap("developer",
                   {.environment = "/driver/environment.tgz",

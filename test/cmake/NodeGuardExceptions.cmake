@@ -26,8 +26,6 @@ set(NODE_GUARD_EXCEPTIONS
     # The proof that no JavaScript runtime is needed: the action that deletes them names them.
     ".github/actions/remove-node/action.yml|tool-word|names the tools it removes from the runner"
     # Migration note and history.
-    "docs/NODE_TOOLS_MIGRATION.md|npm-command|migration note: names the former commands"
-    "docs/NODE_TOOLS_MIGRATION.md|tool-word|migration note: names the former tools"
     "docs/CHANGELOG.md|node-config|history of the releases, which names the options that existed"
     # Diagnostics and tests of the rejection of Node APIs.
     "js/developer/environment/typecheck-snapshot.mjs|node-config|the layout of /project/node_modules that the TypeScript module resolver reads: wf check cannot resolve a package without it"
