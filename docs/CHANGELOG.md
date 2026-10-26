@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Repository cleanup (#376): consolidate the gzip benchmark and differential-validation commands
+  into [HTTP assets](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation); remove
+  `GZIP_CACHE_MEASUREMENTS.md`, `GZIP_DECODER_MEASUREMENTS.md` and the one-off profiles under
+  `docs/test-performance/`. Their dated results remain in Git and new CI reports are workflow artifacts.
+  `PROJECT_STATUS.md` now describes supported paths, contracts and outstanding limitations;
+  completed migration/qualification records remain in Git and this changelog. Remove the unreferenced
+  Hello World and retired Signal Studio screenshots. Active build, test, publication and animation
+  generation tools, plus the measurement evidence cited by proposed ADRs, are retained.
+
 - Tests are organized in tiers by CTest label: `fast` (unit tests, about one second), the standard tier and
   `portability` (the consumer project). CI runs the fast tier first, excludes `portability` from pull requests into
   `develop`, and runs the advanced tier (three suite repetitions, a portability matrix, sanitizers, fuzzers, CEF) weekly
@@ -56,7 +65,7 @@
 - Gzip identity fallback reuses a bounded validated-representation cache for GET and HEAD (#281).
   Cold decoding uses buffered bit reads and a small Huffman lookup (#282), with unchanged
   allocation behavior, strict stream validation and output budgets. Release benchmarks and
-  test-only zlib differential/sanitizer validation are recorded in `docs/GZIP_DECODER_MEASUREMENTS.md`.
+  test-only zlib differential/sanitizer validation are recorded in [HTTP asset validation](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation).
 
 - `WebFrontLifeDeveloper` starts without argument on `./life-project` (created when missing, reused untouched otherwise) and the
   pinned environment; the explicit `<project> [<environment-url> <sha512-integrity>]` form remains. At configuration, the
