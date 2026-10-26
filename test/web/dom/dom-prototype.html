@@ -1,0 +1,263 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebFront DOM prototype</title>
+<style>
+    body { font: 13px system-ui, sans-serif; margin: 8px; }
+    .rows { columns: 6; margin: 0; padding: 0; list-style: none; }
+    .row button { margin-left: 4px; }
+    .inspector .field { display: block; margin: 2px 0; }
+</style>
+<div id="list"></div>
+<div id="events"></div>
+<div id="hostile"></div>
+<div id="react-root"></div>
+<script src="WebFront.js"></script>
+<script src="dom-interpreter.js"></script>
+<script src="react-bridge.js"></script>
+<script>
+    // ADR-018 (#378): drives the scenarios of DomPrototype.cpp, checks the DOM after each one and reports the timings.
+    // A wrong DOM fails the run; timings never do. Times are wall-clock milliseconds measured in the page, from the
+    // request to the resolution of the scenario's Promise (the batch is applied before the Promise resolves, since both
+    // travel on the same WebSocket in order), followed by a forced layout.
+    "use strict";
+    const sizes = [200, 2000];  // rows of five nodes: 1 000 and 10 000 nodes
+    const runs = 5;
+    const clicks = 100;
+    const failures = [];
+    const trace = [];
+    const check = (condition, message) => { if (!condition) failures.push(message); };
+    const cpp = name => webFront.cppFunction(name);
+    const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+    // WebKit rounds performance.now() to the millisecond: sub-millisecond round trips are read as means of many.
+    const mean = values => values.reduce((total, value) => total + value, 0) / values.length;
+    const layout = () => document.body.offsetHeight;
+
+    for (const name of ["list", "events", "hostile"])
+        wfDom.island(name, document.getElementById(name));
+
+    async function scenario(name, count = 0) {
+        const start = performance.now();
+        const answer = await cpp("scenario")(name, count);
+        layout();
+        const milliseconds = performance.now() - start;
+        trace.push(`${name}:${wfDom.nodeCount}`);
+        if (answer === "unsupported") return {unsupported: true};
+        const [bytes, encodeNanoseconds, operations] = answer.split(",").map(Number);
+        return {milliseconds, bytes, encodeMilliseconds: encodeNanoseconds / 1e6, operations};
+    }
+
+    let readsDone = null;
+    window.domPrototype = {readsDone: (nanoseconds, ok) => readsDone(nanoseconds, ok)};
+    function reads(name) {
+        return new Promise((resolve, reject) => {
+            readsDone = (nanoseconds, ok) => ok && nanoseconds >= 0 ? resolve(nanoseconds / 1e6) : reject(new Error(`${name} failed`));
+            cpp("scenario")(name, 0).catch(reject);
+        });
+    }
+
+    function listTexts() {
+        return [...document.querySelectorAll("#list .row span")].map(span => span.textContent);
+    }
+
+    // The same rows built by JavaScript in the page: the cost without any bridge.
+    function localBuild(rows) {
+        const start = performance.now();
+        const list = document.createElement("ul");
+        list.className = "rows";
+        for (let i = 0; i < rows; ++i) {
+            const row = document.createElement("li"), label = document.createElement("span"), button = document.createElement("button");
+            row.className = "row";
+            label.append(document.createTextNode(`row ${i}`));
+            button.type = "button";
+            button.append(document.createTextNode("×"));
+            row.append(label, button);
+            list.append(row);
+        }
+        document.getElementById("list").append(list);
+        layout();
+        const milliseconds = performance.now() - start;
+        list.remove();
+        return milliseconds;
+    }
+
+    async function lists() {
+        const results = [];
+        for (const rows of sizes) {
+            const samples = {build: [], update: [], proxy: [], awaitedReads: [], batchedReads: [], local: []};
+            let build, update;
+            for (let run = 0; run < runs; ++run) {
+                build = await scenario("build", rows);
+                samples.build.push(build.milliseconds);
+                const texts = listTexts();
+                check(texts.length === rows && texts[0] === "row 0" && texts[rows - 1] === `row ${rows - 1}`, `build ${rows}`);
+                update = await scenario("update", run);
+                samples.update.push(update.milliseconds);
+                check(listTexts()[rows - 1] === `row ${rows - 1} (${run})`, `update ${rows}`);
+                const proxy = await scenario("proxy", run);
+                samples.proxy.push(proxy.milliseconds);
+                check(listTexts()[rows - 1] === `row ${rows - 1} [${run}]`, `proxy ${rows}`);
+                await scenario("reset");  // the reads expect the texts of build again
+                await scenario("build", rows);
+                samples.awaitedReads.push(await reads("awaitedReads"));
+                samples.batchedReads.push(await reads("batchedReads"));
+                await scenario("reset");
+                check(document.querySelectorAll("#list *").length === 0, `reset ${rows}`);
+                samples.local.push(localBuild(rows));
+            }
+            results.push({rows, nodes: rows * 5, buildBytes: build.bytes, buildOperations: build.operations,
+                          buildEncodeMilliseconds: build.encodeMilliseconds, updateBytes: update.bytes,
+                          milliseconds: Object.fromEntries(Object.entries(samples).map(([key, values]) => [key, median(values)]))});
+        }
+        check(wfDom.nodeCount < 50, `the interpreter forgot removed nodes (${wfDom.nodeCount} left): ${trace.join(" ")}`);
+        return results;
+    }
+
+    function nextApply() {
+        return new Promise(resolve => {
+            const stop = wfDom.observe(event => { stop(); resolve(event); });
+        });
+    }
+
+    async function events() {
+        await scenario("counter");
+        const button = document.querySelector("#events .increment"), output = document.querySelector("#events output");
+        const latencies = [];
+        for (let i = 1; i <= clicks; ++i) {
+            const applied = nextApply(), start = performance.now();
+            button.click();
+            await applied;
+            latencies.push(performance.now() - start);
+            check(output.textContent === String(i), `click ${i} shows ${output.textContent}`);
+        }
+        return {clicks, meanMilliseconds: mean(latencies), maxMilliseconds: Math.max(...latencies)};
+    }
+
+    async function hostile() {
+        await scenario("hostile");
+        const rejected = await cpp("rejections")();
+        const island = document.getElementById("hostile");
+        check(rejected === 6, `C++ observed ${rejected} rejected batches instead of 6`);
+        check(wfDom.stats.rejected === 6, `the interpreter rejected ${wfDom.stats.rejected} batches instead of 6`);
+        check(island.childNodes.length === 0 && !document.querySelector(".canary"),
+              "a rejected batch changed the page");
+        return {rejected, lastError: wfDom.stats.lastError};
+    }
+
+    async function react() {
+        const loadStart = performance.now();
+        const {React, ReactDOMClient} = await reactBridge.loadReact();
+        const loadMilliseconds = performance.now() - loadStart;
+        const {h, useCppValue, Island} = reactBridge.bind(React);
+        let rendered = () => {}, progressRenders = 0;
+        function App() {
+            const count = useCppValue("count", 0), progress = useCppValue("progress", 0);
+            const [toggle, setToggle] = React.useState(false);
+            React.useEffect(() => rendered({count, toggle}), [count, toggle]);
+            React.useEffect(() => { ++progressRenders; rendered({progress}); }, [progress]);
+            return h("section", null,
+                     h("p", {className: "react-count"}, `count ${count}`),
+                     h("p", {className: "react-progress"}, `progress ${progress}`),
+                     h("button", {className: "react-toggle", onClick: () => setToggle(value => !value)}, toggle ? "on" : "off"),
+                     toggle ? h("p", null, "toggled") : null,
+                     h(Island, {name: "panel", className: "panel"}),
+                     h(Island, {name: "inspector"}));
+        }
+        const renderedWhen = predicate => new Promise(resolve => {
+            const previous = rendered;
+            rendered = state => { previous(state); if (predicate(state)) { rendered = previous; resolve(); } };
+        });
+        const mounted = renderedWhen(() => true);
+        ReactDOMClient.createRoot(document.getElementById("react-root")).render(h(React.StrictMode, null, h(App)));
+        await mounted;
+
+        await scenario("reactPanel");
+        const cppButton = document.querySelector("[data-island=panel] .cpp-increment");
+        check(cppButton !== null, "the C++ button is not inside the React island");
+        const latencies = [];
+        for (let i = 1; i <= clicks; ++i) {
+            const shown = renderedWhen(state => state.count === i), start = performance.now();
+            cppButton.click();
+            await shown;
+            latencies.push(performance.now() - start);
+        }
+        check(document.querySelector(".react-count").textContent === `count ${clicks}`, "React shows the C++ count");
+        const toggled = renderedWhen(state => state.toggle === true);
+        document.querySelector(".react-toggle").click();
+        await toggled;
+        check(document.querySelector("[data-island=panel] .cpp-increment") === cppButton,
+              "a React render replaced the C++ subtree of the island");
+
+        const updates = 1000;
+        progressRenders = 0;
+        const done = renderedWhen(state => state.progress === updates), storeStart = performance.now();
+        await scenario("store", updates);
+        await done;
+        const storeMilliseconds = performance.now() - storeStart;
+        check(document.querySelector(".react-progress").textContent === `progress ${updates}`, "React shows the last store value");
+        return {react: React.version, loadMilliseconds, clicks, clickMeanMilliseconds: mean(latencies),
+                storeUpdates: updates, storeMilliseconds, progressRenders};
+    }
+
+    async function inspector() {
+        const built = await scenario("inspector");
+        if (built.unsupported) return {supported: false};
+        const form = document.querySelector("[data-island=inspector] form");
+        check(form && form.querySelectorAll("label.field").length === 5, "the reflected form has one field per member");
+        const field = name => form.querySelector(`[name=${name}]`);
+        const fire = (element, type) => element.dispatchEvent(new Event(type, {bubbles: true, cancelable: true}));
+        check(form.querySelector("label.field").firstChild.textContent === "Générations par seconde", "the label annotation");
+        // C++26 formats std::to_string(double) like std::format("{}") (P2587): "1", not "1.000000".
+        check(field("speed").min === "1" && field("speed").max === "60", `the range annotation [${field("speed").min}, ${field("speed").max}]`);
+        field("speed").value = "42";
+        fire(field("speed"), "input");
+        field("speed").value = "99";  // outside Range{1, 60}: ignored by C++
+        fire(field("speed"), "input");
+        field("rule").value = "seeds";
+        fire(field("rule"), "change");
+        field("wrap").checked = false;
+        fire(field("wrap"), "change");
+        field("title").value = "Vie";
+        fire(field("title"), "input");
+        const submit = new Event("submit", {cancelable: true});
+        form.dispatchEvent(submit);
+        check(submit.defaultPrevented, "the submit listener declared preventDefault");
+        const json = await cpp("settings")();
+        check(json === '{"speed":42,"density":0.3,"wrap":false,"rule":"seeds","title":"Vie"}', `settings ${json}`);
+        return {supported: true, settings: json, typescript: await cpp("settingsType")(), bytes: built.bytes, operations: built.operations};
+    }
+
+    async function interpreterSize() {
+        const source = await (await fetch("dom-interpreter.js")).arrayBuffer();
+        const gzip = await new Response(new Blob([source]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+        return {bytes: source.byteLength, gzipBytes: gzip.byteLength};
+    }
+
+    function table(report) {
+        const lines = [`engine: ${report.engine}`, "rows nodes | build bytes ops encode | build update proxy awaitedReads batchedReads local (ms, median)"];
+        for (const r of report.lists)
+            lines.push(`${r.rows} ${r.nodes} | ${r.buildBytes} ${r.buildOperations} ${r.buildEncodeMilliseconds.toFixed(2)} | ` +
+                       ["build", "update", "proxy", "awaitedReads", "batchedReads", "local"].map(k => r.milliseconds[k].toFixed(2)).join(" "));
+        lines.push(`events: ${report.events.clicks} clicks, mean ${report.events.meanMilliseconds.toFixed(2)} ms, max ${report.events.maxMilliseconds.toFixed(2)} ms`);
+        lines.push(`hostile: ${report.hostile.rejected} batches rejected (last: ${report.hostile.lastError})`);
+        const r = report.react;
+        lines.push(`react ${r.react}: load ${r.loadMilliseconds.toFixed(1)} ms, click to render mean ${r.clickMeanMilliseconds.toFixed(2)} ms, ` +
+                   `${r.storeUpdates} store updates in ${r.storeMilliseconds.toFixed(1)} ms with ${r.progressRenders} renders`);
+        lines.push(report.inspector.supported ? `inspector: ${report.inspector.operations} operations, ${report.inspector.bytes} bytes, settings ${report.inspector.settings}\n${report.inspector.typescript}`
+                                              : "inspector: no C++26 reflection in this build");
+        lines.push(`interpreter: ${report.interpreter.bytes} bytes, ${report.interpreter.gzipBytes} gzip`);
+        return lines.join("\n");
+    }
+
+    async function all() {
+        await webFront.ready;
+        const report = {engine: navigator.userAgent, runs, lists: await lists(), events: await events(), hostile: await hostile(),
+                        react: await react(), inspector: await inspector(), interpreter: await interpreterSize()};
+        return report;
+    }
+
+    all()
+        .then(report => cpp("report")(failures.length === 0, JSON.stringify(report, null, 2),
+                                      table(report) + (failures.length ? `\nFAILURES:\n${failures.join("\n")}` : "")))
+        .catch(error => cpp("report")(false, "", `${String(error && error.message || error)}\n${failures.join("\n")}`))
+        .finally(() => window.close());
+</script>
