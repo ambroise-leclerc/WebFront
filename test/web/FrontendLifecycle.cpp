@@ -1,3 +1,4 @@
+#include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
@@ -15,7 +16,7 @@
 namespace {
 using Frontend = WEBFRONT_TEST_FRONTEND;
 using TestFS   = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
-using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, Frontend>;
+using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::testdriver::QuietFrontend<Frontend>>;
 static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOpen);
 
 int show(std::string_view page) {
@@ -32,7 +33,7 @@ int show(std::string_view page) {
 
 int expectNavigationFailure() {
     try {
-        Frontend::open("0", "index.html");
+        webfront::testdriver::QuietFrontend<Frontend>::open("0", "index.html");
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 0;  // The contract requires an exception, without prescribing its wording.
@@ -106,17 +107,18 @@ struct PolicyLifecycleFrontend {
                 if (auto live = weak.lock())
                     check(live->view->ExecuteScript(utf16(cancellationScript).c_str(), nullptr), "reporting native navigation cancellation");
             };
-            session->createWindow();
+            session->createWindow(webfront::testdriver::diagnosticWindows());
             session->start(userDataFolder());
             session->run();
         } else
 #endif
 #if defined(WEBFRONT_EMBED_WKWEBVIEW) && defined(__APPLE__)
-        if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
+            if constexpr (std::same_as<Frontend, webfront::frontend::WKWebViewFrontend>) {
             using namespace webfront::frontend::detail::wkwebview;
             initialize();
-            Object pool(send(type("NSAutoreleasePool"), "new"));
-            Session session(webfront::frontend::detail::applicationUrl(address, port, page), {.contentPolicy = policy});
+            Object  pool(send(type("NSAutoreleasePool"), "new"));
+            Session session(webfront::frontend::detail::applicationUrl(address, port, page),
+                            {.contentPolicy = policy, .visible = webfront::testdriver::diagnosticWindows()});
             session.navigationCancelled = [&] {
                 Object script(text(cancellationScript));
                 send<void>(session.view, "evaluateJavaScript:completionHandler:", script.get(), static_cast<id>(nullptr));

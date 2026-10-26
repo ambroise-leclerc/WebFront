@@ -53,3 +53,11 @@ The page is a UTF-8 URI reference. `show("index.html?x=1#result")` retains its q
 A literal `+` in the path is automatically encoded as `%2B`: `show("a+b.html")` serves the filename `a+b.html`. This avoids the server decoder's conversion of an unescaped `+` to a space. Plus signs in the query and fragment retain their original meaning.
 
 The shared `path-encoding` lifecycle case opens `encoded path %23.html` under every frontend and checks the query and fragment (reaching the page proves the decoded filename); the Jasmine suite, which runs in a frame of the developer environment, serves `a+b.html` through the C++ URL builder. Catch2 also checks this path at the system-browser launcher boundary and verifies shell quoting. On Windows the system browser is opened directly with `ShellExecute`, without a command shell; POSIX launches quote the URL as one argument.
+
+## Quiet automated sessions
+
+The per-opening options include `visible` (default `true`). Setting it to `false` creates the real native window and
+engine without presenting or focusing the window. This retains the native event loop and startup/navigation deadlines;
+it does not provide a sandbox or a headless engine. On macOS a WindowServer session is still required. The test driver
+uses this option and supports `WEBFRONT_TEST_VISIBLE=1` for interactive diagnostics.
+See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for the visible-window budget and retained lifecycle cases.

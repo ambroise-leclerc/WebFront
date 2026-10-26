@@ -813,3 +813,24 @@ SCENARIO("WebFront passes per-application content rules to policy-aware frontend
         REQUIRE_FALSE(PolicyFrontend::received.devToolsEnabled);
     }
 }
+
+SCENARIO("Ephemeral ports are bound atomically and forwarded to the frontend") {
+    using App = BasicWFWithFrontend<NetProvider, TestFilesystem, AddressFrontend>;
+    App first{WebFrontConfig{.port = "0"}};
+    App second{WebFrontConfig{.port = "0"}};
+    first.openWindow("index.html");
+    const auto firstPort = AddressFrontend::lastPort;
+    second.openWindow("index.html");
+    REQUIRE(firstPort != "0");
+    REQUIRE(AddressFrontend::lastPort != "0");
+    REQUIRE(firstPort != AddressFrontend::lastPort);
+    REQUIRE(std::stoi(firstPort) > 0);
+    REQUIRE(std::stoi(AddressFrontend::lastPort) > 0);
+    REQUIRE(first.port() == firstPort);
+    REQUIRE(second.port() == AddressFrontend::lastPort);
+    GIVEN("a legacy provider without a bound-endpoint query") {
+        using MockApp = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, AddressFrontend>;
+        MockApp mock{WebFrontConfig{.port = "0"}};
+        REQUIRE(mock.port() == "0");
+    }
+}

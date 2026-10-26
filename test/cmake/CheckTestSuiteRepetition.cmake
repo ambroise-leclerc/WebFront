@@ -82,3 +82,24 @@ if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${WORK
     OR NOT "${output}${error}" MATCHES "Deliberate suite failure")
     message(FATAL_ERROR "The runner must stop at the first failed suite: ${output}${error}")
 endif()
+
+# Worker bounds are checked before CTest can accidentally choose unbounded parallelism.
+foreach(parallel 0 -1 invalid)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DPARALLEL=${parallel}
+        -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(result EQUAL 0 OR NOT "${output}${error}" MATCHES "PARALLEL must be a positive integer")
+        message(FATAL_ERROR "Invalid parallelism was not rejected: ${output}${error}")
+    endif()
+endforeach()
+
+# A failed Xvfb launch is an unsuccessful invocation too: stale reports must already be gone.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    file(WRITE "${WORK}/build/test-results-2.xml" "stale")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env WEBFRONT_TEST_SHARED_DISPLAY=0
+        "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DXVFB_RUN=${CMAKE_COMMAND}
+        -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml"
+        OR NOT EXISTS "${WORK}/build/test-results-manual.xml")
+        message(FATAL_ERROR "A failed display launch must discard only numbered stale reports: ${output}${error}")
+    endif()
+endif()

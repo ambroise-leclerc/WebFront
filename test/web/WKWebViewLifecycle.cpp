@@ -1,3 +1,4 @@
+#include "../driver/TestFrontend.hpp"
 #include <webfront/WebFront.hpp>
 
 #include <future>
@@ -14,7 +15,7 @@ void checkWKWebViewHeader();
 
 namespace {
 using namespace webfront::frontend::detail::wkwebview;
-using Frontend = webfront::frontend::WKWebViewFrontend;
+using Frontend = webfront::testdriver::QuietFrontend<webfront::frontend::WKWebViewFrontend>;
 using App      = webfront::WebFrontWithFrontend<Frontend>;
 
 void require(bool condition, const char* message) {
@@ -74,8 +75,13 @@ void nativeClose(bool quit) {
     const auto previousMenu     = send(app, "mainMenu");
     const auto previousDelegate = send(app, "delegate");
     {
-        Session session("http://127.0.0.1:0/");
+        Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
         session.create();
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
+                "Window visibility option was ignored");
+        if (!webfront::testdriver::diagnosticWindows())
+            require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
+                    "Hidden web content would suspend before asynchronous work finishes");
         // Exercise the real native entry points before any WebKit/bridge callback.
         if (quit)
             send<void>(app, "terminate:", static_cast<id>(nullptr));
@@ -94,7 +100,7 @@ void nativeClose(bool quit) {
 }
 
 struct TestSocket {
-    explicit TestSocket(int descriptor) : descriptor(descriptor) { }
+    explicit TestSocket(int descriptor) : descriptor(descriptor) {}
     TestSocket(const TestSocket&)            = delete;
     TestSocket& operator=(const TestSocket&) = delete;
     ~TestSocket() {
@@ -122,7 +128,7 @@ struct Listener {
 void startupTimeout() {
     // No accept/response: navigation stalls without relying on public networking.
     Listener                             listener;
-    webfront::frontend::WKWebViewOptions options{.startupTimeout = std::chrono::milliseconds(200)};
+    webfront::frontend::WKWebViewOptions options{.startupTimeout = std::chrono::milliseconds(200), .visible = webfront::testdriver::diagnosticWindows()};
     expectFailure(
         [&] {
             Frontend::open("127.0.0.1", listener.port, "index.html", options);
@@ -195,9 +201,15 @@ void settings() {
     for (const bool enabled : {false, true}) {
         Session session("http://127.0.0.1:9002/",
                         {
-                            .contentPolicy = {.devToolsEnabled = enabled, .contextMenusEnabled = enabled}
+                            .contentPolicy = {.devToolsEnabled = enabled, .contextMenusEnabled = enabled},
+                            .visible       = webfront::testdriver::diagnosticWindows()
         });
         session.create();
+        require(static_cast<bool>(send<BOOL>(session.window, "isVisible")) == webfront::testdriver::diagnosticWindows(),
+                "Window visibility option was ignored");
+        if (!webfront::testdriver::diagnosticWindows())
+            require(send<long>(send(send(session.view, "configuration"), "preferences"), "inactiveSchedulingPolicy") == 2L,
+                    "Hidden web content would suspend before asynchronous work finishes");
         require(static_cast<bool>(send<BOOL>(session.view, "isInspectable")) == enabled, "Inspector policy was ignored");
         require(!send<BOOL>(send(send(session.view, "configuration"), "websiteDataStore"), "isPersistent"), "Website data was persistent");
         Object menu(send(type("NSMenu"), "new"));
@@ -210,7 +222,7 @@ void settings() {
 }
 void missingResponse() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:0/");
+    Session session("http://127.0.0.1:0/", {.visible = webfront::testdriver::diagnosticWindows()});
     session.create();
     send<void>(session.delegate, "webView:didFinishNavigation:", session.view, static_cast<id>(nullptr));
     require(session.closed && !session.loaded, "An internal error document was treated as a successful HTTP load");
@@ -223,7 +235,7 @@ void missingResponse() {
 
 void committedNavigation() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:9002/");
+    Session session("http://127.0.0.1:9002/", {.visible = webfront::testdriver::diagnosticWindows()});
     session.create();
     bool notified               = false;
     session.navigationCancelled = [&] {
@@ -234,18 +246,18 @@ void committedNavigation() {
     session.rejectNavigation("initial navigation was denied by contentPolicy");
     send<void>(session.delegate, "webView:didFailNavigation:withError:", session.view, static_cast<id>(nullptr), static_cast<id>(nullptr));
     require(notified && !session.loaded && !session.closed && !session.error, "A denied later navigation closed the committed document");
-    Session initial("http://127.0.0.1:9002/");
+    Session initial("http://127.0.0.1:9002/", {.visible = false});
     initial.rejectNavigation("initial navigation was denied by contentPolicy");
     require(initial.closed && initial.error, "A denied initial navigation was not reported");
 }
 
 void agentApplication() {
-    Object pool(send(type("NSAutoreleasePool"), "new"));
+    Object     pool(send(type("NSAutoreleasePool"), "new"));
     const auto bundle = send(type("NSBundle"), "mainBundle");
     require(utf8(send(bundle, "bundleIdentifier")) == "org.webfront.tests.wkwebview-lifecycle", "Missing test application identity");
     Object key(text("LSUIElement"));
     require(send<BOOL>(send(bundle, "objectForInfoDictionaryKey:", key.get()), "boolValue"), "Test bundle is not an agent");
-    const auto app = send(type("NSApplication"), "sharedApplication");
+    const auto app            = send(type("NSApplication"), "sharedApplication");
     const auto previousPolicy = send<long>(app, "activationPolicy");
     {
         Session session("http://127.0.0.1:0/");

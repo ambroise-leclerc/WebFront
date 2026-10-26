@@ -17,7 +17,7 @@ RUN apt-get update \
         ca-certificates curl git sudo tar xz-utils build-essential \
         ninja-build pkg-config python3 \
         gcc-16 g++-16 libwebkitgtk-6.0-dev lcov libjson-xs-perl \
-        xvfb xauth \
+        xvfb xauth time \
     && rm -rf /var/lib/apt/lists/*
 
 # The workspace is mounted from the host runner and owned by another user: let git (and the tests that call it) read it.

@@ -1,74 +1,165 @@
-# Test scheduling and CI diagnostics
+# Test performance and browser sessions (#388)
 
-The CI uses `ctest --parallel 4`, independently of `cmake --build --parallel 2`.
-Desktop, sanitizer and CEF jobs retain JUnit durations and `LastTest.log` even on
-failure. Manual dispatch with `repeat_desktop_tests=true` repeats each desktop
-suite three times and also runs the extended CEF and sanitizer checks. The CI
-uses `test/cmake/RunTestSuite.cmake`: each pass starts a new CTest invocation,
-so fixtures reset before their stateful dependents run. Repeating individual
-cases with `--repeat` cannot validate the create/init/install/restore journey.
-Each pass retains its own `test-results-<pass>.xml` report and the first failed
-suite stops the runner with a nonzero status.
-Numbered reports from earlier invocations are removed before the first pass,
-including when a rerun requests fewer passes or fails early.
+Run the complete fixture graph, resetting the projects and profiles on every pass:
 
-The developer integration prints phase markers before compilation, previews,
-scripts, type checks, Jasmine runs and terminal checks. Failed macOS desktop
-jobs also retain `build/diagnostics/` (WebKit system log and available crash
-reports), so a terminated content process can be investigated beyond its final
-frontend error. Missing crash reports do not change the test's failure status.
-The developer specs print each started spec through the driver's bridge, retaining
-the last name if the page stalls. Self-build drivers have a native watchdog that
-expires before CTest's timeout, including its forced-close grace period.
-The progress callback is optional: running the specs in an ordinary developer
-application or losing the diagnostic bridge does not change their results.
+```sh
+cmake -DBUILD_DIR=build -DCONFIG=Release -DREPEAT=3 -DPARALLEL=4 -P test/cmake/RunTestSuite.cmake
+```
 
-## Resource audit
+`PARALLEL` is a positive CTest worker bound (default 4). Start with four test workers and two compiler workers;
+raise them only after measuring peak process-family RSS on the actual machine. Nested embedded builds account for two
+CTest processors. On Linux this runner owns one dedicated Xvfb display for the entire invocation. Direct `ctest` commands
+still get a private display per browser process. Neither mode opens windows on the user's Linux desktop.
 
-| Tests | Scheduling constraint |
+Compatible commands use one browser per session and a new HTTP iframe/realm per command. The project is deliberately
+shared within each group, in this order:
+
+| Session | Individual CTest assertions retained |
 | --- | --- |
-| Catch2 scenarios | Separate processes; mutable globals and current directories are process-local. Filesystem fixtures atomically claim temporary directories; the one relative `test.tmp` is used by one scenario only. Real socket tests use ephemeral ports, including developer bootstrap without a project. |
-| Asset checks | Read sources and compare full headers in memory; no shared temporary gzip/header output. |
-| JavaScript and attribution regressions | Own temporary directories/repositories. |
-| Frontend selection | Its own `frontend-tests` directory; multi-config tests have a separate working directory. Each configure starts with a fresh fixture cache. |
-| CEF option scope | Its own `cef-testing-state` directory; each state still configures separately. |
-| Consumer | Separate `consumer-build` tree; no browser is opened. |
-| Journey | One project directory (`<build>/jp`) chained by CTest fixtures; the browser lock; the nested build is `RUN_SERIAL`. |
-| Browser integration and lifecycle | Keep `RESOURCE_LOCK webfront_port_9002`, including the shared CEF profile and generated browser resources. |
-| Life embedded build | Keep `FIXTURES_REQUIRED DeveloperGenerated`, then the build/run fixture dependencies. `RUN_SERIAL TRUE` excludes every other test while it runs, protecting running executables from regeneration/relinking. `PROCESSORS 2` records the nested build's two workers. |
+| WfDriverSession | install, passing test, failing test, unknown command, script output |
+| JourneyStartSession | create, init, install |
+| JourneyBuildSession | check, test, build, embed |
+| JourneyRestoreSession | missing offline cache, restore, verified offline cache |
+| SelfBuildSession | install, build, developer specs, repeat build, permissions refusal |
 
-The browser setup must finish generating headers before the Life embedded build
-starts. Browser tests remain mutually exclusive. No test runs alongside the nested build. The consumer has a different
-build tree; ordinary independent tests can overlap when the embedded build
-is not running.
+The Journey file preparation and cache deletion remain CTest fixtures between sessions. Self-build reproducibility,
+refresh, publication and tampering checks retain their own dependencies. The driver writes a JSON result per command;
+CTest checks the original exit code, output, structured report and file assertions. Unexpected failures make the session
+fail and do not skip subsequent commands. A browser crash, early closure, missing report or watchdog expiry fails the
+session. A native regression exercises a mismatch followed by a successful command. No existing scenario is removed.
 
-Linux coverage processes still write GCC's normal `.gcda` files on the runner's
-local filesystem, using libgcov's file locking. Do not copy this parallel coverage
-command to a filesystem without locking support without isolating and merging
-the profiles. Sanitizer test processes retain their existing runtime settings.
+Each new realm owns its bridge connection, imports, timers, Workers, listeners and child frames; removing it releases
+those resources. Local/session storage and enumerated IndexedDB databases are reset before the next command. The native project Store survives intentionally. Pinned and rebuilt environments retain different
+profiles and URLs/ports. The normal suite resets both; never point the two revisions at a shared persistent profile.
 
-## Reproduction
+Filter the familiar CTest names with `ctest --test-dir build -R WfDriverTestFails --output-on-failure`. CTest includes the
+session fixture and its prerequisite project setup. For a truly isolated process per case, configure
+`-DWEBFRONT_TEST_SESSIONS=OFF` and use the same filter. Repetition must repeat the complete fixture graph, rather than
+`ctest --repeat` on individual stateful commands.
 
-After configuring and building dependencies, run offline from the checkout:
+The driver's session interface also accepts an explicit list and a name substring filter:
 
-```sh
-ctest --test-dir build --output-on-failure --parallel 1 --output-junit "$PWD/build/serial.xml"
-ctest --test-dir build --output-on-failure --parallel 4 --output-junit "$PWD/build/parallel.xml"
-cmake -DBUILD_DIR="$PWD/build" -DREPEAT=3 -P test/cmake/RunTestSuite.cmake
-ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
+```json
+[
+  {"name":"list","command":["list"],"expect":"0"},
+  {"name":"unknown","command":["nosuchcommand"],"expect":"1"}
+]
 ```
 
-Compare both the total real elapsed time printed by CTest and the individual
-JUnit `testcase` durations; summing parallel test times overstates wall time.
-For browser/build comparisons, record cold and warm compilation separately.
-To repeat every case on the three hosted desktop platforms while also running the
-extended CEF/sanitizer checks:
-
 ```sh
-gh workflow run BuildAndTest.yml --ref <pr-branch> -f repeat_desktop_tests=true
+build/test/web/webfront-wf --project /absolute/project --suite /absolute/cases.json \
+  --report-dir /absolute/results --filter unknown --timeout 120
 ```
 
-Use the ordinary PR run (one repetition) for before/after performance comparisons;
-the three-repeat run is a stability check and its wall time includes repetitions.
-Every remaining test over 20 s should be reviewed against the costs above rather
-than disabled or given weaker assertions.
+`timeout` optionally sets the native per-case limit in seconds (a decimal string, default 100). The driver enforces
+both the per-case deadline and `--timeout` for the whole session; CTest groups sum their original case budgets and keep
+a 20-second outer grace. `expect` is a decimal status string; commands are argument arrays, never shell text. Case names must be unique and use
+letters, digits, `_` or `-`. The argument JSON is bounded to 60000 bytes by the bridge. Only the selected reports are
+rewritten; use a dedicated result directory for each invocation. Without `--suite`, the existing one-command interface
+and its exit statuses remain available.
+
+Browser sessions and independent driver cases bind loopback port `0`; `TCPStdnet` atomically binds an OS-assigned port.
+`app.port()` and frontend navigation use that actual port, as does the HTTP/WebSocket content policy. Custom network
+providers without `acceptor.local_endpoint().port()` retain their previous port forwarding. Each driver workspace,
+profile and project has a separate directory. Tests that mutate the same project retain a resource lock and ordered
+fixtures. Native lifecycle tests using fixed URLs keep the `webfront_port_9002` lock. CEF driver sessions additionally override Chromium's
+root/cache profile; its default beside the executable would otherwise forward a second process into the first browser
+singleton even with independent HTTP ports. Nested builds retain that lock
+and `webfront_build_tree` to protect shared browser DLLs and build outputs on Windows, while unrelated unit tests can run.
+
+## Visible windows and retained lifecycle contracts
+
+Driver, embedded-distribution and compatible lifecycle windows use `visible=false` on WebView2/WKWebView. They still
+create a native window, real engine/controller and native event loop. Window visibility is asserted in the native
+lifecycle tests. Failed navigation, close, startup failures, watchdogs and cancellation remain real process tests.
+The two macOS executable/dylib registration orders remain separate images and processes, with hidden native windows.
+
+The developer integration keeps its visible interactive terminal and Life preview. The macOS agent-application case
+keeps one visible window because its contract asserts visibility and the absence of a Dock icon. Linux's real windows
+are confined to Xvfb. This leaves one ordinary visible opening on Windows and two on macOS in the standard configuration;
+engine-specific manual benchmarks and diagnostic runs are outside this budget. Restore all diagnostic windows with
+`WEBFRONT_TEST_VISIBLE=1`. A hidden WKWebView requires macOS 14+ (public inactive scheduling preference) and a WindowServer session; this is not a headless-engine substitute.
+
+## Profiling and interpreting the numbers
+
+```sh
+ctest --test-dir build -C Release --show-only=json-v1 > build/ctest-graph.json
+python3 test/tools/MeasureCommand.py --output build/suite-resources.json -- \
+  cmake -DBUILD_DIR=build -DCONFIG=Release -DREPEAT=3 -DPARALLEL=4 -P test/cmake/RunTestSuite.cmake
+python3 test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml \
+  --workers 4 --log build/Testing/Temporary/LastTest.log --output build/test-profile.txt
+```
+
+Python is only needed for optional resource/graph analysis and the CI fuzzer coordinator; it is not a JavaScript runtime
+or package manager. Ordinary builds and the suite runner need no Python. The analyzer also accepts `--ninja-log build/.ninja_log` to rank actual translation-unit/link job durations
+(inclusive parallel work, not elapsed build time). It produces the slowest cases,
+wall-time median/range across passes and a DOT dependency/lock graph. Solid edges include explicit dependencies and
+fixture setup/cleanup; dashed edges identify locks. `dependency_path_seconds` is the longest weighted dependency path;
+`lower_bound_seconds` additionally considers worker capacity, locked work and globally serial tests. It is a scheduling
+lower bound, not an assertion that locks determine one unique observed critical path. JUnit rounds suite wall time to
+whole seconds; the command resource report has finer elapsed time. Sum of case durations is never described as wall time.
+
+The resource sampler records sampled CPU, process count and peak summed RSS of the command's process family on all
+three desktop platforms. Short-lived children can be missed, and shared pages count in each process's RSS: these are
+sampled bounds, not precise unique-memory or process-creation counts. It preserves the measured command's failure status.
+
+`DeveloperBrowserIntegration` emits begin/end timestamps for each major phase and every actual command, including
+expected failures. `DeveloperSpecs` reports both ends of each spec. The driver reports browser opening/return and shutdown,
+and every suite case, so process-exit costs remain distinguishable. `LastTest-<pass>.log` keeps the full transcript of each pass; the suite
+runner raises the CTest output cap to 2 MiB per case so JUnit retains these details too. The analyzer ranks the emitted
+phase/spec durations. WASM compilation/initialization, command preparation, publication, navigation and execution can be
+located by the enclosing command and spec; these spans include waits and bridge traffic, not just CPU time.
+
+The esbuild helper used by pure developer specs now initializes its real WASM compiler in an esbuild Worker, matching
+the developer environment. In an off-screen WebKit frame, `worker:false` made a four-rebuild spec take 20.726 s locally;
+`worker:true` ran the same assertions in 0.423 s. The test still changes an imported file, checks a syntax error and checks
+recovery. Its inputs were already minimal; reducing assertions would not address the timer/scheduling cost.
+
+## CI, caches, coverage and fuzzers
+
+Windows and macOS start independently of `linux-image`; only Linux waits for its Dockerfile-hashed image. The image
+already supplies GCC/WebKitGTK and the fast JSON module. It also supplies `/usr/bin/time`. Desktop, CEF and sanitizer
+jobs explicitly enable and report sccache. Verified bootstrap and registry archives are cached with keys containing their pin/manifest; configure still checks their integrity. Dependency caches retain their existing keys.
+reproducibility outputs are rebuilt rather than restored from a cache.
+
+The coverage step forces `lcov_json_module=JSON::XS`, verifies lcov's own backend diagnostic and separately times capture,
+filtering and listing. A manual desktop-repeat run also captures once with JSON::PP and compares every file's line,
+function and branch counters against XS before filtering. Public header coverage and the existing exclusions are unchanged.
+The module selection is part of [lcov's JSON support](https://github.com/linux-test-project/lcov/blob/v2.3.1/lib/lcovutil.pm).
+
+The five fuzzers run with two workers by default, each retaining its 1 GiB RSS limit, its own log, artifact prefix and
+writable corpus (including a separate gzip differential corpus). All are awaited and any failure fails the step:
+
+```sh
+python3 test/fuzz/RunFuzzers.py build-sanitizers/test/fuzz --jobs 2 --seconds 30
+```
+
+`--jobs` is configurable; budget at least 1 GiB per worker plus the runner and sanitizer overhead. CI retains logs and
+reports on failure and uploads CTest profiles, dependency graphs, sampled resources, lcov phase measurements and cache
+statistics. Qualification dispatches `BuildAndTest.yml` with `repeat_desktop_tests=true` for three complete desktop
+passes plus GCC/Clang CEF and sanitizers. First-pass fixtures/profiles are fresh; later passes reset them too but may
+benefit from OS/filesystem and compiler caches. They are not measurements of a physically cold OS page cache.
+
+## Measurements
+
+Durable ranked local profiles are under [test-performance](test-performance/). Measurements use wall time and retain
+case/spec counts; differences between machines and independent hosted runs are not controlled speedups. The local
+baseline is `da0297f` on Linux/GCC 16 Release/WebKitGTK, two build workers and four CTest workers, with a busy shared
+workstation. One baseline pass ran 365 cases/97 developer specs in 172.43 s. Its slowest cases were DeveloperSpecs
+(29.819 s), AddSubdirectoryConsumer (23.634 s), JourneyEmbeddedBuild (22.845 s), LifeEmbeddedBuild (22.093 s) and
+DeveloperBrowserIntegration (20.150 s). The two globally serial builds accounted for 44.938 s.
+
+The consumer and embedded tests intentionally compile real C++ consumers of the public headers; frontend configure
+checks intentionally keep independent CMake scopes. Their compilation cost cannot be removed by reusing a prebuilt
+application without losing the contract. Every case remaining over 20 s should be read with its phase transcript and
+these compilation constraints. The updated local passes ran 378 cases/97 developer specs in **92.93, 93.52 and 93.41 s** (median **93.41 s**, range
+0.59 s), a 45.8% reduction against the single baseline pass. They reset the fixtures each time. The dependency-only
+path of the third pass was 69.347 s; no globally serial test remained. Sampled process-family peak summed RSS across
+the three passes was 3.88 GiB, with up to 41 concurrent processes (including browser helpers) and 1179 sampled process
+IDs overall; see the sampling caveats above. The consumer and both embedded compilations remain around 22–24 s;
+the real developer integration remains around 26 s, including three TypeScript versions and terminal/native cancellation.
+Its longest phase is the real Life preview/bridge checks (roughly 8–9 s), followed by the TypeScript 6 install/check
+phase (roughly 4 s). Full before/after hosted desktop results and links follow qualification.
+
+GCC parallel coverage still relies on libgcov's filesystem locking; filesystems without locking require isolated
+profiles and merging. macOS failures retain the existing WebKit system/crash diagnostics as well as the phase logs.

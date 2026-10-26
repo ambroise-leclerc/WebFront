@@ -24,6 +24,15 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 
 The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
 
+## Test performance (#388, 2026-10-26)
+
+Compatible driver commands share sessions while keeping individual CTest assertions, fresh realms and project/profile
+isolation. Native failure, watchdog and lifecycle tests remain separate processes. The suite runner supports configurable
+bounded parallelism and one dedicated Linux Xvfb display. The esbuild helper in developer specs uses its own Worker to
+avoid the off-screen WebKit scheduler cost observed in profiling. Native Windows/macOS options can retain real engines
+with hidden windows. Ports assigned by the OS are forwarded to navigation and the content policy.
+See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for commands, measurement limits, fixture locks and qualification evidence.
+
 ## Accepted TCP connections (#379, 2026-10-26)
 
 The stdnet provider enables `TCP_NODELAY` before handing accepted sockets to HTTP;
