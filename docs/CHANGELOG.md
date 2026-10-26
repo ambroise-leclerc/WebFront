@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- HTTP status-line buffers belong to each response until its asynchronous send ends (#376).
+  Ordinary responses announce `Connection: close`, matching the existing one-request-per-socket
+  server behavior; WebSocket upgrades remain open. Unit and real-browser regressions cover
+  pending response independence, closure headers and concurrent success/error responses.
+- Developer specs report each started spec to the native driver; self-build watchdogs expire
+  before CTest so a stalled page leaves useful output and a nonzero status (#376).
+- CI stability runs repeat the complete CTest fixture graph three times, retaining
+  a separate JUnit report per pass and stopping on the first failure (#376).
+  Reruns remove old numbered reports before starting, and optional spec-progress
+  diagnostics cannot fail specs when the driver callback is absent or disconnected.
+  Repeating each stateful journey step in isolation tried to initialize an already
+  initialized project; an offline CMake regression demonstrates the failure and
+  checks whole-suite repetition and failure propagation.
+- Isolate the GET/HEAD gzip failure tests from the one-job admission limit (#376):
+  receiving a response does not imply that its server-side lease has been released.
+  Browser integration reports its current phase, and failed macOS CI jobs retain WebKit
+  system logs and crash reports alongside CTest diagnostics.
+- Remove completed migration/audit notes and obsolete timing narratives, update their
+  references, and retain historical migration links at their original Git revision (#376).
+  Replace the unused 2,698-line Doxyfile template with CMake's generated configuration;
+  both documentation targets generate the public headers with the project version,
+  and Graphviz is optional. Active build, test and publication scripts remain in use.
+
 ## 0.5.0 - 2026-10-26
 
 - Gzip identity fallback reuses a bounded validated-representation cache for GET and HEAD (#281).
@@ -111,7 +134,7 @@
   v1.3), with a Catch2 scenario that decodes each of them. `NoNodeDependency` audits every file and
   `NoNodeDependencyRejectsInjections` proves the guard. The Node.js tools, `vendor/package*.json` and the comparison job
   of *Developer packages* are deleted; every CI job removes the JavaScript runtimes from the runner first. The record of
-  each former tool and test is `docs/NODE_TOOLS_MIGRATION.md`.
+  each former tool and test is [migration record](https://github.com/ambroise-leclerc/WebFront/blob/c9f5770273999ead7cff5e61f1d2a22a9ffbce89/docs/NODE_TOOLS_MIGRATION.md).
 
 - The developer environment builds itself (#315, distribution 0.6.1, published as `developer-v0.6.1` and pinned by `DeveloperReleaseData.hpp`, and by the bootstrap of the tests): the
   repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json`) and the scripts of
@@ -122,7 +145,7 @@
   are those of the Node.js build, twice in a row (CTest `SelfBuild*`, job `wf-package` of *Developer packages*). The
   publication runs without Node.js (`pages.sh`, `archive-release.sh`, a shell tag check); `-DWEBFRONT_REQUIRE_NODE=OFF`
   configures a test build without it. The inventory of the Node.js tools and their destination is
-  `docs/NODE_TOOLS_MIGRATION.md`; the maintainer procedure is `js/developer/tools/PUBLISHING.md`.
+  [migration record](https://github.com/ambroise-leclerc/WebFront/blob/c9f5770273999ead7cff5e61f1d2a22a9ffbce89/docs/NODE_TOOLS_MIGRATION.md); the maintainer procedure is `js/developer/tools/PUBLISHING.md`.
 
 - `webfront-wf` test driver and bootstrap provisioning (#321, developer distribution 0.6.0 published as `developer-v0.6.0`, pinned by `DeveloperReleaseData.hpp` and by the bootstrap): runs one `wf` command without interaction on a project
   and exits with its status (64 usage, 70 bootstrap failure, 71 time limit, 72 no result), with an optional JSON report.
@@ -200,7 +223,7 @@
 - **Breaking:** the terminal component and the `wf` tool manager (#313): `webfront::Terminal`, `terminal::Shell`,
   `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`, `fs::ToolStore`, `fs::PackageFS`, their embedded
   modules, the embedded xterm.js copy, `third_party/xterm` and `cmake/UpdateXterm.cmake`. The developer environment's
-  terminal and `webfront::Commands` replace them; `docs/UI_COMPONENTS.md` describes the migration. xterm.js is a
+  terminal and `webfront::Commands` replace them; [migration record](https://github.com/ambroise-leclerc/WebFront/blob/c9f5770273999ead7cff5e61f1d2a22a9ffbce89/docs/UI_COMPONENTS.md) describes the migration. xterm.js is a
   locked dependency of the environment archive. `fs::tools::safeRelativePath` becomes `fs::safeRelativePath`
   (`<webfront/system/SafePath.hpp>`).
 

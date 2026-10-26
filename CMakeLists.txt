@@ -55,7 +55,7 @@ if(MSVC AND NOT WEBFRONT_USE_MDDLOG AND WEBFRONT_IS_TOP_LEVEL)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_CURRENT_LIST_DIR}/js/core ${CMAKE_CURRENT_LIST_DIR}/docs ${CMAKE_CURRENT_LIST_DIR}/test/cmake)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_CURRENT_LIST_DIR}/js/core ${CMAKE_CURRENT_LIST_DIR}/test/cmake)
 if(WEBFRONT_IS_TOP_LEVEL)
     include(StandardProjectSettings)
     include(PreventInSourceBuilds)
@@ -83,7 +83,6 @@ include(Sanitizers)
 enable_sanitizers(WebFront_options)
 
 if(WEBFRONT_IS_TOP_LEVEL)
-    configure_file(docs/Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
     include(Doxygen)
     enable_doxygen()
 

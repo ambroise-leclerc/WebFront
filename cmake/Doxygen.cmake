@@ -1,0 +1,15 @@
+function(enable_doxygen)
+  option(ENABLE_DOXYGEN "Enable doxygen doc builds of source" OFF)
+  if(ENABLE_DOXYGEN)
+    set(DOXYGEN_CALLER_GRAPH YES)
+    set(DOXYGEN_CALL_GRAPH YES)
+    set(DOXYGEN_EXTRACT_ALL YES)
+    find_package(Doxygen REQUIRED OPTIONAL_COMPONENTS dot)
+    set(DOXYGEN_GENERATE_LATEX NO)
+    set(DOXYGEN_PROJECT_NUMBER "${PROJECT_VERSION}")
+    doxygen_add_docs(doxygen-docs "${PROJECT_SOURCE_DIR}/include" ALL
+        COMMENT "Generating API documentation with Doxygen")
+    # Keep the previous target as an alias; FindDoxygen owns the generated configuration.
+    add_custom_target(doc_doxygen DEPENDS doxygen-docs)
+  endif()
+endfunction()

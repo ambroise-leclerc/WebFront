@@ -89,7 +89,7 @@ Les abonnements UI multiples et l'injection du navigateur appelant demeurent des
 
 ## Sources et vérification
 
-- [Retrait et migration](../UI_COMPONENTS.md), [Commands](../../include/webfront/Commands.hpp) ; le composant
+- [Référence du terminal](../DEVELOPER_ENVIRONMENT.md), [Commands](../../include/webfront/Commands.hpp) ; le composant
   retiré reste lisible dans l'historique Git.
 - Tests : [UISubscribersTests](../../test/unit/UISubscribersTests.cpp),
   [CommandsTests](../../test/unit/CommandsTests.cpp), [developer-specs](../../test/web/developer-specs.mjs).

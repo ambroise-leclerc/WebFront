@@ -4,6 +4,22 @@
 // rejects(promise, expected) and throws(callback, expected) check that the promise rejects or the callback throws, then
 // that the error satisfies `expected`: a RegExp tested against String(error), a function returning true for the error,
 // or nothing.
+// Keep the last started spec in the driver's output even if its page stops reporting.
+/** Optional driver diagnostics must never change a spec's result. */
+export async function reportSpecStarted(bridge, {fullName}) {
+    try {
+        await bridge.cppFunction('wf.progress')(fullName);
+    } catch {
+        // Ordinary developer applications have no driver callback; diagnostics are best effort.
+    }
+}
+
+if (globalThis.webFront) jasmine.getEnv().addReporter({
+    specStarted(result) {
+        return reportSpecStarted(webFront, result);
+    },
+});
+
 function satisfies(error, expected) {
     if (expected === undefined) return;
     if (expected instanceof RegExp) expect(String(error)).toMatch(expected);

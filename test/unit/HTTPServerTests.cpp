@@ -70,7 +70,7 @@ SCENARIO("HTTP Response") {
         WHEN("extracting buffers") {
             auto buffers = bad.toBuffers<Net>();
             THEN("buffer contents should be") {
-                REQUIRE(buffers.size() == 11);
+                REQUIRE(buffers.size() == 12);
                 using Buffer = decltype(buffers[0]);
                 auto compare = [](Buffer b, std::string s) {
                     auto data = reinterpret_cast<const char*>(b.data());
@@ -87,11 +87,42 @@ SCENARIO("HTTP Response") {
                 REQUIRE(compare(buffers[6], ": "));
                 REQUIRE(compare(buffers[7], "text/html"));
                 REQUIRE(compare(buffers[8], "\r\n"));
-                REQUIRE(compare(buffers[9], "\r\n"));
-                REQUIRE(compare(buffers[10],
+                REQUIRE(compare(buffers[9], "Connection: close\r\n"));
+                REQUIRE(compare(buffers[10], "\r\n"));
+                REQUIRE(compare(buffers[11],
                                 "<html><head><title>Bad Request</title></head><body><h1>400 Bad Request</h1></body></html>"));
             }
         }
+    }
+}
+
+SCENARIO("Pending HTTP response buffers remain independent and announce connection closure") {
+    const auto text = [](const auto& buffers) {
+        std::string result;
+        for (const auto& buffer : buffers)
+            result.append(static_cast<const char*>(buffer.data()), buffer.size());
+        return result;
+    };
+    auto first = Response::getStatusResponse(Response::internalServerError);
+    auto firstBuffers = first.toBuffers<Net>();
+    auto second = Response::getStatusResponse(Response::ok);
+    auto secondBuffers = second.toBuffers<Net>();
+    THEN("another pending send cannot replace the first status line") {
+        REQUIRE(text(firstBuffers).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+        REQUIRE(text(secondBuffers).starts_with("HTTP/1.1 200 OK\r\n"));
+    }
+    THEN("ordinary responses tell clients that the server will close the connection") {
+        REQUIRE(text(firstBuffers).find("\r\nConnection: close\r\n") != std::string::npos);
+        REQUIRE(text(secondBuffers).find("\r\nConnection: close\r\n") != std::string::npos);
+    }
+    GIVEN("a WebSocket upgrade") {
+        Response upgrade;
+        upgrade.statusCode = Response::switchingProtocols;
+        upgrade.headers.emplace_back("Connection", "Upgrade");
+        const auto response = text(upgrade.toBuffers<Net>());
+        REQUIRE(response.find("\r\nConnection: Upgrade\r\n") != std::string::npos);
+        REQUIRE(response.find("Connection: close") == std::string::npos);
+        REQUIRE(text(firstBuffers).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
     }
 }
 
