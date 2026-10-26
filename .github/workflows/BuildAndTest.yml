@@ -63,8 +63,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # Manual runs add extended checks; stability checks opt into desktops.
-    if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
+    # Manual runs add extended checks; stability checks opt into desktops. The image job gates only the Linux leg: when it
+    # fails, Windows and macOS still run (a skipped `needs` would skip the whole matrix) and the Linux leg fails at its pull.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
     timeout-minutes: 25
     strategy:
@@ -98,6 +99,10 @@ jobs:
       - uses: ./.github/actions/setup-cmake
         with:
           version: '4.4.4'
+      # In the container the workspace is mounted elsewhere than the host path that `github.workspace` expands to.
+      - name: Point the CPM cache at the workspace
+        if: matrix.use_image
+        run: echo "CPM_SOURCE_CACHE=$GITHUB_WORKSPACE/.cache/CPM" >> "$GITHUB_ENV"
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: actions/cache@v4
         with:
@@ -159,7 +164,7 @@ jobs:
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
         run: >-
-          cmake -DBUILD_DIR=${{ github.workspace }}/build -DCONFIG=${{ matrix.build_type }}
+          cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
           -DREPEAT=${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && '3' || '1' }}
           -P test/cmake/RunTestSuite.cmake
       - name: Collect coverage
