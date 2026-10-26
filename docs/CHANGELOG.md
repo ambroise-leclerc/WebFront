@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Accepted stdnet connections enable `TCP_NODELAY`, including after WebSocket upgrade (#379).
+  This removes the Nagle/delayed-ACK interaction that could delay a callback's return
+  after it sent a browser message. A real-socket regression checks the option directly;
+  the shared browser suite checks a callback sending a message before returning a value.
+
 - The Linux desktop CI job runs in a prebuilt toolchain image (GCC 16, WebKitGTK, lcov, Xvfb; `.github/docker/linux-ci.Dockerfile`)
   published to ghcr.io and tagged with the hash of its Dockerfile, instead of installing those packages from an Ubuntu mirror
   on every run. Windows, macOS and the extended jobs are unchanged.
