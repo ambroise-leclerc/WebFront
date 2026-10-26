@@ -5,11 +5,13 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation de wf embed et du parcours hors ligne. | À renseigner après intégration. |
+| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 0.3 | 2026-10-24 | Proposée | Ambroise Leclerc | Vérification recentrée sur Life après le retrait de PI : interface React, générations via le bridge et exécution hors projet. | [8368f59](https://github.com/ambroise-leclerc/WebFront/commit/8368f595af1534ea6670ee6d5582f245f9edc1f2) |
+| 1.0 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification multiplateforme du parcours développeur (#316) : la proposition est acceptée. | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 
 ## Statut et date
 
-**Proposée le 2026-10-20.** Le parcours PI démontre une génération navigateur, sa compilation puis
-l'exécution hors projet/cache avec WKWebView. Les autres moteurs nécessitent leur validation.
+**Acceptée le 2026-10-24** (proposée le 2026-10-20). Preuves (#316) : le parcours `Journey*` (create, init, install, check, test, build, embed, compilation et exécution de l'application embarquée depuis un répertoire vide, permission refusée, cache hors ligne puis restauré) est vert sous CEF (GCC et Clang, réseau public coupé), WebKitGTK, WKWebView et WebView2 ([exécution de la PR](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) et [dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204)) ; un échantillon de treize paquets npm réels (React, TypeScript, `@types/*`, jasmine-core…) est installé depuis le registre local ; la release 0.6.0 est publiée et vérifiée.
 
 ## Contexte
 
@@ -36,6 +38,12 @@ Le bridge embarqué reste celui de WebFront, en priorité sur les providers appl
 Conserver les providers historiques pour les consommateurs existants ; leur retrait n'est pas
 une conséquence automatique de cette proposition.
 
+## Alignement sur l'ADR-016
+
+[ADR-016](ADR-016-bootstrap-comme-socle.md) retient cette proposition comme base de l'architecture.
+Elle est **Acceptée** depuis les preuves de #316 (voir le statut). Les providers et composants historiques évoqués ici suivent la
+trajectoire de retrait de l'ADR-016.
+
 ## Alternatives et conséquences
 
 - Distribuer le cache et des fichiers locaux maintiendrait une dépendance au poste de développement.
@@ -51,7 +59,7 @@ une conséquence automatique de cette proposition.
 Tester les octets décompressés, le padding, la stabilité à entrées identiques et les erreurs de
 publication. Compiler le header réellement produit par le navigateur dans un second exécutable,
 puis démarrer celui-ci depuis un répertoire vide, sans racine locale ni callbacks développeur.
-Le test vérifie l'interface React et le résultat PI via le bridge.
+Le test actuel vérifie l'interface React et les générations Life via le bridge ; il remplace la fixture PI retirée.
 
 ## Références
 

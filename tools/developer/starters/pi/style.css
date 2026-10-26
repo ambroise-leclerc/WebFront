@@ -1,5 +1,0 @@
-body { font: 18px system-ui; margin: 3rem; color: #193445; background: #f7fafc; }
-main { max-width: 52rem; margin: auto; }
-input, button { font: inherit; margin: .5rem; padding: .4rem; }
-output { display: block; overflow-wrap: anywhere; margin-top: 2rem; font-family: monospace; }
-[role=alert] { color: #a02828; }

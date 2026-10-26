@@ -2,7 +2,7 @@
 
 [Back to the README](../README.md#use-webfront-in-your-project)
 
-A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS, `WebKitGTKFrontend` on Linux). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/frontend/Frontend.hpp`.
+A frontend decides how the interface is displayed: the system browser (`DefaultBrowserFrontend`, the default), an embedded Chromium window (`CEFFrontend`) or an embedded native web view (`WebView2Frontend` on Windows, `WKWebViewFrontend` on macOS, `WebKitGTKFrontend` on Linux). The application code and interface assets do not change when the frontend does. Platform-specific notes live next to each frontend, for example [WebView2](WEBVIEW2.md) and [WKWebView](WKWEBVIEW.md). This page states the rules they all follow; the C++ concept is `frontend::FrontendType` in `include/webfront/frontend/Frontend.hpp`.
 
 ## The contract
 
@@ -28,17 +28,17 @@ The [shared content policy](CONTENT_POLICY.md) defines bridge-origin authorizati
 
 ## Contract tests
 
-`test/FrontendContractTests.cpp` uses a synchronized mock window and a server loop that stays active
+`test/unit/FrontendContractTests.cpp` uses a synchronized mock window and a server loop that stays active
 until stopped. It verifies blocking until closure, execution on the calling thread, server-loop
 completion before `show()` returns or propagates an exception, and continued service after a
 `keepServerRunning` frontend returns. Standard and non-standard exceptions are covered, including
 startup failures before any window is created. Coordination waits have a 30-second upper bound.
-`test/WebFrontTests.cpp` also checks initialization once per frontend type, retry after failed
+`test/unit/WebFrontTests.cpp` also checks initialization once per frontend type, retry after failed
 initialization, frontend selection and unavailable-engine diagnostics. These tests need no GUI.
 
 ## Adding a frontend
 
-1. Implement the type in `include/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
+1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
 2. Add its support module and one `webfront_register_frontend(...)` entry in `cmake/Frontends.cmake`, using the fields below.
 3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the seven shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
 
@@ -62,7 +62,7 @@ Registry order determines the initial cache default: the first enabled embedded 
 
 ## Lifecycle tests
 
-`webtest/FrontendLifecycle.cpp` runs the same seven cases under the selected embedded engine:
+`test/web/FrontendLifecycle.cpp` runs the same seven cases under the selected embedded engine:
 
 - `no-bridge`: close a page that never connects to the bridge and return from `show()`.
 - `early-close`: close immediately from the page's first script, before any bridge connection.
@@ -90,10 +90,57 @@ their own CTest timeouts.
 WKWebView adds native main-thread, Quit/closure, repeated-opening, initial HTTP failure, stalled-loading
 deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEBVIEW.md#unattended-verification).
 
+## Direct engine access
+
+Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)
+(proposed) describes how an adapter may later add its engine's native resource scheme and message channel without replacing that
+path. Transport benchmarks are **manual measurement tools**, excluded from the default build,
+CTest and every CI workflow. The targets are `webkitgtk_transport_benchmark`,
+`webview2_transport_benchmark` and `wkwebview_transport_benchmark` for their respective engines.
+Build one explicitly, then launch its executable (the macOS executable is inside its `.app` bundle).
+
+For comparable Linux timings, use Release without coverage:
+
+```bash
+cmake -S . -B build-performance -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
+cmake --build build-performance --target webkitgtk_transport_benchmark --parallel 2
+cd test/web
+xvfb-run -a ../../build-performance/test/web/webkitgtk_transport_benchmark /tmp/webkitgtk-transport-benchmark.json
+```
+
+The former `performance-linux` CI job and timed transport CTest cases have been removed (#283).
+The shared page still uses the same sizes, call counts, warm-up, five samples and concurrent
+calls when launched manually. `WebKitGTKTransportContracts` and `WebView2TransportContracts`
+exercise native string replies, C++ evaluation, wrong echoes and evaluation exceptions with
+at most two calls per size; WebView2 also checks shared-buffer calls in both directions.
+They use a separate page without timing batches or performance reports.
+`WKWebViewTransportContracts` runs a separate contracts-only
+executable in CTest; it does not execute measurement batches.
+
+Each prints a table, writes `webkitgtk-transport-benchmark.json`, `webview2-transport-benchmark.json` or
+`wkwebview-transport-benchmark.json` in the build directory
+of `test/web`, and fails only on a wrong echo. WebView2 also measures a shared buffer, which is the only WebView2 direct path
+that beats the HTML bridge at every size; its string messages do not. The ADR gives the figures and the recommended default
+per platform. WKWebView measures `evaluateJavaScript`, `callAsyncJavaScript` and a base64 byte envelope; its public API
+documents Foundation values rather than a shared binary buffer. `WKWebViewTransportContracts` checks replies, errors,
+Promises, incorrect echoes, base64 bytes and subframe rejection separately from timings. These test-only native channels
+do not change the production HTTP/WebSocket transport.
+
 ## Build options
 
 Enabling an engine makes its adapter available; select it explicitly in your application.
 `webfront::NativeApp` chooses the native engine for the current platform.
+
+The options default to `OFF`. In a top-level build with examples and without `ENABLE_TESTING` or `ENABLE_FUZZING`, configuration first
+probes the native engine of the platform (registered with `NATIVE`: WebKitGTK through `pkg-config webkitgtk-6.0`, WKWebView on Clang with
+macOS 13.3+, WebView2 with an MSVC-compatible compiler) and sets `ON` or `OFF` in a normal variable, so `cmake ..` is enough to build the Life
+example with a native window. Automatic values do not create engine cache entries and are probed again at the next configuration.
+An explicit normal or cached option is never replaced, even if it equals the last detected value. Remove the cache entry with
+`-UWEBFRONT_EMBED_WKWEBVIEW` (or the corresponding platform option) to resume automatic detection.
+A missing engine only prints a status; the Life examples then use the default browser and CMake explains what to install.
+Platforms without a registered native engine use the default browser as well. `-DWEBFRONT_AUTODETECT_NATIVE=OFF`
+turns the detection off. CEF is never detected.
 
 | Option | Default | Description |
 | --- | --- | --- |

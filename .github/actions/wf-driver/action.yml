@@ -1,0 +1,42 @@
+name: Build the wf driver
+description: >-
+  Builds webfront-wf (WebKitGTK frontend), the non-interactive driver of the WebFront developer environment, from the
+  bootstrap environment pinned by cmake/WebFrontBootstrap.cmake, and installs a `wf` command that runs a wf command on the
+  project at the root of the workspace. Node.js is neither used nor required.
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-cmake
+      with:
+        version: '4.4.4'
+    # Ubuntu 26.04 ships GCC 16 in its main archive. The image already provides Ninja, pkg-config and Xvfb.
+    - name: Install GCC 16 and WebKitGTK
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-16 g++-16 libwebkitgtk-6.0-dev
+        echo "CC=gcc-16" >> "$GITHUB_ENV"
+        echo "CXX=g++-16" >> "$GITHUB_ENV"
+    - name: Build webfront-wf
+      shell: bash
+      run: |
+        cmake -S . -B build-driver -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON \
+          -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK \
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        cmake --build build-driver --target webfront-wf --parallel 2
+    - name: Install the wf command
+      shell: bash
+      run: |
+        bin="$RUNNER_TEMP/wf-bin"
+        mkdir -p "$bin"
+        # The sandbox opt-out is confined to this driver, which runs trusted sources and a verified environment.
+        cat > "$bin/wf" <<SCRIPT
+        #!/usr/bin/env bash
+        # Messages.hpp prints its encoding trace to the standard output: it is not part of a command's result.
+        export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+        xvfb-run -a "$GITHUB_WORKSPACE/build-driver/test/web/webfront-wf" --project "$GITHUB_WORKSPACE" --manifest-dir js/developer "\$@" 2>&1 \\
+          | grep --line-buffered -v -e '^-> encoded to string of size' -e '^bufferIndex = '
+        exit "\${PIPESTATUS[0]}"
+        SCRIPT
+        chmod +x "$bin/wf"
+        echo "$bin" >> "$GITHUB_PATH"

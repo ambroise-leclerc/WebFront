@@ -14,7 +14,7 @@ target_compile_options(WebFront INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-fblocks>")
 target_link_libraries(WebFront INTERFACE "${WEBFRONT_COCOA_FRAMEWORK}" "${WEBFRONT_WEBKIT_FRAMEWORK}")
 
 function(webfront_add_wkwebview_tests)
-    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../webtest" ABSOLUTE)
+    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/web" ABSOLUTE)
     add_executable(wkwebview_lifecycle "${webtest_source_dir}/WKWebViewLifecycle.cpp"
         "${webtest_source_dir}/WKWebViewHeaderConsumer.cpp")
     target_link_libraries(wkwebview_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
@@ -22,6 +22,16 @@ function(webfront_add_wkwebview_tests)
         add_test(NAME WKWebViewLifecycle-${mode} COMMAND wkwebview_lifecycle ${mode})
         webfront_set_browser_test_properties("WKWebViewLifecycle-${mode}" "${webtest_source_dir}" 90)
     endforeach()
+    # Measurement is manual; the short contract checks remain ordinary browser tests.
+    add_executable(wkwebview_transport_benchmark EXCLUDE_FROM_ALL "${webtest_source_dir}/WKWebViewTransportBenchmark.cpp")
+    add_executable(wkwebview_transport_contracts "${webtest_source_dir}/WKWebViewTransportBenchmark.cpp")
+    target_compile_definitions(wkwebview_transport_contracts PRIVATE WEBFRONT_TRANSPORT_CONTRACTS_ONLY)
+    foreach(target wkwebview_transport_benchmark wkwebview_transport_contracts)
+        target_link_libraries(${target} PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    endforeach()
+    add_dependencies(webtest wkwebview_transport_contracts)
+    add_test(NAME WKWebViewTransportContracts COMMAND wkwebview_transport_contracts)
+    webfront_set_browser_test_properties(WKWebViewTransportContracts "${webtest_source_dir}" 60)
 
     add_library(wkwebview_class_module SHARED "${webtest_source_dir}/WKWebViewClassModule.cpp")
     add_executable(wkwebview_class_images "${webtest_source_dir}/WKWebViewClassImages.cpp")
@@ -38,11 +48,13 @@ function(webfront_add_wkwebview_tests)
         webfront_set_browser_test_properties("WKWebViewClassImages-${order}" "${webtest_source_dir}" 90)
     endforeach()
     # Stable agent bundles avoid one anonymous executable tile per test process in the Dock.
-    foreach(target webtest frontend_lifecycle wkwebview_lifecycle wkwebview_class_images)
+    # The path is normalized: a second spelling of the template would be a duplicate Ninja output.
+    get_filename_component(_wk_plist "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/cmake/WKWebViewTestInfo.plist.in" ABSOLUTE)
+    foreach(target webtest frontend_lifecycle wkwebview_lifecycle wkwebview_class_images wkwebview_transport_benchmark wkwebview_transport_contracts)
         string(REPLACE "_" "-" identifier "${target}")
         set_target_properties(${target} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_GUI_IDENTIFIER "org.webfront.tests.${identifier}"
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/WKWebViewTestInfo.plist.in")
+            MACOSX_BUNDLE_INFO_PLIST "${_wk_plist}")
     endforeach()
 endfunction()

@@ -1,0 +1,351 @@
+{
+  "context": {
+    "date": "2026-10-25",
+    "sourceCommit": "a002f74f78e3e616567dabc846082ad72419ed99",
+    "cpu": "AMD Ryzen 9 3900X, 12 cores / 24 threads",
+    "os": "Ubuntu 26.04.1 LTS, Linux 7.0.0-38-generic, x86_64",
+    "compiler": "GCC 16.1.0",
+    "buildType": "Release",
+    "coverage": false,
+    "webkitgtk": "2.52.6",
+    "display": "Xvfb, GDK_BACKEND=x11, GSK_RENDERER=cairo, LIBGL_ALWAYS_SOFTWARE=1",
+    "method": "Three independent process launches; each report is the median of five run means following one warm-up. Summary takes the median of the three reports per path. Direct path excludes the bridge codec and server thread hop."
+  },
+  "summary": [
+    {
+      "direction": "js->cpp",
+      "mode": "sequential",
+      "bytes": 16,
+      "calls": 8000,
+      "html": 125.75,
+      "direct": 86.875
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "concurrent",
+      "bytes": 16,
+      "calls": 8000,
+      "html": 26.5,
+      "direct": 12
+    },
+    {
+      "direction": "cpp->js",
+      "mode": "sequential",
+      "bytes": 16,
+      "calls": 8000,
+      "html": 131.570591125,
+      "direct": 69.84736037500001
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "sequential",
+      "bytes": 1024,
+      "calls": 8000,
+      "html": 139.5,
+      "direct": 92.5
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "concurrent",
+      "bytes": 1024,
+      "calls": 8000,
+      "html": 33.625,
+      "direct": 16.99999999999909
+    },
+    {
+      "direction": "cpp->js",
+      "mode": "sequential",
+      "bytes": 1024,
+      "calls": 8000,
+      "html": 153.61408600000001,
+      "direct": 74.817695875
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "sequential",
+      "bytes": 32768,
+      "calls": 800,
+      "html": 703.75,
+      "direct": 401.25
+    },
+    {
+      "direction": "js->cpp",
+      "mode": "concurrent",
+      "bytes": 32768,
+      "calls": 800,
+      "html": 293.75,
+      "direct": 126.25
+    },
+    {
+      "direction": "cpp->js",
+      "mode": "sequential",
+      "bytes": 32768,
+      "calls": 800,
+      "html": 731.5273675,
+      "direct": 367.5451325
+    }
+  ],
+  "reports": [
+    {
+      "engine": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+      "channel": "WebKitGTK",
+      "runs": 5,
+      "shortestBatchMilliseconds": 96,
+      "inFlight": 64,
+      "unit": "microseconds per call, median of run means",
+      "firstCallMilliseconds": {
+        "html": 8,
+        "direct": 7,
+        "bridgeReady": 7
+      },
+      "results": [
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 128.87499999999994,
+          "direct": 86.875
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 26.124999999999776,
+          "direct": 12
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 124.5209935,
+          "direct": 71.878838875
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 139.5,
+          "direct": 92.5
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 32.625,
+          "direct": 18
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 144.13877,
+          "direct": 74.817695875
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 723.750000000009,
+          "direct": 401.25
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 293.75,
+          "direct": 132.5
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 731.0892925,
+          "direct": 399.73094375
+        }
+      ]
+    },
+    {
+      "engine": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+      "channel": "WebKitGTK",
+      "runs": 5,
+      "shortestBatchMilliseconds": 90.00000000000728,
+      "inFlight": 64,
+      "unit": "microseconds per call, median of run means",
+      "firstCallMilliseconds": {
+        "html": 8,
+        "direct": 6,
+        "bridgeReady": 7
+      },
+      "results": [
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 125.75,
+          "direct": 79.25
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 26.5,
+          "direct": 12.875
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 141.663644125,
+          "direct": 69.84736037500001
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 156.25,
+          "direct": 99.75
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 34.75,
+          "direct": 16.125
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 162.90603049999999,
+          "direct": 77.12449774999999
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 663.750000000009,
+          "direct": 386.25
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 288.75,
+          "direct": 116.2499999999909
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 780.99925625,
+          "direct": 367.5451325
+        }
+      ]
+    },
+    {
+      "engine": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+      "channel": "WebKitGTK",
+      "runs": 5,
+      "shortestBatchMilliseconds": 86,
+      "inFlight": 64,
+      "unit": "microseconds per call, median of run means",
+      "firstCallMilliseconds": {
+        "html": 7,
+        "direct": 6,
+        "bridgeReady": 7
+      },
+      "results": [
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 122.12500000000006,
+          "direct": 89.75
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 28.125,
+          "direct": 11.875
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 16,
+          "calls": 8000,
+          "html": 131.570591125,
+          "direct": 66.53465425
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 135.75,
+          "direct": 88.25
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 33.625,
+          "direct": 16.99999999999909
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 1024,
+          "calls": 8000,
+          "html": 153.61408600000001,
+          "direct": 71.288637625
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 703.75,
+          "direct": 447.5
+        },
+        {
+          "direction": "js->cpp",
+          "mode": "concurrent",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 330,
+          "direct": 126.25
+        },
+        {
+          "direction": "cpp->js",
+          "mode": "sequential",
+          "bytes": 32768,
+          "calls": 800,
+          "html": 731.5273675,
+          "direct": 361.8843275
+        }
+      ]
+    }
+  ]
+}

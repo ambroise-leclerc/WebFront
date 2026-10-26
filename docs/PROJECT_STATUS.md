@@ -1,21 +1,224 @@
 # WebFront project status
 
+## Current state (#317, epic #303, 2026-10-24)
+
+WebFront is a minimal header-only C++23 core plus a standalone developer environment.
+
+- **Core.** `include/webfront/` holds the C++ library and a closed list of embedded resources (the bridge, the fallback page and
+  module, the favicon, the bootstrap page and loader, and the release data), guarded at 150 KiB decoded by `MinimalCoreAssets`
+  ([ADR-016](adr/ADR-016-bootstrap-comme-socle.md)). No third-party source is vendored.
+- **Developer environment.** Downloaded and verified by `NativeApp::bootstrap("developer")` (0.6.2 published and pinned). `wf init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview` and
+  `embed` work on a manifest (`webfront.project.json`) and a lock; TypeScript and TSX are compiled by esbuild-wasm and type-checked
+  by `wf check` with the project's locked compiler. The application's own commands join the terminal through `webfront::Commands`.
+  See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) and [UI_COMPONENTS](UI_COMPONENTS.md).
+- **No JavaScript runtime or package manager** is needed to use, build, test, regenerate, publish or run the CI of WebFront
+  ([migration record](NODE_TOOLS_MIGRATION.md)); `NoNodeDependency` audits every tracked file.
+- **Proofs.** The `Journey*` chain (create, init, install, check, test, build, embed, compile, run, permission denied, offline cache)
+  passes on CEF, WebKitGTK, WKWebView and WebView2 (see below).
+- **Limitations.** There is no sandbox: the downloaded environment and the authorized scripts have the authority of the bridge and
+  of the project, and the permissions frame only the `context` API of scripts. Only browser packages install; installation scripts
+  and native add-ons are not executed. A synchronous infinite loop in a spec blocks the page hosting `wf test`. File reads fail beyond 260 characters
+  on Windows (#349). General DOM abstractions, packaging, accessibility and native-engine deployment remain application work.
+  The README walkthrough (Game of Life: console, developer, embedded) uses exactly these commands, and `NewcomerDocsMatchExamples`
+  keeps it aligned with the examples.
+
+The sections below are dated records, newest first where the topic is current; earlier entries keep the names and numbers of their time.
+
+## Direct frontend access proposal (#363, 2026-10-24)
+
+[ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) is **proposed**: an embedded frontend may later carry the ADR-003 messages and
+serve the composed filesystem through its engine's own API (for Android, iOS and other mobile platforms where a loopback server
+is awkward), while HTTP/WebSocket remains the normative path of every frontend, of the system browser and of future
+microcontroller targets. Nothing of this transport is implemented yet; the ADR lists its acceptance criteria.
+
+`WebKitGTKTransportBenchmark` measures both paths in one WebKitGTK window. The 2026-10-25 Linux measurements
+(Ryzen 9 3900X, GCC 16.1, Release without coverage, WebKitGTK 2.52.6, Xvfb) use the same 8000 calls (800 at 32 KiB),
+warm-up and five samples as Windows, with the median of three launches; [raw reports](benchmarks/linux-webkitgtk-2026-10-25.json)
+are retained. Concurrent throughput is 2.0 to 2.3 times higher through the direct channel; the figures exclude the codec
+and thread hop a real transport adds. Transport measurements are now manual only (#283): their targets are excluded from the default build,
+timed cases are absent from CTest and the `performance-linux` CI lane has been removed.
+The short WebKitGTK, WebView2 (including shared buffers) and WKWebView direct transport contract checks remain in CTest.
+On WebView2 (Windows 11, Evergreen 155) string messages are slower than the HTML bridge from 32 KiB and for C++ to JS,
+while a shared buffer is 2 to 6 times faster. CEF and mobile engines are not measured; the ADR recommends a
+direct default for Android and iOS (with version-dependent network rules) and HTML until proven for desktop engines.
+The benchmark exposed two per-message diagnostics costs in the bridge, now fixed with regression tests (32 KiB echo: 2.4 ms to 0.7 ms).
+
+The macOS follow-up (2026-10-25) adds `WKWebViewTransportBenchmark`: the same echoes through the HTML bridge, public
+message handlers, `evaluateJavaScript`, `callAsyncJavaScript` and a base64 byte envelope. `WKWebViewTransportContracts`
+passes native replies/errors, abandoned replies, Unicode/NUL and binary bytes, Promise results, wrong echoes and subframe
+rejection. ADR-017 documents the Foundation value boundary and the changes needed for custom-scheme origins and loading;
+the benchmark itself still serves its page over HTTP. The allocation-counting test is excluded only from TSan builds
+because its global operator replacements conflict with Clang's TSan runtime; ordinary and ASan/UBSan builds keep it.
+On the Apple M2 reference host, median 32 KiB sequential echoes through the HTML bridge take 338 µs (JS to C++) and
+334 µs (C++ to JS), versus 388 and 393 µs with the base64 byte envelope. Native strings alone hide that cost. The three
+reports are retained with their dispersion (the first launch was much slower); macOS keeps the HTML default pending
+measurements of a complete transport under controlled load. These figures do not establish iOS performance.
+
+## Repository layout (#320, epic #303)
+
+The root now holds only `.github`, `cmake`, `docs`, `examples`, `include`, `js` and `test`, plus tool configuration files
+(`third_party/` was removed by #319: no third-party source is vendored). Headers moved to `include/webfront/` and are included
+as `<webfront/WebFront.hpp>`; the former `<WebFront.hpp>`, `<http/...>` or `<system/...>` spellings are
+removed without redirect headers (see `docs/CHANGELOG.md`). Browser sources live in `js/core/`
+(bridge, fallback, bootstrap loader and embedding modules) and `js/developer/` (environment, terminal
+components, build tools, vendoring tools); tests live in `test/{unit,web,fuzz,fixtures,cmake}`. The CTest
+case `RepositoryLayout` enforces the root. The generated-provider include changed, so the developer
+distribution is bumped to 0.4.1, published and archived as `developer-v0.4.1`. Version 0.5.0 (project manifest, `wf restore`,
+`wf run`/`wf exec`, `wf check`, the complete terminal) was published as `developer-v0.5.0`; 0.6.0 (`wf build`, `wf dev`, `wf test`, the non-interactive entry) was published as `developer-v0.6.0`, and 0.6.1 (the output of a script reaches `webfront-wf`) is pinned by `DeveloperReleaseData.hpp`, published and archived as `developer-v0.6.1`. On 2026-10-23 Pages returned HTTP 200 for 0.6.1,
+CORS `*` and archives byte-identical to a reproducible local build; the live `--public` test (WebKitGTK, Linux) downloaded them,
+fetched React from npm, ran the PI and Life previews and generated both providers.
+
+## Browser suite as a WebFront project (#311, epic #303)
+
+The Jasmine bridge suite is `test/web/suite/`, a WebFront project (`webfront.project.json`: `jasmine-core`, `react`,
+`react-dom`, `test.specs`). `webtest` is the `webfront-wf` driver (`test/driver/WfDriver.hpp`) plus the C++ callbacks the
+specs call: CTest prepares a copy of the project (`WebSuiteProject`), `wf install` resolves its dependencies from the
+local registry built by `wf run test-registry` (`WebSuiteInstall`), and the `Web*Integration` case runs `wf test` in the
+pinned 0.6.2 bootstrap environment under CEF/Xvfb, WebKitGTK, WebView2 or WKWebView. `SpecRunner.html`, the `TestFS`
+composition and the use of the embedded Jasmine, React and Babel providers by the browser test are gone.
+The retired Signal Studio page is no longer part of the suite; Life covers React/TSX in the developer integration. The specs now run
+in the hidden frame of `wf test`, so the URL assertions of the former top-level page (path, query, fragment) are covered
+by the `path-encoding` lifecycle case, and `webtest` also checks that C++ observed every call the specs make. The Jasmine
+case needs no prepared fixtures: configure downloads the registry's packages (#318). The embedded Jasmine, React and Babel providers, their headers (~2.1 MB), `third_party/{babel,react,jasmine}`, `vendor/update.mjs` and `vendor/check.mjs`, their freshness tests and `EmbeddedGzipContents` were removed by #312 (migration: `wf install` and `wf embed`, see `docs/EMBEDDED_ASSETS.md`); the HTTP gzip and identity negotiation tests use a neutral fixture module.
+
+## Self-hosted developer environment (#315, epic #303)
+
+The repository is a `wf` project (`js/developer/webfront.project.json` and `js/developer/webfront-packages.lock.json`, selected by the driver's
+`--manifest-dir js/developer`, so that the root stays short). The pinned 0.6.2 bootstrap environment runs `js/developer/scripts/build.mjs` with `webfront-wf`:
+the locked esbuild-wasm bundles the environment in the script's Worker, and `environment.tgz`, the starters,
+`provision.json`, the pinned header and (with `--refresh-bootstrap`) the bootstrap bundles and their checksums come out
+the same twice in a row, and byte for byte as the 0.6.2 that is published (`sha512-SYnS6iRd...`). `site.mjs` stages the Pages
+site and refuses to change a published version; `pin.mjs` checks the pin against the published archive; `pages.sh` and
+`archive-release.sh` do the host operations with `gh`. The `DeveloperDistribution.yml` jobs `wf-package` and `publish`, and
+the actions `wf-driver` and `remove-node`, run only on GitHub.
+
+## Developer journey qualification (#316, epic #303)
+
+The whole journey of a developer is a chain of CTest cases (`Journey*`, label `web-integration`) on one project in an empty
+directory, from the environment built from the sources and the local registry, without Node.js, npm or public network after configure
+(the CEF job cuts it):
+
+| Step | Case | Proof |
+| --- | --- | --- |
+| `wf create life` | `JourneyCreate` | the pinned starter is verified and written to `ui/` |
+| `wf init` | `JourneyInit` | the manifest |
+| `wf install` | `JourneyInstall` | eight packages from the registry, among them `@types/react` (archive rooted at `react/`, not `package/`) |
+| `wf check` | `JourneyCheck` | the real Life starter type-checks under TypeScript 5.9 strict |
+| `wf test` | `JourneyTest` | two Jasmine specs in the real engine |
+| `wf build`, `wf embed` | `JourneyBuild`, `JourneyEmbed` | the header `generated/LifeUI.hpp` |
+| compile and run | `JourneyEmbeddedBuild`, `JourneyEmbeddedRun` | the header is compiled into the Life application, which runs from an empty directory |
+| `wf preview`, `wf dev` | `DeveloperBrowserIntegration` | they need the page of the terminal: run in the same engine, with Ctrl+C and the cache |
+
+Error cases: wrong integrity, missing archive, unknown protocol or API version and watchdog (`WfDriverWrongIntegrity`,
+`WfDriverMissingArchive`, `WfDriverIncompatibleProtocol`, `WfDriverIncompatibleApi`, `WfDriverTimeout`), a script outside its
+permissions (`JourneyPermissionDenied`), an emptied cache checked offline then restored (`JourneyOfflineMissing`, `JourneyRestore`,
+`JourneyOfflineVerified`), Ctrl+C on dev, scripts and native commands (`DeveloperBrowserIntegration`).
+
+Green on CEF (GCC and Clang, public network cut), WebKitGTK, WKWebView and WebView2 in the
+[pull request run](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) and the
+[dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204); the durations are in `docs/TEST_PERFORMANCE.md`.
+ADR-013, ADR-014 and ADR-015 are accepted on these proofs. The developer store reads and writes project paths beyond 260 characters on Windows through the extended-length form (#349).
+
+The journey found two defects, now fixed with regression specs: the installer refused every archive whose root is not
+`package/` (all of `@types/*`, whose root is the package name; `npm` strips the first component whatever it is), and the Life starter
+did not type-check under `strict` with the current declarations (`useState<Uint8Array>`).
+
+## Tests, regeneration and CI without Node.js (#318, epic #303)
+
+No path of WebFront depends on a JavaScript runtime or package manager any more: configuring, building, testing, regenerating the embedded assets,
+building the environment, publishing it, and the CI.
+
+- **Provisioning.** With `ENABLE_TESTING=ON`, configure downloads the pinned bootstrap environment and the real packages of the
+  tests' npm registry (`test/web/registry-packages.json`: thirteen archives, verified against their SHA-512; a wrong digest stops
+  the configure; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace the downloads offline). `WEBFRONT_DEVELOPER_FIXTURES`
+  is gone: the CTest chain builds the registry (`TestRegistry`: `wf run test-registry`), installs the build dependencies
+  from it, builds the environment from the current sources (`SelfBuild*`) and assembles the fixtures of the browser tests
+  (`DeveloperFixtures`). At the #344 merge, this rebuilt the published 0.6.1 byte for byte; #335 advances the
+  development sources to 0.6.2 while preserving the published 0.6.1 pins.
+- **Tests.** The pure JavaScript tests of the former runner became Jasmine specs in `test/developer/specs/`, run by the
+  repository's own `wf test` (`DeveloperSpecs`, and the `wf-package` job on the real checkout and lock); 86 tests became 84
+  specs because two moved to CMake: the checksums of the bundle inputs (`BundleInputsFresh`, `BundleInputsRejectsChange`) and
+  the command names reserved by the terminal and by `webfront::Commands` (`CommandNamesAgree`). The tests of the asset
+  generator became `EmbeddedAssetGenerator` (CMake, exit status and format), a Catch2 scenario that decodes every core
+  header and compares it with its source, and the per-asset `*AssetFresh` cases. The mapping is in `docs/NODE_TOOLS_MIGRATION.md`.
+- **Regeneration.** The headers of the core are rendered, and checked, by `js/core/EmbedAsset.cmake`, in pure CMake (ADR-016):
+  they must be checkable by a build that has no browser. `wf run embed-core` is gone.
+- **Guard.** `NoNodeDependency` audits every tracked file for imports and APIs of Node, commands of its tools and package
+  managers, their configuration, their requirement in current documentation and the "like node.js" positioning; the exceptions are listed,
+  with their reason, in `test/cmake/NodeGuardExceptions.cmake`. `NoNodeDependencyRejectsInjections` proves it fails on an
+  import of a Node module, a package installation command in a workflow, `engines.node` in a manifest, a Node script nobody calls, an old command in a
+  guide and the other injections, and passes on a registry URL and on a test that checks the rejection of a Node import.
+- **CI.** The Node.js setup steps, the package installation, the npm cache and the `package` job are gone; the desktop, sanitizer and CEF jobs and
+  `wf-package` run `remove-node` (also on Windows and macOS) before anything else.
+
+Verified locally (WebKitGTK, GCC 15) with every JavaScript runtime and package manager absent from `PATH`; see the pull
+request for the figures. The workflow changes were checked by running their shell steps locally, not by a workflow run before
+the pull request.
+
+## CI test duration (#298, 2026-10-21)
+
+The maintenance asset renderer assembles bounded lines and joins them once, preserving
+all versioned bytes. Local Babel freshness dropped from
+14.75 s to 0.30 s (the renderer is CMake since #318; Babel is gone). CI uses up to four CTest workers, retains timing reports, locks browser ports
+and serializes nested embedded builds against every running test in the same tree.
+Frontend fixtures reuse the parent generator, and the consumer inherits the actual
+test target's compiler cache launcher at generation time.
+
+The first PR CI run passes Linux coverage/native-browser tests in 47.63 s versus
+130.94 s previously. macOS exposes a default-port collision in a developer unit
+test, now corrected to use port 0 and reproduced locally with 9002 occupied.
+Filesystem fixtures also atomically claim their temporary directories. The corrected
+261-test CEF-off suite passes locally with four workers (18.02 s), and all
+14 CEF/Xvfb cases pass with serialized nested builds (63.18 s).
+Repeating each of the 261 CEF-off cases three times passes locally (54.16 s).
+Manual dispatch with `repeat_desktop_tests=true` additionally repeats each desktop
+case three times; successful Windows/macOS qualification and stability results must
+be checked on the corrected head before merging. See the
+[audit, measurements and remaining costs](TEST_PERFORMANCE.md).
+
+
+
+## Release 0.5.0 (2026-10-26)
+
+`webfront::version` and the CMake project version are 0.5.0. This version integrates the
+manifest-driven, self-building developer environment, the reduced identity-only embedded core,
+and bounded cached/worker gzip fallback with buffered decoding. Includes move to
+`<webfront/...>`; removed terminal/tool-manager APIs migrate to the developer terminal and
+`webfront::Commands`. See `docs/CHANGELOG.md` and `docs/UI_COMPONENTS.md` for migration details.
+The published developer environment pin is 0.6.2; environment sources at 0.6.3 are not yet
+published. Library APIs and packaging remain experimental.
+
 ## Release 0.4.0 (#200, 2026-10-21)
 
 `webfront::version` and the CMake project version are 0.4.0. The release presents the repository
 (examples, README, assets layout) and streamlines CI; it adds no library functionality, see
-`CHANGELOG.md`. The developer distribution 0.4.0 is published and archived as `developer-v0.4.0`;
+`docs/CHANGELOG.md`. The developer distribution 0.4.0 is published and archived as `developer-v0.4.0`;
 published 0.1.0 to 0.4.0 remain immutable. APIs and packaging remain experimental.
+
+## CI regression scope (2026-10-24)
+
+- Developer environment 0.6.2 is published (`developer-v0.6.2`); the release and test-bootstrap pins name it.
+- The retired PI starter, its sources and its distribution archive are removed. Life is the maintained starter and covers
+  React/TSX, preview, bitset calls, reproducible embedding and an offline executable without developer callbacks.
+  Retired Signal Studio application regressions are also removed.
+- Deadline, grace-period and dev-polling checks advance a scoped clock. Worker startup and bridge/UI operations stay
+  real. Native command cancellation uses a release handshake; repeated checks reuse immutable fixture package bytes.
+- Bounded-snapshot and NodeNext/no-emit compiler checks retain the real compiler in the browser workflow. New
+  cancellation and clock specs run with the repository's own `wf test`, preserving #344's self-hosted test pipeline.
+  Two identical self-builds demonstrate reproducibility; a separate build verifies bootstrap refresh.
+  An end-to-end packaged script verifies publication permissions.
+- Tests retain their original CTest grouping: total suite time remains visible. Compilation and complete browser
+  workflows are still longer than the two-second target; no timing claim is made by splitting the reporting units.
 
 ## Repository presentation for 0.4 (2026-10-21)
 
 - Public examples now live in `examples/`: Hello World and the three stages of Game of Life.
-  Browser bridge/component/bootstrap sources live in `assets/`; the library remains header-only.
+  Browser bridge/component/bootstrap sources live in `js/`; the library remains header-only.
   PI and Signal Studio resources required by regression tests remain fixtures, without public demo targets.
-- The README starts with Hello World and a linked Life thumbnail, then walks through the native
-  bootstrap, dependency installation, preview and offline embedding. No library feature is added.
+- The README starts with the Life application and its animation, then walks through the native
+  bootstrap, dependency installation, development, checks, tests and offline embedding. No library feature is added.
 - Per-change CI combines unit tests and native browser coverage into three desktop jobs, with
-  npm, CPM and compiler caches. The Linux job uploads GCC coverage on every PR. Sanitizers, fuzzing,
+  npm, CPM and compiler caches. The Linux job prints GCC line coverage on every PR (no external upload). Sanitizers, fuzzing,
   both CEF compiler variants and optional mddlog qualification run weekly or manually. Superseded runs are cancelled.
 - Developer distribution 0.4.0 is published for the revised Life text (`developer-v0.4.0`).
 - The dated entries below record earlier implementations and their original target names.
@@ -60,11 +263,11 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   the Linux sanitizers, WebKitGTK and macOS/WKWebView checks.
 
 
-## Browser-powered development (2026-10-20)
+## Historical developer environment proposals (2026-10-20)
 
 - `NativeApp` can bootstrap a pinned developer environment with a small embedded loader. The
   downloadable terminal, npm library resolver, esbuild/WASM Worker and gzip/header generator do
-  not require Node/npm on application developers' machines.
+  need no JavaScript tooling on application developers' machines.
 - The Game of Life demo (`WebFrontLifeDeveloper`, `wf create life`) uses a compact C++23
   bitset simulation and a spatial React/canvas interface with translucent panels, interactive
   patterns, playback, single step and tempo. The original PI demo remains available. Both cover
@@ -80,17 +283,22 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
   its WKWebView job also passed. The later Windows and sanitizer results are in the validation above.
 - Versioned environment and Life/PI starter archives have a GitHub Pages publication workflow,
   immutable-version checks, dedicated prerelease archiving and a checked-in pinned bootstrap
-  configuration. `wf create life` and `wf create pi` create fresh editable projects without
-  overwriting existing files. Maintainer preparation requires Node/npm; consumers do not.
+  configuration. At that time, `wf create life` and `wf create pi` created fresh editable projects without
+  overwriting existing files. Maintainer preparation uses `wf` itself (#318); consumers install nothing.
   Version 0.2.0 was served at `https://ambroise-leclerc.github.io/WebFront/developer/0.2.0/`,
   with the same archives retained in the `developer-v0.2.0` prerelease; 0.1.0 and later versions are preserved.
   The live WKWebView smoke test downloaded both starters and the environment from Pages, fetched
   React dependencies from npm, passed PI/Life previews and deterministic generation, then compiled
   those public-path headers and ran both applications offline with developer callbacks absent.
   Pages returned HTTP 200, CORS `*` and byte-identical pinned environment data on 2026-10-20.
-- Browser packages only: no installation scripts, native modules, Node API shims, optional
-  dependencies or TypeScript type checking. Peers require explicit compatible roots/direct
-  dependencies. Lockfile restore on a fresh machine and automatic rebuild/watch are future work.
+- Browser packages only: no installation scripts, native modules, Node API shims or optional
+  dependencies. `wf check` (#322) type-checks with the locked `typescript` 5.x/6.x in a Worker, over a bounded
+  in-memory snapshot. `wf run`/`wf exec` (#307) run WebFront scripts in a Worker under the
+  manifest permissions, which frame the `context` API only and are not a sandbox. Peers require explicit compatible roots/direct
+  dependencies. The environment's terminal (#308) runs `wf`, built-in and C++ commands (`webfront::Commands`:
+  per-browser coroutine sessions, streamed output, Ctrl+C cancellation without waiting, drained at shutdown) with
+  multi-row editing, CJK/emoji widths, persistent history and completion. `wf build` / `wf dev` (#309, environment sources) publish manifest entries and rebuild the preview automatically with a reused esbuild context, bounded input polling, error overlays and Ctrl+C cancellation; `wf test` (#310, environment sources) runs the manifest's specs under the project's locked `jasmine-core` in a hidden frame, with a structured report, exit codes 0/1/124/130 and a non-interactive entry that reports to C++; the release pin is 0.6.0. `webfront-wf` (#321) runs one `wf` command without interaction and returns its status; the bootstrap environment is pinned and verified at configure time (0.6.0, which also contains `wf build`, `wf dev` and `wf test`), and `environment.json` declares the `protocol` and `api` versions that the loader checks. `wf restore [--offline]` (0.5.0, #306) rebuilds or checks
+  the cache from the lock, from the application's registry option, else the manifest's, else npmjs.
   See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) for exact commands and limits.
 
 ## Embedded dependency refresh (#284, 2026-10-19)
@@ -98,10 +306,10 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 - React and React DOM 19.3.1, Babel standalone 8.0.7 and Jasmine 7.0.2 replace the older embedded
   versions; xterm 6.0.0 and Fit 0.11.0 remain current. React now uses a local ESM bundle and the
   automatic JSX transform; Jasmine uses its new single boot script. Editable examples still need
-  no npm install, CDN or JavaScript build step.
-- Dependency JavaScript/CSS uses deterministic gzip generated with vendored fflate 0.8.3;
+  no package installation, CDN or JavaScript build step.
+- Dependency JavaScript/CSS uses deterministic gzip generated with the locked fflate 0.8.3;
   sources, licenses, pinned maintenance tooling and offline freshness/decode checks are checked in.
-  Node.js is required for tests/asset maintenance only. Identity fallback from #274 also applies to the updated gzip payloads.
+  Identity fallback from #274 also applies to the updated gzip payloads.
 - The CEF-off Release build passes all 239 CTest cases after integrating #274. All 20 WKWebView browser/lifecycle cases
   pass locally, including the actual React page, C++ callback recovery and xterm/Fit resizing.
   Linux CEF/Xvfb and Windows WebView2 coverage runs through their existing CI jobs.
@@ -115,7 +323,7 @@ Status snapshot: 2026-07-19. Optional mddlog integration note: 2026-10-02. Newco
 
 `webfront::version` and the CMake project version are 0.3.0. The release adds packed `std::bitset<N>`
 bridge values (#289) and the opt-in developer environment with its packed Life demonstration (#288);
-see `CHANGELOG.md`. The developer distribution 0.3.1 is published and archived as `developer-v0.3.1`;
+see `docs/CHANGELOG.md`. The developer distribution 0.3.1 is published and archived as `developer-v0.3.1`;
 published 0.1.0 to 0.3.1 remain immutable. APIs and packaging remain experimental.
 
 ## Release 0.2.0 and native frontend epic (#253, 2026-10-19)
@@ -125,7 +333,7 @@ Compile-time alias checks, CMake selector fixtures and the Windows WebView2,
 macOS WKWebView and Linux WebKitGTK browser/lifecycle CI lanes cover the delivered
 scope. Existing runtime and packaging limitations remain documented below.
 
-`webfront::version` in `include/WebFront.hpp` is the version source for CMake.
+`webfront::version` in `include/webfront/WebFront.hpp` is the version source for CMake.
 The C++ version scenario compares the compiled constant with `PROJECT_VERSION`;
 `ReleaseVersionConsistency` also checks version tags at HEAD without network access.
 The release-version workflow checks the actual tag on tag pushes and published
@@ -202,6 +410,10 @@ pre-run failures remain observable. Native callbacks and policy handling use
 separate named functions.
 See [WebKitGTK notes](WEBKITGTK.md).
 
+The non-interactive test driver uses fresh WebView2 profiles for each CTest invocation,
+including repetitions, so environment revisions served at the same URLs do not share browser
+caches or a lingering browser process. Application WebView2 profiles remain persistent.
+
 ## Input decoder hardening (#267, 2026-10-18)
 
 - Catch2 and browser test targets enable the standard library's vendor hardening mode
@@ -215,7 +427,7 @@ See [WebKitGTK notes](WEBKITGTK.md).
   stalled on that existing regression. Each C++ scenario has a 60-second timeout.
   UBSan diagnostics fail the process. The ASan lane also runs each of three libFuzzer targets for 30 seconds.
 - `ENABLE_FUZZING=ON` builds bridge-message, HTTP-request and WebSocket-frame fuzzers
-  with ASan+UBSan. Seed corpora derive from existing unit examples and live in `fuzz/`;
+  with ASan+UBSan. Seed corpora derive from existing unit examples and live in `test/fuzz/`;
   writable copies stay in the build tree and CI uploads reproducer artifacts on failure.
   HTTP and WebSocket harnesses exercise partial receives; WebSocket decoding rejects
   oversized advertised lengths before allocating their payloads.
@@ -277,15 +489,11 @@ See [WebKitGTK notes](WEBKITGTK.md).
 
 ## UI components: the terminal and the tool manager
 
-- First opt-in UI component (#230), designed in [UI_COMPONENTS.md](UI_COMPONENTS.md): `webfront::Terminal` (`include/components/Terminal.hpp`) registers C++ commands behind an embedded xterm.js 6.0.0 terminal (`fs::TerminalFS`, served under `webfront/components/terminal/`; composed with `fs::DefaultFSWith<>`). The standalone terminal target was removed in 0.4; see the component API example in [UI_COMPONENTS.md](UI_COMPONENTS.md). The bridge protocol is unchanged.
-- Line editing, history and Tab completion run in the browser; C++ receives whole lines and returns the output as the Promise result. A command exception rejects the Promise and is printed as an error. Output is capped at 60000 bytes because bridge strings carry a 16-bit length.
-- Covered by Catch2 (`TerminalTests.cpp`, `TerminalFSTests.cpp`), five asset freshness CTest cases and Jasmine specs (`webtest/js/terminal-specs.mjs`) in the browser integration test.
-- Verified 2026-10-14 on Linux (GCC 16.1, Unix Makefiles generator): CEF-off build with all 100 CTest cases passing; the example driven in headless Chromium (commands, errors, quoting, completion, history, `help`, `clear`); and the Jasmine suite, terminal specs included, run in headless Chromium through a scratch copy of the runner that replaces `CEFFrontend`. A deliberately broken terminal spec made that run fail. **Not verified:** the CEF/Xvfb CTest itself, Windows, macOS and Clang.
-- Limitations: no output streaming, no cancellation, no per-browser sessions, and single-row line redraw (see the design note).
-- The `wf` tool manager (#234, npm-hosted web tools installed during debugging): `webfront::ToolManager` (`include/components/ToolManager.hpp`) stores tools with `fs::ToolStore` under `.webfront/tools/`, records them in `webfront-tools.lock.json`, serves them with `fs::PackageFS` under `webfront/tools/` and runs `wf list`, `wf remove` and `wf help` in C++. `wf search`, `wf install` and `wf open` run in the page, in `wf.mjs` (`assets/components/tools/`, served by `fs::ToolManagerFS`), a terminal extension module loaded through the new `Terminal::extension()`: it fetches the packument and tarball, checks the SHA-512 `dist.integrity` with `crypto.subtle`, gunzips with `DecompressionStream`, reads the ustar archive (pax and prefixed paths included) and sends the files in 256 KiB chunks through `webfront.pkg.*`, after refusing archives unpacking to more than 256 MiB. Ctrl+C interrupts it through the `signal` the terminal passes to browser commands. The registry is set by `ToolManagerOptions::registry`. The standalone tools target was removed in 0.4; the component remains documented in [UI_COMPONENTS.md](UI_COMPONENTS.md). Covered by `ToolStoreTests.cpp`, `ToolManagerTests.cpp`, `TerminalTests.cpp` and the Jasmine specs `webtest/js/tools-specs.mjs`, which install a fixture package from a fake registry served by the test (`webtest/registry/`, regenerated by `make_fixture.py`) into a temporary directory.
-- Verified 2026-10-15 on macOS (Apple clang, CEF off): all CTest cases pass except `AddSubdirectoryConsumer`, which fails locally because of the outdated libc++ headers of the Command Line Tools; the Jasmine suite, tools specs included, run in Chromium through a scratch copy of the runner that replaces `CEFFrontend` (one terminal spec, "reports an application without terminal functions", fails there as it does on develop, because that browser gave its unsized terminal a two-column width); `WebFrontTools` driven against registry.npmjs.org (`wf help`, `wf search`, `wf list`, `wf install left-pad` downloaded, verified and refused as not a tool). **Not verified locally:** the CEF/Xvfb CTest (Linux only; the macOS CEF build of `webtest` fails inside stdexec), Windows.
-- Limitations of the tool manager: no semver ranges (an exact version or a dist-tag), no dependencies (a tool must bundle what it uses), no progress bar beyond step messages, sequential chunk uploads, and the trust model of `npm install`.
-- Found while building it: the C++ encoder wrapped the 16-bit length of strings over 65535 bytes (#231, fixed: such strings now fail explicitly, see "Implemented baseline"); `MimeType::toString()` mapped `csv` to `text/css` (#232, fixed: a `static_assert` now ties the name table to the enum); with GCC 16.1 and the Ninja generator, CMake's module dependency scanning (`-fmodules-ts`) crashes the compiler inside stdexec, while Unix Makefiles builds work.
+- Removed (#313, with #308): `webfront::Terminal`, `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`,
+  `fs::ToolStore`, `fs::PackageFS`, their embedded modules and xterm.js headers, `third_party/xterm` and
+  `cmake/UpdateXterm.cmake`, with their Catch2 and Jasmine tests and the fake tool registry. The environment's
+  terminal and `webfront::Commands` replace them ([UI_COMPONENTS.md](UI_COMPONENTS.md) has the migration);
+  `fs::safeRelativePath` moved to `SafePath.hpp`, the tarball helpers of `wf.mjs` to `js/developer/environment/tarball.mjs`.
 
 ## Intended product
 
@@ -314,17 +522,29 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
 - The browser integration is a timeout-bounded CTest test for CEF-enabled Linux builds and runs under Xvfb in a focused CI job, built with GCC and with Clang. CEF's `NO_UNIQUE_ADDRESS`, `ALWAYS_INLINE` and `NOINLINE` macros break stdexec headers included after CEF's headers, which only Clang 19+ (and, by stdexec's configuration, MSVC) reveals (#243): `frontend/CEF.hpp` includes `networking/SenderHeaders.hpp`, which lists every stdnet and stdexec header WebFront uses, first, and the Catch2 case `CEFMacrosTests.cpp` compiles `WebFront.hpp` after those macros. Verified 2026-10-16 on Linux with Clang 22: the CEF build of `webtest` failed before the fix and `WebFrontBrowserIntegration` passes after it. Not verified: CEF with MSVC or Apple clang.
 - `WEBFRONT_EMBED_CEF=ON` uses CEF 154.0.34 (Chromium 154.0.8037.98, package `ambroise-leclerc/CEF@154.0.34`). An existing CEF 137 build directory must be reconfigured from scratch. On Windows, `libEGL.dll`, `libGLESv2.dll`, `dxcompiler.dll`, `dxil.dll` and `vk_swiftshader_icd.json` are copied only when the distribution ships them (CEF 154 has no ANGLE DLLs, #249). Verified 2026-10-16 on Linux (GCC 16.1, Unix Makefiles): the CEF build with all 138 CTest cases passing, `WebFrontBrowserIntegration` included, and the CEF-off build with all 137; with Clang 22, the CEF build of `webtest` and `WebFrontBrowserIntegration`. **Not verified:** CEF 154 on Windows and macOS (the macOS ARM64 framework requires macOS 13.0+). The earlier multi-example build intermittently raced while copying CEF `locales/` to its shared output directory. The retained examples now use `<build>/examples`.
 - The bridge carries all JavaScript numeric typed-array variants in both directions. C++ `std::vector`, `std::array`, and `std::span` values use the matching typed-array encoding, while decoded parameters own their storage.
-- `assets/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
+- `js/core/WebFront.js` is the readable browser bridge source. CMake deterministically regenerates the embedded `include/webfront/system/WebFrontJsData.hpp` asset and CTest rejects a stale generated copy.
 - Encoded HTTP assets (#274): accepted gzip is served unchanged; otherwise the server decodes
   gzip to identity with the decoded length, no `Content-Encoding` and `Vary: Accept-Encoding`.
   The default decoded-byte budget is 4 MiB and applications can override it through their buffer
-  policy. Other codings remain pass-through only. Fallback runs synchronously per request,
-  including HEAD; caching and byte-wise decoding remain follow-ups. See [HTTP asset encoding](HTTP_ASSETS.md)
-  for negotiation rules, errors, strict stream validation and budget configuration.
+  policy. Other codings remain pass-through only. A server-owned 8 MiB LRU (#281) retains
+  validated identity bytes and HEAD lengths, keyed by complete compressed content and bounded
+  across keys and decoded storage. Each hit rechecks the active output budget; oversized
+  entries are served without retention. Cold fallback runs on a lazy, owned CPU worker (#283),
+  with bounded jobs, consumer slots and buffer reservations; results return to the I/O context.
+  Job, consumer and buffer saturation returns 503; the compressed-input cap (4 MiB by default)
+  returns 500 before cache lookup. Active decoding finishes before shutdown joins. Bounded
+  buffered bit reads and a 256-entry
+  short-code Huffman table reduce cold decoding work (#282); allocation counts are unchanged.
+  See [Release decoder measurements and zlib differential validation](GZIP_DECODER_MEASUREMENTS.md)
+  and [HTTP asset encoding](HTTP_ASSETS.md) for negotiation rules, errors, strict stream validation
+  and budget configuration.
   Regression tests and gzip/HTTP fuzzers cover decoding and encoding preferences.
+  Verified 2026-10-25 on Linux for #281: 275 CEF-off CTest cases and all 64 CEF/Xvfb
+  web-integration cases passed; cold/repeated GET/HEAD measurements are recorded in
+  [Gzip cache measurements](GZIP_CACHE_MEASUREMENTS.md).
   Verified 2026-10-19 on Linux for #274: the CEF-off build/CTest suite, CEF/Xvfb integration and
   WebKitGTK integration passed. The macOS results above describe earlier platform validation.
-- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `assets/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
+- First-party bridge/component text assets are embedded **verbatim rather than compressed**, so `HTTPServer` serves them without a `Content-Encoding` header. Deflate streams are not reproducible across the zlib builds on our macOS, Linux, and Windows runners, so a pre-compressed blob could not be verified by the staleness check. Restoring compression — either a reproducible build-time gzip or on-the-fly compression keyed on `Accept-Encoding` — is tracked as a follow-up. The fallback HTML and module have readable sources under `js/core/fallback/`; `favicon.ico` uses gzip. Legacy third-party Jasmine/React/Babel assets now use gzip for WKWebView local-HTTP compatibility (#258); their decoded payloads are unchanged. Regenerate the text headers with `cmake --build build --target webfront-embedded-assets`. Sources and generated headers use LF on every platform so the CTest freshness checks compare identical bytes.
 - The fallback page awaits `webFront.ready` to display the initial bridge connection result. This promise resolves after the handshake acknowledgement and rejects if the initial connection fails or closes; it does not track later disconnects. Jasmine exercises failure against a test-owned HTTP server on an OS-assigned loopback port that rejects WebSocket upgrades, including the case where the application never consumes `ready`.
 - WebSocket writes own their payload buffers until asynchronous completion and are serialized per connection.
 - The HTTP server looks files up by the request path without its query string (`/app.js?v=2` serves `app.js`); the path is cut at the first `?` before percent-decoding, so an encoded `%3F` stays part of the file name, and the `..` check applies to the decoded path only. The query is not passed to filesystems.
@@ -359,7 +579,7 @@ The minimum demonstration milestone is deliberately narrower than the long-term 
   The Windows CI matrix runs the shared Jasmine bridge suite and timed lifecycle tests under WebView2; CEF/Xvfb remains the Linux lane.
   The WebView2 browser label runs separately with `--no-tests=error`. CI's Evergreen bootstrapper URL is mutable;
   a downloaded installer must carry a valid Microsoft signature, and installed executable versions are logged.
-- Embedded frontend lifecycle coverage is shared through `webtest/FrontendLifecycle.cpp` (#256),
+- Embedded frontend lifecycle coverage is shared through `test/web/FrontendLifecycle.cpp` (#256),
   selected with `WEBFRONT_TEST_FRONTEND` alongside Jasmine. Each registered test platform inherits
   seven timeout-bounded `web-integration` cases: no bridge, immediate page closure, rejected ready,
   failed initial navigation, encoded paths, blocked navigation/popups and an explicit navigation
@@ -414,6 +634,7 @@ Local verification on 2026-07-19 completed successfully: the CEF-off build passe
 - Result values are currently limited to the bridge's existing scalar, string, tuple, numeric typed-array and packed bitset parameter types; richer object/DOM values remain out of scope.
 - `webfront::Task`, `app.spawn(task)`/`ui.spawn(task)` and per-task `TaskHandle::requestStop()` provide application-owned coroutine lifetime without exposing an execution context. The compiled `WebFrontAwaitBrowser` example matches the README; `app.shutdown()` stops and joins before returning; spawn is callable from any thread while the application lives and returns a stopped handle if shutdown rejects it. Destruction keeps owners alive and logs/waits if an external operation delays the join, whereas explicit shutdown reports absent context progress.
 - `ui.jsFunctionSender<R>(name)(...)` (default `R = void`) adds lazy, awaitable typed calls, with value/error/stopped completion and local receiver-token cancellation. Futures and JavaScript Promises remain supported without cancellation. JavaScript already dispatched continues; late replies are discarded. See [execution design](ASYNC_EXECUTION.md).
+- Terminal commands (`webfront::Commands`) stream output with fire-and-forget calls: `context.write` has no flow control, `co_await context.print` waits, without polling, while the browser has more than 32 frames to read.
 - Repeated cancellation of JavaScript functions that never respond reserves their 16-bit IDs until disconnection. Enough such calls exhaust IDs and subsequent calls fail with `Too many outstanding WebFront calls`. Calls have no automatic timeout or per-write delivery acknowledgement.
 - Server-owned counting scopes track HTTP, WebSocket and application operations through destruction. Shutdown drains until scope join completes, independently of unrelated context work. Regression tests cover pending reads, connection lifetime, sender errors, cancellation and result/stop races; the shared Jasmine suite exercises sender value/void/error and late-result cancellation.
 - Ordinary JavaScript arrays encode as tuple-like parameters; only numeric typed arrays use the homogeneous array wire representation.

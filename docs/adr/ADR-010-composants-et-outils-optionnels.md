@@ -10,11 +10,14 @@
 | 1.3 | 2026-10-15 | Acceptée | Ambroise Leclerc | Recherche, installation et ouverture des outils via une extension navigateur. | [18d5bb4](https://github.com/ambroise-leclerc/WebFront/commit/18d5bb4c5db6e4dc5ecf4867378d451887b2c133) |
 | 1.4 | 2026-10-15 | Acceptée | Ambroise Leclerc | Validation des outils avec un registre local factice. | [d53ffcc](https://github.com/ambroise-leclerc/WebFront/commit/d53ffcc40102c7405eb7060d7021aad366d6d7e9) |
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Interruption des commandes navigateur et transferts séquentiels par blocs de 256 KiB. | [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) |
+| 1.6 | 2026-10-22 | Acceptée | Ambroise Leclerc | Trajectoire de retrait de Terminal.hpp, ToolManager.hpp, ToolStore et PackageFS au profit de l'environnement bootstrap (ADR-016). | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 1.7 | 2026-10-23 | Acceptée | Ambroise Leclerc | Retrait effectué (#313) : le terminal de l'environnement et `webfront::Commands` remplacent le composant terminal et le gestionnaire d'outils. | [PR #331](https://github.com/ambroise-leclerc/WebFront/pull/331) |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2026-10-14** (version 1.0).
-Dernière révision : **2026-10-16** (version 1.5).
+Dernière révision : **2026-10-23** (version 1.7) : le terminal et les outils relèvent désormais
+d'[ADR-016](ADR-016-bootstrap-comme-socle.md).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -26,7 +29,7 @@ outils web distribués par npm.
 
 ## Décision
 
-Que chaque composant réunisse une façade C++ sous `include/components/`, un fournisseur de
+Que chaque composant réunisse une façade C++ sous `include/webfront/components/`, un fournisseur de
 ressources embarquées, un module ES exportant `mount(element, options)` et les types du pont. Les noms de
 callbacks utilisent `webfront.<composant>.<fonction>`. Les assets sont optionnels, absents de
 `WebFront` tant que les providers correspondants ne sont pas sélectionnés.
@@ -64,6 +67,14 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 - **Risque :** un outil installé peut appeler tous les callbacks ; ce mécanisme ne remplace
   pas un système de plugins isolés. Staging et intégrité protègent l’installation, pas son code.
 
+### Révision de l'ADR-016
+
+`Terminal.hpp`, `ToolManager.hpp`, `ToolStore`, `PackageFS`, `TerminalFS`, `ToolManagerFS` et xterm
+embarqué sont retirés (#313, version 1.7) : le terminal et le `wf` de l'environnement téléchargé
+([ADR-016](ADR-016-bootstrap-comme-socle.md)) les remplacent, et `webfront::Commands` remplace
+`terminal::Shell` pour les commandes C++ de l'application.
+Les abonnements UI multiples et l'injection du navigateur appelant demeurent des contrats du cœur.
+
 ## Prescriptions d’implémentation et de génération de code
 
 - Que registres et magasins soient possédés conjointement par les callbacks afin que la façade
@@ -78,8 +89,8 @@ l’autorité du bridge de l’application ; c’est une fonction de développem
 
 ## Sources et vérification
 
-- [Architecture des composants et limites](../UI_COMPONENTS.md),
-  [Terminal](../../include/components/Terminal.hpp), [ToolManager](../../include/components/ToolManager.hpp).
-- Tests : [UISubscribersTests](../../test/UISubscribersTests.cpp),
-  [ToolStoreTests](../../test/ToolStoreTests.cpp), [tools-specs](../../webtest/js/tools-specs.mjs).
-- Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md) et [ADR-008](ADR-008-contenu-de-confiance-et-origines.md).
+- [Retrait et migration](../UI_COMPONENTS.md), [Commands](../../include/webfront/Commands.hpp) ; le composant
+  retiré reste lisible dans l'historique Git.
+- Tests : [UISubscribersTests](../../test/unit/UISubscribersTests.cpp),
+  [CommandsTests](../../test/unit/CommandsTests.cpp), [developer-specs](../../test/web/developer-specs.mjs).
+- Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md), [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) et [ADR-016](ADR-016-bootstrap-comme-socle.md).

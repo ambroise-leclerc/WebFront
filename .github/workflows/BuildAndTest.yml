@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '23 4 * * 1'
   workflow_dispatch:
+    inputs:
+      repeat_desktop_tests:
+        description: 'Also run the desktop matrix, repeating each CTest case three times'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,8 +29,8 @@ env:
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
   desktop:
-    # PR/push jobs already cover desktops; manual runs add only the extended checks.
-    if: github.event_name != 'workflow_dispatch'
+    # Manual runs add extended checks; stability checks opt into desktops.
+    if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     # No `name:` expression: a skipped matrix job would display it unevaluated.
     timeout-minutes: 25
     strategy:
@@ -51,25 +56,22 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: tools/assets/package-lock.json
-      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
-        with:
-          cmake-version: '4.4.4'
+          version: '4.4.4'
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: actions/cache@v4
         with:
           path: .cache/CPM
-          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/CMakeLists.txt') }}
+          key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/unit/CMakeLists.txt') }}
           restore-keys: cpm-${{ runner.os }}-
       - name: Initialize MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
       # Ubuntu 26.04 ships GCC 16 in its main archive (no flaky toolchain PPA). The image already
-      # provides CMake, Ninja, Node.js, pkg-config and Xvfb, so install only the missing pieces.
+      # provides CMake, Ninja, pkg-config and Xvfb, so install only the missing pieces.
       - name: Install GCC 16, WebKitGTK and coverage tools
         if: runner.os == 'Linux'
         run: |
@@ -88,11 +90,6 @@ jobs:
         run: |
           command -v sccache
           sccache --version
-      - name: Prepare offline developer fixtures
-        run: |
-          npm ci --prefix tools/assets --ignore-scripts
-          node tools/developer/build.mjs build-developer-environment
-          node tools/developer/fixtures.mjs build-developer-environment
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
       - name: Configure
         run: >-
@@ -101,7 +98,6 @@ jobs:
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
-          -DWEBFRONT_DEVELOPER_FIXTURES=${{ github.workspace }}/build-developer-environment
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} --parallel 2
       - name: Ensure WebView2 Evergreen runtime
@@ -134,7 +130,10 @@ jobs:
       - name: Test C++ and native browser integration
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
-        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error
+        run: >-
+          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4
+          --repeat until-fail:${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && '3' || '1' }}
+          --output-junit "${{ github.workspace }}/build/test-results.xml"
       - name: Collect coverage
         if: runner.os == 'Linux'
         working-directory: build
@@ -143,19 +142,15 @@ jobs:
           lcov --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
           lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
           lcov --list coverage.info
-      - name: Upload coverage
-        if: runner.os == 'Linux'
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
-        with:
-          files: build/coverage.info
-          fail_ci_if_error: true
-          token: ${{ secrets.CODECOV_TOKEN }}
-      - name: Retain diagnostics
-        if: failure()
+      - name: Retain test timings and diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-log-${{ runner.os }}
-          path: build/Testing/Temporary/LastTest.log
+          path: |
+            build/test-results.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
 
   sanitizers:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -178,18 +173,16 @@ jobs:
           path: .cache/CPM
           key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-extended-${{ runner.os }}-
-      - uses: actions/setup-node@v6
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
         with:
-          node-version: 24
-      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
-        with:
-          cmake-version: '4.4.4'
+          version: '4.4.4'
       - name: Install Clang 23 and sanitizer runtimes
         run: |
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
           echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y clang-23 libclang-rt-23-dev libc++-23-dev libc++abi-23-dev
+          sudo apt-get install -y clang-23 libclang-rt-23-dev libc++-23-dev libc++abi-23-dev zlib1g-dev
       - name: Restrict address-space randomization for ThreadSanitizer
         if: matrix.sanitizer == 'thread'
         run: sudo sysctl vm.mmap_rnd_bits=28
@@ -198,28 +191,48 @@ jobs:
         run: >-
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
-          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON' }}
+          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
       - name: Run full CEF-off suite
-        run: ctest --test-dir build-sanitizers --output-on-failure --no-tests=error
+        run: >-
+          ctest --test-dir build-sanitizers --output-on-failure --no-tests=error --parallel 4
+          --output-junit "${{ github.workspace }}/build-sanitizers/test-results.xml"
+      - name: Compare generated gzip streams against zlib
+        timeout-minutes: 5
+        if: matrix.sanitizer == 'address-undefined'
+        run: |
+          python3 test/fuzz/GenerateGzipCorpus.py build-sanitizers/gzip-corpus
+          build-sanitizers/test/unit/gzip_differential build-sanitizers/gzip-corpus
+      - name: Retain test timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.sanitizer }}
+          path: |
+            build-sanitizers/test-results.xml
+            build-sanitizers/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
       - name: Fuzz decoders (30 seconds each)
         if: matrix.sanitizer == 'address-undefined'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build-sanitizers/fuzz/artifacts
+          mkdir -p build-sanitizers/test/fuzz/artifacts
           for decoder in messages http websocket gzip; do
-            build-sanitizers/fuzz/fuzz_$decoder build-sanitizers/fuzz/corpus/$decoder \
+            build-sanitizers/test/fuzz/fuzz_$decoder build-sanitizers/test/fuzz/corpus/$decoder \
               -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
-              -artifact_prefix=build-sanitizers/fuzz/artifacts/$decoder-
+              -artifact_prefix=build-sanitizers/test/fuzz/artifacts/$decoder-
           done
+          build-sanitizers/test/fuzz/fuzz_gzip_differential build-sanitizers/test/fuzz/corpus/gzip \
+            -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
+            -artifact_prefix=build-sanitizers/test/fuzz/artifacts/gzip-differential-
       - name: Upload fuzz findings
         if: failure() && matrix.sanitizer == 'address-undefined'
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-findings
-          path: build-sanitizers/fuzz/artifacts/
+          path: build-sanitizers/test/fuzz/artifacts/
           if-no-files-found: ignore
 
   web-integration:
@@ -238,13 +251,11 @@ jobs:
           path: .cache/CPM
           key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-extended-${{ runner.os }}-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
+      - uses: ./.github/actions/remove-node
 
-      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+      - uses: ./.github/actions/setup-cmake
         with:
-          cmake-version: '4.4.4'
+          version: '4.4.4'
 
       - name: Install Clang 23
         if: matrix.compiler == 'clang'
@@ -256,16 +267,35 @@ jobs:
           echo "CC=clang-23" >> "$GITHUB_ENV"
           echo "CXX=clang++-23" >> "$GITHUB_ENV"
 
-      - name: Prepare offline developer environment and starter fixtures
-        run: |
-          npm ci --prefix tools/assets --ignore-scripts
-          node tools/developer/build.mjs build-developer-environment
-          node tools/developer/fixtures.mjs build-developer-environment
+      # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DWEBFRONT_DEVELOPER_FIXTURES=${{github.workspace}}/build-developer-environment
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON
 
       - name: Build browser test
-        run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration --parallel 2
+        run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2
 
+      # Everything is provisioned by the configure step: the tests must not reach the public network.
+      - name: Cut the public network
+        run: |
+          sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          sudo iptables -A OUTPUT ! -o lo -j REJECT
+          sudo ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          sudo ip6tables -A OUTPUT ! -o lo -j REJECT
       - name: Run Jasmine bridge test
-        run: ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error
+        run: >-
+          ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error --parallel 4
+          --output-junit "${{ github.workspace }}/build-cef/test-results.xml"
+      - name: Restore the network
+        if: always()
+        run: |
+          sudo iptables -F OUTPUT
+          sudo ip6tables -F OUTPUT
+      - name: Retain test timings and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-cef-${{ matrix.compiler }}
+          path: |
+            build-cef/test-results.xml
+            build-cef/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

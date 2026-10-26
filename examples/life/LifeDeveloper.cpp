@@ -1,20 +1,28 @@
 #include "Life.hpp"
-#include <WebFront.hpp>
+#include "LifeFrontend.hpp"
+#include "LifeDeveloperOptions.hpp"
+#include <webfront/WebFront.hpp>
 
 #include <iostream>
 
 int main(int argc, char** argv) {
-    if (argc != 2 && argc != 4) {
-        std::cerr << "Usage: WebFrontLifeDeveloper <project> [<environment-tarball-url> <sha512-integrity>]\n";
+    const auto options = webfront::demo::parseLifeDeveloperOptions(argc, argv);
+    if (!options) {
+        std::cerr << "Usage: WebFrontLifeDeveloper [<project> [<environment-tarball-url> <sha512-integrity>]]\n"
+                     "Without arguments the project is ./"
+                  << webfront::demo::LifeDeveloperOptions::defaultProject << ", created when missing.\n";
         return 2;
     }
     try {
-        webfront::NativeApp app{argv[1]};
+        webfront::demo::prepareLifeProject(options->project);
+        if constexpr (!webfront::demo::lifeNativeWindow)
+            std::cerr << webfront::demo::browserNotice << '\n';
+        webfront::demo::LifeApp app{options->project};
         app.cppFunction("life.step", &webfront::demo::nextLife);
-        if (argc == 2)
+        if (!options->environment)
             app.bootstrap("developer");
         else
-            app.bootstrap("developer", {.environment = argv[2], .integrity = argv[3]});
+            app.bootstrap("developer", {.environment = *options->environment, .integrity = *options->integrity});
         app.show();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

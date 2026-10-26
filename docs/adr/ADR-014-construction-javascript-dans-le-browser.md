@@ -5,11 +5,12 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation du résolveur npm et du compilateur navigateur. | À renseigner après intégration. |
+| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 1.0 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification multiplateforme du parcours développeur (#316) : la proposition est acceptée. | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 
 ## Statut et date
 
-**Proposée le 2026-10-20.** Validation initiale avec React et WKWebView ; couverture multiplateforme
-et étendue de compatibilité des paquets à poursuivre avant acceptation générale.
+**Acceptée le 2026-10-24** (proposée le 2026-10-20). Preuves (#316) : le parcours `Journey*` (create, init, install, check, test, build, embed, compilation et exécution de l'application embarquée depuis un répertoire vide, permission refusée, cache hors ligne puis restauré) est vert sous CEF (GCC et Clang, réseau public coupé), WebKitGTK, WKWebView et WebView2 ([exécution de la PR](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) et [dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204)) ; un échantillon de treize paquets npm réels (React, TypeScript, `@types/*`, jasmine-core…) est installé depuis le registre local ; la release 0.6.0 est publiée et vérifiée.
 
 ## Contexte
 
@@ -39,6 +40,12 @@ pour découvrir leurs exports ou lancer leurs scripts d'installation.
 `wf preview` publie les résultats puis les affiche dans la même fenêtre. L'aperçu utilise le bridge
 ordinaire, y compris les erreurs et les Promises. Ctrl+C termine un build navigateur ; aucun
 processus C++ de compilation ou shell n'est lancé. La transformation TS n'effectue pas de typecheck.
+
+## Alignement sur l'ADR-016
+
+[ADR-016](ADR-016-bootstrap-comme-socle.md) retient cette proposition comme base de l'architecture.
+Elle est **Acceptée** depuis les preuves de #316 (voir le statut). Les providers et composants historiques évoqués ici suivent la
+trajectoire de retrait de l'ADR-016.
 
 ## Alternatives et conséquences
 

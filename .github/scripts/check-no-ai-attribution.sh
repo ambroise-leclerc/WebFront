@@ -25,20 +25,28 @@ revision="$head"
 if [ -n "$base" ]; then
     revision="$base..$head"
 fi
-if ! git rev-list "$revision" >"$commits"; then
+# One Git process supplies all records. Bash matches each line directly, avoiding four grep
+# processes and two git-show processes per regression case (especially costly on macOS).
+if ! git log --no-show-signature --no-notes --no-decorate --no-patch --no-color --no-graph -z --format='%H%x00%an <%ae>%n%cn <%ce>%x00%B' "$revision" >"$commits"; then
     echo "::error::unable to list the commits in $revision"
     exit 1
 fi
+shopt -s nocasematch
+matches_lines() {
+    local line
+    while IFS= read -r line; do
+        if [[ "$line" =~ $2 ]]; then return 0; fi
+    done <<<"$1"
+    return 1
+}
 
 status=0
-while read -r sha; do
-    ident="$(git show -s --format='%an <%ae>%n%cn <%ce>' "$sha")"
-    message="$(git show -s --format='%B' "$sha")"
-    if grep -qiE "$identity" <<<"$ident"; then
+while IFS= read -r -d '' sha && IFS= read -r -d '' ident && IFS= read -r -d '' message; do
+    if matches_lines "$ident" "$identity"; then
         echo "::error::$sha has an AI author or committer"
         status=1
     fi
-    if grep -qiE "$trailer" <<<"$message"; then
+    if matches_lines "$message" "$trailer"; then
         echo "::error::$sha message contains AI attribution"
         status=1
     fi
@@ -46,7 +54,7 @@ done <"$commits"
 
 # Do not print untrusted PR text into workflow commands/logs.
 for field in PR_TITLE PR_BODY; do
-    if grep -qiE "$trailer" <<<"${!field-}"; then
+    if matches_lines "${!field-}" "$trailer"; then
         echo "::error::$field contains AI attribution"
         status=1
     fi

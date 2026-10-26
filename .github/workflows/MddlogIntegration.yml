@@ -22,9 +22,9 @@ jobs:
         ref: 5b43265664d83c3b7135d328f611e685792a1b02
         path: dependencies/mddlog
     - name: Setup CMake (4.3.1, within the qualified 4.0-4.3 window)
-      uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+      uses: ./.github/actions/setup-cmake
       with:
-        cmake-version: '4.3.1'
+        version: '4.3.1'
 
     - name: Install LLVM/Clang 21 and libc++
       run: |
@@ -97,9 +97,9 @@ jobs:
         ref: 5b43265664d83c3b7135d328f611e685792a1b02
         path: dependencies/mddlog
     - name: Setup CMake (4.3.1, within the qualified 4.0-4.3 window)
-      uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
+      uses: ./.github/actions/setup-cmake
       with:
-        cmake-version: '4.3.1'
+        version: '4.3.1'
 
     - name: Install LLVM/Clang 21 and libc++
       run: |
@@ -136,7 +136,7 @@ jobs:
       run: |
         for iteration in 1 2 3 4 5; do
           echo "Transport iteration $iteration"
-          ./build-sanitized/test/tests "[transport],[weblink]" --order rand
+          ./build-sanitized/test/unit/tests "[transport],[weblink]" --order rand
         done
     - name: Run every test once
-      run: ./build-sanitized/test/tests --order rand
+      run: ./build-sanitized/test/unit/tests --order rand

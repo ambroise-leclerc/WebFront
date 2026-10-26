@@ -31,7 +31,7 @@ function(set_project_warnings project_name)
       /wd4714 # '__forceinline' function not inlined: stdexec's coroutine helpers, which are not ours to change
       /analyze # Enable Code Analysis
       /analyze:external- # Disable Code Analysis for external headers
-      /analyze:stacksize 65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB)
+      /analyze:stacksize65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB); one argument, as sccache reads a separate "65536" as a second source file and refuses to cache the compilation
       /permissive- # standards conformance mode for MSVC compiler.
   )
 
@@ -70,6 +70,12 @@ function(set_project_warnings project_name)
       -Wlogical-op # warn about logical operations being used where bitwise were probably wanted
   )
   
+  # GCC 16 at -O2/-O3 reports a stringop-overflow inside stdexec's task_scheduler (std::optional of a type-erased
+  # scheduler) for every coroutine awaiting continues_on. The code is not ours: keep the warning, never fail on it.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    list(APPEND GCC_WARNINGS -Wno-error=stringop-overflow)
+  endif()
+
   # Vérifier si -Wdangling-reference est supporté (GCC 13+ ou certaines versions de GCC 12)
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag("-Wdangling-reference" COMPILER_SUPPORTS_DANGLING_REF)

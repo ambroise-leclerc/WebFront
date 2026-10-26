@@ -8,29 +8,30 @@ WebFront is a C++23 header-only library for serving a browser UI from a C++ appl
 - C++ calls browser functions with `ui.jsFunction(name)(arguments...)`, which is fire-and-forget and ignores the result, or with `ui.jsFunction<R>(name)(arguments...)`, which returns a `std::future<R>`. Only the untyped C++ form is fire-and-forget.
 - `webFront.ready` resolves after the WebSocket handshake acknowledgement and rejects if the initial connection fails or closes.
 
+WebFront also ships a standalone developer environment (`NativeApp::bootstrap("developer")`): a terminal whose `wf` commands (`init`, `install`, `restore`, `dev`, `build`, `check`, `test`, `run`, `exec`, `embed`) manage a project manifest and lock, compile TS/TSX, type-check, run Jasmine specs and generate the application's embedded provider, with no JavaScript runtime or package manager on the developer's machine. It is not a sandbox. See `docs/DEVELOPER_ENVIRONMENT.md`.
+
 The README introduces WebFront through the Game of Life walkthrough, demonstrating the developer bootstrap, reactive TypeScript UI and embedded distribution. The minimal `HelloWorld` example remains available under `examples/hello-world/`. Native modules and the bridge are covered by the Jasmine browser integration test. General DOM abstractions remain future work. Application coroutines use `webfront::Task` and `app.spawn(task)`/`ui.spawn(task)`; retain a `TaskHandle` to request individual cancellation. WebFront owns and drains these tasks. Spawn is callable from any thread while the application lives; a call rejected during shutdown returns a stopped handle. Destructors wait for outstanding operations; explicit shutdown reports a stalled join. Typed C++ sender calls support local cancellation; futures and JavaScript Promises do not expose cancellation.
 
 ## Repository map
 
-- `include/`: public header-only library. `WebFront.hpp` is the main orchestration API.
-- `include/http/`: HTTP and WebSocket protocol implementation.
-- `include/weblink/`: bridge message encoding and routing.
-- `include/system/`: layered virtual filesystems and embedded web resources.
-- `include/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
-- `include/components/`: opt-in UI components (`Terminal.hpp`, `ToolManager.hpp`); their assets are served by embedded providers such as `include/system/TerminalFS.hpp`, and installed tools by `include/system/PackageFS.hpp` from `ToolStore.hpp`'s project directory.
+- `include/webfront/`: public header-only library, included as `<webfront/...>`. `WebFront.hpp` is the main orchestration API; `Commands.hpp` adds an application's C++ commands to the developer environment's terminal.
+- `include/webfront/http/`: HTTP and WebSocket protocol implementation.
+- `include/webfront/weblink/`: bridge message encoding and routing.
+- `include/webfront/system/`: layered virtual filesystems and the embedded web resources, a closed list guarded by the `MinimalCoreAssets` CTest case (normative list and 150 KiB decoded budget in ADR-016; changing it means amending the ADR and `test/cmake/CheckMinimalCoreAssets.cmake` together).
+- `include/webfront/frontend/`: system-browser, CEF, optional Windows WebView2 and macOS WKWebView frontend adapters.
 - `examples/`: only Hello World (`hello-world/`) and Game of Life (`life/`, with console, developer and embedded stages).
-- `assets/`: readable browser bridge, fallback, component and developer-environment sources; production C++ remains header-only in `include/`.
-- `tools/developer/starters/pi/`, `test/fixtures/`, `webtest/fixtures/`: retained package and regression fixtures, not public example applications.
-- `test/`: Catch2 unit tests.
-- `webtest/`: Jasmine real-browser integration test.
-- `cmake/` and `.github/workflows/`: build support and CI.
-- `third_party/xterm/`: vendored xterm.js distribution embedded by the terminal component; refresh it only with `cmake/UpdateXterm.cmake`.
+- `js/core/`: readable browser bridge, fallback and bootstrap loader compiled into `include/webfront/`, plus the embedding CMake modules; `js/developer/`: developer environment (its terminal and `wf`), the wf scripts that build it (`scripts/`), build and vendoring tools. The repository is itself a `wf` project (`js/developer/webfront.project.json` and its lock, selected with `--manifest-dir js/developer`): the environment builds itself, and its pure JavaScript specs (`test/developer/`) run with `wf test`. `docs/NODE_TOOLS_MIGRATION.md` records where each former Node.js tool went. Production C++ remains header-only in `include/webfront/`.
+- `test/fixtures/`, `test/web/fixtures/`: retained regression fixtures, not public example applications.
+- `test/unit/`: Catch2 unit tests; `test/web/`: real-browser integration (`suite/` is the WebFront project of the Jasmine specs, run by `webtest` through `wf test`); `test/driver/`: `webfront-wf`, the non-interactive `wf` driver for tests; `test/fuzz/`, `test/fixtures/`; `test/cmake/`: CMake test scripts and sub-projects. The `RepositoryLayout` CTest case pins the tracked root.
+- `cmake/`: build modules (frontends, CEF, CPM, compiler options); `.github/`: workflows, `.github/CONTRIBUTING.md`.
+- `docs/`: documentation, `docs/CHANGELOG.md`, `docs/Doxyfile.in`.
 - `docs/PROJECT_STATUS.md`: evidence-based status snapshot and known limitations.
 - `docs/adr/README.md`: architecture decision index, Git history, tradeoffs and implementation rules; read the relevant ADRs before changing their contracts.
-- `docs/UI_COMPONENTS.md`: UI component architecture, the terminal component and the planned `wf` tool manager.
-- `docs/ISSUE_AUDIT.md`: recommendations for the current GitHub backlog.
+- `docs/DEVELOPER_ENVIRONMENT.md`: the reference of the developer environment (`wf` commands, manifest and lock, TypeScript and `wf check`, tests, limits, distribution); `docs/EMBEDDED_ASSETS.md`: the core's embedded resources and their regeneration; `docs/NODE_TOOLS_MIGRATION.md`: where each former Node.js tool went (historical record).
+- `docs/UI_COMPONENTS.md`: what replaced the removed terminal component and `wf` tool manager, with the migration to `webfront::Commands`.
+- `docs/ISSUE_AUDIT.md`: recommendations for the GitHub backlog (dated audit; the epic #303 reshaped the scope afterwards).
 
-The legacy `webfront/`, `tests/`, and `webtest` directories are not interchangeable: use `test/` for current C++ tests and `webtest/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
+The historical `webfront/` prototype and the former top-level `webtest/` are gone: use `test/unit/` for current C++ tests and `test/web/` for browser tests. Do not revive legacy code without a specific issue and regression coverage.
 
 ## Build and test commands
 
@@ -48,20 +49,35 @@ cmake --build . --parallel 2
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure --parallel 4
 
 # Run one Catch2 scenario directly
-./build/test/tests "Scenario: JsFunction"
+./build/test/unit/tests "Scenario: JsFunction"
 
-# Linux real-browser integration test
+# Linux real-browser integration test: configure downloads and verifies the pinned bootstrap environment and the packages
+# of the local npm registry; the tests build the rest with wf
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
-cmake --build build-cef --target webtest --parallel
-ctest --test-dir build-cef -L web-integration --output-on-failure
+cmake --build build-cef --target webtest webfront-wf --parallel
+ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
 
 ```
 
+Build the developer environment with wf (the driver comes from any build with `ENABLE_TESTING=ON`), as
+`js/developer/tools/PUBLISHING.md` describes:
+
+```bash
+wf() { build/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer -- "$@"; }
+wf restore && wf run build build-distribution
+```
+
 Important CMake options:
+
+The headers of the embedded assets are generated, and checked by CTest, in pure CMake (`js/core/EmbedAsset.cmake`; the
+`webfront-embedded-assets` target regenerates them). Normal C++ builds consume the versioned headers. Configuring with
+`ENABLE_TESTING=ON` downloads the pinned bootstrap environment and the packages of the test registry, each verified
+against its SHA-512; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine
+without network access.
 
 - `WEBFRONT_EMBED_CEF=OFF` (default): CEF is unavailable; this is the normal unit-test build. `ON` downloads/links CEF and enables the automated browser test; it makes `CEFFrontend` available but does not select it: `webfront::WebFront` always uses the system browser.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
@@ -91,15 +107,15 @@ Exception: a purely C++ change that reuses an existing encoding, introduces no n
 
 ## Coding and testing conventions
 
-- Use C++23, four-space indentation, the repository `.clang-format`, and the naming rules in `CONTRIBUTING.md`.
-- Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `assets/`.
+- Use C++23, four-space indentation, the `.clang-format` of the directory (`include/webfront/`, `test/`, `examples/`), and the naming rules in `.github/CONTRIBUTING.md`.
+- Keep production implementation header-only under `include/`; `examples/` contains the two public examples; browser resources live in `js/`.
 - Prefer standard-library facilities and explicit ownership. Keep public headers ODR-safe (`inline`/templates as appropriate).
 - Catch2 tests use `SCENARIO`/`GIVEN`/`WHEN`/`THEN` and deterministic mocks.
-- Jasmine tests use native modules and must report completion to C++, close themselves, return a meaningful process status, and have a CTest timeout.
+- Jasmine specs are the project `test/web/suite/`, built by esbuild-wasm and run by `wf test` under the locked `jasmine-core` (installed from the local registry by `WebSuiteInstall`); `webtest` is the `webfront-wf` driver plus the C++ callbacks of the specs. The specs tell C++ they are done (`specsFinished`), the process status is that of `wf test` (or 1 when C++ did not observe every call), and the CTest case has a timeout. The registry the suite installs from is built by `wf run test-registry` (the `TestRegistry` case), from the packages that configure downloaded.
 - Every bug fix needs a failing regression test at the lowest useful level. Bridge changes also need the browser integration test.
 - Tests must not require user input, a fixed pre-existing browser session, or public network access after dependencies are configured.
 
-Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. These PRs must also dispatch `BuildAndTest.yml` on the PR head branch before merging (`gh workflow run BuildAndTest.yml --ref <pr-branch>`), then wait for both GCC and Clang CEF jobs to pass. Manual dispatch runs the extended CEF/sanitizer checks without repeating the desktop matrix. It is the required per-PR CEF validation for these changes; the weekly run is a backstop, not a substitute. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
+Before declaring work complete, run the CEF-off build and CTest suite. Run the CEF/Xvfb test when changing the bridge, browser lifecycle, module serving, Jasmine assets, or CEF frontend. These PRs must also dispatch `BuildAndTest.yml` on the PR head branch before merging (`gh workflow run BuildAndTest.yml --ref <pr-branch>`), then wait for both GCC and Clang CEF jobs to pass. Manual dispatch runs the extended CEF/sanitizer checks without repeating the desktop matrix by default. To also repeat every desktop CTest case three times for stability validation, dispatch with `-f repeat_desktop_tests=true`. It is the required per-PR CEF validation for these changes; the weekly run is a backstop, not a substitute. Update README/status documentation when commands, public behavior, or limitations change. The `NewcomerDocsMatchExamples` CTest case fails when the README quick-start commands or snippets drift from the examples, CMake targets, or CI commands, and `AddSubdirectoryConsumer` builds a minimal parent project linking `WebFront::WebFront`.
 
 ## Git and workspace safety
 

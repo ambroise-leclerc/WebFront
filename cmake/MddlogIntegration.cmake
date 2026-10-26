@@ -101,7 +101,7 @@ function(webfront_add_mddlog)
         find_package(mddlog CONFIG REQUIRED)
     endif()
 
-    add_library(WebFront_mddlog STATIC "${PROJECT_SOURCE_DIR}/logging/Logger.cpp")
+    add_library(WebFront_mddlog STATIC "${PROJECT_SOURCE_DIR}/cmake/mddlog/Logger.cpp")
     add_library(WebFront::mddlog ALIAS WebFront_mddlog)
     target_compile_features(WebFront_mddlog PUBLIC cxx_std_23)
     set_target_properties(WebFront_mddlog PROPERTIES CXX_SCAN_FOR_MODULES ON)

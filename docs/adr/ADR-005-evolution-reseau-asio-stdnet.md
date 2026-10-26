@@ -103,8 +103,8 @@ d’un autre thread, mais les opérations réseau se dénouent sur le thread du 
 - [P4100R1 (WG21, 2026)](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p4100r1.pdf) :
   document d’information sur une démarche de réseau pour C++29 ; il éclaire l’horizon des
   travaux sans présumer d’une adoption.
-- [Provider stdnet](../../include/networking/TCPNetworkingStdnet.hpp),
-  [tâches](../../include/networking/Tasks.hpp), [en-têtes sender](../../include/networking/SenderHeaders.hpp).
-- Tests : [StdnetShutdownTests](../../test/StdnetShutdownTests.cpp),
-  [HTTPServerTests](../../test/HTTPServerTests.cpp), [CEFMacrosTests](../../test/CEFMacrosTests.cpp).
+- [Provider stdnet](../../include/webfront/networking/TCPNetworkingStdnet.hpp),
+  [tâches](../../include/webfront/networking/Tasks.hpp), [en-têtes sender](../../include/webfront/networking/SenderHeaders.hpp).
+- Tests : [StdnetShutdownTests](../../test/unit/StdnetShutdownTests.cpp),
+  [HTTPServerTests](../../test/unit/HTTPServerTests.cpp), [CEFMacrosTests](../../test/unit/CEFMacrosTests.cpp).
 - Voir [ADR-006](ADR-006-taches-structurees-et-arret.md).

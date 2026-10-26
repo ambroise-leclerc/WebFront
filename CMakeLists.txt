@@ -12,19 +12,31 @@ option(ENABLE_TESTING "Enable Test Builds" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
+option(WEBFRONT_GZIP_DIFFERENTIAL "Build test-only gzip/zlib differential checks" OFF)
 option(WEBFRONT_USE_MDDLOG "Use the compiled mddlog diagnostic adapter" OFF)
 # The experimental gate must be selected before project() probes the compiler.
 if(WEBFRONT_USE_MDDLOG)
     include(cmake/MddlogPreProject.cmake)
 endif()
 
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/webfront/WebFront.hpp")
 set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/webfront/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 include(cmake/Frontends.cmake)
+# The examples need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window
+# engine is enabled when its dependencies are present. Test and fuzzing builds keep explicit selection.
+if(WEBFRONT_IS_TOP_LEVEL AND WEBFRONT_BUILD_EXAMPLES AND NOT ENABLE_TESTING AND NOT ENABLE_FUZZING)
+    set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT ON)
+else()
+    set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT OFF)
+endif()
+option(WEBFRONT_AUTODETECT_NATIVE "Enable the native window engine of this platform when its dependencies are found" ${WEBFRONT_AUTODETECT_NATIVE_DEFAULT})
+if(WEBFRONT_AUTODETECT_NATIVE)
+    webfront_autodetect_native_frontends()
+endif()
 webfront_declare_frontend_options()
 
 # The library requires threads; consumers inherit the flag through the WebFront target.
@@ -43,7 +55,7 @@ if(MSVC AND NOT WEBFRONT_USE_MDDLOG AND WEBFRONT_IS_TOP_LEVEL)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_CURRENT_LIST_DIR}/js/core ${CMAKE_CURRENT_LIST_DIR}/docs ${CMAKE_CURRENT_LIST_DIR}/test/cmake)
 if(WEBFRONT_IS_TOP_LEVEL)
     include(StandardProjectSettings)
     include(PreventInSourceBuilds)
@@ -54,7 +66,7 @@ target_compile_features(WebFront_options INTERFACE cxx_std_23)
 # actually providing <format>, a command-line -D applies from the start of every translation
 # unit, so other standard headers (e.g. <vector>) that gate their own <format> integration on
 # this macro see it "on" before <format> has been included and fail to compile. Let each
-# toolchain's own <version>/<format> define it accurately; include/details/C++20Support.hpp
+# toolchain's own <version>/<format> define it accurately; include/webfront/details/C++20Support.hpp
 # already falls back to a minimal std::format polyfill when a toolchain leaves it undefined.
 
 add_library(WebFront_warnings INTERFACE)
@@ -71,7 +83,7 @@ include(Sanitizers)
 enable_sanitizers(WebFront_options)
 
 if(WEBFRONT_IS_TOP_LEVEL)
-    configure_file(Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
+    configure_file(docs/Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
     include(Doxygen)
     enable_doxygen()
 
@@ -109,13 +121,13 @@ if(ENABLE_TESTING OR ENABLE_FUZZING)
 endif()
 
 if(ENABLE_FUZZING)
-  add_subdirectory(fuzz)
+  add_subdirectory(test/fuzz)
 endif()
 
 if(ENABLE_TESTING)
   enable_testing()
-  add_subdirectory(test)
-  add_subdirectory(webtest)
+  add_subdirectory(test/unit)
+  add_subdirectory(test/web)
 endif()
 
 if(WEBFRONT_BUILD_EXAMPLES)

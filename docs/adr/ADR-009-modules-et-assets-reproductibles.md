@@ -12,11 +12,16 @@
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Contrôle des fins de ligne LF des sources et en-têtes embarqués. | [520ca23](https://github.com/ambroise-leclerc/WebFront/commit/520ca23fa694519d9f428ed3661e64dcfdf906a2) |
 | 1.6 | 2026-10-19 | Acceptée | Ambroise Leclerc | Négociation gzip/identity, décodage validé et budget de sortie. | [4be7358](https://github.com/ambroise-leclerc/WebFront/commit/4be73581ee6b9f569cb6e50aced73e27562aa38c) |
 | 2.0 | 2026-10-19 | Acceptée | Ambroise Leclerc | Génération gzip reproductible avec compresseur intégré ; distributions actualisées et runtime React ESM local. | [b031ab5](https://github.com/ambroise-leclerc/WebFront/commit/b031ab58ea9cc32290d701094c1333bab455e67f) |
+| 2.1 | 2026-10-22 | Acceptée | Ambroise Leclerc | Assets embarqués limités à la liste normative de l'ADR-016 ; trajectoire de retrait de BabelFS, ReactFS, JasmineFS et des sources vendorisées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 2.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | `third_party/` est supprimé (#319) : `fflate` provient du paquet verrouillé du projet `wf`, aucune source tierce n'est vendorisée. | [1824271](https://github.com/ambroise-leclerc/WebFront/commit/18242715f14711e7871ea29aeccf661d5bef760f) |
+| 2.2 | 2026-10-24 | Acceptée | Ambroise Leclerc | Les retraits annoncés sont réalisés (#312, #313, #318) : les en-têtes du cœur sont rendus et vérifiés par CMake seul (`js/core/EmbedAsset.cmake`), sans compression ni Node.js ; la compression gzip reproductible est celle de `wf embed`. | — |
+| 2.4 | 2026-10-25 | Acceptée | Ambroise Leclerc | Cache LRU possédé par le serveur, clés par contenu gzip complet, contenu GET et longueur HEAD validés partagés, budgets et éviction bornés (#281). | — |
+| 2.5 | 2026-10-25 | Acceptée | Ambroise Leclerc | Décodage à froid dans un worker possédé et borné, coalescence des révisions en vol, retour I/O et drainage avant destruction (#283). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-19** (version 2.0).
+Dernière révision : **2026-10-25** (version 2.5).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -31,9 +36,9 @@ Que les modules ES natifs demeurent la démonstration de référence et que les 
 locaux servent les ressources. React, Babel, Jasmine et xterm sont distribués avec des versions
 et licences traçables ; React partage un environnement ESM local pour DOM, hooks et JSX.
 
-Les sources lisibles résident dans `src/` et `third_party/` ; les en-têtes générés sont versionnés.
-La maintenance utilise `tools/assets/`, les versions exactes et le lockfile. Les distributions
-JS/CSS volumineuses sont compressées avec le fflate vendored, paramètres fixes dont `mtime=0`.
+Les sources lisibles résident dans `js/` ; les en-têtes générés sont versionnés.
+La maintenance utilise les versions exactes et le lockfile. Les distributions
+JS/CSS volumineuses sont compressées avec le `fflate` verrouillé, paramètres fixes dont `mtime=0`.
 Les petits scripts du bridge et des composants restent en identity. Les contrôles CTest
 régénèrent et comparent hors ligne après configuration des dépendances.
 
@@ -54,24 +59,63 @@ un échec de décodage ou dépassement du budget donne 500.
 
 - **Bénéfice :** exécution locale et contrôle de fraîcheur des ressources réellement distribuées.
 - **Coût accepté :** distributions et en-têtes volumineux versionnés, outils de maintenance dédiés.
-- **Risque :** gzip→identity décode synchroniquement sur le thread I/O, à chaque requête, sans
-  cache. Le budget borne la sortie, pas le temps ; cache et déplacement du travail restent futurs.
+- **Coût accepté :** gzip→identity utilise un worker CPU créé au premier miss ; sa file, ses
+  consommateurs et ses buffers sont bornés. Une saturation répond 503. Le décodage actif
+  n’est pas interruptible et doit terminer avant le drainage (#283). Les lectures du provider
+  restent synchrones sur I/O. Voir les contrats ci-dessous et `HTTP_ASSETS.md`.
+
+### Révision de l'ADR-016
+
+Les assets embarqués dans `include/webfront/` se limitent à la liste normative de
+[ADR-016](ADR-016-bootstrap-comme-socle.md). `BabelFS`, `ReactFS`, `JasmineFS`, leurs en-têtes
+générés ont été retirés (#312) et `third_party/` l'a été par #319 ; les bibliothèques sont des
+paquets npm verrouillés fournis par l'environnement. Les en-têtes de la liste normative sont rendus par
+`js/core/EmbedAsset.cmake` (#318), sans compression : les règles de génération gzip ci-dessous décrivent l'historique de la
+décision et ne s'appliquent plus qu'aux providers produits par `wf embed`.
 
 ## Prescriptions d’implémentation et de génération de code
 
 - Que les sources soient modifiées avant régénération ; préserver les fins de ligne LF et les
   licences d’origine.
-- Rafraîchir xterm uniquement avec `cmake/UpdateXterm.cmake` ; suivre `EMBEDDED_ASSETS.md` pour
-  les versions, lockfile et autres distributions.
+- Régénérer les en-têtes du cœur avec la cible `webfront-embedded-assets` ; suivre `EMBEDDED_ASSETS.md`
+  pour les bundles de l'environnement et leurs sommes de contrôle.
 - Que le lancement du programme C++ n’exige ni npm ni connexion réseau.
 - Pour un nouvel asset, tester route, MIME, encodage, taille, lectures partielles et fraîcheur.
 - Pour modifier la négociation, tester gzip, identity, exclusions et flux corrompus ; ne pas
-  affirmer que HEAD ou les ressources décodées sont déjà mis en cache.
+  contourner la validation complète du flux pour remplir le cache ou déduire HEAD d’ISIZE seul.
+
+### Cache des représentations validées (#281)
+
+Le serveur possède, via son `RequestHandler`, un LRU dont le budget par défaut de 8 MiB
+compte clés compressées, contenu décodé et stockage des entrées. La clé est le contenu
+compressé complet, indépendant du chemin et de la durée de vie du provider. Les lectures
+restent nécessaires ; un changement des octets invalide implicitement la réutilisation.
+GET et HEAD partagent une validation complète ; HEAD réutilise la longueur sans recopier
+le corps. Le budget de sortie actif s'applique aussi aux hits. Une entrée trop grande
+reste servie sans rétention ; les erreurs ne deviennent jamais des entrées valides.
+Le contexte serveur sérialise les accès et validations ; aucune tâche de cache ne survit
+au drainage. Les copies de handlers démarrent avec un cache vide. Les limites de rétention,
+allocations temporaires et règles des providers sont précisées dans [HTTP_ASSETS](../HTTP_ASSETS.md).
+
+### Exécution bornée du décodage à froid (#283)
+
+Un serveur possède un worker CPU créé paresseusement et joint avant le drainage du scope
+réseau. Le worker reçoit exclusivement des octets possédés ; providers, cache et sockets
+restent sur le contexte I/O. La continuation revient explicitement par son scheduler réseau.
+Les révisions gzip identiques et le même budget de sortie partagent le travail en vol.
+Les valeurs par défaut sont quatre jobs, seize réponses en attente d'envoi, 64 MiB de
+capacités de buffers réservées et 4 MiB d'entrée compressée. Ces bornes se configurent par
+la policy ; les réservations persistent après le calcul jusqu'à la fin des envois. La
+limite d'entrée compressée donne 500 avant consultation du cache ; la
+saturation des jobs, consommateurs ou buffers donne 503 sans file illimitée ni retour au décodage synchrone. Une annulation
+locale ne retire pas le travail d'un autre consommateur ; un décodage actif termine avant
+la fermeture. Déconnexion détectée à l'envoi, mémoire temporaire de préparation, métadonnées
+bornées et coûts de réservation sont explicités dans [HTTP_ASSETS](../HTTP_ASSETS.md).
 
 ## Sources et vérification
 
 - [Maintenance des assets](../EMBEDDED_ASSETS.md), [contrat HTTP](../HTTP_ASSETS.md),
-  [génération](../../cmake/WebFrontAssets.cmake).
-- Tests : `Asset.*Fresh`, `EmbeddedGzipContents`, [HTTPEncodingTests](../../test/HTTPEncodingTests.cpp),
-  [React dans le navigateur](../../webtest/js/react-demo-specs.mjs).
-- Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md).
+  [génération](../../js/core/WebFrontAssets.cmake).
+- Tests : `Asset.*Fresh`, `EmbeddedGzipContents`, [HTTPEncodingTests](../../test/unit/HTTPEncodingTests.cpp),
+  [React/TSX et application Life dans le navigateur](../../test/web/developer-specs.mjs).
+- Voir [ADR-002](ADR-002-systemes-de-fichiers-composables.md) et [ADR-016](ADR-016-bootstrap-comme-socle.md).

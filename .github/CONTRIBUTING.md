@@ -1,0 +1,124 @@
+# Contributing Guidelines
+
+## Coding Style
+
+We follow the **C++ Core Guidelines** to ensure conformance with modern C++23 generic programming. Please refer to the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for detailed rules. Key points are summarized below:
+
+### Naming Conventions
+
+- **Classes/Structs:**
+  - Use `UpperCamelCase` (e.g., `MyClass`, `DataProcessor`).
+- **Functions/Methods:**
+  - Use `lowerCamelCase` (e.g., `processData()`, `getValue()`).
+- **Variables (including const, constexpr, and constinit variables):**
+  - Use `lowerCamelCase` (e.g., `dataBuffer`, `isReady`).
+- **Namespaces:**
+  - Use 'lowercase' (e.g., 'mui', 'backend').
+- **Macros:**
+  - Use `ALL_CAPS_WITH_UNDERSCORES`. But do not use macros.
+
+### Formatting
+
+- Indent with 4 spaces, no tabs.
+- Place pointer/reference symbols next to the type (e.g., `int* ptr`, `const std::string& name`).
+- Use `nullptr` instead of `NULL`.
+
+### File Organization
+
+- Header files: `.hpp`
+- Source files: `.cpp`
+- **File naming:** Use `UpperCamelCase` for `.hpp` and `.cpp` files (e.g., `Logger.hpp`, `DataProcessor.cpp`).
+
+### Documentation
+
+We use **Doxygen** syntax for code documentation. Follow these guidelines:
+
+- **File-level documentation:** Use `@brief` only, no `@file` or `@author` tags.
+- **Class documentation:** Include `@brief` with detailed description and usage examples.
+- **Method documentation:**
+  - Use compact notation `/** @brief Description */` for simple one-line descriptions.
+  - Use full format with `@param`, `@return`, `@note` for complex methods.
+  - Include usage examples with `@code` blocks when helpful.
+- **Template parameters:** Document with `@tparam` when non-obvious.
+- **Private members:** Generally no documentation needed unless complex.
+
+Example formats:
+```cpp
+/** @brief Simple one-line description */
+void simpleFunction();
+
+/**
+ * @brief Complex function with detailed documentation
+ *
+ * Detailed description of what the function does, including
+ * important implementation details and usage patterns.
+ *
+ * @param param1 Description of first parameter
+ * @param param2 Description of second parameter
+ * @return Description of return value
+ *
+ * @note Important notes about usage or behavior
+ *
+ * @code
+ * // Usage example
+ * auto result = complexFunction(value1, value2);
+ * @endcode
+ */
+ReturnType complexFunction(Type1 param1, Type2 param2);
+```
+## Branching and Project Flow
+
+The `master` branch contains the stable, versioned, and deployable state of the project. Only tested and production-ready code is merged here.
+
+All new features, bug fixes, and changes are developed in feature branches, which are named after the corresponding issue number (e.g., `123-feature-description`).
+
+Feature branches are merged into the `develop` branch, which serves as the integration branch for ongoing development. The `develop` branch collects all completed features and fixes before they are considered stable.
+
+Periodically, when the code in `develop` is stable and ready for release, it is merged into `master` and tagged with a new version.
+
+Hotfixes for production issues may be branched from `master`, then merged back into both `master` and `develop` to keep all branches up to date.
+
+This workflow ensures that `master` always reflects the latest deployable version, while `develop` is used for active development and integration.
+
+## Tooling
+
+To ensure consistency, we use `.clang-format` and `clang-tidy` to enforce our coding style. `.clang-format` is next to the C++ it formats (`include/webfront/`, `test/` and `examples/` each have their own copy, so their styles may diverge); the clang-tidy configuration is `cmake/clang-tidy.yaml`, applied by `-DENABLE_CLANG_TIDY=ON` (or `clang-tidy --config-file=cmake/clang-tidy.yaml`).
+
+- **Clang-Format:** Automatically formats your code to match our style guidelines.
+- **Clang-Tidy:** Detects and warns about style violations, bugs, and non-modern C++ practices.
+
+Please run these tools on your code before submitting a pull request.
+
+## Pull Requests
+
+- **One commit per pull request.**
+- The pull request (PR) title must reference the related issue or feature (e.g., `Add CameraManager class [#42]`).
+- Provide a clear description of the changes and the motivation.
+- Ensure your branch is up to date with `develop` before submitting.
+- All code must pass CI checks and tests before merging.
+- Request a review from at least one maintainer.
+
+The `No AI Attribution` workflow checks commit authors, committers and messages,
+plus PR titles and descriptions, for tool identities, attribution statements and
+Claude session links. Anthropic addresses matching `[a-z.+-]+@anthropic.com`
+are recognized alongside the other tool addresses. Human names alone are allowed.
+Provider-domain rules pair canonical Gemini, Vibe, Codex and ChatGPT names with
+Google, Mistral and OpenAI addresses; those domains alone do not identify a tool.
+Hyphenated names such as `codex-gen` do not match bare tool names in attribution
+statements. Push checks run on `master`
+and `develop`; PR checks run on opening, commit updates, reopening and metadata
+edits. A full-history fallback includes root commits. These pattern checks are
+not an exhaustive detector of every possible attribution wording.
+
+Run `bash .github/scripts/test-no-ai-attribution.sh` for the offline regression
+suite. It also runs in the workflow and as `NoAiAttributionRegression` in CTest
+on UNIX when Bash and Git are available. After merging, a repository administrator
+must add `No AI Attribution` as a required status check in branch protection
+if this policy is to block merges; the workflow alone does not make it required.
+
+## Additional Notes
+
+- Write clear, descriptive commit messages.
+- Add or update documentation as needed.
+- Run all tests locally before submitting your PR.
+

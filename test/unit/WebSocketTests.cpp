@@ -1,0 +1,556 @@
+#include "InjectableNetworking.hpp"
+#include "InlineTaskScope.hpp"
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <webfront/http/WebSocket.hpp>
+#include <webfront/networking/NetworkingMock.hpp>
+
+#include <array>
+#include <functional>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <vector>
+
+using namespace webfront;
+using namespace std;
+using Net = networking::NetworkingMock;
+using webfront::testing::InjectableNetworking;
+using webfront::testing::InjectableSocket;
+
+SCENARIO("A stopped WebSocket does not read again") {
+    InjectableSocket::reset();
+    int closeHandlerCalls = 0;
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
+    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
+    ws->start();
+    REQUIRE(InjectableSocket::readCallCount() == 1);
+
+    GIVEN("A read is pending when the WebSocket is stopped") {
+        ws->stop();
+
+        WHEN("The read completes") {
+            InjectableSocket::fail({});
+
+            THEN("No other read is started and an explicit stop is not reported as a closure") {
+                REQUIRE(InjectableSocket::readCallCount() == 1);
+                REQUIRE(closeHandlerCalls == 0);
+            }
+        }
+    }
+}
+
+SCENARIO("A failed write closes the WebSocket") {
+    InjectableSocket::reset();
+    int closeHandlerCalls = 0;
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
+    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
+    ws->start();
+
+    GIVEN("A pending read and a write which fails") {
+        InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+        ws->write("pending write");
+
+        THEN("The closure is reported once") { REQUIRE(closeHandlerCalls == 1); }
+
+        WHEN("The read completes") {
+            InjectableSocket::fail({});
+
+            THEN("No other read is started and the closure is not reported again") {
+                REQUIRE(InjectableSocket::readCallCount() == 1);
+                REQUIRE(closeHandlerCalls == 1);
+            }
+        }
+    }
+}
+
+SCENARIO("A WebSocket reassembles the messages a browser sends in several frames") {
+    InjectableSocket::reset();
+    vector<vector<byte>> binaryMessages;
+    vector<string>       textMessages;
+    int                  closeHandlerCalls = 0;
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
+    ws->onMessage([&](span<const byte> data) { binaryMessages.emplace_back(data.begin(), data.end()); });
+    ws->onMessage([&](string_view text) { textMessages.emplace_back(text); });
+    ws->onClose([&](websocket::CloseEvent) { ++closeHandlerCalls; });
+    ws->start();
+    const auto bytes = [](string_view text) { return as_bytes(span(text)); };
+    const auto receive = [&](string_view payload, uint8_t finAndOpcode) {
+        InjectableSocket::receive(webfront::testing::clientFrame(bytes(payload), byte{finAndOpcode}));
+    };
+
+    GIVEN("A binary message in three fragments, with a control frame between them") {
+        receive("ab", 0x02);
+        receive("", 0x89);  // ping
+        receive("cd", 0x00);
+        REQUIRE(binaryMessages.empty());
+        receive("ef", 0x80);
+
+        THEN("The handler receives the whole message once") {
+            const auto whole = bytes("abcdef");
+            REQUIRE(binaryMessages == vector<vector<byte>>{{whole.begin(), whole.end()}});
+            REQUIRE(closeHandlerCalls == 0);
+        }
+        AND_WHEN("A text message follows in two fragments") {
+            receive("hel", 0x01);
+            receive("lo", 0x80);
+            THEN("It is delivered as text") {
+                REQUIRE(textMessages == vector<string>{"hello"});
+                REQUIRE(binaryMessages.size() == 1);
+            }
+        }
+    }
+    GIVEN("A continuation frame without a message to continue") {
+        receive("x", 0x80);
+        THEN("The connection fails without delivering it") {
+            REQUIRE(closeHandlerCalls == 1);
+            REQUIRE(binaryMessages.empty());
+        }
+    }
+    GIVEN("A new message before the previous one is finished") {
+        receive("a", 0x02);
+        receive("b", 0x82);
+        THEN("The connection fails without delivering either") {
+            REQUIRE(closeHandlerCalls == 1);
+            REQUIRE(binaryMessages.empty());
+        }
+    }
+    GIVEN("A fragmented ping") {
+        receive("p", 0x09);
+        THEN("The connection fails, since control frames cannot be fragmented") {
+            REQUIRE(closeHandlerCalls == 1);
+        }
+    }
+    InjectableSocket::reset();
+}
+
+SCENARIO("A WebSocket limits the size of the messages it reassembles") {
+    InjectableSocket::reset();
+    vector<vector<byte>> messages;
+    optional<uint16_t>   closeCode;
+    using Limited = http::CustomBuffersPolicy<8192, 8192, 32768, 4>;
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking, Limited>::create(InjectableSocket{}, scope);
+    ws->onMessage([&](span<const byte> data) { messages.emplace_back(data.begin(), data.end()); });
+    ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
+    ws->start();
+    const auto receive = [&](string_view payload, uint8_t finAndOpcode) {
+        InjectableSocket::receive(webfront::testing::clientFrame(as_bytes(span(payload)), byte{finAndOpcode}));
+    };
+    const auto messageSize = static_cast<uint16_t>(std::make_error_code(std::errc::message_size).value());
+
+    GIVEN("Fragments adding up to the limit") {
+        receive("ab", 0x02);
+        receive("cd", 0x80);
+        THEN("The message is delivered") {
+            REQUIRE(messages.size() == 1);
+            REQUIRE_FALSE(closeCode);
+        }
+    }
+    // Only the header of a frame (2 bytes, then the 4-byte mask): the payload never comes.
+    const auto receiveHeader = [&](string_view payload, uint8_t finAndOpcode) {
+        auto frame = webfront::testing::clientFrame(as_bytes(span(payload)), byte{finAndOpcode});
+        frame.resize(6);
+        InjectableSocket::receive(frame);
+    };
+
+    GIVEN("A ping of 125 bytes, more than the message limit") {
+        receive(string(125, 'p'), 0x89);
+        THEN("The connection stays open, since control frames have their own limit") {
+            REQUIRE_FALSE(closeCode);
+            receive("ok", 0x82);
+            REQUIRE(messages.size() == 1);
+        }
+    }
+    GIVEN("The header of a ping announcing 126 bytes") {
+        // FIN and ping; masked 16-bit length 126; masking key.
+        InjectableSocket::receive(vector<byte>{byte{0x89}, byte{0xfe}, byte{0}, byte{126}, byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}});
+        THEN("The connection fails with protocol_error") {
+            REQUIRE(closeCode == static_cast<uint16_t>(std::make_error_code(std::errc::protocol_error).value()));
+        }
+    }
+    GIVEN("A continuation announcing more than what is left of the limit") {
+        receive("ab", 0x02);
+        receiveHeader("cde", 0x80);
+        THEN("The connection fails with message_size on its header") {
+            REQUIRE(messages.empty());
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    GIVEN("The header of a first fragment announcing more than the limit") {
+        receiveHeader("abcde", 0x02);
+        THEN("The connection fails with message_size without waiting for the payload") {
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    GIVEN("The header of a message in one frame announcing more than the limit") {
+        receiveHeader("abcde", 0x82);
+        THEN("The connection fails with message_size") {
+            REQUIRE(messages.empty());
+            REQUIRE(closeCode == messageSize);
+        }
+    }
+    InjectableSocket::reset();
+}
+
+SCENARIO("A WebSocket rejects a frame announcing gigabytes before buffering it") {
+    InjectableSocket::reset();
+    optional<uint16_t> closeCode;
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
+    ws->onMessage([](span<const byte>) {});
+    ws->onClose([&](websocket::CloseEvent event) { closeCode = event.status; });
+    ws->start();
+
+    GIVEN("The header of a first fragment announcing 8 GiB, with the default limit") {
+        // FIN clear, binary; masked 64-bit length 0x200000000; masking key.
+        InjectableSocket::receive(vector<byte>{byte{0x02}, byte{0xff}, byte{0}, byte{0}, byte{0}, byte{2}, byte{0}, byte{0}, byte{0}, byte{0},
+                                               byte{0x12}, byte{0x34}, byte{0x56}, byte{0x78}});
+        THEN("The connection fails with message_size") {
+            REQUIRE(closeCode == static_cast<uint16_t>(std::make_error_code(std::errc::message_size).value()));
+        }
+    }
+    InjectableSocket::reset();
+}
+
+SCENARIO("WebSocket Headers decoding") {
+    GIVEN("Some Header data") {
+        array<uint8_t, 14> data{0b10000001, 0b10000000 | 63, 0x10, 0x11, 0x12, 0x13};
+        WHEN("Casting to header") {
+            auto header = reinterpret_cast<const websocket::Header*>(data.data());
+            THEN("Fields should be") {
+                REQUIRE(header->FIN() == true);
+                REQUIRE(header->RSV1() == false);
+                REQUIRE(header->RSV2() == false);
+                REQUIRE(header->RSV3() == false);
+                REQUIRE(header->opcode() == websocket::Header::Opcode::text);
+                REQUIRE(header->MASK() == true);
+                REQUIRE(header->maskingKey() == std::array<std::byte, 4>{std::byte{0x10}, std::byte{0x11}, std::byte{0x12}, std::byte{0x13}});
+                REQUIRE(header->payloadLenField() == 63);
+                REQUIRE(header->payloadSize() == 63);
+                REQUIRE(header->headerSize() == 6);
+            }
+        }
+    }
+
+    GIVEN("Header data") {
+        array<uint8_t, 14> data{0b10000001, 0b10000000 | 126, 10, 20, 0x10, 0x11, 0x12, 0x13};
+        WHEN("Casting to header") {
+            auto header = reinterpret_cast<const websocket::Header*>(data.data());
+            THEN("Payload size should be 31127 from the 16 bits field") {
+                REQUIRE(header->payloadSize() == 2580);
+                REQUIRE(header->headerSize() == 8);
+            }
+        }
+    }
+
+    GIVEN("Header data") {
+        array<uint8_t, 14> data{0b10000001, 0b10000000 | 127, 10, 20, 30, 40, 50, 60, 70, 80, 0x10, 0x11, 0x12, 0x13};
+        WHEN("Casting to header") {
+            auto header = reinterpret_cast<const websocket::Header*>(data.data());
+            THEN("Payload size should be 13 256 444 from the 64 bits field") {
+                REQUIRE(header->payloadSize() == 726238597903828560);
+                REQUIRE(header->headerSize() == 14);
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket frame encoding"){
+
+  GIVEN("Some text to send"){
+
+    std::string text = "Hello WS";
+
+WHEN("Encoding it") {
+    websocket::Frame<Net> frame(text);
+    THEN("A text frame is produced") {
+        REQUIRE(frame.FIN() == true);
+        REQUIRE(frame.RSV1() == false);
+        REQUIRE(frame.RSV2() == false);
+        REQUIRE(frame.RSV3() == false);
+        REQUIRE(frame.opcode() == websocket::Header::Opcode::text);
+        REQUIRE(frame.MASK() == false);
+        REQUIRE(frame.payloadLenField() == 8);
+        REQUIRE(frame.payloadSize() == 8);
+        REQUIRE(frame.headerSize() == 2);
+
+        auto buffers = frame.toBuffers();
+        using Buffer = decltype(buffers[0]);
+        auto compare = [](Buffer b, std::string s) {
+            auto data = reinterpret_cast<const char*>(b.data());
+            for (size_t index = 0; index < s.size(); ++index)
+                if (data[index] != s[index]) return false;
+            return true;
+        };
+
+        REQUIRE(compare(buffers[1], "Hello WS"));
+    }
+}
+}
+}
+;
+
+SCENARIO("WebSocket frames can own payloads for asynchronous writes") {
+    GIVEN("A frame assembled from temporary message buffers") {
+        array<byte, 2> header{byte{0x01}, byte{0x02}};
+        array<byte, 3> payload{byte{0x03}, byte{0x04}, byte{0x05}};
+        websocket::Frame<Net> frame(header);
+        frame.addBuffer(payload);
+
+        WHEN("The frame is frozen before the source buffers change") {
+            frame.freeze();
+            frame.freeze();
+            header.fill(byte{0xff});
+            payload.fill(byte{0xff});
+            const auto buffers = frame.toBuffers();
+
+            THEN("Repeated freezing keeps the encoded payload valid") {
+                const auto* encodedHeader = static_cast<const byte*>(buffers[1].data());
+                const auto* encodedPayload = static_cast<const byte*>(buffers[2].data());
+                REQUIRE(buffers[1].size() == 2);
+                REQUIRE(encodedHeader[0] == byte{0x01});
+                REQUIRE(encodedHeader[1] == byte{0x02});
+                REQUIRE(buffers[2].size() == 3);
+                REQUIRE(encodedPayload[0] == byte{0x03});
+                REQUIRE(encodedPayload[1] == byte{0x04});
+                REQUIRE(encodedPayload[2] == byte{0x05});
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket decoder") {
+    GIVEN("Some frame data and a decoder") {
+        array<uint8_t, 22> frame{0x1,
+                                 0b10000000 | 8,
+                                 0x10,
+                                 0x11,
+                                 0x12,
+                                 0x13,
+                                 uint8_t{'H' ^ 0x10},
+                                 uint8_t{'e' ^ 0x11},
+                                 uint8_t{'l' ^ 0x12},
+                                 uint8_t{'l' ^ 0x13},
+                                 uint8_t{'o' ^ 0x10},
+                                 uint8_t{' ' ^ 0x11},
+                                 uint8_t{'W' ^ 0x12},
+                                 uint8_t{'S' ^ 0x13}};
+        websocket::FrameDecoder decoder;
+        WHEN("All data is received in one unique chunk") {
+            REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size())));
+            auto bufferParser = std::cbegin(decoder.payload());
+            THEN("Payload is correctly decoded") {
+                for (auto c : {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S'}) REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+            }
+        }
+
+        WHEN("Data is received in two chunks but the first has a complete header") {
+            REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), 7)) == false);
+            REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data() + 7), frame.size() - 7)));
+            auto bufferParser = std::cbegin(decoder.payload());
+            THEN("Payload is correctly decoded") {
+                for (auto c : {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S'}) REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+            }
+        }
+
+        WHEN("Data is received in two chunks but the first has an incomplete header") {
+            REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data()), 3)) == false);
+            REQUIRE(decoder.parse(std::span(reinterpret_cast<const std::byte*>(frame.data() + 3), frame.size() - 3)));
+            auto bufferParser = std::cbegin(decoder.payload());
+            THEN("Payload is correctly decoded") {
+                for (auto c : {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'S'}) REQUIRE(std::to_integer<uint8_t>(*bufferParser++) == c);
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket decoder preserves coalesced frames") {
+    GIVEN("Two masked text frames received in one chunk") {
+        const array<uint8_t, 16> frames{0x81,
+                                        0x82,
+                                        0x10,
+                                        0x11,
+                                        0x12,
+                                        0x13,
+                                        uint8_t{'o' ^ 0x10},
+                                        uint8_t{'n' ^ 0x11},
+                                        0x81,
+                                        0x82,
+                                        0x20,
+                                        0x21,
+                                        0x22,
+                                        0x23,
+                                        uint8_t{'o' ^ 0x20},
+                                        uint8_t{'k' ^ 0x21}};
+        const auto               bytes = std::span(reinterpret_cast<const std::byte*>(frames.data()), frames.size());
+        websocket::FrameDecoder  decoder;
+
+        WHEN("The first frame is decoded") {
+            REQUIRE(decoder.parse(bytes));
+            REQUIRE(decoder.consumed() == 8);
+            REQUIRE(vector<byte>(decoder.payload().begin(), decoder.payload().end()) == vector{byte{'o'}, byte{'n'}});
+
+            THEN("The unconsumed bytes decode as the second frame") {
+                const auto firstFrameSize = decoder.consumed();
+                decoder.reset();
+                REQUIRE(decoder.parse(bytes.subspan(firstFrameSize)));
+                REQUIRE(decoder.consumed() == 8);
+                REQUIRE(vector<byte>(decoder.payload().begin(), decoder.payload().end()) == vector{byte{'o'}, byte{'k'}});
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket header completeness follows its encoded length and mask") {
+    const auto        lengthField = GENERATE(125, 126, 127);
+    const auto        masked      = GENERATE(false, true);
+    websocket::Header header;
+    header.raw[1]             = byte(lengthField | (masked ? 0x80 : 0));
+    const size_t expectedSize = (lengthField == 125 ? 2u : lengthField == 126 ? 4u : 10u) + (masked ? 4u : 0u);
+
+    GIVEN("An encoded WebSocket header") {
+        THEN("It becomes complete at exactly the header boundary") {
+            REQUIRE_FALSE(header.isComplete(expectedSize - 1));
+            REQUIRE(header.isComplete(expectedSize));
+            REQUIRE(header.isComplete(expectedSize + 1));
+        }
+    }
+}
+
+SCENARIO("Short WebSocket headers do not interpret payload bytes as an extended length") {
+    websocket::Header header;
+    header.raw.fill(byte{0xff});
+    header.raw[1] = byte{0x82};
+
+    GIVEN("A short masked header with nonzero bytes after its length field") {
+        THEN("Only the inline length is used") {
+            REQUIRE(header.extendedLenField() == 0);
+            REQUIRE(header.payloadSize() == 2);
+            REQUIRE(header.headerSize() == 6);
+        }
+    }
+}
+
+SCENARIO("WebSocket decoder preserves split extended headers and the following frame") {
+    const auto split = GENERATE(1u, 2u, 7u, 8u, 9u, 13u);
+    // A masked 16-bit length frame followed by an empty masked text frame.
+    vector<byte>       frames{byte{0x81}, byte{0xfe}, byte{0}, byte{126}, byte{0x10}, byte{0x11}, byte{0x12}, byte{0x13}};
+    const vector<byte> expected(126, byte{'x'});
+    const array        mask{byte{0x10}, byte{0x11}, byte{0x12}, byte{0x13}};
+    for (size_t i = 0; i < expected.size(); ++i)
+        frames.push_back(expected[i] ^ mask[i % mask.size()]);
+    frames.insert(frames.end(), {byte{0x81}, byte{0x80}, byte{0}, byte{0}, byte{0}, byte{0}});
+    websocket::FrameDecoder decoder;
+    const auto              bytes = span<const byte>(frames);
+
+    GIVEN("The first frame starts in one read and finishes alongside another frame") {
+        REQUIRE_FALSE(decoder.parse(bytes.first(split)));
+        REQUIRE(decoder.consumed() == split);
+
+        WHEN("The rest of the stream arrives") {
+            REQUIRE(decoder.parse(bytes.subspan(split)));
+            REQUIRE(decoder.consumed() == 134 - split);
+            REQUIRE(vector<byte>(decoder.payload().begin(), decoder.payload().end()) == expected);
+            const auto nextFrameOffset = split + decoder.consumed();
+            decoder.reset();
+
+            THEN("The next frame has not been consumed as part of the payload") {
+                REQUIRE(decoder.parse(bytes.subspan(nextFrameOffset)));
+                REQUIRE(decoder.consumed() == 6);
+                REQUIRE(decoder.payload().empty());
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket decoder waits for an entire split payload") {
+    GIVEN("A masked text frame split across three reads") {
+        const array<uint8_t, 14> frame{0x81,
+                                       0x88,
+                                       0x10,
+                                       0x11,
+                                       0x12,
+                                       0x13,
+                                       uint8_t{'H' ^ 0x10},
+                                       uint8_t{'e' ^ 0x11},
+                                       uint8_t{'l' ^ 0x12},
+                                       uint8_t{'l' ^ 0x13},
+                                       uint8_t{'o' ^ 0x10},
+                                       uint8_t{' ' ^ 0x11},
+                                       uint8_t{'W' ^ 0x12},
+                                       uint8_t{'S' ^ 0x13}};
+        const auto               bytes = std::span(reinterpret_cast<const std::byte*>(frame.data()), frame.size());
+        websocket::FrameDecoder  decoder;
+
+        REQUIRE_FALSE(decoder.parse(bytes.first(7)));
+        REQUIRE(decoder.consumed() == 7);
+
+        // Six of the seven outstanding bytes arrive next. Comparing this chunk's size
+        // against the remaining length after appending would report completion one byte early.
+        WHEN("The middle read still leaves payload bytes outstanding") {
+            REQUIRE_FALSE(decoder.parse(bytes.subspan(7, 6)));
+            REQUIRE(decoder.consumed() == 6);
+
+            THEN("Only the final read completes the frame") {
+                REQUIRE(decoder.parse(bytes.subspan(13)));
+                REQUIRE(decoder.consumed() == 1);
+                REQUIRE(decoder.payload().size() == 8);
+            }
+        }
+    }
+}
+
+SCENARIO("WebSocket stop() is idempotent") {
+    InjectableSocket::reset();
+    int  closeHandlerCalls = 0;
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
+    ws->onClose([&closeHandlerCalls](websocket::CloseEvent) { ++closeHandlerCalls; });
+
+    GIVEN("a started WebSocket that is stopped explicitly while a read is pending") {
+        ws->start();
+        ws->stop();
+
+        WHEN("the still-pending read then completes with an error") {
+            InjectableSocket::fail(make_error_code(errc::bad_file_descriptor));
+
+            THEN("the error is treated as harmless: no duplicate close handler call") {
+                REQUIRE(closeHandlerCalls == 0);
+            }
+        }
+
+        WHEN("stop() is called again") {
+            THEN("the second call has no effect") { REQUIRE_NOTHROW(ws->stop()); }
+        }
+    }
+
+    GIVEN("a started WebSocket whose pending read fails with no prior explicit stop") {
+        ws->start();
+
+        WHEN("the read completes with an error") {
+            InjectableSocket::fail(make_error_code(errc::bad_file_descriptor));
+
+            THEN("the close handler fires exactly once") { REQUIRE(closeHandlerCalls == 1); }
+        }
+    }
+}
+
+SCENARIO("WebSocket frames encode extended payload lengths big-endian") {
+    struct Expected {
+        size_t   size;
+        unsigned lengthField;
+        size_t   headerSize;
+    };
+    constexpr std::array<Expected, 4> cases{{{125, 125, 2}, {126, 126, 4}, {65535, 126, 4}, {65536, 127, 10}}};
+    for (const auto& expected : cases) {
+        const std::string     text(expected.size, 'x');
+        websocket::Frame<Net> frame(text);
+        CHECK(frame.payloadLenField() == expected.lengthField);
+        CHECK(frame.payloadSize() == expected.size);
+        CHECK(frame.headerSize() == expected.headerSize);
+    }
+}

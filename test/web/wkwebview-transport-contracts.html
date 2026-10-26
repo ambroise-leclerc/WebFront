@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WKWebView transport API contracts</title>
+<script src="WebFront.js"></script>
+<script>
+    "use strict";
+    const handlers = window.webkit.messageHandlers;
+    function require(value, message) {
+        if (!value) throw new Error(message);
+    }
+    async function rejects(call, message) {
+        let error;
+        try { await call(); } catch (caught) { error = caught; }
+        require(error && String(error).includes(message), `expected rejection containing ${message}, got ${error}`);
+    }
+    async function verify() {
+        await webFront.ready;
+        // Replies are serialized Foundation values, including Unicode and embedded zeroes.
+        const payload = 'quote " slash \\ zero \0 café 🦊';
+        require(await handlers.wfecho.postMessage(payload) === payload, "string reply changed");
+        const bytes = String.fromCharCode(...Array.from({length: 256}, (_, i) => i));
+        require(atob(await handlers.wfbytes.postMessage(btoa(bytes))) === bytes, "base64 changed binary bytes");
+        await rejects(() => handlers.wfbytes.postMessage("not base64!"), "invalid base64");
+        require(await handlers.wfprobe.postMessage("schemes") === true, "unexpected native URL schemes");
+        await rejects(() => handlers.wfprobe.postMessage("error"), "native probe error");
+        await rejects(() => handlers.wfprobe.postMessage("unanswered"), "");
+        window.benchmark = {echo: value => value};
+        for (const name of ["wfrun", "wfasync", "wfbytesrun"]) {
+            for (const size of [0, 16, 32768])
+                require(await handlers[name].postMessage(`${size} 2`) >= 0, `${name} rejected a valid echo of ${size} bytes`);
+            await rejects(() => handlers[name].postMessage("-1 2"), "invalid or overlapping run");
+        }
+        // A native async function call awaits a returned Promise; evaluateJavaScript does not.
+        window.benchmark = {echo: async value => { await Promise.resolve(); return value; }};
+        require(await handlers.wfasync.postMessage("16 2") >= 0, "callAsyncJavaScript did not await the Promise");
+        require(await handlers.wfrun.postMessage("16 2") === -1, "evaluateJavaScript unexpectedly accepted the Promise");
+        window.benchmark.echo = () => "wrong";
+        require(await handlers.wfasync.postMessage("16 2") === -1, "wrong async echo was accepted");
+        require(await handlers.wfrun.postMessage("16 2") === -1, "wrong evaluated echo was accepted");
+        require(await handlers.wfbytesrun.postMessage("16 2") === -1, "wrong base64 echo was accepted");
+        window.benchmark.echo = () => { throw new Error("JS probe failure"); };
+        require(await handlers.wfasync.postMessage("16 2") === -1, "async exception was accepted");
+        require(await handlers.wfrun.postMessage("16 2") === -1, "evaluation exception was accepted");
+        // Both an inherited application origin and an opaque sandbox origin must be denied in subframes.
+        for (const sandboxed of [false, true]) {
+            const frame = document.createElement("iframe");
+            if (sandboxed) frame.sandbox = "allow-scripts";
+            const result = new Promise(resolve => {
+                const listener = event => {
+                    if (event.source === frame.contentWindow) {
+                        window.removeEventListener("message", listener);
+                        resolve(event.data);
+                    }
+                };
+                window.addEventListener("message", listener);
+            });
+            frame.srcdoc = '<script>window.webkit.messageHandlers.wfecho.postMessage("frame").then(' +
+                '() => parent.postMessage("accepted", "*"), error => parent.postMessage(String(error), "*"));<\/script>';
+            document.body.append(frame);
+            require(String(await result).includes("frame or origin denied"), "subframe reached native channel");
+            frame.remove();
+        }
+    }
+    window.addEventListener("DOMContentLoaded", () => verify()
+        .then(() => webFront.cppFunction("report")(true, "{}", "WKWebView transport contracts passed"))
+        .catch(error => webFront.cppFunction("report")(false, "", String(error)))
+        .finally(() => window.close()));
+</script>
+<body></body>

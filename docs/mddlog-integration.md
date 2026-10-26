@@ -4,8 +4,8 @@
 header-only and builds with CMake 3.31, its usual compilers and generators. It neither
 searches for mddlog nor selects CMake's experimental `import std` gate.
 
-With `ON`, WebFront owns `include/tooling/MddlogLogger.hpp`, the shared declarations
-in `include/tooling/LoggerApi.hpp`, and `logging/Logger.cpp`. `tooling/Logger.hpp`
+With `ON`, WebFront owns `include/webfront/tooling/MddlogLogger.hpp`, the shared declarations
+in `include/webfront/tooling/LoggerApi.hpp`, and `cmake/mddlog/Logger.cpp`. `tooling/Logger.hpp`
 selects the facade through the `WEBFRONT_USE_MDDLOG=1` definition supplied by the
 `WebFront` target. The `WebFront_mddlog` static library (`WebFront::mddlog`) compiles
 the sole module-consuming translation unit. Linking `WebFront` supplies the definition

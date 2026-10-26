@@ -27,7 +27,7 @@ comme sous-projet constituent elles aussi des contrats observables.
 ## Décision
 
 Que Catch2, sous `test/`, vérifie unités, états et erreurs à l’aide de simulacres déterministes.
-Jasmine sous `webtest/` exécute les modules dans un vrai moteur, attend le reporting vers
+Jasmine sous `test/web/` exécute les modules dans un vrai moteur, attend le reporting vers
 C++, se ferme et fournit un statut de processus significatif. CTest borne les tests par des
 timeouts. La CI Linux utilise CEF/Xvfb ; les moteurs natifs ont leurs suites de cycle de vie
 lorsque configurés.
@@ -71,7 +71,7 @@ préexistant, ni d’une intervention humaine, ni du réseau public après confi
 ## Sources et vérification
 
 - [Guide contributeur](../../AGENTS.md), [CI](../../.github/workflows/BuildAndTest.yml),
-  [CMake des tests](../../test/CMakeLists.txt), [runner navigateur](../../webtest/CMakeLists.txt).
+  [CMake des tests](../../test/unit/CMakeLists.txt), [runner navigateur](../../test/web/CMakeLists.txt).
 - Commandes de référence : [README](../../README.md) et [frontends](../FRONTENDS.md).
 - Toute nouvelle architecture doit préciser ses preuves attendues, ses échecs observables et
   les limites encore ouvertes dans [PROJECT_STATUS](../PROJECT_STATUS.md).

@@ -1,0 +1,33 @@
+name: Remove Node.js
+description: >-
+  Deletes node, nodejs, npm, npx and corepack from the runner (an ephemeral machine), then checks that none is reachable:
+  the steps that follow are the proof that a path needs no Node.js.
+runs:
+  using: composite
+  steps:
+    - name: Remove Node.js, npm and npx
+      shell: bash
+      run: |
+        # A hosted Windows runner has no sudo: its user may delete the files itself.
+        remove() { if [ "$RUNNER_OS" = Windows ]; then rm -f "$1"; else sudo rm -f "$1"; fi; }
+        for tool in node nodejs npm npx corepack; do
+          while path=$(command -v "$tool"); do
+            remove "$path" || exit 1
+            hash -r
+          done
+        done
+        # On Windows the command shims (npm.cmd, npx.cmd, corepack.cmd) are separate files next to the executables.
+        if [ "$RUNNER_OS" = Windows ]; then
+          for tool in npm npx corepack; do
+            while path=$(command -v "$tool.cmd"); do
+              rm -f "$path" || exit 1
+              hash -r
+            done
+          done
+        fi
+        for tool in node nodejs npm npx corepack; do
+          if command -v "$tool"; then
+            echo "::error::$tool is still reachable"
+            exit 1
+          fi
+        done

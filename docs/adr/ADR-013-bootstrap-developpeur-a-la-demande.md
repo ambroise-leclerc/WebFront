@@ -5,12 +5,14 @@
 | Version | Date | État | Auteur | Évolution | Commit |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | 2026-10-20 | Proposée | Ambroise Leclerc | Proposition et première implémentation du bootstrap développeur versionné. | À renseigner après intégration. |
+| 0.2 | 2026-10-22 | Proposée | Ambroise Leclerc | Alignement sur ADR-016 : la proposition devient la base de l'architecture ; preuves multiplateformes manquantes listées. | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
+| 0.3 | 2026-10-22 | Proposée | Ambroise Leclerc | Provisioning local des paquets (#306) : `wf restore [--offline]`, priorité du registre de l'application sur celui du manifeste. | À renseigner après intégration. |
+| 0.4 | 2026-10-24 | Proposée | Ambroise Leclerc | Retrait du starter PI ; Life reste le seul starter distribué, créé avec `wf create life`. | [8368f59](https://github.com/ambroise-leclerc/WebFront/commit/8368f595af1534ea6670ee6d5582f245f9edc1f2) |
+| 1.0 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification multiplateforme du parcours développeur (#316) : la proposition est acceptée. | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 
 ## Statut et date
 
-**Proposée le 2026-10-20.** L'implémentation expérimentale est soumise à validation ; la
-distribution publique de l'environnement et la qualification des autres moteurs restent ouvertes.
-La date est celle de la proposition, pas une origine historique reconstituée.
+**Acceptée le 2026-10-24** (proposée le 2026-10-20). Preuves (#316) : le parcours `Journey*` (create, init, install, check, test, build, embed, compilation et exécution de l'application embarquée depuis un répertoire vide, permission refusée, cache hors ligne puis restauré) est vert sous CEF (GCC et Clang, réseau public coupé), WebKitGTK, WKWebView et WebView2 ([exécution de la PR](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081726319) et [dispatch](https://github.com/ambroise-leclerc/WebFront/actions/runs/40081723204)) ; un échantillon de treize paquets npm réels (React, TypeScript, `@types/*`, jasmine-core…) est installé depuis le registre local ; la release 0.6.0 est publiée et vérifiée.
 
 ## Contexte
 
@@ -41,8 +43,14 @@ La première distribution vise GitHub Pages, avec des chemins `developer/<versio
 et une configuration URL/SHA-512 épinglée dans `DeveloperReleaseData.hpp`. Le workflow refuse de
 remplacer les octets d'une version publiée et archive les versions taguées dans des prereleases
 séparées de la bibliothèque C++. Les archives gardent des identifiants de paquet, sans exiger
-publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi un starter PI distinct ;
-`wf create pi` crée son dossier sans remplacer un projet existant.
+publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi un starter Life distinct (le starter PI initial a été retiré) ;
+`wf create life` crée son dossier sans remplacer un projet existant.
+
+## Alignement sur l'ADR-016
+
+[ADR-016](ADR-016-bootstrap-comme-socle.md) retient cette proposition comme base de l'architecture.
+Elle est **Acceptée** depuis les preuves de #316 (voir le statut). Les providers et composants historiques évoqués ici suivent la
+trajectoire de retrait de l'ADR-016.
 
 ## Alternatives et conséquences
 
@@ -51,6 +59,10 @@ publication npm ou propriété d'un scope. Le manifeste vérifié épingle aussi
 - Exécuter une page distante avec le bridge : écarté ; l'environnement validé est servi localement.
 - Le premier lancement nécessite l'accès au dépôt ou un provisioning local explicite. Le cache
   vérifié autorise ensuite un lancement hors ligne.
+- Les paquets suivent la même règle : `wf restore` reconstruit leur cache depuis le lock, depuis le
+  registre fixé par l'application (canal de confiance du distributeur), sinon celui du manifeste, sinon
+  registry.npmjs.org, toujours en HTTPS ou sur l'origine de l'application. Un registre servi par
+  l'application est leur provisioning local explicite ; `wf restore --offline` vérifie le cache sans réseau.
 - Le code téléchargé possède l'autorité du bridge et du projet autorisé ; ce n'est pas un sandbox.
   Le mode distribution n'active pas ces callbacks. Aucun accès au shell n'est ajouté.
 

@@ -11,7 +11,7 @@ function(webfront_register_frontend name)
     if(NOT "${name}" MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
         message(FATAL_ERROR "Frontend name '${name}' must be a C++ identifier")
     endif()
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "XVFB_LINUX;ALWAYS_AVAILABLE" "OPTION;POLICY;DESCRIPTION;SUPPORT;SETUP;TEST_SETUP;TEST_NAME;TEST_TIMEOUT" "PLATFORMS;TEST_PLATFORMS")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "XVFB_LINUX;ALWAYS_AVAILABLE;NATIVE" "OPTION;POLICY;DESCRIPTION;SUPPORT;SETUP;TEST_SETUP;TEST_NAME;TEST_TIMEOUT" "PLATFORMS;TEST_PLATFORMS")
     if(name IN_LIST WEBFRONT_FRONTEND_REGISTRY)
         message(FATAL_ERROR "Frontend '${name}' is already registered")
     endif()
@@ -70,29 +70,32 @@ function(webfront_register_frontend name)
         if(ARG_XVFB_LINUX)
             message(FATAL_ERROR "Frontend '${name}' cannot use XVFB_LINUX without OPTION")
         endif()
+        if(ARG_NATIVE)
+            message(FATAL_ERROR "Frontend '${name}' cannot use NATIVE without OPTION")
+        endif()
     endif()
     list(APPEND WEBFRONT_FRONTEND_REGISTRY "${name}")
     set(WEBFRONT_FRONTEND_REGISTRY "${WEBFRONT_FRONTEND_REGISTRY}" PARENT_SCOPE)
-    foreach(field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX)
+    foreach(field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX NATIVE)
         set(WEBFRONT_FRONTEND_${name}_${field} "${ARG_${field}}" PARENT_SCOPE)
     endforeach()
 endfunction()
 
 webfront_register_frontend(DefaultBrowser ALWAYS_AVAILABLE)
 webfront_register_frontend(WebView2
-    OPTION WEBFRONT_EMBED_WEBVIEW2 POLICY strict
+    NATIVE OPTION WEBFRONT_EMBED_WEBVIEW2 POLICY strict
     DESCRIPTION "Download the pinned WebView2 SDK and link its static loader (Windows only)"
     PLATFORMS Windows SUPPORT WebView2Support
     TEST_PLATFORMS Windows TEST_NAME WebFrontWebView2Integration TEST_TIMEOUT 90
     TEST_SETUP webfront_add_webview2_tests)
 webfront_register_frontend(WKWebView
-    OPTION WEBFRONT_EMBED_WKWEBVIEW POLICY strict
+    NATIVE OPTION WEBFRONT_EMBED_WKWEBVIEW POLICY strict
     DESCRIPTION "Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only)"
     PLATFORMS Darwin SUPPORT WKWebViewSupport
     TEST_PLATFORMS Darwin TEST_NAME WebFrontWKWebViewIntegration TEST_TIMEOUT 90
     TEST_SETUP webfront_add_wkwebview_tests)
 webfront_register_frontend(WebKitGTK
-    OPTION WEBFRONT_EMBED_WEBKITGTK POLICY strict
+    NATIVE OPTION WEBFRONT_EMBED_WEBKITGTK POLICY strict
     DESCRIPTION "Enable the system WebKitGTK 6.0 embedded frontend (Linux only)"
     PLATFORMS Linux SUPPORT WebKitGTKSupport
     TEST_PLATFORMS Linux TEST_NAME WebFrontWebKitGTKIntegration TEST_TIMEOUT 90 XVFB_LINUX
@@ -123,6 +126,73 @@ function(webfront_declare_frontend_options)
         if(${option} AND NOT supported)
             list(JOIN WEBFRONT_FRONTEND_${name}_PLATFORMS ", " platforms)
             message(FATAL_ERROR "${option} is supported only on: ${platforms} (got '${CMAKE_SYSTEM_NAME}')")
+        endif()
+    endforeach()
+endfunction()
+
+
+# Probes whether the native engine <name> can be built here. Sets <out> to ON or OFF and <reason> to a
+# diagnostic for the OFF case. Only the registry's native engines are probed, never CEF. Kept
+# separate so that configure-only tests can supply a deterministic answer.
+function(webfront_probe_native_frontend name out reason)
+    set(available OFF)
+    set(why "")
+    if(name STREQUAL "WebKitGTK")
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(WEBFRONT_AUTODETECT_WEBKITGTK QUIET webkitgtk-6.0)
+        endif()
+        if(WEBFRONT_AUTODETECT_WEBKITGTK_FOUND)
+            set(available ON)
+        else()
+            set(why "pkg-config webkitgtk-6.0 was not found; install libwebkitgtk-6.0-dev (Ubuntu/Debian) or webkitgtk6.0-devel (Fedora), see docs/WEBKITGTK.md")
+        endif()
+    elseif(name STREQUAL "WKWebView")
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            set(why "WKWebViewFrontend requires Clang with Apple Blocks support")
+        elseif(CMAKE_OSX_DEPLOYMENT_TARGET AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "13.3")
+            set(why "CMAKE_OSX_DEPLOYMENT_TARGET ${CMAKE_OSX_DEPLOYMENT_TARGET} is older than 13.3")
+        elseif(NOT CMAKE_OSX_DEPLOYMENT_TARGET AND CMAKE_HOST_SYSTEM_VERSION VERSION_LESS "22.4")
+            set(why "macOS 13.3 or later is required (Darwin ${CMAKE_HOST_SYSTEM_VERSION})")
+        else()
+            set(available ON)
+        endif()
+    elseif(name STREQUAL "WebView2")
+        if(MSVC)
+            set(available ON)
+        else()
+            set(why "WebView2Frontend requires an MSVC-compatible compiler (MSVC or clang-cl)")
+        endif()
+    else()
+        set(why "no probe is defined for ${name}")
+    endif()
+    set(${out} "${available}" PARENT_SCOPE)
+    set(${reason} "${why}" PARENT_SCOPE)
+endfunction()
+
+# Enables, for this platform's native engine, an option the user has not set. Automatic values stay
+# in normal variables: option() honors them (CMP0077), without creating a cache entry. A later
+# configure probes again, while an explicit normal or cached value always wins, even when unchanged.
+# A missing engine only produces a status message; the application reports it at run time.
+function(webfront_autodetect_native_frontends)
+    foreach(name IN LISTS WEBFRONT_FRONTEND_REGISTRY)
+        set(option "${WEBFRONT_FRONTEND_${name}_OPTION}")
+        if(option STREQUAL "" OR NOT WEBFRONT_FRONTEND_${name}_NATIVE)
+            continue()
+        endif()
+        webfront_frontend_supports_platform("${name}" supported)
+        if(NOT supported)
+            continue()
+        endif()
+        if(DEFINED ${option})
+            continue()
+        endif()
+        webfront_probe_native_frontend("${name}" available reason)
+        set(${option} "${available}" PARENT_SCOPE)
+        if(available)
+            message(STATUS "Native window: ${name} detected, ${option}=ON")
+        else()
+            message(STATUS "Native window: ${name} unavailable (${reason}), so applications using NativeApp will report it when started. Set -D${option}=ON once it is installed")
         endif()
     endforeach()
 endfunction()
@@ -177,7 +247,10 @@ function(webfront_set_browser_test_properties name assets_directory timeout)
 endfunction()
 
 # Shared Jasmine and lifecycle registration; engine-specific cases stay in the support module.
+# ARGUMENTS are passed to the Jasmine target (webtest runs `wf test` on a prepared project); SKIP_JASMINE registers the
+# lifecycle and engine cases only, when the target cannot run on this configuration.
 function(webfront_add_browser_tests target frontend assets_directory lifecycle_target)
+    cmake_parse_arguments(ARG "SKIP_JASMINE" "" "ARGUMENTS" ${ARGN})
     if(NOT frontend IN_LIST WEBFRONT_FRONTEND_REGISTRY)
         message(FATAL_ERROR "Unknown browser-test frontend '${frontend}'")
     endif()
@@ -218,11 +291,13 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             webfront_set_browser_test_properties("${lifecycle_name}" "${assets_directory}"
                 "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
         endforeach()
-        set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
-        add_test(NAME ${name} COMMAND ${command})
-        list(APPEND shared_tests "${name}")
-        webfront_set_browser_test_properties("${name}" "${assets_directory}"
-            "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
+        if(NOT ARG_SKIP_JASMINE)
+            set(name "${WEBFRONT_FRONTEND_${frontend}_TEST_NAME}")
+            add_test(NAME ${name} COMMAND ${command} ${ARG_ARGUMENTS})
+            list(APPEND shared_tests "${name}")
+            webfront_set_browser_test_properties("${name}" "${assets_directory}"
+                "${WEBFRONT_FRONTEND_${frontend}_TEST_TIMEOUT}")
+        endif()
     endif()
     # Per-engine tests may be independent of a display and must not be skipped with Jasmine.
     set(setup "${WEBFRONT_FRONTEND_${frontend}_TEST_SETUP}")
@@ -317,4 +392,17 @@ function(webfront_select_frontend var default description)
         endif()
     endforeach()
     set(${var}_TYPE "webfront::frontend::${selected}Frontend" PARENT_SCOPE)
+endfunction()
+
+# Sets <out> to the option of the native engine registered for this platform, or to "" when there is none.
+function(webfront_native_frontend_option out)
+    set(result "")
+    foreach(name IN LISTS WEBFRONT_FRONTEND_REGISTRY)
+        webfront_frontend_supports_platform("${name}" supported)
+        if(WEBFRONT_FRONTEND_${name}_NATIVE AND supported)
+            set(result "${WEBFRONT_FRONTEND_${name}_OPTION}")
+            break()
+        endif()
+    endforeach()
+    set(${out} "${result}" PARENT_SCOPE)
 endfunction()

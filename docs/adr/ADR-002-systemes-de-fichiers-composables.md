@@ -63,9 +63,9 @@ la racine de développement optionnelle, puis la page de repli embarquée d’`I
 `fs::DefaultFSWith<Extra...>` place les providers supplémentaires entre le bridge protégé
 et la racine locale. Sans `documentRoot`, le provider local ne touche pas au disque.
 
-Les espaces réservés `webfront/components/<name>/` et `webfront/tools/<pkg>/` séparent les
-ressources réutilisables des pages applicatives. `PackageFS` ne sert que les installations
-référencées par le store (ADR-010). Les fichiers natifs de développement et `NativeDebugFS`
+Les espaces réservés `webfront/components/<name>/` et `webfront/tools/<pkg>/` séparaient les
+ressources réutilisables des pages applicatives ; `PackageFS` et les composants qui les servaient
+sont retirés (ADR-010 v1.7), l'environnement développeur sert les siennes sous `webfront/developer/`. Les fichiers natifs de développement et `NativeDebugFS`
 ne constituent pas un sandbox de production.
 
 ## Orientation embarquée, Yocto et mobile
@@ -121,8 +121,8 @@ un store restent optionnels et demandent un emplacement adapté à la cible.
 
 ## Sources et vérification
 
-- [DefaultFS](../../include/system/DefaultFS.hpp), [FileSystem](../../include/system/FileSystem.hpp),
-  [NativeFS](../../include/system/NativeFS.hpp).
-- Tests : [FileSystemTests](../../test/FileSystemTests.cpp), [DefaultFSTests](../../test/DefaultFSTests.cpp),
-  [ModuleHTTPServerTests](../../test/ModuleHTTPServerTests.cpp).
+- [DefaultFS](../../include/webfront/system/DefaultFS.hpp), [FileSystem](../../include/webfront/system/FileSystem.hpp),
+  [NativeFS](../../include/webfront/system/NativeFS.hpp).
+- Tests : [FileSystemTests](../../test/unit/FileSystemTests.cpp), [DefaultFSTests](../../test/unit/DefaultFSTests.cpp),
+  [ModuleHTTPServerTests](../../test/unit/ModuleHTTPServerTests.cpp).
 - Voir [ADR-009](ADR-009-modules-et-assets-reproductibles.md) et [ADR-010](ADR-010-composants-et-outils-optionnels.md).

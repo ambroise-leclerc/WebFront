@@ -59,7 +59,7 @@ target_link_libraries(WebFront INTERFACE
 
 # Register lifecycle coverage once, alongside the shared Jasmine runner; paths are module-relative.
 function(webfront_add_webview2_tests)
-    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../webtest" ABSOLUTE)
+    get_filename_component(webtest_source_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/web" ABSOLUTE)
     add_executable(webview2_lifecycle
         "${webtest_source_dir}/WebView2Lifecycle.cpp"
         "${webtest_source_dir}/WebView2HeaderConsumer.cpp")
@@ -69,4 +69,14 @@ function(webfront_add_webview2_tests)
         add_test(NAME WebView2Lifecycle-${mode} COMMAND webview2_lifecycle ${mode})
         webfront_set_browser_test_properties("WebView2Lifecycle-${mode}" "${webtest_source_dir}" 45)
     endforeach()
+    # Short direct-channel correctness checks; no measurement batches or reports.
+    add_executable(webview2_transport_contracts "${webtest_source_dir}/WebView2TransportBenchmark.cpp")
+    target_compile_definitions(webview2_transport_contracts PRIVATE WEBFRONT_TRANSPORT_CONTRACTS_ONLY)
+    target_link_libraries(webview2_transport_contracts PRIVATE WebFront WebFront_warnings WebFront_options)
+    add_dependencies(webtest webview2_transport_contracts)
+    add_test(NAME WebView2TransportContracts COMMAND webview2_transport_contracts)
+    webfront_set_browser_test_properties(WebView2TransportContracts "${webtest_source_dir}" 60)
+    # Manual measurement only: never built or run by CTest/CI.
+    add_executable(webview2_transport_benchmark EXCLUDE_FROM_ALL "${webtest_source_dir}/WebView2TransportBenchmark.cpp")
+    target_link_libraries(webview2_transport_benchmark PRIVATE WebFront WebFront_warnings WebFront_options)
 endfunction()

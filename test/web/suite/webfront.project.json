@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "name": "webfront-browser-tests",
+  "version": "0.1.0",
+  "dependencies": {"jasmine-core": "7.0.2"},
+  "test": {"specs": ["specs/webfront-specs.mjs"]}
+}

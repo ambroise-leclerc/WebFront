@@ -1,0 +1,64 @@
+{
+  "format": 1,
+  "name": "webfront-developer-tools",
+  "version": "0.1.0",
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "esbuild-wasm": "0.28.2",
+    "fflate": "0.8.3",
+    "jasmine-core": "7.0.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "semver": "7.7.3"
+  },
+  "scripts": {
+    "build": "js/developer/scripts/build.mjs",
+    "site": "js/developer/scripts/site.mjs",
+    "pin": "js/developer/scripts/pin.mjs",
+    "test-registry": "test/web/registry/build.mjs"
+  },
+  "test": {
+    "specs": [
+      "test/developer/specs/environment-specs.mjs",
+      "test/developer/specs/manifest-specs.mjs",
+      "test/developer/specs/restore-specs.mjs",
+      "test/developer/specs/scripts-specs.mjs",
+      "test/developer/specs/development-specs.mjs",
+      "test/developer/specs/testing-specs.mjs",
+      "test/developer/specs/timers-specs.mjs",
+      "test/developer/specs/distribution-specs.mjs"
+    ]
+  },
+  "permissions": {
+    "files": [
+      "js/developer/webfront.project.json",
+      "js/developer/webfront-packages.lock.json",
+      ".webfront/developer/packages",
+      "js/core",
+      "js/developer/environment",
+      "js/developer/tools",
+      "js/developer/scripts",
+      "test/developer",
+      "test/web/registry",
+      "registry-archives",
+      "examples/life/ui",
+      "include/webfront/system/DeveloperReleaseData.hpp"
+    ],
+    "publish": [
+      "build-distribution",
+      "build-distribution-repeat",
+      "build-developer-environment",
+      "build-site",
+      "build-registry",
+      "js/core/bootstrap/bootstrap.bundle.mjs",
+      "js/developer/environment/packages.bundle.mjs",
+      "js/developer/environment/PACKAGES-LICENSE.txt",
+      "js/developer/environment/bundles.json",
+      "include/webfront/system/DeveloperReleaseData.hpp"
+    ],
+    "fetch": [
+      "https://ambroise-leclerc.github.io"
+    ]
+  }
+}

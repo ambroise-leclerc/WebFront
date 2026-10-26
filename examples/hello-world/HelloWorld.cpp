@@ -1,4 +1,4 @@
-#include <WebFront.hpp>
+#include <webfront/WebFront.hpp>
 
 // Switching to an embedded Chromium window only changes this alias (CEF must be enabled at
 // configure time with -DWEBFRONT_EMBED_CEF=ON):
