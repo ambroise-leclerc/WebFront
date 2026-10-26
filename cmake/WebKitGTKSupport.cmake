@@ -51,13 +51,4 @@ function(webfront_add_webkitgtk_tests)
     # Manual measurement only: never built or run by CTest/CI.
     add_executable(webkitgtk_transport_benchmark EXCLUDE_FROM_ALL "${source}/WebKitGTKTransportBenchmark.cpp")
     target_link_libraries(webkitgtk_transport_benchmark PRIVATE WebFront WebFront_warnings WebFront_options)
-    # ADR-018 (#378): throwaway DOM prototypes, manual measurement only. C++26 reflection when the compiler has it.
-    add_executable(webkitgtk_dom_prototype EXCLUDE_FROM_ALL "${source}/dom/DomPrototype.cpp")
-    target_link_libraries(webkitgtk_dom_prototype PRIVATE WebFront WebFront_warnings WebFront_options)
-    include(CheckCXXCompilerFlag)
-    check_cxx_compiler_flag("-std=c++26 -freflection" WEBFRONT_HAS_REFLECTION)
-    if(WEBFRONT_HAS_REFLECTION)
-        set_target_properties(webkitgtk_dom_prototype PROPERTIES CXX_STANDARD 26)
-        target_compile_options(webkitgtk_dom_prototype PRIVATE -freflection)
-    endif()
 endfunction()

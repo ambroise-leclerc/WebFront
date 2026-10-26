@@ -9,8 +9,8 @@
 ## État et chronologie
 
 **Proposée** le **2026-10-26** (issue #378). Cette décision ne livre aucune API publique et ne modifie pas le format
-binaire : le seul code livré est un ensemble de prototypes jetables (`test/web/dom/`, cible manuelle
-`webkitgtk_dom_prototype`), jamais construits ni lancés par CTest ou la CI. Elle passera à « Acceptée » quand les
+binaire. Ses mesures viennent de prototypes jetables, retirés du dépôt après mesure et consultables dans le commit
+`ef2bb25` de la PR #385 (`test/web/dom/`, cible manuelle `webkitgtk_dom_prototype`). Elle passera à « Acceptée » quand les
 critères de la section dédiée seront démontrés.
 
 WebFront n'est pas encore en alpha : la décision peut faire évoluer le format de l'[ADR-003](ADR-003-protocole-binaire-et-bornes.md)
@@ -100,7 +100,8 @@ Ils servent de contre-exemple : WebFront garde le DOM réel et donc l'accessibil
 
 ## Prototypes et mesures (WebKitGTK 2.52.6, Linux, 2026-10-26)
 
-Les prototypes résident dans `test/web/dom/`, hors de la bibliothèque :
+Les prototypes ne font pas partie du dépôt : ils sont consultables dans le commit `ef2bb25` de la PR #385, sous
+`test/web/dom/`, hors de la bibliothèque :
 
 - `DomPrototype.hpp` : `Document`, `Node` et `Batch`, l'encodeur C++ d'un flux de mutations (octet de version, puis
   opérations ; entiers en varint LEB128, chaînes UTF-8 préfixées, noms internés une fois par document). Le lot est
@@ -117,14 +118,10 @@ Les prototypes résident dans `test/web/dom/`, hors de la bibliothèque :
 - `DomPrototype.cpp` et `dom-prototype.html` : les scénarios, les vérifications du DOM et le rapport. Le programme
   échoue sur un DOM faux ou un rapport absent, jamais sur une durée.
 
-Exécution (build `-DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON`, Release) :
-
-```bash
-cmake --build build --target webkitgtk_dom_prototype
-mkdir -p packages && for p in react-19.3.1 react-dom-19.3.1 scheduler-0.28.0; do
-    mkdir -p "packages/${p%-*}" && tar xzf "build/registry-archives/$p.tgz" -C "packages/${p%-*}" --strip-components=1; done
-cd test/web/dom && xvfb-run -a ../../../build/test/web/webkitgtk_dom_prototype ../../../packages report.json
-```
+Exécution dans ce commit (build `-DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON`, Release) : construire la cible
+`webkitgtk_dom_prototype`, extraire les archives `react-19.3.1`, `react-dom-19.3.1` et `scheduler-0.28.0` de
+`build/registry-archives/` dans un répertoire de paquets, puis lancer le programme sous Xvfb depuis `test/web/dom`
+avec ce répertoire en argument.
 
 Configuration : AMD Ryzen 9 3900X, Linux 7.0, GCC 16.1.0 (`-std=c++26 -freflection`), WebKitGTK 2.52.6 sous Xvfb.
 WebKit arrondit `performance.now()` à la milliseconde : les allers-retours inférieurs à la milliseconde sont des
@@ -185,6 +182,20 @@ Autres résultats, identiques dans les deux séries :
 6. **Changer le texte d'un élément détruit l'identité de ses enfants.** Le premier prototype perdait la trace d'un nœud
    texte par ligne : `textContent` remplace les enfants sans que l'interpréteur les oublie. `SET_TEXT` doit viser un nœud
    texte, ou oublier explicitement les enfants qu'il remplace.
+
+### Limites des prototypes relevées en revue
+
+La revue de la PR #385 a montré que l'interpréteur jetable ne tient pas toutes ses promesses ; l'interpréteur embarqué
+(#380) doit corriger ces points et les couvrir par des lots hostiles :
+
+- **URL masquées.** Le contrôle par expression régulière laisse passer `"java\tscript:alert(1)"` et
+  `"\x01javascript:alert(1)"` : l'analyseur d'URL du navigateur supprime les tabulations et retours à la ligne partout,
+  et les caractères de contrôle en tête. Il faut analyser avec `URL` et contrôler le protocole résolu.
+- **Validation contre l'état initial seulement.** Un lot qui supprime un nœud puis le réutilise, qui crée un cycle par
+  `append`, ou dont la référence d'`insertBefore` n'est pas un enfant du parent, passe la validation puis échoue en cours
+  d'application : les étapes déjà appliquées restent et C++ n'est pas prévenu. La validation doit suivre les suppressions
+  et la structure produites par le lot ; un échec résiduel doit être signalé comme un rejet.
+- **Îlots déplaçables.** `append(x, îlot)` déplace l'élément prêté par la page, contrairement au modèle de propriété.
 
 ### Réflexion C++26 vérifiée
 
@@ -299,17 +310,18 @@ interaction subit 40 ms.
 
 ## Critères d'acceptation
 
-Chacun fait l'objet d'une issue dédiée (#379 à #383) :
+Chacun est rattaché à une issue dérivée :
 
-1. `TCP_NODELAY` est activé et un test montre qu'un callback qui appelle `ui.jsFunction` avant de rendre ne subit plus de
+1. (#379) `TCP_NODELAY` est activé et un test montre qu'un callback qui appelle `ui.jsFunction` avant de rendre ne subit plus de
    délai.
-2. La commande de lot est spécifiée dans l'ADR-003, avec des tests d'encodage et de décodage C++, l'interpréteur embarqué
+2. (#380) La commande de lot est spécifiée dans l'ADR-003, avec des tests d'encodage et de décodage C++, l'interpréteur embarqué
    et une suite Jasmine dans un vrai navigateur sous CEF, WebKitGTK, WebView2 et WKWebView, lots hostiles compris.
-3. L'API `webfront::dom` (document, nœuds, îlots, événements, lectures groupées) a des tests de cycle de vie :
+3. (#381) L'API `webfront::dom` (document, nœuds, îlots, événements, lectures groupées) a des tests de cycle de vie :
    déconnexion, rechargement de page, plusieurs navigateurs, arrêt ([ADR-006](ADR-006-taches-structurees-et-arret.md)).
-4. Une variante du Game of Life montre un panneau construit en C++ dans l'interface React, avec le store fusionné.
-5. La couche de réflexion est facultative, avec un repli C++23 par descripteurs, et compilée en CI par GCC 16.
-6. Les mesures de cette ADR sont reprises sous CEF et WebView2, et avec un client distant.
+4. (#382) Une variante du Game of Life montre un panneau construit en C++ dans l'interface React, avec le store fusionné.
+5. (#383) La couche de réflexion est facultative, avec un repli C++23 par descripteurs, et compilée en CI par GCC 16.
+6. (#380) Les mesures de cette ADR sont reprises sous CEF et WebView2, et avec un client distant, avec l'interpréteur
+   embarqué.
 
 ## Options écartées et motifs
 
@@ -345,7 +357,11 @@ Négatives acceptées :
 
 - Ne jamais présenter une mutation comme synchrone ni attendable ; ne jamais offrir de lecture implicite ou par propriété.
 - Ne jamais construire de nœud à partir de HTML, ni autoriser `script`, `on*`, `javascript:` ou `data:` dans `href`/`src`.
-- Valider un lot entier avant de l'appliquer ; signaler tout rejet à C++.
+- Valider un lot entier avant de l'appliquer, **contre l'état que ses propres opérations produisent** ; signaler tout rejet
+  à C++. Un échec pendant l'application reste possible (exception du DOM) : il est signalé comme un rejet.
+- Analyser les URL avec l'analyseur du navigateur (`new URL(valeur, document.baseURI)`) et contrôler le protocole résolu,
+  jamais par une expression régulière.
+- Ne jamais déplacer ni supprimer l'élément d'un îlot : C++ n'en possède que les enfants.
 - N'écrire que dans des îlots prêtés ; ne jamais réconcilier un sous-arbre d'une bibliothèque.
 - Grouper les mises à jour d'un même cycle (lot, store) ; ne pas envoyer un message par opération.
 - Garder le cœur en C++23 ; isoler le code réfléchi derrière `__cpp_impl_reflection`.
@@ -376,4 +392,4 @@ Consultées le 2026-10-26 :
 - Réflexion : [P2996R13](https://isocpp.org/files/papers/P2996R13.html),
   [prise en charge C++26 par compilateur](https://en.cppreference.com/cpp/compiler_support/26),
   [fork Bloomberg `clang-p2996`](https://github.com/bloomberg/clang-p2996) ; vérification locale avec GCC 16.1.0.
-- Mesures : `test/web/dom/` de cette ADR, rapports JSON produits par `webkitgtk_dom_prototype`.
+- Mesures : `test/web/dom/` du commit `ef2bb25` (PR #385), rapports JSON produits par `webkitgtk_dom_prototype`.

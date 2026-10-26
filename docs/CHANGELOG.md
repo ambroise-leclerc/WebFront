@@ -4,8 +4,8 @@
 
 - ADR-018 (Proposed, #378) studies DOM access from C++: a batched, validated mutation stream into page-lent islands, React and
   other UI libraries kept as owners of their DOM (external store, islands), optional C++26 reflection for generated
-  interfaces. Throwaway prototypes and their measurements live in `test/web/dom/` (manual target `webkitgtk_dom_prototype`,
-  never built by CTest or CI). They also found a 40 ms delay on callbacks that call `ui.jsFunction` before returning
+  interfaces. Its measurements come from throwaway prototypes, kept out of the repository (commit `ef2bb25` of PR #385).
+  They also found a 40 ms delay on callbacks that call `ui.jsFunction` before returning
   (`TCP_NODELAY` is not set); the fix is tracked by #379.
 
 ## 0.5.0 - 2026-10-26
