@@ -82,3 +82,50 @@ if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${WORK
     OR NOT "${output}${error}" MATCHES "Deliberate suite failure")
     message(FATAL_ERROR "The runner must stop at the first failed suite: ${output}${error}")
 endif()
+
+# Worker bounds are checked before CTest can accidentally choose unbounded parallelism.
+foreach(parallel 0 -1 invalid)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DPARALLEL=${parallel}
+        -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(result EQUAL 0 OR NOT "${output}${error}" MATCHES "PARALLEL must be a positive integer")
+        message(FATAL_ERROR "Invalid parallelism was not rejected: ${output}${error}")
+    endif()
+endforeach()
+
+# A failed Xvfb launch is an unsuccessful invocation too: stale reports must already be gone.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    file(WRITE "${WORK}/build/test-results-2.xml" "stale")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env WEBFRONT_TEST_SHARED_DISPLAY=0
+        "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DXVFB_RUN=${CMAKE_COMMAND}
+        -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml"
+        OR NOT EXISTS "${WORK}/build/test-results-manual.xml")
+        message(FATAL_ERROR "A failed display launch must discard only numbered stale reports: ${output}${error}")
+    endif()
+endif()
+
+# A label exclusion leaves out the tests carrying it, and only them.
+file(MAKE_DIRECTORY "${WORK}/labels/source")
+file(WRITE "${WORK}/labels/source/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.31)
+project(Labelled LANGUAGES NONE)
+enable_testing()
+add_test(NAME Standard COMMAND "${CMAKE_COMMAND}" -E true)
+add_test(NAME Portable COMMAND "${CMAKE_COMMAND}" -E false)
+set_tests_properties(Portable PROPERTIES LABELS portability)
+]=])
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/labels/source" -B "${WORK}/labels/build"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Label fixture configure failed: ${output}${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release -DLABEL_EXCLUDE=portability
+    -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0 OR "${output}${error}" MATCHES "Portable")
+    message(FATAL_ERROR "The excluded label must not run: ${output}${error}")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release
+    -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0)
+    message(FATAL_ERROR "Without an exclusion the portability test must run and fail: ${output}${error}")
+endif()

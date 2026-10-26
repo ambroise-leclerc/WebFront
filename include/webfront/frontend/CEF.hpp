@@ -538,7 +538,8 @@ private:
 
 namespace detail {
 
-inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy, CefRefPtr<SimpleCEFClient> client = nullptr) {
+inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
+                       CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {}) {
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -560,6 +561,13 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
 
     // Platform-specific path configuration
     configurePlatformPaths(settings);
+    if (!profile.empty()) {
+        const auto absoluteProfile = std::filesystem::absolute(profile);
+        std::filesystem::create_directories(absoluteProfile);
+        CefString(&settings.root_cache_path).FromString(absoluteProfile.string());
+        CefString(&settings.cache_path).FromString(absoluteProfile.string());
+        CefString(&settings.log_file).FromString((absoluteProfile / "cef_debug.log").string());
+    }
     log::info("Attempting CEF initialization...");
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {

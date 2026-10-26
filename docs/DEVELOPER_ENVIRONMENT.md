@@ -676,3 +676,9 @@ The packaged-script permission rejection is also exercised end to end.
 
 The standard CEF-off suite also checks project transactions, path rejection, Life rules and boundaries, MIME types,
 bootstrap freshness, package resolution, gzip generation, interruption and offline cache reuse.
+
+## Repository test sessions
+
+The non-interactive test driver can run compatible commands in a shared browser session with fresh command frames and
+individual JSON reports. The production `wf` command API is unchanged. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for
+`--suite`, isolated CTest filters, complete fixture repetition, quiet windows, profiling and concurrency constraints.

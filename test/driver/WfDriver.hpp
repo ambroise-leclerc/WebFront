@@ -6,9 +6,11 @@
 // protocol or API); 71 time limit of the driver; 72 the browser closed without a result.
 #pragma once
 
-#include <webfront/WebFront.hpp>
+#include "../unit/TemporaryDirectory.hpp"
+#include "DriverSuite.hpp"
+#include "TestFrontend.hpp"
 #include <webfront/system/SafePath.hpp>
-
+#include <webfront/WebFront.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -16,8 +18,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -34,9 +36,9 @@ namespace webfront::testdriver {
 struct DriverWebView2Options {
     static frontend::WebView2Options get() {
 #ifdef _MSC_VER
-        char* raw = nullptr;
-        std::size_t length = 0;
-        const auto status = _dupenv_s(&raw, &length, "WEBFRONT_TEST_WEBVIEW2_PROFILE");
+        char*                                             raw    = nullptr;
+        std::size_t                                       length = 0;
+        const auto                                        status = _dupenv_s(&raw, &length, "WEBFRONT_TEST_WEBVIEW2_PROFILE");
         const std::unique_ptr<char, decltype(&std::free)> profile(raw, std::free);
         if (status != 0)
             throw std::runtime_error("Cannot read the WebView2 test profile");
@@ -47,15 +49,43 @@ struct DriverWebView2Options {
     }
     static frontend::WebView2Options get(const char* profile) {
         frontend::WebView2Options options;
+        options.visible = diagnosticWindows();
         if (profile && *profile)
             options.userDataFolder = std::filesystem::path(profile);
         return options;
     }
 };
 
+// CEF's default profile is beside the executable, independent of the HTTP port. Each driver process/session
+// uses its own profile so Chromium cannot forward an invocation into another test's browser singleton.
+struct DriverCEFFrontend : frontend::CEFFrontend {
+    static void initialize() {
+        webfront::detail::ensureFrontendInitialized<frontend::CEFFrontend>();
+    }
+    static void open(std::string_view port, std::string_view page) {
+        open("127.0.0.1", port, page, {});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
+#if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
+        const auto* profile = std::getenv("WEBFRONT_TEST_CEF_PROFILE");
+        if (!profile || !*profile)
+            throw std::runtime_error("CEF test driver requires an isolated WEBFRONT_TEST_CEF_PROFILE");
+        cef::detail::openWindow(frontend::detail::applicationUrl(address, port, page),
+                                webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
+                                nullptr,
+                                std::filesystem::path(profile));
+#else
+        frontend::CEFFrontend::open(address, port, page, policy);
+#endif
+    }
+};
+
 template <typename Frontend>
 using DriverFrontend = std::conditional_t<std::is_same_v<Frontend, frontend::WebView2Frontend>,
-                                          frontend::WebView2FrontendWithOptions<DriverWebView2Options>, Frontend>;
+                                          frontend::WebView2FrontendWithOptions<DriverWebView2Options>,
+                                          std::conditional_t<std::is_same_v<Frontend, frontend::WKWebViewFrontend>,
+                                                             QuietFrontend<Frontend>,
+                                                             std::conditional_t<std::is_same_v<Frontend, frontend::CEFFrontend>, DriverCEFFrontend, Frontend>>>;
 using namespace std::chrono_literals;
 
 inline constexpr int usageStatus     = 64;
@@ -72,6 +102,9 @@ struct Options {
     std::optional<std::filesystem::path> report;
     std::chrono::seconds                 timeout{600};
     std::vector<std::string>             command;
+    std::optional<std::filesystem::path> suite;
+    std::optional<std::filesystem::path> reportDirectory;
+    std::string                          filter;
 };
 
 struct UsageError : std::invalid_argument {
@@ -102,6 +135,12 @@ inline Options parse(int argc, char** argv) {
             options.registryDirectory = value();
         else if (argument == "--manifest-dir")
             options.manifestDirectory = value();
+        else if (argument == "--suite")
+            options.suite = value();
+        else if (argument == "--report-dir")
+            options.reportDirectory = value();
+        else if (argument == "--filter")
+            options.filter = value();
         else if (argument == "--report")
             options.report = value();
         else if (argument == "--timeout") {
@@ -127,8 +166,12 @@ inline Options parse(int argc, char** argv) {
             throw UsageError("--manifest-dir expects a relative '/'-separated directory without '..'");
         }
     }
-    if (options.command.empty())
+    if (options.command.empty() && !options.suite)
         throw UsageError("A wf command is required");
+    if (options.suite && (!options.command.empty() || options.report || !options.reportDirectory))
+        throw UsageError("--suite requires --report-dir and replaces the command and --report");
+    if (!options.suite && (options.reportDirectory || !options.filter.empty()))
+        throw UsageError("--report-dir and --filter require --suite");
     if (options.environment.has_value() != options.integrity.has_value())
         throw UsageError("--environment and --integrity go together");
 #if defined(WEBFRONT_BOOTSTRAP_ARCHIVE) && defined(WEBFRONT_BOOTSTRAP_INTEGRITY)
@@ -153,6 +196,36 @@ inline Sources& sources() {
     return instance;
 }
 
+// Real HTTP page: WebFront.js derives its WebSocket URL from location.host (srcdoc has no host).
+inline constexpr std::string_view suitePage = R"HTML(<!doctype html><div id="preview"></div><script src="/WebFront.js"></script><script type="module">
+                    Promise.resolve().then(async () => {
+                        localStorage.clear();
+                        sessionStorage.clear();
+                        // No environment command uses IndexedDB today, but discard databases created by a spec when supported.
+                        for (const database of await indexedDB.databases?.() ?? []) {
+                            await new Promise((resolve, reject) => {
+                                const request = indexedDB.deleteDatabase(database.name);
+                                request.onsuccess = resolve;
+                                request.onerror = () => reject(request.error);
+                                request.onblocked = () => reject(new Error('A previous case retained an IndexedDB connection'));
+                            });
+                        }
+                        return import('/webfront/developer/environment/' + parent.webfrontDriverCase.entry);
+                    }).then(async runtime => {
+                        await webFront.ready;
+                        const {index, item, config} = parent.webfrontDriverCase;
+                        let result;
+                        await runtime.runNonInteractive(item.command, {bridge: webFront, config,
+                            preview: document.getElementById('preview'), signal: new AbortController().signal,
+                            write: () => {}, onExit: () => {}, reporter: async json => {
+                                result = JSON.parse(json);
+                                await webFront.cppFunction('wf.caseResult')(index, result.exitCode, json);
+                            }});
+                        if (!result) throw new Error('Suite command returned no report');
+                        parent.postMessage({driverCase: index, status: result.exitCode}, location.origin);
+                    }).catch(error => parent.postMessage({driverCase: parent.webfrontDriverCase.index,
+                        error: String(error?.stack ?? error)}, location.origin));</script>)HTML";
+
 /// Serves the environment archive and the optional local registry under /driver/, from outside the project.
 class DriverFS {
 public:
@@ -160,6 +233,15 @@ public:
 
     std::optional<webfront::fs::File> open(std::filesystem::path path) const {
         const auto relative = path.relative_path().generic_string();
+        if (relative == "driver/case.html") {
+            static const auto words = [] {
+                std::vector<std::uint64_t> packed((suitePage.size() + 7) / 8);
+                for (std::size_t i = 0; i < suitePage.size(); ++i)
+                    packed[i / 8] |= static_cast<std::uint64_t>(static_cast<unsigned char>(suitePage[i])) << ((7 - i % 8) * 8);
+                return packed;
+            }();
+            return fs::File{std::span<const std::uint64_t>{words}, suitePage.size()};
+        }
         if (relative == "driver/environment.tgz")
             return read(sources().archive);
         // The starters the environment pins sit next to its archive: plain file names only.
@@ -254,12 +336,17 @@ inline constexpr auto driverScript = R"JS(
     const stop = () => window.close();
     try {
         await webFront.ready;
-        for (;;) {
-            const text = document.getElementById('status')?.textContent ?? '';
-            if (text.startsWith('Bootstrap failed:')) throw Object.assign(new Error(text), {bootstrap: true});
-            if (text.startsWith('Developer environment ready.')) break;
-            await new Promise(resolve => setTimeout(resolve, 50));
-        }
+        // Observe the bootstrap status rather than polling the DOM every 50 ms.
+        await new Promise((resolve, reject) => {
+            const observer = new MutationObserver(check);
+            function check() {
+                const text = document.getElementById('status')?.textContent ?? '';
+                if (text.startsWith('Bootstrap failed:')) { observer.disconnect(); reject(new Error(text)); }
+                else if (text.startsWith('Developer environment ready.')) { observer.disconnect(); resolve(); }
+            }
+            observer.observe(document.documentElement, {subtree: true, childList: true, characterData: true});
+            check();
+        });
         const config = JSON.parse(await report('webfront.developer.config'));
         const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
         const runtime = await import(`/webfront/developer/environment/${environment.entry}`);
@@ -267,10 +354,37 @@ inline constexpr auto driverScript = R"JS(
             throw Object.assign(new Error('Bootstrap failed: this developer environment has no non-interactive mode'), {bootstrap: true});
         config.starters = Object.fromEntries(Object.entries(environment.starters ?? {}).map(([name, value]) =>
             [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
-        const argv = JSON.parse(await report('wf.arguments'));
-        await runtime.runNonInteractive(argv, {bridge: webFront, config, preview: document.getElementById('preview'),
-            signal: new AbortController().signal, write: () => {}, onExit: () => {},
-            reporter: json => report('wf.result', JSON.parse(json).exitCode, json)});
+        const suite = JSON.parse(await report('wf.suite'));
+        if (suite) {
+            let failed = false;
+            // One native browser, one fresh realm per command: imports, timers, Workers, listeners and frames
+            // belong to that realm. Only the explicit project and immutable HTTP resources survive between cases.
+            for (let index = 0; index < suite.length; ++index) {
+                const item = suite[index];
+                await report('wf.caseStarted', index);
+                const frame = document.createElement('iframe');
+                frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1024px;height:768px';
+                const finished = new Promise((resolve, reject) => {
+                    const receive = event => {
+                        if (event.source !== frame.contentWindow || event.data?.driverCase !== index) return;
+                        removeEventListener('message', receive);
+                        event.data.error ? reject(new Error(event.data.error)) : resolve(event.data.status);
+                    };
+                    addEventListener('message', receive);
+                });
+                window.webfrontDriverCase = {index, item, config, entry: environment.entry};
+                frame.src = '/driver/case.html?case=' + index;
+                document.body.append(frame);
+                try { failed = (await finished !== item.expect) || failed; }
+                finally { frame.remove(); delete window.webfrontDriverCase; }
+            }
+            await report('wf.result', failed ? 1 : 0, JSON.stringify({exitCode: failed ? 1 : 0, output: 'Suite completed'}));
+        } else {
+            const argv = JSON.parse(await report('wf.arguments'));
+            await runtime.runNonInteractive(argv, {bridge: webFront, config, preview: document.getElementById('preview'),
+                signal: new AbortController().signal, write: () => {}, onExit: () => {},
+                reporter: json => report('wf.result', JSON.parse(json).exitCode, json)});
+        }
     } catch (error) {
         await report('wf.bootstrapFailed', String(error?.message ?? error)).catch(() => {});
     } finally { stop(); }
@@ -284,6 +398,8 @@ class DriverBrowser {
 public:
     void connected(UI ui) {
         std::scoped_lock lock{mutex};
+        if (browser)
+            return;  // Commands and wf test create their own connected frames; inject only the native page.
         browser.emplace(std::move(ui));
         browser->addScript(closing ? "window.close()" : driverScript);
     }
@@ -296,9 +412,9 @@ public:
     }
 
 private:
-    std::mutex mutex;
+    std::mutex        mutex;
     std::optional<UI> browser;
-    bool closing = false;
+    bool              closing = false;
 };
 
 inline std::string jsonArray(const std::vector<std::string>& items) {
@@ -338,7 +454,7 @@ struct PlainSetup {
     };
     template <typename App>
     void configure(App&) {}
-    int finish(int status) {
+    int  finish(int status) {
         return status;
     }
 };
@@ -362,8 +478,55 @@ int run(const Options& options, Setup&& setup = {}) {
     if (sources().registry)
         sources().registry = std::filesystem::canonical(*sources().registry);
 
-    Outcome outcome;
-    App     app{options.project, {}};
+    const auto cases = options.suite ? parseSuite(readSuite(*options.suite), options.filter) : std::vector<SuiteCase>{};
+    if (options.reportDirectory) {
+        std::filesystem::create_directories(*options.reportDirectory);
+        for (const auto& item : cases)
+            std::filesystem::remove(*options.reportDirectory / (item.name + ".json"));
+    }
+    std::string suiteJson = "null";
+    if (!cases.empty()) {
+        suiteJson = "[";
+        for (const auto& item : cases)
+            suiteJson += (suiteJson.size() > 1 ? "," : "") + std::string("{\"name\":") + json::quote(item.name) + ",\"command\":" + jsonArray(item.command)
+                         + ",\"expect\":" + std::to_string(item.expected) + "}";
+        suiteJson += "]";
+        if (suiteJson.size() > 60000)
+            throw UsageError("Suite arguments exceed the bridge string budget (60000 bytes)");
+    }
+    std::size_t completed  = 0;
+    bool        caseFailed = false;
+    const auto  started    = std::chrono::steady_clock::now();
+    const auto  phase      = [&](std::string_view name) {
+        std::cout << "driver " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() << "ms " << name << std::endl;
+    };
+    DriverDeadline deadlines{options.timeout};
+    Outcome        outcome;
+    App            app{options.project, {.port = "0"}};
+    app.cppFunction("wf.suite", [suiteJson] {
+        return suiteJson;
+    });
+    app.cppFunction("wf.caseStarted", [&](double index) {
+        if (index != static_cast<double>(completed) || completed >= cases.size())
+            throw std::runtime_error("Unexpected suite start index");
+        deadlines.beginCase(cases[completed].timeout);
+        phase("begin " + cases[completed].name);
+    });
+    app.cppFunction("wf.caseResult", [&](double index, double exitCode, std::string json) {
+        if (index != static_cast<double>(completed) || completed >= cases.size())
+            throw std::runtime_error("Unexpected suite result index");
+        deadlines.endCase();
+        const auto& item = cases[completed];
+        printOutput(json);
+        Options reportOptions;
+        reportOptions.report = *options.reportDirectory / (item.name + ".json");
+        writeReport(reportOptions, json);
+        if (exitCode != item.expected)
+            std::cerr << "suite case " << item.name << ": expected status " << item.expected << ", got " << exitCode << std::endl;
+        caseFailed = (exitCode != item.expected) || caseFailed;
+        phase("end " + item.name);
+        ++completed;
+    });
     app.cppFunction("wf.arguments", [arguments = jsonArray(options.command)] {
         return arguments;
     });
@@ -378,13 +541,13 @@ int run(const Options& options, Setup&& setup = {}) {
     });
     setup.configure(app);
     app.bootstrap("developer",
-                  {.environment = "/driver/environment.tgz",
-                   .integrity   = *options.integrity,
-                   .registry    = options.registryDirectory ? std::optional<std::string>{"/driver/registry/"} : std::nullopt,
+                  {.environment       = "/driver/environment.tgz",
+                   .integrity         = *options.integrity,
+                   .registry          = options.registryDirectory ? std::optional<std::string>{"/driver/registry/"} : std::nullopt,
                    .manifestDirectory = options.manifestDirectory});
 
     DriverBrowser<typename App::UI> browser;
-    auto subscription = app.subscribeUIStarted([&](typename App::UI ui) {
+    auto                            subscription = app.subscribeUIStarted([&](typename App::UI ui) {
         browser.connected(ui);
     });
     // The time limit: ask the page to close, then end the process if the browser does not follow.
@@ -392,13 +555,7 @@ int run(const Options& options, Setup&& setup = {}) {
         std::mutex                  mutex;
         std::condition_variable_any wake;
         std::unique_lock            lock{mutex};
-        if (wake.wait_for(lock,
-                          stop,
-                          options.timeout,
-                          [] {
-                              return false;
-                          })
-            || stop.stop_requested())
+        if (!deadlines.expired(stop))
             return;
         outcome.timedOut();
         try {
@@ -417,9 +574,12 @@ int run(const Options& options, Setup&& setup = {}) {
             std::_Exit(timeoutStatus);
         }
     });
+    phase("begin browser");
     app.show();
+    phase("end browser / begin shutdown");
     watchdog.request_stop();
     app.shutdown();
+    phase("end shutdown");
 
     int         status    = noResultStatus;
     bool        hasResult = false;
@@ -437,6 +597,8 @@ int run(const Options& options, Setup&& setup = {}) {
         std::cerr << failure << '\n';
     else
         std::cerr << "The browser closed before the command reported a result\n";
+    if (!cases.empty() && status == 0 && (caseFailed || completed != cases.size()))
+        status = 1;
     return setup.finish(status);
 }
 
@@ -446,11 +608,20 @@ int main(int argc, char** argv, std::string_view program, Setup&& setup = {}) {
     try {
         // CEF child processes must dispatch before interpreting application arguments or creating files.
         webfront::detail::ensureFrontendInitialized<Frontend>();
+#if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
+        std::optional<webfront::test::TemporaryDirectory> temporaryProfile;
+        if constexpr (std::is_same_v<Frontend, frontend::CEFFrontend>) {
+            if (!std::getenv("WEBFRONT_TEST_CEF_PROFILE")) {
+                temporaryProfile.emplace();
+                ::setenv("WEBFRONT_TEST_CEF_PROFILE", temporaryProfile->path().c_str(), 1);
+            }
+        }
+#endif
         return run<Frontend>(parse(argc, argv), std::forward<Setup>(setup));
     } catch (const UsageError& error) {
-        std::cerr << program << ": " << error.what() << "\nUsage: " << program
-                  << " --project <dir> [--environment <archive> --integrity <sha512-...>] "
-                  << "[--registry-dir <dir>] [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]\n";
+        std::cerr << program << ": " << error.what() << "\nUsage: " << program << " --project <dir> [--environment <archive> --integrity <sha512-...>] "
+                  << "[--registry-dir <dir>] [--report <file>] [--timeout <seconds>] [--suite <json> --report-dir <dir> [--filter <name>]] [--] <wf command> "
+                     "[arguments...]\n";
         return usageStatus;
     } catch (const std::exception& error) {
         std::cerr << program << ": " << error.what() << '\n';

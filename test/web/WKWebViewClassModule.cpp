@@ -12,7 +12,7 @@ extern "C" __attribute__((visibility("default"))) void* webfrontWKViewClass() {
 
 extern "C" __attribute__((visibility("default"))) void webfrontWKModuleSession() {
     Object  pool(send(type("NSAutoreleasePool"), "new"));
-    Session session("http://127.0.0.1:0/");
+    Session session("http://127.0.0.1:0/", {.visible = false});
     session.create();
     send<void>(session.window, "performClose:", static_cast<id>(nullptr));
     if (!session.closed)

@@ -295,6 +295,7 @@ auto makeCppFunctionResponder(Callable&& callable) {
  */
 struct WebFrontConfig {
     std::string           address{"127.0.0.1"};
+    /// "0" requests an ephemeral port with TCPStdnet. The frontend receives the bound port.
     std::string           port{"9002"};
     std::filesystem::path documentRoot{};
     ContentPolicy         contentPolicy{};
@@ -315,7 +316,7 @@ public:
     explicit BasicWF(WebFrontConfig config)
         : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
           httpAddress(config.address),
-          httpPort(config.port),
+          httpPort(httpServer.port()),
           httpDocRoot(config.documentRoot),
           contentPolicy(std::move(config.contentPolicy)),
           idsCounter(0) {
@@ -343,6 +344,9 @@ public:
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
         : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
+
+    /** @brief The listening port, including the OS-assigned TCPStdnet port when configured with "0". */
+    std::string_view port() const noexcept { return httpPort; }
 
     ~BasicWF() noexcept {
         stopAndJoinServer();

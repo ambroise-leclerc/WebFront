@@ -20,6 +20,8 @@ struct WebView2Options {
     std::chrono::milliseconds startupTimeout{std::chrono::seconds{30}};
     std::filesystem::path     userDataFolder{};
     ContentPolicy             contentPolicy{};
+    /** @brief Keep the native window hidden while retaining the real controller and message loop. */
+    bool                      visible{true};
 };
 
 }  // namespace webfront::frontend
@@ -259,7 +261,7 @@ public:
         check(controller->put_Bounds(bounds), "resizing controller");
     }
 
-    void createWindow() {
+    void createWindow(bool visible = true) {
         className = L"WebFront.WebView2." + std::to_wstring(reinterpret_cast<std::uintptr_t>(this));
         WNDCLASSW windowClass{};
         windowClass.lpfnWndProc   = windowProcedure;
@@ -288,7 +290,8 @@ public:
         startupTimer = SetTimer(nullptr, 0, startupTimeoutMilliseconds, nullptr);
         if (!startupTimer)
             throw std::runtime_error("WebView2: cannot start startup timer");
-        ShowWindow(window, SW_SHOW);
+        if (visible)
+            ShowWindow(window, SW_SHOW);
     }
 
     void start(const std::filesystem::path& profile, EnvironmentFactory createEnvironment = CreateCoreWebView2EnvironmentWithOptions) {
@@ -613,7 +616,7 @@ inline void open(std::string_view address,
         prepare(*session);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
     std::filesystem::create_directories(profile);
-    session->createWindow();
+    session->createWindow(options.visible);
     session->start(profile);
     session->run();
 }

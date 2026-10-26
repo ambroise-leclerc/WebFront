@@ -269,7 +269,7 @@ private:
         webFront->cppFunction("senderCancellationObserved", [this] {
             return state.senderCancellationObserved.load();
         });
-        webFront->cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
+        webFront->cppFunction("plusPageUrl", [this] { return frontend::detail::applicationUrl(webFront->port(), "a+b.html"); });
         webFront->cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket->url(); });
         uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;

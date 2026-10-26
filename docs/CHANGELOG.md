@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Tests are organized in tiers by CTest label: `fast` (unit tests, about one second), the standard tier and
+  `portability` (the consumer project). CI runs the fast tier first, excludes `portability` from pull requests into
+  `develop`, and runs the advanced tier (three suite repetitions, a portability matrix, sanitizers, fuzzers, CEF) weekly
+  and on pull requests into `master`. `RunTestSuite.cmake` accepts `LABEL_EXCLUDE`. See [TEST_TIERS](TEST_TIERS.md) (#388).
+
+- Compatible `wf` regression commands share browser sessions, with fresh command realms and individual CTest reports
+  (#388). The suite runner reuses one Xvfb display on Linux, supports bounded `PARALLEL`, and records detailed phase/spec
+  timings. Independent driver groups use OS-assigned ports; `WebFrontConfig::port = "0"` and `app.port()` expose this
+  with TCPStdnet. Native `WebView2Options::visible` / `WKWebViewOptions::visible` default to true and allow quiet tests.
+  Windows/macOS CI no longer wait for the Linux image, extended jobs use sccache, fuzzers have bounded concurrency,
+  and lcov verifies its fast JSON backend. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md).
+
 - Accepted stdnet connections enable `TCP_NODELAY`, including after WebSocket upgrade (#379).
   This removes the Nagle/delayed-ACK interaction that could delay a callback's return
   after it sent a browser message. A real-socket regression checks the option directly;

@@ -237,7 +237,11 @@ endfunction()
 # Separate discovery from registration so configure-only tests can supply a deterministic result.
 function(webfront_find_xvfb out)
     find_program(XVFB_RUN_EXECUTABLE xvfb-run)
-    set(${out} "${XVFB_RUN_EXECUTABLE}" PARENT_SCOPE)
+    if(XVFB_RUN_EXECUTABLE)
+        set(${out} "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../test/tools/WithDisplay.sh" PARENT_SCOPE)
+    else()
+        set(${out} "${XVFB_RUN_EXECUTABLE}" PARENT_SCOPE)
+    endif()
 endfunction()
 
 function(webfront_set_browser_test_properties name assets_directory timeout)

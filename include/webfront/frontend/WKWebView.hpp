@@ -18,6 +18,8 @@ struct WKWebViewOptions {
     /** @brief The initial document must finish loading within this interval; no bridge connection is required. */
     std::chrono::milliseconds startupTimeout{30000};
     ContentPolicy             contentPolicy{};
+    /** @brief Keep the native window hidden and avoid activating the application. A WindowServer is still required. */
+    bool                      visible{true};
 };
 
 }  // namespace webfront::frontend
@@ -294,12 +296,21 @@ struct Session {
         attach(delegate, this);
         installed = true;
         send<void>(app, "setDelegate:", delegate);
-        send<BOOL>(app, "setActivationPolicy:", applicationActivationPolicy());
+        send<BOOL>(app, "setActivationPolicy:", options.visible ? applicationActivationPolicy() : 2L);
         installMenu();
         send<void>(app, "finishLaunching");
 
         Object configuration(send(type("WKWebViewConfiguration"), "new"));
         send<void>(configuration.get(), "setWebsiteDataStore:", send(type("WKWebsiteDataStore"), "nonPersistentDataStore"));
+        // Hidden content otherwise suspends once its load event completes. Use the public macOS 14+ preference
+        // so asynchronous bridge/Worker work and close requests keep progressing without a visible native window.
+        if (!options.visible) {
+            const auto preferences = send(configuration.get(), "preferences");
+            const auto selector = sel_registerName("setInactiveSchedulingPolicy:");
+            if (!send<BOOL>(preferences, "respondsToSelector:", selector))
+                throw std::runtime_error("WKWebView: hidden sessions require macOS 14 or later (inactiveSchedulingPolicy)");
+            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L); // WKInactiveSchedulingPolicyNone
+        }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
         const CGRect bounds{
@@ -324,8 +335,10 @@ struct Session {
         send<void>(window, "setContentView:", view);
         send<BOOL>(window, "makeFirstResponder:", view);
         send<void>(window, "center");
-        send<void>(window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
-        send<void>(app, "activateIgnoringOtherApps:", static_cast<BOOL>(true));
+        if (options.visible) {
+            send<void>(window, "makeKeyAndOrderFront:", static_cast<id>(nullptr));
+            send<void>(app, "activateIgnoringOtherApps:", static_cast<BOOL>(true));
+        }
     }
 
     void start() {

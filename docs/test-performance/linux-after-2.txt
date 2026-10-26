@@ -1,0 +1,35 @@
+CTest profile
+
+Cases: 378
+wall_seconds: 93.000
+sum_seconds: 196.682
+dependency_path_seconds: 69.216
+serial_seconds: 0.000
+lower_bound_seconds: 83.583
+
+Slowest cases (seconds):
+   26.683 DeveloperBrowserIntegration
+   24.152 AddSubdirectoryConsumer
+   22.616 LifeEmbeddedBuild
+   22.544 JourneyEmbeddedBuild
+   15.483 SelfBuildSession
+   10.920 JourneyBuildSession
+    8.197 SelfBuildRefresh
+    4.320 WfDriverTimeout
+    3.442 CEFTestingState
+    3.288 JourneyRestoreSession
+    2.649 NoAiAttributionRegression
+    2.555 JourneyStartSession
+    2.519 WfDriverManifestDirectory
+    2.501 TestRegistry
+    2.489 WfDriverSession
+    2.347 SelfBuildSiteRepeat
+    2.110 WfDriverSuiteFailure
+    2.021 SelfBuildSiteRefusesChange
+    1.957 WebFrontWebKitGTKIntegration
+    1.905 WfDriverRenamedEntry
+    1.820 FrontendSelection
+    1.772 SelfBuildSite
+    1.761 LifeEmbeddedIntegration
+    1.747 JourneyEmbeddedRun
+    1.681 JourneyPermissionDenied
