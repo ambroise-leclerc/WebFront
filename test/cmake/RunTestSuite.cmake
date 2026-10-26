@@ -9,6 +9,8 @@ endif()
 if(NOT REPEAT MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "REPEAT must be a positive integer")
 endif()
+# CTest runs in the build directory: a relative path would place a relative report path inside it, and miss the cleanup below.
+cmake_path(ABSOLUTE_PATH BUILD_DIR NORMALIZE)
 get_filename_component(cmake_bin "${CMAKE_COMMAND}" DIRECTORY)
 find_program(CTEST_EXECUTABLE ctest HINTS "${cmake_bin}" REQUIRED)
 set(options --test-dir "${BUILD_DIR}" --output-on-failure --no-tests=error --parallel 4)
