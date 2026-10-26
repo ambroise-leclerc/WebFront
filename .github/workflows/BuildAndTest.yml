@@ -184,6 +184,12 @@ jobs:
               echo "$target clean rebuild: $(( $(date +%s) - start )) s"
               sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
             done
+            # The consumer project of AddSubdirectoryConsumer: its single translation unit against the warm cache.
+            sccache --zero-stats > /dev/null
+            start=$(date +%s)
+            cmake --build build/test/unit/consumer-build --config ${{ matrix.build_type }} --clean-first > build/probe-consumer.log 2>&1 || tail -n 20 build/probe-consumer.log
+            echo "consumer clean rebuild: $(( $(date +%s) - start )) s"
+            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
           } 2>&1 | tee build/embedded-cache-probe.txt
       - name: Collect coverage
         if: runner.os == 'Linux'
