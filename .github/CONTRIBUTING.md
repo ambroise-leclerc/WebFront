@@ -33,6 +33,14 @@ We follow the **C++ Core Guidelines** to ensure conformance with modern C++23 ge
 
 We use **Doxygen** syntax for code documentation. Follow these guidelines:
 
+API documentation is optional: configure with `-DENABLE_DOXYGEN=ON`, then run
+`cmake --build <build-directory> --target doxygen-docs` (the previous
+`doc_doxygen` target remains available). CMake generates the configuration from
+the public headers and the project version; Graphviz is optional. The default
+build needs neither tool. Current build/test commands are in [AGENTS.md](../AGENTS.md),
+and developer-environment publication is described in
+[PUBLISHING.md](../js/developer/tools/PUBLISHING.md).
+
 - **File-level documentation:** Use `@brief` only, no `@file` or `@author` tags.
 - **Class documentation:** Include `@brief` with detailed description and usage examples.
 - **Method documentation:**

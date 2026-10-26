@@ -243,7 +243,6 @@ struct Response : Headers {
     template<typename Net>
     [[nodiscard]] std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
-        static std::string httpStatus;
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
         buffers.push_back(Net::Buffer(httpStatus));
 
@@ -255,6 +254,10 @@ struct Response : Headers {
             buffers.push_back(Net::Buffer(header.value));
             buffers.push_back(Net::Buffer(crlf));
         }
+        // This server handles one HTTP request per socket. Prevent a browser from
+        // reusing it before shutdown is observed; upgraded WebSockets remain open.
+        if (statusCode != switchingProtocols)
+            buffers.push_back(Net::Buffer(std::string_view{"Connection: close\r\n"}));
         buffers.push_back(Net::Buffer(crlf));
         if (!content.empty()) buffers.push_back(Net::Buffer(content));
 
@@ -262,6 +265,9 @@ struct Response : Headers {
     }
 
 private:
+    // Buffer views must stay valid independently until this response's asynchronous send ends.
+    mutable std::string httpStatus;
+
     [[nodiscard]] static std::string toString(StatusCode code) {
         static constexpr std::array<std::pair<StatusCode, std::string_view>, 10> names{
             {{switchingProtocols, "Switching Protocols"},

@@ -2,7 +2,28 @@
 import {parseTestOptions, specFiles, jasmineCore, buildReport, formatReport, reportResult, runnerFiles, fitResult, abortable} from '../../../js/developer/environment/testing.mjs';
 import {execute} from '../../../js/developer/environment/runtime.mjs';
 import {bundleTests} from '../../../js/developer/environment/bundler.mjs';
-import {rejects, throws, esbuild} from '../support.mjs';
+import {rejects, throws, esbuild, reportSpecStarted} from '../support.mjs';
+
+describe('optional spec progress', () => {
+    it('reports the started spec when the driver callback is available', async () => {
+        const calls = [];
+        const bridge = {cppFunction: name => async fullName => { calls.push([name, fullName]); }};
+        await reportSpecStarted(bridge, {fullName: 'suite spec'});
+        expect(calls).toEqual([['wf.progress', 'suite spec']]);
+    });
+
+    it('keeps specs runnable without the driver callback or after disconnection', async () => {
+        for (const message of ['C++ function not found: wf.progress', 'WebSocket disconnected']) {
+            const bridge = {cppFunction: () => async () => { throw new Error(message); }};
+            await reportSpecStarted(bridge, {fullName: 'suite spec'});
+        }
+    });
+
+    it('handles a bridge that throws before returning its Promise', async () => {
+        const bridge = {cppFunction: () => { throw new Error('bridge unavailable'); }};
+        await reportSpecStarted(bridge, {fullName: 'suite spec'});
+    });
+});
 
 describe('wf test', () => {
     // Compiling the wasm of esbuild takes a while on a machine without a GPU.

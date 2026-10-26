@@ -448,6 +448,38 @@ SCENARIO("Gzip response leases enforce exact capacity accounting after CPU compl
     REQUIRE(executor.statistics().bytes == 0);
 }
 
+SCENARIO("Failed gzip responses retain their job slot until the response lease is released") {
+    for (const bool throws : {false, true}) {
+        auto gate = std::make_shared<Gate>();
+        gate->release();
+        Executor   executor({1, 2, 200000, 1000}, {gate, throws});
+        Completion first, next;
+        auto       corrupt           = std::string(gzipfixtures::fixed);
+        corrupt[corrupt.size() - 8] ^= 1;
+        auto    a                    = ex::connect(executor.submit(corrupt, 23768), Receiver{first, {}});
+        auto    b                    = ex::connect(executor.submit(std::string(gzipfixtures::fixed), 23768, true), Receiver{next, {}});
+        Finally cleanup{[&] {
+            executor.stop();
+            executor.join();
+        }};
+        ex::start(a);
+        first.wait();
+        REQUIRE(static_cast<bool>(*first.result));
+        REQUIRE_FALSE(first.result->valid());
+        // Completion and the consumer's receipt of a response do not release its reservation.
+        ex::start(b);
+        next.wait();
+        REQUIRE_FALSE(static_cast<bool>(*next.result));
+        REQUIRE(executor.statistics().decodes == 1);
+        REQUIRE(executor.statistics().jobs == 1);
+        first.result.reset();
+        executor.stop();
+        executor.join();
+        REQUIRE(executor.statistics().jobs == 0);
+        REQUIRE(executor.statistics().bytes == 0);
+    }
+}
+
 SCENARIO("Gzip completion resumes on the supplied I/O scheduler") {
     auto           gate = std::make_shared<Gate>();
     Executor       executor({}, {gate});
@@ -529,20 +561,23 @@ SCENARIO("HTTP gzip workers preserve failure statuses and remain lazy on pass-th
     }
     GIVEN("invalid gzip and exceptions from the worker") {
         for (const bool fail : {false, true}) {
-            Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate, fail});
-            std::jthread                                 io([&] {
-                server.run();
-            });
-            Net::IoContext                               clients;
-            Net::Socket                                  get(clients), head(clients);
-            Finally                                      cleanup{[&] {
-                server.stop();
-                io.join();
-                server.drain();
-            }};
-            for (auto* client : {&get, &head}) {
-                send(*client, port, fail ? "/asset.js" : "/corrupt.js", {}, client == &head);
-                const auto response = receive(*client, client == &head);
+            for (const bool head : {false, true}) {
+                // A received response can precede release of its server-side lease. Give each
+                // error case its own one-job server so this tests 500, rather than admission (503).
+                Server<Net, NeutralFS, OneJob, GatedDecoder> server("127.0.0.1", port, ".", {}, {gate, fail});
+                std::jthread                                 io([&] {
+                    server.run();
+                });
+                Net::IoContext                               clients;
+                Net::Socket                                  client(clients);
+                Finally                                      cleanup{[&] {
+                    server.stop();
+                    io.join();
+                    server.drain();
+                }};
+                send(client, port, fail ? "/asset.js" : "/corrupt.js", {}, head);
+                const auto response = receive(client, head);
+                CAPTURE(fail, head, response);
                 REQUIRE(response.starts_with("HTTP/1.1 500"));
                 REQUIRE(response.find("Vary: Accept-Encoding") != std::string::npos);
             }

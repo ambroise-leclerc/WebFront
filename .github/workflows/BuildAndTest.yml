@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       repeat_desktop_tests:
-        description: 'Also run the desktop matrix, repeating each CTest case three times'
+        description: 'Also run the desktop matrix, repeating the complete CTest suite three times'
         type: boolean
         default: false
 
@@ -131,9 +131,9 @@ jobs:
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
         run: >-
-          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4
-          --repeat until-fail:${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && '3' || '1' }}
-          --output-junit "${{ github.workspace }}/build/test-results.xml"
+          cmake -DBUILD_DIR=${{ github.workspace }}/build -DCONFIG=${{ matrix.build_type }}
+          -DREPEAT=${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && '3' || '1' }}
+          -P test/cmake/RunTestSuite.cmake
       - name: Collect coverage
         if: runner.os == 'Linux'
         working-directory: build
@@ -142,14 +142,30 @@ jobs:
           lcov --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
           lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
           lcov --list coverage.info
+      - name: Collect macOS browser crash diagnostics
+        if: failure() && runner.os == 'macOS'
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          mkdir -p build/diagnostics
+          /usr/bin/log show --last 15m --style compact \
+            --predicate 'process CONTAINS "WebKit" OR process == "developer_integration"' \
+            > build/diagnostics/webkit.log 2>&1 || true
+          shopt -s nullglob
+          for directory in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+            for report in "$directory"/*WebKit* "$directory"/*WebContent* "$directory"/*developer_integration*; do
+              if [ -f "$report" ]; then cp "$report" build/diagnostics/; fi
+            done
+          done
       - name: Retain test timings and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-log-${{ runner.os }}
           path: |
-            build/test-results.xml
+            build/test-results-*.xml
             build/Testing/Temporary/LastTest.log
+            build/diagnostics/
           if-no-files-found: ignore
 
   sanitizers:

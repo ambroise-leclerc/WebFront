@@ -10,9 +10,9 @@ WebFront is a minimal header-only C++23 core plus a standalone developer environ
 - **Developer environment.** Downloaded and verified by `NativeApp::bootstrap("developer")` (0.6.2 published and pinned). `wf init`, `create`, `install`, `restore`, `run`, `exec`, `check`, `test`, `build`, `dev`, `preview` and
   `embed` work on a manifest (`webfront.project.json`) and a lock; TypeScript and TSX are compiled by esbuild-wasm and type-checked
   by `wf check` with the project's locked compiler. The application's own commands join the terminal through `webfront::Commands`.
-  See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md) and [UI_COMPONENTS](UI_COMPONENTS.md).
+  See [DEVELOPER_ENVIRONMENT](DEVELOPER_ENVIRONMENT.md).
 - **No JavaScript runtime or package manager** is needed to use, build, test, regenerate, publish or run the CI of WebFront
-  ([migration record](NODE_TOOLS_MIGRATION.md)); `NoNodeDependency` audits every tracked file.
+  (`NoNodeDependency` audits every tracked file).
 - **Proofs.** The `Journey*` chain (create, init, install, check, test, build, embed, compile, run, permission denied, offline cache)
   passes on CEF, WebKitGTK, WKWebView and WebView2 (see below).
 - **Limitations.** There is no sandbox: the downloaded environment and the authorized scripts have the authority of the bridge and
@@ -33,6 +33,40 @@ throwaway prototypes are not in the repository (commit `ef2bb25` of PR #385 keep
 wire format is unchanged. The prototypes found that the server does not set `TCP_NODELAY`: a bridge callback that calls
 `ui.jsFunction` before returning delays its result by about 40 ms on Linux (Nagle and delayed acknowledgements). The fix is
 tracked by #379; the behavior is unchanged in this release.
+
+## CI reliability and repository cleanup (#376, 2026-10-26)
+
+HTTP responses now own their status-line storage instead of sharing mutable static
+storage across pending sends. Ordinary responses announce `Connection: close`, matching
+the server's one-request-per-socket behavior and preventing clients from trying to reuse
+a connection being shut down. A deterministic buffer-lifetime regression failed before
+the correction; the real-browser integration also checks concurrent response statuses,
+the closure header and the still-connected WebSocket bridge.
+
+The manual desktop stability check now runs the whole CTest suite three times,
+with fixtures recreated on each pass. CTest's per-case repetition was incompatible
+with the stateful Journey chain. An offline CMake regression demonstrates that
+failure, validates three complete passes and verifies nonzero failure propagation.
+
+The gzip HTTP failure scenario now uses a separate one-job server for each GET/HEAD
+case. A client can receive a response before its server-side lease is destroyed;
+the next request could therefore hit admission pressure (503) instead of testing
+the intended decoder error (500). A deterministic executor test retains a failed
+response lease and verifies that it still occupies the sole job slot.
+
+The WKWebView content-process termination seen on the October 26 develop push has
+not yet been reproduced locally. Phase markers and macOS CI crash/system logs now
+support investigation; these diagnostics alone do not establish its cause or a fix.
+A separate local `DeveloperSpecs` stall occurred on the third complete sweep; an
+isolated retry passed. The specs now log each started name through the native driver,
+whose watchdog expires before CTest, preserving the last progress and failure status.
+
+Completed repository-audit and migration notes have been removed; current commands
+remain in the developer reference and historical details in Git. Test scheduling
+documentation retains current constraints and reproduction commands. The unused
+Doxyfile template is replaced by FindDoxygen's generated configuration, with a
+regression that actually builds the optional API documentation target. The build,
+test and publication scripts were checked for callers; their active paths remain.
 
 ## Direct frontend access proposal (#363, 2026-10-24)
 
@@ -150,7 +184,7 @@ building the environment, publishing it, and the CI.
   specs because two moved to CMake: the checksums of the bundle inputs (`BundleInputsFresh`, `BundleInputsRejectsChange`) and
   the command names reserved by the terminal and by `webfront::Commands` (`CommandNamesAgree`). The tests of the asset
   generator became `EmbeddedAssetGenerator` (CMake, exit status and format), a Catch2 scenario that decodes every core
-  header and compares it with its source, and the per-asset `*AssetFresh` cases. The mapping is in `docs/NODE_TOOLS_MIGRATION.md`.
+  header and compares it with its source, and the per-asset `*AssetFresh` cases. Migration details are retained in Git history.
 - **Regeneration.** The headers of the core are rendered, and checked, by `js/core/EmbedAsset.cmake`, in pure CMake (ADR-016):
   they must be checkable by a build that has no browser. `wf run embed-core` is gone.
 - **Guard.** `NoNodeDependency` audits every tracked file for imports and APIs of Node, commands of its tools and package
@@ -194,7 +228,7 @@ be checked on the corrected head before merging. See the
 manifest-driven, self-building developer environment, the reduced identity-only embedded core,
 and bounded cached/worker gzip fallback with buffered decoding. Includes move to
 `<webfront/...>`; removed terminal/tool-manager APIs migrate to the developer terminal and
-`webfront::Commands`. See `docs/CHANGELOG.md` and `docs/UI_COMPONENTS.md` for migration details.
+`webfront::Commands`. See the [command reference](DEVELOPER_ENVIRONMENT.md) for the current API; migration details remain in Git history.
 The published developer environment pin is 0.6.2; environment sources at 0.6.3 are not yet
 published. Library APIs and packaging remain experimental.
 
@@ -502,7 +536,7 @@ caches or a lingering browser process. Application WebView2 profiles remain pers
 - Removed (#313, with #308): `webfront::Terminal`, `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`,
   `fs::ToolStore`, `fs::PackageFS`, their embedded modules and xterm.js headers, `third_party/xterm` and
   `cmake/UpdateXterm.cmake`, with their Catch2 and Jasmine tests and the fake tool registry. The environment's
-  terminal and `webfront::Commands` replace them ([UI_COMPONENTS.md](UI_COMPONENTS.md) has the migration);
+  terminal and `webfront::Commands` replace them ([command reference](DEVELOPER_ENVIRONMENT.md));
   `fs::safeRelativePath` moved to `SafePath.hpp`, the tarball helpers of `wf.mjs` to `js/developer/environment/tarball.mjs`.
 
 ## Intended product
