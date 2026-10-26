@@ -13,7 +13,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   when its dependencies are available. See [frontends](FRONTENDS.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment (0.6.2). Its terminal provides `wf init`, `create`, `install`, `restore`, `run`,
-  `exec`, `check`, `test`, `build`, `dev`, `preview` and `embed`. The manifest and lock describe
+  `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
   dependencies, entries, providers, scripts and permissions. TypeScript/TSX compilation uses
   esbuild-wasm; type checking uses the project's locked TypeScript. Application commands use
   `webfront::Commands`. See the [developer reference](DEVELOPER_ENVIRONMENT.md).
