@@ -28,7 +28,41 @@ env:
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
+  # The Linux toolchain image is tagged with the hash of its Dockerfile and built only when that tag is missing from ghcr.io,
+  # so a change of the Dockerfile is validated by the very run that carries it. A pull request from a fork cannot push it
+  # (read-only token): its Linux job then fails at the pull, which a maintainer re-run on a branch of this repository fixes.
+  linux-image:
+    if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Name the image after its Dockerfile
+        id: tag
+        run: |
+          hash=$(sha256sum .github/docker/linux-ci.Dockerfile | cut -c1-16)
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/linux-ci:$hash" >> "$GITHUB_OUTPUT"
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push the image if its tag does not exist
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.image }}" > /dev/null 2>&1; then
+            echo "${{ steps.tag.outputs.image }} already exists"
+          else
+            docker build -f .github/docker/linux-ci.Dockerfile -t "${{ steps.tag.outputs.image }}" .github/docker
+            docker push "${{ steps.tag.outputs.image }}"
+          fi
+
   desktop:
+    needs: linux-image
+    permissions:
+      contents: read
+      packages: read
     # Manual runs add extended checks; stability checks opt into desktops.
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
     # No `name:` expression: a skipped matrix job would display it unevaluated.
@@ -40,6 +74,7 @@ jobs:
         include:
           - platform: linux-gcc-webkitgtk
             os: ubuntu-26.04
+            use_image: true
             build_type: Debug
             test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
             options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON
@@ -54,6 +89,8 @@ jobs:
             test_env: {}
             options: -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
     runs-on: ${{ matrix.os }}
+    # Only the Linux job runs in the prebuilt toolchain image; an empty value means no container.
+    container: ${{ matrix.use_image && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.linux-image.outputs.image, github.actor, github.token)) || '' }}
     steps:
       - uses: actions/checkout@v7
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
@@ -70,16 +107,7 @@ jobs:
       - name: Initialize MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-      # Ubuntu 26.04 ships GCC 16 in its main archive (no flaky toolchain PPA). The image already
-      # provides CMake, Ninja, pkg-config and Xvfb, so install only the missing pieces.
-      - name: Install GCC 16, WebKitGTK and coverage tools
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            gcc-16 g++-16 libwebkitgtk-6.0-dev lcov
-          echo "CC=gcc-16" >> "$GITHUB_ENV"
-          echo "CXX=g++-16" >> "$GITHUB_ENV"
+      # GCC 16, WebKitGTK, lcov, Ninja and Xvfb come from the container image (.github/docker/linux-ci.Dockerfile).
       - name: Setup Xcode
         if: runner.os == 'macOS'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1

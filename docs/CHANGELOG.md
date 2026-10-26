@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The Linux desktop CI job runs in a prebuilt toolchain image (GCC 16, WebKitGTK, lcov, Xvfb; `.github/docker/linux-ci.Dockerfile`)
+  published to ghcr.io and tagged with the hash of its Dockerfile, instead of installing those packages from an Ubuntu mirror
+  on every run. Windows, macOS and the extended jobs are unchanged.
+
 - HTTP status-line buffers belong to each response until its asynchronous send ends (#376).
   Ordinary responses announce `Connection: close`, matching the existing one-request-per-socket
   server behavior; WebSocket upgrades remain open. Unit and real-browser regressions cover
