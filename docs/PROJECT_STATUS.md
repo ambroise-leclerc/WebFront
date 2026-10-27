@@ -79,6 +79,7 @@ are retained for investigation; diagnostics alone do not establish a correction.
   fixed-version runtime packaging, application installers and accessibility remain application work.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
-  The document/node API (#381) and a direct engine transport remain future work.
+  The per-connection document/node API, events and grouped sender reads are available; see
+  [DOM from C++](DOM.md). A direct engine transport remains future work.
   [ADR-018](adr/ADR-018-acces-au-dom.md) describes DOM islands;
   [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) retains transport experiments and acceptance criteria.

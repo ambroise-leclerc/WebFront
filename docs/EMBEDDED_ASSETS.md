@@ -80,7 +80,7 @@ const release = dom.island('panel', document.getElementById('panel')); // empty 
 Register C++ callbacks `wfDom.rejected(batchId, reason)` and, when listening to events,
 `wfDom.event(nodeId, nameIndex, value)`. The low-level `msg::DomBatch` codec and
 `ui.sendDomBatch(batch)` implement [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md);
-the document/node API remains separate work (#381). The default filesystem protects both
+the higher-level document/node API is described in [DOM.md](DOM.md). The default filesystem protects both
 `WebFront.js` and `webfront-dom.mjs` from document-root overrides.
 
 The interpreter accepts trusted application commands, as [ADR-008](adr/ADR-008-contenu-de-confiance-et-origines.md)
@@ -88,7 +88,7 @@ specifies. `style` may load CSS resources or position overlays, and `id`/`name` 
 DOM properties. The allowlist does not isolate untrusted producers. The name dictionary is retained
 until the document is discarded, including definitions acquired from rejected batches; it has a
 1 MiB UTF-8 budget in addition to the entry and per-name limits. Low-level C++ callers manage its
-mirror; the document helper is separate work (#381). After semantic rejection, retry the corrected
+mirror; the `Document` helper manages its own mirror (see [DOM.md](DOM.md)). After semantic rejection, retry the corrected
 operations using the names already acquired, without repeating their NAME definitions. Redefining
 an acquired index is rejected.
 
