@@ -2,7 +2,7 @@
 // archives (test/web/registry-packages.json, downloaded and verified at configure time) and from synthetic packages for
 // the edge cases. The test application serves the directory from its own origin, so no test reaches the public registry.
 // Everything here uses only browser APIs: build.mjs runs it with wf.
-import {tar} from '../../../js/developer/tools/archive.mjs';
+import {tar, storedGzip} from '../../../js/developer/tools/archive.mjs';
 import {gunzip, readTar} from '../../../js/developer/environment/tarball.mjs';
 
 const encoder = new TextEncoder();
@@ -12,33 +12,6 @@ async function integrity(bytes) {
 }
 const decoder = new TextDecoder();
 
-// The fixture builds the registry that provides fflate, so it cannot depend on it: a gzip stream of stored blocks is
-// deterministic and needs no compressor.
-const crcTable = Uint32Array.from({length: 256}, (_, n) => {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    return c >>> 0;
-});
-function storedGzip(bytes) {
-    const blocks = Math.max(1, Math.ceil(bytes.length / 0xffff));
-    const out = new Uint8Array(10 + bytes.length + 5 * blocks + 8);
-    const view = new DataView(out.buffer);
-    out.set([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]);
-    let at = 10;
-    for (let block = 0; block < blocks; block++) {
-        const chunk = bytes.subarray(block * 0xffff, (block + 1) * 0xffff);
-        out[at++] = block === blocks - 1 ? 1 : 0;
-        view.setUint16(at, chunk.length, true);
-        view.setUint16(at + 2, ~chunk.length & 0xffff, true);
-        out.set(chunk, at + 4);
-        at += 4 + chunk.length;
-    }
-    let crc = 0xffffffff;
-    for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-    view.setUint32(at, (crc ^ 0xffffffff) >>> 0, true);
-    view.setUint32(at + 4, bytes.length >>> 0, true);
-    return out;
-}
 const archive = files => storedGzip(tar(new Map([...files].map(([path, bytes]) => [`package/${path}`, bytes]))));
 // The fixture's versions are plain major.minor.patch numbers.
 function compareVersions(a, b) {

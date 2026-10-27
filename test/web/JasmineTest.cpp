@@ -7,6 +7,7 @@
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
+#include "../../examples/life/react/LifeReact.hpp"
 #include "RejectedWebSocketServer.hpp"
 
 #include <array>
@@ -98,6 +99,7 @@ public:
         rejectedWebSocket.emplace();
         registerCallbacks();
         registerBitsetCallbacks();
+        lifeReactSubscription = demo::installLifeReact(app);
     }
 
     /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
@@ -110,6 +112,14 @@ public:
         if (!shutdownDocument || shutdownDocument->valid() || shutdownNode.valid()) {
             log::error("DOM handles remained valid after application shutdown");
             return 1;
+        }
+        for (auto& [id, store] : reactStores) {
+            if (store.valid())
+                return 1;
+            try {
+                store.set({0, "after shutdown"});
+                return 1;
+            } catch (const std::runtime_error&) { }
         }
         try {
             shutdownDocument->text("after shutdown");
@@ -133,6 +143,8 @@ private:
     dom::Node                            shutdownNode;
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
+    UISubscription                   lifeReactSubscription;
+    std::map<WebLinkId, react::Store<TestWF::UI, std::tuple<std::uint32_t, std::string>>> reactStores;
     UISubscription                       closedDomSubscription;
     std::map<WebLinkId, bool>            closedDocumentRejected;
     future<string> cppResult;
@@ -326,6 +338,23 @@ private:
         });
         webFront->cppFunction("domClosedDocumentRejected", [this](uint32_t id) {
             return closedDocumentRejected[static_cast<WebLinkId>(id)];
+        });
+        webFront->cppFunction("reactBurst", [this](TestWF::UI ui) {
+            auto [it, inserted] = reactStores.try_emplace(ui.id(), ui, "counter");
+            for (std::uint32_t i = 0; i < 1000; ++i)
+                it->second.set({i, "été 🌍"});
+            return static_cast<std::uint32_t>(ui.id());
+        });
+        webFront->cppFunction("reactStoreValid", [this](std::uint32_t id) {
+            return reactStores.at(static_cast<WebLinkId>(id)).valid();
+        });
+        webFront->cppFunction("reactPanel", [this](TestWF::UI ui) {
+            auto doc   = ui.document();
+            auto label = doc.text("C++ island");
+            doc.island("panel").append(label);
+            doc.flush();
+            documentTexts[ui.id()] = label;
+            return static_cast<std::uint32_t>(ui.id());
         });
         webFront->cppFunction("domDocumentOffThread", [](TestWF::UI ui) {
             bool               rejected = false;

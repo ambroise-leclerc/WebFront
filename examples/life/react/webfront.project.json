@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "name": "webfront-life-react",
+  "version": "0.1.0",
+  "dependencies": {"react": "19.3.1", "react-dom": "19.3.1", "@webfront/react": "0.1.0"},
+  "entries": {"main": "main.tsx"},
+  "providers": {"LifeReactUI": {"entry": "main", "output": "generated/LifeReactUI.hpp"}}
+}

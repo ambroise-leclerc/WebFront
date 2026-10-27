@@ -1,5 +1,9 @@
 add_executable(webtest JasmineTest.cpp)
 target_link_libraries(webtest PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+if(MSVC)
+    # The shared browser suite instantiates enough bridge callbacks to exceed standard COFF's section limit.
+    target_compile_options(webtest PRIVATE /bigobj)
+endif()
 
 include(Frontends)
 include("${PROJECT_SOURCE_DIR}/test/cmake/DriverSessions.cmake")
@@ -330,6 +334,7 @@ if(_browser_tests_available)
         if(_webtest_runs)
             add_test(NAME WebSuiteProject
                 COMMAND ${CMAKE_COMMAND} -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/suite -DPROJECT=${_suite_project}
+                    -DLIFE_REACT=${PROJECT_SOURCE_DIR}/examples/life/react/main.tsx
                     -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareWfProject.cmake)
             set_tests_properties(WebSuiteProject PROPERTIES FIXTURES_SETUP WebSuiteProject LABELS "web-integration" TIMEOUT 30)
             add_test(NAME WebSuiteInstall
@@ -340,7 +345,23 @@ if(_browser_tests_available)
             webfront_set_browser_test_properties(WebSuiteInstall "${CMAKE_CURRENT_SOURCE_DIR}" 120)
             set_tests_properties(WebSuiteInstall PROPERTIES FIXTURES_REQUIRED "WebSuiteProject;TestRegistry" FIXTURES_SETUP WebSuiteInstalled
                 RESOURCE_LOCK "${_suite_project}")
-            set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled)
+            foreach(action Check Build)
+                string(TOLOWER "${action}" command)
+                add_test(NAME ReactAdapter${action}
+                    COMMAND ${_developer_xvfb_prefix} ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
+                        -DPROJECT=${_suite_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work -DENVIRONMENT= -DINTEGRITY=
+                        -DREGISTRY=${_registry} -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/ReactAdapter${action}
+                        -DEXPECT_STATUS=0 -DCOMMAND=${command} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+                webfront_set_browser_test_properties(ReactAdapter${action} "${CMAKE_CURRENT_SOURCE_DIR}" 120)
+                set_tests_properties(ReactAdapter${action} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled RESOURCE_LOCK "${_suite_project}")
+            endforeach()
+            set_tests_properties(ReactAdapterBuild PROPERTIES FIXTURES_SETUP ReactAdapterBuilt)
+            add_test(NAME ReactAdapterPages COMMAND ${CMAKE_COMMAND}
+                -DBUILD=${_suite_project}/.webfront/developer/build -DOUTPUT=${_suite_project}/pages/react-example
+                -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareReactExample.cmake)
+            set_tests_properties(ReactAdapterPages PROPERTIES FIXTURES_REQUIRED ReactAdapterBuilt FIXTURES_SETUP ReactAdapterPages
+                RESOURCE_LOCK "${_suite_project}" LABELS "web-integration" TIMEOUT 30)
+            set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED "WebSuiteInstalled;ReactAdapterPages")
         endif()
 
         # The environment builds itself (#315): the pinned bootstrap environment runs js/developer/scripts on a copy of the
@@ -400,6 +421,11 @@ if(_browser_tests_available)
             REQUIRES SelfBuildProject TestRegistry PROVIDES SelfBuildInstalled)
         webfront_add_self_build_test(SelfBuild 0 "run|build|build-distribution" OUTPUT "Script build completed"
             REQUIRES SelfBuildInstalled PROVIDES SelfBuilt)
+        webfront_add_self_build_test(ReactAdapterPackage 0 "run|react-package" OUTPUT "React adapter:" REQUIRES SelfBuildInstalled
+            PROVIDES ReactAdapterPackaged)
+        add_test(NAME ReactAdapterPackageContents COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-package-check -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReactPackage.cmake)
+        set_tests_properties(ReactAdapterPackageContents PROPERTIES FIXTURES_REQUIRED ReactAdapterPackaged LABELS "web-integration" TIMEOUT 30)
         # Developer specs migrated by #344 remain in the browser under the repository's locked Jasmine.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)
