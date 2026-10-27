@@ -61,6 +61,7 @@ include/webfront/system/*Data.hpp                   text eol=lf
 js/developer/environment/*                          text eol=lf
 
 # Starter archives and every hashed distribution input must be identical on Windows.
+LICENSE                                    text eol=lf
 examples/life/ui/*                          text eol=lf
 js/developer/tools/*                           text eol=lf
 
