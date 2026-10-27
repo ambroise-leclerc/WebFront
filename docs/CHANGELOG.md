@@ -12,6 +12,10 @@
   1 MiB per interpreter, and document the trusted-content model, event values and recovery after
   residual exceptions. Real WebSocket tests cover events and listener cleanup; a C++ regression
   covers sending through a lost UI link. The manual DOM benchmark is described in embedded assets.
+  Reserve batch id zero for uncorrelated rejections and require explicit nonzero C++ ids. Index
+  subscriptions by node and revoke islands by subtree traversal. Both codecs limit each batch to
+  131,072 operations; C++ reserves the counted operation total and rejects unused operands.
+  Event integration checks count identities/values independently of arrival order.
 
 - The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
   within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately

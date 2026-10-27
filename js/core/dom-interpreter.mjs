@@ -1,6 +1,7 @@
 // ADR-003: optional DOM command interpreter. Only this module touches the DOM; WebFront.js routes command 5.
 const maxBytes = 1024 * 1024;
 const maxEntries = 65536;
+const maxOperations = 131072;
 const maxNameBytes = 1024 * 1024;
 const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
 const encoder = new TextEncoder();
@@ -78,22 +79,27 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
     const names = [];
     let nameBytes = 0;
     const nodes = new Map();
-    let mounted = new WeakSet();
+    let mounted = new WeakMap();
     const islands = new Map(), listeners = new Map();
     const allowedAttribute = name => !name.startsWith('on') && !forbiddenAttributes.has(name) &&
         (attributes.has(name) || /^(aria|data)-[a-z0-9-]+$/.test(name));
     const safeUrl = value => ['http:', 'https:', 'mailto:'].includes(new URL(value, document.baseURI).protocol);
 
     function unlisten(id, index) {
-        const key = `${id}:${index}`, entry = listeners.get(key);
+        const group = listeners.get(id), entry = group?.get(index);
         if (entry) {
             entry.node.removeEventListener(entry.name, entry.listener);
-            listeners.delete(key);
+            group.delete(index);
+            if (!group.size) listeners.delete(id);
         }
     }
-    function cleanListeners(live) {
-        for (const [key, entry] of listeners)
-            if (!live.has(entry.id)) unlisten(entry.id, Number(key.split(':')[1]));
+    function cleanListeners(ids) {
+        for (const id of ids) {
+            const group = listeners.get(id);
+            if (!group) continue;
+            for (const entry of group.values()) entry.node.removeEventListener(entry.name, entry.listener);
+            listeners.delete(id);
+        }
     }
     function listen(id, index, name, flags) {
         unlisten(id, index);
@@ -107,15 +113,19 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             bridge.cppFunction('wfDom.event')(id, index, value).catch(() => {});
         };
         node.addEventListener(name, listener);
-        listeners.set(`${id}:${index}`, {id, node, name, listener});
+        let group = listeners.get(id);
+        if (!group) { group = new Map(); listeners.set(id, group); }
+        group.set(index, {node, name, listener});
     }
 
     function decode(bytes) {
-        if (!(bytes instanceof Uint8Array) || bytes.length < 6 || bytes.length > maxBytes || bytes[0] !== 5 || bytes[1] !== 1)
+        if (!(bytes instanceof Uint8Array) || bytes.length < 6 || bytes.length > maxBytes || bytes[0] !== 5 || bytes[1] !== 1 ||
+            (bytes[2] | bytes[3] | bytes[4] | bytes[5]) === 0)
             throw new RangeError('invalid DOM batch header or size');
         const input = reader(bytes), operations = [];
         // Retain each fully decoded NAME even if a later operation or validation rejects the batch.
         while (!input.done) {
+            if (operations.length === maxOperations) throw new RangeError('DOM batch operation limit exceeded');
             const op = input.byte();
             if (op < 1 || op > 13) throw new Error(`unknown DOM operation ${op}`);
             const a = input.uint();
@@ -137,7 +147,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
     function apply(bytes) {
         const operations = decode(bytes);
         // Only edited records and child-set deltas are copied. Untouched entries stay in the live table.
-        const changes = new Map(), newMounts = new Set();
+        const changes = new Map(), newMounts = new Map();
         let liveSize = nodes.size;
         const lookup = id => changes.has(id) ? changes.get(id) : nodes.get(id);
         const steps = [];
@@ -245,7 +255,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
                 steps.push(() => {
                     nodes.get(a).node.remove();
                     for (const id of removed) nodes.delete(id);
-                    cleanListeners(nodes);
+                    cleanListeners(removed);
                 });
                 break;
             }
@@ -260,7 +270,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
                 const name = nameAt(b), node = islands.get(name)?.element;
                 if (!node) throw new Error(`unknown DOM island ${name}`);
                 if (mounted.has(node) || newMounts.has(node)) throw new Error('island already mounted');
-                newMounts.add(node);
+                newMounts.set(node, a);
                 fresh(a, {node, text: false, island: true});
                 steps.push(() => nodes.set(a, {node}));
                 break;
@@ -272,10 +282,10 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
         try {
             for (const step of steps) step();
         } catch (error) {
-            cleanListeners(new Map());
+            cleanListeners(listeners.keys());
             nodes.clear();
             islands.clear();
-            mounted = new WeakSet();
+            mounted = new WeakMap();
             throw error;
         }
         for (const [id, entry] of changes) {
@@ -286,7 +296,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
                 nodes.set(id, entry);
             }
         }
-        for (const node of newMounts) mounted.add(node);
+        for (const [node, id] of newMounts) mounted.set(node, id);
     }
 
     const api = {
@@ -305,17 +315,16 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             return () => {
                 if (islands.get(name) !== token) return;
                 islands.delete(name);
+                const rootId = mounted.get(element);
                 mounted.delete(element);
-                const removed = new Set();
-                for (const [id, entry] of nodes) {
-                    if (entry.node === element || element.contains(entry.node)) removed.add(id);
-                    else {
-                        for (let parent = entry.parent; parent !== null; parent = nodes.get(parent)?.parent ?? null)
-                            if (nodes.get(parent)?.node === element) { removed.add(id); break; }
-                    }
+                if (rootId === undefined) return;
+                const pending = [rootId];
+                while (pending.length) {
+                    const id = pending.pop(), entry = nodes.get(id);
+                    for (const child of entry.children) pending.push(child);
+                    cleanListeners([id]);
+                    nodes.delete(id);
                 }
-                for (const id of removed) nodes.delete(id);
-                cleanListeners(nodes);
             };
         },
     };

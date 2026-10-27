@@ -112,7 +112,7 @@ private:
     TestState            state;
     // Accessed only by callbacks on the server context. finish() runs after WfDriver joins app.shutdown().
     std::map<std::uint32_t, std::string> domRejections;
-    std::string domEventLog;
+    std::array<std::uint32_t, 6> domEventCounts{};
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     future<string> cppResult;
@@ -286,12 +286,18 @@ private:
         });
 
         webFront->cppFunction("wfDom.event", [this](uint32_t node, uint32_t event, const string& value) {
-            domEventLog += to_string(node) + ":" + to_string(event) + ":" + value + "|";
+            using Event = tuple<uint32_t, uint32_t, string_view>;
+            static constexpr array<Event, 5> expected{
+                Event{10, 4, "hello"}, Event{11, 5, "true"}, Event{11, 5, "false"},
+                Event{10, 6, "Escape"}, Event{10, 7, ""}};
+            size_t index = 0;
+            while (index < expected.size() && expected[index] != Event{node, event, value})
+                ++index;
+            ++domEventCounts[index]; // Last slot counts all unexpected identities or values.
         });
-        webFront->cppFunction("domEventLog", [this] {
-            if (domEventLog == "10:4:hello|11:5:true|11:5:false|10:6:Escape|10:7:|")
-                state.domEventsObserved = true;
-            return domEventLog;
+        webFront->cppFunction("domEventCounts", [this] {
+            if (domEventCounts == array<uint32_t, 6>{1, 1, 1, 1, 1, 0}) state.domEventsObserved = true;
+            return domEventCounts;
         });
 
         webFront->cppFunction("cancelBrowserSender", [this] {
@@ -438,7 +444,9 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
+        if (!(state.domBatchSent && state.domRejectionObserved && state.domEventsObserved
+              && state.browserReady && state.subscriberNotified
+              && browserCallsObserved() && cppCallsObserved()
               && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;

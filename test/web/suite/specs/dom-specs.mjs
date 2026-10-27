@@ -15,6 +15,24 @@ const text = (id, value) => [3, ...uint(id), ...str(value)];
 const attr = (id, index, value) => [4, ...uint(id), ...uint(index), ...str(value)];
 const prop = (id, index, value) => [6, ...uint(id), ...uint(index), ...str(value)];
 
+function countCollectionVisits(action) {
+    let visited = 0;
+    const methods = [[Map.prototype, Symbol.iterator], [Map.prototype, 'values'], [Set.prototype, Symbol.iterator]];
+    const originals = methods.map(([prototype, key]) => prototype[key]);
+    try {
+        methods.forEach(([prototype, key], i) => {
+            const original = originals[i];
+            prototype[key] = function* () {
+                for (const value of original.call(this)) { ++visited; yield value; }
+            };
+        });
+        action();
+    } finally {
+        methods.forEach(([prototype, key], i) => { prototype[key] = originals[i]; });
+    }
+    return visited;
+}
+
 describe('Embedded DOM command interpreter', () => {
     let install, bridge, dom, root, release;
     beforeAll(async () => { ({installDomInterpreter: install} = await import(moduleUrl)); });
@@ -167,22 +185,78 @@ describe('Embedded DOM command interpreter', () => {
         for (let id = 2; id < 2002; ++id) ops.push(text(id, 'x'), [8, 1, ...uint(id)]);
         dom.apply(packet(ops));
         const update = packet([[7, 2, ...str('changed')], text(2002, 'new'), [8, 1, ...uint(2002)]]);
-        let visited = 0;
-        const originals = [Map.prototype[Symbol.iterator], Set.prototype[Symbol.iterator]];
-        try {
-            for (const [prototype, original] of [[Map.prototype, originals[0]], [Set.prototype, originals[1]]]) {
-                prototype[Symbol.iterator] = function* () {
-                    for (const value of original.call(this)) { ++visited; yield value; }
-                };
-            }
-            dom.apply(update);
-        } finally {
-            Map.prototype[Symbol.iterator] = originals[0];
-            Set.prototype[Symbol.iterator] = originals[1];
-        }
+        const visited = countCollectionVisits(() => dom.apply(update));
         expect(root.firstChild.data).toBe('changed');
         expect(root.lastChild.data).toBe('new');
         expect(visited).toBeLessThan(20); // Work must not grow with the 2,000 untouched children.
+    });
+
+    it('only visits subscriptions of removed nodes across a multi-remove batch', () => {
+        const ops = [name(3, 'click')];
+        for (let id = 2; id < 1002; ++id)
+            ops.push([2, ...uint(id), 1], [8, 1, ...uint(id)], [11, ...uint(id), 3, 0]);
+        dom.apply(packet(ops));
+        const removed = Array.from(root.children).slice(0, 50);
+        const update = packet(removed.map((_, i) => [10, ...uint(i + 2)]));
+        const visited = countCollectionVisits(() => dom.apply(update));
+        expect(visited).toBeLessThan(500);
+        for (const node of removed) node.click();
+        expect(bridge.cppFunction).not.toHaveBeenCalled();
+        root.firstChild.click();
+        expect(bridge.cppFunction).toHaveBeenCalledTimes(1);
+    });
+
+    it('revokes only its subtree without scanning or invalidating a detached chain', () => {
+        const count = 1000, ops = [name(3, 'click'), [2, 2, 1], [8, 1, 2], [11, 2, 3, 0]];
+        for (let id = 100; id < 100 + count; ++id) {
+            ops.push([2, ...uint(id), 1]);
+            if (id > 100) ops.push([8, ...uint(id - 1), ...uint(id)]);
+        }
+        ops.push([11, ...uint(99 + count), 3, 0]);
+        dom.apply(packet(ops));
+        const child = root.firstChild;
+        const visited = countCollectionVisits(() => release());
+        expect(visited).toBeLessThan(20);
+        child.click();
+        expect(bridge.cppFunction).not.toHaveBeenCalled();
+        expect(() => dom.apply(packet([attr(2, 2, 'forgotten')]))).toThrow();
+        const other = document.createElement('div'), revoke = dom.island('other', other);
+        try {
+            dom.apply(packet([name(4, 'other'), [13, 1, 4], [8, 1, 100]]));
+            expect(other.querySelectorAll('div').length).toBe(count);
+            let leaf = other.firstChild;
+            while (leaf.firstChild) leaf = leaf.firstChild;
+            leaf.click();
+            expect(bridge.cppFunction).toHaveBeenCalledTimes(1);
+        } finally { revoke(); }
+    });
+
+    it('resumes after semantic rejection by reusing acquired names instead of redefining them', () => {
+        const rejected = packet([name(3, 'data-ready'), [2, 2, 1], [8, 1, 2], [10, 99]]);
+        expect(() => dom.apply(rejected)).toThrow();
+        expect(root.childNodes.length).toBe(0);
+        dom.apply(packet([[2, 2, 1], attr(2, 3, 'recovered'), [8, 1, 2]]));
+        expect(root.firstChild.dataset.ready).toBe('recovered');
+        expect(() => dom.apply(packet([name(3, 'data-ready')]))).toThrow();
+    });
+
+    it('reserves batch id zero for uncorrelated malformed-message rejections', () => {
+        expect(() => dom.apply(packet([], 0))).toThrow();
+        expect(() => dom.apply(packet([], 1))).not.toThrow();
+    });
+
+    it('enforces the operation-count boundary before applying an oversized operation stream', () => {
+        dom.apply(packet([text(2, 'initial'), [8, 1, 2]]));
+        const count = 131072, bytes = new Uint8Array(6 + count * 3);
+        bytes.set(packet([]));
+        for (let offset = 6; offset < bytes.length; offset += 3) bytes.set([7, 2, 0], offset);
+        expect(() => dom.apply(bytes)).not.toThrow();
+        expect(root.textContent).toBe('');
+        dom.apply(packet([[7, 2, ...str('keep')]]));
+        const oversized = new Uint8Array(bytes.length + 3);
+        oversized.set(bytes); oversized.set([7, 2, 0], bytes.length);
+        expect(() => dom.apply(oversized)).toThrow();
+        expect(root.textContent).toBe('keep');
     });
 
     it('discards rejected structural deltas and supports removing then recreating an identifier', () => {
@@ -241,16 +315,16 @@ describe('DOM commands over the real WebSocket', () => {
             ]));
             const input = root.firstChild, checkbox = root.lastChild;
             input.value = 'hello'; input.dispatchEvent(new Event('input'));
-            checkbox.checked = true; checkbox.dispatchEvent(new Event('change'));
             checkbox.checked = false; checkbox.dispatchEvent(new Event('change'));
-            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
             const click = new Event('click', {cancelable: true}); input.dispatchEvent(click);
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+            checkbox.checked = true; checkbox.dispatchEvent(new Event('change'));
             expect(click.defaultPrevented).toBeTrue();
-            const expected = '10:4:hello|11:5:true|11:5:false|10:6:Escape|10:7:|';
-            expect(await webFront.cppFunction('domEventLog')()).toBe(expected);
+            const expected = [1, 1, 1, 1, 1, 0]; // One of each expected event/value, no unexpected events; arrival order is irrelevant.
+            expect(Array.from(await webFront.cppFunction('domEventCounts')())).toEqual(expected);
             await webFront.cppFunction('sendDomBatch')(packet([[12, 10, 4], [10, 11]]));
             input.dispatchEvent(new Event('input')); checkbox.dispatchEvent(new Event('change'));
-            expect(await webFront.cppFunction('domEventLog')()).toBe(expected);
+            expect(Array.from(await webFront.cppFunction('domEventCounts')())).toEqual(expected);
         } finally { release(); root.remove(); delete webFront.domBatchHandler; }
     });
 

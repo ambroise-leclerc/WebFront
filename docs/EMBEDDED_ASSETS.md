@@ -88,7 +88,18 @@ specifies. `style` may load CSS resources or position overlays, and `id`/`name` 
 DOM properties. The allowlist does not isolate untrusted producers. The name dictionary is retained
 until the document is discarded, including definitions acquired from rejected batches; it has a
 1 MiB UTF-8 budget in addition to the entry and per-name limits. Low-level C++ callers manage its
-mirror; the document helper is separate work (#381).
+mirror; the document helper is separate work (#381). After semantic rejection, retry the corrected
+operations using the names already acquired, without repeating their NAME definitions. Redefining
+an acquired index is rejected.
+
+`data:` URLs are rejected even for `<img src>`; serve an image from an embedded application provider
+or a development document root and use its relative HTTP URL instead.
+
+C++ batches require an explicit nonzero identifier (`msg::DomBatch(id)`); zero is reserved for
+uncorrelated malformed-message rejections. Both codecs enforce a limit of 131,072 operations per
+batch as well as the 1 MiB byte limit. The owning C++ decoder reserves the counted operation total;
+its object memory still scales with that count. Invalid formats, UTF-8 and unused nonzero operands
+throw `std::invalid_argument`; byte/operation budget violations throw `std::length_error`.
 
 A residual DOM exception invalidates all node handles and island registrations. Existing release
 functions then do nothing. C++ receives `wfDom.rejected` and must arrange page recovery: explicitly

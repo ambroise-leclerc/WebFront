@@ -2,6 +2,7 @@
 #include <webfront/weblink/DomBatch.hpp>
 
 #include <algorithm>
+#include <type_traits>
 
 using namespace webfront::msg;
 
@@ -71,7 +72,7 @@ SCENARIO("DOM codecs reject malformed input and enforce the complete command bud
                                                           packet({11, 1, 2, 4})};
         THEN("Each is rejected") {
             for (const auto& bytes : invalid)
-                REQUIRE_THROWS(DomBatch::decode(bytes));
+                REQUIRE_THROWS_AS(DomBatch::decode(bytes), std::invalid_argument);
             auto header = packet({});
             for (std::size_t size = 0; size < 6; ++size)
                 REQUIRE_THROWS(DomBatch::decode(std::span(header).first(size)));
@@ -83,7 +84,7 @@ SCENARIO("DOM codecs reject malformed input and enforce the complete command bud
         }
     }
     GIVEN("A text operation filling exactly 1 MiB including headers") {
-        DomBatch batch;
+        DomBatch batch(1);
         batch.add({DomOp::text, 1, 0, 0, std::string(DomBatch::maxBytes - 11, 'x')});
         THEN("The boundary succeeds, the next operation fails atomically, and the decoder rejects oversized input") {
             REQUIRE(batch.data().size() == DomBatch::maxBytes);
@@ -96,12 +97,55 @@ SCENARIO("DOM codecs reject malformed input and enforce the complete command bud
         }
     }
     GIVEN("An invalid outgoing operation") {
-        DomBatch batch;
+        DomBatch batch(1);
         THEN("No prefix is appended") {
             REQUIRE_THROWS(batch.add({DomOp::text, 1, 0, 0, std::string("\xc0\x80", 2)}));
             REQUIRE_THROWS(batch.add({DomOp::listen, 1, 2, 4}));
             REQUIRE_THROWS(batch.add({static_cast<DomOp>(255), 1}));
             REQUIRE(batch.data().size() == DomBatch::headerBytes);
+        }
+    }
+}
+
+SCENARIO("DOM batch identifiers and operands are explicit and canonical") {
+    STATIC_REQUIRE_FALSE(std::is_default_constructible_v<DomBatch>);
+    GIVEN("the reserved uncorrelated identifier zero") {
+        THEN("neither encoder nor decoder accepts it as a real batch") {
+            REQUIRE_THROWS_AS(DomBatch(0), std::invalid_argument);
+            auto raw = packet({});
+            std::fill(raw.begin() + 2, raw.begin() + 6, std::byte{0});
+            REQUIRE_THROWS_AS(DomBatch::decode(raw), std::invalid_argument);
+        }
+    }
+    GIVEN("nonzero operands absent from the operation's wire layout") {
+        DomBatch                        batch(1);
+        const std::vector<DomOperation> invalid{
+            {DomOp::remove, 1, 2},
+            {DomOp::text, 1, 0, 3, "text"},
+            {DomOp::append, 1, 2, 3},
+            {DomOp::listen, 1, 2, 0, "unused"}
+        };
+        THEN("each encoding fails without appending a prefix") {
+            for (const auto& op : invalid)
+                REQUIRE_THROWS_AS(batch.add(op), std::invalid_argument);
+            REQUIRE(batch.data().size() == DomBatch::headerBytes);
+        }
+    }
+}
+
+SCENARIO("DOM operation counts bound owning decoder allocation independently of wire bytes") {
+    GIVEN("a batch containing exactly the maximum number of minimum-sized operations") {
+        DomBatch batch(1);
+        for (std::size_t i = 0; i < DomBatch::maxOperations; ++i)
+            batch.add({DomOp::remove, 1});
+        THEN("the exact boundary decodes, and both codecs reject one additional operation") {
+            REQUIRE(DomBatch::decode(batch.data()).second.size() == DomBatch::maxOperations);
+            REQUIRE_THROWS_AS(batch.add({DomOp::remove, 1}), std::length_error);
+            auto raw = std::vector(batch.data().begin(), batch.data().end());
+            raw.push_back(std::byte(DomOp::remove));
+            raw.push_back(std::byte{1});
+            REQUIRE(raw.size() < DomBatch::maxBytes);
+            REQUIRE_THROWS_AS(DomBatch::decode(raw), std::length_error);
         }
     }
 }

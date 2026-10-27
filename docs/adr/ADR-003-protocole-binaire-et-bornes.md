@@ -16,11 +16,12 @@
 | 1.9 | 2026-10-20 | Acceptée | Ambroise Leclerc | `std::bitset<N>` compacté dans le format Uint8Array existant, sans nouvel opcode. | [5bc294e](https://github.com/ambroise-leclerc/WebFront/commit/5bc294eb0a9ba81ae7789b425baa6e299e848d97) |
 | 1.10 | 2026-10-26 | Acceptée | Ambroise Leclerc | Commande `domBatch` bornée, interpréteur embarqué optionnel et validation transactionnelle (#380). | — |
 | 1.11 | 2026-10-27 | Acceptée | Ambroise Leclerc | Validation par delta, budget cumulé des noms, récupération et contrat des événements précisés (#380). | — |
+| 1.12 | 2026-10-27 | Acceptée | Ambroise Leclerc | Identifiant de lot non nul, plafond d’opérations, codec canonique et nettoyage limité aux sous-arbres concernés (#380). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-27** (version 1.11).
+Dernière révision : **2026-10-27** (version 1.12).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -67,9 +68,20 @@ Cette section remplace le transport `wfDom.apply` des prototypes de l'[ADR-018](
 les propositions d'API de document et de nœuds de cette ADR restent distinctes.
 
 Un message WebSocket C++ → navigateur contient exactement un lot : `05 01`, un identifiant de lot
-`uint32` **little-endian fixe**, puis zéro ou plusieurs opérations jusqu'à la fin du message. Le plafond
+`uint32` **little-endian fixe non nul**, puis zéro ou plusieurs opérations jusqu'à la fin du message.
+L'identifiant zéro est réservé aux rejets non corrélables, notamment un en-tête tronqué ; il n'est
+jamais un identifiant de lot valide. C++ exige `DomBatch(id)` sans valeur par défaut et rejette zéro,
+comme le décodeur JavaScript. Le plafond
 est de **1 048 576 octets, en-tête de six octets inclus**, vérifié avant décodage/allocation par les
 codecs C++ et JavaScript. Il est indépendant du plafond WebSocket (qui peut être plus restrictif).
+Chaque lot contient au plus **131 072 opérations**, NAME comprises, vérifiées à l'encodage C++ et
+avant application au décodage C++/JavaScript. Ce second plafond limite l'amplification mémoire des
+nombreuses opérations courtes. Le décodeur C++ compte et valide la structure sans copier les chaînes,
+réserve le nombre d'opérations comptées, puis décode les valeurs possédées : au plus 131 072 objets
+`DomOperation` (soit `131072 * sizeof(DomOperation)` octets de valeurs), plus les chaînes et les
+surcoûts des conteneurs/allocateurs, plutôt qu'une croissance géométrique jusqu'à environ 524 000 objets.
+Le coût accepté est un second parcours des en-têtes. Le budget des valeurs de chaînes reste inclus
+dans le plafond de message. Le retour possédé n'est pas une vue sans allocation.
 Aucune compatibilité avec le prototype de l'ADR-018 n'est requise.
 
 Les entiers des opérations sont des `uint32` LEB128 non signés **canoniques** : cinq octets au plus,
@@ -105,6 +117,9 @@ réinitialisation sur le fil : les réutiliser permet de continuer à muter apr�
 de nouveaux noms exige un nouveau document/rechargement. L'émetteur doit tenir le miroir des indices,
 des longueurs et des définitions acquises ; le codec `msg::DomBatch` ne constitue pas une table d'internement.
 Le helper C++ de document reste dans #381. Un rechargement impose de reconstruire également ce miroir.
+Après un rejet sémantique, le lot corrigé réemploie les indices déjà acquis : il ne renvoie pas les
+mêmes NAME. Par exemple, si NAME(3, `data-ready`) précède une opération rejetée, la reprise utilise
+ATTRIBUTE(..., 3, ...) ; renvoyer NAME(3, ...) est une redéfinition hors séquence et sera rejeté.
 
 Les noms sont internés par document navigateur, définis séquentiellement à partir de zéro. Une
 référence ne peut viser qu'une définition antérieure dans le flux. Toutes les définitions entièrement
@@ -115,8 +130,10 @@ suit créations, déplacements et suppressions. Cet arbre est un delta sur la ta
 identifiants et ensembles d'enfants modifiés sont enregistrés ; un parent large utilise lui aussi des
 ajouts/suppressions différés. MOUNT consulte un index faible des éléments montés. Un petit lot de texte
 ou d'attributs ne parcourt donc pas les nœuds non concernés. Les suppressions parcourent le sous-arbre
-affecté et les déplacements vérifient les chaînes d'ancêtres ; la révocation d'un îlot et le nettoyage
-des écouteurs peuvent parcourir les tables correspondantes. Ces limites bornent les ressources, sans
+affecté et les déplacements vérifient les chaînes d'ancêtres. Les écouteurs sont indexés par identifiant
+de nœud : REMOVE ne désabonne que les identifiants supprimés. La révocation d'un îlot part de son
+identifiant monté et parcourt ses enfants ; elle ne scanne ni les arbres détachés ni leurs ancêtres.
+Son coût est linéaire dans son sous-arbre et ses abonnements. Ces limites bornent les ressources, sans
 promesse de temps constant. Une erreur de validation ne modifie aucun nœud DOM.
 Un parent texte, un cycle, une référence INSERT_BEFORE qui n'est pas enfant du parent, la réutilisation
 d'un nœud supprimé et toute mutation/déplacement/suppression de l'élément d'îlot sont rejetés.
@@ -147,6 +164,12 @@ peut charger des URL CSS externes et positionner des surcouches ; `id` et `name`
 conservés pour construire des interfaces ordinaires. Les restrictions des URL décrites ci-dessus visent
 les attributs URL, pas le contenu CSS. Ne pas transmettre des lots non fiables à cet interpréteur ; les
 politiques d'origine/navigations ne filtrent pas toutes les sous-ressources réseau.
+
+Les erreurs de format, d'UTF-8, de flags, d'identifiant zéro et d'opérandes C++ inutilisés non nuls
+produisent `std::invalid_argument`. Les dépassements de taille de message ou de nombre d'opérations
+produisent `std::length_error`. À l'encodage C++, les champs `b`/`c` absents du format de l'opération
+doivent être zéro et une valeur de chaîne absente doit être vide ; ils ne sont jamais ignorés.
+Une erreur d'ajout n'ajoute aucun préfixe ni opération au lot.
 
 C++ construit `msg::DomBatch` (`weblink/DomBatch.hpp`) et l'envoie par `ui.sendDomBatch(batch)` sur le
 contexte du bridge. L'envoi n'est pas attendable et n'accuse pas réception. Tout rejet, y compris

@@ -34,19 +34,29 @@ struct DomOperation {
 /** @brief An owning command; all integers are canonical uint32 LEB128 except the fixed little-endian batch id. */
 class DomBatch {
 public:
-    static constexpr std::size_t maxBytes    = 1024 * 1024;  // Complete command, including the six-byte header.
-    static constexpr std::size_t headerBytes = 6;
+    static constexpr std::size_t maxBytes      = 1024 * 1024;  // Complete command, including the six-byte header.
+    static constexpr std::size_t headerBytes   = 6;
+    static constexpr std::size_t maxOperations = 131072;
 
-    explicit DomBatch(std::uint32_t id = 0) : bytes{std::byte(Command::domBatch), std::byte{1}} {
+    explicit DomBatch(std::uint32_t id) : bytes{std::byte(Command::domBatch), std::byte{1}} {
+        if (id == 0)
+            throw std::invalid_argument("DOM batch id zero is reserved");
         for (unsigned shift = 0; shift < 32; shift += 8)
             bytes.push_back(std::byte((id >> shift) & 255));
     }
 
     /// Appends atomically: an invalid UTF-8 string or an oversized operation leaves this batch unchanged.
     void add(const DomOperation& op) {
-        std::vector<std::byte> encoded{std::byte(op.code)};
+        if (operationCount == maxOperations)
+            throw std::length_error("DOM batch operation limit exceeded");
         const auto [integers, string] = layout(op.code);
         const std::array values{op.a, op.b, op.c};
+        for (unsigned i = integers; i < values.size(); ++i)
+            if (values[i] != 0 && !(op.code == DomOp::listen && i == 2))
+                throw std::invalid_argument("Nonzero unused DOM operand");
+        if (!string && !op.value.empty())
+            throw std::invalid_argument("Unused DOM string operand");
+        std::vector<std::byte> encoded{std::byte(op.code)};
         for (unsigned i = 0; i < integers; ++i)
             putVarint(encoded, values[i]);
         if (op.code == DomOp::listen) {
@@ -65,6 +75,7 @@ public:
         if (encoded.size() > maxBytes - bytes.size())
             throw std::length_error("DOM batch exceeds 1 MiB");
         bytes.insert(bytes.end(), encoded.begin(), encoded.end());
+        ++operationCount;
     }
 
     [[nodiscard]] std::span<const std::byte> header() const {
@@ -82,38 +93,31 @@ public:
         if (raw.size() > maxBytes)
             throw std::length_error("DOM batch exceeds 1 MiB");
         if (raw.size() < headerBytes || raw[0] != std::byte(Command::domBatch) || raw[1] != std::byte{1})
-            throw std::runtime_error("Invalid DOM batch header");
+            throw std::invalid_argument("Invalid DOM batch header");
         std::uint32_t id{};
         for (unsigned i = 0; i < 4; ++i)
             id |= std::uint32_t(raw[2 + i]) << (8 * i);
+        if (id == 0)
+            throw std::invalid_argument("DOM batch id zero is reserved");
+        Reader      counter{raw.subspan(headerBytes)};
+        std::size_t count{};
+        while (!counter.raw.empty()) {
+            if (count == maxOperations)
+                throw std::length_error("DOM batch operation limit exceeded");
+            readOperation(counter, false);
+            ++count;
+        }
         Reader                    input{raw.subspan(headerBytes)};
         std::vector<DomOperation> operations;
-        while (!input.raw.empty()) {
-            DomOperation op{static_cast<DomOp>(input.byte())};
-            const auto [integers, string] = layout(op.code);
-            std::array<std::uint32_t*, 3> values{&op.a, &op.b, &op.c};
-            for (unsigned i = 0; i < integers; ++i)
-                *values[i] = input.varint();
-            if (op.code == DomOp::listen) {
-                op.c = input.byte();
-                if (op.c > 3)
-                    throw std::runtime_error("Invalid DOM listener flags");
-            }
-            if (string) {
-                const auto size = input.varint();
-                if (size > input.raw.size())
-                    throw std::runtime_error("Truncated DOM string");
-                op.value.assign(reinterpret_cast<const char*>(input.raw.data()), size);
-                validateUtf8(op.value);
-                input.raw = input.raw.subspan(size);
-            }
-            operations.push_back(std::move(op));
-        }
+        operations.reserve(count);
+        while (!input.raw.empty())
+            operations.push_back(readOperation(input, true));
         return {id, std::move(operations)};
     }
 
 private:
     std::vector<std::byte> bytes;
+    std::size_t            operationCount{};
 
     static std::pair<unsigned, bool> layout(DomOp code) {
         switch (code) {
@@ -136,7 +140,7 @@ private:
             case DomOp::remove:
                 return {1, false};
         }
-        throw std::runtime_error("Unknown DOM operation");
+        throw std::invalid_argument("Unknown DOM operation");
     }
 
     static void putVarint(std::vector<std::byte>& out, std::uint32_t value) {
@@ -151,7 +155,7 @@ private:
         std::span<const std::byte> raw;
         std::uint8_t               byte() {
             if (raw.empty())
-                throw std::runtime_error("Truncated DOM batch");
+                throw std::invalid_argument("Truncated DOM batch");
             const auto value = std::uint8_t(raw.front());
             raw              = raw.subspan(1);
             return value;
@@ -161,14 +165,40 @@ private:
             for (unsigned i = 0; i < 5; ++i) {
                 const auto next = byte();
                 if ((i == 4 && next > 15) || (i && next == 0))
-                    throw std::runtime_error("Noncanonical or overflowing DOM varint");
+                    throw std::invalid_argument("Noncanonical or overflowing DOM varint");
                 value |= std::uint32_t(next & 127) << (7 * i);
                 if (!(next & 128))
                     return value;
             }
-            throw std::runtime_error("Overflowing DOM varint");
+            throw std::invalid_argument("Overflowing DOM varint");
         }
     };
+
+    // First pass validates structure/count without allocating strings; the owning pass checks UTF-8 before copying.
+    static DomOperation readOperation(Reader& input, bool ownStrings) {
+        DomOperation op{static_cast<DomOp>(input.byte())};
+        const auto [integers, string] = layout(op.code);
+        std::array<std::uint32_t*, 3> values{&op.a, &op.b, &op.c};
+        for (unsigned i = 0; i < integers; ++i)
+            *values[i] = input.varint();
+        if (op.code == DomOp::listen) {
+            op.c = input.byte();
+            if (op.c > 3)
+                throw std::invalid_argument("Invalid DOM listener flags");
+        }
+        if (string) {
+            const auto size = input.varint();
+            if (size > input.raw.size())
+                throw std::invalid_argument("Truncated DOM string");
+            if (ownStrings) {
+                const std::string_view value(reinterpret_cast<const char*>(input.raw.data()), size);
+                validateUtf8(value);
+                op.value.assign(value);
+            }
+            input.raw = input.raw.subspan(size);
+        }
+        return op;
+    }
 
     static void validateUtf8(std::string_view value) {
         std::size_t i = 0;

@@ -21,7 +21,7 @@ function string(out, value) {
     for (const byte of bytes) out.push(byte);
 }
 function tree(count) {
-    const out = [5, 1, 0, 0, 0, 0, 1, 0];
+    const out = [5, 1, 1, 0, 0, 0, 1, 0];
     string(out, 'root');
     out.push(13, 1, 0);
     for (let id = 2; id <= count + 1; ++id) {
@@ -38,7 +38,7 @@ document.getElementById('run').addEventListener('click', () => {
         const release = dom.island('root', root);
         try {
             dom.apply(tree(count));
-            const update = new Uint8Array([5, 1, 0, 0, 0, 0, 7, 2, 1, 120]);
+            const update = new Uint8Array([5, 1, 1, 0, 0, 0, 7, 2, 1, 120]);
             for (let i = 0; i < 20; ++i) dom.apply(update);
             const samples = [];
             for (let repeat = 0; repeat < 3; ++repeat) {
