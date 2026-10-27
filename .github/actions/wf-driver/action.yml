@@ -13,6 +13,11 @@ runs:
     - name: Install GCC 16 and WebKitGTK
       shell: bash
       run: |
+        # The hosted runner's Azure mirror can trickle large GCC packages until the job times out.
+        # Keep Ubuntu's suites and package verification, using its primary archive instead.
+        if [ -f /etc/apt/apt-mirrors.txt ]; then
+          sudo sed -i 's|azure\.archive\.ubuntu\.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+        fi
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 gcc-16 g++-16 libwebkitgtk-6.0-dev
         echo "CC=gcc-16" >> "$GITHUB_ENV"
