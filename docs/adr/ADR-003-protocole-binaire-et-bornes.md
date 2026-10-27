@@ -15,10 +15,12 @@
 | 1.8 | 2026-10-16 | Acceptée | Ambroise Leclerc | Plafond indépendant de 125 octets pour les trames de contrôle. | [3ebc181](https://github.com/ambroise-leclerc/WebFront/commit/3ebc181fce48240aa2cecebfe4d3f8cc4966732d) |
 | 1.9 | 2026-10-20 | Acceptée | Ambroise Leclerc | `std::bitset<N>` compacté dans le format Uint8Array existant, sans nouvel opcode. | [5bc294e](https://github.com/ambroise-leclerc/WebFront/commit/5bc294eb0a9ba81ae7789b425baa6e299e848d97) |
 
+| 1.10 | 2026-10-26 | Acceptée | Ambroise Leclerc | Commande `domBatch` bornée, interpréteur embarqué optionnel et validation transactionnelle (#380). | — |
+
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-20** (version 1.9).
+Dernière révision : **2026-10-26** (version 1.10).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -58,6 +60,79 @@ fragmentés, conserve les fragments incomplets et traite les trames réunies dan
 La politique borne chaque message à 64 MiB par défaut ; que tout dépassement annoncé soit
 refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur propre plafond de
 125 octets.
+
+## Commande DOM (`domBatch`, code 5, version 1)
+
+Un message WebSocket C++ → navigateur contient exactement un lot : `05 01`, un identifiant de lot
+`uint32` **little-endian fixe**, puis zéro ou plusieurs opérations jusqu'à la fin du message. Le plafond
+est de **1 048 576 octets, en-tête de six octets inclus**, vérifié avant décodage/allocation par les
+codecs C++ et JavaScript. Il est indépendant du plafond WebSocket (qui peut être plus restrictif).
+Aucune compatibilité avec le prototype de l'ADR-018 n'est requise.
+
+Les entiers des opérations sont des `uint32` LEB128 non signés **canoniques** : cinq octets au plus,
+quatre bits utiles au maximum dans le cinquième, aucun groupe haut nul superflu. Une chaîne est sa
+longueur en octets LEB128, puis ses octets UTF-8 stricts (pas de surrogates, surlongueurs ni code point
+au-delà de U+10FFFF ; un BOM initial est conservé). L'opcode et les flags sont des octets bruts.
+
+| Code | Opération | Opérandes dans l'ordre |
+| --- | --- | --- |
+| 1 | NAME | index, chaîne |
+| 2 | ELEMENT | identifiant, index du tag |
+| 3 | TEXT | identifiant, chaîne |
+| 4 | ATTRIBUTE | identifiant, index du nom, chaîne |
+| 5 | UNSET_ATTRIBUTE | identifiant, index du nom |
+| 6 | PROPERTY | identifiant, index du nom, chaîne |
+| 7 | SET_TEXT | identifiant de **nœud texte**, chaîne |
+| 8 | APPEND | parent, enfant |
+| 9 | INSERT_BEFORE | parent, enfant, référence |
+| 10 | REMOVE | identifiant (oublie tout le sous-arbre) |
+| 11 | LISTEN | identifiant, index de l'événement, flags |
+| 12 | UNLISTEN | identifiant, index de l'événement |
+| 13 | MOUNT | identifiant, index du nom de l'îlot |
+
+Les flags de LISTEN sont `1 = preventDefault`, `2 = stopPropagation` ; tous les autres bits sont
+interdits. PROPERTY accepte `value` (chaîne), `checked`, `disabled`, `indeterminate` (exactement
+`true` ou `false`), et `selectedIndex` (entier décimal de -1 à 2³¹-1). Les objets ne traversent pas le pont.
+Les identifiants de nœuds sont non nuls et uniques parmi les nœuds vivants. L'interpréteur borne les
+nœuds vivants et les noms à 65 536 entrées chacun, les noms à 1 024 octets UTF-8.
+
+Les noms sont internés par document navigateur, définis séquentiellement à partir de zéro. Une
+référence ne peut viser qu'une définition antérieure dans le flux. Toutes les définitions entièrement
+décodées restent acquises même si la suite du lot est rejetée, y compris lors d'une erreur sémantique.
+Un message mal formé ne garantit pas que ses définitions restantes soient acquises ; l'émetteur doit
+alors abandonner ce document. Les autres opérations sont validées contre un arbre temporaire qui
+suit créations, déplacements et suppressions. Une erreur de validation ne modifie aucun nœud DOM.
+Un parent texte, un cycle, une référence INSERT_BEFORE qui n'est pas enfant du parent, la réutilisation
+d'un nœud supprimé et toute mutation/déplacement/suppression de l'élément d'îlot sont rejetés.
+
+Le module embarqué distinct `/webfront-dom.mjs` exporte `installDomInterpreter(webFront, extensions)`.
+L'application le charge explicitement et prête des éléments HTML autorisés, vides et disjoints par
+`interpreter.island(nom, élément)` ; la fonction retournée révoque les identifiants et écouteurs du
+sous-arbre. Réenregistrer le même nom et élément conserve les nœuds ; une ancienne révocation ne
+révoque pas une inscription ultérieure. Seuls les enfants sont détenus par C++ ; MOUNT ne déplace
+pas l'élément prêté. Les nœuds détachés créés par un lot restent connus jusqu'à REMOVE ou à la fin du document.
+L'application conserve la responsabilité de révoquer un îlot avant que la page en modifie le sous-arbre.
+
+La construction utilise exclusivement `createElement` et `createTextNode`, jamais HTML. Les listes
+blanches par défaut du module couvrent les éléments HTML usuels, attributs, propriétés et événements.
+L'application peut ajouter des tags, attributs et événements par les tableaux `extensions.tags`,
+`extensions.attributes`, `extensions.events` (copiés à l'installation). Les noms sont minuscules,
+sans namespace ; `script`, les conteneurs exécutables (`iframe`, `object`, `embed`, etc.), les attributs
+`on*`, `srcdoc`, `is`, `xmlns`, et les attributs multi-URL `srcset`/`ping` restent interdits.
+Les attributs URL simples (`href`, `src`, `action`, etc.) passent par `new URL(valeur, document.baseURI)` ;
+seuls `http:`, `https:` et `mailto:` sont autorisés, même dans une extension. `javascript:` et `data:`
+sont donc rejetés après normalisation des caractères de contrôle par le navigateur.
+
+C++ construit `msg::DomBatch` (`weblink/DomBatch.hpp`) et l'envoie par `ui.sendDomBatch(batch)` sur le
+contexte du bridge. L'envoi n'est pas attendable et n'accuse pas réception. Tout rejet, y compris
+l'absence de module installé ou une exception DOM résiduelle pendant l'application, remonte par le
+callback ordinaire `wfDom.rejected(uint32 batchId, string reason)` ; l'application doit l'enregistrer.
+Le motif est limité à 4 096 unités UTF-16 avant encodage. Si l'en-tête est tronqué, l'identifiant vaut zéro.
+Les événements utilisent `wfDom.event(uint32 nodeId, uint32 nameIndex, string value)` et leurs
+Promises sont traitées. Les erreurs de transport/déconnexion ne peuvent pas être signalées par ce canal.
+Une exception résiduelle d'application peut laisser des modifications partielles ; elle invalide tous
+les handles et îlots de l'interpréteur, obligeant la page à reconstruire/prêter de nouveaux îlots.
+L'API publique document/nœuds et les lectures groupées relèvent de #381.
 
 ## Options écartées et motifs
 

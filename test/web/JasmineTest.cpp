@@ -19,6 +19,7 @@
 #include <future>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -106,6 +107,8 @@ private:
     optional<RejectedWebSocketServer> rejectedWebSocket;
     optional<TaskHandle>             cancelledTask;
     TestState            state;
+    std::map<std::uint32_t, std::string> domRejections;
+    bool domBatchSent{};
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     future<string> cppResult;
@@ -262,6 +265,21 @@ private:
     }
 
     void registerCallbacks() {
+        webFront->cppFunction("sendDomBatch", [this](TestWF::UI ui, const vector<uint8_t>& bytes) {
+            const auto [id, operations] = msg::DomBatch::decode(std::as_bytes(std::span(bytes)));
+            msg::DomBatch batch(id);
+            for (const auto& operation : operations) batch.add(operation);
+            ui.sendDomBatch(batch);
+            domBatchSent = true;
+        });
+        webFront->cppFunction("wfDom.rejected", [this](uint32_t id, const string& reason) {
+            domRejections[id] = reason;
+        });
+        webFront->cppFunction("domBatchRejection", [this](uint32_t id) {
+            const auto found = domRejections.find(id);
+            return found == domRejections.end() ? string{} : found->second;
+        });
+
         webFront->cppFunction("cancelBrowserSender", [this] {
             if (cancelledTask)
                 cancelledTask->requestStop();
@@ -406,7 +424,7 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
+        if (!(domBatchSent && !domRejections.empty() && state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
               && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;

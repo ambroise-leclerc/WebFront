@@ -201,7 +201,7 @@ public:
         }
     }
 
-    void sendCommand(auto message) { ws->write(message.header(), message.payload()); }
+    void sendCommand(const auto& message) { ws->write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
 
     template<typename Result>

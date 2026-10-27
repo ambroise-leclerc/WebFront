@@ -7,6 +7,7 @@
 #include "FallbackModuleData.hpp"
 #include "FaviconData.hpp"
 #include "FileSystem.hpp"
+#include "DomInterpreterData.hpp"
 #include "WebFrontJsData.hpp"
 
 #include <filesystem>
@@ -33,6 +34,7 @@ public:
         auto filename = file.relative_path().string();
         if (filename == "index.html") return File(IndexHtml{});
         if (filename == "favicon.ico") return File{WebFrontIco{}};
+        if (filename == "webfront-dom.mjs") return File{generated::DomInterpreterData{}};
         if (filename == "WebFront.js") return File{WebFrontJs{}};
         if (filename == "webfront-fallback.mjs") return File{FallbackModule{}};
         return {};

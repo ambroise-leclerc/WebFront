@@ -26,6 +26,9 @@ function(webfront_add_embedded_assets)
     cmake_path(NORMAL_PATH root)
     add_custom_target(webfront-embedded-assets COMMENT "Regenerating the embedded assets of the core")
     _webfront_add_embedded_asset(
+        "${root}/js/core/dom-interpreter.mjs" "${root}/include/webfront/system/DomInterpreterData.hpp"
+        DomInterpreterData DomInterpreterAssetFresh)
+    _webfront_add_embedded_asset(
         "${root}/js/core/WebFront.js" "${root}/include/webfront/system/WebFrontJsData.hpp"
         WebFrontJsData WebFrontJsAssetsFresh)
     _webfront_add_embedded_asset(

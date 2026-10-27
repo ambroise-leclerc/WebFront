@@ -1,6 +1,6 @@
 # Embedded assets
 
-The C++ library embeds only what every application needs: the browser bridge (`WebFront.js`), the
+The C++ library embeds the browser bridge (`WebFront.js`), the optional DOM interpreter (`webfront-dom.mjs`), the
 fallback page and module, and the bootstrap page and loader of the developer environment, with the
 pinned release data (`Developer*Data.hpp`). Each is generated from a readable source under `js/core/`
 (including the default favicon, `js/core/favicon.ico`) into a header under `include/webfront/system/`. Libraries such as React, Babel and Jasmine are not
@@ -23,8 +23,8 @@ outside the normative list of [ADR-016](adr/ADR-016-bootstrap-comme-socle.md), o
 150 KiB. The budget counts decoded bytes (gzip streams are measured by their trailer), so it does not depend on the
 encoding; the test also prints the encoded bytes and the size of the headers. Adding a resource means amending the ADR
 and the list in the script together. `MinimalCoreAssetsRejectsUnlisted` proves the guard fails on an unlisted
-header, a hidden payload and an oversized resource. `du -sh include/webfront/system` was about 2.5 MB when the epic began
-and is 188 KB now.
+header, a hidden payload and an oversized resource. `du -sh include/webfront/system` was about 2.5 MB when the epic began;
+the guard reports current sizes.
 
 ## Maintenance
 
@@ -39,8 +39,8 @@ ctest --test-dir build -R 'Asset.*Fresh|EmbeddedAssetGenerator|BundleInputs|embe
 
 `js/core/EmbedAsset.cmake` renders a header (identity encoded, five 64-bit words per line, big-endian, the last word padded
 with zeros, `dataSize` excluding the padding) and compares its exact bytes with a checked-in one (`-DCHECK`, so that a header
-with CRLF line ends is stale). It assembles bounded lines and joins them once, avoiding a growing-string CMake loop: the six
-core assets, about 35 KB, take a fraction of a second. Generation and checking share one renderer, without intermediate files.
+with CRLF line ends is stale). It assembles bounded lines and joins them once, avoiding a growing-string CMake loop: the seven
+core assets take a fraction of a second. Generation and checking share one renderer, without intermediate files.
 `EmbeddedAssetGenerator` (`test/cmake/CheckEmbedAsset.cmake`) covers the exact format, empty and binary inputs, word
 boundaries, padding, a path with spaces, a checkout reached through a symbolic link and a nonzero status for stale or missing
 files; a per-asset `*AssetFresh` test attributes each stale header, and a Catch2 scenario decodes every header with the C++
@@ -65,3 +65,20 @@ and failure responses.
 
 fflate (MIT) and esbuild are locked packages of the developer environment (`webfront-packages.lock.json`), not vendored
 sources; fflate is not embedded in C++ applications. Package notices travel with the packages that `wf install` downloads.
+
+## Optional DOM interpreter
+
+A page that receives DOM batches loads the version-matched module explicitly:
+
+```js
+const { installDomInterpreter } = await import('/webfront-dom.mjs');
+const dom = installDomInterpreter(webFront);
+const release = dom.island('panel', document.getElementById('panel')); // empty element
+// Call release() before the page takes back the subtree.
+```
+
+Register C++ callbacks `wfDom.rejected(batchId, reason)` and, when listening to events,
+`wfDom.event(nodeId, nameIndex, value)`. The low-level `msg::DomBatch` codec and
+`ui.sendDomBatch(batch)` implement [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md);
+the document/node API remains separate work (#381). The default filesystem protects both
+`WebFront.js` and `webfront-dom.mjs` from document-root overrides.

@@ -9,6 +9,7 @@
         textCommand: 2,
         callFunction: 3,
         functionReturn: 4,
+        domBatch: 5,
     });
 
     const TextCommand = Object.freeze({debugLog: 0, injectScript: 1});
@@ -166,6 +167,16 @@
                 break;
             case Command.callFunction:
                 this.callJsFunction(view);
+                break;
+            case Command.domBatch:
+                try {
+                    if (view.byteLength > 1024 * 1024) throw new RangeError("DOM batch exceeds 1 MiB");
+                    if (!this.domBatchHandler) throw new Error("DOM interpreter is not installed");
+                    this.domBatchHandler(new Uint8Array(buffer));
+                } catch (error) {
+                    const id = view.byteLength >= 6 ? view.getUint32(2, true) : 0;
+                    this.cppFunction("wfDom.rejected")(id, String(error.message || error).slice(0, 4096)).catch(() => {});
+                }
                 break;
             case Command.functionReturn:
                 this.handleFunctionReturn(view);

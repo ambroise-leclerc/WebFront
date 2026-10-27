@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- DOM batch protocol (#380): bounded command 5, canonical uint32 LEB128 and UTF-8 codec,
+  interned names and correlated rejection callbacks. The optional embedded `webfront-dom.mjs`
+  validates the evolving tree before applying mutations, protects page-owned islands, and
+  rejects executable content and normalized unsafe URLs. Catch2 and the shared Jasmine
+  suite cover encoding boundaries, hostile batches and real WebSocket dispatch. ADR-003
+  specifies the wire contract; ADR-016 adds the module within the existing 150 KiB budget.
+
+
 - The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
   within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately
   delays bootstrap beyond its command limit and requires the command's start marker before accepting
