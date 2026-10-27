@@ -1,12 +1,12 @@
+#include "InjectableNetworking.hpp"
+#include "Mocks.hpp"
+#include "Version.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
-#include <webfront/tooling/Logger.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
+#include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>
-
-#include "Mocks.hpp"
-#include "Version.hpp"
 
 #include <array>
 #include <atomic>
@@ -16,8 +16,10 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace webfront;
@@ -847,4 +849,47 @@ SCENARIO("Sending a DOM batch through a lost UI link throws ConnectionError") {
             REQUIRE(ui.pendingWrites() == 0);
         }
     }
+}
+
+namespace {
+struct DomNoTimerNet : testing::InjectableNetworking {
+    static inline bool accepted{};
+    static auto        Accept(Acceptor&) {
+        return networking::ex::then(networking::ex::just(), []() -> Socket {
+            if (std::exchange(accepted, true))
+                throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+            return Socket{};
+        });
+    }
+};
+}  // namespace
+
+SCENARIO("DOM readiness explains a missing network timer while the ordinary bridge remains usable", "[dom]") {
+    using Socket = testing::InjectableSocket;
+    Socket::reset();
+    DomNoTimerNet::accepted = false;
+    BasicWF<DomNoTimerNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+    app.cppFunction("echo", [] {
+        return std::string{"bridge stays available"};
+    });
+    const std::string upgrade = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    Socket::receive(std::as_bytes(std::span(upgrade)));
+    msg::Handshake handshake;
+    Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+    REQUIRE(app.connectedBrowsers() == 1);
+    auto call = [](std::string name, msg::CallId id) {
+        msg::FunctionCall<> message;
+        message.setCallId(id);
+        websocket::Frame<DomNoTimerNet> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+        message.encodeParameter(name, frame);
+        frame.freeze();
+        Socket::receive(testing::clientFrame(testing::messagePayload(frame)));
+    };
+    call("wfDom.ready", 21);
+    REQUIRE(Socket::wrote("DOM API requires Net::ResumeAfter"));
+    call("echo", 22);
+    REQUIRE(Socket::wrote("bridge stays available"));
+    REQUIRE(app.connectedBrowsers() == 1);
+    app.shutdown();
 }

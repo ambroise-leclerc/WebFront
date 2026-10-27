@@ -45,6 +45,155 @@ describe('Embedded DOM command interpreter', () => {
     });
     afterEach(() => { release(); root.remove(); });
 
+    it('validates grouped reads, UTF-8 framing and exact result budgets', async () => {
+        const previous = globalThis.wfDom;
+        globalThis.wfDom = {};
+        try {
+            await dom.connect();
+            await expectAsync(dom.connect()).toBeRejected();
+            dom.apply(packet([name(3, 'input'), [2, 2, 3], text(3, 'été 🌍'), [8, 1, 2], [8, 1, 3]]));
+            const read = globalThis.wfDom.read, input = root.firstChild;
+            input.value = 'value';
+            const result = read(new Uint32Array([3, 0, 2, 1, 2, 2]));
+            const view = new DataView(result.buffer), values = [];
+            for (let offset = 0; offset < result.length;) {
+                const size = view.getUint32(offset, true); offset += 4;
+                values.push(new TextDecoder('utf-8', {fatal: true}).decode(result.subarray(offset, offset + size)));
+                offset += size;
+            }
+            expect(values).toEqual(['été 🌍', 'value', 'false']);
+            for (const invalid of [[], new Uint32Array(), new Uint32Array([2]), new Uint32Array(8194),
+                new Uint32Array([999, 0]), new Uint32Array([2, 5]), new Uint32Array([3, 3])])
+                expect(() => read(invalid)).toThrow();
+            const textNode = root.lastChild;
+            textNode.data = 'x'.repeat(1024 * 1024 - 4);
+            expect(read(new Uint32Array([3, 0])).length).toBe(1024 * 1024);
+            textNode.data += 'x';
+            expect(() => read(new Uint32Array([3, 0]))).toThrow();
+        } finally { globalThis.wfDom = previous; }
+    });
+
+    it('uses an empty value for bubbled input/change on a non-form subscriber', () => {
+        const received = [];
+        bridge.cppFunction.and.returnValue((...args) => { received.push(args); return Promise.resolve(); });
+        dom.apply(packet([name(3, 'input'), name(4, 'change'), [2, 2, 1], [2, 3, 3],
+            [8, 2, 3], [8, 1, 2], [11, 2, 3, 0], [11, 2, 4, 0]]));
+        const input = root.firstChild.firstChild;
+        input.value = 'child value';
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        input.dispatchEvent(new Event('change', {bubbles: true}));
+        expect(received).toEqual([[2, 3, ''], [2, 4, '']]);
+    });
+
+    it('reports an oversized UTF-8 event value in the browser without truncating it', async () => {
+        const diagnostic = spyOn(console, 'error');
+        bridge.cppFunction = webFront.cppFunction.bind(webFront);
+        dom.apply(packet([name(3, 'textarea'), name(4, 'input'), [2, 2, 3], [8, 1, 2], [11, 2, 4, 0]]));
+        const textarea = root.firstChild;
+        textarea.value = 'é'.repeat(32768); // 65,536 UTF-8 bytes, despite only 32,768 UTF-16 units.
+        textarea.dispatchEvent(new Event('input'));
+        await Promise.resolve();
+        expect(diagnostic).toHaveBeenCalledWith('WebFront DOM event delivery failed', jasmine.any(RangeError));
+        expect(textarea.value).toBe('é'.repeat(32768));
+    });
+
+    it('logs a failed post-connection island revocation instead of silently ignoring it', async () => {
+        const previous = globalThis.wfDom;
+        globalThis.wfDom = {};
+        try {
+            await dom.connect();
+            const error = new Error('revocation unavailable');
+            const diagnostic = spyOn(console, 'error');
+            bridge.cppFunction.and.callFake(name => () => name === 'wfDom.revoked' ? Promise.reject(error) : Promise.resolve());
+            release();
+            await Promise.resolve();
+            expect(diagnostic).toHaveBeenCalledWith('WebFront DOM island revocation failed', error);
+        } finally { globalThis.wfDom = previous; }
+    });
+
+    it('can retry connect after bridge readiness or the DOM handshake rejects', async () => {
+        const previous = globalThis.wfDom;
+        globalThis.wfDom = {};
+        try {
+            bridge.ready = Promise.reject(new Error('bridge unavailable'));
+            await expectAsync(dom.connect()).toBeRejectedWithError('bridge unavailable');
+            bridge.ready = Promise.resolve();
+            bridge.cppFunction.and.returnValue(() => Promise.reject(new Error('DOM unavailable')));
+            await expectAsync(dom.connect()).toBeRejectedWithError('DOM unavailable');
+            bridge.cppFunction.and.returnValue(() => Promise.resolve());
+            await expectAsync(dom.connect()).toBeResolved();
+        } finally { globalThis.wfDom = previous; }
+    });
+
+    it('retries only unacknowledged revocations after a partially successful connect', async () => {
+        const previous = globalThis.wfDom;
+        globalThis.wfDom = {};
+        const second = dom.island('second', document.createElement('div'));
+        const third = dom.island('third', document.createElement('div'));
+        let readyCalls = 0, fail = true;
+        const revoked = [];
+        bridge.ready = Promise.resolve();
+        bridge.cppFunction.and.callFake(name => island => {
+            if (name === 'wfDom.ready') {
+                ++readyCalls;
+                return readyCalls === 1 ? Promise.resolve() : Promise.reject(new Error('duplicate ready'));
+            }
+            revoked.push(island);
+            if (island === 'second' && fail) {
+                fail = false;
+                return Promise.reject(new Error('revocation not acknowledged'));
+            }
+            return Promise.resolve();
+        });
+        try {
+            const attempt = dom.connect();
+            release(); second();
+            await expectAsync(attempt).toBeRejectedWithError('revocation not acknowledged');
+            expect(revoked).toEqual(['root', 'second']);
+            third(); // Also retain releases made between the failed attempt and the retry.
+            expect(revoked).toEqual(['root', 'second']);
+            await expectAsync(dom.connect()).toBeResolved();
+            expect(readyCalls).toBe(1);
+            expect(revoked).toEqual(['root', 'second', 'second', 'third']);
+            await expectAsync(dom.connect()).toBeRejectedWithError('DOM interpreter already connected');
+        } finally { globalThis.wfDom = previous; }
+    });
+
+    it('defers revocations until the DOM handshake is acknowledged', async () => {
+        const previous = globalThis.wfDom;
+        globalThis.wfDom = {};
+        let ready, acknowledge;
+        bridge.ready = new Promise(resolve => { ready = resolve; });
+        const calls = [];
+        bridge.cppFunction.and.callFake(name => (...args) => {
+            calls.push([name, ...args]);
+            return name === 'wfDom.ready' ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve();
+        });
+        try {
+            const pending = dom.connect();
+            release();
+            expect(calls).toEqual([]);
+            ready();
+            await Promise.resolve();
+            expect(calls).toEqual([['wfDom.ready']]);
+            acknowledge();
+            await pending;
+            expect(calls).toEqual([['wfDom.ready'], ['wfDom.revoked', 'root']]);
+        } finally { globalThis.wfDom = previous; }
+    });
+
+    it('matches native insertBefore(node, node) without changing sibling order or identity', () => {
+        dom.apply(packet([text(2, 'first'), text(3, 'second'), [8, 1, 2], [8, 1, 3]]));
+        const first = root.firstChild, second = root.lastChild;
+        root.insertBefore(first, first);
+        dom.apply(packet([[9, 1, 2, 2], [7, 2, ...str('updated')]]));
+        expect(root.firstChild).toBe(first);
+        expect(root.lastChild).toBe(second);
+        expect(first.data).toBe('updated');
+        dom.apply(packet([[10, 2], [10, 3]]));
+        expect(root.childNodes.length).toBe(0);
+    });
+
     it('creates, inserts, moves, removes and updates text without parsing HTML', () => {
         dom.apply(packet([[2, 2, 1], text(3, '<b>été 🌍</b>'), [8, 2, 3], [8, 1, 2], attr(2, 2, 'hello')]));
         const element = root.firstChild, child = element.firstChild;

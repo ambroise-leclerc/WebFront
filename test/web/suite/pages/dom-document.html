@@ -1,0 +1,10 @@
+<!doctype html>
+<div id="root"></div>
+<script src="/WebFront.js"></script>
+<script type="module">
+import {installDomInterpreter} from '/webfront-dom.mjs';
+const dom = installDomInterpreter(webFront);
+window.releaseIsland = dom.island('root', document.getElementById('root'));
+window.connectDocument = () => dom.connect();
+window.documentConnected = new URLSearchParams(location.search).has('defer') ? webFront.ready : dom.connect();
+</script>

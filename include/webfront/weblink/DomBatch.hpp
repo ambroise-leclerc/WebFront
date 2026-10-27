@@ -200,6 +200,8 @@ private:
         return op;
     }
 
+public:
+    /// Validates UTF-8 shared by DOM command strings and grouped read results.
     static void validateUtf8(std::string_view value) {
         std::size_t i = 0;
         while (i < value.size()) {
