@@ -14,7 +14,6 @@
 | 1.7 | 2026-10-16 | Acceptée | Ambroise Leclerc | Limite de message vérifiée dès l’en-tête, avant allocation de la charge utile. | [68f01f5](https://github.com/ambroise-leclerc/WebFront/commit/68f01f53f304ddb56155be0d47fb6fdd293de142) |
 | 1.8 | 2026-10-16 | Acceptée | Ambroise Leclerc | Plafond indépendant de 125 octets pour les trames de contrôle. | [3ebc181](https://github.com/ambroise-leclerc/WebFront/commit/3ebc181fce48240aa2cecebfe4d3f8cc4966732d) |
 | 1.9 | 2026-10-20 | Acceptée | Ambroise Leclerc | `std::bitset<N>` compacté dans le format Uint8Array existant, sans nouvel opcode. | [5bc294e](https://github.com/ambroise-leclerc/WebFront/commit/5bc294eb0a9ba81ae7789b425baa6e299e848d97) |
-
 | 1.10 | 2026-10-26 | Acceptée | Ambroise Leclerc | Commande `domBatch` bornée, interpréteur embarqué optionnel et validation transactionnelle (#380). | — |
 
 ## État et chronologie

@@ -10,7 +10,6 @@
 | 1.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | Tests, régénération et CI sans Node.js ni npm (#318) : les en-têtes du cœur sont produits et vérifiés par un générateur CMake pur (`js/core/EmbedAsset.cmake`), qui remplace `wf run embed-core` et le générateur Node.js ; les paquets du registre de test sont téléchargés et vérifiés au configure ; les tests JavaScript deviennent des specs Jasmine exécutées par `wf test` ; garde-fou global `NoNodeDependency`. | — |
 | 1.4 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification du parcours (#316) : ADR-013, ADR-014 et ADR-015 passent à « Acceptée ». | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 | 1.5 | 2026-10-24 | Acceptée | Ambroise Leclerc | Documentation consolidée (#317) : la formulation courante décrit directement l'environnement et ses commandes (`wf init`, `install`, `dev`, `check`, `test`, `embed`), sans comparaison avec d'autres outils ; les versions et décisions antérieures de ce tableau et de l'historique Git restent l'historique de la décision. | [#317](https://github.com/ambroise-leclerc/WebFront/issues/317) |
-
 | 1.6 | 2026-10-26 | Acceptée | Ambroise Leclerc | Ajout du module DOM optionnel `DomInterpreterData`, commande bornée de l’ADR-003 (#380) ; budget inchangé. | — |
 
 ## Statut et date

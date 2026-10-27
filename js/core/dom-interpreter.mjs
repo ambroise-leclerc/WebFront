@@ -2,6 +2,7 @@
 const maxBytes = 1024 * 1024;
 const maxEntries = 65536;
 const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+const encoder = new TextEncoder();
 const defaultTags = 'div span p ul ol li button input label select option form fieldset legend h1 h2 h3 h4 table thead tbody tr td th strong em small output progress meter textarea section header footer nav a img br hr pre code';
 const defaultAttributes = 'class id style title type name value placeholder min max step checked disabled readonly for href src alt role tabindex colspan rowspan width height selected lang dir hidden';
 const defaultEvents = 'click dblclick input change submit keydown keyup focus blur pointerdown pointerup';
@@ -103,7 +104,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             const c = op === 9 ? input.uint() : op === 11 ? input.byte() : 0;
             const value = [1, 3, 4, 6, 7].includes(op) ? input.string() : '';
             if (op === 1) {
-                if (a !== names.length || a >= maxEntries || new TextEncoder().encode(value).length > 1024)
+                if (a !== names.length || a >= maxEntries || encoder.encode(value).length > 1024)
                     throw new Error('invalid DOM name definition');
                 names.push(value);
             }
