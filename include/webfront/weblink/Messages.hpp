@@ -35,6 +35,7 @@ enum class Command : uint8_t {
     textCommand,
     callFunction,    // 1:Command  1:ParamsCount 2:CallId  4:ParamsDataSize
     functionReturn,  // 1:Command  1:ParamsCount 2:CallId  4:ParamsDataSize
+    domBatch,        // version 1, uint32 little-endian batch id, bounded DOM operation stream
 };
 
 enum class CodedType : uint8_t {

@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM batch measurement</title>
+<h1>Single-operation DOM batches</h1>
+<p>Manual measurement on detached DOM trees. No timing threshold, transport, rendering or layout measurement.</p>
+<button id="run">Measure</button>
+<pre id="output">Ready</pre>
+<script type="module">
+import {installDomInterpreter} from './webfront-dom.mjs';
+const encoder = new TextEncoder();
+function uint(out, value) {
+    do {
+        const low = value % 128;
+        value = Math.floor(value / 128);
+        out.push(low | (value ? 128 : 0));
+    } while (value);
+}
+function string(out, value) {
+    const bytes = encoder.encode(value);
+    uint(out, bytes.length);
+    for (const byte of bytes) out.push(byte);
+}
+function tree(count) {
+    const out = [5, 1, 1, 0, 0, 0, 1, 0];
+    string(out, 'root');
+    out.push(13, 1, 0);
+    for (let id = 2; id <= count + 1; ++id) {
+        out.push(3); uint(out, id); string(out, 'x');
+        out.push(8, 1); uint(out, id);
+    }
+    return new Uint8Array(out);
+}
+document.getElementById('run').addEventListener('click', () => {
+    const result = [];
+    for (const count of [100, 10000, 60000]) {
+        const dom = installDomInterpreter({});
+        const root = document.createElement('div');
+        const release = dom.island('root', root);
+        try {
+            dom.apply(tree(count));
+            const update = new Uint8Array([5, 1, 1, 0, 0, 0, 7, 2, 1, 120]);
+            for (let i = 0; i < 20; ++i) dom.apply(update);
+            const samples = [];
+            for (let repeat = 0; repeat < 3; ++repeat) {
+                const start = performance.now();
+                for (let i = 0; i < 100; ++i) dom.apply(update);
+                samples.push((performance.now() - start) / 100);
+            }
+            samples.sort((a, b) => a - b);
+            if (root.firstChild.data !== 'x') throw new Error('Incorrect text mutation');
+            result.push({nodes: count + 1, millisecondsPerBatch: samples[1], samples});
+        } finally { release(); }
+    }
+    document.getElementById('output').textContent = JSON.stringify({userAgent: navigator.userAgent, result}, null, 2);
+});
+</script>

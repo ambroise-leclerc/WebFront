@@ -3,6 +3,7 @@
 /// @brief Virtual file system providing access to WebFront.js, favicon.ico and a minimal index.html.
 #pragma once
 
+#include "DomInterpreterData.hpp"
 #include "FallbackIndexHtmlData.hpp"
 #include "FallbackModuleData.hpp"
 #include "FaviconData.hpp"
@@ -33,6 +34,7 @@ public:
         auto filename = file.relative_path().string();
         if (filename == "index.html") return File(IndexHtml{});
         if (filename == "favicon.ico") return File{WebFrontIco{}};
+        if (filename == "webfront-dom.mjs") return File{generated::DomInterpreterData{}};
         if (filename == "WebFront.js") return File{WebFrontJs{}};
         if (filename == "webfront-fallback.mjs") return File{FallbackModule{}};
         return {};

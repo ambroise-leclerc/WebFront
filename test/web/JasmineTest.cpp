@@ -19,6 +19,7 @@
 #include <future>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -37,6 +38,9 @@ constexpr string_view jsToCppToken{"js-to-cpp-token"};
 
 struct TestState {
     atomic<bool> browserReady{false};
+    atomic<bool> domBatchSent{false};
+    atomic<bool> domRejectionObserved{false};
+    atomic<bool> domEventsObserved{false};
     atomic<bool> jsToCppObserved{false};
     atomic<bool> jsExtendedFrameObserved{false};
     atomic<bool> jsArraysObserved{false};
@@ -106,6 +110,9 @@ private:
     optional<RejectedWebSocketServer> rejectedWebSocket;
     optional<TaskHandle>             cancelledTask;
     TestState            state;
+    // Accessed only by callbacks on the server context. finish() runs after WfDriver joins app.shutdown().
+    std::map<std::uint32_t, std::string> domRejections;
+    std::array<std::uint32_t, 6> domEventCounts{};
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     future<string> cppResult;
@@ -262,6 +269,37 @@ private:
     }
 
     void registerCallbacks() {
+        webFront->cppFunction("sendDomBatch", [this](TestWF::UI ui, const vector<uint8_t>& bytes) {
+            const auto [id, operations] = msg::DomBatch::decode(std::as_bytes(std::span(bytes)));
+            msg::DomBatch batch(id);
+            for (const auto& operation : operations) batch.add(operation);
+            ui.sendDomBatch(batch);
+            state.domBatchSent = true;
+        });
+        webFront->cppFunction("wfDom.rejected", [this](uint32_t id, const string& reason) {
+            domRejections[id] = reason;
+            state.domRejectionObserved = true;
+        });
+        webFront->cppFunction("domBatchRejection", [this](uint32_t id) {
+            const auto found = domRejections.find(id);
+            return found == domRejections.end() ? string{} : found->second;
+        });
+
+        webFront->cppFunction("wfDom.event", [this](uint32_t node, uint32_t event, const string& value) {
+            using Event = tuple<uint32_t, uint32_t, string_view>;
+            static constexpr array<Event, 5> expected{
+                Event{10, 4, "hello"}, Event{11, 5, "true"}, Event{11, 5, "false"},
+                Event{10, 6, "Escape"}, Event{10, 7, ""}};
+            size_t index = 0;
+            while (index < expected.size() && expected[index] != Event{node, event, value})
+                ++index;
+            ++domEventCounts.at(index); // Last slot counts all unexpected identities or values.
+        });
+        webFront->cppFunction("domEventCounts", [this] {
+            if (domEventCounts == array<uint32_t, 6>{1, 1, 1, 1, 1, 0}) state.domEventsObserved = true;
+            return domEventCounts;
+        });
+
         webFront->cppFunction("cancelBrowserSender", [this] {
             if (cancelledTask)
                 cancelledTask->requestStop();
@@ -406,7 +444,9 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
+        if (!(state.domBatchSent && state.domRejectionObserved && state.domEventsObserved
+              && state.browserReady && state.subscriberNotified
+              && browserCallsObserved() && cppCallsObserved()
               && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;

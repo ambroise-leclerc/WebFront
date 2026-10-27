@@ -10,6 +10,7 @@
 | 1.3 | 2026-10-24 | Acceptée | Ambroise Leclerc | Tests, régénération et CI sans Node.js ni npm (#318) : les en-têtes du cœur sont produits et vérifiés par un générateur CMake pur (`js/core/EmbedAsset.cmake`), qui remplace `wf run embed-core` et le générateur Node.js ; les paquets du registre de test sont téléchargés et vérifiés au configure ; les tests JavaScript deviennent des specs Jasmine exécutées par `wf test` ; garde-fou global `NoNodeDependency`. | — |
 | 1.4 | 2026-10-24 | Acceptée | Ambroise Leclerc | Qualification du parcours (#316) : ADR-013, ADR-014 et ADR-015 passent à « Acceptée ». | [#348](https://github.com/ambroise-leclerc/WebFront/pull/348) |
 | 1.5 | 2026-10-24 | Acceptée | Ambroise Leclerc | Documentation consolidée (#317) : la formulation courante décrit directement l'environnement et ses commandes (`wf init`, `install`, `dev`, `check`, `test`, `embed`), sans comparaison avec d'autres outils ; les versions et décisions antérieures de ce tableau et de l'historique Git restent l'historique de la décision. | [#317](https://github.com/ambroise-leclerc/WebFront/issues/317) |
+| 1.6 | 2026-10-26 | Acceptée | Ambroise Leclerc | Ajout du module DOM optionnel `DomInterpreterData`, commande bornée de l’ADR-003 (#380) ; budget inchangé. | — |
 
 ## Statut et date
 
@@ -46,6 +47,7 @@ téléchargée et vérifiée, tandis que le code source de WebFront redevient mi
 | Ressource | Rôle |
 | --- | --- |
 | `WebFrontJsData` | Bridge `WebFront.js` |
+| `DomInterpreterData` | Module optionnel `/webfront-dom.mjs`, chargé explicitement par les pages DOM |
 | `FallbackIndexHtmlData` | Page de repli |
 | `FallbackModuleData` | Module de repli |
 | `FaviconData` (alias `IndexFS::WebFrontIco`, source `js/core/favicon.ico`) | Icône par défaut |
@@ -82,7 +84,7 @@ autorisés ont l'autorité du bridge et du projet désigné. Un durcissement ult
 Aucun usage (utilisateur, contributeur, CI) ne requiert Node.js ou npm : seuls restent un
 compilateur C++23, CMake et le moteur du frontend choisi. Les en-têtes du cœur sont régénérés et
 vérifiés sans Node (#318), **par CMake seul** : `js/core/EmbedAsset.cmake` rend l'en-tête de chaque
-ressource (six sources de moins de 30 Kio, quelques dixièmes de seconde) et compare ses octets exacts à ceux du fichier
+ressource (sept sources de moins de 40 Kio, quelques dixièmes de seconde) et compare ses octets exacts à ceux du fichier
 versionné. Le choix d'un générateur CMake pur plutôt que d'un script exécuté par `wf` tient à ce que la fraîcheur des
 en-têtes doit être vérifiable par un build qui n'a pas de navigateur (la CI CEF-off, les sanitizers) ; une seule
 implémentation du rendu subsiste, la compression gzip n'ayant plus d'usage dans le cœur (elle reste celle de `wf embed`,

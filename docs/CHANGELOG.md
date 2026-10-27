@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- DOM batch protocol (#380): bounded command 5, canonical uint32 LEB128 and UTF-8 codec,
+  interned names and correlated rejection callbacks. The optional embedded `webfront-dom.mjs`
+  validates the evolving tree before applying mutations, protects page-owned islands, and
+  rejects executable content and normalized unsafe URLs. Catch2 and the shared Jasmine
+  suite cover encoding boundaries, hostile batches and real WebSocket dispatch. ADR-003
+  specifies the wire contract; ADR-016 adds the module within the existing 150 KiB budget.
+  Follow-up: validate against per-node and per-child-set deltas, cap retained UTF-8 name bytes at
+  1 MiB per interpreter, and document the trusted-content model, event values and recovery after
+  residual exceptions. Real WebSocket tests cover events and listener cleanup; a C++ regression
+  covers sending through a lost UI link. The manual DOM benchmark is described in embedded assets.
+  Reserve batch id zero for uncorrelated rejections and require explicit nonzero C++ ids. Index
+  subscriptions by node and revoke islands by subtree traversal. Both codecs limit each batch to
+  131,072 operations; C++ reserves the counted operation total and rejects unused operands.
+  Event integration checks count identities/values independently of arrival order.
+  Reject `PROPERTY value` on `output` before applying a batch, preserving tracked children;
+  update output text with `SET_TEXT`. Use checked event-count indexing for MSVC analysis.
+
 - The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
   within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately
   delays bootstrap beyond its command limit and requires the command's start marker before accepting

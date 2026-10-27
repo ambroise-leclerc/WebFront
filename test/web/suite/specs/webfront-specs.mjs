@@ -1,4 +1,5 @@
 import './content-policy-specs.mjs';
+import './dom-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
 
 // The page of the application is covered by the lifecycle cases (path-encoding): these specs run in the frame of wf test.

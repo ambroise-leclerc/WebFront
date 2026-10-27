@@ -42,6 +42,7 @@
 # Embedded headers hold the exact bytes of their text sources. Freshness tests
 # re-read those sources, so Windows checkouts must preserve LF for every asset.
 js/core/WebFront.js                          text eol=lf
+js/core/dom-interpreter.mjs                  text eol=lf
 js/core/bootstrap/*                          text eol=lf
 js/core/favicon.ico                          binary
 include/webfront/system/WebFrontJsData.hpp           text eol=lf

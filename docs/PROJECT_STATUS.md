@@ -77,6 +77,8 @@ are retained for investigation; diagnostics alone do not establish a correction.
   require macOS 14+ and a WindowServer session. Automated CEF coverage is Linux/Xvfb;
   Windows/macOS CEF deployment is not qualified. WebView2 needs its installed Evergreen runtime;
   fixed-version runtime packaging, application installers and accessibility remain application work.
-- General DOM abstractions and a direct engine transport are proposals, not public APIs.
+- The low-level DOM batch command and optional embedded interpreter are implemented; see
+  [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
+  The document/node API (#381) and a direct engine transport remain future work.
   [ADR-018](adr/ADR-018-acces-au-dom.md) describes DOM islands;
   [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) retains transport experiments and acceptance criteria.

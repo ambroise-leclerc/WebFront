@@ -5,6 +5,7 @@
 #include <webfront/system/FallbackModuleData.hpp>
 #include <webfront/system/FaviconData.hpp>
 #include <webfront/system/WebFrontJsData.hpp>
+#include <webfront/system/DomInterpreterData.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -52,6 +53,7 @@ void requireHeaderMatchesSource(std::string_view source) {
 SCENARIO("The embedded assets of the core are the readable sources they are generated from") {
     GIVEN("The generated headers of include/webfront/system and the sources of js/core") {
         THEN("Each header embeds exactly the bytes of its source, without compression and with zero padding only") {
+            requireHeaderMatchesSource<fs::generated::DomInterpreterData>("js/core/dom-interpreter.mjs");
             requireHeaderMatchesSource<fs::generated::WebFrontJsData>("js/core/WebFront.js");
             requireHeaderMatchesSource<fs::generated::FallbackIndexHtmlData>("js/core/fallback/index.html");
             requireHeaderMatchesSource<fs::generated::FallbackModuleData>("js/core/fallback/webfront-fallback.mjs");

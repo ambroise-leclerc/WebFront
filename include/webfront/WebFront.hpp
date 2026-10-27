@@ -13,6 +13,7 @@
 #include "system/WindowsCompat.hpp"
 #include "Task.hpp"
 #include "UISubscribers.hpp"
+#include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
 
@@ -63,6 +64,13 @@ public:
         if (!link)
             throw ConnectionError("Connection with client lost");
         link->sendCommand(msg::TextCommand(msg::TxtOpcode::injectScript, script));
+    }
+
+    /// Queues one DOM command on the bridge context. Rejections arrive at wfDom.rejected(batchId, reason).
+    void sendDomBatch(const msg::DomBatch& batch) const {
+        const auto link = webFront.findLink(webLinkId);
+        if (!link) throw ConnectionError("Connection with client lost");
+        link->sendCommand(batch);
     }
 
     /// The frames queued for this browser and not yet written to the network; 0 once its connection is gone.
