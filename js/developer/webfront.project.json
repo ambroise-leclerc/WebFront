@@ -32,6 +32,7 @@
   },
   "permissions": {
     "files": [
+      "LICENSE",
       "js/developer/webfront.project.json",
       "js/developer/webfront-packages.lock.json",
       ".webfront/developer/packages",

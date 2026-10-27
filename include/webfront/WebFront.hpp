@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @date 18/01/2022 19:34:27
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet

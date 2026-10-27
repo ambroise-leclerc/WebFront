@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- License WebFront under Apache-2.0 OR CECILL-B, at the recipient's option.
+  Include both full license texts (CeCILL-B in French and English), document
+  contribution terms and carry the license into newly built developer and
+  Life starter archives. Third-party components retain their own licenses.
+
 - DOM batch protocol (#380): bounded command 5, canonical uint32 LEB128 and UTF-8 codec,
   interned names and correlated rejection callbacks. The optional embedded `webfront-dom.mjs`
   validates the evolving tree before applying mutations, protects page-owned islands, and
