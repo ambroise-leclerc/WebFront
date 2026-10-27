@@ -1,4 +1,5 @@
 [
+  "LICENSE",
   "js/developer/environment/manifest.mjs",
   "js/developer/environment/project.mjs",
   "js/developer/environment/installer.mjs",

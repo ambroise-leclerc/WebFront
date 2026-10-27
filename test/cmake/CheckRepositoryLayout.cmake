@@ -13,7 +13,7 @@ endif()
 
 set(expected
     .gitattributes .github .gitignore
-    AGENTS.md CMakeLists.txt README.md
+    AGENTS.md CMakeLists.txt LICENSE README.md
     cmake docs examples include js test)
 
 set(actual "")
@@ -51,6 +51,10 @@ if(NOT from_git)
             message(FATAL_ERROR "Third-party sources are not vendored; lock the library as a package instead: ${path}")
         endif()
     endforeach()
+endif()
+# Include the license during local validation before it has been added to Git.
+if(EXISTS "${ROOT}/LICENSE")
+    list(APPEND actual LICENSE)
 endif()
 # .gitattributes and .gitignore are export-ignored, so archives legitimately lack them.
 set(archive_optional .gitattributes .gitignore)

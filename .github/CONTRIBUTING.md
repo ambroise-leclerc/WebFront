@@ -1,5 +1,13 @@
 # Contributing Guidelines
 
+## License of contributions
+
+Unless explicitly agreed otherwise, contributions submitted for inclusion in
+WebFront must be available under **Apache-2.0 OR CECILL-B**, at the recipient's
+option, as described in [LICENSE](../LICENSE). Submit only work you have the
+right to license on these terms, and retain existing third-party license and
+copyright notices.
+
 ## Coding Style
 
 We follow the **C++ Core Guidelines** to ensure conformance with modern C++23 generic programming. Please refer to the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for detailed rules. Key points are summarized below:

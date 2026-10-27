@@ -281,4 +281,16 @@ CI runs one combined C++ / native-browser job per desktop platform on each code 
 - Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority, and script permissions frame only the `context` API: neither is a sandbox. Only packages that run in a browser are supported; installation scripts and native add-ons are not executed. Builds transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - Packaging, accessibility and native-engine deployment still need application-specific work. General DOM abstractions remain future work. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
+## License
+
+WebFront is dual-licensed under **Apache-2.0 OR CECILL-B**, at your option.
+You may use, modify and redistribute WebFront under either license; you do not
+need to comply with both simultaneously. See [LICENSE](LICENSE) for the full
+Apache 2.0 and CeCILL-B version 1 texts, including the French and English
+versions of CeCILL-B.
+
+Third-party components retain their own licenses and notices. The WebFront
+license choice does not replace the licenses of its dependencies or bundled
+third-party code.
+
 [Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)

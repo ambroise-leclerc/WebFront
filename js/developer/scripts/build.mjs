@@ -69,7 +69,8 @@ export default async function (context) {
         ['xterm Fit addon', lockedFile(lock, '@xterm/addon-fit', 'LICENSE')],
         ['fflate', lockedFile(lock, 'fflate', 'LICENSE')],
     ];
-    const notices = [];
+    const webfrontLicense = await project.readText('LICENSE');
+    const notices = [webfrontLicense];
     for (const [name, path] of licenses) notices.push(`${name}\n${await project.readText(path)}`);
     files.set('LICENSES.txt', await write(`${output}/LICENSES.txt`, notices.join('\n\n')));
 
@@ -77,6 +78,7 @@ export default async function (context) {
     const starters = {};
     for (const [name, provider] of [['life', 'LifeUI']]) {
         const starterFiles = new Map();
+        starterFiles.set('package/LICENSE', encoder.encode(webfrontLicense));
         for (const file of ['main.tsx', 'style.css'])
             starterFiles.set(`package/${file}`, await project.read(`examples/life/ui/${file}`));
         const recipe = {format: 1, name: `${name}-starter`, version, dependencies: {
@@ -84,7 +86,7 @@ export default async function (context) {
             entries: {main: 'main.tsx'}, providers: {[provider]: {entry: 'main', output: `generated/${provider}.hpp`}}};
         starterFiles.set('package/webfront.project.json', encoder.encode(JSON.stringify(recipe, null, 2) + '\n'));
         starterFiles.set('package/package.json', encoder.encode(JSON.stringify({name: `@webfront/${name}-starter`, version,
-            private: true, webfront: {kind: 'starter', entry: 'main.tsx'}}, null, 2) + '\n'));
+            private: true, license: '(Apache-2.0 OR CECILL-B)', webfront: {kind: 'starter', entry: 'main.tsx'}}, null, 2) + '\n'));
         const starterBytes = compress(tar(starterFiles));
         const archive = `${name}-starter.tgz`;
         await write(`${output}/${archive}`, starterBytes);
@@ -94,6 +96,7 @@ export default async function (context) {
         compiler: `esbuild-wasm@${dependencies['esbuild-wasm']}`, semver: dependencies.semver, starters}, null, 2) + '\n'));
     files.set('package.json', await write(`${output}/package.json`, JSON.stringify({name: '@webfront/developer-environment', version,
         description: 'Browser-powered WebFront developer environment', type: 'module',
+        license: '(Apache-2.0 OR CECILL-B)',
         files: ['runtime.mjs', 'compiler.mjs', 'script-worker.mjs', 'typecheck-worker.mjs', 'esbuild.wasm', 'xterm.css', 'environment.json', 'LICENSES.txt']}, null, 2) + '\n'));
 
     const bytes = compress(tar(new Map([...files].map(([name, content]) => [`package/${name}`, content]))));
