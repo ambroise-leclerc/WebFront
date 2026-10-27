@@ -107,6 +107,9 @@ empty the former island elements (`replaceChildren()`) or replace them before le
 again. Names remain interned. Reload the document to reset names as well. See ADR-003 for the exact
 `wfDom.event` value contract.
 
+`PROPERTY value` is rejected on `<output>`, including empty elements, because its native setter
+replaces child nodes. Create a text child and use `SET_TEXT` to update the displayed value.
+
 ## Manual small-batch measurement
 
 `test/web/dom-benchmark.html` measures repeated single-operation SET_TEXT batches against detached

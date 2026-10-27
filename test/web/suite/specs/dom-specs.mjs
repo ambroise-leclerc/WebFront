@@ -60,6 +60,25 @@ describe('Embedded DOM command interpreter', () => {
         expect(() => dom.apply(packet([[7, 3, ...str('gone')]]))).toThrow();
     });
 
+    it('rejects output.value atomically and keeps its child handles attached and usable', () => {
+        dom.apply(packet([name(3, 'output'), name(4, 'value'), [2, 2, 3],
+            text(3, 'original'), [8, 2, 3], [8, 1, 2]]));
+        const output = root.firstChild, child = output.firstChild;
+        expect(() => dom.apply(packet([attr(2, 2, 'partial'), prop(2, 4, 'replacement')]))).toThrow();
+        expect(output.hasAttribute('title')).toBeFalse();
+        expect(output.firstChild).toBe(child);
+        expect(output.textContent).toBe('original');
+        dom.apply(packet([[7, 3, ...str('updated')]]));
+        expect(output.firstChild).toBe(child);
+        expect(output.textContent).toBe('updated');
+        // Newly created (even empty) outputs must also reject the native setter before any DOM step.
+        expect(() => dom.apply(packet([[2, 4, 3], [8, 1, 4], prop(4, 4, 'untracked')]))).toThrow();
+        expect(root.childNodes.length).toBe(1);
+        dom.apply(packet([[10, 2]]));
+        expect(root.childNodes.length).toBe(0);
+        expect(() => dom.apply(packet([[7, 3, ...str('gone')]]))).toThrow();
+    });
+
     for (const [label, definition, operation] of [
         ['script', 'script', [2, 8, 3]],
         ['inline handler', 'onclick', attr(2, 3, 'alert(1)')],

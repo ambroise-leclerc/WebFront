@@ -17,11 +17,12 @@
 | 1.10 | 2026-10-26 | Acceptée | Ambroise Leclerc | Commande `domBatch` bornée, interpréteur embarqué optionnel et validation transactionnelle (#380). | — |
 | 1.11 | 2026-10-27 | Acceptée | Ambroise Leclerc | Validation par delta, budget cumulé des noms, récupération et contrat des événements précisés (#380). | — |
 | 1.12 | 2026-10-27 | Acceptée | Ambroise Leclerc | Identifiant de lot non nul, plafond d’opérations, codec canonique et nettoyage limité aux sous-arbres concernés (#380). | — |
+| 1.13 | 2026-10-27 | Acceptée | Ambroise Leclerc | Rejet de PROPERTY value sur output pour préserver les identifiants de ses enfants (#380). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-27** (version 1.12).
+Dernière révision : **2026-10-27** (version 1.13).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -108,6 +109,8 @@ au-delà de U+10FFFF ; un BOM initial est conservé). L'opcode et les flags sont
 Les flags de LISTEN sont `1 = preventDefault`, `2 = stopPropagation` ; tous les autres bits sont
 interdits. PROPERTY accepte `value` (chaîne), `checked`, `disabled`, `indeterminate` (exactement
 `true` ou `false`), et `selectedIndex` (entier décimal de -1 à 2³¹-1). Les objets ne traversent pas le pont.
+`PROPERTY value` est rejeté sur `output`, même vide : son setter natif remplace les enfants et
+invaliderait les identifiants suivis. Créer un nœud texte enfant et le mettre à jour par SET_TEXT.
 Les identifiants de nœuds sont non nuls et uniques parmi les nœuds vivants. L'interpréteur borne les
 nœuds vivants et les noms à 65 536 entrées chacun, les noms à 1 024 octets UTF-8, et la somme des
 longueurs UTF-8 des noms à **1 048 576 octets par interpréteur** (hors surcoûts des chaînes et tables JS).

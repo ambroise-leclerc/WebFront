@@ -16,6 +16,8 @@
   subscriptions by node and revoke islands by subtree traversal. Both codecs limit each batch to
   131,072 operations; C++ reserves the counted operation total and rejects unused operands.
   Event integration checks count identities/values independently of arrival order.
+  Reject `PROPERTY value` on `output` before applying a batch, preserving tracked children;
+  update output text with `SET_TEXT`. Use checked event-count indexing for MSVC analysis.
 
 - The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
   within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately

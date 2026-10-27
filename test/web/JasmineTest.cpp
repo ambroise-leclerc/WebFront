@@ -293,7 +293,7 @@ private:
             size_t index = 0;
             while (index < expected.size() && expected[index] != Event{node, event, value})
                 ++index;
-            ++domEventCounts[index]; // Last slot counts all unexpected identities or values.
+            ++domEventCounts.at(index); // Last slot counts all unexpected identities or values.
         });
         webFront->cppFunction("domEventCounts", [this] {
             if (domEventCounts == array<uint32_t, 6>{1, 1, 1, 1, 1, 0}) state.domEventsObserved = true;

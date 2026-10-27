@@ -196,7 +196,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             case 2: {
                 const tag = nameAt(b);
                 if (!tags.has(tag) || forbiddenTags.has(tag)) throw new Error(`forbidden DOM tag ${tag}`);
-                fresh(a, {text: false});
+                fresh(a, {tag, text: false});
                 steps.push(() => { nodes.set(a, {node: document.createElement(tag)}); });
                 break;
             }
@@ -213,9 +213,12 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
                 break;
             }
             case 6: {
-                element(a);
+                const entry = element(a);
                 const name = nameAt(b);
                 if (!propertyNames.has(name)) throw new Error(`forbidden DOM property ${name}`);
+                // The native output.value setter replaces children behind the tracked tree's back.
+                if (name === 'value' && entry.tag === 'output')
+                    throw new Error('PROPERTY value on output requires explicit text-node updates');
                 if (['checked', 'disabled', 'indeterminate'].includes(name) && !['true', 'false'].includes(value))
                     throw new Error('invalid DOM boolean');
                 if (name === 'selectedIndex' && (!/^-?\d+$/.test(value) || !Number.isInteger(Number(value)) || Number(value) < -1 || Number(value) > 2147483647))
