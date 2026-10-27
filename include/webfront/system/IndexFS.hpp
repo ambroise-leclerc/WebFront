@@ -3,11 +3,11 @@
 /// @brief Virtual file system providing access to WebFront.js, favicon.ico and a minimal index.html.
 #pragma once
 
+#include "DomInterpreterData.hpp"
 #include "FallbackIndexHtmlData.hpp"
 #include "FallbackModuleData.hpp"
 #include "FaviconData.hpp"
 #include "FileSystem.hpp"
-#include "DomInterpreterData.hpp"
 #include "WebFrontJsData.hpp"
 
 #include <filesystem>

@@ -82,3 +82,46 @@ Register C++ callbacks `wfDom.rejected(batchId, reason)` and, when listening to 
 `ui.sendDomBatch(batch)` implement [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md);
 the document/node API remains separate work (#381). The default filesystem protects both
 `WebFront.js` and `webfront-dom.mjs` from document-root overrides.
+
+The interpreter accepts trusted application commands, as [ADR-008](adr/ADR-008-contenu-de-confiance-et-origines.md)
+specifies. `style` may load CSS resources or position overlays, and `id`/`name` can introduce named
+DOM properties. The allowlist does not isolate untrusted producers. The name dictionary is retained
+until the document is discarded, including definitions acquired from rejected batches; it has a
+1 MiB UTF-8 budget in addition to the entry and per-name limits. Low-level C++ callers manage its
+mirror; the document helper is separate work (#381).
+
+A residual DOM exception invalidates all node handles and island registrations. Existing release
+functions then do nothing. C++ receives `wfDom.rejected` and must arrange page recovery: explicitly
+empty the former island elements (`replaceChildren()`) or replace them before lending empty elements
+again. Names remain interned. Reload the document to reset names as well. See ADR-003 for the exact
+`wfDom.event` value contract.
+
+## Manual small-batch measurement
+
+`test/web/dom-benchmark.html` measures repeated single-operation SET_TEXT batches against detached
+flat DOM trees with 101, 10,001 and 60,001 live nodes. SET_TEXT repeatedly assigns `x` to the same
+existing text node. Each size warms up with 20 batches, then takes
+three samples of 100 batches; the displayed result is the median time per batch. It includes decoding,
+validation and DOM text mutation, and excludes transport, layout and rendering. It is not a CTest case
+and asserts no timing threshold. To run from the repository root with optional Python tooling:
+
+```sh
+measure_dir="$(mktemp -d)"
+cp test/web/dom-benchmark.html "$measure_dir/index.html"
+cp js/core/dom-interpreter.mjs "$measure_dir/webfront-dom.mjs"
+python3 -m http.server 8000 --bind 127.0.0.1 --directory "$measure_dir"
+# Open http://127.0.0.1:8000/ in a browser and click Measure.
+```
+
+Local Chrome 156/macOS observation on 2026-10-27, baseline `fe7e23b` versus the transactional delta
+implementation (milliseconds per batch, median of three samples):
+
+| Live nodes | Whole-table copy | Transactional delta |
+| --- | ---: | ---: |
+| 101 | 0.095 | 0.007 |
+| 10,001 | 8.628 | 0.007 |
+| 60,001 | 10.627 | 0.043 |
+
+These short local measurements are sensitive to JIT, garbage collection, timer resolution and host
+load; they are not a cross-engine guarantee. The deterministic Jasmine regression separately counts
+Map/Set iterator visits to ensure a small text/append batch does not scan unrelated nodes or siblings.

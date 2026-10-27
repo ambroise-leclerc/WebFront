@@ -5,11 +5,16 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-26 | Proposée | Ambroise Leclerc | Décision initiale (#378) : état de l'art TypeScript, Rust et Python vérifié, huit solutions comparées, prototypes mesurés sous WebKitGTK (flux de mutations, proxy, lectures attendues, îlots React, formulaire généré par réflexion C++26, lots hostiles), découverte d'un délai de 40 ms du transport (Nagle). | À renseigner après intégration. |
+| 1.1 | 2026-10-27 | Proposée, partiellement remplacée | Ambroise Leclerc | Le transport du prototype est remplacé par ADR-003 1.10 et suivantes ; l’API document/nœuds reste proposée (#381). | — |
 
 ## État et chronologie
 
-**Proposée** le **2026-10-26** (issue #378). Cette décision ne livre aucune API publique et ne modifie pas le format
-binaire. Ses mesures viennent de prototypes jetables, retirés du dépôt après mesure et consultables dans le commit
+**Proposée** le **2026-10-26** (issue #378), **partiellement remplacée** le **2026-10-27**.
+Le transport DOM est désormais livré par l'[ADR-003, version 1.10 et suivantes](ADR-003-protocole-binaire-et-bornes.md),
+avec la commande `domBatch` et `/webfront-dom.mjs` (#380). L'appel `wfDom.apply` par `jsFunction` décrit
+ci-dessous est uniquement le protocole historique des prototypes ; il ne décrit pas le transport livré.
+L'API document/nœuds, les adaptateurs et la réflexion restent proposés (#381 à #384).
+Les mesures historiques viennent de prototypes jetables, retirés du dépôt après mesure et consultables dans le commit
 `ef2bb25` de la PR #385 (`test/web/dom/`, cible manuelle `webkitgtk_dom_prototype`). Elle passera à « Acceptée » quand les
 critères de la section dédiée seront démontrés.
 
@@ -19,7 +24,7 @@ sans compatibilité ascendante, à condition d'en respecter les règles (évolut
 
 ## Contexte
 
-Aujourd'hui, le C++ n'accède pas au DOM. Une application écrit du JavaScript ou du TypeScript (par exemple
+Lors de la décision initiale, le C++ n'accédait pas au DOM. Une application écrit du JavaScript ou du TypeScript (par exemple
 `examples/life/ui/main.tsx`, en React), qui expose des fonctions que C++ appelle par `ui.jsFunction`, et appelle les
 callbacks C++ par `webFront.cppFunction`. Le bridge ne transporte que des scalaires, chaînes, tuples, tableaux typés
 numériques et `std::bitset<N>` ([ADR-004](ADR-004-appels-asynchrones-et-erreurs.md)). Les anciennes issues #6

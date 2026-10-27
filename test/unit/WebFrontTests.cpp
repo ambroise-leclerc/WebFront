@@ -834,3 +834,17 @@ SCENARIO("Ephemeral ports are bound atomically and forwarded to the frontend") {
         REQUIRE(mock.port() == "0");
     }
 }
+
+SCENARIO("Sending a DOM batch through a lost UI link throws ConnectionError") {
+    using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+    GIVEN("a UI handle whose connection is absent from the application") {
+        App           app("9161");
+        App::UI       ui(app, 42);
+        msg::DomBatch batch(7);
+        batch.add({msg::DomOp::text, 1, 0, 0, "unreachable"});
+        THEN("sending fails synchronously without queuing a frame") {
+            REQUIRE_THROWS_AS(ui.sendDomBatch(batch), ConnectionError);
+            REQUIRE(ui.pendingWrites() == 0);
+        }
+    }
+}

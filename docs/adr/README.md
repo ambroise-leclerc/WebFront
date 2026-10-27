@@ -42,7 +42,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | --- | --- | --- | --- | --- |
 | [ADR-001](ADR-001-coeur-cpp23-header-only.md) | A header-only C++23 core embedded in the application | Accepted | 2020-04-19 | 1.5 — 2026-10-13 |
 | [ADR-002](ADR-002-systemes-de-fichiers-composables.md) | An abstract, composable filesystem as the foundation for portability | Accepted | 2023-03-16 | 2.4 — 2026-10-14 |
-| [ADR-003](ADR-003-protocole-binaire-et-bornes.md) | A shared, typed and bounded binary protocol | Accepted | 2022-02-06 | 1.10 — 2026-10-26 |
+| [ADR-003](ADR-003-protocole-binaire-et-bornes.md) | A shared, typed and bounded binary protocol | Accepted | 2022-02-06 | 1.11 — 2026-10-27 |
 | [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | Asynchronous calls with deliberately asymmetric contracts | Accepted | 2022-02-06 | 2.4 — 2026-10-18 |
 | [ADR-005](ADR-005-evolution-reseau-asio-stdnet.md) | From standalone ASIO to stdnet: anticipating standard networking without blocking progress | Accepted through 3.1; 3.2 proposed | 2022-01-21 | 3.2 — 2026-10-26 |
 | [ADR-006](ADR-006-taches-structurees-et-arret.md) | Owning, cancelling and joining every task | Accepted | 2026-10-13 | 2.1 — 2026-10-25 |
@@ -57,7 +57,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-015](ADR-015-ressources-generees-par-application.md) | Generating application-owned embedded resources | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
 | [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.6 — 2026-10-26 |
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
-| [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed | 2026-10-26 | 1.0 — 2026-10-26 |
+| [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded | 2026-10-26 | 1.1 — 2026-10-27 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.

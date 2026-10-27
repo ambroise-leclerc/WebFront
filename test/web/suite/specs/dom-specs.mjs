@@ -162,15 +162,98 @@ describe('Embedded DOM command interpreter', () => {
         expect(root.isConnected).toBeTrue();
     });
 
+    it('does not scan unrelated nodes or siblings for a small text or append batch', () => {
+        const ops = [];
+        for (let id = 2; id < 2002; ++id) ops.push(text(id, 'x'), [8, 1, ...uint(id)]);
+        dom.apply(packet(ops));
+        const update = packet([[7, 2, ...str('changed')], text(2002, 'new'), [8, 1, ...uint(2002)]]);
+        let visited = 0;
+        const originals = [Map.prototype[Symbol.iterator], Set.prototype[Symbol.iterator]];
+        try {
+            for (const [prototype, original] of [[Map.prototype, originals[0]], [Set.prototype, originals[1]]]) {
+                prototype[Symbol.iterator] = function* () {
+                    for (const value of original.call(this)) { ++visited; yield value; }
+                };
+            }
+            dom.apply(update);
+        } finally {
+            Map.prototype[Symbol.iterator] = originals[0];
+            Set.prototype[Symbol.iterator] = originals[1];
+        }
+        expect(root.firstChild.data).toBe('changed');
+        expect(root.lastChild.data).toBe('new');
+        expect(visited).toBeLessThan(20); // Work must not grow with the 2,000 untouched children.
+    });
+
+    it('discards rejected structural deltas and supports removing then recreating an identifier', () => {
+        dom.apply(packet([[2, 2, 1], text(3, 'old'), [8, 2, 3], [8, 1, 2]]));
+        expect(() => dom.apply(packet([[8, 1, 3], [8, 3, 2]]))).toThrow();
+        dom.apply(packet([[10, 2], text(2, 'replacement'), [8, 1, 2]]));
+        expect(root.textContent).toBe('replacement');
+        expect(() => dom.apply(packet([[7, 3, ...str('gone')]]))).toThrow();
+    });
+
+    it('bounds retained name bytes across accepted and rejected batches', () => {
+        const word = 'a'.repeat(1024);
+        let index = 3;
+        for (const count of [512, 511]) {
+            const ops = [];
+            for (let i = 0; i < count; ++i) ops.push(name(index++, word));
+            // Definitions survive semantic rejection, but still consume the same global byte budget.
+            expect(() => dom.apply(packet([...ops, [10, 99]]))).toThrow();
+        }
+        // root/div/title occupy 12 bytes. Fill exactly the remaining dictionary budget.
+        dom.apply(packet([name(index++, 'b'.repeat(1012))]));
+        expect(() => dom.apply(packet([name(index, 'x')]))).toThrow();
+        dom.apply(packet([[2, 2, 1], [8, 1, 2]])); // Already-interned names remain usable.
+        expect(root.firstChild.localName).toBe('div');
+    });
+
     it('reports residual DOM exceptions as rejection instead of losing them', () => {
         dom.apply(packet([[2, 2, 1], [8, 1, 2]]));
         spyOn(root.firstChild, 'setAttribute').and.throwError('DOM failure');
         expect(() => dom.apply(packet([attr(2, 2, 'value')]))).toThrowError('DOM failure');
         expect(() => dom.apply(packet([[10, 2]]))).toThrow();
+        release(); // Already invalidated: this does not erase the partial DOM left in the page.
+        expect(root.childNodes.length).toBe(1);
+        expect(() => dom.island('root', root)).toThrow();
+        root.replaceChildren();
+        release = dom.island('root', root);
+        dom.apply(packet([[13, 1, 0], text(2, 'recovered'), [8, 1, 2]]));
+        expect(root.textContent).toBe('recovered');
     });
 });
 
 describe('DOM commands over the real WebSocket', () => {
+    it('delivers event values and listener removal through the real WebSocket', async () => {
+        await webFront.ready;
+        const {installDomInterpreter} = await import(moduleUrl);
+        const dom = installDomInterpreter(webFront);
+        const root = document.body.appendChild(document.createElement('div'));
+        const release = dom.island('root', root);
+        try {
+            await webFront.cppFunction('sendDomBatch')(packet([
+                name(0, 'root'), name(1, 'input'), name(2, 'type'), name(3, 'checked'),
+                name(4, 'input'), name(5, 'change'), name(6, 'keydown'), name(7, 'click'),
+                [13, 1, 0], [2, 10, 1], [2, 11, 1], attr(11, 2, 'checkbox'),
+                [8, 1, 10], [8, 1, 11], [11, 10, 4, 0], [11, 11, 5, 0],
+                [11, 10, 6, 0], [11, 10, 7, 3],
+            ]));
+            const input = root.firstChild, checkbox = root.lastChild;
+            input.value = 'hello'; input.dispatchEvent(new Event('input'));
+            checkbox.checked = true; checkbox.dispatchEvent(new Event('change'));
+            checkbox.checked = false; checkbox.dispatchEvent(new Event('change'));
+            input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+            const click = new Event('click', {cancelable: true}); input.dispatchEvent(click);
+            expect(click.defaultPrevented).toBeTrue();
+            const expected = '10:4:hello|11:5:true|11:5:false|10:6:Escape|10:7:|';
+            expect(await webFront.cppFunction('domEventLog')()).toBe(expected);
+            await webFront.cppFunction('sendDomBatch')(packet([[12, 10, 4], [10, 11]]));
+            input.dispatchEvent(new Event('input')); checkbox.dispatchEvent(new Event('change'));
+            expect(await webFront.cppFunction('domEventLog')()).toBe(expected);
+        } finally { release(); root.remove(); delete webFront.domBatchHandler; }
+    });
+
     it('round trips C++ encoding and reports correlated hostile and unloaded-interpreter rejections', async () => {
         await webFront.ready;
         const id = 0x12345678;

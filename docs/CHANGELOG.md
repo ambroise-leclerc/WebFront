@@ -8,7 +8,10 @@
   rejects executable content and normalized unsafe URLs. Catch2 and the shared Jasmine
   suite cover encoding boundaries, hostile batches and real WebSocket dispatch. ADR-003
   specifies the wire contract; ADR-016 adds the module within the existing 150 KiB budget.
-
+  Follow-up: validate against per-node and per-child-set deltas, cap retained UTF-8 name bytes at
+  1 MiB per interpreter, and document the trusted-content model, event values and recovery after
+  residual exceptions. Real WebSocket tests cover events and listener cleanup; a C++ regression
+  covers sending through a lost UI link. The manual DOM benchmark is described in embedded assets.
 
 - The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
   within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately

@@ -1,6 +1,7 @@
 // ADR-003: optional DOM command interpreter. Only this module touches the DOM; WebFront.js routes command 5.
 const maxBytes = 1024 * 1024;
 const maxEntries = 65536;
+const maxNameBytes = 1024 * 1024;
 const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
 const encoder = new TextEncoder();
 const defaultTags = 'div span p ul ol li button input label select option form fieldset legend h1 h2 h3 h4 table thead tbody tr td th strong em small output progress meter textarea section header footer nav a img br hr pre code';
@@ -42,6 +43,22 @@ function reader(bytes) {
     };
 }
 
+// Transactional child-set overlay: editing a wide parent does not copy or scan its existing children.
+class ChildDelta {
+    constructor(base) { this.base = base; this.added = new Set(); this.removed = new Set(); }
+    add(id) { this.removed.delete(id); if (!this.base.has(id)) this.added.add(id); }
+    delete(id) { if (!this.added.delete(id) && this.base.has(id)) this.removed.add(id); }
+    *[Symbol.iterator]() {
+        for (const id of this.base) if (!this.removed.has(id)) yield id;
+        yield* this.added;
+    }
+    commit() {
+        for (const id of this.removed) this.base.delete(id);
+        for (const id of this.added) this.base.add(id);
+        return this.base;
+    }
+}
+
 /** Install once per bridge/document. The page explicitly lends empty elements with island(name, element).
  * Extension lists are copied; executable tags/attributes and unsafe URL schemes remain forbidden.
  * apply throws on rejection; the bridge reports it to C++ as wfDom.rejected(batchId, reason).
@@ -59,7 +76,9 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
         }
     }
     const names = [];
-    let nodes = new Map();
+    let nameBytes = 0;
+    const nodes = new Map();
+    let mounted = new WeakSet();
     const islands = new Map(), listeners = new Map();
     const allowedAttribute = name => !name.startsWith('on') && !forbiddenAttributes.has(name) &&
         (attributes.has(name) || /^(aria|data)-[a-z0-9-]+$/.test(name));
@@ -104,9 +123,11 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             const c = op === 9 ? input.uint() : op === 11 ? input.byte() : 0;
             const value = [1, 3, 4, 6, 7].includes(op) ? input.string() : '';
             if (op === 1) {
-                if (a !== names.length || a >= maxEntries || encoder.encode(value).length > 1024)
-                    throw new Error('invalid DOM name definition');
+                const size = encoder.encode(value).length;
+                if (a !== names.length || a >= maxEntries || size > 1024 || size > maxNameBytes - nameBytes)
+                    throw new Error('invalid DOM name definition or dictionary budget');
                 names.push(value);
+                nameBytes += size;
             }
             operations.push({op, a, b, c, value, nameLimit: names.length});
         }
@@ -115,13 +136,20 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
 
     function apply(bytes) {
         const operations = decode(bytes);
-        // A shadow tree tracks the state produced by every preceding operation, including removals and moves.
-        const shadow = new Map(Array.from(nodes, ([id, entry]) => [id, {...entry, children: new Set(entry.children)}]));
+        // Only edited records and child-set deltas are copied. Untouched entries stay in the live table.
+        const changes = new Map(), newMounts = new Set();
+        let liveSize = nodes.size;
+        const lookup = id => changes.has(id) ? changes.get(id) : nodes.get(id);
         const steps = [];
         const get = id => {
-            const entry = shadow.get(id);
+            const entry = lookup(id);
             if (!entry) throw new Error(`unknown DOM node ${id}`);
             return entry;
+        };
+        const edit = id => {
+            const entry = get(id);
+            if (!changes.has(id)) changes.set(id, {...entry, children: new ChildDelta(entry.children)});
+            return changes.get(id);
         };
         const writable = id => {
             const entry = get(id);
@@ -134,8 +162,9 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             return entry;
         };
         const fresh = (id, entry) => {
-            if (!id || shadow.has(id) || shadow.size >= maxEntries) throw new Error('invalid or duplicate DOM node');
-            shadow.set(id, {...entry, parent: null, children: new Set()});
+            if (!id || lookup(id) || liveSize >= maxEntries) throw new Error('invalid or duplicate DOM node');
+            changes.set(id, {...entry, parent: null, children: new Set()});
+            ++liveSize;
         };
         const forget = id => {
             // Iterative traversal: hostile deep trees must not overflow the JavaScript stack.
@@ -143,7 +172,8 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             while (pending.length) {
                 const current = pending.pop(), entry = get(current);
                 for (const child of entry.children) pending.push(child);
-                shadow.delete(current);
+                changes.set(current, null);
+                --liveSize;
             }
         };
         for (const {op, a, b, c, value, nameLimit} of operations) {
@@ -194,16 +224,16 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
                 if (op === 9 && get(c).parent !== a) throw new Error('insertBefore reference is not a child');
                 for (let ancestor = a; ancestor !== null; ancestor = get(ancestor).parent)
                     if (ancestor === b) throw new Error('DOM cycle');
-                if (child.parent !== null) get(child.parent).children.delete(b);
-                child.parent = a;
-                parent.children.add(b);
+                if (child.parent !== null) edit(child.parent).children.delete(b);
+                edit(b).parent = a;
+                edit(a).children.add(b);
                 steps.push(() => op === 8 ? nodes.get(a).node.appendChild(nodes.get(b).node) :
                     nodes.get(a).node.insertBefore(nodes.get(b).node, nodes.get(c).node));
                 break;
             }
             case 10: {
                 const entry = writable(a);
-                if (entry.parent !== null) get(entry.parent).children.delete(a);
+                if (entry.parent !== null) edit(entry.parent).children.delete(a);
                 const removed = [];
                 const pending = [a];
                 while (pending.length) {
@@ -229,7 +259,8 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             case 13: {
                 const name = nameAt(b), node = islands.get(name)?.element;
                 if (!node) throw new Error(`unknown DOM island ${name}`);
-                if (Array.from(shadow.values()).some(entry => entry.node === node)) throw new Error('island already mounted');
+                if (mounted.has(node) || newMounts.has(node)) throw new Error('island already mounted');
+                newMounts.add(node);
                 fresh(a, {node, text: false, island: true});
                 steps.push(() => nodes.set(a, {node}));
                 break;
@@ -244,10 +275,18 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             cleanListeners(new Map());
             nodes.clear();
             islands.clear();
+            mounted = new WeakSet();
             throw error;
         }
-        for (const [id, entry] of shadow) entry.node = nodes.get(id).node;
-        nodes = shadow;
+        for (const [id, entry] of changes) {
+            if (!entry) nodes.delete(id);
+            else {
+                entry.node = nodes.get(id).node;
+                if (entry.children instanceof ChildDelta) entry.children = entry.children.commit();
+                nodes.set(id, entry);
+            }
+        }
+        for (const node of newMounts) mounted.add(node);
     }
 
     const api = {
@@ -266,6 +305,7 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             return () => {
                 if (islands.get(name) !== token) return;
                 islands.delete(name);
+                mounted.delete(element);
                 const removed = new Set();
                 for (const [id, entry] of nodes) {
                     if (entry.node === element || element.contains(entry.node)) removed.add(id);

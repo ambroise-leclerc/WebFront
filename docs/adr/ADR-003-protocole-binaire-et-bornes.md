@@ -15,11 +15,12 @@
 | 1.8 | 2026-10-16 | Acceptée | Ambroise Leclerc | Plafond indépendant de 125 octets pour les trames de contrôle. | [3ebc181](https://github.com/ambroise-leclerc/WebFront/commit/3ebc181fce48240aa2cecebfe4d3f8cc4966732d) |
 | 1.9 | 2026-10-20 | Acceptée | Ambroise Leclerc | `std::bitset<N>` compacté dans le format Uint8Array existant, sans nouvel opcode. | [5bc294e](https://github.com/ambroise-leclerc/WebFront/commit/5bc294eb0a9ba81ae7789b425baa6e299e848d97) |
 | 1.10 | 2026-10-26 | Acceptée | Ambroise Leclerc | Commande `domBatch` bornée, interpréteur embarqué optionnel et validation transactionnelle (#380). | — |
+| 1.11 | 2026-10-27 | Acceptée | Ambroise Leclerc | Validation par delta, budget cumulé des noms, récupération et contrat des événements précisés (#380). | — |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-26** (version 1.10).
+Dernière révision : **2026-10-27** (version 1.11).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -62,6 +63,9 @@ refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur p
 
 ## Commande DOM (`domBatch`, code 5, version 1)
 
+Cette section remplace le transport `wfDom.apply` des prototypes de l'[ADR-018](ADR-018-acces-au-dom.md) ;
+les propositions d'API de document et de nœuds de cette ADR restent distinctes.
+
 Un message WebSocket C++ → navigateur contient exactement un lot : `05 01`, un identifiant de lot
 `uint32` **little-endian fixe**, puis zéro ou plusieurs opérations jusqu'à la fin du message. Le plafond
 est de **1 048 576 octets, en-tête de six octets inclus**, vérifié avant décodage/allocation par les
@@ -93,14 +97,27 @@ Les flags de LISTEN sont `1 = preventDefault`, `2 = stopPropagation` ; tous les 
 interdits. PROPERTY accepte `value` (chaîne), `checked`, `disabled`, `indeterminate` (exactement
 `true` ou `false`), et `selectedIndex` (entier décimal de -1 à 2³¹-1). Les objets ne traversent pas le pont.
 Les identifiants de nœuds sont non nuls et uniques parmi les nœuds vivants. L'interpréteur borne les
-nœuds vivants et les noms à 65 536 entrées chacun, les noms à 1 024 octets UTF-8.
+nœuds vivants et les noms à 65 536 entrées chacun, les noms à 1 024 octets UTF-8, et la somme des
+longueurs UTF-8 des noms à **1 048 576 octets par interpréteur** (hors surcoûts des chaînes et tables JS).
+Une définition qui dépasse un de ces plafonds n'est pas acquise. Le budget cumulé compte aussi les
+noms acquis dans des lots rejetés. Les noms sont conservés pour la vie du document, sans purge ni
+réinitialisation sur le fil : les réutiliser permet de continuer à muter après saturation, mais ajouter
+de nouveaux noms exige un nouveau document/rechargement. L'émetteur doit tenir le miroir des indices,
+des longueurs et des définitions acquises ; le codec `msg::DomBatch` ne constitue pas une table d'internement.
+Le helper C++ de document reste dans #381. Un rechargement impose de reconstruire également ce miroir.
 
 Les noms sont internés par document navigateur, définis séquentiellement à partir de zéro. Une
 référence ne peut viser qu'une définition antérieure dans le flux. Toutes les définitions entièrement
 décodées restent acquises même si la suite du lot est rejetée, y compris lors d'une erreur sémantique.
 Un message mal formé ne garantit pas que ses définitions restantes soient acquises ; l'émetteur doit
 alors abandonner ce document. Les autres opérations sont validées contre un arbre temporaire qui
-suit créations, déplacements et suppressions. Une erreur de validation ne modifie aucun nœud DOM.
+suit créations, déplacements et suppressions. Cet arbre est un delta sur la table vivante : seuls les
+identifiants et ensembles d'enfants modifiés sont enregistrés ; un parent large utilise lui aussi des
+ajouts/suppressions différés. MOUNT consulte un index faible des éléments montés. Un petit lot de texte
+ou d'attributs ne parcourt donc pas les nœuds non concernés. Les suppressions parcourent le sous-arbre
+affecté et les déplacements vérifient les chaînes d'ancêtres ; la révocation d'un îlot et le nettoyage
+des écouteurs peuvent parcourir les tables correspondantes. Ces limites bornent les ressources, sans
+promesse de temps constant. Une erreur de validation ne modifie aucun nœud DOM.
 Un parent texte, un cycle, une référence INSERT_BEFORE qui n'est pas enfant du parent, la réutilisation
 d'un nœud supprimé et toute mutation/déplacement/suppression de l'élément d'îlot sont rejetés.
 
@@ -122,15 +139,41 @@ Les attributs URL simples (`href`, `src`, `action`, etc.) passent par `new URL(v
 seuls `http:`, `https:` et `mailto:` sont autorisés, même dans une extension. `javascript:` et `data:`
 sont donc rejetés après normalisation des caractères de contrôle par le navigateur.
 
+Le modèle de menace est celui de l'[ADR-008](ADR-008-contenu-de-confiance-et-origines.md) : l'application
+C++ et le code de la page sont de confiance. Les listes blanches empêchent des constructions exécutables
+accidentelles ; elles ne constituent pas un bac à sable pour des lots provenant d'un tiers. `style`
+peut charger des URL CSS externes et positionner des surcouches ; `id` et `name`, notamment sur `img` et
+`form`, peuvent masquer des propriétés nommées du document ou de la fenêtre (DOM clobbering). Ils sont
+conservés pour construire des interfaces ordinaires. Les restrictions des URL décrites ci-dessus visent
+les attributs URL, pas le contenu CSS. Ne pas transmettre des lots non fiables à cet interpréteur ; les
+politiques d'origine/navigations ne filtrent pas toutes les sous-ressources réseau.
+
 C++ construit `msg::DomBatch` (`weblink/DomBatch.hpp`) et l'envoie par `ui.sendDomBatch(batch)` sur le
 contexte du bridge. L'envoi n'est pas attendable et n'accuse pas réception. Tout rejet, y compris
 l'absence de module installé ou une exception DOM résiduelle pendant l'application, remonte par le
 callback ordinaire `wfDom.rejected(uint32 batchId, string reason)` ; l'application doit l'enregistrer.
 Le motif est limité à 4 096 unités UTF-16 avant encodage. Si l'en-tête est tronqué, l'identifiant vaut zéro.
 Les événements utilisent `wfDom.event(uint32 nodeId, uint32 nameIndex, string value)` et leurs
-Promises sont traitées. Les erreurs de transport/déconnexion ne peuvent pas être signalées par ce canal.
+Promises sont traitées. `nameIndex` désigne le nom interné à LISTEN. La valeur est celle du nœud
+abonné (`event.currentTarget`), pas d'un descendant à l'origine d'un événement bouillonnant :
+
+| Événement | `value` |
+| --- | --- |
+| `input`, `change` sur une case à cocher | `String(currentTarget.checked)`, soit `"true"` ou `"false"` |
+| Autres `input`, `change` | `String(currentTarget.value)` |
+| `keydown`, `keyup` | `event.key` |
+| Tout autre événement | La chaîne vide `""` |
+
+Les flags `preventDefault` et `stopPropagation` sont appliqués immédiatement dans le navigateur,
+avant le callback C++ ; UNLISTEN et REMOVE retirent les écouteurs. Les erreurs de transport/déconnexion ne peuvent pas être signalées par ce canal.
 Une exception résiduelle d'application peut laisser des modifications partielles ; elle invalide tous
-les handles et îlots de l'interpréteur, obligeant la page à reconstruire/prêter de nouveaux îlots.
+les handles et îlots de l'interpréteur. Les fonctions `release()` déjà retournées deviennent inertes :
+elles n'effacent pas les enfants partiels et ne notifient pas la page. Le rejet arrive seulement au
+callback C++ ; l'application doit en organiser la notification de sa page. Pour récupérer, la page
+remplace les éléments d'îlot, ou vide explicitement leurs enfants (`element.replaceChildren()`), puis
+les prête de nouveau avec `island()`. Prêter un ancien élément encore non vide reste interdit.
+Les identifiants de nœuds sont à reconstruire, mais la table de noms et son budget restent acquis.
+La page peut aussi choisir de recharger tout le document pour remettre les deux tables à zéro.
 L'API publique document/nœuds et les lectures groupées relèvent de #381.
 
 ## Options écartées et motifs
