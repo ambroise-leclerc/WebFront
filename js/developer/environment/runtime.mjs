@@ -299,7 +299,7 @@ export async function runNonInteractive(argv, {reporter, onExit = code => global
     const keepDiagnostics = values => {
         diagnostics = (values ?? []).slice(0,10).map(item => ({text:clipText(item.text ?? '',256),
             ...(item.location ? {file:clipText(String(item.location.file ?? '').replace(/^project:/,''),128),line:item.location.line,column:item.location.column+1} : {}),
-            ...(!item.location && item.file ? {file:clipText(item.file,128),line:item.line,column:item.column} : {}),
+            ...(!item.location && item.file ? {file:clipText(String(item.file).replace(/^project:/,''),128),line:item.line,column:item.column} : {}),
             ...(item.code === undefined ? {} : {code:item.code})}));
     };
     const append = text => {

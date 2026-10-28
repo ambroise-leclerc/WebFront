@@ -1,4 +1,4 @@
-import {clipText,createAutomationRunner,createPreviewInspector} from '../../../js/developer/environment/automation.mjs';
+import {clipText,createAutomationRunner,createPreviewInspector,fitCompletion} from '../../../js/developer/environment/automation.mjs';
 import {exclusive,execute,runNonInteractive} from '../../../js/developer/environment/runtime.mjs';
 import {rejects} from '../support.mjs';
 
@@ -87,5 +87,23 @@ describe('Developer automation', () => {
         await rejects(runner.start({runId:'one',operation:'build',arguments:{}}),/refused/);
         expect(runner.output.length).toBeLessThanOrEqual(2048);
         await runner.start({runId:'two',operation:'build',arguments:{}}).catch(() => {});
+    });
+
+    it('fits a result of control characters, which JSON escapes to six bytes each, into one bridge string', () => {
+        const fitted=fitCompletion({exitCode:1,output:'\u0001'.repeat(16000),report:null});
+        expect(new TextEncoder().encode(JSON.stringify(fitted)).length).toBeLessThanOrEqual(56000);
+        expect(fitted.truncated).toBeTrue();
+        expect(fitCompletion({exitCode:0,output:'ok'}).output).toBe('ok');
+    });
+
+    it('reports cancellation as 130 even when the command failed with its own code', async () => {
+        const completed=[];
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},
+            run:(_argv,context) => new Promise(resolve => context.signal.addEventListener('abort',() => resolve({exitCode:1,output:'Interrupted',report:null}))),
+            complete:async (id,result) => {completed.push({id,result});}});
+        const work=runner.start({runId:'one',operation:'check',arguments:{}});
+        runner.cancel('one');
+        await work;
+        expect(completed[0].result.exitCode).toBe(130);
     });
 });

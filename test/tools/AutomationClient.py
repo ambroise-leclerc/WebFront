@@ -17,7 +17,8 @@ import time
 
 
 class Client:
-    def __init__(self, command, stderr):
+    def __init__(self, command, stderr, timeout=30):
+        self.timeout = timeout  # seconds for the session to become ready and for one operation to finish
         self.child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=stderr, text=True, encoding="utf-8")
         self.messages = queue.Queue()
@@ -62,7 +63,7 @@ class Client:
         assert result["protocolVersion"] == "2025-11-25", result
         self.send("notifications/initialized", notification=True)
         assert len(self.send("tools/list")["tools"]) == 4
-        end = time.monotonic() + 30
+        end = time.monotonic() + self.timeout
         while time.monotonic() < end:
             state = self.tool("session")
             if state["state"] == "ready":
@@ -80,7 +81,7 @@ class Client:
         return self.tool("result", {"session": self.session, "runId": run})
 
     def wait(self, run):
-        end = time.monotonic() + 30
+        end = time.monotonic() + self.timeout
         while time.monotonic() < end:
             result = self.result(run)
             if result["state"] not in ("queued", "running"):

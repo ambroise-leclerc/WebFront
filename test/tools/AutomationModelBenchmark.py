@@ -55,7 +55,8 @@ def run_task(args, model, task, repetition, integrity):
             raise RuntimeError(installed.stdout + installed.stderr)
         log_path = pathlib.Path(args.work) / f"model-{repetition}-{task}-{abs(hash(model))}.log"
         with log_path.open("w") as log:
-            client = Client([args.agent, *common, "--mcp", "--timeout", "120", "--allow", "check", "--allow", "test"], log)
+            client = Client([args.agent, *common, "--mcp", "--timeout", "120", "--allow", "check", "--allow", "test"], log,
+                            timeout=135)  # beyond the native 120 s operation deadline, so a long command is not cut short here
             try:
                 client.initialize()
                 catalog = client.send("tools/list")["tools"]

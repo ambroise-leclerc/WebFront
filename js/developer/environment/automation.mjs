@@ -97,6 +97,16 @@ export function createPreviewInspector(frame) {
     };
 }
 
+const resultBytes = 56000;  // under the 60,000-byte native message limit and the bridge's 16-bit string length
+/** Shrinks a result's output until its JSON, which escapes control characters to six bytes each, fits one bridge string. */
+export function fitCompletion(result) {
+    const encoder = new TextEncoder();
+    const size = value => encoder.encode(JSON.stringify(value)).length;
+    result = {...result, output: clipText(result.output ?? '', 16000)};
+    while (size(result) > resultBytes && result.output.length) result = {...result, output: clipText(result.output, result.output.length >> 1), truncated: true};
+    return size(result) > resultBytes ? {exitCode: result.exitCode, output: 'The result is too large to report', truncated: true} : result;
+}
+
 /** One active native run, cooperatively cancellable; poll stays responsive while a command runs. */
 export function createAutomationRunner({run, exclusive, context, inspector, onState = () => {}, complete}) {
     let active = null, output = '';
@@ -124,8 +134,11 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                         if (args.pattern) argv.push(args.pattern);
                         result = await run(argv, {...context, signal:controller.signal, onExit:() => {},
                             write:text => { output = clip(output + text); }, reporter:undefined});
+                        // A command that stopped because of the cancellation reports it, whatever code it chose.
+                        if (controller.signal.aborted && result.exitCode !== 0) result = {...result, exitCode:130};
                     }
                 } catch (error) { result = {exitCode:controller.signal.aborted ? 130 : 1, output:clip(error?.message ?? error), report:null}; }
+                result = fitCompletion(result);
                 output = clip(result.output);
                 try { await complete(request.runId, result); }
                 finally {
