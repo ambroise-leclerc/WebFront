@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Consumer Jasmine/CTest integration (#402): opt-in instrumentation runs classic JavaScript
+  specs in an application's own page with its existing DOM and callbacks. The public CMake
+  helper provisions verified Jasmine, passes application arguments and checks a fresh JSON
+  report. An external process timeout bounds even a synchronously blocked renderer and, on POSIX,
+  kills its whole process group. `JasmineTest` is inert unless the target defines
+  `WEBFRONT_JASMINE_TESTING`; a spec file that fails to load fails the run.
+
 - ADR-019 (Proposed, #404) proposes making the developer environment automatable: one versioned
   operation contract (JSON Schema) projected onto the window, a public CLI with agent instructions and an
   optional local MCP stdio adapter, with a threat model, local-model requirements and acceptance criteria.

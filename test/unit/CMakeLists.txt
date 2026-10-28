@@ -29,7 +29,7 @@ list(APPEND TESTS_LIST ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cp
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp JasmineConsumerTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)

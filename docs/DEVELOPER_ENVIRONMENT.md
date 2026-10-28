@@ -459,6 +459,10 @@ The last successful preview stays available. Browser disconnection also stops th
 
 ## Tests (`wf test`)
 
+To test an existing application's own page from a consuming CMake project, see
+[consumer Jasmine/CTest integration](CONSUMER_TESTING.md). That opt-in path is independent of
+the developer terminal and does not require a wf manifest.
+
 `wf test [--timeout <seconds>] [pattern]` runs the project's Jasmine specs in the browser. The project chooses
 the Jasmine: `wf install jasmine-core` resolves it from the registry like any package, and the lock pins its version
 and integrity. Nothing else is needed, and no public network once the package is in the cache.
