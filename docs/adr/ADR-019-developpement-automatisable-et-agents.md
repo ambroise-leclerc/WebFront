@@ -5,6 +5,7 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-28 | Proposée | Ambroise Leclerc | Comparaison des voies d'automatisation, orientation MCP locale et modèle de menace de l'épique #403 ; #402 comme premier cas consommateur. | À renseigner après intégration. |
+| 1.1 | 2026-10-28 | Proposée | Ambroise Leclerc | Contrat d'opérations décrit en JSON Schema et projeté vers plusieurs adaptateurs ; CLI et consignes d'agent comme voie de premier rang ; WebDriver BiDi et WebMCP au comparatif ; exigences propres aux modèles locaux ; précisions sur le premier incrément et la gravité conditionnelle de HTTP. | — |
 
 ## État et portée
 
@@ -23,8 +24,8 @@ intervention humaine, sans runner qui imite Jasmine et sans dépendance à une s
 L'environnement développeur possède déjà `runNonInteractive(argv, ...)`. Le pilote interne
 `webfront-wf`, sous `test/driver/`, lui transmet des commandes et récupère statut, sortie et rapport
 JSON. Ses watchdogs natifs bornent l'exécution même si la page cesse de répondre. Le rapport détaillé
-concerne actuellement `wf test` ; les autres commandes n'offrent pas toutes des résultats sémantiques
-équivalents. Cette base n'est pas un contrat public stabilisé pour un consommateur.
+est recueilli par le pilote pour `wf test` ; la couverture des autres commandes par des résultats
+sémantiques équivalents reste à inventorier. Cette base n'est pas un contrat public stabilisé pour un consommateur.
 
 Le terminal, la compilation et les tests utilisent l'environnement téléchargé, épinglé et vérifié.
 `wf test` exécute les specs dans une frame de l'environnement ; il ne faut pas confondre cette voie
@@ -58,9 +59,12 @@ mesure de performance ou de compatibilité MCP n'est revendiquée ici.
 | Voie | Intérêt | Limites et coût | Position proposée |
 | --- | --- | --- | --- |
 | CLI structurée issue du pilote interne | Simple pour CI, CTest et scripts ; réutilise le provisioning et les watchdogs. | Publiciser packaging, schémas et cycle de vie ; la CLI seule décrit mal une fenêtre partagée et ses événements. Coût moyen. | Socle à stabiliser, utilisable sans agent ni MCP. |
+| Consignes d'agent (fichier de consignes ou skill) sur la CLI | Les agents disposant d'un shell la découvrent à la demande, sans protocole ni catalogue d'outils chargé à chaque tour ; fonctionne avec la plupart des modèles, y compris locaux. | Ni découverte typée ni négociation de capacités ; l'autorité reste celle du shell qui la lance. Coût faible au-dessus de la CLI. | Voie agent de premier rang, livrée avec la CLI. |
 | MCP local sur stdio | Découverte des outils et schémas par les clients compatibles ; processus lancé par le client, sans endpoint MCP réseau. | Adaptation du protocole, packaging, stdout exclusivement protocolaire, compatibilité clients ; accès au processus toujours sensible. Coût moyen au-dessus du socle. | Première voie MCP à prototyper. |
 | MCP Streamable HTTP local | Service persistant, plusieurs clients, attachement naturel à une fenêtre existante. | Authentification, Host/Origin, révocation, connexions et sessions ; nouveau service réseau privilégié. Coût élevé. | Différé jusqu'à preuve d'un besoin non couvert par stdio et IPC natif. |
 | Pilotage navigateur : accessibilité/DOM, captures, Playwright ou CDP | Vérifie l'IHM visible et les interactions ; outils génériques utiles aux agents. | Sélecteurs fragiles, captures coûteuses et sensibles, fonctions différentes selon moteur ; runtime supplémentaire possible. Coût moyen à élevé pour une couverture commune. | Complément pour inspecter et agir, pas unique contrat d'exécution de wf. |
+| WebDriver BiDi (standard W3C) | Protocole d'événements standardisé, successeur annoncé de CDP pour le pilotage navigateur ; plus plausible que CDP comme dénominateur commun. | Niveau de support inégal selon CEF, WebKitGTK, WKWebView, WebView2 et navigateur système, à qualifier moteur par moteur ; processus ou passerelle supplémentaires. Coût moyen à élevé. | À qualifier par moteur ; pas de dépendance dans le premier incrément. |
+| WebMCP (outils déclarés par la page) | La preview pourrait publier des outils adaptés à l'agent, sans sélecteurs fragiles. | Proposition expérimentale ; les outils viennent de la page, donc d'une source non fiable dans le modèle de menace ci-dessous. Coût inconnu. | À surveiller ; ne confère aucun droit et n'est pas adopté. |
 | Export du bridge ou terminal brut | Rapide à expérimenter, fonctions existantes immédiatement accessibles. | Autorité native trop large, types bas niveau, parsing de texte, appels arbitraires, aucune politique commune fiable. | Écarté comme interface publique par défaut. |
 | Service distant ou multi-utilisateur | Machines provisionnées et automatisation centralisée. | Identité, TLS, isolation entre utilisateurs, secrets, facturation/quotas et exploitation ; change le modèle de confiance. Coût très élevé. | Hors premier incrément ; décision dédiée. |
 
@@ -72,6 +76,11 @@ exigerait l'évolution et les tests conjoints prescrits par ADR-003.
 ## Décision proposée
 
 ### Un contrat d'opérations partagé, puis des adaptateurs
+
+Décrire chaque opération une fois, en JSON Schema versionné, source unique de ses entrées, résultats,
+erreurs et capacités. La fenêtre, la CLI, MCP et d'éventuels appels de fonctions compatibles avec
+d'autres clients en sont des projections ; aucun n'ajoute de sémantique ni de droit. Le choix d'une
+révision MCP ou d'un format d'appel reste ainsi remplaçable sans changer les opérations.
 
 Séparer les opérations développeur du rendu du terminal. La fenêtre, la CLI publique future,
 CTest et MCP appellent le même dispatch, les mêmes validations et les mêmes permissions. Réutiliser
@@ -121,6 +130,19 @@ Les captures sont explicites et bornées. Ni `eval`, ni shell généraliste, ni 
 callbacks ne sont nécessaires au premier contrat. Une API métier d'automatisation telle que celle
 de SiliconForge reste un choix explicite du consommateur et doit recevoir sa propre politique.
 
+### Agents à modèle local
+
+Le contrôle d'accès ne suppose aucune qualité de raisonnement du modèle, et un modèle local, souvent
+plus petit, y est plus exposé. Exigences : catalogue d'outils réduit, à gros grain, aux descriptions
+courtes, dont le coût en tokens est mesuré ; sorties bornées et diagnostics concis ; schémas
+simples exploitables par un décodage contraint (grammaire ou JSON Schema) lorsque le moteur d'inférence
+l'offre. Les opérations longues sont asynchrones et consultables, car prefill et génération
+peuvent être lents et partager la machine avec le build et le navigateur ; les quotas de
+concurrence tiennent compte de la mémoire. Un agent local avec CLI ou stdio doit fonctionner sans réseau
+public après provisioning. Les moteurs d'inférence courants n'étant pas des clients MCP, la validation
+passe par un hôte qui l'est ; la CLI et ses consignes en restent l'alternative. L'embarquement d'un modèle
+dans une application WebFront pour sa propre IHM est un autre sujet, hors de cet ADR.
+
 ### #402 livre une première capacité indépendante
 
 Stabiliser une intégration publique Jasmine/CTest pour un consommateur qui sert sa propre page.
@@ -147,10 +169,10 @@ Les mesures sont des exigences à implémenter, pas des protections aujourd'hui 
 
 | Menace et gravité | Mesures exigées | Risque résiduel |
 | --- | --- | --- |
-| Injection de prompt dans sources, page, diagnostics ou descriptions d'outils — élevée | Traiter les contenus comme données ; outils/schémas de confiance ; autorisations hors du projet, vérifiées côté contrôleur à chaque appel. Une annotation MCP n'accorde aucun droit. | L'agent peut encore choisir une action autorisée nuisible ; séparer l'autorité de la qualité du raisonnement. |
+| Injection de prompt dans sources, page, diagnostics, descriptions d'outils ou outils déclarés par la page — élevée | Traiter les contenus comme données ; outils/schémas de confiance ; autorisations hors du projet, vérifiées côté contrôleur à chaque appel. Une annotation MCP n'accorde aucun droit. Les outils déclarés par une page ne sont jamais ajoutés au catalogue de confiance. | L'agent peut encore choisir une action autorisée nuisible ; séparer l'autorité de la qualité du raisonnement. Un modèle local plus petit y résiste souvent moins : confirmations humaines plus strictes par défaut. |
 | Exécution arbitraire par script, test, paquet ou callback — critique | Aucune exportation automatique du bridge ; capacités séparées pour exécution, écriture et réseau ; politique plafonnée par le lanceur, non extensible par le manifeste. | Le code exécuté garde l'autorité accessible au processus. Projet hostile : isolation OS/CI dédiée et secrets retirés ; aucun sandbox WebFront annoncé. |
 | Accès non autorisé ou détournement de session — critique | Stdio ou IPC protégé ; attachement explicite et révocable ; autorisation liée à projet/session ; identifiants non assimilés à une identité. | Un processus du même utilisateur peut dépasser les garanties du canal ; documenter cette limite. |
-| DNS rebinding, requêtes web et exposition réseau — critique si HTTP ajouté | Loopback uniquement, validation Host et Origin, refus d'Origin invalide, authentification indépendante même sans Origin ; pas de CORS permissif. Aucun accès distant implicite. | Origin n'authentifie pas un client natif ; la politique du bridge ADR-008 ne sécurise pas à elle seule MCP. |
+| DNS rebinding, requêtes web et exposition réseau — sans objet tant que HTTP n'est pas retenu, critique s'il l'est | Loopback uniquement, validation Host et Origin, refus d'Origin invalide, authentification indépendante même sans Origin ; pas de CORS permissif. Aucun accès distant implicite. | Origin n'authentifie pas un client natif ; la politique du bridge ADR-008 ne sécurise pas à elle seule MCP. |
 | Chemins hostiles, liens symboliques et courses — élevée | Projet explicitement lié, résolution et contrôle au moment de l'accès, traitement des liens et opérations atomiques quand nécessaires ; cas de course testés. | NativeDebugFS et permissions de manifeste n'isolent pas du code exécuté avec les droits OS du processus. |
 | Exfiltration de secrets et SSRF — critique | Environnement hérité minimisé, lectures/sorties bornées, réseau et endpoints explicitement autorisés, contrôle des redirections ; aucun passage automatique de tokens. | Logs, DOM et captures peuvent contenir des secrets. L'expurgation seule ne protège pas d'un code hostile ; isolation et contrôle réseau externes nécessaires. |
 | Renderer bloqué, sorties illimitées, concurrence — élevée | Watchdog natif, quotas et contrôle de flux, sérialisation des mutations, fermeture et drainage déterministes ; arrêt forcé par superviseur si le processus ne se termine pas. | Une interruption peut laisser un effet déjà commis ; distinguer arrêté, terminé et résultat inconnu. |
@@ -169,12 +191,19 @@ et automatisation de la vraie fenêtre. Les coûts acceptés seraient un contrat
 packaging optionnel, des adaptateurs moteurs et clients à maintenir, une politique d'autorisation
 et un superviseur natif. MCP ne remplace ni les tests ni la sécurité du système hôte.
 
+Le premier incrément (session démarrée par l'adaptateur) ne couvre pas encore le partage d'une fenêtre
+déjà ouverte entre le développeur et l'agent, objectif central de l'épique : cet attachement dépend de
+l'IPC authentifié non encore choisi et reste une condition d'acceptation.
+
 Avant acceptation :
 
 - Livrer #402 et un consommateur externe de régression, sans runner Jasmine de substitution ;
   tester réussite, échec, zéro spec, crash, timeout, exécutions parallèles et nettoyage sous Linux sans affichage.
 - Démontrer par prototype le même check/build/test dans la fenêtre, la CLI et deux clients MCP
-  identifiés ; mesurer démarrage, coût des sorties et arrêt, et consigner dépendances et versions.
+  identifiés, dont un hôte branché sur un modèle local ; mesurer démarrage, coût des sorties et arrêt,
+  ainsi que le coût en tokens du catalogue d'outils, et consigner dépendances et versions.
+- Définir un petit jeu de tâches de référence (par exemple corriger un échec de `wf check`, relancer
+  les tests) et publier le taux de réussite par classe de modèle essayée, sans en faire une garantie.
 - Démontrer démarrage autonome, choix de session et attachement refusé sans autorisation ;
   révocation, fermeture, déconnexion, renderer bloqué et arrêt pendant publication.
 - Éprouver chemins hostiles, limites, injection de contenu, refus de capacités, absence de secrets
@@ -186,7 +215,7 @@ Avant acceptation :
   moteurs natifs concernés. Tests sans réseau public après provisioning ; dispatch CI requis
   selon AGENTS.md avant fusion des changements concernés vers develop.
 
-Restent à décider par prototype : SDK ou implémentation limitée, version MCP, schémas publics,
+Restent à décider par prototype : couverture des commandes par des rapports structurés, SDK ou implémentation limitée, version MCP, schémas publics,
 packaging du pilote, mécanisme IPC par OS, granularité des permissions, capacités d'inspection par
 moteur et besoin réel d'HTTP. L'accès distant/multi-utilisateur et le shell généraliste sont hors
 du premier incrément. L'ADR reste proposée tant que ces choix et preuves ne sont pas consignés.
@@ -205,6 +234,9 @@ Sources externes consultées le **2026-10-28** :
   stdio et Streamable HTTP, séparation des logs et du protocole, contrôles d'origine et recommandations d'authentification.
 - [MCP, bonnes pratiques de sécurité](https://modelcontextprotocol.io/docs/2025-11-25/tutorials/security/security_best_practices) :
   compromission des serveurs locaux, sessions, SSRF, délégation d'autorité et minimisation des droits.
+
+WebDriver BiDi et WebMCP sont cités d'après des connaissances générales et n'ont pas été vérifiés auprès de
+leurs spécifications à la date de cette révision ; leur état est à confirmer avant toute décision.
 
 Ces références décrivent MCP ; le découpage WebFront, la préférence pour stdio, les contrôles IPC
 et les niveaux de risque sont les propositions de cette ADR, et non une certification MCP.
