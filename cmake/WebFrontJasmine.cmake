@@ -22,7 +22,9 @@ endfunction()
 
 # webfront_add_jasmine_test(NAME name TARGET application SPECS files... [ARGS ...]
 #     [FRONTEND engine] [TIMEOUT seconds] [JASMINE path/to/jasmine.js])
-# TARGET must retain webfront::testing::JasmineTest before show() in its test-enabled build.
+# TARGET must retain webfront::testing::JasmineTest before show() in its test-enabled build; the helper defines
+# WEBFRONT_JASMINE_TESTING on it, and without that macro JasmineTest is inert. ARGS reach the application literally,
+# as individual arguments (empty ones, semicolons and '$<' included).
 function(webfront_add_jasmine_test)
     cmake_parse_arguments(PARSE_ARGV 0 ARG "" "NAME;TARGET;FRONTEND;TIMEOUT;JASMINE" "SPECS;ARGS")
     if(ARG_UNPARSED_ARGUMENTS OR ARG_KEYWORDS_MISSING_VALUES OR NOT ARG_NAME OR NOT ARG_TARGET OR NOT ARG_SPECS)
@@ -38,6 +40,10 @@ function(webfront_add_jasmine_test)
     if(NOT kind STREQUAL "EXECUTABLE")
         message(FATAL_ERROR "Jasmine TARGET must be an executable")
     endif()
+    list(LENGTH ARG_SPECS spec_count)
+    if(spec_count GREATER 100)
+        message(FATAL_ERROR "Jasmine supports at most 100 spec files, got ${spec_count}")
+    endif()
     if(NOT ARG_TIMEOUT)
         set(ARG_TIMEOUT 60)
     endif()
@@ -51,20 +57,33 @@ function(webfront_add_jasmine_test)
         endif()
         get_property(platforms GLOBAL PROPERTY "WEBFRONT_JASMINE_${ARG_FRONTEND}_PLATFORMS")
         get_property(option GLOBAL PROPERTY "WEBFRONT_JASMINE_${ARG_FRONTEND}_OPTION")
-        if(NOT CMAKE_SYSTEM_NAME IN_LIST platforms OR NOT ${option})
+        # The option property holds a variable name; an unset one must not break the condition's syntax.
+        set(enabled OFF)
+        if(option)
+            if(${option})
+                set(enabled ON)
+            endif()
+        endif()
+        if(NOT CMAKE_SYSTEM_NAME IN_LIST platforms OR NOT enabled)
             message(FATAL_ERROR "Jasmine FRONTEND '${ARG_FRONTEND}' is not enabled on this platform")
         endif()
     endif()
     # Use the same pinned package and verifier as wf's registry, outside the core resources.
     if(NOT ARG_JASMINE)
-        webfront_provision_bootstrap(archive
-            URL "https://registry.npmjs.org/jasmine-core/-/jasmine-core-7.0.2.tgz"
-            INTEGRITY "sha512-YMVijt84KPQQFm1db1AQAxTXfq0k3wU06OkepLViljURFqiRQ7EYYX2eUAshhUv9fA9t1E2N65GrdqvupA9VPQ=="
-            DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/package"
-            LOCAL_DIR "${WEBFRONT_JASMINE_ARCHIVE_DIR}")
-        file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/package"
-            PATTERNS "package/lib/jasmine-core/jasmine.js" "package/LICENSE")
-        set(ARG_JASMINE "${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/package/package/lib/jasmine-core/jasmine.js")
+        # Provision and extract once per directory, however many tests it registers.
+        set(package "${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/package")
+        get_property(provisioned GLOBAL PROPERTY "WEBFRONT_JASMINE_PROVISIONED_${package}")
+        if(NOT provisioned)
+            webfront_provision_bootstrap(archive
+                URL "https://registry.npmjs.org/jasmine-core/-/jasmine-core-7.0.2.tgz"
+                INTEGRITY "sha512-YMVijt84KPQQFm1db1AQAxTXfq0k3wU06OkepLViljURFqiRQ7EYYX2eUAshhUv9fA9t1E2N65GrdqvupA9VPQ=="
+                DESTINATION "${package}"
+                LOCAL_DIR "${WEBFRONT_JASMINE_ARCHIVE_DIR}")
+            file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${package}"
+                PATTERNS "package/lib/jasmine-core/jasmine.js" "package/LICENSE")
+            set_property(GLOBAL PROPERTY "WEBFRONT_JASMINE_PROVISIONED_${package}" TRUE)
+        endif()
+        set(ARG_JASMINE "${package}/package/lib/jasmine-core/jasmine.js")
     endif()
     set(files "[]")
     set(index 0)
@@ -87,6 +106,11 @@ function(webfront_add_jasmine_test)
     set(arguments "[]")
     set(index 0)
     foreach(argument IN LISTS ARG_ARGS)
+        if(argument MATCHES "\\]==\\]")
+            message(FATAL_ERROR "A Jasmine ARGS entry must not contain ']==]'")
+        endif()
+        # file(GENERATE) evaluates generator expressions: keep every argument literal.
+        string(REPLACE "$<" "$<1:$><" argument "${argument}")
         _webfront_jasmine_quote("${argument}" quoted)
         string(JSON arguments SET "${arguments}" ${index} "${quoted}")
         math(EXPR index "${index} + 1")
