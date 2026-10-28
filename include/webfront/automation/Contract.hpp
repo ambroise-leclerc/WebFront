@@ -60,24 +60,55 @@ class TransportError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };
-inline Object operationContract(std::string_view operation) {
-    const Object definitions{Object(contractSource).raw("x-webfront-operations")};
-    if (!definitions.has(operation))
-        throw std::invalid_argument("Unknown automation operation");
-    return Object(definitions.raw(operation));
+inline const Object& contractObject() {
+    static const Object contract{contractSource};
+    return contract;
 }
-inline std::string startSchema() {
-    const Object contract{contractSource};
-    return objectJson({
-        {                "type",       contract.raw("type")},
-        {"additionalProperties",                    "false"},
-        {            "required",   contract.raw("required")},
-        {          "properties", contract.raw("properties")}
+inline const Object& argumentProperties() {
+    static const Object properties{Object(Object(contractObject().raw("properties")).raw("arguments")).raw("properties")};
+    return properties;
+}
+struct OperationDefinition {
+    Object                   schema;
+    std::string              permission;
+    std::vector<std::string> arguments, required;
+};
+inline const auto& operationDefinitions() {
+    static const auto definitions = [] {
+        std::map<std::string, OperationDefinition, std::less<>> values;
+        const Object                                            schemas{contractObject().raw("x-webfront-operations")};
+        for (const auto& [name, raw] : schemas.members()) {
+            const Object schema{raw};
+            values.emplace(
+                name,
+                OperationDefinition{schema, schema.string("permission"), contractStrings(schema.raw("arguments")), contractStrings(schema.raw("required"))});
+        }
+        return values;
+    }();
+    return definitions;
+}
+inline const OperationDefinition& operationDefinition(std::string_view operation) {
+    const auto& definitions = operationDefinitions();
+    const auto  found       = definitions.find(operation);
+    if (found == definitions.end())
+        throw std::invalid_argument("Unknown automation operation");
+    return found->second;
+}
+inline const Object& operationContract(std::string_view operation) {
+    return operationDefinition(operation).schema;
+}
+inline const std::string& startSchema() {
+    static const auto schema = objectJson({
+        {                "type",       contractObject().raw("type")},
+        {"additionalProperties",                            "false"},
+        {            "required",   contractObject().raw("required")},
+        {          "properties", contractObject().raw("properties")}
     });
+    return schema;
 }
 inline void validateOperation(std::string_view operation, const Object& arguments) {
-    const auto definition = operationContract(operation);
-    const auto allowed    = contractStrings(definition.raw("arguments"));
+    const auto& definition = operationDefinition(operation);
+    const auto& allowed    = definition.arguments;
     for (const auto& [key, raw] : arguments.members()) {
         if (std::ranges::find(allowed, key) == allowed.end())
             throw std::invalid_argument("Unexpected operation argument: " + key);
@@ -85,7 +116,7 @@ inline void validateOperation(std::string_view operation, const Object& argument
         if (value.size() > 4096 || value.contains('\0'))
             throw std::invalid_argument("Invalid operation argument");
     }
-    for (const auto& key : contractStrings(definition.raw("required"))) {
+    for (const auto& key : definition.required) {
         if (!arguments.has(key) || (key != "value" && arguments.string(key).empty()))
             throw std::invalid_argument("Missing operation argument: " + key);
     }

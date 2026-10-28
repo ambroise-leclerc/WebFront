@@ -2,6 +2,7 @@
 #pragma once
 #include "Json.hpp"
 
+#include <chrono>
 #include <stop_token>
 #include <thread>
 #ifdef _WIN32
@@ -33,7 +34,7 @@ namespace webfront::automation {
 class StdioInput {
 public:
     enum class Status { waiting, line, closed };
-    // Never blocks waiting for a complete line. A browser close can therefore stop the worker.
+    // Waits at most 10 ms for input, never for a complete line. Browser close can stop the worker.
     Status read(std::string& line) {
         line.clear();
         const auto newline = buffer.find('\n');
@@ -49,8 +50,10 @@ public:
         if (GetFileType(handle) == FILE_TYPE_PIPE) {
             if (!PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr))
                 return Status::closed;
-            if (!available)
+            if (!available) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
                 return Status::waiting;
+            }
         } else if (GetFileType(handle) != FILE_TYPE_DISK) {
             throw std::runtime_error("MCP stdin must be a pipe or redirected file");
         }
@@ -59,7 +62,7 @@ public:
             return finish(line);
 #else
         pollfd     descriptor{STDIN_FILENO, POLLIN, 0};
-        const auto status = ::poll(&descriptor, 1, 0);
+        const auto status = ::poll(&descriptor, 1, 10);
         if (status < 0) {
             if (errno == EINTR)
                 return Status::waiting;
@@ -86,7 +89,7 @@ public:
             buffer.erase(0, end + 1);
             return Status::line;
         }
-        return Status::waiting;
+        return Status::waiting;  // Caller retries immediately; the next read waits for input, without a fixed sleep.
     }
 
 private:

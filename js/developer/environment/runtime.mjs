@@ -268,21 +268,40 @@ const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install 
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
 let executionToken = null, automationActive = false, cppActive = 0;
-export async function exclusive(context, action) {
+export async function exclusive(context, action, {settlesOnAbort = false} = {}) {
+    const interruption = () => Object.assign(new Error(context.signal?.reason?.message ?? 'Interrupted'),{exitCode:130});
+    if (context.signal?.aborted && !settlesOnAbort) throw interruption();
     const nested = executionToken !== null && context.executionToken === executionToken;
-    if (context.automation && cppActive) throw new Error('Developer environment is busy with an application command');
-    if (executionToken !== null && !nested) throw new Error('Developer environment is busy; wait or stop the active operation');
+    if (context.executionToken && !nested) throw new Error('Developer operation no longer owns its lease');
+    if (context.automation && cppActive) throw Object.assign(new Error('Developer environment is busy with an application command'),{code:'busy'});
+    if (executionToken !== null && !nested) throw Object.assign(new Error('Developer environment is busy; wait or stop the active operation'),{code:'busy'});
     if (!nested) { executionToken = Symbol('developer operation'); automationActive = context.automation === true; }
-    try { return await action({...context, executionToken}); }
-    finally { if (!nested) {executionToken = null; automationActive=false;} }
+    const token = executionToken;
+    let abort, cancellationTimer;
+    const interrupted = new Promise((_,reject) => {
+        // Workers already have a two-second stop grace. Preserve their outcome and cleanup first,
+        // then bound an unresponsive preparation/command Promise as well.
+        abort = () => { cancellationTimer=setTimeout(() => reject(interruption()),2500); };
+        if (!settlesOnAbort) context.signal?.addEventListener('abort',abort,{once:true});
+    });
+    try {
+        const running=action({...context, executionToken:token});
+        return await (settlesOnAbort ? running : Promise.race([running,interrupted]));
+    }
+    finally {
+        clearTimeout(cancellationTimer);
+        if (!settlesOnAbort) context.signal?.removeEventListener('abort',abort);
+        if (!nested && executionToken === token) {executionToken = null; automationActive=false;}
+    }
 }
 
 export async function execute(args, context) {
-    return exclusive(context, async owned => {
-        const [command = 'help', ...rest] = args;
-        if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
-        return commands[command](rest, owned);
-    });
+    const [command = 'help', ...rest] = args;
+    if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
+    // A watch keeps its compiler alive, but owns the shared window only while rebuilding/publishing.
+    if (command === 'dev') return commands[command](rest,{...context,withBuild:action => exclusive(context,action)});
+    // wf test already bounds cancellation and cleanup; retain its lease until that cleanup finishes.
+    return exclusive(context, async owned => commands[command](rest, owned),{settlesOnAbort:command==='test'});
 }
 
 export const connectAutomation = context => connectAgent({...context,run:runNonInteractive,exclusive});

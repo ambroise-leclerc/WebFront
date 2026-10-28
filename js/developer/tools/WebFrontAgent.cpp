@@ -102,9 +102,8 @@ struct Options {
     std::chrono::seconds               startupTimeout{120};
 };
 std::string argumentName(std::string_view flag) {
-    const Object fields{Object(Object(contractSource).raw("properties")).raw("arguments")};
-    const Object properties{fields.raw("properties")};
-    for (const auto& [key, schema] : properties.members()) {
+    const auto& fields = argumentProperties();
+    for (const auto& [key, schema] : fields.members()) {
         std::string option = "--";
         for (char c : key) {
             if (c >= 'A' && c <= 'Z') {
@@ -175,8 +174,7 @@ void runMcp(Backend& controller, std::stop_token stop, Closed&& closed) {
                 std::cout << *reply << '\n' << std::flush;
             if (!std::cout)
                 break;
-        } else
-            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
     }
 }
 

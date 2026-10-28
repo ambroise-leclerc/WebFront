@@ -1,6 +1,7 @@
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <webfront/automation/Mcp.hpp>
+#include <webfront/automation/Stdio.hpp>
 
 namespace {
 using namespace webfront::automation;
@@ -18,6 +19,40 @@ Object query(const Session& session, std::string id) {
     }));
 }
 }  // namespace
+
+#ifndef _WIN32
+SCENARIO("MCP stdin drains buffered lines and preserves a partial line through EOF") {
+    struct InputPipe {
+        int saved = ::dup(STDIN_FILENO);
+        int descriptors[2]{-1, -1};
+        ~InputPipe() {
+            if (saved >= 0) {
+                ::dup2(saved, STDIN_FILENO);
+                ::close(saved);
+            }
+            for (const int descriptor : descriptors)
+                if (descriptor >= 0)
+                    ::close(descriptor);
+        }
+    } pipe;
+    REQUIRE(pipe.saved >= 0);
+    REQUIRE(::pipe(pipe.descriptors) == 0);
+    REQUIRE(::dup2(pipe.descriptors[0], STDIN_FILENO) == STDIN_FILENO);
+    REQUIRE(::write(pipe.descriptors[1], "one\ntwo\npart", 12) == 12);
+    StdioInput  input;
+    std::string line;
+    REQUIRE(input.read(line) == StdioInput::Status::line);
+    REQUIRE(line == "one");
+    REQUIRE(input.read(line) == StdioInput::Status::line);
+    REQUIRE(line == "two");
+    REQUIRE(input.read(line) == StdioInput::Status::waiting);
+    REQUIRE(::close(pipe.descriptors[1]) == 0);
+    pipe.descriptors[1] = -1;
+    REQUIRE(input.read(line) == StdioInput::Status::line);
+    REQUIRE(line == "part");
+    REQUIRE(input.read(line) == StdioInput::Status::closed);
+}
+#endif
 
 SCENARIO("Automation authorization stays native and binds requests to a project session") {
     webfront::test::TemporaryDirectory directory;
@@ -104,6 +139,9 @@ SCENARIO("MCP initialization, tool errors and request identifiers follow the sup
     REQUIRE(Object(*mcp.receive(R"({"jsonrpc":"2.0","id":null,"method":"ping"})")).has("error"));
     REQUIRE(Object(*mcp.receive("{bad")).has("error"));
     REQUIRE_FALSE(mcp.receive(R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":42}})"));
+    for (const auto notification : {R"({"jsonrpc":"1.0","method":"ping"})", R"({"jsonrpc":"2.0"})", R"({"method":"ping"})", R"({"jsonrpc":"2.0","method":17})"})
+        REQUIRE_FALSE(mcp.receive(notification));
+    REQUIRE(Object(*mcp.receive(R"({"jsonrpc":"1.0","id":7,"method":"ping"})")).has("error"));
 }
 
 SCENARIO("Automation JSON rejects duplicate keys, non-UTF8 and deeply nested or oversized input") {
@@ -133,6 +171,29 @@ SCENARIO("The versioned operation schema projects the same fields and permission
             REQUIRE(std::ranges::find(allowed, field) != allowed.end());
     }
     REQUIRE(Object(startSchema()).has("properties"));
+    REQUIRE(&contractObject() == &contractObject());
+    REQUIRE(&operationContract("build") == &operationContract("build"));
+    REQUIRE(&startSchema() == &startSchema());
+}
+
+SCENARIO("A completed automation snapshot replaces progress with the final bounded output") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+        {directory.path(), {"build"}}
+    };
+    session.poll();
+    const auto id = Object(session.start(command(session, "build"))).string("runId");
+    session.poll("last progress tail");
+    const auto output = std::string(12000, 'x') + "final summary";
+    session.complete(id,
+                     objectJson({
+                         {"exitCode",                           "0"},
+                         {  "output", webfront::json::quote(output)},
+                         {  "report",                        "null"}
+    }));
+    const Object result{session.result(query(session, id))};
+    REQUIRE(result.string("output") == output);
+    REQUIRE(result.string("output") == Object(result.raw("result")).string("output"));
 }
 
 SCENARIO("A completion the native side cannot validate fails its run instead of wedging the session") {
@@ -160,6 +221,17 @@ SCENARIO("A completion the native side cannot validate fails its run instead of 
             THEN("the run fails as well") {
                 REQUIRE(Object(session.result(query(session, id))).string("state") == "failed");
             }
+        }
+        WHEN("an invalid completion has a very long unexpected member name") {
+            session.complete(id,
+                             objectJson({
+                                 {std::string(50000, 'x'), "0"}
+            }));
+            const Object result{session.result(query(session, id))};
+            REQUIRE(result.string("state") == "failed");
+            REQUIRE(result.string("output").size() < 1200);
+            REQUIRE(result.string("output") == Object(result.raw("result")).string("output"));
+            REQUIRE_NOTHROW(session.start(command(session, "build")));
         }
     }
 }

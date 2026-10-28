@@ -1,9 +1,7 @@
 /// @brief Explicitly bind an automation controller to one developer window. No callbacks in normal applications.
 #pragma once
 #include "../WebFront.hpp"
-#include "Session.hpp"
-
-#include <random>
+#include "Channel.hpp"
 
 namespace webfront::automation {
 // The capability is known only to this script's closure and to the native binder: a callback also needs it, because
@@ -57,10 +55,7 @@ class Binding {
         void                     authorize(const AppUI& ui, std::string_view presented) const {
             if (!browser || browser->id() != ui.id())
                 throw std::runtime_error("Automation callback belongs to another page");
-            unsigned mismatch = presented.size() != capability.size();
-            for (std::size_t index = 0; index < presented.size() && index < capability.size(); ++index)
-                mismatch |= static_cast<unsigned>(static_cast<unsigned char>(presented[index])) ^ static_cast<unsigned>(static_cast<unsigned char>(capability[index]));
-            if (mismatch)
+            if (!channel::sameToken(presented, capability))
                 throw std::runtime_error("Automation callback lacks the page capability");
         }
     };
@@ -68,15 +63,9 @@ class Binding {
 public:
     /// Retain until after application shutdown. Only the first connected window is selected.
     Binding(App& app, std::shared_ptr<Session> session) : state(std::make_shared<State>()) {
-        state->session   = std::move(session);
-        std::random_device random;
-        for (int i = 0; i < 8; ++i) {
-            constexpr std::string_view digits = "0123456789abcdef";
-            const auto                 word   = random();
-            for (int shift = 0; shift < 32; shift += 8)
-                state->capability += {digits[(word >> shift >> 4) & 15], digits[(word >> shift) & 15]};
-        }
-        const auto owned = state;
+        state->session    = std::move(session);
+        state->capability = channel::nonce();
+        const auto owned  = state;
         app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string capability, std::string output) {
             std::scoped_lock lock{owned->mutex};
             owned->authorize(ui, capability);

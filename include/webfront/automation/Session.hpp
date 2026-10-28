@@ -56,8 +56,8 @@ public:
                 throw OperationError("not_ready", "Developer session is not ready");
             if (active)
                 throw OperationError("busy", "Developer session is busy");
-            const auto operation  = request.string("operation");
-            const auto permission = operationContract(operation).string("permission");
+            const auto  operation  = request.string("operation");
+            const auto& permission = operationDefinition(operation).permission;
             if (!knownPermission(permission) || std::ranges::find(options.allow, permission) == options.allow.end())
                 throw OperationError("not_authorized", "Automation operation is not authorized: " + operation);
             const Object arguments{request.raw("arguments", "{}")};
@@ -124,17 +124,29 @@ public:
         std::scoped_lock lock{mutex};
         if (!active || *active != id)
             throw std::runtime_error("Unexpected or late automation completion");
-        auto& run    = find(*active);
-        int   status = 1;
+        auto&       run    = find(*active);
+        int         status = 1;
+        std::string output;
         try {
-            status = completionStatus(result);
+            const Object checked{result};
+            status = completionStatus(checked);
+            output = checked.string("output");
         } catch (const std::exception& error) {
+            std::string reason{error.what()};
+            if (reason.size() > 1024) {
+                std::size_t end = 1024;
+                while (end && (static_cast<unsigned char>(reason[end]) & 0xC0) == 0x80)
+                    --end;
+                reason.resize(end);
+            }
+            output = "Invalid automation completion: " + reason;
             result = objectJson({
-                { "exitCode",                                                         "1"},
-                {   "output", json::quote(std::string("Invalid automation completion: ") + error.what())}
+                {"exitCode",                 "1"},
+                {  "output", json::quote(output)}
             });
         }
         run.result = std::move(result);
+        run.output = std::move(output);
         run.state  = status == 0 ? "succeeded" : status == 130 ? "cancelled" : "failed";
         audit(run.state, run.operation, run.id);
         active.reset();
@@ -193,8 +205,7 @@ private:
         return value + "]";
     }
 
-    static int completionStatus(const std::string& result) {
-        const Object checked{result};
+    static int completionStatus(const Object& checked) {
         checked.only({"exitCode", "output", "report", "truncated", "data", "diagnostics"});
         const auto code         = checked.raw("exitCode");
         int        status       = -1;
@@ -205,9 +216,8 @@ private:
         return status;
     }
     static bool knownPermission(std::string_view name) {
-        const Object operations{Object(contractSource).raw("x-webfront-operations")};
-        for (const auto& [operation, definition] : operations.members())
-            if (Object(definition).string("permission") == name)
+        for (const auto& [operation, definition] : operationDefinitions())
+            if (definition.permission == name)
                 return true;
         return false;
     }

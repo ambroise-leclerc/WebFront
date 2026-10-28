@@ -3,6 +3,52 @@
 #include <webfront/automation/Channel.hpp>
 
 #include <deque>
+#ifndef _WIN32
+    #include <spawn.h>
+    #include <sys/wait.h>
+extern char** environ;
+#endif
+
+SCENARIO("Native attachment sockets cannot be inherited by renderer executables") {
+    using namespace webfront::automation;
+    [[maybe_unused]] channel::Runtime runtime;
+    const auto                        check = [](channel::Handle socket) {
+#ifdef _WIN32
+        DWORD flags = HANDLE_FLAG_INHERIT;
+        REQUIRE(GetHandleInformation(reinterpret_cast<HANDLE>(socket), &flags));
+        REQUIRE((flags & HANDLE_FLAG_INHERIT) == 0);
+#else
+        REQUIRE((::fcntl(socket, F_GETFD) & FD_CLOEXEC) != 0);
+        // An actual exec must not expose a socket via the inherited descriptor table.
+        const auto           command = "test ! -S /dev/fd/" + std::to_string(socket);
+        std::array<char*, 4> args{const_cast<char*>("sh"), const_cast<char*>("-c"), const_cast<char*>(command.c_str()), nullptr};
+        pid_t                child = 0;
+        REQUIRE(::posix_spawn(&child, "/bin/sh", nullptr, nullptr, args.data(), environ) == 0);
+        int status = 0;
+        REQUIRE(::waitpid(child, &status, 0) == child);
+        REQUIRE(WIFEXITED(status));
+        REQUIRE(WEXITSTATUS(status) == 0);
+#endif
+    };
+    GIVEN("a listener, its client, an accepted peer, and an adopted socket") {
+        channel::Socket listener{channel::createSocket()};
+        auto            address = channel::address(0);
+        REQUIRE(::bind(listener.value, reinterpret_cast<const sockaddr*>(&address), sizeof address) == 0);
+        REQUIRE(::listen(listener.value, 1) == 0);
+#ifdef _WIN32
+        int size = sizeof address;
+#else
+        socklen_t size = sizeof address;
+#endif
+        REQUIRE(::getsockname(listener.value, reinterpret_cast<sockaddr*>(&address), &size) == 0);
+        channel::Socket client{channel::createSocket()};
+        REQUIRE(::connect(client.value, reinterpret_cast<const sockaddr*>(&address), sizeof address) == 0);
+        channel::Socket accepted{channel::acceptSocket(listener.value)};
+        channel::Socket adopted{::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)};
+        for (const auto socket : {listener.value, client.value, accepted.value, adopted.value})
+            check(socket);
+    }
+}
 
 SCENARIO("A private native attachment grants only the already running controller's authority") {
     using namespace webfront::automation;
@@ -67,8 +113,8 @@ SCENARIO("A silent loopback connection does not delay the owner's requests") {
     const Object  endpoint{channel::readEndpoint(directory.path() / "attachment")};
     GIVEN("several peers that connect and send nothing") {
         [[maybe_unused]] channel::Runtime runtime;
-        std::deque<channel::Socket>     idle;  // Socket is neither copyable nor movable
-        const auto                      port = static_cast<unsigned short>(std::stoi(endpoint.raw("port")));
+        std::deque<channel::Socket>       idle;  // Socket is neither copyable nor movable
+        const auto                        port = static_cast<unsigned short>(std::stoi(endpoint.raw("port")));
         for (int index = 0; index < 4; ++index) {
             idle.emplace_back(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
             const auto address = channel::address(port);

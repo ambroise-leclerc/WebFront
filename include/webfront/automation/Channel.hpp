@@ -7,6 +7,7 @@
 #include <fstream>
 #include <list>
 #include <thread>
+#include <utility>
 #ifdef _WIN32
     // WinSock must precede Windows, and BCrypt requires Windows' type declarations.
     #ifndef NOMINMAX
@@ -80,11 +81,49 @@ inline void nonblocking(Handle socket) {
         throw std::runtime_error("Cannot configure native attachment socket");
 }
 #endif
+inline bool nonInheritable(Handle socket) {
+#ifdef _WIN32
+    return SetHandleInformation(reinterpret_cast<HANDLE>(socket), HANDLE_FLAG_INHERIT, 0) != 0;
+#else
+    const auto flags = ::fcntl(socket, F_GETFD);
+    return flags >= 0 && ::fcntl(socket, F_SETFD, flags | FD_CLOEXEC) == 0;
+#endif
+}
+inline Handle createSocket() {
+#ifdef _WIN32
+    const auto socket = ::WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+#elif defined(SOCK_CLOEXEC)
+    const auto socket = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+#else
+    const auto socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#endif
+    if (socket != invalid && !nonInheritable(socket)) {
+        close(socket);
+        return invalid;
+    }
+    return socket;
+}
+inline Handle acceptSocket(Handle listener) {
+#if defined(__linux__) && defined(SOCK_CLOEXEC)
+    const auto socket = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+#else
+    const auto socket = ::accept(listener, nullptr, nullptr);
+#endif
+    if (socket != invalid && !nonInheritable(socket)) {
+        close(socket);
+        return invalid;
+    }
+    return socket;
+}
 struct Socket {
     Handle value = invalid;
     explicit Socket(Handle handle) : value(handle) {
         if (value == invalid)
             throw std::runtime_error("Cannot open native attachment socket");
+        if (!nonInheritable(value)) {
+            close(std::exchange(value, invalid));
+            throw std::runtime_error("Cannot prevent native attachment socket inheritance");
+        }
 #if defined(SO_NOSIGPIPE) && !defined(_WIN32)
         const int enabled = 1;
         if (setsockopt(value, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled)) {
@@ -283,7 +322,7 @@ public:
     ChannelServer(std::shared_ptr<Session> controller, const std::filesystem::path& directory)
         : session(std::move(controller)),
           privateDirectory(channel::outsideProject(*session, directory)),
-          listener(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)),
+          listener(channel::createSocket()),
           token(channel::nonce()) {
         auto address = channel::address(0);
         if (::bind(listener.value, reinterpret_cast<const sockaddr*>(&address), sizeof address) || ::listen(listener.value, 8))
@@ -332,7 +371,7 @@ private:
             });
             if (!channel::wait(listener.value, POLLIN, 20))
                 continue;
-            const auto handle = ::accept(listener.value, nullptr, nullptr);
+            const auto handle = channel::acceptSocket(listener.value);
             if (handle == channel::invalid)
                 continue;
             if (connections.size() >= maxConnections) {
@@ -428,7 +467,7 @@ private:
     unsigned short                    port = 0;
     std::string                       token;
     std::string                       request(std::string_view method, std::string_view arguments) const {
-        channel::Socket peer{::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)};
+        channel::Socket peer{channel::createSocket()};
         const auto      address = channel::address(port);
         // Loopback connect has no remote address or DNS lookup. Bound the following IO independently.
         channel::nonblocking(peer.value);

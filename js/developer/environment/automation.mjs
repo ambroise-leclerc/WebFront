@@ -19,15 +19,19 @@ export function clipText(value, max, fromEnd = false) {
     return text.toWellFormed?.() ?? text;
 }
 export function createPreviewInspector(frame) {
-    let revision = 0, observed = null, navigating = false;
+    let revision = 0, observed = null, navigating = false, errorsTruncated = false;
     const errors = [];
     let detachErrors = () => {};
     const loaded = () => {
-        ++revision; navigating=false; errors.length=0; detachErrors();
+        ++revision; navigating=false; errors.length=0; errorsTruncated=false; detachErrors();
         try {
             const view=frame.contentWindow;
             if (view.location.origin !== location.origin) return;
-            const error = event => { if (errors.length<20) errors.push(clipText(event.message ?? event.reason ?? 'Preview error',512)); };
+            const error = event => {
+                const text=String(event.message ?? event.reason ?? 'Preview error');
+                errorsTruncated ||= errors.length>=20 || text.length>512;
+                if (errors.length<20) errors.push(clipText(text,512));
+            };
             view.addEventListener('error',error);
             view.addEventListener('unhandledrejection',error);
             detachErrors=() => {view.removeEventListener('error',error);view.removeEventListener('unhandledrejection',error);};
@@ -50,18 +54,21 @@ export function createPreviewInspector(frame) {
         inspect() {
             const {doc, pageId} = page();
             const elements = [];
+            let truncated = errorsTruncated;
+            const field = (value,max) => { const text=String(value); truncated ||= text.length>max; return clipText(text,max); };
             // Explicit IDs give stable semantic targets. Do not export form values or full HTML.
             for (const element of doc.querySelectorAll('[id]')) {
-                if (elements.length === 40) break;
                 if (element.closest('script,style,[hidden],[aria-hidden="true"],[contenteditable]')) continue;
                 if (!element.getClientRects().length) continue;
+                if (elements.length === 40) { truncated = true; break; }
                 const form = /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName);
-                elements.push({id: clipText(element.id,256), tag: element.tagName.toLowerCase(),
-                    role: clipText(element.getAttribute('role') ?? '',64),
-                    text: form ? '' : clipText([...element.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(''),128),
-                    label: clipText(element.getAttribute('aria-label') ?? '',128)});
+                elements.push({id: field(element.id,256), tag: element.tagName.toLowerCase(),
+                    role: field(element.getAttribute('role') ?? '',64),
+                    text: form ? '' : field([...element.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(''),128),
+                    label: field(element.getAttribute('aria-label') ?? '',128)});
             }
-            const result={pageId, ready:true, title:clipText(doc.title,256), elements, errors:[...errors], truncated:doc.querySelectorAll('[id]').length > elements.length};
+            const title=field(doc.title,256);
+            const result={pageId, ready:true, title, elements, errors:[...errors], truncated};
             const encoder=new TextEncoder();
             while (encoder.encode(JSON.stringify(result)).length>30000) {
                 if (result.errors.length) result.errors.pop();
@@ -114,7 +121,7 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
     return {
         get output() { return clipText(output,2048,true); },
         cancel(id) { if (active?.id === id) active.controller.abort(new Error('Interrupted by automation')); },
-        start(request) {
+        async start(request) {
             if (active) throw new Error('Automation runner is busy');
             const controller = new AbortController();
             const owned = active = {id:request.runId, controller};
@@ -140,11 +147,11 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                 } catch (error) { result = {exitCode:controller.signal.aborted ? 130 : 1, output:clip(error?.message ?? error), report:null}; }
                 result = fitCompletion(result);
                 output = clip(result.output);
-                try { await complete(request.runId, result); }
-                finally {
-                    if (active === owned) active = null;
-                    onState(`${request.operation}: ${result.exitCode === 0 ? 'succeeded' : 'failed'} (${request.runId})`);
-                }
+                // Native completion permits the next run immediately, even before its bridge reply returns.
+                // Release local ownership first so polling can accept that run during the round trip.
+                if (active === owned) active = null;
+                onState(`${request.operation}: ${result.exitCode === 0 ? 'succeeded' : 'failed'} (${request.runId})`);
+                await complete(request.runId, result);
                 return result;
             })();
             return finished;

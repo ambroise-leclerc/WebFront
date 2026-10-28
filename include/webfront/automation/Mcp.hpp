@@ -22,9 +22,9 @@ public:
             if (!validId(id) && !notification)
                 return error("null", -32600, "Invalid request id");
             if (request.string("jsonrpc") != "2.0" || !request.has("method"))
-                return error(id, -32600, "Expected JSON-RPC 2.0 request");
+                throw std::invalid_argument("Expected JSON-RPC 2.0 request");
             request.only({"jsonrpc", "id", "method", "params"});
-            invalid = -32602;
+            invalid             = -32602;
             const auto   method = request.string("method");
             const Object params{request.raw("params", "{}")};
             if (notification) {
@@ -88,7 +88,7 @@ public:
                 return success(id,
                                toolResult(objectJson({
                                               {"error", json::quote(std::string(failure.what()) + "; the outcome of this call is unknown")},
-                                              { "code",                                           json::quote("disconnected")}
+                                              { "code",                                                        json::quote("disconnected")}
                 }),
                                           true));
             } catch (const std::exception& failure) {

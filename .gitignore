@@ -6,6 +6,7 @@ build*/
 .vscode/
 
 # Compiled binaries
+__pycache__/
 *.exe
 *.dll
 *.lib

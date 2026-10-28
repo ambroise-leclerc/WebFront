@@ -112,6 +112,8 @@ remain inaccessible to the attachment client. Same-user compromise remains outsi
 The protocol uses bounded messages and two-second IO deadlines. Each connection has its own thread
 (at most 32; more are refused), so a silent peer holds only its own slot until its deadline; a hostile
 local peer can still occupy all slots and cause local denial of service. There is no TLS or remote/multi-user authentication promise.
+Listening, accepted and client sockets are non-inheritable; POSIX closes them on exec. The page
+capability uses the same OS cryptographic generator and comparison as the attachment channel.
 
 Stdout contains only one JSON-RPC message per line in MCP mode. Diagnostics go to stderr.
 The client owns the stdio adapter and closes stdin to end its connection. In owned-window mode
@@ -156,10 +158,16 @@ Unknown arguments, wrong sessions, unsupported commands and option-like entry/pa
 are refused natively. Entry paths must be project-relative. A queued/running operation blocks
 another native start. A terminal command already active in the page causes an explicit busy
 failure instead of interleaving mutations. Nested wf script dispatch from the human terminal
-retains its execution lease. The window displays the agent operation and a stop button.
+retains its execution lease. Interrupting a terminal command lets worker cancellation finish, then
+releases that lease within 2.5 seconds even if its Promise stalls; cancellation remains cooperative
+for work already dispatched. `wf test` finishes
+its bounded cancellation/cleanup before releasing ownership. A human `wf dev` owns the lease only
+while compiling/publishing, so agents can use the window while it waits for edits. The window
+displays the agent operation and a stop button.
 
 Poll the run ID until its state is `succeeded`, `failed`, `cancelled`, `timeout` or `disconnected`.
-The final `result` contains `{exitCode, output, report}`; Jasmine supplies `report`, while compiler
+The final `result` contains `{exitCode, output, report}`; top-level `output` becomes that final
+bounded output instead of the progress tail. Jasmine supplies `report`, while compiler
 errors may also provide a bounded `diagnostics` array with message, source file and one-based
 line/column. Inspection and actions return `data`. No terminal text parsing is needed to determine
 success or locate the structured diagnostics. Output is bounded in memory and on the bridge;
