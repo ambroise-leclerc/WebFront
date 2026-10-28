@@ -21,6 +21,12 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   `NativeAppWithAssets<Provider>` runs without project files, developer callbacks or tool cache.
   Native-engine deployment remains application work. The [README walkthrough](../README.md)
   covers the console, developer and embedded Game of Life stages; Hello World is the other public example.
+- **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
+  for an explicitly launched developer window. Native grants select check/build/test/preview,
+  bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,
+  lifecycle, limits and the supported MCP profile. It requires a rebuilt compatible environment;
+  the pinned 0.6.2 archive predates the API. Explicitly shared human windows support authenticated
+  native attachment. This does not discover arbitrary processes or isolate untrusted project code.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers

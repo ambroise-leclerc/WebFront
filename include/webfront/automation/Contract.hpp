@@ -1,0 +1,88 @@
+/// @brief Trusted versioned JSON Schema contract, projected into CLI discovery and MCP schemas.
+#pragma once
+#include "Json.hpp"
+
+namespace webfront::automation {
+inline constexpr std::string_view contractSource = R"JSON({
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"urn:webfront:automation:v1",
+ "title":"WebFront developer operation contract v1",
+ "type":"object","additionalProperties":false,"required":["session","operation"],
+ "properties":{
+   "session":{"type":"string","minLength":1},
+   "operation":{"type":"string","enum":["check","build","test","preview","inspect","click","fill"]},
+   "arguments":{"type":"object","additionalProperties":false,"properties":{
+     "entry":{"type":"string","maxLength":4096,"description":"Project-relative path or manifest entry; no leading option or path traversal."},
+     "pattern":{"type":"string","maxLength":4096,"description":"Spec name substring, never a command option."},
+     "pageId":{"type":"string","minLength":1,"maxLength":4096},
+     "elementId":{"type":"string","minLength":1,"maxLength":4096},
+     "value":{"type":"string","maxLength":4096}
+   }}
+ },
+ "$defs":{
+   "commandResult":{"type":"object","required":["exitCode","output","report"],"properties":{
+     "exitCode":{"type":"integer","minimum":0,"maximum":255},"output":{"type":"string"},
+     "report":{"type":["object","null"]},"diagnostics":{"type":"array"},"data":{"type":"object"},"truncated":{"type":"boolean"}}},
+   "errors":{"enum":["not_authorized","wrong_session","busy","invalid_arguments","not_ready","unknown_run","disconnected","timeout"]},
+   "run":{"type":"object","required":["runId","operation","state","cancelRequested","output","result"],"properties":{
+     "runId":{"type":"string"},"operation":{"type":"string"},"state":{"enum":["queued","running","succeeded","failed","cancelled","timeout","disconnected"]},
+     "cancelRequested":{"type":"boolean"},"output":{"type":"string"},"result":{"oneOf":[{"$ref":"#/$defs/commandResult"},{"type":"null"}]}}}
+ },
+ "x-webfront-version":1,
+ "x-webfront-limits":{"requestBytes":60000,"jsonDepth":32,"argumentBytes":4096,"retainedRuns":64},
+ "x-webfront-operations":{
+   "check":{"permission":"check","arguments":[],"required":[]},
+   "build":{"permission":"build","arguments":["entry"],"required":[]},
+   "test":{"permission":"test","arguments":["pattern"],"required":[]},
+   "preview":{"permission":"preview","arguments":["entry"],"required":[]},
+   "inspect":{"permission":"inspect","arguments":[],"required":[]},
+   "click":{"permission":"interact","arguments":["pageId","elementId"],"required":["pageId","elementId"]},
+   "fill":{"permission":"interact","arguments":["pageId","elementId","value"],"required":["pageId","elementId","value"]}
+ }
+})JSON";
+
+inline std::vector<std::string> contractStrings(std::string_view value) {
+    std::vector<std::string> strings;
+    json::Reader             reader{value};
+    reader.array([&] {
+        strings.push_back(reader.string());
+    });
+    reader.end();
+    return strings;
+}
+class OperationError : public std::runtime_error {
+public:
+    OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) { }
+    const std::string code;
+};
+inline Object operationContract(std::string_view operation) {
+    const Object definitions{Object(contractSource).raw("x-webfront-operations")};
+    if (!definitions.has(operation))
+        throw std::invalid_argument("Unknown automation operation");
+    return Object(definitions.raw(operation));
+}
+inline std::string startSchema() {
+    const Object contract{contractSource};
+    return objectJson({
+        {                "type",       contract.raw("type")},
+        {"additionalProperties",                    "false"},
+        {            "required",   contract.raw("required")},
+        {          "properties", contract.raw("properties")}
+    });
+}
+inline void validateOperation(std::string_view operation, const Object& arguments) {
+    const auto definition = operationContract(operation);
+    const auto allowed    = contractStrings(definition.raw("arguments"));
+    for (const auto& [key, raw] : arguments.members()) {
+        if (std::ranges::find(allowed, key) == allowed.end())
+            throw std::invalid_argument("Unexpected operation argument: " + key);
+        const auto value = stringValue(raw);
+        if (value.size() > 4096 || value.contains('\0'))
+            throw std::invalid_argument("Invalid operation argument");
+    }
+    for (const auto& key : contractStrings(definition.raw("required"))) {
+        if (!arguments.has(key) || (key != "value" && arguments.string(key).empty()))
+            throw std::invalid_argument("Missing operation argument: " + key);
+    }
+}
+}  // namespace webfront::automation

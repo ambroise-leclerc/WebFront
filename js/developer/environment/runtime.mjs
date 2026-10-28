@@ -16,6 +16,7 @@ import {build, dev} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
+import {connectAutomation as connectAgent} from './automation.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -124,6 +125,7 @@ async function preview(args, {bridge, signal, preview: frame}) {
     const result = await compile(bridge, entry, signal);
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
     frame.hidden = false;
+    frame.dispatchEvent(new Event('webfront-preview-navigating'));
     // Replace transient builds without accumulating browser session history.
     frame.contentWindow.location.replace(`/webfront/developer/preview/index.html?build=${Date.now()}`);
     return syncNotice(project) + 'Preview ready.';
@@ -187,7 +189,7 @@ const checkWorker = () => new Worker(new URL('./typecheck-worker.mjs', import.me
 
 // wf check [--timeout <seconds>]: a TypeScript type check with the locked typescript, in a Worker that writes nothing.
 // snapshotBounds lowers the snapshot's bounds for the integration test.
-async function check(args, {bridge, signal, write = () => {}, createWorker = checkWorker, deadline, snapshotBounds}) {
+async function check(args, {bridge, signal, write = () => {}, createWorker = checkWorker, deadline, snapshotBounds, onDiagnostics}) {
     const {timeout} = parseCheckOptions(args);
     const project = await loadManifest(bridge);
     const [typescript] = typescriptPackage(project.lock);
@@ -195,6 +197,7 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
     const outcome = await runWorker({createWorker, host, signal, timeout: secondsLeft(runDeadline(timeout, deadline)), write,
         message: {lock: project.lock, typescript, entries: Object.values(project.manifest.entries ?? {}), bounds: snapshotBounds}});
     await host.stop();
+    onDiagnostics?.(outcome.diagnostics ?? []);
     return syncNotice(project) + runResult('Type check', outcome, host.publications);
 }
 
@@ -263,11 +266,25 @@ async function list(_args, {bridge}) {
 const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
-export async function execute(args, context) {
-    const [command = 'help', ...rest] = args;
-    if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
-    return commands[command](rest, context);
+let executionToken = null, automationActive = false, cppActive = 0;
+export async function exclusive(context, action) {
+    const nested = executionToken !== null && context.executionToken === executionToken;
+    if (context.automation && cppActive) throw new Error('Developer environment is busy with an application command');
+    if (executionToken !== null && !nested) throw new Error('Developer environment is busy; wait or stop the active operation');
+    if (!nested) { executionToken = Symbol('developer operation'); automationActive = context.automation === true; }
+    try { return await action({...context, executionToken}); }
+    finally { if (!nested) {executionToken = null; automationActive=false;} }
 }
+
+export async function execute(args, context) {
+    return exclusive(context, async owned => {
+        const [command = 'help', ...rest] = args;
+        if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
+        return commands[command](rest, owned);
+    });
+}
+
+export const connectAutomation = context => connectAgent({...context,run:runNonInteractive,exclusive});
 
 /**
  * Runs one wf command without a terminal, for a page that the application drives: the command's output goes to
@@ -277,18 +294,31 @@ export async function execute(args, context) {
  * that cannot be sent, ends with a non-zero code; it never stays open. Resolves with the result.
  */
 export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
-    let exitCode = 0, output = '', report = null;
-    const collect = text => { output += text; write(text); };
+    let exitCode = 0, output = '', report = null, truncated = false, diagnostics = [];
+    const keepDiagnostics = values => {
+        diagnostics = (values ?? []).slice(0,10).map(item => ({text:String(item.text ?? '').slice(0,256),
+            ...(item.location ? {file:String(item.location.file ?? '').replace(/^project:/,'').slice(0,128),line:item.location.line,column:item.location.column+1} : {}),
+            ...(!item.location && item.file ? {file:String(item.file).slice(0,128),line:item.line,column:item.column} : {}),
+            ...(item.code === undefined ? {} : {code:item.code})}));
+    };
+    const append = text => {
+        text = String(text ?? '');
+        const room = 16000-output.length;
+        truncated ||= text.length > room;
+        output += text.slice(0,room);
+    };
+    const collect = text => { append(text); write(text); };
     try {
         setManifestDirectory(context.config?.manifestDirectory);
         // Not `output += await ...`: the left side is read before the command runs, which would drop what it wrote.
-        const summary = await execute(argv, {...context, write: collect, onReport: value => { report = value; }});
-        output += summary;
+        const summary = await execute(argv, {...context, write: collect, onReport: value => { report = value; }, onDiagnostics:keepDiagnostics});
+        append(summary);
     } catch (error) {
         exitCode = error?.exitCode ?? 1;
-        output += error?.message ?? String(error);
+        if (error?.diagnostics) keepDiagnostics(error.diagnostics);
+        append(error?.message ?? String(error));
     }
-    const result = {exitCode, output, report};
+    const result = fitResult({exitCode, output, report, ...(truncated ? {truncated:true} : {}), ...(diagnostics.length ? {diagnostics} : {})});
     try { await reporter?.(JSON.stringify(fitResult(result))); }
     catch (error) {
         result.exitCode = exitCode || 1;
@@ -408,7 +438,12 @@ export async function runLine(line, context) {
     const write = text => context.write?.(toTerminalText(text));
     if (command === 'wf') return toTerminalText(await execute(args, {...context, write}));
     if (Object.hasOwn(builtins, command)) return toTerminalText(await builtins[command](args, context));
-    if (context.cppCommands?.has(command)) return runCommand(context.bridge, command, args, {signal: context.signal, write});
+    if (context.cppCommands?.has(command)) {
+        if (automationActive) throw new Error('Developer environment is busy with an automation operation');
+        ++cppActive;
+        try { return await runCommand(context.bridge, command, args, {signal: context.signal, write}); }
+        finally {--cppActive;}
+    }
     throw new Error(`Unknown command: ${command}. Type help to list the commands.`);
 }
 

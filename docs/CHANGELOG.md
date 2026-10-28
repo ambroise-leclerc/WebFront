@@ -15,6 +15,13 @@
   cell edits until startup succeeds and bounds island readiness. Test installation uses the exact
   archive bytes, with file-list and SHA-512 checks. Registry publication stays explicit.
 
+- Optional native developer automation (#403): `webfront-agent` drives its developer window
+  through stdio MCP or a JSON CLI, with native operation grants, asynchronous run IDs, bounded
+  structured diagnostics/results, preview inspection/actions, cooperative cancellation and
+  an external renderer deadline. Human commands share dispatch and arbitrate agent operations.
+  No MCP network endpoint or arbitrary callback/shell export is added. A compatible rebuilt
+  environment is required until a release is published and pinned.
+
 - License WebFront under Apache-2.0 OR CECILL-B, at the recipient's option.
   Include both full license texts (CeCILL-B in French and English), document
   contribution terms and carry the license into newly built developer and

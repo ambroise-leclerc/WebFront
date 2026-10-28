@@ -9,6 +9,7 @@ endif()
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" OFF)
+option(WEBFRONT_BUILD_AUTOMATION "Build the optional local developer CLI/MCP launcher" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
@@ -114,6 +115,23 @@ endif()
 # Embedded asset regeneration target and CTest freshness checks.
 include(WebFrontAssets)
 webfront_add_embedded_assets()
+
+if(WEBFRONT_BUILD_AUTOMATION OR (ENABLE_TESTING AND
+    (WEBFRONT_EMBED_CEF OR WEBFRONT_EMBED_WKWEBVIEW OR WEBFRONT_EMBED_WEBVIEW2 OR WEBFRONT_EMBED_WEBKITGTK)))
+    webfront_default_embedded_frontend(_automation_default FALLBACK CEF)
+    webfront_select_frontend(WEBFRONT_AUTOMATION_FRONTEND "${_automation_default}"
+        "Developer automation frontend" EMBEDDED_ONLY REQUIRE_AVAILABLE)
+    if(NOT ${WEBFRONT_FRONTEND_${WEBFRONT_AUTOMATION_FRONTEND}_OPTION})
+        message(FATAL_ERROR "Automation needs an explicitly enabled embedded frontend")
+    endif()
+    add_executable(webfront-agent js/developer/tools/WebFrontAgent.cpp)
+    target_link_libraries(webfront-agent PRIVATE WebFront WebFront_options WebFront_warnings)
+    if(WIN32)
+        target_link_libraries(webfront-agent PRIVATE ws2_32 bcrypt advapi32)
+    endif()
+    target_compile_definitions(webfront-agent PRIVATE WEBFRONT_AUTOMATION_FRONTEND_TYPE=${WEBFRONT_AUTOMATION_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(webfront-agent)
+endif()
 
 if(ENABLE_TESTING OR ENABLE_FUZZING)
   include(TestHardening)

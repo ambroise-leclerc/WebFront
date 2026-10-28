@@ -22,6 +22,7 @@
   "test": {
     "specs": [
       "test/developer/specs/environment-specs.mjs",
+      "test/developer/specs/automation-specs.mjs",
       "test/developer/specs/manifest-specs.mjs",
       "test/developer/specs/restore-specs.mjs",
       "test/developer/specs/scripts-specs.mjs",

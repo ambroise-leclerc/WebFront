@@ -500,6 +500,10 @@ each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs
 
 ### Without a terminal
 
+For the optional native CLI/MCP controller of a live developer window, see
+[developer automation](AUTOMATION.md). It reuses this command dispatch with explicit native
+grants, structured diagnostics and watchdogs, without exporting scripts or application callbacks.
+
 An application that drives the environment from its own page (`webfront-wf`, below, is one) calls
 `runNonInteractive(argv, {bridge, config, preview, reporter, onExit})` from `runtime.mjs`:
 

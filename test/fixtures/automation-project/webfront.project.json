@@ -1,0 +1,8 @@
+{
+  "format":1,
+  "name":"automation-fixture",
+  "version":"0.1.0",
+  "dependencies":{"jasmine-core":"7.0.2","typescript":"6.0.3"},
+  "entries":{"main":"main.ts"},
+  "test":{"specs":["automation.spec.js"]}
+}
