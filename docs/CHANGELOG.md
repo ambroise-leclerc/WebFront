@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Consumer Jasmine/CTest integration (#402): opt-in instrumentation runs classic JavaScript
+  specs in an application's own page with its existing DOM and callbacks. The public CMake
+  helper provisions verified Jasmine, passes application arguments and checks a fresh JSON
+  report. An external process timeout bounds even a synchronously blocked renderer.
+
 - Optional React adapter (#382): an installable `@webfront/react` package with cached
   `useSyncExternalStore` snapshots and empty `Island` components that tolerate StrictMode
   effect replay. `webfront::react::Store` coalesces the last snapshot per 1 ms server cycle

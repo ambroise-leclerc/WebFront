@@ -67,6 +67,33 @@ set(_fixtures "${CMAKE_CURRENT_BINARY_DIR}/developer-fixtures")
 set(_webtest_runs OFF)
 if(_browser_tests_available)
     set(_webtest_runs ON)
+    add_executable(jasmine_consumer JasmineConsumer.cpp)
+    # The CEF CI builds webtest explicitly, then runs every web-integration case.
+    add_dependencies(webtest jasmine_consumer)
+    target_link_libraries(jasmine_consumer PRIVATE WebFront WebFront_test_hardening WebFront_options WebFront_warnings)
+    target_compile_definitions(jasmine_consumer PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(jasmine_consumer)
+    # Exercise the public helper without a configure-time public network dependency beyond the pinned registry.
+    set(WEBFRONT_JASMINE_ARCHIVE_DIR "${_registry_archives}")
+    foreach(mode pass fail empty close hang)
+        set(limit 30)
+        if(mode STREQUAL "hang")
+            set(limit 5)
+        endif()
+        webfront_add_jasmine_test(NAME ConsumerJasmine-${mode} TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT ${limit}
+            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/${mode}.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        if(NOT mode STREQUAL "pass")
+            set_tests_properties(ConsumerJasmine-${mode} PROPERTIES WILL_FAIL TRUE)
+        endif()
+        set_tests_properties(ConsumerJasmine-${mode} PROPERTIES FIXTURES_SETUP ConsumerJasmineRuns)
+    endforeach()
+    add_test(NAME ConsumerJasmineReports COMMAND "${CMAKE_COMMAND}"
+        "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine"
+        -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckConsumerJasmineReports.cmake")
+    set_tests_properties(ConsumerJasmineReports PROPERTIES FIXTURES_REQUIRED ConsumerJasmineRuns
+        LABELS web-integration TIMEOUT 15)
     set(_suite_project "${CMAKE_CURRENT_BINARY_DIR}/web-suite-project")
     math(EXPR _suite_timeout "${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_TIMEOUT} - 10")
     webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle

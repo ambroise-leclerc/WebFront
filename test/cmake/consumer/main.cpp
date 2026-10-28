@@ -12,10 +12,12 @@
 #endif
 
 #include <webfront/WebFront.hpp>
+#include <webfront/testing/Jasmine.hpp>
 
 int main(int argc, char**) {
     if (argc > 1) {  // never taken by the smoke test: it only proves that the library compiles and links
         webfront::WebFront app;
+        webfront::testing::JasmineTest tests{app};
         app.show();
     }
     return 0;
