@@ -12,16 +12,19 @@ public:
     std::optional<std::string> receive(std::string_view line) {
         std::string id           = "null";
         bool        notification = false;
+        int         invalid      = -32700;  // JSON-RPC code of a failure at the current stage: parse, request shape, then parameters
         try {
             Object request{line};
+            invalid      = -32600;
             notification = !request.has("id");
             if (request.has("id"))
                 id = request.raw("id");
             if (!validId(id) && !notification)
                 return error("null", -32600, "Invalid request id");
             if (request.string("jsonrpc") != "2.0" || !request.has("method"))
-                return error("null", -32600, "Expected JSON-RPC 2.0 request");
+                return error(id, -32600, "Expected JSON-RPC 2.0 request");
             request.only({"jsonrpc", "id", "method", "params"});
+            invalid = -32602;
             const auto   method = request.string("method");
             const Object params{request.raw("params", "{}")};
             if (notification) {
@@ -80,13 +83,21 @@ public:
                                               { "code",   json::quote(failure.code)}
                 }),
                                           true));
+            } catch (const TransportError& failure) {
+                // A mutation may have started before the response was lost: the agent must not retry it blindly.
+                return success(id,
+                               toolResult(objectJson({
+                                              {"error", json::quote(std::string(failure.what()) + "; the outcome of this call is unknown")},
+                                              { "code",                                           json::quote("disconnected")}
+                }),
+                                          true));
             } catch (const std::exception& failure) {
                 return success(id, toolResult("{\"code\":\"invalid_arguments\",\"error\":" + json::quote(failure.what()) + "}", true));
             }
         } catch (const std::exception& failure) {
             if (notification)
                 return {};
-            return error(id, id == "null" ? -32700 : -32602, failure.what());
+            return error(id, invalid, failure.what());
         }
     }
 

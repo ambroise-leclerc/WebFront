@@ -119,9 +119,21 @@ std::string argumentName(std::string_view flag) {
     return {};
 }
 
+int timeoutSeconds(std::string_view text) {
+    int        seconds      = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), seconds);
+    if (error != std::errc{} || end != text.data() + text.size() || seconds < 1 || seconds > 3600)
+        throw std::invalid_argument("Timeout must be 1..3600 whole seconds");
+    return seconds;
+}
+
 template <typename Backend>
-int runCli(Backend& controller, std::string_view operation, const std::map<std::string, std::string>& arguments, std::stop_token stop = {}) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{120};
+int runCli(Backend&                                   controller,
+           std::string_view                           operation,
+           const std::map<std::string, std::string>& arguments,
+           std::chrono::seconds                       startupTimeout,
+           std::stop_token                            stop = {}) {
+    const auto deadline = std::chrono::steady_clock::now() + startupTimeout;
     while (!stop.stop_requested() && Object(controller.describe()).string("state") == "starting") {
         if (std::chrono::steady_clock::now() > deadline)
             throw std::runtime_error("Developer startup timed out");
@@ -175,6 +187,7 @@ int attach(int argc, char** argv) {
     std::string                        operation;
     std::map<std::string, std::string> arguments;
     bool                               shutdown = false;
+    std::chrono::seconds               startupTimeout{120};
     for (int index = 3; index < argc; ++index) {
         const std::string flag = argv[index];
         if (flag == "--mcp")
@@ -187,6 +200,8 @@ int attach(int argc, char** argv) {
             throw std::invalid_argument("Attachment argument needs a value");
         if (flag == "--operation")
             operation = argv[index];
+        else if (flag == "--startup-timeout")
+            startupTimeout = std::chrono::seconds{timeoutSeconds(argv[index])};
         else if (const auto name = argumentName(flag); !name.empty())
             arguments[name] = json::quote(argv[index]);
         else
@@ -199,7 +214,7 @@ int attach(int argc, char** argv) {
         return 0;
     }
     if (!operation.empty())
-        return runCli(controller, operation, arguments);
+        return runCli(controller, operation, arguments, startupTimeout);
     runMcp(controller, {}, [] {
         return false;
     });
@@ -237,11 +252,7 @@ Options parse(int argc, char** argv) {
             result.arguments[field] = json::quote(value());
         else if (argument == "--mcp") {
         } else if (argument == "--timeout" || argument == "--startup-timeout") {
-            const auto text         = value();
-            int        seconds      = 0;
-            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), seconds);
-            if (error != std::errc{} || end != text.data() + text.size() || seconds < 1 || seconds > 3600)
-                throw std::invalid_argument("Timeout must be 1..3600 whole seconds");
+            const int seconds = timeoutSeconds(value());
             if (argument == "--startup-timeout")
                 result.startupTimeout = std::chrono::seconds{seconds};
             else
@@ -310,10 +321,11 @@ int main(int argc, char** argv) {
             channel.emplace(session, options.listen);
         std::atomic<int>  status{0};
         std::atomic<bool> done{false};
+        std::atomic<bool> finished{false};  // the transport completed its work: a closed session is then a normal ending
         const auto        launched = std::chrono::steady_clock::now();
         std::jthread      supervisor([&](std::stop_token stop) {
             while (!stop.stop_requested() && !done.load()) {
-                const bool starting = Object(session->describe()).string("state") == "starting";
+                const bool starting = !session->wasReady() && !session->isClosed();
                 if (session->expire() || (starting && std::chrono::steady_clock::now() - launched > options.startupTimeout)) {
                     status.store(71);
                     session->close("Native automation deadline exceeded");
@@ -325,8 +337,13 @@ int main(int argc, char** argv) {
                     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
                     while (!stop.stop_requested() && !done.load() && std::chrono::steady_clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
-                    if (!stop.stop_requested() && !done.load())
-                        std::_Exit(status.load() ? status.load() : 72);
+                    if (!stop.stop_requested() && !done.load()) {
+                        // A normal ending keeps its own status; only an abnormal one is reported as stuck.
+                        const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
+                        std::error_code ignored;
+                        std::filesystem::remove_all(profile.path, ignored);  // _Exit skips the destructors
+                        std::_Exit(code);
+                    }
                     return;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
@@ -338,13 +355,14 @@ int main(int argc, char** argv) {
                     while (!stop.stop_requested() && !session->isClosed())
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
                 } else if (!options.operation.empty()) {
-                    const auto result = runCli(*session, options.operation, options.arguments, stop);
+                    const auto result = runCli(*session, options.operation, options.arguments, options.startupTimeout, stop);
                     int        expected = 0;
                     status.compare_exchange_strong(expected, result);
                 } else
                     runMcp(*session, stop, [&] {
                         return session->isClosed();
                     });
+                finished.store(true);
             } catch (const std::exception& error) {
                 std::cerr << "Automation: " << error.what() << '\n';
                 int expected = 0;

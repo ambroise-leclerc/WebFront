@@ -3,10 +3,16 @@
 #include "../WebFront.hpp"
 #include "Session.hpp"
 
+#include <random>
+
 namespace webfront::automation {
-inline constexpr std::string_view connectionScript = R"JS(
+// The capability is known only to this script's closure and to the native binder: a callback also needs it, because
+// the bridge identifies a connection, not a frame, and the preview frame shares this page's origin and bridge.
+inline constexpr std::string_view connectionScriptTemplate = R"JS(
 void (async () => {
-    const call = (name,...args) => webFront.cppFunction('webfront.automation.'+name)(...args);
+    const capability = '__CAPABILITY__';
+    const cppFunction = webFront.cppFunction.bind(webFront);
+    const call = (name,...args) => cppFunction('webfront.automation.'+name)(capability,...args);
     try {
         await webFront.ready;
         await new Promise((resolve,reject) => {
@@ -25,13 +31,19 @@ void (async () => {
         const environment = await response.json();
         const runtime = await import('/webfront/developer/environment/'+environment.entry);
         if (typeof runtime.connectAutomation !== 'function') throw new Error('This environment has no automation API v1; provision an updated environment');
-        runtime.connectAutomation({bridge:webFront,config,preview:document.getElementById('preview')});
+        runtime.connectAutomation({bridge:webFront,call,config,preview:document.getElementById('preview')});
     } catch (error) {
         await call('failed',String(error?.message ?? error).slice(0,1024)).catch(() => {});
         window.close();
     }
 })();
 )JS";
+
+inline std::string connectionScript(std::string_view capability) {
+    std::string script{connectionScriptTemplate};
+    script.replace(script.find("__CAPABILITY__"), std::string_view("__CAPABILITY__").size(), capability);
+    return script;
+}
 
 template <typename App>
 class Binding {
@@ -40,10 +52,16 @@ class Binding {
         std::shared_ptr<Session> session;
         std::mutex               mutex;
         std::optional<AppUI>     browser;
+        std::string              capability;
         bool                     closing = false;
-        void                     authorize(const AppUI& ui) const {
+        void                     authorize(const AppUI& ui, std::string_view presented) const {
             if (!browser || browser->id() != ui.id())
                 throw std::runtime_error("Automation callback belongs to another page");
+            unsigned mismatch = presented.size() != capability.size();
+            for (std::size_t index = 0; index < presented.size() && index < capability.size(); ++index)
+                mismatch |= static_cast<unsigned char>(presented[index]) ^ static_cast<unsigned char>(capability[index]);
+            if (mismatch)
+                throw std::runtime_error("Automation callback lacks the page capability");
         }
     };
 
@@ -51,20 +69,27 @@ public:
     /// Retain until after application shutdown. Only the first connected window is selected.
     Binding(App& app, std::shared_ptr<Session> session) : state(std::make_shared<State>()) {
         state->session   = std::move(session);
+        std::random_device random;
+        for (int i = 0; i < 8; ++i) {
+            constexpr std::string_view digits = "0123456789abcdef";
+            const auto                 word   = random();
+            for (int shift = 0; shift < 32; shift += 8)
+                state->capability += {digits[(word >> shift >> 4) & 15], digits[(word >> shift) & 15]};
+        }
         const auto owned = state;
-        app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string output) {
+        app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string capability, std::string output) {
             std::scoped_lock lock{owned->mutex};
-            owned->authorize(ui);
+            owned->authorize(ui, capability);
             return owned->session->poll(std::move(output));
         });
-        app.cppFunction("webfront.automation.complete", [owned](AppUI ui, std::string id, std::string result) {
+        app.cppFunction("webfront.automation.complete", [owned](AppUI ui, std::string capability, std::string id, std::string result) {
             std::scoped_lock lock{owned->mutex};
-            owned->authorize(ui);
+            owned->authorize(ui, capability);
             owned->session->complete(id, std::move(result));
         });
-        app.cppFunction("webfront.automation.failed", [owned](AppUI ui, std::string reason) {
+        app.cppFunction("webfront.automation.failed", [owned](AppUI ui, std::string capability, std::string reason) {
             std::scoped_lock lock{owned->mutex};
-            owned->authorize(ui);
+            owned->authorize(ui, capability);
             owned->session->close(reason.substr(0, 1024));
         });
         started = app.subscribeUIStarted([owned](AppUI ui) {
@@ -72,7 +97,7 @@ public:
             if (owned->browser)
                 return;
             owned->browser.emplace(ui);
-            ui.addScript(owned->closing ? "window.close()" : connectionScript);
+            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->capability));
         });
         closed  = app.subscribeUIClosed([owned](AppUI ui) {
             std::scoped_lock lock{owned->mutex};

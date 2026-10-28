@@ -6,7 +6,7 @@ const rejected = document.createElement('output');
 rejected.id='authorization';
 document.body.append(rejected);
 const bridge = (globalThis as any).webFront;
-void bridge.ready.then(() => bridge.cppFunction('webfront.automation.poll')('')).then(
+void bridge.ready.then(() => bridge.cppFunction('webfront.automation.poll')('', '')).then(
     () => {rejected.textContent='incorrectly authorized';},
     () => {rejected.textContent='denied';});
 document.getElementById('increment')!.addEventListener('click', () => {

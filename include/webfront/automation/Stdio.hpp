@@ -5,8 +5,25 @@
 #include <stop_token>
 #include <thread>
 #ifdef _WIN32
+    // Same discipline as Channel.hpp: no min/max macros, and no winsock.h that a later <winsock2.h> would redefine.
+    #ifndef NOMINMAX
+        #define NOMINMAX
+        #define WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
+    #endif
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+        #define WEBFRONT_AUTOMATION_RESTORE_LEAN
+    #endif
     #include <io.h>
     #include <windows.h>
+    #ifdef WEBFRONT_AUTOMATION_RESTORE_LEAN
+        #undef WEBFRONT_AUTOMATION_RESTORE_LEAN
+        #undef WIN32_LEAN_AND_MEAN
+    #endif
+    #ifdef WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
+        #undef WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
+        #undef NOMINMAX
+    #endif
 #else
     #include <poll.h>
     #include <unistd.h>

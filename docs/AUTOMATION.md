@@ -109,8 +109,9 @@ it before any operation executes. Web requests and incorrect capabilities are re
 this file to a shared location. The server removes its file/directory on normal closure, without
 recursively deleting caller-owned content. Independent processes without a shared endpoint file
 remain inaccessible to the attachment client. Same-user compromise remains outside this boundary.
-The protocol uses bounded messages and two-second IO deadlines; a hostile local peer can still
-cause local denial of service. There is no TLS or remote/multi-user authentication promise.
+The protocol uses bounded messages and two-second IO deadlines. Each connection has its own thread
+(at most 32; more are refused), so a silent peer holds only its own slot until its deadline; a hostile
+local peer can still occupy all slots and cause local denial of service. There is no TLS or remote/multi-user authentication promise.
 
 Stdout contains only one JSON-RPC message per line in MCP mode. Diagnostics go to stderr.
 The client owns the stdio adapter and closes stdin to end its connection. In owned-window mode
@@ -183,7 +184,11 @@ because they broaden disclosure and require engine-specific qualification.
 
 Launching the server grants the client authority over the explicitly selected trusted project.
 The native controller checks its grant on every start. Only the first developer-window connection
-can poll or complete its operations; preview/test frames are refused by connection identity.
+can poll or complete its operations; preview/test frames that open their own WebSocket are refused by
+connection identity. A preview frame shares the developer page's origin and bridge, so each callback also
+needs a capability that only the connection script's closure and the native binder hold. It is not a
+sandbox: build, test and preview execute trusted project code, which can still tamper with the page it
+runs in.
 Session identifiers are not credentials. Input is limited to 60,000 UTF-8 bytes and JSON depth 32,
 with duplicate keys refused. Browser reads/writes still use the existing developer store's path
 and transactional-publication checks. Untrusted project text cannot modify the native grant list.

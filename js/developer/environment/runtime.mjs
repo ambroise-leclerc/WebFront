@@ -16,7 +16,7 @@ import {build, dev} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
-import {connectAutomation as connectAgent} from './automation.mjs';
+import {connectAutomation as connectAgent, clipText} from './automation.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -297,16 +297,16 @@ export const connectAutomation = context => connectAgent({...context,run:runNonI
 export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
     let exitCode = 0, output = '', report = null, truncated = false, diagnostics = [];
     const keepDiagnostics = values => {
-        diagnostics = (values ?? []).slice(0,10).map(item => ({text:String(item.text ?? '').slice(0,256),
-            ...(item.location ? {file:String(item.location.file ?? '').replace(/^project:/,'').slice(0,128),line:item.location.line,column:item.location.column+1} : {}),
-            ...(!item.location && item.file ? {file:String(item.file).slice(0,128),line:item.line,column:item.column} : {}),
+        diagnostics = (values ?? []).slice(0,10).map(item => ({text:clipText(item.text ?? '',256),
+            ...(item.location ? {file:clipText(String(item.location.file ?? '').replace(/^project:/,''),128),line:item.location.line,column:item.location.column+1} : {}),
+            ...(!item.location && item.file ? {file:clipText(item.file,128),line:item.line,column:item.column} : {}),
             ...(item.code === undefined ? {} : {code:item.code})}));
     };
     const append = text => {
         text = String(text ?? '');
         const room = 16000-output.length;
         truncated ||= text.length > room;
-        output += text.slice(0,room);
+        output += clipText(text,room);
     };
     const collect = text => { append(text); write(text); };
     try {

@@ -134,3 +134,83 @@ SCENARIO("The versioned operation schema projects the same fields and permission
     }
     REQUIRE(Object(startSchema()).has("properties"));
 }
+
+SCENARIO("A completion the native side cannot validate fails its run instead of wedging the session") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+        {directory.path(), {"build"}}
+    };
+    session.poll();
+    GIVEN("a running operation") {
+        const auto id = Object(session.start(command(session, "build"))).string("runId");
+        REQUIRE(Object(session.poll()).string("operation") == "build");
+        WHEN("the page reports a lone surrogate, which no bridge string can carry") {
+            REQUIRE_NOTHROW(session.complete(id, "{\"exitCode\":0,\"output\":\"cut \\ud83d\"}"));
+            THEN("the run fails with the reason and the session stays usable") {
+                const Object result{session.result(query(session, id))};
+                REQUIRE(result.string("state") == "failed");
+                REQUIRE(Object(result.raw("result")).string("output").find("Invalid automation completion") != std::string::npos);
+                REQUIRE_FALSE(session.expire(std::chrono::steady_clock::now() + std::chrono::hours{1}));
+                REQUIRE_FALSE(session.isClosed());
+                REQUIRE_NOTHROW(session.start(command(session, "build")));
+            }
+        }
+        WHEN("the page reports an exit code out of range") {
+            session.complete(id, R"({"exitCode":999,"output":""})");
+            THEN("the run fails as well") {
+                REQUIRE(Object(session.result(query(session, id))).string("state") == "failed");
+            }
+        }
+    }
+}
+
+SCENARIO("MCP errors keep the request id and distinguish a lost transport from bad arguments") {
+    struct LostBackend {
+        std::string describe() const {
+            throw TransportError("Native attachment is unavailable");
+        }
+        std::string start(const Object&) const {
+            throw TransportError("Native attachment receive deadline exceeded");
+        }
+        std::string result(const Object&) const {
+            return "{}";
+        }
+        std::string cancel(const Object&) const {
+            return "{}";
+        }
+    } backend;
+    Mcp mcp{backend};
+    mcp.receive(
+        R"({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"test","version":"1"},"capabilities":{}}})");
+    mcp.receive(R"({"jsonrpc":"2.0","method":"notifications/initialized"})");
+    GIVEN("a request with a valid id but a wrong version or no method") {
+        const Object wrongVersion{*mcp.receive(R"({"jsonrpc":"1.0","id":7,"method":"ping"})")};
+        THEN("the error answers that id with the invalid-request code") {
+            REQUIRE(wrongVersion.raw("id") == "7");
+            REQUIRE(Object(wrongVersion.raw("error")).raw("code") == "-32600");
+            const Object noMethod{*mcp.receive(R"({"jsonrpc":"2.0","id":8})")};
+            REQUIRE(noMethod.raw("id") == "8");
+            REQUIRE(Object(noMethod.raw("error")).raw("code") == "-32600");
+            const Object extra{*mcp.receive(R"({"jsonrpc":"2.0","id":9,"method":"ping","other":1})")};
+            REQUIRE(extra.raw("id") == "9");
+            REQUIRE(Object(extra.raw("error")).raw("code") == "-32600");
+        }
+        THEN("only unparseable input is a parse error, without an id") {
+            const Object broken{*mcp.receive("{bad")};
+            REQUIRE(broken.raw("id") == "null");
+            REQUIRE(Object(broken.raw("error")).raw("code") == "-32700");
+        }
+    }
+    GIVEN("a backend whose channel to the owner failed") {
+        const Object tool{
+            Object(*mcp.receive(
+                       R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"webfront.start","arguments":{"session":"s","operation":"build"}}})"))
+                .raw("result")};
+        THEN("the tool reports disconnected, not invalid arguments, and says the outcome is unknown") {
+            REQUIRE(tool.raw("isError") == "true");
+            const Object content{tool.raw("structuredContent")};
+            REQUIRE(content.string("code") == "disconnected");
+            REQUIRE(content.string("error").find("outcome") != std::string::npos);
+        }
+    }
+}

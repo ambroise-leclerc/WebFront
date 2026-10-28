@@ -1,4 +1,4 @@
-import {createAutomationRunner,createPreviewInspector} from '../../../js/developer/environment/automation.mjs';
+import {clipText,createAutomationRunner,createPreviewInspector} from '../../../js/developer/environment/automation.mjs';
 import {exclusive,execute,runNonInteractive} from '../../../js/developer/environment/runtime.mjs';
 import {rejects} from '../support.mjs';
 
@@ -65,5 +65,27 @@ describe('Developer automation', () => {
         expect(result.truncated).toBeTrue();
         expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(30000);
         inspector.dispose();
+    });
+
+    it('cuts text on whole code points so that nothing native code must refuse crosses the bridge', () => {
+        const emoji='😀';
+        expect(clipText('ab'+emoji,3)).toBe('ab');
+        expect(clipText('ab'+emoji,4)).toBe('ab'+emoji);
+        expect(clipText(emoji+'ab',3,true)).toBe('ab');
+        expect(clipText(emoji+'ab',4,true)).toBe(emoji+'ab');
+        expect(clipText(emoji,1)).toBe('');
+        expect(clipText('a\ud83dz',3)).toBe('a\ufffdz');
+        expect(clipText(undefined,5)).toBe('');
+        const cut=clipText(emoji.repeat(10),15);
+        expect(JSON.stringify(cut)).not.toMatch(/\\ud[89ab]/i);
+    });
+
+    it('reports a native completion failure without keeping the run active', async () => {
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},
+            run:async () => ({exitCode:0,output:'x'.repeat(20000),report:null}),
+            complete:async () => { throw new Error('refused'); }});
+        await rejects(runner.start({runId:'one',operation:'build',arguments:{}}),/refused/);
+        expect(runner.output.length).toBeLessThanOrEqual(2048);
+        await runner.start({runId:'two',operation:'build',arguments:{}}).catch(() => {});
     });
 });

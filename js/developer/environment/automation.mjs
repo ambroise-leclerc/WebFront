@@ -1,5 +1,23 @@
 // Optional developer-window automation. Native code chooses the page and grants operations.
 // This module neither grants permissions nor exports arbitrary callbacks, eval or a shell.
+
+/** Cuts text to at most `max` UTF-16 units, keeping its start or (fromEnd) its end, without splitting a surrogate pair:
+ *  a lone surrogate cannot cross the bridge, and native code would refuse the whole message. */
+export function clipText(value, max, fromEnd = false) {
+    let text = String(value ?? '');
+    if (text.length > max) {
+        if (fromEnd) {
+            let start = text.length - max;
+            if ((text.charCodeAt(start) & 0xFC00) === 0xDC00) ++start;
+            text = text.slice(start);
+        } else {
+            let end = max;
+            if (end > 0 && (text.charCodeAt(end - 1) & 0xFC00) === 0xD800) --end;
+            text = text.slice(0, end);
+        }
+    }
+    return text.toWellFormed?.() ?? text;
+}
 export function createPreviewInspector(frame) {
     let revision = 0, observed = null, navigating = false;
     const errors = [];
@@ -9,7 +27,7 @@ export function createPreviewInspector(frame) {
         try {
             const view=frame.contentWindow;
             if (view.location.origin !== location.origin) return;
-            const error = event => { if (errors.length<20) errors.push(String(event.message ?? event.reason ?? 'Preview error').slice(0,512)); };
+            const error = event => { if (errors.length<20) errors.push(clipText(event.message ?? event.reason ?? 'Preview error',512)); };
             view.addEventListener('error',error);
             view.addEventListener('unhandledrejection',error);
             detachErrors=() => {view.removeEventListener('error',error);view.removeEventListener('unhandledrejection',error);};
@@ -38,12 +56,12 @@ export function createPreviewInspector(frame) {
                 if (element.closest('script,style,[hidden],[aria-hidden="true"],[contenteditable]')) continue;
                 if (!element.getClientRects().length) continue;
                 const form = /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName);
-                elements.push({id: element.id.slice(0,256), tag: element.tagName.toLowerCase(),
-                    role: (element.getAttribute('role') ?? '').slice(0,64),
-                    text: form ? '' : [...element.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join('').slice(0,128),
-                    label: (element.getAttribute('aria-label') ?? '').slice(0,128)});
+                elements.push({id: clipText(element.id,256), tag: element.tagName.toLowerCase(),
+                    role: clipText(element.getAttribute('role') ?? '',64),
+                    text: form ? '' : clipText([...element.childNodes].filter(node => node.nodeType === 3).map(node => node.textContent).join(''),128),
+                    label: clipText(element.getAttribute('aria-label') ?? '',128)});
             }
-            const result={pageId, ready:true, title:doc.title.slice(0,256), elements, errors:[...errors], truncated:doc.querySelectorAll('[id]').length > elements.length};
+            const result={pageId, ready:true, title:clipText(doc.title,256), elements, errors:[...errors], truncated:doc.querySelectorAll('[id]').length > elements.length};
             const encoder=new TextEncoder();
             while (encoder.encode(JSON.stringify(result)).length>30000) {
                 if (result.errors.length) result.errors.pop();
@@ -82,9 +100,9 @@ export function createPreviewInspector(frame) {
 /** One active native run, cooperatively cancellable; poll stays responsive while a command runs. */
 export function createAutomationRunner({run, exclusive, context, inspector, onState = () => {}, complete}) {
     let active = null, output = '';
-    const clip = value => String(value).slice(0,16000);
+    const clip = value => clipText(value,16000);
     return {
-        get output() { return output.slice(-2048); },
+        get output() { return clipText(output,2048,true); },
         cancel(id) { if (active?.id === id) active.controller.abort(new Error('Interrupted by automation')); },
         start(request) {
             if (active) throw new Error('Automation runner is busy');
@@ -122,8 +140,9 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
     };
 }
 
-export function connectAutomation({bridge, preview, run, exclusive, ...context}) {
-    const call = (name,...args) => bridge.cppFunction('webfront.automation.'+name)(...args);
+/** `call(name, ...args)` invokes a native automation callback; the page that connects holds its capability. */
+export function connectAutomation({bridge, call, preview, run, exclusive, ...context}) {
+    if (typeof call !== 'function') throw new Error('Automation needs the page capability to call native code');
     const panel = document.createElement('section');
     panel.setAttribute('aria-label','Developer automation');
     const status = document.createElement('output');

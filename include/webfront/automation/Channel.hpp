@@ -3,7 +3,9 @@
 #include "Session.hpp"
 
 #include <array>
+#include <atomic>
 #include <fstream>
+#include <list>
 #include <thread>
 #ifdef _WIN32
     // WinSock must precede Windows, and BCrypt requires Windows' type declarations.
@@ -236,11 +238,11 @@ inline void send(Handle socket, std::string_view bytes) {
     #endif
 #endif
         if (written <= 0)
-            throw std::runtime_error("Native attachment send failed");
+            throw TransportError("Native attachment send failed");
         bytes.remove_prefix(static_cast<std::size_t>(written));
     }
     if (!bytes.empty())
-        throw std::runtime_error("Native attachment send deadline exceeded");
+        throw TransportError("Native attachment send deadline exceeded");
 }
 inline std::string receive(Handle socket, std::size_t limit) {
     const auto  until = std::chrono::steady_clock::now() + std::chrono::seconds{2};
@@ -255,17 +257,17 @@ inline std::string receive(Handle socket, std::size_t limit) {
         const auto count = ::recv(socket, bytes, sizeof bytes, 0);
 #endif
         if (count <= 0)
-            throw std::runtime_error("Native attachment connection closed");
+            throw TransportError("Native attachment connection closed");
         text.append(bytes, static_cast<std::size_t>(count));
         const auto end = text.find('\n');
         if ((end == std::string::npos ? text.size() : end) > limit)
-            throw std::runtime_error("Native attachment message exceeds its limit");
+            throw TransportError("Native attachment message exceeds its limit");
         if (end != std::string::npos) {
             text.resize(end);
             return text;
         }
     }
-    throw std::runtime_error("Native attachment receive deadline exceeded");
+    throw TransportError("Native attachment receive deadline exceeded");
 }
 inline sockaddr_in address(unsigned short port) {
     sockaddr_in value{};
@@ -315,53 +317,75 @@ private:
     channel::Socket                   listener;
     std::string                       token;
     std::jthread                      worker;
-    void                              serve(std::stop_token stop) {
+    // One thread per connection, so a peer that connects and stays silent only holds its own slot until the receive
+    // deadline; the owner's clients are served meanwhile. Excess connections are refused rather than queued.
+    struct Connection {
+        std::atomic<bool> finished{false};
+        std::jthread      thread;
+    };
+    static constexpr std::size_t maxConnections = 32;
+    void                         serve(std::stop_token stop) {
+        std::list<Connection> connections;  // joined when this function returns, each bounded by the IO deadlines
         while (!stop.stop_requested() && !session->isClosed()) {
+            std::erase_if(connections, [](const Connection& connection) {
+                return connection.finished.load();
+            });
             if (!channel::wait(listener.value, POLLIN, 20))
                 continue;
             const auto handle = ::accept(listener.value, nullptr, nullptr);
             if (handle == channel::invalid)
                 continue;
-            channel::Socket peer{handle};
-            bool            authorized = false;
-            try {
-                channel::nonblocking(peer.value);
-                const Object request{channel::receive(peer.value, messageLimit)};
-                request.only({"version", "token", "method", "params"});
-                if (request.raw("version") != "1" || !channel::sameToken(request.string("token"), token))
-                    throw std::runtime_error("Unauthorized native attachment");
-                authorized          = true;
-                const auto   method = request.string("method");
-                const Object arguments{request.raw("params", "{}")};
-                std::string  result;
-                if (method == "describe") {
-                    arguments.only({});
-                    result = session->describe();
-                } else if (method == "start")
-                    result = session->start(arguments);
-                else if (method == "result")
-                    result = session->result(arguments);
-                else if (method == "cancel")
-                    result = session->cancel(arguments);
-                else if (method == "shutdown") {
-                    arguments.only({});
-                    session->close("Closed by the authorized native owner");
-                    result = "{}";
-                } else
-                    throw std::runtime_error("Unknown native attachment method");
-                channel::send(peer.value, "{\"result\":" + result + "}\n");
-            } catch (const std::exception& failure) {
-                // Never echo tokens, request data, or implementation exceptions to an unauthenticated peer.
-                try {
-                    const auto* operation = dynamic_cast<const OperationError*>(&failure);
-                    channel::send(peer.value,
-                                  objectJson({
-                                      {"error",                           json::quote(authorized ? failure.what() : "Native attachment refused")},
-                                      { "code", json::quote(authorized ? (operation ? operation->code : "invalid_arguments") : "not_authorized")}
-                    })
-                                      + "\n");
-                } catch (const std::exception&) { }
+            if (connections.size() >= maxConnections) {
+                channel::Socket refused{handle};
+                continue;
             }
+            auto& connection  = connections.emplace_back();
+            connection.thread = std::jthread([this, handle, &connection] {
+                handleConnection(handle);
+                connection.finished.store(true);
+            });
+        }
+    }
+    void handleConnection(channel::Handle handle) {
+        channel::Socket peer{handle};
+        bool            authorized = false;
+        try {
+            channel::nonblocking(peer.value);
+            const Object request{channel::receive(peer.value, messageLimit)};
+            request.only({"version", "token", "method", "params"});
+            if (request.raw("version") != "1" || !channel::sameToken(request.string("token"), token))
+                throw std::runtime_error("Unauthorized native attachment");
+            authorized          = true;
+            const auto   method = request.string("method");
+            const Object arguments{request.raw("params", "{}")};
+            std::string  result;
+            if (method == "describe") {
+                arguments.only({});
+                result = session->describe();
+            } else if (method == "start")
+                result = session->start(arguments);
+            else if (method == "result")
+                result = session->result(arguments);
+            else if (method == "cancel")
+                result = session->cancel(arguments);
+            else if (method == "shutdown") {
+                arguments.only({});
+                session->close("Closed by the authorized native owner");
+                result = "{}";
+            } else
+                throw std::runtime_error("Unknown native attachment method");
+            channel::send(peer.value, "{\"result\":" + result + "}\n");
+        } catch (const std::exception& failure) {
+            // Never echo tokens, request data, or implementation exceptions to an unauthenticated peer.
+            try {
+                const auto* operation = dynamic_cast<const OperationError*>(&failure);
+                channel::send(peer.value,
+                              objectJson({
+                                  {"error",                           json::quote(authorized ? failure.what() : "Native attachment refused")},
+                                  { "code", json::quote(authorized ? (operation ? operation->code : "invalid_arguments") : "not_authorized")}
+                })
+                                  + "\n");
+            } catch (const std::exception&) { }
         }
     }
 };
@@ -410,7 +434,7 @@ private:
         channel::nonblocking(peer.value);
         const auto connected = ::connect(peer.value, reinterpret_cast<const sockaddr*>(&address), sizeof address);
         if (connected != 0 && !channel::wait(peer.value, POLLOUT, 2000))
-            throw std::runtime_error("Native attachment connect deadline exceeded");
+            throw TransportError("Native attachment connect deadline exceeded");
         int status = 0;
 #ifdef _WIN32
         int        length  = sizeof status;
@@ -420,7 +444,7 @@ private:
         const auto checked = getsockopt(peer.value, SOL_SOCKET, SO_ERROR, &status, &length);
 #endif
         if (checked || status)
-            throw std::runtime_error("Native attachment is unavailable");
+            throw TransportError("Native attachment is unavailable");
         channel::send(peer.value,
                       objectJson({
                           {"version",                    "1"},

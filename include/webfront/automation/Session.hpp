@@ -118,19 +118,22 @@ public:
         return "{\"runId\":" + json::quote(run.id) + ",\"operation\":" + json::quote(run.operation) + ",\"arguments\":" + run.arguments + "}";
     }
 
+    // A completion the page cannot make valid (for example text that is not UTF-8) must not leave the run active until the
+    // deadline revokes the whole session: the run fails, with the reason as its output.
     void complete(std::string_view id, std::string result) {
-        const Object checked{result};
-        checked.only({"exitCode", "output", "report", "truncated", "data", "diagnostics"});
-        const auto code         = checked.raw("exitCode");
-        int        status       = -1;
-        const auto [end, error] = std::from_chars(code.data(), code.data() + code.size(), status);
-        if (error != std::errc{} || end != code.data() + code.size() || status < 0 || status > 255)
-            throw std::invalid_argument("Invalid automation exitCode");
-        checked.string("output");
         std::scoped_lock lock{mutex};
         if (!active || *active != id)
             throw std::runtime_error("Unexpected or late automation completion");
-        auto& run  = find(*active);
+        auto& run    = find(*active);
+        int   status = 1;
+        try {
+            status = completionStatus(result);
+        } catch (const std::exception& error) {
+            result = objectJson({
+                { "exitCode",                                                         "1"},
+                {   "output", json::quote(std::string("Invalid automation completion: ") + error.what())}
+            });
+        }
         run.result = std::move(result);
         run.state  = status == 0 ? "succeeded" : status == 130 ? "cancelled" : "failed";
         audit(run.state, run.operation, run.id);
@@ -190,6 +193,17 @@ private:
         return value + "]";
     }
 
+    static int completionStatus(const std::string& result) {
+        const Object checked{result};
+        checked.only({"exitCode", "output", "report", "truncated", "data", "diagnostics"});
+        const auto code         = checked.raw("exitCode");
+        int        status       = -1;
+        const auto [end, error] = std::from_chars(code.data(), code.data() + code.size(), status);
+        if (error != std::errc{} || end != code.data() + code.size() || status < 0 || status > 255)
+            throw std::invalid_argument("Invalid automation exitCode");
+        checked.string("output");
+        return status;
+    }
     static bool knownPermission(std::string_view name) {
         const Object operations{Object(contractSource).raw("x-webfront-operations")};
         for (const auto& [operation, definition] : operations.members())

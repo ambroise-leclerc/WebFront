@@ -55,6 +55,11 @@ public:
     OperationError(std::string category, std::string message) : std::runtime_error(std::move(message)), code(std::move(category)) { }
     const std::string code;
 };
+/// The channel to the native owner failed: the outcome of the request in flight is unknown.
+class TransportError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 inline Object operationContract(std::string_view operation) {
     const Object definitions{Object(contractSource).raw("x-webfront-operations")};
     if (!definitions.has(operation))
