@@ -59,7 +59,7 @@ class Binding {
                 throw std::runtime_error("Automation callback belongs to another page");
             unsigned mismatch = presented.size() != capability.size();
             for (std::size_t index = 0; index < presented.size() && index < capability.size(); ++index)
-                mismatch |= static_cast<unsigned char>(presented[index]) ^ static_cast<unsigned char>(capability[index]);
+                mismatch |= static_cast<unsigned>(static_cast<unsigned char>(presented[index])) ^ static_cast<unsigned>(static_cast<unsigned char>(capability[index]));
             if (mismatch)
                 throw std::runtime_error("Automation callback lacks the page capability");
         }
