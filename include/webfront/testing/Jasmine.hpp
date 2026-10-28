@@ -83,15 +83,18 @@ inline std::optional<std::string> jasmineConfigurationPath() {
     return std::nullopt;
 }
 
-inline constexpr std::string_view jasmineScript = R"JS(
+/// Bytes per bridge read, shared by the page script (injected as CHUNK) and JasmineSession::read.
+inline constexpr std::size_t jasmineChunkSize = 49152;
+
+inline constexpr std::string_view jasmineScriptBody = R"JS(
 void (async () => {
     const call = (name, ...args) => webFront.cppFunction('webfront.testing.' + name)(...args);
     const load = async index => {
         const parts = [];
-        for (let offset = 0; ; offset += 49152) {
+        for (let offset = 0; ; offset += CHUNK) {
             const part = await call('read', index, offset);
             parts.push(part);
-            if (part.length < 49152) break;
+            if (part.length < CHUNK) break;
         }
         const script = document.createElement('script');
         script.textContent = await new Blob(parts).text();
@@ -155,10 +158,15 @@ void (async () => {
 })();
 )JS";
 
+/// The page script: the shared chunk size followed by the body that uses it.
+inline std::string jasmineScript() {
+    return "const CHUNK = " + std::to_string(jasmineChunkSize) + ";\n" + std::string(jasmineScriptBody);
+}
+
 /// The state shared by the bridge callbacks of one test run. Independent of the application type so it can be tested alone.
 class JasmineSession {
 public:
-    static constexpr std::size_t chunkSize = 49152;  // keep in step with jasmineScript
+    static constexpr std::size_t chunkSize = jasmineChunkSize;
 
     JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath)
         : files(std::move(contents)), report(std::move(reportPath)) {}
@@ -269,7 +277,7 @@ public:
         app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui.id(), result); });
         subscription = app.subscribeUIStarted([owned](AppUI ui) {
             if (owned->attach(ui.id()))
-                ui.addScript(detail::jasmineScript);
+                ui.addScript(detail::jasmineScript());
         });
     }
 

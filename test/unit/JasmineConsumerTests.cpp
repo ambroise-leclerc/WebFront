@@ -119,7 +119,8 @@ SCENARIO("A Jasmine session validates and records exactly one result") {
 }
 
 SCENARIO("The injected script reads in the same chunk size the session serves and reports load errors") {
-    const auto script = webfront::testing::detail::jasmineScript;
-    REQUIRE(script.find(std::to_string(JasmineSession::chunkSize)) != std::string_view::npos);
+    const auto script = webfront::testing::detail::jasmineScript();
+    REQUIRE(script.starts_with("const CHUNK = " + std::to_string(JasmineSession::chunkSize) + ";"));
+    REQUIRE(script.find("49152", script.find("49152") + 1) == std::string::npos);  // the number appears only in the CHUNK definition
     REQUIRE(script.find("failed to load") != std::string_view::npos);
 }
