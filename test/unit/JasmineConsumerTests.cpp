@@ -58,7 +58,7 @@ SCENARIO("A Jasmine session serves its files in bounded chunks to the instrument
             REQUIRE(session.read(7, 2, 2).size() == 3);
         }
         THEN("indexes and offsets outside the file are rejected") {
-            for (const auto [index, offset] : {std::pair{-1.0, 0.0}, {3.0, 0.0}, {0.5, 0.0}, {0.0, -1.0}, {0.0, 0.5},
+            for (const auto& [index, offset] : {std::pair{-1.0, 0.0}, {3.0, 0.0}, {0.5, 0.0}, {0.0, -1.0}, {0.0, 0.5},
                                                {0.0, static_cast<double>(chunk * 2 + 1)}, {std::nan(""), 0.0}, {0.0, std::nan("")},
                                                {0.0, HUGE_VAL}})
                 REQUIRE_THROWS(session.read(7, index, offset));
