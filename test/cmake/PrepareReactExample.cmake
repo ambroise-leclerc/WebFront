@@ -1,0 +1,11 @@
+# Stage wf's documented build output into the browser fixture's ordinary page tree.
+cmake_minimum_required(VERSION 3.31)
+if(NOT BUILD OR NOT OUTPUT)
+    message(FATAL_ERROR "BUILD and OUTPUT are required")
+endif()
+if(NOT EXISTS "${BUILD}/app.js")
+    message(FATAL_ERROR "React example app.js is missing in ${BUILD}; run wf build first")
+endif()
+file(REMOVE_RECURSE "${OUTPUT}")
+file(MAKE_DIRECTORY "${OUTPUT}")
+file(COPY "${BUILD}/" DESTINATION "${OUTPUT}")

@@ -21,6 +21,9 @@ app.onUIStarted([](auto ui) {
 });
 ```
 
+The optional [`@webfront/react` adapter](REACT.md) lends empty React `Island` components
+and provides coalesced C++ stores; it is installed separately with `wf`.
+
 A custom page lends only empty, disjoint elements that its UI library does not
 reconcile. It opts into the document callbacks explicitly:
 

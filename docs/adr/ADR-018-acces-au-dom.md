@@ -7,6 +7,7 @@
 | 1.0 | 2026-10-26 | Proposée | Ambroise Leclerc | Décision initiale (#378) : état de l'art TypeScript, Rust et Python vérifié, huit solutions comparées, prototypes mesurés sous WebKitGTK (flux de mutations, proxy, lectures attendues, îlots React, formulaire généré par réflexion C++26, lots hostiles), découverte d'un délai de 40 ms du transport (Nagle). | À renseigner après intégration. |
 | 1.1 | 2026-10-27 | Proposée, partiellement remplacée | Ambroise Leclerc | Le transport du prototype est remplacé par ADR-003 1.10 et suivantes ; l’API document/nœuds reste proposée (#381). | — |
 | 1.2 | 2026-10-27 | Proposée, partiellement livrée | Ambroise Leclerc | API document/nœuds, cycle de 1 ms, événements et lectures groupées (#381). | — |
+| 1.3 | 2026-10-27 | Proposée, partiellement livrée | Ambroise Leclerc | Adaptateur React hors du cœur, store fusionné et variante Life (#382). | — |
 
 ## État et chronologie
 
@@ -14,8 +15,8 @@
 Le transport DOM est désormais livré par l'[ADR-003, version 1.10 et suivantes](ADR-003-protocole-binaire-et-bornes.md),
 avec la commande `domBatch` et `/webfront-dom.mjs` (#380). L'appel `wfDom.apply` par `jsFunction` décrit
 ci-dessous est uniquement le protocole historique des prototypes ; il ne décrit pas le transport livré.
-L’API document/nœuds est livrée par #381 ([DOM.md](../DOM.md)) ; les adaptateurs et la réflexion
-restent proposés (#382 à #384). Le point d’envoi retenu est un cycle serveur de 1 ms
+L’API document/nœuds est livrée par #381 ([DOM.md](../DOM.md)) ; l’adaptateur React et le store fusionné sont livrés par #382 ([REACT.md](../REACT.md)).
+Les autres adaptateurs, la réflexion et les événements attendables restent proposés (#383 et #384). Le point d’envoi retenu est un cycle serveur de 1 ms
 après la première écriture en attente, au sein d’une tâche possédée et drainée.
 `flush()` et les lectures explicites peuvent envoyer plus tôt. `SET_TEXT` reste limité
 aux nœuds texte. Une révocation invalide le sous-arbre ; avec des écritures en attente,

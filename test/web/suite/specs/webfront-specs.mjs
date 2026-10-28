@@ -1,3 +1,4 @@
+import './react-specs.mjs';
 import './fallback-specs.mjs';
 import './dom-document-specs.mjs';
 import './content-policy-specs.mjs';

@@ -81,5 +81,8 @@ are retained for investigation; diagnostics alone do not establish a correction.
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
   The per-connection document/node API, events and grouped sender reads are available; see
   [DOM from C++](DOM.md). A direct engine transport remains future work.
+  The optional [React adapter](REACT.md) provides a coalesced C++ store and a StrictMode-safe
+  `Island`, demonstrated in the Life variant. Its npm archive is prepared locally; public
+  registry publication is a separate action. Solid, Svelte, Vue and Lit adapters remain future work.
   [ADR-018](adr/ADR-018-acces-au-dom.md) describes DOM islands;
   [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) retains transport experiments and acceptance criteria.

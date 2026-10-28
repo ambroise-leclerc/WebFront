@@ -2,6 +2,21 @@
   "format": 1,
   "name": "webfront-browser-tests",
   "version": "0.1.0",
-  "dependencies": {"jasmine-core": "7.0.2"},
-  "test": {"specs": ["specs/webfront-specs.mjs"]}
+  "dependencies": {
+    "jasmine-core": "7.0.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "@webfront/react": "0.1.0",
+    "typescript": "5.9.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  },
+  "test": {
+    "specs": [
+      "specs/webfront-specs.mjs"
+    ]
+  },
+  "entries": {
+    "life-react": "pages/life-react.tsx"
+  }
 }

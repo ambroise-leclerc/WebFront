@@ -6,6 +6,7 @@
 // test/web/registry-packages.json), kept byte for byte; the synthetic ones are generated. The registry's files go to
 // build-registry/, next to an integrities.json of every package.
 import {realPackage, syntheticPackages, registryFiles} from './fixture.mjs';
+import {reactPackage} from '../../../js/developer/scripts/react-package.mjs';
 
 export default async function (context) {
     if (context.args.length) throw new Error('Usage: wf run test-registry');
@@ -14,6 +15,8 @@ export default async function (context) {
     if (!archives.length) throw new Error('registry-archives holds no archive');
     const packages = [];
     for (const name of archives) packages.push(await realPackage(await project.read(`registry-archives/${name}`)));
+    // Preserve exactly the same archive bytes that `wf run react-package` writes.
+    packages.push(await reactPackage(project));
     const {files, integrities} = await registryFiles([...packages, ...syntheticPackages()]);
     for (const [name, bytes] of files) await project.write(`build-registry/${name}`, bytes);
     await project.write('build-registry/integrities.json', JSON.stringify(integrities, null, 2) + '\n');

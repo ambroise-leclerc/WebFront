@@ -7,6 +7,7 @@
 file(REMOVE_RECURSE "${PROJECT}")
 file(MAKE_DIRECTORY "${PROJECT}" "${PROJECT}/include/webfront/system" "${PROJECT}/js/developer")
 file(COPY "${SOURCE}/LICENSE" DESTINATION "${PROJECT}")
+file(COPY "${SOURCE}/js/react" DESTINATION "${PROJECT}/js")
 file(COPY "${SOURCE}/js/core" DESTINATION "${PROJECT}/js")
 file(COPY "${SOURCE}/js/developer/webfront.project.json" DESTINATION "${PROJECT}/js/developer")
 foreach(directory environment scripts tools)

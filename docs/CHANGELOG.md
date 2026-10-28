@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Optional React adapter (#382): an installable `@webfront/react` package with cached
+  `useSyncExternalStore` snapshots and empty `Island` components that tolerate StrictMode
+  effect replay. `webfront::react::Store` coalesces the last snapshot per 1 ms server cycle
+  without changing the wire format or core assets. A Game of Life variant constructs its
+  simulation panel in C++ inside React. Package assembly, wf installation, declarations,
+  batching and island lifecycle have regression coverage. Explicit flush failures retain the
+  pending snapshot; automatic error callbacks are contained and logged. Moved-from
+  store wrappers reject operations explicitly. Self-capturing error callbacks are released on
+  close and automatic failure; subscriber and island-release exceptions are logged and isolated.
+  The Life variant gates
+  cell edits until startup succeeds and bounds island readiness. Test installation uses the exact
+  archive bytes, with file-list and SHA-512 checks. Registry publication stays explicit.
+
 - License WebFront under Apache-2.0 OR CECILL-B, at the recipient's option.
   Include both full license texts (CeCILL-B in French and English), document
   contribution terms and carry the license into newly built developer and
