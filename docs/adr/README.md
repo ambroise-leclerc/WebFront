@@ -1,9 +1,10 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **18 ADRs**, with unique numbers (16 accepted decisions and 2 proposals).
+when making changes or generating code. It contains **19 ADRs**, with unique numbers (16 accepted decisions and 3 proposals).
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
-the developer environment proposals are dated **2026-10-20**, the direct frontend access proposal **2026-10-24**, and the DOM access proposal **2026-10-26**. Each ADR is versioned
+the developer environment proposals are dated **2026-10-20**, the direct frontend access proposal **2026-10-24**,
+the DOM access proposal **2026-10-26**, and the developer automation proposal **2026-10-28**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
 The ADRs themselves are written in French.
 
@@ -58,6 +59,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-016](ADR-016-bootstrap-comme-socle.md) | The bootstrap environment as WebFront's foundation | Accepted | 2026-10-22 | 1.6 — 2026-10-26 |
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.3 — 2026-10-27 |
+| [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Proposed | 2026-10-28 | 1.1 — 2026-10-28 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -84,6 +86,7 @@ the chronology, which does not follow the numerical order.
 | DOM access from C++, generated interfaces, React or other UI library integration | 003, 004, 006, 008, 010, 016, 018 |
 | Diagnostics and log transport | 006, 011 |
 | Downloaded development environment, npm libraries and generated application assets | 008, 009, 010, 013, 014, 015, 016 |
+| Developer automation, agent access, MCP and consumer UI tests | 004, 006, 008, 012, 013, 014, 016, 019 |
 
 ADRs explain decisions; [AGENTS.md](../../AGENTS.md) sets out working instructions,
 the [README](../../README.md) provides the user journey, and specialist documents define
@@ -101,7 +104,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-019**. Retain historical numbers and files.
+  is **ADR-020**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

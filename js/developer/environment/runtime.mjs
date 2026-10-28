@@ -49,7 +49,8 @@ async function readPackages(bridge, lock, signal) {
 async function onWorkerMessage(bridge, worker, finish, data) {
     if (data.type === 'read') worker.postMessage(await answerRead(bridge, data));
     else if (data.type === 'result') finish(null, data.files);
-    else if (data.type === 'error') finish(new Error(data.error));
+    else if (data.type === 'error')
+        finish(Object.assign(new Error(data.error), Array.isArray(data.diagnostics) ? {diagnostics: data.diagnostics} : {}));
 }
 
 function buildInWorker(bridge, message, signal) {

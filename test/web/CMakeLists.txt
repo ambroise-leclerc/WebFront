@@ -22,6 +22,13 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     add_dependencies(webtest frontend_lifecycle)
 endif()
 
+# The runner passes arguments literally and kills the whole process tree at its deadline (POSIX shell wrapper).
+if(UNIX)
+    add_test(NAME JasmineRunnerArgumentsAndDeadline COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/jasmine-runner-check" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckJasmineRunner.cmake")
+    set_tests_properties(JasmineRunnerArgumentsAndDeadline PROPERTIES TIMEOUT 60)
+endif()
+
 # The publication script that archives the files in a release refuses a missing or invalid manifest (needs bash and jq).
 find_program(WEBFRONT_BASH bash)
 find_program(WEBFRONT_JQ jq)
@@ -91,6 +98,40 @@ endif()
 set(_webtest_runs OFF)
 if(_browser_tests_available)
     set(_webtest_runs ON)
+    add_executable(jasmine_consumer JasmineConsumer.cpp)
+    # The CEF CI builds webtest explicitly, then runs every web-integration case.
+    add_dependencies(webtest jasmine_consumer)
+    target_link_libraries(jasmine_consumer PRIVATE WebFront WebFront_test_hardening WebFront_options WebFront_warnings)
+    target_compile_definitions(jasmine_consumer PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(jasmine_consumer)
+    # Exercise the public helper without a configure-time public network dependency beyond the pinned registry.
+    set(WEBFRONT_JASMINE_ARCHIVE_DIR "${_registry_archives}")
+    # Each expected failure must fail for its own reason, which the runner names: WILL_FAIL would accept any failure.
+    set(_reason_fail "Jasmine did not pass \\(status: failed\\)")
+    set(_reason_empty "${_reason_fail}")
+    set(_reason_pending "${_reason_fail}")
+    set(_reason_broken "Jasmine did not pass \\(status: error\\)")
+    set(_reason_close "exited without reporting a result")
+    set(_reason_hang "timed out after 5 seconds")
+    foreach(mode pass fail empty pending broken close hang)
+        set(limit 30)
+        if(mode STREQUAL "hang")
+            set(limit 5)
+        endif()
+        webfront_add_jasmine_test(NAME ConsumerJasmine-${mode} TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT ${limit}
+            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/${mode}.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        if(NOT mode STREQUAL "pass")
+            set_tests_properties(ConsumerJasmine-${mode} PROPERTIES PASS_REGULAR_EXPRESSION "${_reason_${mode}}")
+        endif()
+        set_tests_properties(ConsumerJasmine-${mode} PROPERTIES FIXTURES_SETUP ConsumerJasmineRuns)
+    endforeach()
+    add_test(NAME ConsumerJasmineReports COMMAND "${CMAKE_COMMAND}"
+        "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine"
+        -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckConsumerJasmineReports.cmake")
+    set_tests_properties(ConsumerJasmineReports PROPERTIES FIXTURES_REQUIRED ConsumerJasmineRuns
+        LABELS web-integration TIMEOUT 15)
     set(_suite_project "${CMAKE_CURRENT_BINARY_DIR}/web-suite-project")
     math(EXPR _suite_timeout "${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_TIMEOUT} - 10")
     webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle

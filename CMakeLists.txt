@@ -115,6 +115,8 @@ endif()
 # Embedded asset regeneration target and CTest freshness checks.
 include(WebFrontAssets)
 webfront_add_embedded_assets()
+# Opt-in consumer test registration; inclusion alone downloads nothing and registers no tests.
+include(WebFrontJasmine)
 
 if(WEBFRONT_BUILD_AUTOMATION OR (ENABLE_TESTING AND
     (WEBFRONT_EMBED_CEF OR WEBFRONT_EMBED_WKWEBVIEW OR WEBFRONT_EMBED_WEBVIEW2 OR WEBFRONT_EMBED_WEBKITGTK)))
