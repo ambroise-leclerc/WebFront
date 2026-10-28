@@ -5,10 +5,12 @@
 limit=$1
 shift
 set -m
+expired=$(mktemp -u)
 "$@" &
 command_pid=$!
 (
     sleep "$limit"
+    : > "$expired"
     kill -KILL -- "-$command_pid" 2>/dev/null
 ) &
 watchdog_pid=$!
@@ -17,5 +19,9 @@ status=$?
 kill -KILL -- "-$watchdog_pid" 2>/dev/null
 # Whatever the command left behind in its group goes with it.
 kill -KILL -- "-$command_pid" 2>/dev/null
-[ "$status" = 137 ] && exit 124
+# Only the watchdog's flag makes a kill a timeout: an unrelated SIGKILL keeps its own status.
+if [ -e "$expired" ]; then
+    rm -f "$expired"
+    exit 124
+fi
 exit "$status"

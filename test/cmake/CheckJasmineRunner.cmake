@@ -40,3 +40,10 @@ foreach(pid IN LISTS pids)
         message(FATAL_ERROR "Process ${pid} survived the deadline")
     endif()
 endforeach()
+
+# A SIGKILL that is not the deadline keeps its own status instead of being reported as a timeout.
+file(WRITE "${work}/arguments-Test.json" "[]\n")
+run_runner("${SOURCE_DIR}/test/cmake/jasmine-runner/kill.sh" 20)
+if(error MATCHES "timed out")
+    message(FATAL_ERROR "An unrelated SIGKILL was reported as a timeout: ${status} ${error}")
+endif()

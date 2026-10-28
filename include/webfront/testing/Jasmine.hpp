@@ -249,6 +249,7 @@ private:
 }  // namespace detail
 
 #ifdef WEBFRONT_JASMINE_TESTING
+inline namespace jasmine_enabled {
 /**
  * @brief Instruments the newest connected page only when WEBFRONT_JASMINE_CONFIG is set by CTest.
  * Compiled only where webfront_add_jasmine_test defined WEBFRONT_JASMINE_TESTING on the target; any other build gets an
@@ -289,7 +290,9 @@ private:
     std::shared_ptr<detail::JasmineSession> session;
     UISubscription                          subscription;
 };
+}  // namespace jasmine_enabled
 #else
+inline namespace jasmine_inert {
 /// Inert in a build that did not define WEBFRONT_JASMINE_TESTING: it registers nothing and reports success.
 template <typename App>
 class JasmineTest {
@@ -299,5 +302,6 @@ public:
         return 0;
     }
 };
+}  // namespace jasmine_inert
 #endif
 }  // namespace webfront::testing
