@@ -111,9 +111,9 @@ class Client:
         self.reader.join(timeout=2)
 
 
-def check_startup_backoff(agent, root, late_ready=False):
+def check_startup_backoff(agent, root, ready_delay=0):
     """The attach-only path needs no renderer and must not create 50 connections per second."""
-    endpoint = root / ("late-owner" if late_ready else "starting-owner")
+    endpoint = root / f"owner-{ready_delay}"
     endpoint.mkdir(mode=0o700)
     stopped = threading.Event()
     calls = []
@@ -141,9 +141,9 @@ def check_startup_backoff(agent, root, late_ready=False):
                         continue
                     request = json.loads(message)
                     calls.append(request["method"])
-                    if late_ready and stopped.wait(1.25):
+                    if ready_delay and stopped.wait(ready_delay):
                         continue
-                    state = "ready" if late_ready else "starting"
+                    state = "ready" if ready_delay else "starting"
                     try:
                         peer.sendall(json.dumps({"result": {"session": "starting", "state": state}}).encode() + b"\n")
                     except OSError:
@@ -156,9 +156,10 @@ def check_startup_backoff(agent, root, late_ready=False):
                                     capture_output=True, text=True, timeout=5)
             assert result.returncode == 71, result.stdout + result.stderr
             assert 1 <= len(calls) <= 6 and set(calls) == {"describe"}, calls
-            if late_ready:
-                assert time.monotonic() - began < 1.8, "Transport exceeded the startup deadline"
+            if ready_delay:
                 assert calls == ["describe"], calls
+            if ready_delay >= 2:
+                assert time.monotonic() - began < 1.8, "Transport exceeded the startup deadline"
         finally:
             stopped.set()
             worker.join(timeout=3)
@@ -246,7 +247,8 @@ def main():
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="session-") as temporary:
         check_startup_backoff(args.agent, pathlib.Path(temporary))
-        check_startup_backoff(args.agent, pathlib.Path(temporary), late_ready=True)
+        check_startup_backoff(args.agent, pathlib.Path(temporary), ready_delay=1.25)
+        check_startup_backoff(args.agent, pathlib.Path(temporary), ready_delay=3)
         project = pathlib.Path(temporary) / "project"
         shutil.copytree(args.fixture, project)
         command = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,

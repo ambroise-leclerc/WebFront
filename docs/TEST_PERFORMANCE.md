@@ -70,7 +70,8 @@ root/cache profile; its default beside the executable would otherwise forward a 
 singleton even with independent HTTP ports. Nested builds retain that lock
 and `webfront_build_tree` to protect shared browser DLLs and build outputs on Windows, while unrelated unit tests can run.
 
-Automation follows the same independent-port/profile rule. Its functional MCP scenario does not
+Automation uses independent ports and project/temporary directories; browser storage isolation
+still depends on the frontend, as documented in [AUTOMATION.md](AUTOMATION.md). Its functional MCP scenario does not
 hold `webfront_port_9002`. The two watchdog cases alone share `webfront_automation_watchdog`, limiting
 deliberately spinning renderers without blocking unrelated browser work. Their test archive replaces
 only the operation body with a marker followed by a synchronous loop; signed dispatch, the native

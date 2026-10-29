@@ -270,7 +270,8 @@ without loading/compiling Jasmine just to provoke that hang. They exercise the p
 callback/runner, native two-second deadline, five-second close grace, stdio EOF and endpoint removal;
 the CLI case also reuses the endpoint after forced exit. The MCP case delays bootstrap by three
 seconds to verify that its shorter operation deadline starts only after startup. The cases retain
-separate private projects/profiles and ephemeral ports; only the two spinning renderers share a lock.
+separate private project/temporary directories and ephemeral ports; the frontend storage limits
+listed above still apply. Only the two spinning renderers share a lock.
 That regression uses Python's standard library as a test client; Python is not a runtime
 dependency of the launcher. It is registered when a Python interpreter and embedded test engine
 are available; without xvfb-run on Linux the optional window tests are skipped with a warning.
