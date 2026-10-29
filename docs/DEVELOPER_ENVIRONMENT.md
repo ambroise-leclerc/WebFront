@@ -570,7 +570,8 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
 The release pin (`DeveloperReleaseData.hpp`) and test-bootstrap pin are independent;
-`cmake/WebFrontBootstrap.cmake` keeps the verified 0.6.2 test bootstrap. Historically, 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), 0.6.1 fixed `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary, and 0.6.2 reads the archives of `@types` packages and the manifest directory. The other `WfDriver*` cases run the environment built from the current sources
+`cmake/WebFrontBootstrap.cmake` keeps the verified 0.6.2 test bootstrap.
+Historically, 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), 0.6.1 fixed `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary, and 0.6.2 reads the archives of `@types` packages and the manifest directory. The other `WfDriver*` cases run the environment built from the current sources
 (the `SelfBuild` cases, assembled by the fixture `DeveloperFixtures`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
 report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
