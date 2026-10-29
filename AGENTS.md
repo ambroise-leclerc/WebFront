@@ -71,6 +71,8 @@ wf() { build/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer -
 wf restore && wf run build build-distribution
 ```
 
+On Linux, configuring tests with an enabled browser frontend requires `xvfb-run`, even if the subsequent CTest invocation selects only `-L fast`. Install Xvfb for the browser suite, or explicitly disable browser frontends (`-DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF`) for a C++-only workflow. Missing Xvfb may skip only the optional Automation window tests; it must not silently remove the required Jasmine, developer journey or WfDriver coverage.
+
 Important CMake options:
 
 The headers of the embedded assets are generated, and checked by CTest, in pure CMake (`js/core/EmbedAsset.cmake`; the

@@ -62,6 +62,7 @@ set(_browser_tests_available OFF)
 if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
    AND CMAKE_SYSTEM_NAME IN_LIST WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_PLATFORMS)
     set(_browser_tests_available ON)
+    webfront_require_browser_test_display("${WEBFRONT_WEBTEST_FRONTEND}")
     webfront_provision_registry(_registry_archives "${CMAKE_CURRENT_SOURCE_DIR}/registry-packages.json"
         "${CMAKE_BINARY_DIR}/registry-archives")
 endif()
@@ -69,6 +70,49 @@ endif()
 set(_self_project "${CMAKE_CURRENT_BINARY_DIR}/self-build-project")
 set(_registry "${_self_project}/build-registry")
 set(_fixtures "${CMAKE_CURRENT_BINARY_DIR}/developer-fixtures")
+if(_browser_tests_available AND TARGET webfront-agent)
+    webfront_optional_window_test_runner(_window_test_prefix _automation_windows_available)
+    add_dependencies(webtest webfront-agent)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND AND _automation_windows_available)
+        set(_agent_command "$<TARGET_FILE:webfront-agent>")
+        # The client launches both native processes on the display supplied to the whole test.
+        set(_agent_prefix "${_window_test_prefix}")
+        foreach(_pair "session|AutomationMcpWindow" "mcp-watchdog|AutomationMcpWatchdog" "cli-watchdog|AutomationCliWatchdog")
+            string(REPLACE "|" ";" _entry "${_pair}")
+            list(GET _entry 0 _scenario)
+            list(GET _entry 1 _case)
+            add_test(NAME ${_case} COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/test/tools/AutomationClient.py"
+                --scenario "${_scenario}"
+                --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
+                --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
+                --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
+                --work "${CMAKE_CURRENT_BINARY_DIR}/automation-${_scenario}")
+            set_tests_properties(${_case} PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
+                LABELS web-integration TIMEOUT 120)
+            webfront_use_own_profile(${_case} "automation-${_scenario}")
+            if(NOT _scenario STREQUAL "session")
+                # One deliberately spinning renderer at a time, without serializing unrelated browser tests.
+                set_tests_properties(${_case} PROPERTIES RESOURCE_LOCK webfront_automation_watchdog)
+            endif()
+        endforeach()
+        execute_process(COMMAND "${Python3_EXECUTABLE}" -c
+            "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
+            RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)
+        if(_sdk_available EQUAL 0)
+            add_test(NAME AutomationSdkWindow COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/test/tools/AutomationSdkClient.py"
+                --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
+                --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
+                --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
+                --work "${CMAKE_CURRENT_BINARY_DIR}/automation-sdk")
+            set_tests_properties(AutomationSdkWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
+                LABELS web-integration TIMEOUT 120)
+            webfront_use_own_profile(AutomationSdkWindow automation-sdk)
+        endif()
+    endif()
+endif()
 # The Jasmine suite is a WebFront project (suite/) that webtest runs with `wf test` in the pinned bootstrap environment;
 # its dependencies come from the local registry.
 set(_webtest_runs OFF)

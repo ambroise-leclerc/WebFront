@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- Let automation use an idle `wf dev` watcher started through nested `wf run` aliases, while
+  retaining exclusive compilation/publication and module-script execution. Accept manifest entry
+  labels such as `app:debug` and `app..debug` in native build/preview requests.
+
+- Keep automation CLI bootstrap failures at exit 70 regardless of transport completion order,
+  while preserving native deadline and signal exit statuses.
+
+- Record the [local-model MCP qualification](validation/automation-models-2026-10-29.md) on five
+  installed models through LM Studio: 30/30 final sources pass host verification, while 29/30
+  model conversations observe successful check/test results. Retain per-task data, measured token
+  costs, the incomplete Flint case and the distinction from the built-in Ollama benchmark.
+
+- Keep mandatory browser coverage enabled without silently falling back when xvfb is missing;
+  restrict optional display gating to automation. Retry transient native socket errors within the
+  deadline, accept authenticated sequence gaps while refusing replay, recover stalled preview
+  navigation, drain Windows stdin on pipe closure, preserve Unicode bootstrap failures and keep
+  the bounded audit focused on start-authorization decisions. Share native platform declarations.
+
+- Split functional MCP coverage from short native watchdog process regressions, with private ports
+  and profiles and a lock limited to spinning renderers. Bound attachment startup IO by its remaining
+  deadline and preserve diagnostic paths through the producer's 256-character limit.
+
+- Select the automation window with a single-use launcher URL claim instead of connection order,
+  create profiles with private permissions atomically, keep queued output separate from previous
+  runs, and complete unexpected busy runner starts as errors. Document strict counter failure and
+  the Windows endpoint reader's reliance on its directory ACL.
+
+- Harden developer automation callbacks with per-message HMAC-SHA-256 and replay protection,
+  revoke the attachment listener and endpoint on shutdown/watchdog exit, preserve final output
+  summaries and invalidate old preview actions before every navigation. Document the actual
+  frontend storage limits and add a maintained optional official MCP SDK regression.
+
 - The embedded native windows take their title and initial size from `WebFrontConfig::window`
   (`WindowOptions`, #396). The default title is the executable's name (or "WebFront" if it cannot be determined) instead of
   "WebFront Application"/"WebFront". The WebKitGTK lifecycle suite reads the native title back; a unit test
@@ -31,6 +63,13 @@
   The Life variant gates
   cell edits until startup succeeds and bounds island readiness. Test installation uses the exact
   archive bytes, with file-list and SHA-512 checks. Registry publication stays explicit.
+
+- Optional native developer automation (#403): `webfront-agent` drives its developer window
+  through stdio MCP or a JSON CLI, with native operation grants, asynchronous run IDs, bounded
+  structured diagnostics/results, preview inspection/actions, cooperative cancellation and
+  an external renderer deadline. Human commands share dispatch and arbitrate agent operations.
+  No MCP network endpoint or arbitrary callback/shell export is added. A compatible rebuilt
+  environment is required until a release is published and pinned.
 
 - License WebFront under Apache-2.0 OR CECILL-B, at the recipient's option.
   Include both full license texts (CeCILL-B in French and English), document

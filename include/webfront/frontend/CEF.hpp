@@ -53,6 +53,10 @@ public:
 
 #ifdef WEBFRONT_EMBED_CEF
 
+    #ifndef _WIN32
+        #include <csignal>
+    #endif
+
     // CEF defines macros such as NO_UNIQUE_ADDRESS and ALWAYS_INLINE that break stdexec's preprocessor
     // machinery when it is included afterwards: pull every stdnet and stdexec header WebFront uses in first.
     #include "../networking/SenderHeaders.hpp"
@@ -539,7 +543,7 @@ namespace detail {
 
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
                        CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
-                       WindowOptions windowSettings = {}) {
+                       WindowOptions windowSettings = {}, bool preserveSignalHandlers = false) {
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -555,6 +559,8 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     );
     CefSettings settings;
     settings.no_sandbox = true;
+    // An embedder owning native shutdown must keep its SIGINT/SIGTERM handlers.
+    settings.disable_signal_handlers = preserveSignalHandlers;
     // Common settings for all platforms
     settings.multi_threaded_message_loop = false;
     settings.log_severity                = LOGSEVERITY_INFO;
@@ -570,7 +576,21 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     }
     log::info("Attempting CEF initialization...");
     CefRefPtr<SimpleCEFApp> app(new SimpleCEFApp);
-    if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
+    #ifndef _WIN32
+    struct sigaction previousInt{}, previousTerm{};
+    if (preserveSignalHandlers && (::sigaction(SIGINT, nullptr, &previousInt) || ::sigaction(SIGTERM, nullptr, &previousTerm)))
+        throw std::runtime_error("Cannot preserve native signal handlers");
+    #endif
+    const bool initialized = CefInitialize(main_args, settings, app.get(), nullptr);
+    #ifndef _WIN32
+    // Chrome's browser startup can install handlers independently of ContentMain's setting.
+    // Restore the embedder's exact actions once all browser initialization has finished.
+    if (preserveSignalHandlers && (::sigaction(SIGINT, &previousInt, nullptr) || ::sigaction(SIGTERM, &previousTerm, nullptr))) {
+        if (initialized) CefShutdown();
+        throw std::runtime_error("Cannot restore native signal handlers");
+    }
+    #endif
+    if (!initialized) {
         throw std::runtime_error("CEF initialization failed");
     }
     // Create the browser client

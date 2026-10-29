@@ -18,6 +18,7 @@
   "js/developer/environment/starter.mjs",
   "js/developer/environment/paths.mjs",
   "js/developer/environment/runtime.mjs",
+  "js/developer/environment/automation.mjs",
   "js/developer/environment/development.mjs",
   "js/developer/environment/testing.mjs",
   "js/developer/environment/terminal.mjs",

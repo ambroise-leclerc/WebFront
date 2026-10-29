@@ -202,6 +202,11 @@ The builds remove TypeScript types without checking them; `wf check` runs the Ty
 
 The type packages come next: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
 
+An optional native [automation launcher](docs/AUTOMATION.md) exposes the developer window through
+local stdio MCP or a JSON CLI, with explicit permissions for check/build/test/preview and bounded
+UI inspection/actions. It requires a compatible environment built from the sources; the pinned
+0.6.2 archive predates this API.
+
 ### 5. Try the result
 
 ![Game of Life running in a native window](docs/images/life-preview.jpg)

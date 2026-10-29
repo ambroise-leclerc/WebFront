@@ -163,6 +163,14 @@ public:
         }
     }
 
+    /// Returns the exact JSON spelling of one checked value, borrowing the reader's input.
+    std::string_view rawValue() {
+        skipWhitespace();
+        const auto start = index;
+        skipValue();
+        return text.substr(start, index - start);
+    }
+
     /// Checks that only whitespace follows the value read.
     void end() {
         skipWhitespace();

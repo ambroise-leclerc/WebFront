@@ -396,5 +396,11 @@ export function checkReport(ts, snapshot, {program, diagnostics}, bounds = snaps
     const projectFiles = program.getSourceFiles().filter(file => projectRelative(file.fileName) !== null).length;
     if (errors.length) lines.push(`Found ${errors.length} error${errors.length === 1 ? '' : 's'} in ${files.size} file${files.size === 1 ? '' : 's'}.`);
     else if (!snapshot.truncated) lines.push(`No type errors in ${projectFiles} project file${projectFiles === 1 ? '' : 's'} (TypeScript ${ts.version}).`);
-    return {lines, code: errors.length || snapshot.truncated ? 1 : 0};
+    const structured = diagnostics.slice(0,20).map(diagnostic => {
+        const position = diagnostic.file?.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        return {text:ts.flattenDiagnosticMessageText(diagnostic.messageText,'\n').slice(0,512),
+            code:diagnostic.code, category:ts.DiagnosticCategory[diagnostic.category].toLowerCase(),
+            ...(position ? {file:displayPath(snapshot,diagnostic.file.fileName).slice(0,256),line:position.line+1,column:position.character+1} : {})};
+    });
+    return {lines, code: errors.length || snapshot.truncated ? 1 : 0, diagnostics:structured};
 }

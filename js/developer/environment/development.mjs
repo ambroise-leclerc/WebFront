@@ -112,7 +112,14 @@ let revision = 0;
 export function showPreview(frame, directory = 'preview') {
     if (!frame) throw new Error('No preview frame is available');
     frame.hidden = false;
-    frame.contentWindow.location.replace(`/webfront/developer/${directory}/index.html?build=${Date.now()}-${++revision}`);
+    const id=++revision;
+    frame.dispatchEvent?.(new CustomEvent('webfront-preview-navigating',{detail:{id}}));
+    try {
+        frame.contentWindow.location.replace(`/webfront/developer/${directory}/index.html?build=${Date.now()}-${id}`);
+    } catch (error) {
+        frame.dispatchEvent?.(new CustomEvent('webfront-preview-failed',{detail:{id}}));
+        throw error;
+    }
 }
 
 // Manifest labels allow punctuation that project paths forbid. Escape it without collisions; also avoid
@@ -174,7 +181,7 @@ export async function inputsChanged(bridge, observed, signal) {
     return false;
 }
 
-export async function dev(args, {bridge, signal, preview: frame, write = () => {}}) {
+export async function dev(args, {bridge, signal, preview: frame, write = () => {}, withBuild = action => action()}) {
     if (args.length > 1) throw new Error('Usage: wf dev [entry.tsx|name]');
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -193,27 +200,30 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
             active.throwIfAborted();
             const configReads = new Map(), budget = {bytes: 0};
             try {
-                // Record the configuration before loading it. A concurrent edit triggers another iteration.
-                for (const path of [manifestPath, lockPath]) {
-                    try { await observedRead(bridge, path, configReads, budget, active); }
-                    catch (error) { if (configReads.get(path) !== 'missing') throw error; }
-                }
-                const project = await loadProject(bridge);
-                if (!project.manifest && args[0] === undefined) throw new Error(noManifest);
-                const entry = resolveEntry(project.manifest, args[0], 'wf dev <entry.tsx>');
-                if (!session || session.closed) session = compilerSession(bridge, active);
-                const files = await session.rebuild({entry, lock: project.lock ?? {format: 1, roots: {}, packages: {}}});
-                files.set('index.html', applicationPage(files));
-                await publish(bridge, '.webfront/developer/preview', files, {signal: active});
-                // Once commit succeeds, display its publication even if Ctrl+C arrived while awaiting it.
-                diagnostic = '';
-                previewDiagnostics(frame, '');
-                showPreview(frame);
-                // A successful build can drop dependencies that are no longer imported.
-                observed = new Map(session.observed);
-                write(syncNotice(project) + 'Preview ready. Watching inputs (Ctrl+C to stop).\n');
+                await withBuild(async () => {
+                    // Record the configuration before loading it. A concurrent edit triggers another iteration.
+                    for (const path of [manifestPath, lockPath]) {
+                        try { await observedRead(bridge, path, configReads, budget, active); }
+                        catch (error) { if (configReads.get(path) !== 'missing') throw error; }
+                    }
+                    const project = await loadProject(bridge);
+                    if (!project.manifest && args[0] === undefined) throw new Error(noManifest);
+                    const entry = resolveEntry(project.manifest, args[0], 'wf dev <entry.tsx>');
+                    if (!session || session.closed) session = compilerSession(bridge, active);
+                    const files = await session.rebuild({entry, lock: project.lock ?? {format: 1, roots: {}, packages: {}}});
+                    files.set('index.html', applicationPage(files));
+                    await publish(bridge, '.webfront/developer/preview', files, {signal: active});
+                    // Once commit succeeds, display its publication even if Ctrl+C arrived while awaiting it.
+                    diagnostic = '';
+                    previewDiagnostics(frame, '');
+                    showPreview(frame);
+                    // A successful build can drop dependencies that are no longer imported.
+                    observed = new Map(session.observed);
+                    write(syncNotice(project) + 'Preview ready. Watching inputs (Ctrl+C to stop).\n');
+                });
             } catch (error) {
                 if (active.aborted) throw stopped();
+                if (error?.code === 'busy') { await waitForPoll(active); continue; }
                 diagnostic = diagnosticsText(error);
                 write(diagnostic + '\n');
                 previewDiagnostics(frame, diagnostic);
