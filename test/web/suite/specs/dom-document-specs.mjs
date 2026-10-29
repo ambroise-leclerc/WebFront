@@ -91,6 +91,35 @@ describe('C++ DOM document API', () => {
         } finally { frame.remove(); }
     });
 
+    it('lets a C++ coroutine await successive events and cancels its pending wait', async () => {
+        const frame = await connectedFrame();
+        try {
+            const page = frame.contentWindow, root = page.document.getElementById('root');
+            await call(frame, 'domDocumentBuild');
+            await until(() => root.querySelector('input'));
+            const input = root.querySelector('input'), results = [];
+            page.documentAwaitResult = key => results.push(key);
+            // The flag declared by next() shows that the browser subscription is installed: exactly one event is delivered.
+            const press = key => {
+                const event = new page.KeyboardEvent('keydown', {key, cancelable: true});
+                input.dispatchEvent(event);
+                return event.defaultPrevented;
+            };
+            await call(frame, 'domDocumentAwait');
+            await until(() => press('Enter'));
+            await until(() => results.length === 1);
+            await until(() => press('Escape'));
+            await until(() => results.length === 2);
+            expect(results).toEqual(['Enter', 'Escape']);
+            expect(await call(frame, 'domDocumentAwaitCancelled')).toBeFalse();
+            await call(frame, 'domDocumentCancelAwait');
+            await until(() => call(frame, 'domDocumentAwaitCancelled'));
+            input.click();
+            await call(frame, 'domDocumentAwaitCancelled'); // Round trip after an event nobody awaits.
+            expect(results.length).toBe(2);
+        } finally { frame.remove(); }
+    });
+
     it('isolates browsers and invalidates handles on disconnect and reload', async () => {
         const first = await connectedFrame(), second = await connectedFrame();
         try {
