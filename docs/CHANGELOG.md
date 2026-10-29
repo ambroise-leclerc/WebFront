@@ -5,9 +5,10 @@
 - Native-window detection is enabled by default for add_subdirectory/CPM consumers (#397).
   On MSVC this downloads the pinned WebView2 SDK at configure time, including when no target
   calls the helper; disable detection explicitly for offline or browser-only builds.
-  Frontend metadata and detected options are accessible from parent and sibling directories.
+  A parent's own `ENABLE_TESTING`/`ENABLE_FUZZING` do not disable it. Frontend metadata and detected
+  options are accessible from parent and sibling directories.
   `webfront_use_native_window(target)` applies native setup and defines `WEBFRONT_NATIVE_WINDOW`
-  when available, with a configuration notice for the browser fallback otherwise.
+  when available, with a configuration notice (printed once) for the browser fallback otherwise.
 
 - Let automation use an idle `wf dev` watcher started through nested `wf run` aliases, while
   retaining exclusive compilation/publication and module-script execution. Accept manifest entry

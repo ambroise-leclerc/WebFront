@@ -3,7 +3,11 @@ include_guard(GLOBAL)
 # Metadata is shared across directory scopes, including parents of add_subdirectory/CPM.
 # Keep ordinary variables available for existing internal callers and extension fixtures.
 macro(_webfront_load_frontends)
-    get_property(WEBFRONT_FRONTEND_REGISTRY GLOBAL PROPERTY WEBFRONT_FRONTEND_REGISTRY)
+    # Without a published registry, ordinary variables set by a standalone caller stay untouched.
+    get_property(_wf_published GLOBAL PROPERTY WEBFRONT_FRONTEND_REGISTRY SET)
+    if(_wf_published)
+        get_property(WEBFRONT_FRONTEND_REGISTRY GLOBAL PROPERTY WEBFRONT_FRONTEND_REGISTRY)
+    endif()
     foreach(_wf_entry IN LISTS WEBFRONT_FRONTEND_REGISTRY)
         foreach(_wf_field OPTION POLICY DESCRIPTION SUPPORT SUPPORT_FILE SETUP TEST_SETUP TEST_NAME TEST_TIMEOUT PLATFORMS TEST_PLATFORMS XVFB_LINUX NATIVE)
             get_property(WEBFRONT_FRONTEND_${_wf_entry}_${_wf_field} GLOBAL
@@ -21,6 +25,7 @@ macro(_webfront_load_frontends)
     unset(_wf_field)
     unset(_wf_option)
     unset(_wf_configured)
+    unset(_wf_published)
 endmacro()
 
 # Registration order is the priority for the default embedded frontend. A new engine needs one
@@ -153,9 +158,16 @@ function(webfront_use_native_window target)
         else()
             set(advice "${advice}; use the default browser on this platform.")
         endif()
-        message(NOTICE "Native window: no native engine will be built.\n"
-            "  ${target} will open the default browser instead (frontend DefaultBrowser).\n"
-            "  ${advice}")
+        # The advice is identical for every target of a configuration: print it once.
+        get_property(noticed GLOBAL PROPERTY WEBFRONT_NATIVE_FALLBACK_NOTICED)
+        if(noticed)
+            message(STATUS "Native window: ${target} will open the default browser instead")
+        else()
+            set_property(GLOBAL PROPERTY WEBFRONT_NATIVE_FALLBACK_NOTICED ON)
+            message(NOTICE "Native window: no native engine will be built.\n"
+                "  ${target} will open the default browser instead (frontend DefaultBrowser).\n"
+                "  ${advice}")
+        endif()
     endif()
 endfunction()
 
