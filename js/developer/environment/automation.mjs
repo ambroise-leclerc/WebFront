@@ -22,10 +22,16 @@ export function clipText(value, max, fromEnd = false) {
 }
 export function createPreviewInspector(frame) {
     let revision = 0, observed = null, navigating = false, errorsTruncated = false;
+    let pending=null, navigationTimer;
     const errors = [];
     let detachErrors = () => {};
     const loaded = () => {
-        ++revision; navigating=false; errors.length=0; errorsTruncated=false; detachErrors();
+        const doc=frame?.contentDocument;
+        const changed=navigating || doc!==observed;
+        clearTimeout(navigationTimer); pending=null;
+        navigating=false;
+        if (!changed) return;
+        observed=doc; ++revision; errors.length=0; errorsTruncated=false; detachErrors();
         try {
             const view=frame.contentWindow;
             if (view.location.origin !== location.origin) return;
@@ -39,17 +45,36 @@ export function createPreviewInspector(frame) {
             detachErrors=() => {view.removeEventListener('error',error);view.removeEventListener('unhandledrejection',error);};
         } catch { /* Cross-origin frames are refused by page(), without reading their content. */ }
     };
-    const navigation = () => { navigating=true; ++revision; };
+    const recover = attempt => {
+        if (!attempt || pending!==attempt) return;
+        try {
+            // Cancel the provisional navigation before making the old document usable again.
+            frame.contentWindow.stop();
+            loaded();
+        } catch { /* An inaccessible browsing context remains refused until a real load. */ }
+    };
+    const navigation = event => {
+        clearTimeout(navigationTimer);
+        const attempt=pending={id:event.detail?.id,document:frame?.contentDocument};
+        navigating=true; ++revision;
+        navigationTimer=setTimeout(() => recover(attempt),30000);
+    };
+    const failed = event => {
+        if (pending && (event.detail?.id===undefined || event.detail.id===pending.id)) recover(pending);
+    };
     frame?.addEventListener('load', loaded);
     frame?.addEventListener('webfront-preview-navigating', navigation);
+    frame?.addEventListener('webfront-preview-failed',failed);
+    frame?.addEventListener('error',failed);
     const page = () => {
+        if (navigating && frame?.contentDocument?.readyState==='complete' && frame.contentDocument!==pending?.document) loaded();
         if (!frame || frame.hidden || !frame.contentDocument || navigating) throw new Error('No ready application preview');
         const doc = frame.contentDocument;
         const url = new URL(doc.URL);
         if (url.origin !== location.origin || !url.pathname.startsWith('/webfront/developer/preview/'))
             throw new Error('The preview is outside its authorized origin/path');
-        if (doc !== observed) { observed = doc; ++revision; }
         if (doc.readyState !== 'complete') throw new Error('Application preview is loading');
+        if (doc !== observed) loaded();
         return {doc, pageId: String(revision)};
     };
     return {
@@ -102,7 +127,11 @@ export function createPreviewInspector(frame) {
             }
             return {pageId:current.pageId, elementId, applied:true};
         },
-        dispose() { frame?.removeEventListener('load', loaded); frame?.removeEventListener('webfront-preview-navigating',navigation); detachErrors(); }
+        dispose() {
+            clearTimeout(navigationTimer);
+            frame?.removeEventListener('load', loaded); frame?.removeEventListener('webfront-preview-navigating',navigation);
+            frame?.removeEventListener('webfront-preview-failed',failed); frame?.removeEventListener('error',failed); detachErrors();
+        }
     };
 }
 

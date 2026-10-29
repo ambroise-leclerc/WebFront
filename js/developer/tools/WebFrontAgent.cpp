@@ -380,8 +380,14 @@ int main(int argc, char** argv) {
             session->close();
         });
         app.show(binding.launchPage());
-        if (!session->wasReady() && !Object(session->describe()).string("failure").empty() && status.load() == 0)
-            status.store(70);
+        if (!session->wasReady()) {
+            const auto failure = Object(session->describe()).string("failure");
+            if (!failure.empty()) {
+                std::cerr << "Automation startup: " << failure << '\n';
+                if (status.load() == 0)
+                    status.store(70);
+            }
+        }
         session->close("Developer window closed");
         transport.request_stop();
         app.shutdown();

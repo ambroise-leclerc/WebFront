@@ -195,6 +195,11 @@ def watchdog(args):
                     assert len(exports) == 1, "The watchdog fixture needs the real runNonInteractive export"
                     data += b"\n" + exports[0] + blocked
                     if args.scenario == "mcp-watchdog":
+                        connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
+                        assert len(connect) == 1
+                        # A bridge RangeError consumes a JS sequence without reaching native code.
+                        data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
+                                 b"=context=>{void context.call('poll','x'.repeat(65536)).then(()=>window.close(),()=>beforeGap(context));};")
                         # Only this startup test needs a delay longer than the operation's two-second deadline.
                         data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
                     member.size = len(data)
@@ -230,6 +235,24 @@ def watchdog(args):
             relaunched = subprocess.run([args.agent, *common, "--listen", str(endpoint), "--allow", "build", "--operation", "build"],
                                         capture_output=True, text=True, timeout=45)
             assert relaunched.returncode == 0, relaunched.stdout + relaunched.stderr
+            assert not endpoint.exists()
+            failed_environment = root / "failed-bootstrap.tgz"
+            with tarfile.open(environment, "r:gz") as archive, tarfile.open(failed_environment, "w:gz") as output:
+                for member in archive.getmembers():
+                    data = archive.extractfile(member).read() if member.isfile() else None
+                    if member.name == "package/runtime.mjs":
+                        connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
+                        assert len(connect) == 1
+                        data += b"\n" + connect[0] + b"=()=>{throw new Error('B'+String.fromCodePoint(0xe9).repeat(1022)+String.fromCodePoint(0x1f600)+'tail');};"
+                        member.size = len(data)
+                    output.addfile(member, io.BytesIO(data) if data is not None else None)
+            failed_command = list(command)
+            failed_command[failed_command.index("--environment") + 1] = str(failed_environment)
+            failed_command[failed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
+            failed = subprocess.run([args.agent, *failed_command, "--listen", str(endpoint), "--operation", "build"],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=15)
+            assert failed.returncode != 0
+            assert "Automation startup: B" + "é" * 511 + "\n" in failed.stderr, failed.stderr
             assert not endpoint.exists()
     print(f"{args.scenario}: blocked renderer, native deadline, EOF and private endpoint cleanup passed")
 

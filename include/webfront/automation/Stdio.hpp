@@ -1,35 +1,12 @@
 /// @brief Interruptible bounded stdin reads for the optional local MCP executable.
 #pragma once
 #include "Json.hpp"
+#include "Platform.hpp"
 
 #include <cerrno>
 #include <chrono>
 #include <stop_token>
 #include <thread>
-#ifdef _WIN32
-    // Same discipline as Channel.hpp: no min/max macros, and no winsock.h that a later <winsock2.h> would redefine.
-    #ifndef NOMINMAX
-        #define NOMINMAX
-        #define WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
-    #endif
-    #ifndef WIN32_LEAN_AND_MEAN
-        #define WIN32_LEAN_AND_MEAN
-        #define WEBFRONT_AUTOMATION_RESTORE_LEAN
-    #endif
-    #include <io.h>
-    #include <windows.h>
-    #ifdef WEBFRONT_AUTOMATION_RESTORE_LEAN
-        #undef WEBFRONT_AUTOMATION_RESTORE_LEAN
-        #undef WIN32_LEAN_AND_MEAN
-    #endif
-    #ifdef WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
-        #undef WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
-        #undef NOMINMAX
-    #endif
-#else
-    #include <poll.h>
-    #include <unistd.h>
-#endif
 
 namespace webfront::automation {
 class StdioInput {
@@ -50,7 +27,7 @@ public:
         DWORD      available = 0;
         if (GetFileType(handle) == FILE_TYPE_PIPE) {
             if (!PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr))
-                return Status::closed;
+                return finish(line);
             if (!available) {
                 std::this_thread::sleep_for(std::chrono::milliseconds{10});
                 return Status::waiting;
@@ -73,7 +50,7 @@ public:
             return Status::waiting;
         const auto count = ::read(STDIN_FILENO, bytes, sizeof bytes);
         if (count < 0) {
-            if (errno == EINTR || errno == EAGAIN)
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 return Status::waiting;
             throw std::runtime_error("Cannot read MCP stdin");
         }

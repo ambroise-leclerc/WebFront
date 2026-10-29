@@ -192,6 +192,53 @@ describe('Developer automation', () => {
         } finally {inspector.dispose();}
     });
 
+    it('recovers failed, superseded and unreported preview navigations without accepting stale actions', async () => {
+        const documentFor=() => {
+            const doc=document.implementation.createHTMLDocument('preview');
+            Object.defineProperty(doc,'URL',{value:location.origin+'/webfront/developer/preview/index.html'});
+            Object.defineProperty(doc,'readyState',{value:'complete'});
+            return doc;
+        };
+        const frame=new EventTarget();
+        let stopped=0, fail=false;
+        Object.assign(frame,{hidden:false,contentDocument:documentFor(),contentWindow:{stop() {++stopped;},location:{replace() {
+            if(fail) throw new Error('navigation blocked');
+        }}}});
+        const inspector=createPreviewInspector(frame);
+        const ids=[];
+        frame.addEventListener('webfront-preview-navigating',event => ids.push(event.detail.id));
+        try {
+            const first=inspector.inspect().pageId;
+            fail=true;
+            expect(() => showPreview(frame)).toThrowError(/blocked/);
+            expect(inspector.inspect().pageId).not.toBe(first);
+            expect(() => inspector.action('click',{pageId:first,elementId:'x'})).toThrowError(/Preview changed/);
+            fail=false;
+            await withTimers([30000],async clock => {
+                showPreview(frame);
+                expect(() => inspector.inspect()).toThrowError(/No ready/);
+                clock.fire(30000);
+                expect(inspector.inspect().ready).toBeTrue();
+                expect(clock.pending()).toBe(0);
+            });
+            expect(stopped).toBe(2);
+            showPreview(frame);
+            frame.dispatchEvent(new Event('error'));
+            expect(inspector.inspect().ready).toBeTrue();
+            showPreview(frame);
+            const superseded=ids.at(-1);
+            showPreview(frame);
+            frame.dispatchEvent(new CustomEvent('webfront-preview-failed',{detail:{id:superseded}}));
+            expect(() => inspector.inspect()).toThrowError(/No ready/);
+            // A replacement document that is complete is observable even when its load event was lost.
+            frame.contentDocument=documentFor();
+            const replacement=inspector.inspect();
+            expect(replacement.ready).toBeTrue();
+            frame.dispatchEvent(new Event('load'));
+            expect(inspector.inspect().pageId).toBe(replacement.pageId);
+        } finally {inspector.dispose();}
+    });
+
     it('keeps the final summary and a moving progress tail within automation limits', async () => {
         const completed=[];
         let progress;

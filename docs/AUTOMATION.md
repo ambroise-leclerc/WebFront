@@ -152,7 +152,10 @@ the result instead of interpreting successful JSON-RPC delivery as a successful 
 
 The server supports protocol revision **2025-11-25**, initialization, ping and tools. It advertises
 no prompts, resources, sampling, logging or experimental task capability. A client requesting
-another revision receives the supported revision and must decide whether it can continue.
+another revision receives the supported revision and must decide whether it can continue, as
+specified by [MCP version negotiation](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#version-negotiation).
+It should disconnect if it does not support the offered revision; the server does not silently
+claim support for the client's unknown version.
 Tool results include both `structuredContent` and its JSON spelling as text.
 
 | Tool | Arguments | Result |
@@ -208,7 +211,10 @@ Preview inspection is limited to the local developer preview, visible elements w
 bounded text/labels and observed error/rejection events. It omits form values and full HTML.
 Click accepts buttons, checkboxes and radio/submit controls; fill accepts ordinary text/number
 fields, excluding passwords and file inputs. Actions require the inspected page revision and are
-refused after navigation or while loading. They are synthetic DOM interactions, not a guarantee
+refused after navigation or while loading. Failed navigations cancel provisional loading before
+the previous document can be inspected again, with a fresh revision. A navigation still pending
+after 30 seconds is stopped; a replacement document already complete can also be recognized without
+its load event. Inaccessible or unauthorized documents remain refused. They are synthetic DOM interactions, not a guarantee
 of browser-trusted input. Captures, arbitrary selectors and full accessibility trees are deferred
 because they broaden disclosure and require engine-specific qualification.
 
@@ -226,11 +232,10 @@ order. Preview/test frames opening their own WebSocket are refused by connection
 Do not disclose the launch URL or its fragment; hostile same-user processes are outside this boundary.
 Callback packets carry HMAC-SHA-256 proofs over a monotonic counter, method and
 UTF-8 length-delimited arguments; replies are also authenticated and exact replays are refused.
-The native counter accepts exactly the next sequence, and advances only after authenticating it.
-A dropped/rejected request can desynchronize the page permanently; even its signed `failed`
-notification may then be rejected. This deliberately fails closed, without counter resynchronization:
-the page closes and the native startup/run deadline remains the fallback when it cannot notify the
-owner. Relaunch the session after such a transport/authentication failure.
+The native counter accepts any strictly greater authenticated sequence. Gaps are permitted because
+a local encoding/bridge failure can consume a JavaScript sequence without reaching C++; rejected
+proofs do not advance the native counter. Replays and delayed older calls remain refused. The next
+valid signed poll or failure report can therefore recover after a dropped call without sharing a new secret.
 The bootstrap key is imported as a non-extractable WebCrypto key and its injection script removes
 itself from the DOM before yielding. Later callback packets do not contain that reusable secret.
 The native implementation is checked against [RFC 4231 vectors](https://www.rfc-editor.org/rfc/rfc4231).
@@ -252,8 +257,10 @@ removed and externally controlled network access for untrusted repositories.
 Inherited process environment is not automatically sanitized: callers must launch the executable
 with the environment/secrets appropriate to the project. Inspection limits and omission of form
 values are data minimization, not a confidentiality guarantee; page text and diagnostics can still
-contain secrets. Run results and the last 64 native audit decisions/completions are kept in memory,
-not automatically written to disk. Audit entries omit arguments and output. Retention,
+contain secrets. Run results and the last 64 native start-authorization decisions are kept in memory,
+not automatically written to disk. Audit entries carry the actual operation and the assigned run ID
+(empty for a denial before allocation), and omit arguments/output. Busy, not-ready, malformed requests
+and lifecycle completions do not evict those decisions. Retention,
 access to client-side transcripts and secret expurgation remain the caller's responsibility.
 Remote/multi-user access, HTTP, arbitrary uninstrumented window discovery and physical device
 control need their own reviewed authorization/isolation design.
@@ -274,7 +281,9 @@ separate private project/temporary directories and ephemeral ports; the frontend
 listed above still apply. Only the two spinning renderers share a lock.
 That regression uses Python's standard library as a test client; Python is not a runtime
 dependency of the launcher. It is registered when a Python interpreter and embedded test engine
-are available; without xvfb-run on Linux the optional window tests are skipped with a warning.
+are available; without xvfb-run on Linux only the optional Automation window tests are skipped with
+a warning. The mandatory Jasmine, developer and driver browser coverage still requires a display
+runner and configuration fails if it is unavailable.
 The maintained [official SDK regression](../test/tools/AutomationSdkClient.py) uses `mcp==2.3.0`
 in a separate test environment. It checks initialization, catalogue, structured results, an operation
 failure, a real build and detachment from a shared window. It accepts the same path arguments as

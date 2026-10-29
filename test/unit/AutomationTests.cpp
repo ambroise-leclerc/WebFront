@@ -86,7 +86,6 @@ SCENARIO("Page callback authentication matches RFC 4231 and refuses wire replay 
     const std::string  key(64, 'a');
     PageAuthentication auth{key};
     const auto         captured = hmac(key, payload("1", "poll", {"latest output é😀"}));
-    REQUIRE_THROWS(auth.authorize("2", hmac(key, payload("2", "failed", {"dropped first message"})), "failed", {"dropped first message"}));
     REQUIRE_THROWS(auth.authorize("1", captured, "failed", {"forged by a frame"}));
     REQUIRE_THROWS(auth.authorize("1", captured, "poll", {"tampered output"}));
     REQUIRE_NOTHROW(auth.authorize("1", captured, "poll", {"latest output é😀"}));
@@ -94,6 +93,10 @@ SCENARIO("Page callback authentication matches RFC 4231 and refuses wire replay 
     const auto completed = hmac(key, payload("2", "complete", {"run-1", R"({"exitCode":0})"}));
     REQUIRE_THROWS(auth.authorize("2", completed, "complete", {"run-2", R"({"exitCode":0})"}));
     REQUIRE_NOTHROW(auth.authorize("2", completed, "complete", {"run-1", R"({"exitCode":0})"}));
+    REQUIRE_THROWS(auth.authorize("3", captured, "poll", {"latest output é😀"}));
+    REQUIRE_NOTHROW(auth.authorize("5", hmac(key, payload("5", "poll", {"after dropped messages"})), "poll", {"after dropped messages"}));
+    REQUIRE_THROWS(auth.authorize("4", hmac(key, payload("4", "poll", {"late"})), "poll", {"late"}));
+    REQUIRE_NOTHROW(auth.authorize("8", hmac(key, payload("8", "failed", {"transport failure"})), "failed", {"transport failure"}));
     REQUIRE(hmac(key, payload("3", "complete", {"a", "bc"})) != hmac(key, payload("3", "complete", {"ab", "c"})));
     REQUIRE(hmac(key, payload("3", "reply:poll", {"null"})) != hmac(key, payload("3", "poll", {"null"})));
 }
@@ -225,6 +228,30 @@ SCENARIO("MCP initialization, tool errors and request identifiers follow the sup
     for (const auto notification : {R"({"jsonrpc":"1.0","method":"ping"})", R"({"jsonrpc":"2.0"})", R"({"method":"ping"})", R"({"jsonrpc":"2.0","method":17})"})
         REQUIRE_FALSE(mcp.receive(notification));
     REQUIRE(Object(*mcp.receive(R"({"jsonrpc":"1.0","id":7,"method":"ping"})")).has("error"));
+}
+
+SCENARIO("Automation audit retains authorization decisions through busy and malformed retries") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+                                   {directory.path(), {"build"}}
+    };
+    REQUIRE_THROWS(session.start(command(session, "build")));
+    REQUIRE(Object(session.describe()).raw("audit") == "[]");
+    session.poll();
+    REQUIRE_THROWS(session.start(command(session, "test")));
+    const auto denied = Object(session.describe()).raw("audit");
+    REQUIRE(denied.find("\"operation\":\"test\"") != std::string::npos);
+    const auto id    = Object(session.start(command(session, "build"))).string("runId");
+    const auto audit = Object(session.describe()).raw("audit");
+    REQUIRE(audit.find(id) != std::string::npos);
+    for (int i = 0; i < 100; ++i) {
+        REQUIRE_THROWS(session.start(command(session, "build")));
+        REQUIRE_THROWS(session.start(command(session, "build", R"({"entry":"../escape"})")));
+    }
+    REQUIRE(Object(session.describe()).raw("audit") == audit);
+    session.poll();
+    session.complete(id, R"({"exitCode":0,"output":"","report":null})");
+    REQUIRE(Object(session.describe()).raw("audit") == audit);
 }
 
 SCENARIO("Automation JSON rejects duplicate keys, non-UTF8 and deeply nested or oversized input") {

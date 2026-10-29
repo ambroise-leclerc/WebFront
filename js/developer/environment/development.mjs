@@ -112,8 +112,14 @@ let revision = 0;
 export function showPreview(frame, directory = 'preview') {
     if (!frame) throw new Error('No preview frame is available');
     frame.hidden = false;
-    frame.dispatchEvent?.(new Event('webfront-preview-navigating'));
-    frame.contentWindow.location.replace(`/webfront/developer/${directory}/index.html?build=${Date.now()}-${++revision}`);
+    const id=++revision;
+    frame.dispatchEvent?.(new CustomEvent('webfront-preview-navigating',{detail:{id}}));
+    try {
+        frame.contentWindow.location.replace(`/webfront/developer/${directory}/index.html?build=${Date.now()}-${id}`);
+    } catch (error) {
+        frame.dispatchEvent?.(new CustomEvent('webfront-preview-failed',{detail:{id}}));
+        throw error;
+    }
 }
 
 // Manifest labels allow punctuation that project paths forbid. Escape it without collisions; also avoid

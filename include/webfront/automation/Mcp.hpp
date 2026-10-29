@@ -46,6 +46,8 @@ public:
                 if (client.string("name").empty() || client.string("version").empty())
                     return error(id, -32602, "Invalid clientInfo");
                 initialized = true;
+                // Lifecycle version negotiation: offer our supported version when the requested one differs.
+                // A client that does not support it should disconnect, rather than use a mismatched profile.
                 return success(id,
                                R"({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"webfront-developer","version":"1.0.0"}})");
             }

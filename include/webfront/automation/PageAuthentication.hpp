@@ -82,15 +82,14 @@ inline std::string payload(std::string_view sequence, std::string_view method, s
 }
 class PageAuthentication {
 public:
-    explicit PageAuthentication(std::string secret = channel::nonce()) : key(std::move(secret)) { }
+    explicit PageAuthentication(std::string secret = channel::nonce()) : key(std::move(secret)) {}
     const std::string& secret() const {
         return key;
     }
     void authorize(std::string_view sequence, std::string_view signature, std::string_view method, std::initializer_list<std::string_view> arguments) {
         std::uint64_t value     = 0;
         const auto [end, error] = std::from_chars(sequence.data(), sequence.data() + sequence.size(), value);
-        if (error != std::errc{} || end != sequence.data() + sequence.size() || sequence != std::to_string(value)
-            || counter == std::numeric_limits<std::uint64_t>::max() || value != counter + 1
+        if (error != std::errc{} || end != sequence.data() + sequence.size() || sequence != std::to_string(value) || value <= counter
             || !channel::sameToken(signature, hmac(key, payload(sequence, method, arguments))))
             throw std::runtime_error("Automation callback authentication failed");
         counter = value;

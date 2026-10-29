@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep mandatory browser coverage enabled without silently falling back when xvfb is missing;
+  restrict optional display gating to automation. Retry transient native socket errors within the
+  deadline, accept authenticated sequence gaps while refusing replay, recover stalled preview
+  navigation, drain Windows stdin on pipe closure, preserve Unicode bootstrap failures and keep
+  the bounded audit focused on start-authorization decisions. Share native platform declarations.
+
 - Split functional MCP coverage from short native watchdog process regressions, with private ports
   and profiles and a lock limited to spinning renderers. Bound attachment startup IO by its remaining
   deadline and preserve diagnostic paths through the producer's 256-character limit.

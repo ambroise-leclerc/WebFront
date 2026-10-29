@@ -12,6 +12,16 @@ void (async () => {
     const parse = JSON.parse.bind(JSON);
     const sign = crypto.subtle.sign.bind(crypto.subtle);
     const verify = crypto.subtle.verify.bind(crypto.subtle);
+    const failureText = value => {
+        let text='';
+        for (const character of String(value ?? '')) {
+            const code=character.charCodeAt(0);
+            const part=character.length===1 && code>=0xD800 && code<=0xDFFF ? '\uFFFD' : character;
+            if (text.length+part.length>1024) break;
+            text+=part;
+        }
+        return text;
+    };
     let key;
     const cppFunction = webFront.cppFunction.bind(webFront);
     const payload = (sequence,method,args) => {
@@ -56,7 +66,7 @@ void (async () => {
         if (typeof runtime.connectAutomation !== 'function') throw new Error('This environment has no automation API v1; provision an updated environment');
         runtime.connectAutomation({bridge:webFront,call,config,preview:document.getElementById('preview')});
     } catch (error) {
-        await call('failed',String(error?.message ?? error).slice(0,1024)).catch(() => {});
+        await call('failed',failureText(error?.message ?? error)).catch(() => {});
         window.close();
     }
 })();
@@ -121,7 +131,13 @@ public:
         app.cppFunction("webfront.automation.failed", [owned](AppUI ui, std::string sequence, std::string mac, std::string reason) {
             std::scoped_lock lock{owned->mutex};
             owned->authorize(ui, sequence, mac, "failed", {reason});
-            owned->session->close(reason.substr(0, 1024));
+            if (reason.size() > 1024) {
+                std::size_t end = 1024;
+                while (end && (static_cast<unsigned char>(reason[end]) & 0xC0) == 0x80)
+                    --end;
+                reason.resize(end);
+            }
+            owned->session->close(std::move(reason));
             return owned->reply(sequence, "failed", "null");
         });
         started = app.subscribeUIStarted([owned](AppUI ui) {
@@ -155,7 +171,7 @@ public:
         if (state->browser) {
             try {
                 state->browser->addScript("window.close()");
-            } catch (const std::exception&) { }  // a native watchdog still supervises renderer termination
+            } catch (const std::exception&) {}  // a native watchdog still supervises renderer termination
         }
     }
 

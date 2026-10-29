@@ -50,29 +50,29 @@ public:
     std::string start(const Object& request) {
         request.only({"session", "operation", "arguments"});
         std::scoped_lock lock{mutex};
+        const auto       operation  = request.string("operation");
+        const auto&      permission = operationDefinition(operation).permission;
+        const Object     arguments{request.raw("arguments", "{}")};
+        validateArguments(operation, arguments);
         try {
             authorize(request);
-            if (!ready || closed)
-                throw OperationError("not_ready", "Developer session is not ready");
-            if (active)
-                throw OperationError("busy", "Developer session is busy");
-            const auto  operation  = request.string("operation");
-            const auto& permission = operationDefinition(operation).permission;
             if (!knownPermission(permission) || std::ranges::find(options.allow, permission) == options.allow.end())
                 throw OperationError("not_authorized", "Automation operation is not authorized: " + operation);
-            const Object arguments{request.raw("arguments", "{}")};
-            validateArguments(operation, arguments);
-            if (runs.size() == 64)
-                runs.pop_front();  // no active run is evicted; only one may execute
-            const auto id = "run-" + std::to_string(++counter);
-            runs.push_back({id, operation, objectJson(arguments.members()), "queued", "null", "", false, Clock::now() + options.timeout});
-            active = id;
-            audit("allowed", operation, id);
-            return snapshot(runs.back());
-        } catch (...) {
-            audit("denied", "start", "");
+        } catch (const OperationError&) {
+            audit("denied", operation, "");
             throw;
         }
+        if (!ready || closed)
+            throw OperationError("not_ready", "Developer session is not ready");
+        if (active)
+            throw OperationError("busy", "Developer session is busy");
+        if (runs.size() == 64)
+            runs.pop_front();
+        const auto id = "run-" + std::to_string(++counter);
+        runs.push_back({id, operation, objectJson(arguments.members()), "queued", "null", "", false, Clock::now() + options.timeout});
+        active = id;
+        audit("allowed", operation, id);
+        return snapshot(runs.back());
     }
 
     std::string result(const Object& request) const {
@@ -149,7 +149,6 @@ public:
         run.result = std::move(result);
         run.output = std::move(output);
         run.state  = status == 0 ? "succeeded" : status == 130 ? "cancelled" : "failed";
-        audit(run.state, run.operation, run.id);
         active.reset();
     }
 
@@ -165,7 +164,6 @@ public:
             return false;
         auto& run = find(*active);
         run.state = "timeout";
-        audit("timeout", run.operation, run.id);
         active.reset();
         closeLocked("Native operation deadline exceeded; session revoked");
         return true;
@@ -261,7 +259,6 @@ private:
         failure = std::move(reason);
         if (active) {
             find(*active).state = "disconnected";
-            audit("disconnected", find(*active).operation, *active);
             active.reset();
         }
     }

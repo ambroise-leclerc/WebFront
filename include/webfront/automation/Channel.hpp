@@ -1,5 +1,6 @@
 /// @brief Opt-in authenticated native loopback channel for sharing an already open developer window.
 #pragma once
+#include "Platform.hpp"
 #include "Session.hpp"
 
 #include <array>
@@ -8,37 +9,23 @@
 #include <list>
 #include <thread>
 #include <utility>
-#ifdef _WIN32
-    // WinSock must precede Windows, and BCrypt requires Windows' type declarations.
-    #ifndef NOMINMAX
-        #define NOMINMAX
-        #define WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
-    #endif
-// clang-format off
-#include <winsock2.h>
-#include <windows.h>
-#include <ws2tcpip.h>
-#include <bcrypt.h>
-#include <sddl.h>
-    // clang-format on
-    #ifdef WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
-        #undef WEBFRONT_AUTOMATION_RESTORE_NOMINMAX
-        #undef NOMINMAX
-    #endif
-#else
-    #include <arpa/inet.h>
-    #include <fcntl.h>
-    #include <poll.h>
-    #include <sys/socket.h>
-    #include <sys/stat.h>
-    #include <unistd.h>
-    #if defined(__APPLE__) || defined(__linux__)
-        #include <sys/random.h>
-    #endif
-#endif
 
 namespace webfront::automation {
 namespace channel {
+inline bool retryableSocketError(int code) {
+#ifdef _WIN32
+    return code == WSAEWOULDBLOCK || code == WSAEINTR;
+#else
+    return code == EAGAIN || code == EWOULDBLOCK || code == EINTR;
+#endif
+}
+inline int socketError() {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
 #ifdef _WIN32
 using Handle                    = SOCKET;
 inline constexpr Handle invalid = INVALID_SOCKET;
@@ -70,7 +57,7 @@ inline constexpr Handle invalid = -1;
 inline void             close(Handle socket) {
     ::close(socket);
 }
-struct Runtime { };
+struct Runtime {};
 inline bool wait(Handle socket, short events, int milliseconds) {
     pollfd item{socket, events, 0};
     return ::poll(&item, 1, milliseconds) > 0;
@@ -272,20 +259,39 @@ inline bool waitUntil(Handle socket, short events, std::chrono::steady_clock::ti
     const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
     return remaining.count() > 0 && wait(socket, events, static_cast<int>(std::min(remaining, std::chrono::milliseconds{20}).count()));
 }
-inline void
-send(Handle socket, std::string_view bytes, std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds{2}) {
+struct SocketWrite {
+    auto operator()(Handle socket, std::string_view bytes) const {
+#ifdef _WIN32
+        return ::send(socket, bytes.data(), static_cast<int>(bytes.size()), 0);
+#else
+    #ifdef MSG_NOSIGNAL
+        return ::send(socket, bytes.data(), bytes.size(), MSG_NOSIGNAL);
+    #else
+        return ::send(socket, bytes.data(), bytes.size(), 0);
+    #endif
+#endif
+    }
+};
+struct SocketRead {
+    auto operator()(Handle socket, char* bytes, std::size_t size) const {
+#ifdef _WIN32
+        return ::recv(socket, bytes, static_cast<int>(size), 0);
+#else
+        return ::recv(socket, bytes, size, 0);
+#endif
+    }
+};
+template <typename Write = SocketWrite>
+inline void send(Handle                                socket,
+                 std::string_view                      bytes,
+                 std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds{2},
+                 Write                                 write = {}) {
     while (!bytes.empty() && std::chrono::steady_clock::now() < until) {
         if (!waitUntil(socket, POLLOUT, until))
             continue;
-#ifdef _WIN32
-        const auto written = ::send(socket, bytes.data(), static_cast<int>(bytes.size()), 0);
-#else
-    #ifdef MSG_NOSIGNAL
-        const auto written = ::send(socket, bytes.data(), bytes.size(), MSG_NOSIGNAL);
-    #else
-        const auto written = ::send(socket, bytes.data(), bytes.size(), 0);
-    #endif
-#endif
+        const auto written = write(socket, bytes);
+        if (written < 0 && retryableSocketError(socketError()))
+            continue;
         if (written <= 0)
             throw TransportError("Native attachment send failed");
         bytes.remove_prefix(static_cast<std::size_t>(written));
@@ -293,14 +299,19 @@ send(Handle socket, std::string_view bytes, std::chrono::steady_clock::time_poin
     if (!bytes.empty())
         throw TransportError("Native attachment send deadline exceeded");
 }
-inline std::string
-receive(Handle socket, std::size_t limit, std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds{2}) {
+template <typename Read = SocketRead>
+inline std::string receive(Handle                                socket,
+                           std::size_t                           limit,
+                           std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds{2},
+                           Read                                  read  = {}) {
     std::string text;
     while (std::chrono::steady_clock::now() < until) {
         if (!waitUntil(socket, POLLIN, until))
             continue;
         char       bytes[4096];
-        const auto count = ::recv(socket, bytes, sizeof bytes, 0);
+        const auto count = read(socket, bytes, sizeof bytes);
+        if (count < 0 && retryableSocketError(socketError()))
+            continue;
         if (count <= 0)
             throw TransportError("Native attachment connection closed");
         text.append(bytes, static_cast<std::size_t>(count));
@@ -444,7 +455,7 @@ private:
                                   { "code", json::quote(authorized ? (operation ? operation->code : "invalid_arguments") : "not_authorized")}
                 })
                                   + "\n");
-            } catch (const std::exception&) { }
+            } catch (const std::exception&) {}
         }
     }
 };
