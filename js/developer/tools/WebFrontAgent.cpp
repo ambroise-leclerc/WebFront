@@ -3,6 +3,7 @@
 #include <webfront/automation/Binding.hpp>
 #include <webfront/automation/Channel.hpp>
 #include <webfront/automation/Instructions.hpp>
+#include <webfront/automation/Interrupt.hpp>
 #include <webfront/automation/Mcp.hpp>
 #include <webfront/automation/Stdio.hpp>
 #include <webfront/DeveloperApp.hpp>
@@ -160,6 +161,7 @@ int runCli(Backend&                                   controller,
         objectJson({{"session", json::quote(identity)}, {"runId", json::quote(id)}}
         )
     };
+    delay = std::chrono::milliseconds{50};
     while (!stop.stop_requested()) {
         const auto result = controller.result(query);
         const auto state  = Object(result, 256000).string("state");
@@ -167,7 +169,8 @@ int runCli(Backend&                                   controller,
             std::cout << result << '\n' << std::flush;
             return state == "succeeded" ? 0 : 1;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        std::this_thread::sleep_for(delay);
+        delay = std::min(delay * 2, std::chrono::milliseconds{1000});
     }
     return 1;
 }
@@ -193,11 +196,10 @@ void runMcp(Backend& controller, std::stop_token stop, Closed&& closed) {
 int attach(int argc, char** argv) {
     if (argc < 3)
         throw std::invalid_argument("--attach needs the explicitly authorized endpoint directory");
-    ChannelClient                      controller{argv[2]};
     std::string                        operation;
     std::map<std::string, std::string> arguments;
     bool                               shutdown = false;
-    std::chrono::seconds               startupTimeout{120};
+    std::chrono::seconds               startupTimeout{120}, requestTimeout{30};
     for (int index = 3; index < argc; ++index) {
         const std::string flag = argv[index];
         if (flag == "--mcp")
@@ -212,11 +214,14 @@ int attach(int argc, char** argv) {
             operation = argv[index];
         else if (flag == "--startup-timeout")
             startupTimeout = std::chrono::seconds{timeoutSeconds(argv[index])};
+        else if (flag == "--request-timeout")
+            requestTimeout = std::chrono::seconds{timeoutSeconds(argv[index])};
         else if (const auto name = argumentName(flag); !name.empty())
             arguments[name] = json::quote(argv[index]);
         else
             throw std::invalid_argument("Unknown attachment argument");
     }
+    ChannelClient controller{argv[2], requestTimeout};
     if (shutdown) {
         if (!operation.empty())
             throw std::invalid_argument("--shutdown cannot execute an operation");
@@ -312,6 +317,7 @@ int main(int argc, char** argv) {
         // profile.
         webfront::detail::ensureFrontendInitialized<Selected>();
         const auto options = parse(argc, argv);
+        Interrupt interrupt;
         Profile    profile;
         sources.profile = profile.path;
         auto session    = std::make_shared<Session>(options.session);
@@ -332,6 +338,10 @@ int main(int argc, char** argv) {
         const auto        launched = std::chrono::steady_clock::now();
         std::jthread      supervisor([&](std::stop_token stop) {
             while (!stop.stop_requested() && !done.load()) {
+                if (const auto number = interrupt.signal()) {
+                    status.store(128 + number);
+                    session->close("Interrupted by native signal");
+                }
                 const bool starting = !session->wasReady() && !session->isClosed();
                 if (session->expire() || (starting && std::chrono::steady_clock::now() - launched > options.startupTimeout)) {
                     status.store(71);
@@ -380,6 +390,8 @@ int main(int argc, char** argv) {
             session->close();
         });
         app.show(binding.launchPage());
+        if (const auto number = interrupt.signal())
+            status.store(128 + number);
         if (!session->wasReady()) {
             const auto failure = Object(session->describe()).string("failure");
             if (!failure.empty()) {

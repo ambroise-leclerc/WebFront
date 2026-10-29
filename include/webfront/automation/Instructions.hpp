@@ -8,6 +8,7 @@ inline constexpr std::string_view agentInstructions = R"(WebFront developer auto
    Attach only to the exact directory supplied by the owner; never discover or read unrelated endpoints.
 3. Run `webfront-agent --attach DIRECTORY --operation check` or build/test/preview as authorized.
    Add --entry or --pattern only for the operation that accepts it. No shell string is interpreted.
+   Attached responses have a 30-second budget; --request-timeout SECONDS changes it (1..3600).
 4. Read JSON state and result.exitCode. A failed operation is not a successful verification.
    Use structured diagnostics (file, one-based line/column, text) to locate a fix.
 5. Edit files through your separately authorized workspace tools, then repeat the relevant check/test.

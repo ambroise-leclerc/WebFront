@@ -264,7 +264,7 @@ async function list(_args, {bridge}) {
 const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
-let executionToken = null, automationActive = false, cppActive = 0;
+let executionToken = null, executionCount = 0, automationActive = false, cppActive = 0;
 export async function exclusive(context, action, {settlesOnAbort = false} = {}) {
     const interruption = () => Object.assign(new Error(context.signal?.reason?.message ?? 'Interrupted'),{exitCode:130});
     if (context.signal?.aborted && !settlesOnAbort) throw interruption();
@@ -281,14 +281,19 @@ export async function exclusive(context, action, {settlesOnAbort = false} = {}) 
         abort = () => { cancellationTimer=setTimeout(() => reject(interruption()),2500); };
         if (!settlesOnAbort) context.signal?.addEventListener('abort',abort,{once:true});
     });
+    ++executionCount;
+    const release = () => {
+        if (executionToken===token && --executionCount===0) {executionToken=null; automationActive=false;}
+    };
+    let running;
     try {
-        const running=action({...context, executionToken:token});
+        try { running=Promise.resolve(action({...context,executionToken:token})).finally(release); }
+        catch(error) {release(); throw error;}
         return await (settlesOnAbort ? running : Promise.race([running,interrupted]));
     }
     finally {
         clearTimeout(cancellationTimer);
         if (!settlesOnAbort) context.signal?.removeEventListener('abort',abort);
-        if (!nested && executionToken === token) {executionToken = null; automationActive=false;}
     }
 }
 

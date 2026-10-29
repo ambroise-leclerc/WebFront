@@ -1,7 +1,19 @@
 // Stdio must be safe as the first Windows include, before the socket declarations.
-#include <catch2/catch_test_macros.hpp>
-#include <webfront/automation/Channel.hpp>
+// clang-format off
 #include <webfront/automation/Stdio.hpp>
+#include <webfront/automation/Channel.hpp>
+// clang-format on
+#include <catch2/catch_test_macros.hpp>
+#include <webfront/automation/Interrupt.hpp>
+
+SCENARIO("Native interrupt handlers record catchable signals without doing shutdown work") {
+    webfront::automation::Interrupt interrupt;
+    REQUIRE(interrupt.signal() == 0);
+    REQUIRE(std::raise(SIGINT) == 0);
+    REQUIRE(interrupt.signal() == SIGINT);
+    REQUIRE(std::raise(SIGTERM) == 0);
+    REQUIRE(interrupt.signal() == SIGTERM);
+}
 
 #ifdef _WIN32
 SCENARIO("Windows MCP stdin drains a final unterminated line after its pipe closes") {

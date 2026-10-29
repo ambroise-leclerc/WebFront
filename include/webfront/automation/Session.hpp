@@ -3,12 +3,12 @@
 
 #include "../system/DeveloperPaths.hpp"
 #include "Contract.hpp"
+#include "Credentials.hpp"
 
 #include <chrono>
 #include <deque>
 #include <mutex>
 #include <optional>
-#include <random>
 
 namespace webfront::automation {
 struct SessionOptions {
@@ -33,9 +33,7 @@ public:
         for (const auto& permission : this->options.allow)
             if (!knownPermission(permission))
                 throw std::invalid_argument("Unknown automation permission: " + permission);
-        std::random_device random;
-        for (int i = 0; i < 4; ++i)
-            identity += std::to_string(random()) + "-";
+        identity = channel::nonce();
     }
 
     std::string describe() const {
@@ -48,20 +46,22 @@ public:
     }
 
     std::string start(const Object& request) {
-        request.only({"session", "operation", "arguments"});
         std::scoped_lock lock{mutex};
-        const auto       operation  = request.string("operation");
-        const auto&      permission = operationDefinition(operation).permission;
-        const Object     arguments{request.raw("arguments", "{}")};
-        validateArguments(operation, arguments);
         try {
             authorize(request);
-            if (!knownPermission(permission) || std::ranges::find(options.allow, permission) == options.allow.end())
-                throw OperationError("not_authorized", "Automation operation is not authorized: " + operation);
         } catch (const OperationError&) {
-            audit("denied", operation, "");
+            audit("denied", operationLabel(request), "");
             throw;
         }
+        const auto operation  = request.string("operation");
+        const auto definition = operationDefinitions().find(operation);
+        if (definition == operationDefinitions().end() || std::ranges::find(options.allow, definition->second.permission) == options.allow.end()) {
+            audit("denied", operationLabel(request), "");
+            throw OperationError("not_authorized", "Automation operation is not authorized");
+        }
+        request.only({"session", "operation", "arguments"});
+        const Object arguments{request.raw("arguments", "{}")};
+        validateArguments(operation, arguments);
         if (!ready || closed)
             throw OperationError("not_ready", "Developer session is not ready");
         if (active)
@@ -128,11 +128,18 @@ public:
         auto&       run    = find(*active);
         int         status = 1;
         std::string output;
+        bool        interrupted = false;
         try {
             const Object checked{result};
-            status = completionStatus(checked);
-            output = checked.string("output");
+            status          = completionStatus(checked);
+            const auto flag = checked.raw("cancelled", "false");
+            if (flag != "true" && flag != "false")
+                throw std::invalid_argument("Invalid cancellation marker");
+            interrupted = flag == "true";
+            output      = checked.string("output");
         } catch (const std::exception& error) {
+            status      = 1;
+            interrupted = false;
             std::string reason{error.what()};
             if (reason.size() > 1024) {
                 std::size_t end = 1024;
@@ -148,7 +155,7 @@ public:
         }
         run.result = std::move(result);
         run.output = std::move(output);
-        run.state  = status == 0 ? "succeeded" : status == 130 ? "cancelled" : "failed";
+        run.state  = status == 0 ? "succeeded" : status == 130 && (run.cancel || interrupted) ? "cancelled" : "failed";
         active.reset();
     }
 
@@ -205,7 +212,7 @@ private:
     }
 
     static int completionStatus(const Object& checked) {
-        checked.only({"exitCode", "output", "report", "truncated", "data", "diagnostics"});
+        checked.only({"exitCode", "output", "report", "truncated", "data", "diagnostics", "cancelled"});
         const auto code         = checked.raw("exitCode");
         int        status       = -1;
         const auto [end, error] = std::from_chars(code.data(), code.data() + code.size(), status);
@@ -220,8 +227,20 @@ private:
                 return true;
         return false;
     }
+    static std::string operationLabel(const Object& request) {
+        try {
+            const auto operation = request.string("operation");
+            if (!operation.empty() && operation.size() <= 64)
+                return operation;
+        } catch (const std::exception&) { }
+        return "<unknown>";
+    }
     void authorize(const Object& request) const {
-        if (request.string("session") != identity)
+        std::string claimed;
+        try {
+            claimed = request.string("session");
+        } catch (const std::exception&) { }
+        if (!channel::sameToken(claimed, identity))
             throw OperationError("wrong_session", "Wrong automation session");
     }
     static void validateArguments(std::string_view operation, const Object& args) {

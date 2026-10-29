@@ -34,8 +34,19 @@ describe('Developer automation', () => {
         runner.cancel('one');
         await work;
         expect(completed[0].result.exitCode).toBe(130);
+        expect(completed[0].result.cancelled).toBeTrue();
         await runner.start({runId:'two',operation:'exec',arguments:{}});
         expect(completed[1].result.exitCode).toBe(1);
+    });
+
+    it('does not turn a script exit 130 into a cancellation', async () => {
+        let completed;
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},
+            run:async () => ({exitCode:130,output:'script failed',report:null}),
+            complete:async (_id,result) => {completed=result;}});
+        await runner.start({runId:'natural',operation:'build'});
+        expect(completed.exitCode).toBe(130);
+        expect(completed.cancelled).toBeFalse();
     });
 
     it('accepts the next run before the previous native completion acknowledgement returns', async () => {
@@ -72,7 +83,7 @@ describe('Developer automation', () => {
         expect(completed[1].result.exitCode).toBe(0);
     });
 
-    it('releases an interrupted lease even if the command never resolves, without releasing its successor', async () => {
+    it('retains an interrupted lease until its action actually settles', async () => {
         const controller=new AbortController();
         let finish, stale;
         const first=exclusive({signal:controller.signal},context => {
@@ -84,13 +95,29 @@ describe('Developer automation', () => {
             clock.fire(2500);
             await rejects(first,/Interrupted/);
         });
+        await rejects(exclusive({automation:true},async () => {}),/busy/);
+        await rejects(exclusive({},async () => {}),/busy/);
+        finish();
+        await new Promise(resolve => setTimeout(resolve,0));
         await exclusive({automation:true},async context => {
-            finish();
-            await Promise.resolve();
-            await rejects(exclusive(stale,async () => {}),/abort|Interrupted/i);
+            await rejects(exclusive(stale,async () => {}),/abort|Interrupted|lease/i);
             await rejects(exclusive({},async () => {}),/busy/);
             expect(await execute(['help'],context)).toContain('wf test');
         });
+    });
+
+    it('retains ownership of nested work after both cancellation races have ended', async () => {
+        const controller=new AbortController();
+        let finish;
+        const root=exclusive({signal:controller.signal},context => exclusive(context,() => new Promise(resolve => {finish=resolve;})));
+        await withTimers([2500],async clock => {
+            controller.abort(new Error('Interrupted'));
+            clock.fire(2500); clock.fire(2500);
+            await rejects(root,/Interrupted/);
+        });
+        await rejects(exclusive({},async () => {}),/busy/);
+        finish(); await new Promise(resolve => setTimeout(resolve,0));
+        await exclusive({},async () => {});
     });
 
     it('lets agents use a human dev window while its watch is idle', async () => {
@@ -347,5 +374,6 @@ describe('Developer automation', () => {
         runner.cancel('one');
         await work;
         expect(completed[0].result.exitCode).toBe(130);
+        expect(completed[0].result.cancelled).toBeTrue();
     });
 });

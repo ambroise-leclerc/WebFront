@@ -1,6 +1,6 @@
 /// @brief Opt-in authenticated native loopback channel for sharing an already open developer window.
 #pragma once
-#include "Platform.hpp"
+#include "Credentials.hpp"
 #include "Session.hpp"
 
 #include <array>
@@ -57,7 +57,7 @@ inline constexpr Handle invalid = -1;
 inline void             close(Handle socket) {
     ::close(socket);
 }
-struct Runtime {};
+struct Runtime { };
 inline bool wait(Handle socket, short events, int milliseconds) {
     pollfd item{socket, events, 0};
     return ::poll(&item, 1, milliseconds) > 0;
@@ -130,31 +130,6 @@ struct Socket {
     Socket(const Socket&)            = delete;
     Socket& operator=(const Socket&) = delete;
 };
-inline std::string nonce() {
-    std::array<unsigned char, 32> bytes{};
-#ifdef _WIN32
-    if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(bytes.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0)
-        throw std::runtime_error("Cannot generate attachment capability");
-#else
-    if (getentropy(bytes.data(), bytes.size()))
-        throw std::runtime_error("Cannot generate attachment capability");
-#endif
-    constexpr std::string_view digits = "0123456789abcdef";
-    std::string                result;
-    for (auto byte : bytes) {
-        result += digits[byte >> 4];
-        result += digits[byte & 15];
-    }
-    return result;
-}
-inline bool sameToken(std::string_view left, std::string_view right) {
-    if (left.size() != right.size())
-        return false;
-    unsigned mismatch = 0;
-    for (std::size_t index = 0; index < left.size(); ++index)
-        mismatch |= static_cast<unsigned>(static_cast<unsigned char>(left[index])) ^ static_cast<unsigned>(static_cast<unsigned char>(right[index]));
-    return mismatch == 0;
-}
 
 inline std::filesystem::path outsideProject(const Session& controller, const std::filesystem::path& requested) {
     const auto project     = std::filesystem::path(Object(controller.describe()).string("project"));
@@ -224,35 +199,76 @@ inline void writeEndpoint(const std::filesystem::path& path, std::string_view co
     // Publish only complete bytes, after closing the file; clients never observe a partial capability.
     std::filesystem::rename(staged, path);
 }
-inline std::string readEndpoint(const std::filesystem::path& directory) {
-    const auto path = directory / "endpoint.json";
-    if (std::filesystem::is_symlink(std::filesystem::symlink_status(directory)) || std::filesystem::is_symlink(std::filesystem::symlink_status(path)))
-        throw std::runtime_error("Attachment endpoint cannot be a symbolic link");
-#ifdef _WIN32
-    if ((GetFileAttributesW(path.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
-        throw std::runtime_error("Attachment endpoint cannot be a reparse point");
-    std::ifstream input(path, std::ios::binary);
-    std::string   text(4097, '\0');
-    input.read(text.data(), static_cast<std::streamsize>(text.size()));
-    text.resize(static_cast<std::size_t>(input.gcount()));
-    if (!input.eof() || text.size() > 4096)
-        throw std::runtime_error("Cannot read bounded attachment endpoint");
-    return text;
-#else
-    const int file = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW);
-    if (file < 0)
-        throw std::runtime_error("Cannot open private attachment endpoint");
-    struct stat info{};
-    if (fstat(file, &info) || !S_ISREG(info.st_mode) || info.st_uid != geteuid() || (info.st_mode & 0077) != 0) {
-        ::close(file);
-        throw std::runtime_error("Attachment endpoint must be owned by this user with no group/other access");
+#ifndef _WIN32
+struct Descriptor {
+    int value;
+    ~Descriptor() {
+        if (value >= 0)
+            ::close(value);
     }
+    Descriptor(const Descriptor&) = delete;
+    explicit Descriptor(int descriptor) : value(descriptor) { }
+};
+inline std::string readEndpointFile(int directory) {
+    Descriptor  file{::openat(directory, "endpoint.json", O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+    struct stat info{};
+    if (file.value < 0 || ::fstat(file.value, &info) || !S_ISREG(info.st_mode) || info.st_uid != ::geteuid() || (info.st_mode & 0077) != 0)
+        throw std::runtime_error("Attachment endpoint must be owned by this user with no group/other access");
+    std::string            text;
     std::array<char, 4097> bytes{};
-    const auto             count = ::read(file, bytes.data(), bytes.size());
-    ::close(file);
-    if (count < 1 || static_cast<std::size_t>(count) > 4096)
+    while (text.size() <= 4096) {
+        const auto count = ::read(file.value, bytes.data(), bytes.size() - text.size());
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count < 0)
+            throw std::runtime_error("Cannot read private attachment endpoint");
+        if (count == 0)
+            break;
+        text.append(bytes.data(), static_cast<std::size_t>(count));
+    }
+    if (text.empty() || text.size() > 4096)
+        throw std::runtime_error("Invalid attachment endpoint size");
+    return text;
+}
+#endif
+inline std::string readEndpoint(const std::filesystem::path& directory) {
+#ifdef _WIN32
+    struct FileHandle {
+        HANDLE value;
+        ~FileHandle() {
+            if (value != INVALID_HANDLE_VALUE)
+                CloseHandle(value);
+        }
+    };
+    // Deny directory rename/deletion while resolving and reading its endpoint.
+    FileHandle                 parent{CreateFileW(directory.c_str(),
+                                                  FILE_READ_ATTRIBUTES,
+                                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                                  nullptr,
+                                                  OPEN_EXISTING,
+                                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                                                  nullptr)};
+    BY_HANDLE_FILE_INFORMATION parentInfo{};
+    if (parent.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(parent.value, &parentInfo)
+        || !(parentInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (parentInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+        throw std::runtime_error("Attachment directory cannot be a reparse point");
+    const auto                 path = directory / "endpoint.json";
+    FileHandle                 file{CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (file.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(file.value, &info)
+        || (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) || info.nFileSizeHigh || info.nFileSizeLow > 4096)
+        throw std::runtime_error("Cannot read bounded private attachment endpoint");
+    std::array<char, 4097> bytes{};
+    DWORD                  count = 0;
+    if (!ReadFile(file.value, bytes.data(), static_cast<DWORD>(bytes.size()), &count, nullptr) || count == 0 || count > 4096)
         throw std::runtime_error("Invalid attachment endpoint size");
     return {bytes.data(), static_cast<std::size_t>(count)};
+#else
+    Descriptor  parent{::open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)};
+    struct stat info{};
+    if (parent.value < 0 || ::fstat(parent.value, &info) || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid() || (info.st_mode & 0077) != 0)
+        throw std::runtime_error("Attachment directory must be private and owned by this user");
+    return readEndpointFile(parent.value);
 #endif
 }
 inline bool waitUntil(Handle socket, short events, std::chrono::steady_clock::time_point deadline) {
@@ -359,7 +375,13 @@ public:
                                    {  "token",                      json::quote(token)}
         }));
         worker = std::jthread([this](std::stop_token stop) {
-            serve(stop);
+            try {
+                serve(stop);
+            } catch (const std::exception&) {
+                listener.reset();
+                privateDirectory.cleanup();
+                session->close("Native attachment server failed");
+            }
         });
     }
     ~ChannelServer() {
@@ -380,48 +402,121 @@ private:
     channel::Socket                   listener;
     std::string                       token;
     std::jthread                      worker;
-    // One thread per connection, so a peer that connects and stays silent only holds its own slot until the receive
-    // deadline; the owner's clients are served meanwhile. Excess connections are refused rather than queued.
+    // Unauthenticated peers own only bounded buffers/descriptors. They never occupy RPC threads.
     struct Connection {
         std::atomic<bool> finished{false};
         std::jthread      thread;
     };
-    static constexpr std::size_t maxConnections = 32;
-    void                         serve(std::stop_token stop) {
-        std::list<Connection> connections;  // joined when this function returns, each bounded by the IO deadlines
+    struct Pending {
+        channel::Socket                       socket;
+        std::string                           input;
+        std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        explicit Pending(channel::Handle handle) : socket(handle) {
+            channel::nonblocking(handle);
+        }
+    };
+    static constexpr std::size_t maxConnections = 32, maxPending = 64;
+    static void                  refuse(channel::Handle socket, bool busy = false) {
+        // A fresh peer has an empty send buffer. Never wait on an unauthenticated client.
+        const auto message = busy ? std::string_view{"{\"error\":\"Native owner is busy\",\"code\":\"busy\"}\n"}
+                                  : std::string_view{"{\"error\":\"Native attachment refused\",\"code\":\"not_authorized\"}\n"};
+        (void)channel::SocketWrite{}(socket, message);
+    }
+    void serve(std::stop_token stop) {
+        std::list<Connection> connections;
+        std::list<Pending>    pending;
         struct Revoke {
             ChannelServer& owner;
             ~Revoke() {
                 owner.listener.reset();
                 owner.privateDirectory.cleanup();
             }
-        } revoke{*this};  // revoke the endpoint before joining pending connection handlers
+        } revoke{*this};
         while (!stop.stop_requested() && !session->isClosed()) {
             std::erase_if(connections, [](const Connection& connection) {
                 return connection.finished.load();
             });
-            if (!channel::wait(listener.value, POLLIN, 20))
+#ifdef _WIN32
+            std::vector<WSAPOLLFD> items;
+#else
+            std::vector<pollfd> items;
+#endif
+            items.push_back({listener.value, POLLIN, 0});
+            for (const auto& peer : pending)
+                items.push_back({peer.socket.value, POLLIN, 0});
+#ifdef _WIN32
+            if (::WSAPoll(items.data(), static_cast<ULONG>(items.size()), 20) < 0)
                 continue;
-            const auto handle = channel::acceptSocket(listener.value);
-            if (handle == channel::invalid)
+#else
+            if (::poll(items.data(), static_cast<nfds_t>(items.size()), 20) < 0)
                 continue;
-            if (connections.size() >= maxConnections) {
-                channel::Socket refused{handle};
-                continue;
+#endif
+            std::size_t index = 1;
+            for (auto peer = pending.begin(); peer != pending.end();) {
+                bool keep = std::chrono::steady_clock::now() < peer->deadline;
+                if (keep && items[index].revents) {
+                    char       bytes[4096];
+                    const auto count = channel::SocketRead{}(peer->socket.value, bytes, sizeof bytes);
+                    if (count > 0) {
+                        peer->input.append(bytes, static_cast<std::size_t>(count));
+                        const auto newline = peer->input.find('\n');
+                        if ((newline == std::string::npos ? peer->input.size() : newline) > messageLimit)
+                            keep = false;
+                        else if (newline != std::string::npos) {
+                            peer->input.resize(newline);
+                            try {
+                                const Object request{peer->input};
+                                request.only({"version", "token", "method", "params"});
+                                if (request.raw("version") != "1" || !channel::sameToken(request.string("token"), token))
+                                    throw std::runtime_error("Unauthorized native attachment");
+                                if (connections.size() >= maxConnections)
+                                    refuse(peer->socket.value, true);
+                                else {
+                                    auto&           connection = connections.emplace_back();
+                                    channel::Socket transfer{std::exchange(peer->socket.value, channel::invalid)};
+                                    try {
+                                        connection.thread = std::jthread([this, handle = transfer.value, input = std::move(peer->input), &connection] {
+                                            handleConnection(handle, input);
+                                            connection.finished.store(true);
+                                        });
+                                        transfer.value    = channel::invalid;
+                                    } catch (...) {
+                                        connection.finished.store(true);
+                                        throw;
+                                    }
+                                }
+                            } catch (const std::exception&) {
+                                refuse(peer->socket.value);
+                            }
+                            keep = false;
+                        }
+                    } else if (count == 0 || !channel::retryableSocketError(channel::socketError()))
+                        keep = false;
+                }
+                ++index;
+                if (keep)
+                    ++peer;
+                else
+                    peer = pending.erase(peer);
             }
-            auto& connection  = connections.emplace_back();
-            connection.thread = std::jthread([this, handle, &connection] {
-                handleConnection(handle);
-                connection.finished.store(true);
-            });
+            // Drain a bounded batch, then service readable peers before accepting another batch.
+            if (items.front().revents)
+                for (std::size_t accepted = 0; accepted < maxPending; ++accepted) {
+                    const auto handle = channel::acceptSocket(listener.value);
+                    if (handle == channel::invalid)
+                        break;
+                    if (pending.size() >= maxPending)
+                        pending.pop_front();
+                    pending.emplace_back(handle);
+                }
         }
     }
-    void handleConnection(channel::Handle handle) {
+    void handleConnection(channel::Handle handle, const std::string& input) {
         channel::Socket peer{handle};
         bool            authorized = false;
         try {
             channel::nonblocking(peer.value);
-            const Object request{channel::receive(peer.value, messageLimit)};
+            const Object request{input};
             request.only({"version", "token", "method", "params"});
             if (request.raw("version") != "1" || !channel::sameToken(request.string("token"), token))
                 throw std::runtime_error("Unauthorized native attachment");
@@ -455,14 +550,16 @@ private:
                                   { "code", json::quote(authorized ? (operation ? operation->code : "invalid_arguments") : "not_authorized")}
                 })
                                   + "\n");
-            } catch (const std::exception&) {}
+            } catch (const std::exception&) { }
         }
     }
 };
 
 class ChannelClient {
 public:
-    explicit ChannelClient(const std::filesystem::path& directory) {
+    explicit ChannelClient(const std::filesystem::path& directory, std::chrono::milliseconds timeout = std::chrono::seconds{30}) : requestTimeout(timeout) {
+        if (timeout <= std::chrono::milliseconds{0} || timeout > std::chrono::hours{1})
+            throw std::invalid_argument("Invalid attachment request timeout");
         std::error_code unavailable;
         if (!std::filesystem::is_regular_file(directory / "endpoint.json", unavailable))
             throw TransportError("Native attachment endpoint is unavailable");
@@ -509,10 +606,11 @@ private:
     [[maybe_unused]] channel::Runtime runtime;
     unsigned short                    port = 0;
     std::string                       token;
+    std::chrono::milliseconds         requestTimeout;
     std::string                       request(std::string_view                      method,
                                               std::string_view                      arguments,
                                               std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max()) const {
-        const auto      until = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::seconds{2});
+        const auto      until = std::min(deadline, std::chrono::steady_clock::now() + requestTimeout);
         channel::Socket peer{channel::createSocket()};
         const auto      address = channel::address(port);
         // Loopback connect has no remote address or DNS lookup. Bound the following IO independently.

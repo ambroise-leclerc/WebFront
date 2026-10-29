@@ -138,7 +138,7 @@ SCENARIO("MCP stdin drains buffered lines and preserves a partial line through E
 SCENARIO("Automation authorization stays native and binds requests to a project session") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-                                   {directory.path(), {"build", "test", "inspect"}}
+        {directory.path(), {"build", "test", "inspect"}}
     };
     Session other{
         {directory.path(), {"build"}}
@@ -167,10 +167,61 @@ SCENARIO("Automation authorization stays native and binds requests to a project 
     }
 }
 
+SCENARIO("Authorization precedes operation and argument validation") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+        {directory.path(), {"build"}}
+    };
+    const auto identity = Object(session.describe()).string("session");
+    REQUIRE(identity.size() == 64);
+    Session other{
+        {directory.path(), {"build"}}
+    };
+    REQUIRE(Object(other.describe()).string("session") != identity);
+    const auto refuses = [&](const Object& request, std::string_view code) {
+        try {
+            session.start(request);
+            FAIL("Unauthorized request was accepted");
+        } catch (const OperationError& error) {
+            REQUIRE(error.code == code);
+        }
+    };
+    for (const auto operation : {"build", "exec", "unknown"}) {
+        refuses(Object(objectJson({
+                    {  "session",                      "\"wrong\""},
+                    {"operation", webfront::json::quote(operation)},
+                    {"arguments",                             "17"}
+        })),
+                "wrong_session");
+    }
+    refuses(Object(R"({"session":17,"operation":false,"arguments":17})"), "wrong_session");
+    refuses(command(session, "test", "17"), "not_authorized");
+    const auto audit = Object(session.describe()).raw("audit");
+    REQUIRE(audit.find("denied") != std::string::npos);
+    REQUIRE(audit.find("unknown") != std::string::npos);
+    REQUIRE(audit.find("test") != std::string::npos);
+}
+
+SCENARIO("Exit code 130 needs an actual cancellation request") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+        {directory.path(), {"build"}}
+    };
+    session.poll();
+    const auto first = Object(session.start(command(session, "build"))).string("runId");
+    session.poll();
+    session.complete(first, R"({"exitCode":130,"output":"script exit","report":null})");
+    REQUIRE(Object(session.result(query(session, first))).string("state") == "failed");
+    const auto second = Object(session.start(command(session, "build"))).string("runId");
+    session.poll();
+    session.complete(second, R"({"exitCode":130,"output":"human stop","report":null,"cancelled":true})");
+    REQUIRE(Object(session.result(query(session, second))).string("state") == "cancelled");
+}
+
 SCENARIO("Automation cancellation and native deadlines cannot reuse a stalled renderer") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-                                   {directory.path(), {"build"}, std::chrono::seconds{1}}
+        {directory.path(), {"build"}, std::chrono::seconds{1}}
     };
     session.poll();
     const auto id = Object(session.start(command(session, "build"))).string("runId");
@@ -200,7 +251,7 @@ SCENARIO("Automation cancellation and native deadlines cannot reuse a stalled re
 SCENARIO("MCP initialization, tool errors and request identifiers follow the supported profile") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-                                   {directory.path(), {}}
+        {directory.path(), {}}
     };
     Mcp mcp{session};
     REQUIRE(Object(*mcp.receive(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).has("error"));
@@ -233,7 +284,7 @@ SCENARIO("MCP initialization, tool errors and request identifiers follow the sup
 SCENARIO("Automation audit retains authorization decisions through busy and malformed retries") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-                                   {directory.path(), {"build"}}
+        {directory.path(), {"build"}}
     };
     REQUIRE_THROWS(session.start(command(session, "build")));
     REQUIRE(Object(session.describe()).raw("audit") == "[]");
@@ -289,7 +340,7 @@ SCENARIO("The versioned operation schema projects the same fields and permission
 SCENARIO("A completed automation snapshot replaces progress with the final bounded output") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-                                   {directory.path(), {"build"}}
+        {directory.path(), {"build"}}
     };
     session.poll();
     const auto id = Object(session.start(command(session, "build"))).string("runId");
@@ -316,7 +367,7 @@ SCENARIO("A completed automation snapshot replaces progress with the final bound
 SCENARIO("A completion the native side cannot validate fails its run instead of wedging the session") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-                                   {directory.path(), {"build"}}
+        {directory.path(), {"build"}}
     };
     session.poll();
     GIVEN("a running operation") {

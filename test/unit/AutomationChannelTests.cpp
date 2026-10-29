@@ -175,7 +175,7 @@ SCENARIO("A silent loopback connection does not delay the owner's requests") {
         [[maybe_unused]] channel::Runtime runtime;
         std::deque<channel::Socket>       idle;  // Socket is neither copyable nor movable
         const auto                        port = static_cast<unsigned short>(std::stoi(endpoint.raw("port")));
-        for (int index = 0; index < 4; ++index) {
+        for (int index = 0; index < 80; ++index) {
             idle.emplace_back(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
             const auto address = channel::address(port);
             REQUIRE(::connect(idle.back().value, reinterpret_cast<const sockaddr*>(&address), sizeof address) == 0);
@@ -186,4 +186,66 @@ SCENARIO("A silent loopback connection does not delay the owner's requests") {
             REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::milliseconds{1500});
         }
     }
+}
+
+#ifndef _WIN32
+SCENARIO("Endpoint reads stay anchored to the private directory after a pathname swap") {
+    using namespace webfront::automation;
+    webfront::test::TemporaryDirectory root;
+    const auto                         path = root.path() / "endpoint";
+    channel::PrivateDirectory          original{path};
+    channel::writeEndpoint(path / "endpoint.json", "original");
+    channel::Descriptor pinned{::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)};
+    REQUIRE(pinned.value >= 0);
+    const auto moved = root.path() / "moved";
+    std::filesystem::rename(path, moved);
+    channel::PrivateDirectory replacement{path};
+    channel::writeEndpoint(path / "endpoint.json", "replacement");
+    REQUIRE(channel::readEndpointFile(pinned.value) == "original");
+    REQUIRE(channel::readEndpoint(path) == "replacement");
+    std::filesystem::permissions(path, std::filesystem::perms::others_read, std::filesystem::perm_options::add);
+    REQUIRE_THROWS(channel::readEndpoint(path));
+    std::filesystem::permissions(path, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+    replacement.cleanup();
+    std::filesystem::create_directory_symlink(moved, path);
+    REQUIRE_THROWS(channel::readEndpoint(path));
+    std::filesystem::remove(path);
+}
+#endif
+
+SCENARIO("Attachment response deadlines are configurable independently of renderer work") {
+    using namespace webfront::automation;
+    webfront::test::TemporaryDirectory root;
+    channel::PrivateDirectory          endpoint{root.path() / "endpoint"};
+    [[maybe_unused]] channel::Runtime  runtime;
+    channel::Socket                    listener{channel::createSocket()};
+    auto                               address = channel::address(0);
+    REQUIRE(::bind(listener.value, reinterpret_cast<const sockaddr*>(&address), sizeof address) == 0);
+    REQUIRE(::listen(listener.value, 2) == 0);
+#ifdef _WIN32
+    int length = sizeof address;
+#else
+    socklen_t length = sizeof address;
+#endif
+    REQUIRE(::getsockname(listener.value, reinterpret_cast<sockaddr*>(&address), &length) == 0);
+    channel::writeEndpoint(endpoint.path / "endpoint.json",
+                           objectJson({
+                               {"version",                                     "1"},
+                               {   "port", std::to_string(ntohs(address.sin_port))},
+                               {  "token", webfront::json::quote(channel::nonce())}
+    }));
+    std::jthread  server([&] {
+        for (int index = 0; index < 2; ++index) {
+            channel::Socket peer{channel::acceptSocket(listener.value)};
+            try {
+                (void)channel::receive(peer.value, 60000);
+                std::this_thread::sleep_for(std::chrono::milliseconds{40});
+                channel::send(peer.value, "{\"result\":{\"state\":\"ready\"}}\n");
+            } catch (const TransportError&) { }
+        }
+    });
+    ChannelClient impatient{endpoint.path, std::chrono::milliseconds{5}};
+    REQUIRE_THROWS_AS(impatient.describe(), TransportError);
+    ChannelClient patient{endpoint.path, std::chrono::milliseconds{500}};
+    REQUIRE(Object(patient.describe()).string("state") == "ready");
 }

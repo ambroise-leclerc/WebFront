@@ -7,6 +7,7 @@
 #include <chrono>
 #include <stop_token>
 #include <thread>
+#include <utility>
 
 namespace webfront::automation {
 class StdioInput {

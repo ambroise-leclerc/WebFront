@@ -22,7 +22,7 @@ inline constexpr std::string_view contractSource = R"JSON({
  "$defs":{
    "commandResult":{"type":"object","required":["exitCode","output","report"],"properties":{
      "exitCode":{"type":"integer","minimum":0,"maximum":255},"output":{"type":"string"},
-     "report":{"type":["object","null"]},"diagnostics":{"type":"array"},"data":{"type":"object"},"truncated":{"type":"boolean"}}},
+     "cancelled":{"type":"boolean"},"report":{"type":["object","null"]},"diagnostics":{"type":"array"},"data":{"type":"object"},"truncated":{"type":"boolean"}}},
    "errors":{"enum":["not_authorized","wrong_session","busy","invalid_arguments","not_ready","unknown_run","disconnected","timeout"]},
    "run":{"type":"object","required":["runId","operation","state","cancelRequested","output","result"],"properties":{
      "runId":{"type":"string"},"operation":{"type":"string"},"state":{"enum":["queued","running","succeeded","failed","cancelled","timeout","disconnected"]},

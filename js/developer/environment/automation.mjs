@@ -185,7 +185,7 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                         if (controller.signal.aborted && result.exitCode !== 0) result = {...result, exitCode:130};
                     }
                 } catch (error) { result = {exitCode:controller.signal.aborted ? 130 : 1, output:clip(error?.message ?? error), report:null}; }
-                result = fitCompletion(result);
+                result = fitCompletion({...result,cancelled:controller.signal.aborted && result.exitCode===130});
                 output = clip(result.output);
                 // Native completion permits the next run immediately, even before its bridge reply returns.
                 // Release local ownership first so polling can accept that run during the round trip.

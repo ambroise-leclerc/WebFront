@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import signal
 
 
 class Client:
@@ -166,6 +167,50 @@ def check_startup_backoff(agent, root, ready_delay=0):
             assert not worker.is_alive()
 
 
+def check_result_backoff(agent, root):
+    """One second of work should not need fifty new TCP connections."""
+    endpoint = root / "result-backoff"
+    endpoint.mkdir(mode=0o700)
+    stopped = threading.Event()
+    polls = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(0.1)
+        (endpoint / "endpoint.json").write_text(json.dumps({"version": 1, "port": listener.getsockname()[1], "token": "f" * 64}))
+        (endpoint / "endpoint.json").chmod(0o600)
+        began = time.monotonic()
+        def serve():
+            while not stopped.is_set():
+                try:
+                    peer, _ = listener.accept()
+                except socket.timeout:
+                    continue
+                with peer:
+                    peer.settimeout(2)
+                    message = b""
+                    while b"\n" not in message:
+                        message += peer.recv(4096)
+                    method = json.loads(message)["method"]
+                    result = {"session": "owner", "state": "ready"}
+                    if method == "start":
+                        result = {"runId": "run-1"}
+                    elif method == "result":
+                        polls.append(time.monotonic())
+                        result = {"state": "running"} if time.monotonic() - began < 1 else {"state": "succeeded", "result": {"exitCode": 0, "output": "done"}}
+                    peer.sendall(json.dumps({"result": result}).encode() + b"\n")
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        try:
+            result = subprocess.run([agent, "--attach", str(endpoint), "--operation", "build"], capture_output=True, text=True, timeout=5)
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert 2 <= len(polls) <= 6, polls
+        finally:
+            stopped.set()
+            worker.join(timeout=3)
+            assert not worker.is_alive()
+
+
 def watchdog(args):
     """Exercise native revocation with a real blocked renderer, without compiling Jasmine first.
 
@@ -263,6 +308,7 @@ def main():
     integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="session-") as temporary:
+        check_result_backoff(args.agent, pathlib.Path(temporary))
         check_startup_backoff(args.agent, pathlib.Path(temporary))
         check_startup_backoff(args.agent, pathlib.Path(temporary), ready_delay=1.25)
         check_startup_backoff(args.agent, pathlib.Path(temporary), ready_delay=3)
@@ -336,10 +382,13 @@ def main():
 
         # A human-owned window is already running before either agent attaches. Native grants remain the owner's.
         endpoint = pathlib.Path(temporary) / "shared-window"
+        profiles = (pathlib.Path(temporary) / "profiles").resolve()
+        profiles.mkdir()
+        owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
         with (pathlib.Path(temporary) / "shared.log").open("w") as log:
             owner = subprocess.Popen([args.agent, *command, "--serve", "--listen", str(endpoint),
                                       "--allow", "build", "--allow", "test", "--timeout", "20"],
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True)
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, env=owner_environment)
             try:
                 deadline = time.monotonic() + 20
                 while not (endpoint / "endpoint.json").exists():
@@ -381,10 +430,16 @@ def main():
                 cli = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                      capture_output=True, text=True, timeout=30)
                 assert cli.returncode == 0 and json.loads(cli.stdout)["state"] == "succeeded", cli.stdout + cli.stderr
-                shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
-                                          capture_output=True, text=True, timeout=10)
-                assert shutdown.returncode == 0, shutdown.stderr
-                assert owner.wait(timeout=10) == 0
+                assert list(profiles.glob("webfront-agent-*")), "The test must observe the actual native profile"
+                if os.name == "posix":
+                    owner.send_signal(signal.SIGTERM)
+                    assert owner.wait(timeout=15) == 128 + signal.SIGTERM, pathlib.Path(log.name).read_text()
+                else:
+                    shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
+                                              capture_output=True, text=True, timeout=10)
+                    assert shutdown.returncode == 0, shutdown.stderr
+                    assert owner.wait(timeout=10) == 0
+                assert not list(profiles.glob("webfront-agent-*")), "The owner left its native profile behind"
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)
