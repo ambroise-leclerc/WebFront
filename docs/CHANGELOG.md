@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Accept ADR-019 for the delivered local automation contract, shared window and native grants,
+  with consumer Jasmine coverage, the five-model qualification and the final PR #407 CI evidence.
+  Record the remaining distribution publication gate and deferred remote/browser transports.
+- Native-window detection is enabled by default for add_subdirectory/CPM consumers (#397).
+  On MSVC this downloads the pinned WebView2 SDK at configure time, including when no target
+  calls the helper; disable detection explicitly for offline or browser-only builds.
+  A parent's own `ENABLE_TESTING`/`ENABLE_FUZZING` do not disable it. Frontend metadata and detected
+  options are accessible from parent and sibling directories.
+  `webfront_use_native_window(target)` applies native setup and defines `WEBFRONT_NATIVE_WINDOW`
+  when available, with a configuration notice (printed once) for the browser fallback otherwise.
+
 - Let automation use an idle `wf dev` watcher started through nested `wf run` aliases, while
   retaining exclusive compilation/publication and module-script execution. Accept manifest entry
   labels such as `app:debug` and `app..debug` in native build/preview requests.
@@ -46,10 +57,10 @@
   kills its whole process group. `JasmineTest` is inert unless the target defines
   `WEBFRONT_JASMINE_TESTING`; a spec file that fails to load fails the run.
 
-- ADR-019 (Proposed, #404) proposes making the developer environment automatable: one versioned
+- The initial ADR-019 proposal (#404, now accepted above) compared developer automation paths: one versioned
   operation contract (JSON Schema) projected onto the window, a public CLI with agent instructions and an
   optional local MCP stdio adapter, with a threat model, local-model requirements and acceptance criteria.
-  It delivers no server, driver or API; #402 stays an independent deliverable.
+  The proposal itself introduced no server, driver or API; #402 remained an independent deliverable.
 
 - Optional React adapter (#382): an installable `@webfront/react` package with cached
   `useSyncExternalStore` snapshots and empty `Island` components that tolerate StrictMode

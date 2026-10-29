@@ -166,17 +166,51 @@ endif()
 if(DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
     list(APPEND _consumer_dependency_args -DCMAKE_CXX_SCAN_FOR_MODULES:BOOL=${CMAKE_CXX_SCAN_FOR_MODULES})
 endif()
+# Exercise public frontend helpers across directory scopes and the default detection in a real parent project.
+add_test(NAME FrontendConsumerConfiguration
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-consumer
+        -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+        "-DDEPENDENCY_ARGS=${_consumer_dependency_args}"
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendConsumer.cmake)
+set_tests_properties(FrontendConsumerConfiguration PROPERTIES TIMEOUT 120)
 # Read the actual target's launcher at generation time, including an explicitly
 # configured or auto-discovered cache. Do not depend on Cache.cmake's local variable.
+# The build smoke test opts out of detection to avoid SDK downloads after configuration;
+# FrontendConsumerConfiguration tests the automatic path with deterministic support instead.
 add_test(NAME AddSubdirectoryConsumer
     COMMAND ${CMAKE_CTEST_COMMAND}
         --build-and-test ${PROJECT_SOURCE_DIR}/test/cmake/consumer ${CMAKE_CURRENT_BINARY_DIR}/consumer-build
         --build-generator ${CMAKE_GENERATOR}
         --build-config $<CONFIG>
-        --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${_consumer_dependency_args}
+        --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION} ${_consumer_dependency_args}
+            -DWEBFRONT_AUTODETECT_NATIVE=OFF
             -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
             -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600 LABELS portability)
+
+# Compile the real native frontend from a consuming project on the native desktop CI jobs.
+# Reuse the configured SDK source (including WebView2) and CPM bootstrap without network access.
+webfront_native_frontend_option(_consumer_native_option)
+set(_consumer_native_enabled OFF)
+if(_consumer_native_option)
+    set(_consumer_native_enabled "${${_consumer_native_option}}")
+endif()
+if(_consumer_native_enabled)
+    set(_consumer_native_dependency_args ${_consumer_dependency_args})
+    if(WEBFRONT_EMBED_WEBVIEW2)
+        list(APPEND _consumer_native_dependency_args -DCPM_WebView2SDK_SOURCE=${WebView2SDK_SOURCE_DIR})
+    endif()
+    add_test(NAME AddSubdirectoryNativeConsumer
+        COMMAND ${CMAKE_CTEST_COMMAND}
+            --build-and-test ${PROJECT_SOURCE_DIR}/test/cmake/consumer ${CMAKE_CURRENT_BINARY_DIR}/native-consumer-build
+            --build-generator ${CMAKE_GENERATOR} --build-config $<CONFIG>
+            --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+                ${_consumer_native_dependency_args} -DEXPECT_NATIVE=ON
+                -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
+                -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+    set_tests_properties(AddSubdirectoryNativeConsumer PROPERTIES TIMEOUT 600)
+endif()
 
 # Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
 add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)

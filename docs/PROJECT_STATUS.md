@@ -9,8 +9,11 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
 
 - **C++ applications.** Link `WebFront::WebFront` from a CMake parent project. The default
   `webfront::WebFront` uses the system browser. Native applications explicitly select WebView2,
-  WKWebView, WebKitGTK or CEF; the standalone examples detect the platform's native engine
-  when its dependencies are available. See [frontends](FRONTENDS.md).
+  WKWebView, WebKitGTK or CEF. Standalone and consumer builds detect the platform's native
+  engine when its dependencies are available (outside test/fuzzing builds).
+  `webfront_use_native_window(target)` provides target setup and a definition for selecting
+  the native adapter with a browser fallback; see the [consumer example](../README.md#use-webfront-in-your-project)
+  and [frontends](FRONTENDS.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`, `install`, `restore`, `run`,
   `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
@@ -62,7 +65,8 @@ final source correctness (30/30 host-verified tasks) from completed verification
 (29/30 conversations). The report retains per-task data, token costs and the incomplete Flint case.
 The maintained benchmark's built-in inference protocol remains Ollama; the measurement adapter is
 not a supported launcher dependency or an additional benchmark CLI mode. These limited tasks do not
-establish general model reliability or accept all of ADR-019's criteria.
+establish general model reliability. [ADR-019](adr/ADR-019-developpement-automatisable-et-agents.md)
+accepts the implemented local contract and records these limits and its evidence.
 
 The #376 regressions cover response-owned HTTP status storage, `Connection: close` and
 failed gzip response leases occupying their admission slot until destruction. Repetition

@@ -258,7 +258,32 @@ target_link_libraries(MyApp PRIVATE WebFront::WebFront)
 
 As a subproject, examples and tests are off by default and compiler settings do not leak into your targets. `WEBFRONT_BUILD_EXAMPLES=OFF` disables examples in a standalone build too.
 
-`webfront::WebFront` always uses the system browser. Native adapters remain optional: the examples enable the one of your platform when its dependencies are found, while your own application selects its frontend explicitly; CEF is available when you need an embedded Chromium distribution. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
+`webfront::WebFront` always uses the system browser. For a native window with the same browser fallback as the examples, add this after linking your target (also works after `CPMAddPackage`):
+
+```cmake
+webfront_use_native_window(MyApp)
+```
+
+Select the application type in `main.cpp` using the definition supplied by the helper:
+
+```cpp
+#include <webfront/WebFront.hpp>
+
+#if defined(WEBFRONT_NATIVE_WINDOW)
+using App = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
+#else
+using App = webfront::WebFront;
+#endif
+
+int main() {
+    App app;
+    app.show();
+}
+```
+
+Native engines are detected by default for consumer builds, whatever variables the parent project defines, and for standalone builds except with `ENABLE_TESTING=ON` or `ENABLE_FUZZING=ON`. The helper applies the native engine's target setup and defines `WEBFRONT_NATIVE_WINDOW` only when that engine is enabled; otherwise CMake prints installation advice and the application uses the default browser. On Windows, detection requires an MSVC-compatible compiler and downloads the pinned WebView2 SDK; the Evergreen runtime must be installed separately. Linux needs WebKitGTK 6.0 development files, and macOS needs Clang and macOS 13.3 or later. Explicit `WEBFRONT_EMBED_<ENGINE>=ON|OFF` values take precedence; `WEBFRONT_AUTODETECT_NATIVE=OFF` disables detection. No option needs to be set before `add_subdirectory`/CPM for the default path.
+
+For explicit engine selection, `webfront_native_frontend_option(out)` and `webfront_setup_frontends_for_target(MyApp)` are also callable from the parent or other directories. The latter applies setup for all enabled engines; the native helper selects only the platform's native engine and never CEF. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
 
 ## Build and test
 
