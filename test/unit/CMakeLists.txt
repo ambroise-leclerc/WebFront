@@ -25,7 +25,7 @@ endif()
 
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
-list(APPEND TESTS_LIST ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
+list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
@@ -49,6 +49,43 @@ target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 # Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
 catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+
+# The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
+add_executable(forms_declaration FormsDeclaration.cpp)
+target_link_libraries(forms_declaration PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+
+# The optional C++26 layer of the forms (ADR-018, #383): reflection needs GCC 16 with -std=c++26 -freflection. The library
+# stays C++23; only this test executable is compiled as C++26. CI requires it on Linux so that it cannot be skipped there.
+option(WEBFRONT_REQUIRE_REFLECTION_TESTS "Fail the configuration when the C++26 reflection tests cannot be compiled" OFF)
+set(_reflection_flags "-std=c++26 -freflection")
+set(_reflection_supported OFF)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "${_reflection_flags}")
+  check_cxx_source_compiles([=[
+#include <meta>
+#if !defined(__cpp_impl_reflection) || !defined(__cpp_expansion_statements)
+#error no reflection
+#endif
+struct S { [[=1]] int m; };
+static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
+int main() { return 0; }
+]=] WEBFRONT_HAS_REFLECTION)
+  unset(CMAKE_REQUIRED_FLAGS)
+  set(_reflection_supported ${WEBFRONT_HAS_REFLECTION})
+endif()
+if(_reflection_supported)
+  add_executable(forms_reflection_tests FormsReflectionTests.cpp)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
+  set_target_properties(forms_reflection_tests PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+  target_compile_options(forms_reflection_tests PRIVATE -freflection)
+  catch_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+elseif(WEBFRONT_REQUIRE_REFLECTION_TESTS)
+  message(FATAL_ERROR "WEBFRONT_REQUIRE_REFLECTION_TESTS: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} "
+      "does not compile C++26 reflection with ${_reflection_flags} (GCC 16 or later is required)")
+else()
+  message(STATUS "Skipping the C++26 reflection tests of the forms: GCC 16 with -freflection is required")
+endif()
 
 add_test(NAME ReleaseVersionConsistency
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DEXPECTED_VERSION=${PROJECT_VERSION}

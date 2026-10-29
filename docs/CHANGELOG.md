@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add optional [type descriptors and generated forms](FORMS.md) (#383, ADR-018 criterion 5):
+  `forms::Description<T>` (name, label, kind, bounds, choices, accessors) written by hand in C++23,
+  `forms::form()` and `forms::inspector()` built in a DOM document from them, and
+  `forms::typescriptDeclaration()`, whose output the developer journey type-checks with `wf check`.
+  The optional `forms::describe<T>()` produces the same descriptors by C++26 reflection from
+  `Label`/`Range` annotations; its tests build with GCC 16 and are required on the Linux CI job
+  (`WEBFRONT_REQUIRE_REFLECTION_TESTS`). The library stays C++23.
+
 - Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native
   window when the platform engine is compiled in and a session exists, the system browser otherwise,
   with the reason printed once and available from `fallbackReason()`. An application needs neither a
