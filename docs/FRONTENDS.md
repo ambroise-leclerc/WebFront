@@ -104,8 +104,9 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 `frontend::nativeWebViewAvailable` is `true` when this platform's native engine is compiled in. It says
 nothing about the session. `frontend::NativeOrBrowserFrontend` decides at run time: its `initialize()`
 tries the native engine and, if that throws (engine not compiled in, no `DISPLAY`/`WAYLAND_DISPLAY`,
-missing runtime), it uses the system browser for the whole process and prints the reason once to
-`std::cerr`. `fallbackReason()` returns that reason and `usesNativeWindow()` tells which path was taken
+missing runtime), it initializes the browser frontend and uses the system browser for the whole process and prints the reason once to
+`std::cerr`. Only `initialize()` triggers the fallback: if the native `open()` throws, the exception
+propagates as for any frontend. `fallbackReason()` returns that reason and `usesNativeWindow()` tells which path was taken
 once the application is constructed.
 
 ```cpp

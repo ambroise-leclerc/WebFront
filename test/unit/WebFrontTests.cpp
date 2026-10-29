@@ -25,6 +25,11 @@
 #include <utility>
 #include <vector>
 
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    #include <sys/wait.h>
+    #include <unistd.h>
+#endif
+
 using namespace webfront;
 
 SCENARIO("The public version matches the version detected by CMake", "[version]") {
@@ -381,9 +386,10 @@ struct FallbackNativeWindow {
 };
 
 struct FallbackBrowser {
+    static inline int initializeCalls = 0;
     static inline int openCalls = 0;
     static constexpr frontend::Action action{frontend::Action::keepServerRunning};
-    static void                       initialize() {}
+    static void                       initialize() { ++initializeCalls; }
     static void                       open(std::string_view, std::string_view) { ++openCalls; }
 };
 
@@ -397,8 +403,10 @@ SCENARIO("Native window or browser, decided at run time") {
         FallbackNativeWindow::displayAvailable = true;
         FallbackNativeWindow::openCalls        = 0;
         FallbackBrowser::openCalls             = 0;
+        FallbackBrowser::initializeCalls       = 0;
         Fallback::initialize();
         THEN("the native window is used and closing it stops the server") {
+            REQUIRE(FallbackBrowser::initializeCalls == 0);
             REQUIRE(Fallback::usesNativeWindow());
             REQUIRE_FALSE(Fallback::fallbackReason().has_value());
             REQUIRE(Fallback::closeServerAfterOpen());
@@ -411,12 +419,14 @@ SCENARIO("Native window or browser, decided at run time") {
         FallbackNativeWindow::displayAvailable = false;
         FallbackNativeWindow::openCalls        = 0;
         FallbackBrowser::openCalls             = 0;
+        FallbackBrowser::initializeCalls       = 0;
         std::ostringstream captured;
         auto* const        previous = std::cerr.rdbuf(captured.rdbuf());
         Fallback::initialize();
         std::cerr.rdbuf(previous);
         THEN("the browser is used, the reason is kept and printed, and the server keeps running") {
             REQUIRE_FALSE(Fallback::usesNativeWindow());
+            REQUIRE(FallbackBrowser::initializeCalls == 1);
             REQUIRE(Fallback::fallbackReason().value_or("").find("display") != std::string::npos);
             REQUIRE(captured.str().find("opening the system browser instead of a native window") != std::string::npos);
             REQUIRE_FALSE(Fallback::closeServerAfterOpen());
@@ -435,23 +445,23 @@ SCENARIO("Native window or browser, decided at run time") {
     }
 #if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
     GIVEN("the real WebKitGTK engine and no DISPLAY or WAYLAND_DISPLAY") {
-        const char* const display = std::getenv("DISPLAY");
-        const char* const wayland = std::getenv("WAYLAND_DISPLAY");
-        const std::string savedDisplay = display ? display : "";
-        const std::string savedWayland = wayland ? wayland : "";
-        unsetenv("DISPLAY");
-        unsetenv("WAYLAND_DISPLAY");
-        std::ostringstream captured;
-        auto* const        previous = std::cerr.rdbuf(captured.rdbuf());
-        frontend::NativeOrBrowserFrontend::initialize();
-        std::cerr.rdbuf(previous);
-        if (display)
-            setenv("DISPLAY", savedDisplay.c_str(), 1);
-        if (wayland)
-            setenv("WAYLAND_DISPLAY", savedWayland.c_str(), 1);
+        // A child process: GTK may already be initialized in this one, and the environment must stay untouched.
+        const pid_t child = fork();
+        REQUIRE(child >= 0);
+        if (child == 0) {
+            unsetenv("DISPLAY");
+            unsetenv("WAYLAND_DISPLAY");
+            std::cerr.rdbuf(nullptr);
+            frontend::NativeOrBrowserFrontend::initialize();
+            const bool fellBack = !frontend::NativeOrBrowserFrontend::usesNativeWindow()
+                                  && frontend::NativeOrBrowserFrontend::fallbackReason().value_or("").find("display") != std::string::npos;
+            _exit(fellBack ? 0 : 1);
+        }
+        int status = 0;
+        REQUIRE(waitpid(child, &status, 0) == child);
         THEN("the frontend falls back to the browser and names the missing display") {
-            REQUIRE_FALSE(frontend::NativeOrBrowserFrontend::usesNativeWindow());
-            REQUIRE(frontend::NativeOrBrowserFrontend::fallbackReason().value_or("").find("display") != std::string::npos);
+            REQUIRE(WIFEXITED(status));
+            REQUIRE(WEXITSTATUS(status) == 0);
         }
     }
 #endif

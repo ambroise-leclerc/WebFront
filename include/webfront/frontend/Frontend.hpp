@@ -139,7 +139,9 @@ void openWith(std::string_view address, std::string_view port, std::string_view 
  *
  * initialize() tries Native::initialize(); if it throws (engine not compiled in, no display, missing runtime), the
  * frontend remembers the reason, prints it once to std::cerr and uses Browser for the whole process. The decision is
- * per frontend type and made once, like every initialize(). Applications need neither a WEBFRONT_EMBED_* macro nor a
+ * per frontend type and made once, like every initialize(). Only initialize() triggers the fallback: an exception
+ * from the native open() propagates, because a window that failed after it started cannot be told apart from one
+ * the user closed. Applications need neither a WEBFRONT_EMBED_* macro nor a
  * second application type.
  *
  * `action` is that of the native window; the browser path is reported at run time through closeServerAfterOpen(),
@@ -157,8 +159,15 @@ struct NativeOrBrowserFrontendFor {
         return !state().reason.has_value();
     }
     /// Whether the server stops once open() returns: true for a native window, false for the browser.
-    [[nodiscard]] static bool closeServerAfterOpen() { return usesNativeWindow() && Native::action == Action::closeServerAfterOpen; }
+    [[nodiscard]] static bool closeServerAfterOpen() {
+        if constexpr (Native::action == Action::closeServerAfterOpen)
+            return usesNativeWindow();
+        else
+            return false;
+    }
 
+    // Called once per process by BasicWF (std::call_once). It resets the decision, so a direct caller must not
+    // race it with open(); the unit tests call it repeatedly on purpose.
     static void initialize() {
         auto& s = state();
         s.reason.reset();
@@ -167,8 +176,10 @@ struct NativeOrBrowserFrontendFor {
         } catch (const std::exception& e) {
             s.reason = e.what();
         }
-        if (s.reason)
-            std::cerr << "WebFront: opening the system browser instead of a native window: " << *s.reason << std::endl;
+        if (s.reason) {
+            std::cerr << "WebFront: opening the system browser instead of a native window: " << *s.reason << '\n';
+            Browser::initialize();
+        }
     }
 
     static void open(std::string_view port, std::string_view file) {
