@@ -243,13 +243,22 @@ private:
         if (!channel::sameToken(claimed, identity))
             throw OperationError("wrong_session", "Wrong automation session");
     }
+    // Match manifest.mjs labels before applying path rules: labels may contain ':' and consecutive dots.
+    static bool entryLabel(std::string_view value) {
+        const auto alphanumeric = [](char c) {
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        };
+        return !value.empty() && value.size() <= 64 && alphanumeric(value.front()) && std::ranges::all_of(value, [&](char c) {
+            return alphanumeric(c) || c == ':' || c == '_' || c == '.' || c == '-';
+        });
+    }
     static void validateArguments(std::string_view operation, const Object& args) {
         validateOperation(operation, args);
         for (const auto& [key, raw] : args.members()) {
             const auto value = stringValue(raw);
             if (key == "entry" && !value.empty() && (value.starts_with('-') || value.contains('\\') || value.starts_with('/')))
                 throw std::invalid_argument("Entry must be a project-relative path or manifest entry");
-            if (key == "entry" && !value.empty())
+            if (key == "entry" && !value.empty() && !entryLabel(value))
                 fs::safeRelativePath(value);
             if (key == "pattern" && value.starts_with('-'))
                 throw std::invalid_argument("Pattern must not be an option");

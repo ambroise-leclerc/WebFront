@@ -120,16 +120,24 @@ describe('Developer automation', () => {
         await exclusive({},async () => {});
     });
 
-    it('lets agents use a human dev window while its watch is idle', async () => {
+    for (const argv of [['dev','app:debug'], ['run','watch'], ['run','nested-watch']])
+    it(`lets agents use an idle human watch started with wf ${argv.join(' ')}`, async () => {
         setManifestDirectory();
         const encode=text => new TextEncoder().encode(text);
         const {bridge}=memoryBridge(new Map([['webfront.project.json',encode(JSON.stringify({
-            format:1,name:'watch',version:'0.1.0',entries:{main:'main.ts'}
+            format:1,name:'watch',version:'0.1.0',entries:{'app:debug':'main.ts'},
+            scripts:{watch:'wf dev app:debug','nested-watch':'wf run watch'}
         }))]]));
         const previousWorker=globalThis.Worker;
+        let enteredBuild, finishBuild;
+        const building=new Promise(resolve => {enteredBuild=resolve;});
         globalThis.Worker=class {
             postMessage(message) {
-                if (message.type==='build') queueMicrotask(() => this.onmessage({data:{type:'result',files:new Map([['app.js',encode('')]])}}));
+                if (message.type==='build') {
+                    expect(message.entry).toBe('main.ts');
+                    finishBuild=() => this.onmessage({data:{type:'result',files:new Map([['app.js',encode('')]])}});
+                    enteredBuild();
+                }
             }
             terminate() {}
         };
@@ -137,16 +145,59 @@ describe('Developer automation', () => {
         let ready, failed;
         const waiting=new Promise((resolve,reject) => {ready=resolve; failed=reject;});
         const preview={hidden:true,contentDocument:null,contentWindow:{location:{replace() {}}},addEventListener() {},removeEventListener() {}};
-        const watch=execute(['dev'],{bridge,preview,signal:controller.signal,write:text => {
+        const watch=execute(argv,{bridge,preview,signal:controller.signal,write:text => {
             if(text.includes('Watching inputs')) ready(); else failed(new Error(text));
         }});
         try {
+            await building;
+            await rejects(exclusive({automation:true},async () => {}),/busy/);
+            finishBuild();
             await waiting;
             await new Promise(resolve => setTimeout(resolve,0));
             await exclusive({automation:true},async context => expect(await execute(['help'],context)).toContain('wf test'));
         } finally {
             controller.abort();
             await rejects(watch,error => error.exitCode===130);
+            if(previousWorker===undefined) delete globalThis.Worker; else globalThis.Worker=previousWorker;
+        }
+    });
+
+    it('keeps a module script exclusive through compilation and execution', async () => {
+        setManifestDirectory();
+        const encode=text => new TextEncoder().encode(text);
+        const {bridge}=memoryBridge(new Map([['webfront.project.json',encode(JSON.stringify({
+            format:1,name:'module',version:'0.1.0',scripts:{generate:'tools/generate.mjs'}
+        }))]]));
+        const previousWorker=globalThis.Worker;
+        let enteredCompile, finishCompile, enteredRun, finishRun;
+        const compiling=new Promise(resolve => {enteredCompile=resolve;});
+        const running=new Promise(resolve => {enteredRun=resolve;});
+        globalThis.Worker=class {
+            postMessage(message) {
+                if (message.type==='script') {
+                    finishCompile=() => this.onmessage({data:{type:'result',files:new Map([['script.js',encode('')]])}});
+                    enteredCompile();
+                } else if (message.type==='run') {
+                    finishRun=() => this.onmessage({data:{type:'exit',code:0}});
+                    enteredRun();
+                } else if (message.type==='abort') this.onmessage({data:{type:'exit',code:130}});
+            }
+            terminate() {}
+        };
+        const controller=new AbortController();
+        const work=execute(['run','generate'],{bridge,signal:controller.signal});
+        try {
+            await compiling;
+            await rejects(exclusive({automation:true},async () => {}),/busy/);
+            finishCompile();
+            await running;
+            await rejects(exclusive({automation:true},async () => {}),/busy/);
+            finishRun();
+            expect(await work).toContain('Script generate completed');
+            await exclusive({automation:true},async () => {});
+        } finally {
+            controller.abort();
+            await work.catch(() => {});
             if(previousWorker===undefined) delete globalThis.Worker; else globalThis.Worker=previousWorker;
         }
     });

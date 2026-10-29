@@ -187,16 +187,18 @@ Operations and their arguments:
 | `fill` | `{pageId, elementId, value}` | `interact` |
 
 Unknown arguments, wrong sessions, unsupported commands and option-like entry/pattern strings
-are refused natively. Entry paths must be project-relative. A queued/running operation blocks
+are refused natively. Entries accept manifest labels (including `app:debug` and `app..debug`);
+entry paths must be project-relative. A queued/running operation blocks
 another native start. A terminal command already active in the page causes an explicit busy
-failure instead of interleaving mutations. Nested wf script dispatch from the human terminal
-retains its execution lease. Interrupting a terminal command lets worker cancellation finish, then
+failure instead of interleaving mutations. A `wf run` alias passes ownership to its resolved
+command; module scripts retain their lease through execution and publication.
+Interrupting a terminal command lets worker cancellation finish, then
 returns control within 2.5 seconds if its Promise stalls, while retaining the lease until all
 underlying and nested work actually settles. New operations remain busy during that interval;
 reload or close a permanently stuck environment to stop it. `wf test` finishes
 its bounded cancellation/cleanup before releasing ownership. A human `wf dev` owns the lease only
-while compiling/publishing, so agents can use the window while it waits for edits. The window
-displays the agent operation and a stop button.
+while compiling/publishing, including when launched through `wf run` aliases, so agents can use
+the window while it waits for edits. The window displays the agent operation and a stop button.
 
 Poll the run ID until its state is `succeeded`, `failed`, `cancelled`, `timeout` or `disconnected`.
 Exit code 130 means `cancelled` only after a native cancel request or an authenticated page

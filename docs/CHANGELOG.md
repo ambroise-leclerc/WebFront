@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Let automation use an idle `wf dev` watcher started through nested `wf run` aliases, while
+  retaining exclusive compilation/publication and module-script execution. Accept manifest entry
+  labels such as `app:debug` and `app..debug` in native build/preview requests.
+
 - Keep automation CLI bootstrap failures at exit 70 regardless of transport completion order,
   while preserving native deadline and signal exit statuses.
 

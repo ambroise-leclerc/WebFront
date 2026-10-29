@@ -199,6 +199,35 @@ SCENARIO("Automation authorization stays native and binds requests to a project 
     }
 }
 
+SCENARIO("Automation entries accept manifest labels while refusing unsafe paths") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+        {directory.path(), {"build", "preview"}}
+    };
+    session.poll();
+    GIVEN("entry labels and relative paths accepted by wf") {
+        for (const auto operation : {"build", "preview"}) {
+            for (const auto entry : {"main", "app:debug", "app..debug", "src/main.tsx"}) {
+                const auto   arguments = objectJson({
+                    {"entry", webfront::json::quote(entry)}
+                });
+                const auto   id        = Object(session.start(command(session, operation, arguments))).string("runId");
+                const Object dispatched{session.poll()};
+                REQUIRE(Object(dispatched.raw("arguments")).string("entry") == entry);
+                session.complete(id, R"({"exitCode":0,"output":"","report":null})");
+            }
+        }
+    }
+    GIVEN("paths that cannot name manifest entries") {
+        for (const auto entry : {"../escape", "/absolute", "--help", "C:/escape", "src/../escape", "src\\main.ts", "src/app:debug.ts"}) {
+            const auto arguments = objectJson({
+                {"entry", webfront::json::quote(entry)}
+            });
+            REQUIRE_THROWS(session.start(command(session, "build", arguments)));
+        }
+    }
+}
+
 SCENARIO("Authorization precedes operation and argument validation") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{

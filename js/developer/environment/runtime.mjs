@@ -165,14 +165,20 @@ async function loadManifest(bridge) {
 
 // wf run [--timeout <seconds>] <script> [args...]
 async function run(args, context) {
-    const {timeout, target, args: extra} = parseRunOptions(args, 'wf run [--timeout <seconds>] <script> [args...]');
-    const project = await loadManifest(context.bridge);
-    const depth = context.depth ?? 0;
-    // The limit covers the scripts this one runs through wf commands, whatever their own --timeout.
-    const deadline = runDeadline(timeout, context.deadline);
-    const command = scriptCommand(project.manifest, target, extra, tokenize, depth);
-    if (command.kind === 'wf') return execute(command.argv, {...context, depth: depth + 1, deadline});
-    return syncNotice(project) + await runModule(context, project, {label: `Script ${target}`, entry: command.entry, args: command.args, deadline});
+    const outcome = await exclusive(context, async owned => {
+        const {timeout, target, args: extra} = parseRunOptions(args, 'wf run [--timeout <seconds>] <script> [args...]');
+        const project = await loadManifest(owned.bridge);
+        const depth = context.depth ?? 0;
+        // The limit covers the scripts this one runs through wf commands, whatever their own --timeout.
+        const deadline = runDeadline(timeout, context.deadline);
+        const command = scriptCommand(project.manifest, target, extra, tokenize, depth);
+        if (command.kind === 'wf') return {argv:command.argv, context:{...context, depth:depth + 1, deadline}};
+        return {result:syncNotice(project) + await runModule(owned, project,
+            {label: `Script ${target}`, entry: command.entry, args: command.args, deadline})};
+    });
+    // Hand the lease to the resolved command: a dev alias must release it while watching, just like wf dev.
+    // Module scripts retain ownership through their complete execution and publication above.
+    return outcome.argv ? execute(outcome.argv, outcome.context) : outcome.result;
 }
 
 // wf exec [--timeout <seconds>] <package>[:<entry>] [args...]
@@ -300,6 +306,7 @@ export async function exclusive(context, action, {settlesOnAbort = false} = {}) 
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;
     if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
+    if (command === 'run') return run(rest,context);
     // A watch keeps its compiler alive, but owns the shared window only while rebuilding/publishing.
     if (command === 'dev') return commands[command](rest,{...context,withBuild:action => exclusive(context,action)});
     // wf test already bounds cancellation and cleanup; retain its lease until that cleanup finishes.
