@@ -1,4 +1,4 @@
-# <img src="docs/images/webfront-swallow.svg" width="42" height="24" alt=""> WebFront
+# <img src="docs/images/webfront-icon.svg" width="24" height="24" alt=""> WebFront
 
 [![CI](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml/badge.svg?branch=develop)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![Windows · MSVC](https://img.shields.io/badge/CI-Windows%20%C2%B7%20MSVC-0078D4)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
