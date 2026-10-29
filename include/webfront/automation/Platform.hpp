@@ -37,3 +37,17 @@
         #include <sys/random.h>
     #endif
 #endif
+
+#ifndef _WIN32
+namespace webfront::automation::platform {
+inline constexpr bool retryablePosixError(int code) {
+    if (code == EINTR || code == EAGAIN)
+        return true;
+    #if EWOULDBLOCK != EAGAIN
+    if (code == EWOULDBLOCK)
+        return true;
+    #endif
+    return false;
+}
+}  // namespace webfront::automation::platform
+#endif

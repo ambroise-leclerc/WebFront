@@ -67,7 +67,8 @@ SCENARIO("Native attachment sockets cannot be inherited by renderer executables"
 #ifdef _WIN32
             WSASetLastError(index == 0 ? WSAEINTR : WSAEWOULDBLOCK);
 #else
-            errno = index == 0 ? EINTR : index == 1 ? EAGAIN : EWOULDBLOCK;
+            constexpr std::array errors{EINTR, EAGAIN, EWOULDBLOCK};
+            errno = errors[static_cast<std::size_t>(index)];
 #endif
         };
         int        writes = 0, reads = 0;
@@ -82,12 +83,12 @@ SCENARIO("Native attachment sockets cannot be inherited by renderer executables"
         REQUIRE(channel::receive(accepted.value,
                                  100,
                                  until,
-                                 [&](channel::Handle socket, char* bytes, std::size_t size) -> std::ptrdiff_t {
+                                 [&](channel::Handle socket, char* bytes, std::size_t capacity) -> std::ptrdiff_t {
                                      if (reads++ < 3) {
                                          transient(reads - 1);
                                          return -1;
                                      }
-                                     return channel::SocketRead{}(socket, bytes, std::min(size, std::size_t{2}));
+                                     return channel::SocketRead{}(socket, bytes, std::min(capacity, std::size_t{2}));
                                  })
                 == "hello");
         REQUIRE(writes >= 6);

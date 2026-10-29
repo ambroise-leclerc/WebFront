@@ -16,7 +16,7 @@ inline bool retryableSocketError(int code) {
 #ifdef _WIN32
     return code == WSAEWOULDBLOCK || code == WSAEINTR;
 #else
-    return code == EAGAIN || code == EWOULDBLOCK || code == EINTR;
+    return platform::retryablePosixError(code);
 #endif
 }
 inline int socketError() {

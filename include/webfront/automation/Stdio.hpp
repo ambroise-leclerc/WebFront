@@ -50,7 +50,7 @@ public:
             return Status::waiting;
         const auto count = ::read(STDIN_FILENO, bytes, sizeof bytes);
         if (count < 0) {
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+            if (platform::retryablePosixError(errno))
                 return Status::waiting;
             throw std::runtime_error("Cannot read MCP stdin");
         }
