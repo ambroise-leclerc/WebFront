@@ -237,3 +237,56 @@ SCENARIO("A frontend startup failure before window creation completes the server
         }
     }
 }
+
+namespace {
+struct WindowRecorder {
+    static inline WindowOptions received;
+    static constexpr frontend::Action action = frontend::Action::keepServerRunning;
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
+    static void open(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions& window) {
+        received = window;
+    }
+};
+
+WindowOptions windowReceivedBy(WebFrontConfig config) {
+    using App = BasicWFWithFrontend<ContractNet, MockFileSystem<>, WindowRecorder>;
+    WindowRecorder::received = {.title = "unset", .width = -1, .height = -1};
+    App app(std::move(config));
+    app.show();
+    app.stop();
+    return WindowRecorder::received;
+}
+}  // namespace
+
+SCENARIO("The application chooses the title and the size of the embedded window") {
+    GIVEN("a configuration with a window title and size") {
+        const auto window = windowReceivedBy({.window = {.title = "SiliconForge", .width = 640, .height = 480}});
+        THEN("the frontend receives them unchanged") {
+            CHECK(window.title == "SiliconForge");
+            CHECK(window.width == 640);
+            CHECK(window.height == 480);
+        }
+    }
+    GIVEN("a default configuration") {
+        const auto window = windowReceivedBy({});
+        THEN("the frontend receives an empty title and the default size") {
+            CHECK(window.title.empty());
+            CHECK(window.width == 1200);
+            CHECK(window.height == 800);
+        }
+        THEN("the effective title is the executable's name, never the former constant") {
+            const auto effective = frontend::detail::resolveWindow(window);
+            CHECK_FALSE(effective.title.empty());
+            CHECK(effective.title != "WebFront Application");
+        }
+    }
+    GIVEN("an invalid size and an explicit title") {
+        const auto effective = frontend::detail::resolveWindow({.title = "T", .width = 0, .height = -5});
+        THEN("the title is kept and the size falls back to the default") {
+            CHECK(effective.title == "T");
+            CHECK(effective.width == 1200);
+            CHECK(effective.height == 800);
+        }
+    }
+}

@@ -6,6 +6,7 @@
 #include "CEFPaths.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
+#include "Window.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -80,9 +81,6 @@ static constexpr bool webfrontEmbedCEF{true};
 
 // Constants
 namespace {
-constexpr const char* kWindowTitle         = "WebFront Application";
-constexpr int         kDefaultWindowWidth  = 1200;
-constexpr int         kDefaultWindowHeight = 800;
 constexpr const char* kCEFCacheDir         = "cef_cache";
 constexpr const char* kCEFLogFile          = "cef_debug.log";
 constexpr const char* kICUDataFile         = "icudtl.dat";
@@ -275,7 +273,7 @@ inline void initialize() {
 
 class SimpleCEFWindowDelegate : public CefWindowDelegate {
 public:
-    SimpleCEFWindowDelegate() = default;
+    explicit SimpleCEFWindowDelegate(WindowOptions options = frontend::detail::resolveWindow({})) : windowOptions(std::move(options)) {}
 
     // CefWindowDelegate methods
     void OnWindowCreated(CefRefPtr<CefWindow> window) override {
@@ -283,8 +281,8 @@ public:
         window->AddChildView(browserView);
 
         // Set window properties for a clean application window
-        window->SetTitle(kWindowTitle);
-        window->CenterWindow(CefSize(kDefaultWindowWidth, kDefaultWindowHeight));
+        window->SetTitle(windowOptions.title);
+        window->CenterWindow(CefSize(windowOptions.width, windowOptions.height));
         window->Show();
     }
 
@@ -300,7 +298,7 @@ public:
     }
 
     CefSize GetPreferredSize(CefRefPtr<CefView> /*view*/) override {
-        return CefSize(kDefaultWindowWidth, kDefaultWindowHeight);
+        return CefSize(windowOptions.width, windowOptions.height);
     }
 
     void SetBrowserView(CefRefPtr<CefBrowserView> view) {
@@ -309,6 +307,7 @@ public:
 
 private:
     CefRefPtr<CefBrowserView> browserView;
+    WindowOptions             windowOptions;
 
     #ifdef __clang__
         #pragma clang diagnostic push
@@ -539,7 +538,8 @@ private:
 namespace detail {
 
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
-                       CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {}) {
+                       CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
+                       WindowOptions windowSettings = {}) {
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -588,7 +588,7 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(client, url, browser_settings, nullptr, nullptr, nullptr);
 
     // Create a window delegate for controlling the window appearance
-    CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate);
+    CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate(frontend::detail::resolveWindow(std::move(windowSettings))));
     window_delegate->SetBrowserView(browser_view);
 
     // Create a top-level window with no browser chrome
@@ -605,9 +605,13 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
 
 }  // namespace detail
 
-inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {}) {
+inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {},
+                 const WindowOptions& window = {}) {
     detail::openWindow(frontend::detail::applicationUrl(address, port, file),
-                       webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy});
+                       webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
+                       nullptr,
+                       {},
+                       window);
 }
 
 }  // namespace webfront::cef
@@ -625,7 +629,7 @@ inline void initialize() {
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
-inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}) {
+inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}, const WindowOptions& = {}) {
     throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }

@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
+#include "Window.hpp"
 
 #include <chrono>
 #include <concepts>
@@ -20,6 +21,7 @@ struct WebView2Options {
     std::chrono::milliseconds startupTimeout{std::chrono::seconds{30}};
     std::filesystem::path     userDataFolder{};
     ContentPolicy             contentPolicy{};
+    WindowOptions             window{};
     /** @brief Keep the native window hidden while retaining the real controller and message loop. */
     bool                      visible{true};
 };
@@ -274,12 +276,12 @@ public:
         registered = true;
         window     = CreateWindowExW(0,
                                      className.c_str(),
-                                     L"WebFront Application",
+                                     utf16(windowOptions.title).c_str(),
                                      WS_OVERLAPPEDWINDOW,
                                      CW_USEDEFAULT,
                                      CW_USEDEFAULT,
-                                     1200,
-                                     800,
+                                     windowOptions.width,
+                                     windowOptions.height,
                                      nullptr,
                                      nullptr,
                                      windowClass.hInstance,
@@ -315,6 +317,7 @@ public:
 
 private:
     std::wstring className;
+    WindowOptions windowOptions = resolveWindow({});
     bool         registered                 = false;
     bool         initialNavigationPending   = true;
     UINT         startupTimeoutMilliseconds = 30'000;
@@ -616,6 +619,7 @@ inline void open(std::string_view address,
         prepare(*session);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
     std::filesystem::create_directories(profile);
+    session->windowOptions = frontend::detail::resolveWindow(options.window);
     session->createWindow(options.visible);
     session->start(profile);
     session->run();
@@ -653,6 +657,12 @@ struct WebView2Frontend {
         options.contentPolicy = policy;
         open(address, port, file, options);
     }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+        WebView2Options options;
+        options.contentPolicy = policy;
+        options.window        = window;
+        open(address, port, file, options);
+    }
 };
 
 /** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
@@ -668,6 +678,12 @@ struct WebView2FrontendWithOptions : WebView2Frontend {
     static void open(std::string_view address, std::string_view port, std::string_view page, const Policy& policy) {
         auto options          = OptionsProvider::get();
         options.contentPolicy = policy;
+        WebView2Frontend::open(address, port, page, options);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
+        auto options          = OptionsProvider::get();
+        options.contentPolicy = policy;
+        options.window        = window;
         WebView2Frontend::open(address, port, page, options);
     }
 };

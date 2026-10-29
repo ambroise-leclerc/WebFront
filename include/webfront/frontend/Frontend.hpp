@@ -2,6 +2,7 @@
 
 #include "../ContentPolicy.hpp"
 #include "Action.hpp"
+#include "Window.hpp"
 #include "CEF.hpp"
 #include "DefaultBrowser.hpp"
 #include "NativeWebView.hpp"
@@ -34,6 +35,7 @@ namespace webfront::frontend {
  * An unavailable frontend remains declared and throws during initialization or opening with a
  * diagnostic naming its enabling CMake option. ContentPolicy rules and adapter capabilities
  * are documented in docs/CONTENT_POLICY.md.
+ * An optional open(address, port, file, policy, window) overload also receives the application's WindowOptions.
  * An optional open(address, port, file) overload receives the configured address; build URLs with
  * detail::applicationUrl() so all frontends preserve the same URI-reference semantics.
  */
@@ -62,6 +64,10 @@ struct DefaultBrowserFrontend {
         // External browsers own their navigation/UI; bridge authorization remains server-side.
         browser::open(address, port, file);
     }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+        (void)window;  // The system browser owns its window.
+        open(address, port, file, policy);
+    }
 };
 
 struct CEFFrontend {
@@ -83,6 +89,9 @@ struct CEFFrontend {
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
         cef::open(address, port, file, policy);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+        cef::open(address, port, file, policy, window);
     }
 };
 

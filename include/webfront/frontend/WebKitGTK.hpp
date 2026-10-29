@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
+#include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
 
 #include <filesystem>
@@ -56,6 +57,7 @@ public:
     int (*init)()                                                                 = symbol<decltype(init)>("gtk_init_check");
     Object (*windowNew)()                                                         = symbol<decltype(windowNew)>("gtk_window_new");
     void (*windowTitle)(Object, const char*)                                      = symbol<decltype(windowTitle)>("gtk_window_set_title");
+    const char* (*windowGetTitle)(Object)                                         = symbol<decltype(windowGetTitle)>("gtk_window_get_title");
     void (*windowSize)(Object, int, int)                                          = symbol<decltype(windowSize)>("gtk_window_set_default_size");
     void (*windowChild)(Object, Object)                                           = symbol<decltype(windowChild)>("gtk_window_set_child");
     void (*windowPresent)(Object)                                                 = symbol<decltype(windowPresent)>("gtk_window_present");
@@ -144,6 +146,7 @@ struct Session : FailureState {
     Api::Object                          view    = nullptr;
     Api::Object                          network = nullptr;
     webfront::detail::BoundContentPolicy policy;
+    WindowOptions                        windowOptions;
     std::function<void()>                navigationCancelled;
     bool                                 closed            = false;
     bool                                 initialNavigation = true;
@@ -151,7 +154,8 @@ struct Session : FailureState {
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
 
-    explicit Session(webfront::detail::BoundContentPolicy rules) : policy(std::move(rules)) {}
+    explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
+        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;
     ~Session() {
@@ -217,8 +221,8 @@ struct Session : FailureState {
         network          = a.networkNew(data.c_str(), cache.c_str());
         view             = a.refSink(a.objectNew(a.viewType(), "network-session", network, nullptr));
         window           = a.windowNew();
-        a.windowTitle(window, "WebFront Application");
-        a.windowSize(window, 1200, 800);
+        a.windowTitle(window, windowOptions.title.c_str());
+        a.windowSize(window, windowOptions.width, windowOptions.height);
         a.windowChild(window, view);
         configureSettings();
         registerHandlers();
@@ -363,12 +367,13 @@ struct Session : FailureState {
 
 struct OpenOptions {
     ContentPolicy                 contentPolicy{};
+    WindowOptions                 window{};
     std::function<void(Session&)> configure{};
 };
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}) {
     initialize();
-    Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), options.contentPolicy});
+    Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), options.contentPolicy}, options.window);
     session.create();
     if (options.configure)
         options.configure(session);
@@ -394,9 +399,13 @@ struct WebKitGTKFrontend {
         open("127.0.0.1", port, page);
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
+        open(address, port, page, policy, WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
-        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy});
+        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window});
 #else
+        (void)window;
         (void)address;
         (void)port;
         (void)page;

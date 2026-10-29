@@ -22,6 +22,15 @@ A frontend is a type with:
 - **URL.** Built-in frontends also provide `open(address, port, file)`, which `BasicWF` prefers when available. Build the URL with `frontend::detail::applicationUrl(address, port, file)` in `frontend/Url.hpp`: it uses the configured address and preserves URI query/fragment syntax and existing percent escapes. Spaces and UTF-8 bytes are encoded. For literal filename delimiters use `%23`, `%3F` and `%25`. The two-argument overload uses `127.0.0.1`; wildcard binds open their matching loopback address.
 - **Selection.** `webfront::WebFront` always uses the system browser. An application opts into another frontend with `webfront::WebFrontWithFrontend<...>`; enabling an embedded engine at configuration time never changes the default.
 
+## Window title and size
+
+`WebFrontConfig::window` (`webfront::WindowOptions`: `title`, `width`, `height`) sets the initial window of the
+embedded frontends (WebKitGTK, CEF, WebView2, WKWebView); the system browser ignores it. An empty title selects the
+executable's name (never a fixed product string), and a non-positive size selects 1200 x 800. `BasicWF` passes the
+options to a frontend that provides `open(address, port, file, policy, window)`; WebView2 and WKWebView also accept
+them in `WebView2Options::window` and `WKWebViewOptions::window`. The title is fixed at creation: following
+`document.title` is not implemented.
+
 ## Content policy
 
 The [shared content policy](CONTENT_POLICY.md) defines bridge-origin authorization, embedded navigation, popup handling, DevTools and context-menu settings, including defaults and opt-outs. The system browser cannot expose embedded navigation/UI hooks; its bridge is protected by the same server check.
