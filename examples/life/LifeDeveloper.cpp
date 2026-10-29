@@ -15,8 +15,6 @@ int main(int argc, char** argv) {
     }
     try {
         webfront::demo::prepareLifeProject(options->project);
-        if constexpr (!webfront::demo::lifeNativeWindow)
-            std::cerr << webfront::demo::browserNotice << '\n';
         webfront::demo::LifeApp app{options->project};
         app.cppFunction("life.step", &webfront::demo::nextLife);
         if (!options->environment)

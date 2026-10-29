@@ -99,6 +99,24 @@ their own CTest timeouts.
 WKWebView adds native main-thread, Quit/closure, repeated-opening, initial HTTP failure, stalled-loading
 deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEBVIEW.md#unattended-verification).
 
+## Native window with browser fallback
+
+`frontend::nativeWebViewAvailable` is `true` when this platform's native engine is compiled in. It says
+nothing about the session. `frontend::NativeOrBrowserFrontend` decides at run time: its `initialize()`
+tries the native engine and, if that throws (engine not compiled in, no `DISPLAY`/`WAYLAND_DISPLAY`,
+missing runtime), it uses the system browser for the whole process and prints the reason once to
+`std::cerr`. `fallbackReason()` returns that reason and `usesNativeWindow()` tells which path was taken
+once the application is constructed.
+
+```cpp
+using App = webfront::WebFrontWithFrontend<webfront::frontend::NativeOrBrowserFrontend>;
+```
+
+A native window stops the server when it closes; the browser path leaves it running until Enter, as
+`DefaultBrowserFrontend` does. Because `action` is `constexpr`, the frontend reports this through the
+optional `closeServerAfterOpen()` hook, which `show()` consults after `open()` returns.
+`NativeOrBrowserFrontendFor<Native, Browser>` composes any two frontends the same way.
+
 ## Direct engine access
 
 Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)

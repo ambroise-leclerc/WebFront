@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native
+  window when the platform engine is compiled in and a session exists, the system browser otherwise,
+  with the reason printed once and available from `fallbackReason()`. An application needs neither a
+  `WEBFRONT_EMBED_*` macro nor a second application type. A frontend may define an optional
+  `static bool closeServerAfterOpen()` to override its `action` at run time.
+
 - Accept ADR-019 for the delivered local automation contract, shared window and native grants,
   with consumer Jasmine coverage, the five-model qualification and the final PR #407 CI evidence.
   Record the remaining distribution publication gate and deferred remote/browser transports.

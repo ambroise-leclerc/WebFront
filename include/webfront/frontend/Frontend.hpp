@@ -12,6 +12,11 @@
 
 #include <concepts>
 #include <cstdlib>
+#include <exception>
+#include <iostream>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -36,6 +41,7 @@ namespace webfront::frontend {
  * diagnostic naming its enabling CMake option. ContentPolicy rules and adapter capabilities
  * are documented in docs/CONTENT_POLICY.md.
  * An optional open(address, port, file, policy, window) overload also receives the application's WindowOptions.
+ * An optional static bool closeServerAfterOpen() overrides `action` at run time (NativeOrBrowserFrontend).
  * An optional open(address, port, file) overload receives the configured address; build URLs with
  * detail::applicationUrl() so all frontends preserve the same URI-reference semantics.
  */
@@ -94,6 +100,107 @@ struct CEFFrontend {
         cef::open(address, port, file, policy, window);
     }
 };
+
+namespace detail {
+
+#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
+using PlatformNativeFrontend = NativeWebViewFrontend;
+#else
+// No native engine exists on this platform: the fallback always takes the browser.
+struct PlatformNativeFrontend {
+    static constexpr Action action{Action::closeServerAfterOpen};
+
+    static void initialize() {
+        throw std::runtime_error("no native web view exists for this platform");
+    }
+    static void open(std::string_view, std::string_view) {
+        initialize();
+    }
+};
+#endif
+
+// Calls the richest open() the frontend offers, as BasicWF does.
+template <typename Frontend>
+void openWith(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+    if constexpr (requires { Frontend::open(address, port, file, policy, window); })
+        Frontend::open(address, port, file, policy, window);
+    else if constexpr (requires { Frontend::open(address, port, file, policy); })
+        Frontend::open(address, port, file, policy);
+    else if constexpr (requires { Frontend::open(address, port, file); })
+        Frontend::open(address, port, file);
+    else
+        Frontend::open(port, file);
+}
+
+}  // namespace detail
+
+/**
+ * @brief A native window when one can be opened, the system browser otherwise.
+ *
+ * initialize() tries Native::initialize(); if it throws (engine not compiled in, no display, missing runtime), the
+ * frontend remembers the reason, prints it once to std::cerr and uses Browser for the whole process. The decision is
+ * per frontend type and made once, like every initialize(). Applications need neither a WEBFRONT_EMBED_* macro nor a
+ * second application type.
+ *
+ * `action` is that of the native window; the browser path is reported at run time through closeServerAfterOpen(),
+ * which the application consults after open() returns.
+ */
+template <FrontendType Native, FrontendType Browser>
+struct NativeOrBrowserFrontendFor {
+    static constexpr Action action{Native::action};
+
+    /// Why the browser is used, or nullopt when the native window is. Meaningful after initialize().
+    [[nodiscard]] static std::optional<std::string> fallbackReason() {
+        return state().reason;
+    }
+    [[nodiscard]] static bool usesNativeWindow() {
+        return !state().reason.has_value();
+    }
+    /// Whether the server stops once open() returns: true for a native window, false for the browser.
+    [[nodiscard]] static bool closeServerAfterOpen() { return usesNativeWindow() && Native::action == Action::closeServerAfterOpen; }
+
+    static void initialize() {
+        auto& s = state();
+        s.reason.reset();
+        try {
+            Native::initialize();
+        } catch (const std::exception& e) {
+            s.reason = e.what();
+        }
+        if (s.reason)
+            std::cerr << "WebFront: opening the system browser instead of a native window: " << *s.reason << std::endl;
+    }
+
+    static void open(std::string_view port, std::string_view file) {
+        if (usesNativeWindow())
+            Native::open(port, file);
+        else
+            Browser::open(port, file);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file) {
+        open(address, port, file, ContentPolicy{}, WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy) {
+        open(address, port, file, policy, WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+        if (usesNativeWindow())
+            detail::openWith<Native>(address, port, file, policy, window);
+        else
+            detail::openWith<Browser>(address, port, file, policy, window);
+    }
+
+private:
+    struct State {
+        std::optional<std::string> reason;
+    };
+    static State& state() {
+        static State instance;
+        return instance;
+    }
+};
+
+using NativeOrBrowserFrontend = NativeOrBrowserFrontendFor<detail::PlatformNativeFrontend, DefaultBrowserFrontend>;
 
 // WEBFRONT_EMBED_CEF only means "CEF is available"; it never changes which frontend
 // plain WebFront selects. Applications opt into CEF explicitly via WebFrontWithFrontend<CEFFrontend>.

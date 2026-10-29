@@ -11,6 +11,20 @@
 // Other platforms have no native alias; their applications can select another frontend.
 namespace webfront::frontend {
 
+/**
+ * @brief True when this platform's native web view engine is compiled in (WEBFRONT_EMBED_WEBKITGTK on Linux,
+ * WEBFRONT_EMBED_WEBVIEW2 on Windows, WEBFRONT_EMBED_WKWEBVIEW on macOS).
+ *
+ * It says nothing about the session: a native window can still fail at run time, for instance without a display.
+ * NativeOrBrowserFrontend handles that case.
+ */
+#if (defined(_WIN32) && defined(WEBFRONT_EMBED_WEBVIEW2)) || (defined(__APPLE__) && defined(WEBFRONT_EMBED_WKWEBVIEW)) \
+    || (defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK))
+inline constexpr bool nativeWebViewAvailable = true;
+#else
+inline constexpr bool nativeWebViewAvailable = false;
+#endif
+
 #if defined(_WIN32)
 /** @brief Opt-in Windows web view; availability and options are those of WebView2Frontend. */
 using NativeWebViewFrontend = WebView2Frontend;

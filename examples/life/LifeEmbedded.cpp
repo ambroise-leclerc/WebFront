@@ -7,8 +7,6 @@
 
 int main() {
     try {
-        if constexpr (!webfront::demo::lifeNativeWindow)
-            std::cerr << webfront::demo::browserNotice << '\n';
         webfront::demo::LifeAppWithAssets<webfront::fs::LifeUI> app;
         app.cppFunction("life.step", &webfront::demo::nextLife);
         app.show();
