@@ -1,6 +1,7 @@
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <webfront/automation/Binding.hpp>
+#include <webfront/automation/ExitStatus.hpp>
 #include <webfront/automation/Mcp.hpp>
 #include <webfront/automation/PageAuthentication.hpp>
 #include <webfront/automation/Stdio.hpp>
@@ -34,6 +35,37 @@ struct BindingApp {
     }
 };
 using namespace webfront::automation;
+SCENARIO("A failed automation bootstrap retains exit 70 regardless of transport completion order") {
+    GIVEN("the transport reports the closed session before or after bootstrap failure") {
+        THEN("the bootstrap failure is distinct from an operation failure in both orders") {
+            for (const bool transportFirst : {false, true}) {
+                CAPTURE(transportFirst);
+                std::atomic<int> status{0};
+                const auto       transportFailure = [&] {
+                    int expected = 0;
+                    status.compare_exchange_strong(expected, 1);
+                };
+                if (transportFirst)
+                    transportFailure();
+                recordBootstrapFailure(status);
+                if (!transportFirst)
+                    transportFailure();
+                REQUIRE(status.load() == 70);
+            }
+        }
+    }
+    GIVEN("a native deadline or signal reports a more specific shutdown reason") {
+        THEN("bootstrap reporting preserves each specific reason") {
+            for (const int reason : {71, 72, 130, 143}) {
+                CAPTURE(reason);
+                std::atomic<int> status{reason};
+                recordBootstrapFailure(status);
+                REQUIRE(status.load() == reason);
+            }
+        }
+    }
+}
+
 Object command(const Session& session, std::string operation, std::string args = "{}") {
     return Object(objectJson({
         {  "session", webfront::json::quote(Object(session.describe()).string("session"))},

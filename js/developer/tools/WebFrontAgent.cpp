@@ -2,6 +2,7 @@
 // components.
 #include <webfront/automation/Binding.hpp>
 #include <webfront/automation/Channel.hpp>
+#include <webfront/automation/ExitStatus.hpp>
 #include <webfront/automation/Instructions.hpp>
 #include <webfront/automation/Interrupt.hpp>
 #include <webfront/automation/Mcp.hpp>
@@ -416,8 +417,7 @@ int main(int argc, char** argv) {
             const auto failure = Object(session->describe()).string("failure");
             if (!failure.empty()) {
                 std::cerr << "Automation startup: " << failure << '\n';
-                if (status.load() == 0)
-                    status.store(70);
+                recordBootstrapFailure(status);
             }
         }
         session->close("Developer window closed");

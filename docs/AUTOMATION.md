@@ -152,7 +152,9 @@ For a single CLI operation, replace `--mcp` with `--operation build [--entry mai
 controller and permissions. The CLI waits, emits one final JSON run snapshot and returns 0
 on success, 1 on operation failure, 64 on configuration errors, 69 when an attachment is unavailable
 (the outcome of an in-flight mutation may be unknown), 70 on bootstrap failure,
-71 on the native deadline. Closing a window without a command result does not imply success.
+71 on the native deadline. Bootstrap failure stays 70 whether the transport observes the closed
+session before or after the main thread; specific native deadline and signal statuses retain priority.
+Closing a window without a command result does not imply success.
 MCP operation failures are returned as tool errors or failed run states; clients must inspect
 the result instead of interpreting successful JSON-RPC delivery as a successful build.
 
@@ -327,3 +329,11 @@ guarantee, and an unavailable model is never counted as a passing experiment.
 
 The host follows the [Ollama tool-calling protocol](https://docs.ollama.com/capabilities/tool-calling)
 and [chat token counters](https://docs.ollama.com/api/chat), consulted on 2026-10-28.
+
+The [2026-10-29 local-model qualification](validation/automation-models-2026-10-29.md) records
+five installed models tested through a separate LM Studio measurement adapter: Devstral Small 2,
+Qwen 3.8, Muse Glimmer, Flint and Nemotron Cascade 2. All 30 final sources passed independent host
+check/tests; 29 model conversations themselves observed both operations succeed. The report includes
+per-task data, catalogue/token costs, recovered refusals, the Flint response-limit case and native
+exit-status validation. This is measured evidence for that setup, not a supported LM Studio mode
+of the maintained Ollama benchmark or a general success guarantee.

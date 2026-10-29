@@ -56,6 +56,14 @@ resource limits and complete-suite repetition. Sessions retain individual CTest 
 independent driver processes use OS-assigned loopback ports. Manual transport measurements
 remain separate from the short native transport contract tests.
 
+[Local-model qualification](validation/automation-models-2026-10-29.md) records five installed
+models driving the real MCP window through an external LM Studio measurement adapter. It distinguishes
+final source correctness (30/30 host-verified tasks) from completed verification observed by the model
+(29/30 conversations). The report retains per-task data, token costs and the incomplete Flint case.
+The maintained benchmark's built-in inference protocol remains Ollama; the measurement adapter is
+not a supported launcher dependency or an additional benchmark CLI mode. These limited tasks do not
+establish general model reliability or accept all of ADR-019's criteria.
+
 The #376 regressions cover response-owned HTTP status storage, `Connection: close` and
 failed gzip response leases occupying their admission slot until destruction. Repetition
 recreates the entire fixture graph rather than repeating individual stateful cases.

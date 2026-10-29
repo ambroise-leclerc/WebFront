@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Keep automation CLI bootstrap failures at exit 70 regardless of transport completion order,
+  while preserving native deadline and signal exit statuses.
+
+- Record the [local-model MCP qualification](validation/automation-models-2026-10-29.md) on five
+  installed models through LM Studio: 30/30 final sources pass host verification, while 29/30
+  model conversations observe successful check/test results. Retain per-task data, measured token
+  costs, the incomplete Flint case and the distinction from the built-in Ollama benchmark.
+
 - Keep mandatory browser coverage enabled without silently falling back when xvfb is missing;
   restrict optional display gating to automation. Retry transient native socket errors within the
   deadline, accept authenticated sequence gaps while refusing replay, recover stalled preview
