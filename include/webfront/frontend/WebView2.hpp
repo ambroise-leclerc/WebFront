@@ -13,6 +13,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace webfront::frontend {
 
@@ -263,7 +264,8 @@ public:
         check(controller->put_Bounds(bounds), "resizing controller");
     }
 
-    void createWindow(bool visible = true) {
+    void createWindow(bool visible = true, WindowOptions settings = {}) {
+        windowOptions = frontend::detail::resolveWindow(std::move(settings));
         className = L"WebFront.WebView2." + std::to_wstring(reinterpret_cast<std::uintptr_t>(this));
         WNDCLASSW windowClass{};
         windowClass.lpfnWndProc   = windowProcedure;
@@ -317,7 +319,7 @@ public:
 
 private:
     std::wstring className;
-    WindowOptions windowOptions = resolveWindow({});
+    WindowOptions windowOptions;
     bool         registered                 = false;
     bool         initialNavigationPending   = true;
     UINT         startupTimeoutMilliseconds = 30'000;
@@ -619,8 +621,7 @@ inline void open(std::string_view address,
         prepare(*session);
     const auto profile = options.userDataFolder.empty() ? userDataFolder() : std::filesystem::absolute(options.userDataFolder);
     std::filesystem::create_directories(profile);
-    session->windowOptions = frontend::detail::resolveWindow(options.window);
-    session->createWindow(options.visible);
+    session->createWindow(options.visible, options.window);
     session->start(profile);
     session->run();
 }
