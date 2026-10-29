@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Accept ADR-019 for the delivered local automation contract, shared window and native grants,
+  with consumer Jasmine coverage, the five-model qualification and the final PR #407 CI evidence.
+  Record the remaining distribution publication gate and deferred remote/browser transports.
+
 - Let automation use an idle `wf dev` watcher started through nested `wf run` aliases, while
   retaining exclusive compilation/publication and module-script execution. Accept manifest entry
   labels such as `app:debug` and `app..debug` in native build/preview requests.

@@ -1,0 +1,42 @@
+{
+  "format": 1,
+  "date": "2026-10-29",
+  "source": "22f67954608924b174ef05dba71a2bc45b392a22",
+  "environment_integrity": "sha512-3AVF2xKsUfHys5VREA6DmkjiEDKjx9VQtPTrsjdiazzfpNQvbKEjW2ox5Kd2hPeOP5MfcMvbDHQ4SZoO97P5Xg==",
+  "frontend": "WKWebView",
+  "samples": [
+    {
+      "sample": 1,
+      "startup_to_ready_ms": 787.28,
+      "check_and_test_ms": 712.1,
+      "stdin_close_to_exit_ms": 74.39,
+      "tool_count": 4,
+      "exit_code": 0,
+      "catalogue_reply_bytes": 1882,
+      "catalogue_tools_bytes": 1872
+    },
+    {
+      "sample": 2,
+      "startup_to_ready_ms": 776.44,
+      "check_and_test_ms": 760.18,
+      "stdin_close_to_exit_ms": 78.35,
+      "tool_count": 4,
+      "exit_code": 0,
+      "catalogue_reply_bytes": 1882,
+      "catalogue_tools_bytes": 1872
+    },
+    {
+      "sample": 3,
+      "startup_to_ready_ms": 789.66,
+      "check_and_test_ms": 755.38,
+      "stdin_close_to_exit_ms": 66.98,
+      "tool_count": 4,
+      "exit_code": 0,
+      "catalogue_reply_bytes": 1882,
+      "catalogue_tools_bytes": 1872
+    }
+  ],
+  "os": "macOS 27.2",
+  "architecture": "arm64",
+  "scope": "Local lifecycle samples, not an inference benchmark or performance guarantee"
+}
