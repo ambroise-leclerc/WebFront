@@ -133,10 +133,7 @@ void windowTitle() {
         gtk::Session session(webfront::detail::BoundContentPolicy{}, std::move(window));
         session.create();
         const char* native = session.a.windowGetTitle(session.window);
-        auto        title  = std::string(native ? native : "");
-        CloseDuringLoop probe(session);  // Close through the loop, as a user would, so the session unwinds normally.
-        session.run("about:blank");
-        return title;
+        return std::string(native ? native : "");  // The session destructor tears the window down; no navigation is needed.
     };
     if (titleOf({.title = "SiliconForge"}) != "SiliconForge")
         throw std::runtime_error("The application's window title was not applied");

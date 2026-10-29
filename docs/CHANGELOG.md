@@ -3,8 +3,8 @@
 ## Unreleased
 
 - The embedded native windows take their title and initial size from `WebFrontConfig::window`
-  (`WindowOptions`, #396). The default title is the executable's name instead of "WebFront
-  Application"/"WebFront". The WebKitGTK lifecycle suite reads the native title back; a unit test
+  (`WindowOptions`, #396). The default title is the executable's name (or "WebFront" if it cannot be determined) instead of
+  "WebFront Application"/"WebFront". The WebKitGTK lifecycle suite reads the native title back; a unit test
   covers the dispatch to the frontend. Following `document.title` and an icon remain future work.
 
 - DOM batch protocol (#380): bounded command 5, canonical uint32 LEB128 and UTF-8 codec,

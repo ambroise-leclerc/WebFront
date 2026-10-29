@@ -26,7 +26,7 @@ A frontend is a type with:
 
 `WebFrontConfig::window` (`webfront::WindowOptions`: `title`, `width`, `height`) sets the initial window of the
 embedded frontends (WebKitGTK, CEF, WebView2, WKWebView); the system browser ignores it. An empty title selects the
-executable's name (never a fixed product string), and a non-positive size selects 1200 x 800. `BasicWF` passes the
+executable's name ("WebFront" if it cannot be determined), and a non-positive size selects 1200 x 800. `BasicWF` passes the
 options to a frontend that provides `open(address, port, file, policy, window)`; WebView2 and WKWebView also accept
 them in `WebView2Options::window` and `WKWebViewOptions::window`. The title is fixed at creation: following
 `document.title` is not implemented.
