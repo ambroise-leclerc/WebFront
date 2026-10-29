@@ -65,7 +65,8 @@ final source correctness (30/30 host-verified tasks) from completed verification
 (29/30 conversations). The report retains per-task data, token costs and the incomplete Flint case.
 The maintained benchmark's built-in inference protocol remains Ollama; the measurement adapter is
 not a supported launcher dependency or an additional benchmark CLI mode. These limited tasks do not
-establish general model reliability or accept all of ADR-019's criteria.
+establish general model reliability. [ADR-019](adr/ADR-019-developpement-automatisable-et-agents.md)
+accepts the implemented local contract and records these limits and its evidence.
 
 The #376 regressions cover response-owned HTTP status storage, `Connection: close` and
 failed gzip response leases occupying their admission slot until destruction. Repetition
