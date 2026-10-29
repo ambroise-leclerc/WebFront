@@ -2,6 +2,17 @@ cmake_minimum_required(VERSION 3.31)
 if(NOT ROOT OR NOT WORK)
     message(FATAL_ERROR "ROOT and WORK are required")
 endif()
+# Every nested command is bounded: a hang then fails here with its output, instead of CTest killing the whole test silently.
+function(run_bounded)
+    execute_process(${ARGN} TIMEOUT 60 RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    if(status MATCHES "timeout")
+        message(FATAL_ERROR "A fixture command did not finish within 60 s (it normally takes seconds): ${ARGN}
+${out}${err}")
+    endif()
+    set(result "${status}" PARENT_SCOPE)
+    set(output "${out}" PARENT_SCOPE)
+    set(error "${err}" PARENT_SCOPE)
+endfunction()
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}/source")
 file(WRITE "${WORK}/source/CMakeLists.txt" [=[
@@ -21,21 +32,18 @@ if(NOT value STREQUAL "fresh")
 endif()
 file(WRITE state consumed)
 ]=])
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/source" -B "${WORK}/build"
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/source" -B "${WORK}/build")
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Fixture configure failed: ${output}${error}")
 endif()
 get_filename_component(cmake_bin "${CMAKE_COMMAND}" DIRECTORY)
 find_program(CTEST_EXECUTABLE ctest HINTS "${cmake_bin}" REQUIRED)
 # This is the old CI command: the second mutation must fail, even though Prepare ran three times.
-execute_process(COMMAND "${CTEST_EXECUTABLE}" --test-dir "${WORK}/build" -C Release --repeat until-fail:3 --output-on-failure
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CTEST_EXECUTABLE}" --test-dir "${WORK}/build" -C Release --repeat until-fail:3 --output-on-failure)
 if(result EQUAL 0 OR NOT "${output}${error}" MATCHES "Fixture must be prepared")
     message(FATAL_ERROR "The fixture did not expose repetition of individual mutations: ${output}${error}")
 endif()
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake")
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Whole-suite repetition failed: ${output}${error}")
 endif()
@@ -47,16 +55,15 @@ endforeach()
 # A shorter successful rerun must discard old passes without touching unrelated reports.
 file(WRITE "${WORK}/build/test-results-manual.xml" "keep")
 file(WRITE "${WORK}/build/test-results-2-extra.xml" "keep")
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=1 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=1 -P "${ROOT}/test/cmake/RunTestSuite.cmake")
 if(NOT result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${WORK}/build/test-results-3.xml"
     OR NOT EXISTS "${WORK}/build/test-results-manual.xml" OR NOT EXISTS "${WORK}/build/test-results-2-extra.xml")
     message(FATAL_ERROR "A shorter rerun must keep only its own numbered reports: ${output}${error}")
 endif()
 # A relative build directory (the container jobs of the CI pass "build") designates the same directory for the reports as for CTest.
 file(WRITE "${WORK}/build/test-results-3.xml" "stale")
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=build -DCONFIG=Release -DREPEAT=2 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
-    WORKING_DIRECTORY "${WORK}" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=build -DCONFIG=Release -DREPEAT=2 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
+    WORKING_DIRECTORY "${WORK}")
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Repetition with a relative build directory failed: ${output}${error}")
 endif()
@@ -69,15 +76,13 @@ if(EXISTS "${WORK}/build/build" OR EXISTS "${WORK}/build/test-results-3.xml")
     message(FATAL_ERROR "A relative build directory must not nest its reports nor keep a stale numbered report")
 endif()
 # Recreate the successful reports to exercise cleanup when the next invocation fails early.
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake")
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Preparing reports for the failed rerun failed: ${output}${error}")
 endif()
 # Failures must stop the loop and propagate a nonzero process status.
 file(WRITE "${WORK}/source/mutate.cmake" "message(FATAL_ERROR \"Deliberate suite failure\")\n")
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake"
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DCONFIG=Release -DREPEAT=3 -P "${ROOT}/test/cmake/RunTestSuite.cmake")
 if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml" OR EXISTS "${WORK}/build/test-results-3.xml"
     OR NOT "${output}${error}" MATCHES "Deliberate suite failure")
     message(FATAL_ERROR "The runner must stop at the first failed suite: ${output}${error}")
@@ -85,8 +90,8 @@ endif()
 
 # Worker bounds are checked before CTest can accidentally choose unbounded parallelism.
 foreach(parallel 0 -1 invalid)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DPARALLEL=${parallel}
-        -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DPARALLEL=${parallel}
+        -P "${ROOT}/test/cmake/RunTestSuite.cmake")
     if(result EQUAL 0 OR NOT "${output}${error}" MATCHES "PARALLEL must be a positive integer")
         message(FATAL_ERROR "Invalid parallelism was not rejected: ${output}${error}")
     endif()
@@ -95,9 +100,9 @@ endforeach()
 # A failed Xvfb launch is an unsuccessful invocation too: stale reports must already be gone.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
     file(WRITE "${WORK}/build/test-results-2.xml" "stale")
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env WEBFRONT_TEST_SHARED_DISPLAY=0
+    run_bounded(COMMAND "${CMAKE_COMMAND}" -E env WEBFRONT_TEST_SHARED_DISPLAY=0
         "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/build -DXVFB_RUN=${CMAKE_COMMAND}
-        -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+        -P "${ROOT}/test/cmake/RunTestSuite.cmake")
     if(result EQUAL 0 OR EXISTS "${WORK}/build/test-results-2.xml"
         OR NOT EXISTS "${WORK}/build/test-results-manual.xml")
         message(FATAL_ERROR "A failed display launch must discard only numbered stale reports: ${output}${error}")
@@ -114,18 +119,17 @@ add_test(NAME Standard COMMAND "${CMAKE_COMMAND}" -E true)
 add_test(NAME Portable COMMAND "${CMAKE_COMMAND}" -E false)
 set_tests_properties(Portable PROPERTIES LABELS portability)
 ]=])
-execute_process(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/labels/source" -B "${WORK}/labels/build"
-    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -S "${WORK}/labels/source" -B "${WORK}/labels/build")
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Label fixture configure failed: ${output}${error}")
 endif()
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release -DLABEL_EXCLUDE=portability
-    -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release -DLABEL_EXCLUDE=portability
+    -P "${ROOT}/test/cmake/RunTestSuite.cmake")
 if(NOT result EQUAL 0 OR "${output}${error}" MATCHES "Portable")
     message(FATAL_ERROR "The excluded label must not run: ${output}${error}")
 endif()
-execute_process(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release
-    -P "${ROOT}/test/cmake/RunTestSuite.cmake" RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+run_bounded(COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${WORK}/labels/build -DCONFIG=Release
+    -P "${ROOT}/test/cmake/RunTestSuite.cmake")
 if(result EQUAL 0)
     message(FATAL_ERROR "Without an exclusion the portability test must run and fail: ${output}${error}")
 endif()
