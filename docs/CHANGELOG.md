@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The embedded native windows take their title and initial size from `WebFrontConfig::window`
+  (`WindowOptions`, #396). The default title is the executable's name (or "WebFront" if it cannot be determined) instead of
+  "WebFront Application"/"WebFront". The WebKitGTK lifecycle suite reads the native title back; a unit test
+  covers the dispatch to the frontend. Following `document.title` and an icon remain future work.
+
 - Consumer Jasmine/CTest integration (#402): opt-in instrumentation runs classic JavaScript
   specs in an application's own page with its existing DOM and callbacks. The public CMake
   helper provisions verified Jasmine, passes application arguments and checks a fresh JSON

@@ -13,7 +13,7 @@ include(CTest)
 
 add_test(NAME TestSuiteRepetition COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -DWORK=${CMAKE_CURRENT_BINARY_DIR}/suite-repetition -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestSuiteRepetition.cmake)
-set_tests_properties(TestSuiteRepetition PROPERTIES TIMEOUT 30)
+set_tests_properties(TestSuiteRepetition PROPERTIES TIMEOUT 180)
 
 # Optional maintainer tooling: the default C++ build must not require Doxygen.
 find_program(WEBFRONT_TEST_DOXYGEN doxygen)

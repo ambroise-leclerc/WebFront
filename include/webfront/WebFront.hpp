@@ -322,6 +322,8 @@ struct WebFrontConfig {
     std::string           port{"9002"};
     std::filesystem::path documentRoot{};
     ContentPolicy         contentPolicy{};
+    /// Initial window of the embedded frontends; the title defaults to the executable's name.
+    WindowOptions         window{};
 };
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
@@ -342,6 +344,7 @@ public:
           httpPort(httpServer.port()),
           httpDocRoot(config.documentRoot),
           contentPolicy(std::move(config.contentPolicy)),
+          windowOptions(std::move(config.window)),
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
@@ -552,7 +555,9 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
-        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
+        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
+        else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename); })
             Frontend::open(httpAddress, httpPort, htmlFilename);
@@ -646,6 +651,7 @@ private:
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     ContentPolicy                                                            contentPolicy;
+    WindowOptions                                                            windowOptions;
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;

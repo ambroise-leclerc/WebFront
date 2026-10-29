@@ -26,19 +26,24 @@ struct QuietFrontend : Frontend {
         open("127.0.0.1", port, page, ContentPolicy{});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy = {}) {
+        open(address, port, page, policy, WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
         if constexpr (std::is_same_v<Frontend, frontend::WKWebViewFrontend>) {
             frontend::WKWebViewOptions options;
             options.contentPolicy = policy;
+            options.window        = window;
             options.visible       = diagnosticWindows();
             Frontend::open(address, port, page, options);
         } else if constexpr (std::is_same_v<Frontend, frontend::WebView2Frontend>) {
             frontend::WebView2Options options;
             options.contentPolicy = policy;
+            options.window        = window;
             options.visible       = diagnosticWindows();
             Frontend::open(address, port, page, options);
         } else {
             // Linux engines use one Xvfb display around a complete suite; their native windows stay real.
-            Frontend::open(address, port, page, policy);
+            Frontend::open(address, port, page, policy, window);
         }
     }
 };

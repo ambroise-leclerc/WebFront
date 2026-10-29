@@ -3,6 +3,7 @@
 #include "../ContentPolicy.hpp"
 #include "Action.hpp"
 #include "Url.hpp"
+#include "Window.hpp"
 
 #include <chrono>
 #include <concepts>
@@ -18,6 +19,7 @@ struct WKWebViewOptions {
     /** @brief The initial document must finish loading within this interval; no bridge connection is required. */
     std::chrono::milliseconds startupTimeout{30000};
     ContentPolicy             contentPolicy{};
+    WindowOptions             window{};
     /** @brief Keep the native window hidden and avoid activating the application. A WindowServer is still required. */
     bool                      visible{true};
 };
@@ -313,9 +315,10 @@ struct Session {
         }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
+        const auto   windowOptions = frontend::detail::resolveWindow(options.window);
         const CGRect bounds{
-            {   0,   0},
-            {1024, 768}
+            {                                 0,                                   0},
+            {static_cast<CGFloat>(windowOptions.width), static_cast<CGFloat>(windowOptions.height)}
         };
         view = send(send(reinterpret_cast<id>(viewClass()), "alloc"), "initWithFrame:configuration:", bounds, configuration.get());
         if (!view)
@@ -330,7 +333,7 @@ struct Session {
             throw std::runtime_error("WKWebView: cannot create window (a WindowServer session is required)");
         send<void>(window, "setReleasedWhenClosed:", static_cast<BOOL>(false));
         send<void>(window, "setDelegate:", delegate);
-        Object title(text("WebFront"));
+        Object title(text(windowOptions.title));
         send<void>(window, "setTitle:", title.get());
         send<void>(window, "setContentView:", view);
         send<BOOL>(window, "makeFirstResponder:", view);
@@ -592,6 +595,9 @@ struct WKWebViewFrontend {
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {}) {
         open(address, port, file, WKWebViewOptions{.contentPolicy = policy});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+        open(address, port, file, WKWebViewOptions{.contentPolicy = policy, .window = window});
     }
 };
 
