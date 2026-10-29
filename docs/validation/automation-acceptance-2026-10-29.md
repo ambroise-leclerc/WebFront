@@ -22,6 +22,13 @@ or rerun inference. The source is the merged PR #407, `22f67954608924b174ef05dba
   owned-window and authenticated shared-window use against that same candidate. No SDK was installed
   by configure, the launcher or the test.
 
+## Provenance of the measured tree
+
+The automation sources are those of `22f6795`. The 0.6.3 candidate adds only the release preparation
+of draft PR #413 (`01a7906`), whose difference from `22f6795` is limited to `bundles.json`, the generated
+`DeveloperReleaseData.hpp` pin and documentation. The samples and the candidate checks were taken from that
+combination on a local checkout; the exact tree of those runs was not recorded beyond this description.
+
 ## Lifecycle samples
 
 Three fresh generated fixture projects and three native MCP processes were measured with WKWebView.

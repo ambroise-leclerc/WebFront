@@ -2,6 +2,8 @@
   "format": 1,
   "date": "2026-10-29",
   "source": "22f67954608924b174ef05dba71a2bc45b392a22",
+  "release_preparation": "01a79069c6b1eaff344db9fedd9027fc3f4dca2b",
+  "release_preparation_scope": "draft PR #413; differs from source only in bundles.json, DeveloperReleaseData.hpp and documentation",
   "environment_integrity": "sha512-3AVF2xKsUfHys5VREA6DmkjiEDKjx9VQtPTrsjdiazzfpNQvbKEjW2ox5Kd2hPeOP5MfcMvbDHQ4SZoO97P5Xg==",
   "frontend": "WKWebView",
   "samples": [

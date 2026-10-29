@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-28 | Proposée | Ambroise Leclerc | Comparaison des voies d'automatisation, orientation MCP locale et modèle de menace de l'épique #403 ; #402 comme premier cas consommateur. | À renseigner après intégration. |
 | 1.1 | 2026-10-28 | Proposée | Ambroise Leclerc | Contrat d'opérations décrit en JSON Schema et projeté vers plusieurs adaptateurs ; CLI et consignes d'agent comme voie de premier rang ; WebDriver BiDi et WebMCP au comparatif ; exigences propres aux modèles locaux ; précisions sur le premier incrément et la gravité conditionnelle de HTTP. | — |
-| 1.2 | 2026-10-29 | Acceptée | Ambroise Leclerc | Décision fondée sur les livraisons #405, #406 et #407 : contrat v1, CLI/MCP stdio, attachement authentifié, protections et réserves ; qualification de cinq modèles locaux, preuves CI et préparation de la distribution 0.6.3. | [#407](https://github.com/ambroise-leclerc/WebFront/pull/407), tête `4a1c92b`, intégration `22f6795`. |
+| 1.2 | 2026-10-29 | Acceptée | Ambroise Leclerc | Décision fondée sur les livraisons #405, #406 et #407 : contrat v1, CLI/MCP stdio, attachement authentifié, protections et réserves ; qualification de cinq modèles locaux, preuves CI et préparation de la distribution 0.6.3. | [#407](https://github.com/ambroise-leclerc/WebFront/pull/407), tête `4a1c92b`, intégration `22f6795` ; révision ADR `cf1bf15`. |
 
 ## État et portée
 
@@ -67,13 +67,15 @@ au codec binaire. Les règles d'évolution de l'ADR-003 restent applicables.
 
 `include/webfront/automation/Contract.hpp` décrit les opérations, entrées, résultats, erreurs et
 permissions. CLI, catalogue MCP et validations natives sont projetés depuis cette source unique.
-`Session.hpp` possède les runs, leurs identifiants, délais, états, résultats bornés et l'audit.
+`Session.hpp` possède les runs, leurs identifiants, délais, états, résultats et l'audit ; la borne des résultats
+est appliquée avant `complete` par le chemin `connectAutomation`, pas par `Session`.
 Le terminal et l'agent réutilisent runNonInteractive et le même moteur de build/check/test ;
 l'agent est soumis en plus aux grants natifs, sans exporter toute l'autorité du terminal humain.
 
 Le premier contrat expose check, build, test, preview, inspect, click et fill. Il distingue les
 diagnostics structurés, la sortie, le rapport de tests et les données d'inspection. Une opération
-longue rend un runId consultable ; les sorties coupées sont signalées. L'annulation est coopérative,
+longue rend un runId consultable ; le chemin `connectAutomation` borne les sorties (queue de 16 000 unités) et signale
+les coupures par `truncated`, alors que `runNonInteractive` conserve par défaut sa sortie complète. L'annulation est coopérative,
 ne revient pas sur une publication commise et ne garantit pas d'arrêter le JavaScript déjà lancé.
 Un résultat perdu après une mutation est signalé comme incertain, jamais rejoué automatiquement.
 Installation/restauration réseau, wf run/exec et callbacks C++ arbitraires ne sont pas des outils MCP.
@@ -191,8 +193,8 @@ les échecs de raisonnement restent visibles et ne doivent pas augmenter leur au
 
 Les mesures de démarrage/arrêt de réception sont distinctes des latences de tâches des modèles.
 La disponibilité et l'arrêt sont aussi vérifiés par les scénarios de processus et leurs échéances. Une mesure de capacité
-ou de performance ne constitue pas une qualification universelle de sécurité. Les comparaisons
-CI de #407 distinguent compilation à cache froid et exécution répétée avec les caches alimentés.
+ou de performance ne constitue pas une qualification universelle de sécurité. Les durées de CI ne sont
+pas utilisées ici comme mesure de performance.
 
 MCP HTTP, accès distant/multi-utilisateur, WebDriver BiDi, WebMCP, captures et installation de modèles
 restent différés ; les installer ou les exposer demande une décision propre. L'autorité héritée,
