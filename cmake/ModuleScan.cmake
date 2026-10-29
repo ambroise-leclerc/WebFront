@@ -2,6 +2,8 @@
 # <stdexec/execution.hpp> alone under -fmodules-ts) when CMake adds -fmodules-ts, which it does for every
 # C++20+ target while module scanning is not OFF (CMP0155). WebFront consumers include headers only, so
 # module scanning is never needed for the targets that link WebFront::WebFront.
+# Limit: source-level CXX_SCAN_FOR_MODULES and CXX_MODULES file sets still make CMake scan a target, and
+# neither the check nor webfront_disable_module_scan() covers them.
 
 # Turn module scanning off for the given targets.
 function(webfront_disable_module_scan)
@@ -22,13 +24,12 @@ function(_webfront_collect_scanned_targets directory out)
         if(NOT _links OR NOT ("WebFront::WebFront" IN_LIST _links OR "WebFront" IN_LIST _links))
             continue()
         endif()
-        # A target property overrides the CMAKE_CXX_SCAN_FOR_MODULES variable.
+        # CMake initializes the property from CMAKE_CXX_SCAN_FOR_MODULES when the target is created, so a
+        # later change of the variable has no effect on it. An unset property means the variable was unset
+        # then, and scanning follows CMP0155 (on for C++20 and later).
         get_target_property(_scan ${_target} CXX_SCAN_FOR_MODULES)
         if(_scan STREQUAL "_scan-NOTFOUND")
-            set(_scan "${CMAKE_CXX_SCAN_FOR_MODULES}")
-            if(NOT DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
-                set(_scan ON)
-            endif()
+            set(_scan ON)
         endif()
         if(_scan)
             list(APPEND _found ${_target})
