@@ -127,6 +127,23 @@ void nativeClose() {
     app.show("no-bridge.html");
 }
 
+void windowTitle() {
+    gtk::initialize();
+    const auto titleOf = [](webfront::WindowOptions window) {
+        gtk::Session session(webfront::detail::BoundContentPolicy{}, std::move(window));
+        session.create();
+        const char* native = session.a.windowGetTitle(session.window);
+        return std::string(native ? native : "");  // The session destructor tears the window down; no navigation is needed.
+    };
+    if (titleOf({.title = "SiliconForge"}) != "SiliconForge")
+        throw std::runtime_error("The application's window title was not applied");
+    const auto defaultTitle = titleOf({});
+    if (defaultTitle.empty() || defaultTitle == "WebFront Application")
+        throw std::runtime_error("The default window title must be the executable's name");
+    if (defaultTitle != "webkitgtk_lifecycle")
+        throw std::runtime_error("Unexpected default window title: " + defaultTitle);
+}
+
 void preRunFailure() {
     // No GTK display or window is needed to preserve an error recorded by configure().
     gtk::Session session(webfront::detail::BoundContentPolicy{});
@@ -159,7 +176,8 @@ void run(std::string_view mode) {
         {         "http-error",          httpError},
         {       "native-close",        nativeClose},
         {    "pre-run-failure",      preRunFailure},
-        {"profile-permissions", profilePermissions}
+        {"profile-permissions", profilePermissions},
+        {       "window-title",        windowTitle}
     };
     const auto selected = cases.find(mode);
     if (selected == cases.end())

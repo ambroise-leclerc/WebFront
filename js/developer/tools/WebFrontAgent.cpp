@@ -92,13 +92,16 @@ struct CEFAgentFrontend : frontend::CEFFrontend {
         open("127.0.0.1", port, page, {});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy) {
+        open(address, port, page, policy, WindowOptions{});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
 #if defined(WEBFRONT_EMBED_CEF) && defined(__linux__)
         webfront::cef::detail::openWindow(frontend::detail::applicationUrl(address, port, page),
                                           webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
                                           nullptr,
-                                          sources.profile, true);
+                                          sources.profile, window, true);
 #else
-        frontend::CEFFrontend::open(address, port, page, policy);
+        frontend::CEFFrontend::open(address, port, page, policy, window);
 #endif
     }
 };
