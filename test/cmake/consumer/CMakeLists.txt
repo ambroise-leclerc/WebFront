@@ -5,10 +5,24 @@ cmake_minimum_required(VERSION 3.31)
 project(WebFrontConsumer LANGUAGES C CXX)
 
 set(WEBFRONT_SOURCE_DIR "" CACHE PATH "Path of the WebFront checkout")
+if(CPM_MODULE)
+    # A nested consumer configure reuses the already downloaded CPM module offline.
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/cmake")
+    get_filename_component(cpm_filename "${CPM_MODULE}" NAME)
+    file(COPY_FILE "${CPM_MODULE}" "${CMAKE_BINARY_DIR}/cmake/${cpm_filename}" ONLY_IF_DIFFERENT)
+endif()
 add_subdirectory("${WEBFRONT_SOURCE_DIR}" webfront)
 
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE WebFront::WebFront)
+webfront_use_native_window(consumer)
+if(EXPECT_NATIVE)
+    get_target_property(definitions consumer COMPILE_DEFINITIONS)
+    if(NOT "WEBFRONT_NATIVE_WINDOW" IN_LIST definitions)
+        message(FATAL_ERROR "The platform's native frontend was not selected")
+    endif()
+    target_compile_definitions(consumer PRIVATE WEBFRONT_CONSUMER_EXPECT_NATIVE)
+endif()
 target_compile_definitions(consumer PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:WEBFRONT_CONSUMER_CXX=1>")
 
 # Registration from the parent scope must not rely on WebFront's private module path/registry.

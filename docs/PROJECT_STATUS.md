@@ -9,8 +9,11 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
 
 - **C++ applications.** Link `WebFront::WebFront` from a CMake parent project. The default
   `webfront::WebFront` uses the system browser. Native applications explicitly select WebView2,
-  WKWebView, WebKitGTK or CEF; the standalone examples detect the platform's native engine
-  when its dependencies are available. See [frontends](FRONTENDS.md).
+  WKWebView, WebKitGTK or CEF. Standalone and consumer builds detect the platform's native
+  engine when its dependencies are available (outside test/fuzzing builds).
+  `webfront_use_native_window(target)` provides target setup and a definition for selecting
+  the native adapter with a browser fallback; see the [consumer example](../README.md#use-webfront-in-your-project)
+  and [frontends](FRONTENDS.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
   environment (0.6.2). Its terminal provides `wf init`, `create`, `install`, `restore`, `run`,
   `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
