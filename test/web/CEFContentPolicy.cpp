@@ -210,7 +210,7 @@ struct ProbeFrontend {
 int main() {
     try {
         using FS = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
-        webfront::BasicWFWithFrontend<webfront::NetProvider, FS, ProbeFrontend> app("9002", std::filesystem::current_path());
+        webfront::BasicWFWithFrontend<webfront::NetProvider, FS, ProbeFrontend> app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.show("policy-controls.html");
         return 0;
     } catch (const std::exception& error) {
