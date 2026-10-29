@@ -1,4 +1,5 @@
 {
+  "LICENSE": "0b96b3ed27eb64ba777eaa049093d0047c7f9a4e690b6e68b52fde2844226ccd",
   "js/developer/environment/manifest.mjs": "8a655810fd7bd380d861adad9a7870bb677fd530483cf9113ca240e03facdce5",
   "js/developer/environment/project.mjs": "280cced29e41bc48d5d9d69934186ababfdbbc9dc32ed9517e17af4f19d3bd73",
   "js/developer/environment/installer.mjs": "1159404b151dc8c580d9a155a9ec0dfa3fcb6a8e073d8586d29b329ce91b741b",
@@ -38,10 +39,10 @@
   "examples/life/ui/main.tsx": "7b1ff285d2a6b8f897ef12df872886e61ef4b24e2358a9423b76b38ab75c85d3",
   "examples/life/ui/style.css": "9bb55eb0f0a3287e5b7dc78af9d69608b87ff42c4d9c8a653bc83a52fe293c44",
   "js/developer/tools/distribution.json": "7029cf3e2e64e5ea44b595fddcc0151fca4cc210d2ef1258cee7bb8d75e7cd2f",
-  "js/developer/tools/archive.mjs": "bfe9feeb5e4d4e1b7c44c4dec4dcbeab4ae59c2bf16a1d2b32cd6910a2b84e7b",
+  "js/developer/tools/archive.mjs": "da63bb9d796ddfd24ed945b15c53f66a0400eb177886fd4f1c8fd10cafb5a91b",
   "js/developer/tools/distribution.mjs": "1108b61bc659dd945ba1417aa84337bca03039842d342c95815b5463d87a136e",
-  "js/developer/scripts/build.mjs": "df91efbc9bb19559c36440f0be7ec2b2af406209146a0d8eb88d688803a74c68",
-  "js/developer/webfront.project.json": "691836184ab09fddf7248920473a0b89402dea1807747deb018c4597049455a8",
+  "js/developer/scripts/build.mjs": "7aa0358dbd8555ab83bf0380f67892e96b7e9806d4968de18e1a8eaf6e91c080",
+  "js/developer/webfront.project.json": "e0c0bb021b1649afd5f77e8e2a45c707d2d807b1132fb4a7c17bbc2db4d3e527",
   "js/core/bootstrap/bootstrap.bundle.mjs": "536831257f0fc92e31911841750e1e59247f7c64e756b0fcb878efd9860a741f",
   "js/developer/environment/packages.bundle.mjs": "413e1dbf24d3993894d6bcbd9c01bd456e446170931f8daacfd06ce537cb2abc",
   "include/webfront/system/DeveloperReleaseData.hpp": "567a88fed2839a23c2abad2dd9c2b74afe9934b1e1bdf44ec1099d9332b35c90"

@@ -4,11 +4,19 @@
 
 const status = document.getElementById("status");
 
+let bridgeConnected = false;
 try {
     await webFront.ready;
+    bridgeConnected = true;
     status.textContent = "Connected to WebFront";
     status.dataset.state = "connected";
+    const { installDomInterpreter } = await import('./webfront-dom.mjs');
+    const dom = installDomInterpreter(webFront);
+    dom.island('root', document.getElementById('webfront-root'));
+    await dom.connect();
 } catch (error) {
-    status.textContent = `Connection failed: ${error.message}`;
-    status.dataset.state = "error";
+    status.textContent = bridgeConnected
+        ? `Connected to WebFront; DOM unavailable: ${error.message}`
+        : `Connection failed: ${error.message}`;
+    status.dataset.state = bridgeConnected ? "dom-error" : "error";
 }

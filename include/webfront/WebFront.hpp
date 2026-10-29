@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0 OR CECILL-B
 /// @date 18/01/2022 19:34:27
 /// @author Ambroise Leclerc
 /// @brief WebFront UI main objet
 #pragma once
 
+#include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
 #include "JsFunction.hpp"
@@ -73,6 +75,19 @@ public:
         link->sendCommand(batch);
     }
 
+    /// One shared DOM document for this connection; call only on the server thread.
+    [[nodiscard]] auto document() const {
+        return dom::Document<BasicUI>{*this};
+    }
+
+private:
+    template <typename>
+    friend class dom::Document;
+    [[nodiscard]] auto domState() const {
+        return webFront.domState(webLinkId);
+    }
+
+public:
     /// The frames queued for this browser and not yet written to the network; 0 once its connection is gone.
     [[nodiscard]] std::size_t pendingWrites() const {
         const auto link = webFront.findLink(webLinkId);
@@ -345,7 +360,7 @@ public:
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, link);
+                webLinks.emplace(id, Connection{link, std::this_thread::get_id(), false});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -428,9 +443,43 @@ public:
     [[nodiscard]] std::shared_ptr<WebLink<Net, Policy>> findLink(WebLinkId id) const {
         std::scoped_lock lock{linksMutex};
         const auto       found = webLinks.find(id);
-        return found == webLinks.end() ? nullptr : found->second;
+        return found == webLinks.end() ? nullptr : found->second.link;
     }
 
+private:
+    template <typename>
+    friend class BasicUI;
+    /// Internal DOM document storage, confined to the server thread.
+    std::shared_ptr<dom::detail::State> domState(WebLinkId id) {
+        std::shared_ptr<WebLink<Net, Policy>> link;
+        {
+            std::scoped_lock lock{linksMutex};
+            const auto       found = webLinks.find(id);
+            if (found == webLinks.end() || found->second.closed)
+                throw ConnectionError("Connection with client lost");
+            if (found->second.thread != std::this_thread::get_id())
+                throw std::logic_error("DOM document requires the server thread");
+            link = found->second.link;
+        }
+        // The connection's immutable server-thread identity was checked before touching this map.
+        if (auto found = domDocuments.find(id); found != domDocuments.end())
+            return found->second;
+        auto state  = std::make_shared<dom::detail::State>();
+        state->send = [weak = std::weak_ptr(link)](const msg::DomBatch& batch) {
+            const auto connection = weak.lock();
+            if (!connection)
+                throw ConnectionError("Connection with client lost");
+            connection->sendCommand(batch);
+        };
+        state->schedule = [this, id, weak = std::weak_ptr(state)] {
+            if (auto shared = weak.lock())
+                static_cast<void>(spawn(flushDomAfter(UI{*this, id}, std::move(shared))));
+        };
+        domDocuments.emplace(id, state);
+        return state;
+    }
+
+public:
     /// The browsers connected now: a closed connection is released shortly after its closure.
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
@@ -568,7 +617,7 @@ private:
         {
             std::scoped_lock lock{linksMutex};
             if (auto found = webLinks.find(id); found != webLinks.end()) {
-                released = std::move(found->second);
+                released = std::move(found->second.link);
                 webLinks.erase(found);
             }
         }
@@ -576,7 +625,10 @@ private:
     }
 
     void releaseLinks() {
-        std::map<WebLinkId, std::shared_ptr<WebLink<Net, Policy>>> released;
+        for (auto& [id, document] : domDocuments)
+            document->close();
+        domDocuments.clear();
+        std::map<WebLinkId, Connection>                           released;
         std::scoped_lock                                          lock{linksMutex};
         released.swap(webLinks);
     }
@@ -601,15 +653,74 @@ private:
     ContentPolicy                                                            contentPolicy;
     WindowOptions                                                            windowOptions;
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
-    std::map<WebLinkId, std::shared_ptr<WebLink<Net, Policy>>>               webLinks;
+    struct Connection {
+        std::shared_ptr<WebLink<Net, Policy>> link;
+        std::thread::id                       thread;
+        bool                                  closed;
+    };
+    std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
     std::function<void(UI)>                                                uiStartedHandler;
     std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::shared_ptr<detail::UISubscribers<UI>>                               uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>, std::less<>> cppFunctions;
+    std::map<WebLinkId, std::shared_ptr<dom::detail::State>>                                                                    domDocuments;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
 private:
+    static Task flushDomAfter(UI ui, std::shared_ptr<dom::detail::State> state) {
+        co_await ui.resumeAfter(std::chrono::milliseconds(1));
+        state->scheduled = false;
+        if (!state->alive)
+            co_return;
+        try {
+            state->flush();
+        } catch (const std::exception& error) {
+            state->reject(state->batchId, error.what());
+        }
+    }
+
+    bool domCall(const WebLinkEvent& event, WebLink<Net, Policy>& link) {
+        if (event.text == "wfDom.ready") {
+            auto handler = detail::makeCppFunctionHandler<Policy, void>([this, id = event.webLinkId] {
+                auto state = domState(id);
+                state->check();
+                if (state->ready)
+                    return;  // Retrying a lost readiness acknowledgement must not reset the document.
+                state->ready = true;
+                state->wake();
+            });
+            detail::makeCppFunctionResponder<Net, Policy, void>(std::move(handler))(event.data, link, event.callId);
+            return true;
+        }
+        const auto found = domDocuments.find(event.webLinkId);
+        if (found == domDocuments.end() || !found->second->ready)
+            return false;  // Low-level batch users retain their own callbacks until explicit connection.
+        auto state = found->second;
+        if (event.text == "wfDom.event") {
+            auto handler = detail::makeCppFunctionHandler<Policy, void, std::uint32_t, std::uint32_t, std::string>(
+                [state](std::uint32_t node, std::uint32_t name, std::string value) {
+                    if (state->alive)
+                        state->event(node, name, std::move(value));
+                });
+            detail::makeCppFunctionResponder<Net, Policy, void>(std::move(handler))(event.data, link, event.callId);
+        } else if (event.text == "wfDom.revoked") {
+            auto handler = detail::makeCppFunctionHandler<Policy, void, std::string>([state](std::string name) {
+                if (state->alive)
+                    state->revoke(name);
+            });
+            detail::makeCppFunctionResponder<Net, Policy, void>(std::move(handler))(event.data, link, event.callId);
+        } else if (event.text == "wfDom.rejected") {
+            auto handler = detail::makeCppFunctionHandler<Policy, void, std::uint32_t, std::string>([state](std::uint32_t id, std::string reason) {
+                if (state->alive)
+                    state->reject(id, std::move(reason));
+            });
+            detail::makeCppFunctionResponder<Net, Policy, void>(std::move(handler))(event.data, link, event.callId);
+        } else
+            return false;
+        return true;
+    }
+
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
             case WebLinkEvent::Code::linked:
@@ -621,6 +732,15 @@ private:
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
+                {
+                    std::scoped_lock lock{linksMutex};
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
+                        found->second.closed = true;
+                }
+                if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
+                    found->second->close();
+                    domDocuments.erase(found);
+                }
                 uiClosedSubscribers->notify(UI{*this, event.webLinkId});
                 // The link is running this handler: it is released afterwards, by a task on the server context.
                 // During shutdown the task is refused and the link goes with the application.
@@ -631,6 +751,13 @@ private:
                 const auto link = findLink(event.webLinkId);
                 if (!link)
                     break;
+                if constexpr (requires(typename Net::Acceptor& acceptor) { Net::ResumeAfter(acceptor, std::chrono::milliseconds(1)); }) {
+                    if (domCall(event, *link))
+                        break;
+                } else if (event.text == "wfDom.ready") {
+                    link->sendError(event.callId, "DOM API requires Net::ResumeAfter");
+                    break;
+                }
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId});
                 else

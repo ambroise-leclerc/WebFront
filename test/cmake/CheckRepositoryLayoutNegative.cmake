@@ -11,6 +11,7 @@ foreach(entry .gitattributes .github .gitignore AGENTS.md CMakeLists.txt README.
         cmake docs examples js test)
     file(WRITE "${WORK_DIR}/${entry}/placeholder" "")
 endforeach()
+file(WRITE "${WORK_DIR}/LICENSE" "Apache-2.0 OR CECILL-B\n")
 file(WRITE "${WORK_DIR}/include/webfront/WebFront.hpp" "")
 
 function(git)

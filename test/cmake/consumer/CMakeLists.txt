@@ -11,6 +11,17 @@ add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE WebFront::WebFront)
 target_compile_definitions(consumer PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:WEBFRONT_CONSUMER_CXX=1>")
 
+# Registration from the parent scope must not rely on WebFront's private module path/registry.
+# This test configures/builds the consumer only; the dummy JS is never executed as Jasmine.
+enable_testing()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dummy.js" "// configuration fixture\n")
+webfront_add_jasmine_test(NAME PublicJasmineRegistration TARGET consumer
+    JASMINE "${CMAKE_CURRENT_BINARY_DIR}/dummy.js" SPECS "${CMAKE_CURRENT_BINARY_DIR}/dummy.js")
+get_property(engines GLOBAL PROPERTY WEBFRONT_JASMINE_FRONTENDS)
+if(NOT "WKWebView" IN_LIST engines)
+    message(FATAL_ERROR "Public Jasmine frontend metadata was lost across add_subdirectory")
+endif()
+
 # Sanitizer, coverage and linker options are internal: consumers must not inherit them.
 get_target_property(_webfront_libs WebFront::WebFront INTERFACE_LINK_LIBRARIES)
 if("WebFront_options" IN_LIST _webfront_libs OR "WebFront_warnings" IN_LIST _webfront_libs OR "WebFront_test_hardening" IN_LIST _webfront_libs)

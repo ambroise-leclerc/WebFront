@@ -1,0 +1,21 @@
+<!doctype html>
+<div id="root"></div>
+<script src="/WebFront.js"></script>
+<script>
+// Delay the real startup call so that the maintained UI can be exercised before acknowledgement.
+const invoke = webFront.cppFunction.bind(webFront);
+window.toggleCalls = 0;
+webFront.cppFunction = name => {
+    const call = invoke(name);
+    if (name === 'life.react.start') return (...args) => new Promise((resolve, reject) => {
+        window.finishStart = () => call(...args).then(resolve, reject);
+    });
+    if (name === 'life.react.toggle') return (...args) => { ++window.toggleCalls; return call(...args); };
+    return call;
+};
+if (new URLSearchParams(location.search).has('block-mount')) {
+    const query = document.querySelector.bind(document);
+    document.querySelector = selector => selector === '[data-testid="cpp-panel"]' ? null : query(selector);
+}
+</script>
+<script type="module" src="/react-example/app.js"></script>

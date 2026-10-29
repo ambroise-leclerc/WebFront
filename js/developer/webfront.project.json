@@ -16,6 +16,7 @@
     "build": "js/developer/scripts/build.mjs",
     "site": "js/developer/scripts/site.mjs",
     "pin": "js/developer/scripts/pin.mjs",
+    "react-package": "js/developer/scripts/react-package.mjs",
     "test-registry": "test/web/registry/build.mjs"
   },
   "test": {
@@ -32,10 +33,12 @@
   },
   "permissions": {
     "files": [
+      "LICENSE",
       "js/developer/webfront.project.json",
       "js/developer/webfront-packages.lock.json",
       ".webfront/developer/packages",
       "js/core",
+      "js/react",
       "js/developer/environment",
       "js/developer/tools",
       "js/developer/scripts",
@@ -51,6 +54,7 @@
       "build-developer-environment",
       "build-site",
       "build-registry",
+      "build-react-package",
       "js/core/bootstrap/bootstrap.bundle.mjs",
       "js/developer/environment/packages.bundle.mjs",
       "js/developer/environment/PACKAGES-LICENSE.txt",

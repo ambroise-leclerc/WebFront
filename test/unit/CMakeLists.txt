@@ -25,11 +25,11 @@ endif()
 
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
-list(APPEND TESTS_LIST DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
+list(APPEND TESTS_LIST ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp JasmineConsumerTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
@@ -94,6 +94,10 @@ if(WEBFRONT_USE_MDDLOG)
   set_target_properties(mddlog_header_consumer PROPERTIES CXX_SCAN_FOR_MODULES OFF CXX_MODULE_STD OFF)
   add_test(NAME MddlogHeaderConsumer COMMAND mddlog_header_consumer)
 endif()
+
+add_test(NAME ReactProjectPreparation COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-project-preparation -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckPrepareReactProject.cmake)
+set_tests_properties(ReactProjectPreparation PROPERTIES TIMEOUT 30)
 
 # The documented newcomer commands and snippets must keep matching the built examples and CI.
 add_test(NAME RepositoryLayout

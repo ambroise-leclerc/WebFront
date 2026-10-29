@@ -1,5 +1,9 @@
 add_executable(webtest JasmineTest.cpp)
 target_link_libraries(webtest PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+if(MSVC)
+    # The shared browser suite instantiates enough bridge callbacks to exceed standard COFF's section limit.
+    target_compile_options(webtest PRIVATE /bigobj)
+endif()
 
 include(Frontends)
 include("${PROJECT_SOURCE_DIR}/test/cmake/DriverSessions.cmake")
@@ -16,6 +20,13 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     target_compile_definitions(frontend_lifecycle PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
     webfront_setup_frontends_for_target(frontend_lifecycle)
     add_dependencies(webtest frontend_lifecycle)
+endif()
+
+# The runner passes arguments literally and kills the whole process tree at its deadline (POSIX shell wrapper).
+if(UNIX)
+    add_test(NAME JasmineRunnerArgumentsAndDeadline COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/jasmine-runner-check" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckJasmineRunner.cmake")
+    set_tests_properties(JasmineRunnerArgumentsAndDeadline PROPERTIES TIMEOUT 60)
 endif()
 
 # The publication script that archives the files in a release refuses a missing or invalid manifest (needs bash and jq).
@@ -63,6 +74,40 @@ set(_fixtures "${CMAKE_CURRENT_BINARY_DIR}/developer-fixtures")
 set(_webtest_runs OFF)
 if(_browser_tests_available)
     set(_webtest_runs ON)
+    add_executable(jasmine_consumer JasmineConsumer.cpp)
+    # The CEF CI builds webtest explicitly, then runs every web-integration case.
+    add_dependencies(webtest jasmine_consumer)
+    target_link_libraries(jasmine_consumer PRIVATE WebFront WebFront_test_hardening WebFront_options WebFront_warnings)
+    target_compile_definitions(jasmine_consumer PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(jasmine_consumer)
+    # Exercise the public helper without a configure-time public network dependency beyond the pinned registry.
+    set(WEBFRONT_JASMINE_ARCHIVE_DIR "${_registry_archives}")
+    # Each expected failure must fail for its own reason, which the runner names: WILL_FAIL would accept any failure.
+    set(_reason_fail "Jasmine did not pass \\(status: failed\\)")
+    set(_reason_empty "${_reason_fail}")
+    set(_reason_pending "${_reason_fail}")
+    set(_reason_broken "Jasmine did not pass \\(status: error\\)")
+    set(_reason_close "exited without reporting a result")
+    set(_reason_hang "timed out after 5 seconds")
+    foreach(mode pass fail empty pending broken close hang)
+        set(limit 30)
+        if(mode STREQUAL "hang")
+            set(limit 5)
+        endif()
+        webfront_add_jasmine_test(NAME ConsumerJasmine-${mode} TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT ${limit}
+            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/${mode}.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        if(NOT mode STREQUAL "pass")
+            set_tests_properties(ConsumerJasmine-${mode} PROPERTIES PASS_REGULAR_EXPRESSION "${_reason_${mode}}")
+        endif()
+        set_tests_properties(ConsumerJasmine-${mode} PROPERTIES FIXTURES_SETUP ConsumerJasmineRuns)
+    endforeach()
+    add_test(NAME ConsumerJasmineReports COMMAND "${CMAKE_COMMAND}"
+        "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine"
+        -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckConsumerJasmineReports.cmake")
+    set_tests_properties(ConsumerJasmineReports PROPERTIES FIXTURES_REQUIRED ConsumerJasmineRuns
+        LABELS web-integration TIMEOUT 15)
     set(_suite_project "${CMAKE_CURRENT_BINARY_DIR}/web-suite-project")
     math(EXPR _suite_timeout "${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_TIMEOUT} - 10")
     webfront_add_browser_tests(webtest "${WEBFRONT_WEBTEST_FRONTEND}" "${CMAKE_CURRENT_SOURCE_DIR}" frontend_lifecycle
@@ -330,6 +375,7 @@ if(_browser_tests_available)
         if(_webtest_runs)
             add_test(NAME WebSuiteProject
                 COMMAND ${CMAKE_COMMAND} -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/suite -DPROJECT=${_suite_project}
+                    -DLIFE_REACT=${PROJECT_SOURCE_DIR}/examples/life/react/main.tsx
                     -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareWfProject.cmake)
             set_tests_properties(WebSuiteProject PROPERTIES FIXTURES_SETUP WebSuiteProject LABELS "web-integration" TIMEOUT 30)
             add_test(NAME WebSuiteInstall
@@ -340,7 +386,23 @@ if(_browser_tests_available)
             webfront_set_browser_test_properties(WebSuiteInstall "${CMAKE_CURRENT_SOURCE_DIR}" 120)
             set_tests_properties(WebSuiteInstall PROPERTIES FIXTURES_REQUIRED "WebSuiteProject;TestRegistry" FIXTURES_SETUP WebSuiteInstalled
                 RESOURCE_LOCK "${_suite_project}")
-            set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled)
+            foreach(action Check Build)
+                string(TOLOWER "${action}" command)
+                add_test(NAME ReactAdapter${action}
+                    COMMAND ${_developer_xvfb_prefix} ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DDRIVER=$<TARGET_FILE:webfront-wf>
+                        -DPROJECT=${_suite_project} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/wf-driver-work -DENVIRONMENT= -DINTEGRITY=
+                        -DREGISTRY=${_registry} -DPROFILE=${CMAKE_CURRENT_BINARY_DIR}/wf-profiles/ReactAdapter${action}
+                        -DEXPECT_STATUS=0 -DCOMMAND=${command} -P ${PROJECT_SOURCE_DIR}/test/cmake/RunWfDriver.cmake)
+                webfront_set_browser_test_properties(ReactAdapter${action} "${CMAKE_CURRENT_SOURCE_DIR}" 120)
+                set_tests_properties(ReactAdapter${action} PROPERTIES FIXTURES_REQUIRED WebSuiteInstalled RESOURCE_LOCK "${_suite_project}")
+            endforeach()
+            set_tests_properties(ReactAdapterBuild PROPERTIES FIXTURES_SETUP ReactAdapterBuilt)
+            add_test(NAME ReactAdapterPages COMMAND ${CMAKE_COMMAND}
+                -DBUILD=${_suite_project}/.webfront/developer/build -DOUTPUT=${_suite_project}/pages/react-example
+                -P ${PROJECT_SOURCE_DIR}/test/cmake/PrepareReactExample.cmake)
+            set_tests_properties(ReactAdapterPages PROPERTIES FIXTURES_REQUIRED ReactAdapterBuilt FIXTURES_SETUP ReactAdapterPages
+                RESOURCE_LOCK "${_suite_project}" LABELS "web-integration" TIMEOUT 30)
+            set_tests_properties(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_NAME} PROPERTIES FIXTURES_REQUIRED "WebSuiteInstalled;ReactAdapterPages")
         endif()
 
         # The environment builds itself (#315): the pinned bootstrap environment runs js/developer/scripts on a copy of the
@@ -400,6 +462,11 @@ if(_browser_tests_available)
             REQUIRES SelfBuildProject TestRegistry PROVIDES SelfBuildInstalled)
         webfront_add_self_build_test(SelfBuild 0 "run|build|build-distribution" OUTPUT "Script build completed"
             REQUIRES SelfBuildInstalled PROVIDES SelfBuilt)
+        webfront_add_self_build_test(ReactAdapterPackage 0 "run|react-package" OUTPUT "React adapter:" REQUIRES SelfBuildInstalled
+            PROVIDES ReactAdapterPackaged)
+        add_test(NAME ReactAdapterPackageContents COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-package-check -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReactPackage.cmake)
+        set_tests_properties(ReactAdapterPackageContents PROPERTIES FIXTURES_REQUIRED ReactAdapterPackaged LABELS "web-integration" TIMEOUT 30)
         # Developer specs migrated by #344 remain in the browser under the repository's locked Jasmine.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)

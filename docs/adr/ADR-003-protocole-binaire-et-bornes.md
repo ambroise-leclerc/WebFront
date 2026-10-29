@@ -18,11 +18,13 @@
 | 1.11 | 2026-10-27 | Acceptée | Ambroise Leclerc | Validation par delta, budget cumulé des noms, récupération et contrat des événements précisés (#380). | — |
 | 1.12 | 2026-10-27 | Acceptée | Ambroise Leclerc | Identifiant de lot non nul, plafond d’opérations, codec canonique et nettoyage limité aux sous-arbres concernés (#380). | — |
 | 1.13 | 2026-10-27 | Acceptée | Ambroise Leclerc | Rejet de PROPERTY value sur output pour préserver les identifiants de ses enfants (#380). | — |
+| 1.14 | 2026-10-27 | Proposée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [PR #394](https://github.com/ambroise-leclerc/WebFront/pull/394) |
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-27** (version 1.13).
+**Acceptée jusqu’à la version 1.13.** L’extension 1.14 est **proposée** dans la PR #394, en attente d’intégration.
+Décision initiale : **2022-02-06** (version 1.0).
+Dernière révision : **2026-10-27** (version 1.14).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -66,7 +68,7 @@ refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur p
 ## Commande DOM (`domBatch`, code 5, version 1)
 
 Cette section remplace le transport `wfDom.apply` des prototypes de l'[ADR-018](ADR-018-acces-au-dom.md) ;
-les propositions d'API de document et de nœuds de cette ADR restent distinctes.
+l’API de document et de nœuds de #381 utilise désormais ce transport, comme décrit ci-dessous.
 
 Un message WebSocket C++ → navigateur contient exactement un lot : `05 01`, un identifiant de lot
 `uint32` **little-endian fixe non nul**, puis zéro ou plusieurs opérations jusqu'à la fin du message.
@@ -180,13 +182,16 @@ l'absence de module installé ou une exception DOM résiduelle pendant l'applica
 callback ordinaire `wfDom.rejected(uint32 batchId, string reason)` ; l'application doit l'enregistrer.
 Le motif est limité à 4 096 unités UTF-16 avant encodage. Si l'en-tête est tronqué, l'identifiant vaut zéro.
 Les événements utilisent `wfDom.event(uint32 nodeId, uint32 nameIndex, string value)` et leurs
-Promises sont traitées. `nameIndex` désigne le nom interné à LISTEN. La valeur est celle du nœud
+Promises sont traitées. Une valeur d’événement dépassant 65 535 octets UTF-8
+n’est pas livrée à C++ et n’est pas tronquée ; le rejet d’encodage, de transport ou
+de callback est journalisé dans la console du navigateur. Il n’existe pas de
+notification C++ distincte pour cet échec. `nameIndex` désigne le nom interné à LISTEN. La valeur est celle du nœud
 abonné (`event.currentTarget`), pas d'un descendant à l'origine d'un événement bouillonnant :
 
 | Événement | `value` |
 | --- | --- |
 | `input`, `change` sur une case à cocher | `String(currentTarget.checked)`, soit `"true"` ou `"false"` |
-| Autres `input`, `change` | `String(currentTarget.value)` |
+| Autres `input`, `change` | `String(currentTarget.value ?? "")` (vide si la propriété est absente) |
 | `keydown`, `keyup` | `event.key` |
 | Tout autre événement | La chaîne vide `""` |
 
@@ -200,7 +205,27 @@ remplace les éléments d'îlot, ou vide explicitement leurs enfants (`element.r
 les prête de nouveau avec `island()`. Prêter un ancien élément encore non vide reste interdit.
 Les identifiants de nœuds sont à reconstruire, mais la table de noms et son budget restent acquis.
 La page peut aussi choisir de recharger tout le document pour remettre les deux tables à zéro.
-L'API publique document/nœuds et les lectures groupées relèvent de #381.
+L’API publique document/nœuds utilise ce flux et les appels ordinaires existants (#381).
+`dom.connect()` installe `wfDom.read` dans le navigateur puis attend `webFront.ready`
+avant d’appeler `wfDom.ready()` côté C++. Cet appel est idempotent sur une connexion
+vivante : réessayer un acquittement perdu ne remet ni noms ni nœuds à zéro. Le mode connecté n’est acquis qu’après
+l’acquittement ; un échec de cette négociation permet de réessayer. Les révocations
+survenues pendant l’attente sont envoyées après acquittement. La connexion n’est
+complète qu’après acquittement de toutes les révocations ; une reprise conserve la
+négociation et les révocations déjà acquittées, sans répéter `wfDom.ready`. Les
+révocations non acquittées et celles survenues entre tentatives restent en attente. `release()` envoie `wfDom.revoked(string islandName)`
+quand ce mode est actif. Le document C++ reçoit les rejets et les événements de sa connexion ;
+les utilisateurs bas niveau sans `connect()` gardent leurs propres callbacks.
+
+Une lecture groupée appelle `wfDom.read(Uint32Array pairs)` : chaque paire contient
+l’identifiant de nœud puis la propriété (0 textContent, 1 value, 2 checked, 3 largeur,
+4 hauteur du rectangle en pixels CSS). Le groupe contient 1 à 4 096 paires, toutes
+validées avant lecture. Le résultat est un Uint8Array d’au plus 1 MiB : pour chaque
+requête, longueur UTF-8 uint32 little-endian puis les octets de sa valeur convertie
+en chaîne (propriété absente : chaîne vide). Les frontières et le nombre exact de
+résultats sont contrôlés en C++. Les erreurs rejettent l’appel ordinaire. Aucun nouveau
+code de type du bridge n’est ajouté. L’arrêt sender reste local et ignore une réponse tardive.
+Voir [DOM.md](../DOM.md) pour les règles d’identité et d’exécution.
 
 ## Options écartées et motifs
 
@@ -214,6 +239,9 @@ L'API publique document/nœuds et les lectures groupées relèvent de #381.
 
 - **Bénéfice :** contrat compact et tableaux numériques utilisables sans conversion en texte.
 - **Coût accepté :** maintenance de deux codecs et limites visibles aux utilisateurs.
+- **Coût proposé en 1.14 :** état optimiste par connexion, tâche d’envoi cadencée et mémoire
+  des nœuds côté C++. Un rejet ou une révocation avec des écritures en attente impose
+  un rechargement ; l’arrêt sender ne peut pas interrompre une lecture déjà envoyée au navigateur.
 - **Risque :** dépassements, mauvais types ou allocation excessive ; contrôler les bornes avant
   lecture/allocation et exercer les décodeurs avec sanitizers et fuzzing.
 
@@ -225,7 +253,9 @@ L'API publique document/nœuds et les lectures groupées relèvent de #381.
   le codec JavaScript et `IndexFS.hpp` inchangés. Les tests doivent alors démontrer la
   compatibilité avec le codec JavaScript existant dans un navigateur réel.
 - Que toute évolution du protocole s’accompagne de tests d’encodage et de décodage ainsi que
-  d’une régression en navigateur réel, erreurs et frontières de taille comprises.
+  d’une régression en navigateur réel, erreurs et frontières de taille comprises. Pour 1.14,
+  `DomDocumentTests.cpp` et les suites Jasmine `dom-document-specs.mjs`/`dom-specs.mjs`
+  couvrent identités, durées de vie, arrêt local, callbacks bas niveau avant connexion, lectures et bornes.
 - Ne pas contourner une limite de chaîne par un cast de longueur ; découper les données ou
   employer un tableau numérique lorsque le contrat fonctionnel le permet.
 - Garder `BuffersPolicyType` et ses valeurs de repli compatibles avec les politiques existantes.

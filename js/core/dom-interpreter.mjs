@@ -108,9 +108,11 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
             if (flags & 1) event.preventDefault();
             if (flags & 2) event.stopPropagation();
             const value = name === 'input' || name === 'change'
-                ? (node.type === 'checkbox' ? String(node.checked) : String(node.value))
+                ? (node.type === 'checkbox' ? String(node.checked) : String(node.value ?? ''))
                 : name === 'keydown' || name === 'keyup' ? event.key : '';
-            bridge.cppFunction('wfDom.event')(id, index, value).catch(() => {});
+            bridge.cppFunction('wfDom.event')(id, index, value).catch(error => {
+                console.error('WebFront DOM event delivery failed', error);
+            });
         };
         node.addEventListener(name, listener);
         let group = listeners.get(id);
@@ -302,7 +304,62 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
         for (const [node, id] of newMounts) mounted.set(node, id);
     }
 
+    let connected = false, connecting = null, handshakeAcknowledged = false, connectionRequested = false;
+    const pendingRevocations = new Set();
+    function read(requests) {
+        if (!(requests instanceof Uint32Array) || !requests.length || requests.length % 2 || requests.length > 8192)
+            throw new RangeError('DOM reads require 1..4096 node/property pairs');
+        // Validate every request before reading properties or forcing layout.
+        for (let i = 0; i < requests.length; i += 2) {
+            if (!nodes.has(requests[i]) || requests[i + 1] > 4 ||
+                (requests[i + 1] >= 3 && !(nodes.get(requests[i]).node instanceof Element)))
+                throw new Error('invalid DOM read request');
+        }
+        const parts = [];
+        let size = 0;
+        for (let i = 0; i < requests.length; i += 2) {
+            const node = nodes.get(requests[i]).node, kind = requests[i + 1];
+            const value = kind === 0 ? node.textContent : kind === 1 ? node.value : kind === 2 ? node.checked :
+                kind === 3 ? node.getBoundingClientRect().width : node.getBoundingClientRect().height;
+            const text = String(value ?? '');
+            if (text.length + 4 > maxBytes - size) throw new RangeError('DOM read result exceeds 1 MiB');
+            const bytes = encoder.encode(text);
+            if (bytes.length + 4 > maxBytes - size) throw new RangeError('DOM read result exceeds 1 MiB');
+            parts.push(bytes);
+            size += 4 + bytes.length;
+        }
+        const result = new Uint8Array(size), view = new DataView(result.buffer);
+        let offset = 0;
+        for (const bytes of parts) {
+            view.setUint32(offset, bytes.length, true);
+            result.set(bytes, offset + 4);
+            offset += 4 + bytes.length;
+        }
+        return result;
+    }
     const api = {
+        // Opt in to the C++ Document API; low-level batch users need no built-in callback registration.
+        async connect() {
+            if (connected) throw new Error('DOM interpreter already connected');
+            if (connecting) return connecting;
+            connectionRequested = true;
+            globalThis.wfDom ??= {};
+            globalThis.wfDom.read = read;
+            connecting = (async () => {
+                if (!handshakeAcknowledged) {
+                    await bridge.ready;
+                    await bridge.cppFunction('wfDom.ready')();
+                    handshakeAcknowledged = true;
+                }
+                for (const name of pendingRevocations) {
+                    await bridge.cppFunction('wfDom.revoked')(name);
+                    pendingRevocations.delete(name);
+                }
+                connected = true;
+            })();
+            try { await connecting; }
+            finally { connecting = null; }
+        },
         apply,
         island(name, element) {
             if (!(element instanceof HTMLElement) || !tags.has(element.localName) || forbiddenTags.has(element.localName))
@@ -320,6 +377,10 @@ export function installDomInterpreter(bridge = globalThis.webFront, extensions =
                 islands.delete(name);
                 const rootId = mounted.get(element);
                 mounted.delete(element);
+                if (connected) bridge.cppFunction('wfDom.revoked')(name).catch(error => {
+                    console.error('WebFront DOM island revocation failed', error);
+                });
+                else if (connectionRequested) pendingRevocations.add(name);
                 if (rootId === undefined) return;
                 const pending = [rootId];
                 while (pending.length) {

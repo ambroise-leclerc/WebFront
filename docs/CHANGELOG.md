@@ -7,6 +7,54 @@
   "WebFront Application"/"WebFront". The WebKitGTK lifecycle suite reads the native title back; a unit test
   covers the dispatch to the frontend. Following `document.title` and an icon remain future work.
 
+- Consumer Jasmine/CTest integration (#402): opt-in instrumentation runs classic JavaScript
+  specs in an application's own page with its existing DOM and callbacks. The public CMake
+  helper provisions verified Jasmine, passes application arguments and checks a fresh JSON
+  report. An external process timeout bounds even a synchronously blocked renderer and, on POSIX,
+  kills its whole process group. `JasmineTest` is inert unless the target defines
+  `WEBFRONT_JASMINE_TESTING`; a spec file that fails to load fails the run.
+
+- ADR-019 (Proposed, #404) proposes making the developer environment automatable: one versioned
+  operation contract (JSON Schema) projected onto the window, a public CLI with agent instructions and an
+  optional local MCP stdio adapter, with a threat model, local-model requirements and acceptance criteria.
+  It delivers no server, driver or API; #402 stays an independent deliverable.
+
+- Optional React adapter (#382): an installable `@webfront/react` package with cached
+  `useSyncExternalStore` snapshots and empty `Island` components that tolerate StrictMode
+  effect replay. `webfront::react::Store` coalesces the last snapshot per 1 ms server cycle
+  without changing the wire format or core assets. A Game of Life variant constructs its
+  simulation panel in C++ inside React. Package assembly, wf installation, declarations,
+  batching and island lifecycle have regression coverage. Explicit flush failures retain the
+  pending snapshot; automatic error callbacks are contained and logged. Moved-from
+  store wrappers reject operations explicitly. Self-capturing error callbacks are released on
+  close and automatic failure; subscriber and island-release exceptions are logged and isolated.
+  The Life variant gates
+  cell edits until startup succeeds and bounds island readiness. Test installation uses the exact
+  archive bytes, with file-list and SHA-512 checks. Registry publication stays explicit.
+
+- License WebFront under Apache-2.0 OR CECILL-B, at the recipient's option.
+  Include both full license texts (CeCILL-B in French and English), document
+  contribution terms and carry the license into newly built developer and
+  Life starter archives. Third-party components retain their own licenses.
+
+- Per-browser DOM documents (#381): `ui.document()` shares node identities, name interning,
+  writes grouped on a 1 ms server cadence, event callbacks with declared browser flags, and
+  explicit grouped read senders with local cancellation. The fallback page lends `root`;
+  custom pages opt in through `dom.connect()`. Revocation, disconnection and shutdown
+  invalidate handles. Reject element-only operations on text nodes/islands locally; enforce
+  the connection thread before document lookup and refuse document creation during closure.
+  DOM connection attempts retry unacknowledged revocations after partial success, retaining
+  the acknowledged handshake; server readiness is idempotent for a lost acknowledgement.
+  Revocation notification failures are logged, and missing network timers report an explicit error.
+  Empty event callbacks fail locally; validity predicates are
+  nonthrowing and return false off the document thread. Document the single-thread context
+  requirement and the coordinated handoff needed before page-initiated island unmounts.
+  Missing form values are empty. Event values over 65,535 UTF-8 bytes are not delivered to C++
+  or truncated; their rejected delivery is logged in the browser console.
+  The fallback distinguishes bridge failures from DOM initialization failures. Batch-id exhaustion
+  notifies `onError`, and insert-before-self follows native no-op semantics. The server-thread
+  and rejection/reload contracts are in `docs/DOM.md`.
+
 - DOM batch protocol (#380): bounded command 5, canonical uint32 LEB128 and UTF-8 codec,
   interned names and correlated rejection callbacks. The optional embedded `webfront-dom.mjs`
   validates the evolving tree before applying mutations, protects page-owned islands, and
