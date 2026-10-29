@@ -27,9 +27,9 @@ string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 include(cmake/Frontends.cmake)
-# The examples need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window
+# Applications need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window
 # engine is enabled when its dependencies are present. Test and fuzzing builds keep explicit selection.
-if(WEBFRONT_IS_TOP_LEVEL AND WEBFRONT_BUILD_EXAMPLES AND NOT ENABLE_TESTING AND NOT ENABLE_FUZZING)
+if(NOT ENABLE_TESTING AND NOT ENABLE_FUZZING)
     set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT ON)
 else()
     set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT OFF)
