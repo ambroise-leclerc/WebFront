@@ -563,7 +563,9 @@ public:
             Frontend::open(httpAddress, httpPort, htmlFilename);
         else
             Frontend::open(httpPort, htmlFilename);
-        if constexpr (Frontend::action == frontend::Action::closeServerAfterOpen)
+        if constexpr (requires { Frontend::closeServerAfterOpen(); })
+            return Frontend::closeServerAfterOpen() ? WindowAction::closeWindow : WindowAction::none;
+        else if constexpr (Frontend::action == frontend::Action::closeServerAfterOpen)
             return WindowAction::closeWindow;
         else
             return WindowAction::none;

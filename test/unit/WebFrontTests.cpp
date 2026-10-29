@@ -11,9 +11,12 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <list>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -21,6 +24,11 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    #include <sys/wait.h>
+    #include <unistd.h>
+#endif
 
 using namespace webfront;
 
@@ -364,6 +372,116 @@ SCENARIO("The frontend contract: open() runs on the calling thread and a closing
             }
         }
     }
+}
+
+struct FallbackNativeWindow {
+    static inline bool        displayAvailable = true;
+    static inline int         openCalls        = 0;
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+    static void               initialize() {
+        if (!displayAvailable)
+            throw std::runtime_error("cannot open a display; set DISPLAY or WAYLAND_DISPLAY");
+    }
+    static void open(std::string_view, std::string_view) { ++openCalls; }
+};
+
+struct FallbackBrowser {
+    static inline int initializeCalls = 0;
+    static inline int openCalls = 0;
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static void                       initialize() { ++initializeCalls; }
+    static void                       open(std::string_view, std::string_view) { ++openCalls; }
+};
+
+SCENARIO("Native window or browser, decided at run time") {
+    using Fallback = frontend::NativeOrBrowserFrontendFor<FallbackNativeWindow, FallbackBrowser>;
+    STATIC_REQUIRE(frontend::FrontendType<Fallback>);
+    STATIC_REQUIRE(frontend::FrontendType<frontend::NativeOrBrowserFrontend>);
+    STATIC_REQUIRE(std::is_same_v<webfront::WebFrontWithFrontend<frontend::NativeOrBrowserFrontend>::FrontendProvider, frontend::NativeOrBrowserFrontend>);
+
+    GIVEN("a native window that can open") {
+        FallbackNativeWindow::displayAvailable = true;
+        FallbackNativeWindow::openCalls        = 0;
+        FallbackBrowser::openCalls             = 0;
+        FallbackBrowser::initializeCalls       = 0;
+        Fallback::initialize();
+        THEN("the native window is used and closing it stops the server") {
+            REQUIRE(FallbackBrowser::initializeCalls == 0);
+            REQUIRE(Fallback::usesNativeWindow());
+            REQUIRE_FALSE(Fallback::fallbackReason().has_value());
+            REQUIRE(Fallback::closeServerAfterOpen());
+            Fallback::open("127.0.0.1", "9200", "index.html");
+            REQUIRE(FallbackNativeWindow::openCalls == 1);
+            REQUIRE(FallbackBrowser::openCalls == 0);
+        }
+    }
+    GIVEN("a session without a display") {
+        FallbackNativeWindow::displayAvailable = false;
+        FallbackNativeWindow::openCalls        = 0;
+        FallbackBrowser::openCalls             = 0;
+        FallbackBrowser::initializeCalls       = 0;
+        std::ostringstream captured;
+        auto* const        previous = std::cerr.rdbuf(captured.rdbuf());
+        Fallback::initialize();
+        std::cerr.rdbuf(previous);
+        THEN("the browser is used, the reason is kept and printed, and the server keeps running") {
+            REQUIRE_FALSE(Fallback::usesNativeWindow());
+            REQUIRE(FallbackBrowser::initializeCalls == 1);
+            REQUIRE(Fallback::fallbackReason().value_or("").find("display") != std::string::npos);
+            REQUIRE(captured.str().find("opening the system browser instead of a native window") != std::string::npos);
+            REQUIRE_FALSE(Fallback::closeServerAfterOpen());
+            Fallback::open("127.0.0.1", "9200", "index.html");
+            REQUIRE(FallbackNativeWindow::openCalls == 0);
+            REQUIRE(FallbackBrowser::openCalls == 1);
+        }
+        THEN("an application falling back does not stop the server after open()") {
+            using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, Fallback>;
+            App app("9203");
+            const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+            app.show();
+            REQUIRE(FallbackBrowser::openCalls == 1);
+            REQUIRE(WebFrontIoContextMock::stopCalls.load() == previousStopCalls);
+        }
+    }
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    GIVEN("the real WebKitGTK engine and no DISPLAY or WAYLAND_DISPLAY") {
+        // A child process: GTK may already be initialized in this one, and the environment must stay untouched.
+        const pid_t child = fork();
+        REQUIRE(child >= 0);
+        if (child == 0) {
+            unsetenv("DISPLAY");
+            unsetenv("WAYLAND_DISPLAY");
+            std::cerr.rdbuf(nullptr);
+            frontend::NativeOrBrowserFrontend::initialize();
+            const bool fellBack = !frontend::NativeOrBrowserFrontend::usesNativeWindow()
+                                  && frontend::NativeOrBrowserFrontend::fallbackReason().value_or("").find("display") != std::string::npos;
+            _exit(fellBack ? 0 : 1);
+        }
+        int status = 0;
+        REQUIRE(waitpid(child, &status, 0) == child);
+        THEN("the frontend falls back to the browser and names the missing display") {
+            REQUIRE(WIFEXITED(status));
+            REQUIRE(WEXITSTATUS(status) == 0);
+        }
+    }
+#endif
+}
+
+SCENARIO("The native engine availability is a constant") {
+    STATIC_REQUIRE(std::is_same_v<decltype(frontend::nativeWebViewAvailable), const bool>);
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    STATIC_REQUIRE(frontend::nativeWebViewAvailable);
+#elif defined(__linux__)
+    STATIC_REQUIRE_FALSE(frontend::nativeWebViewAvailable);
+    THEN("without an engine the fallback frontend always uses the browser") {
+        std::ostringstream captured;
+        auto* const        previous = std::cerr.rdbuf(captured.rdbuf());
+        frontend::NativeOrBrowserFrontend::initialize();
+        std::cerr.rdbuf(previous);
+        REQUIRE_FALSE(frontend::NativeOrBrowserFrontend::usesNativeWindow());
+        REQUIRE(frontend::NativeOrBrowserFrontend::fallbackReason().value_or("").find("WEBFRONT_EMBED_WEBKITGTK") != std::string::npos);
+    }
+#endif
 }
 
 SCENARIO("The frontend contract: a failing open() stops the server whatever its action") {
