@@ -3,6 +3,7 @@ import argparse
 import json
 import pathlib
 import queue
+import re
 import shutil
 import subprocess
 import socket
@@ -110,9 +111,9 @@ class Client:
         self.reader.join(timeout=2)
 
 
-def check_startup_backoff(agent, root):
+def check_startup_backoff(agent, root, late_ready=False):
     """The attach-only path needs no renderer and must not create 50 connections per second."""
-    endpoint = root / "starting-owner"
+    endpoint = root / ("late-owner" if late_ready else "starting-owner")
     endpoint.mkdir(mode=0o700)
     stopped = threading.Event()
     calls = []
@@ -140,29 +141,112 @@ def check_startup_backoff(agent, root):
                         continue
                     request = json.loads(message)
                     calls.append(request["method"])
-                    peer.sendall(b'{"result":{"session":"starting","state":"starting"}}\n')
+                    if late_ready and stopped.wait(1.25):
+                        continue
+                    state = "ready" if late_ready else "starting"
+                    try:
+                        peer.sendall(json.dumps({"result": {"session": "starting", "state": state}}).encode() + b"\n")
+                    except OSError:
+                        pass  # A correctly bounded client already closed its socket.
         worker = threading.Thread(target=serve, daemon=True)
         worker.start()
         try:
+            began = time.monotonic()
             result = subprocess.run([agent, "--attach", str(endpoint), "--operation", "build", "--startup-timeout", "1"],
                                     capture_output=True, text=True, timeout=5)
             assert result.returncode == 71, result.stdout + result.stderr
             assert 1 <= len(calls) <= 6 and set(calls) == {"describe"}, calls
+            if late_ready:
+                assert time.monotonic() - began < 1.8, "Transport exceeded the startup deadline"
+                assert calls == ["describe"], calls
         finally:
             stopped.set()
             worker.join(timeout=3)
             assert not worker.is_alive()
 
 
+def watchdog(args):
+    """Exercise native revocation with a real blocked renderer, without compiling Jasmine first.
+
+    Only the test archive replaces the operation body. The real signed callback, runner, native
+    deadline, window close grace, stdio EOF and endpoint cleanup remain on the production path.
+    """
+    pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=args.work, prefix="watchdog-") as temporary:
+        root = pathlib.Path(temporary)
+        project = root / "project"
+        shutil.copytree(args.fixture, project)
+        environment = root / "watchdog-environment.tgz"
+        blocked = b""" = async (_argv,context) => {
+            const call=(name,...args) => context.bridge.cppFunction('webfront.developer.'+name)(...args);
+            const id=await call('begin','renderer.started',false);
+            await call('write',id,'output',0,new Uint8Array([1]));
+            await call('commit',id);
+            while(true) {}
+        };"""
+        replaced = False
+        with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(environment, "w:gz") as output:
+            for member in archive.getmembers():
+                data = archive.extractfile(member).read() if member.isfile() else None
+                if member.name == "package/runtime.mjs":
+                    # Locate the named export, rather than hard-coding a minifier's local identifier.
+                    exports = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as runNonInteractive(?=[,}])", data)
+                    assert len(exports) == 1, "The watchdog fixture needs the real runNonInteractive export"
+                    data += b"\n" + exports[0] + blocked
+                    if args.scenario == "mcp-watchdog":
+                        # Only this startup test needs a delay longer than the operation's two-second deadline.
+                        data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
+                    member.size = len(data)
+                    replaced = True
+                output.addfile(member, io.BytesIO(data) if data is not None else None)
+        assert replaced
+        command = ["--project", str(project), "--environment", str(environment),
+                   "--integrity", "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode(),
+                   "--registry-dir", args.registry, "--startup-timeout", "30", "--timeout", "2", "--allow", "build"]
+        endpoint = root / "forced-window"
+        with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
+            if args.scenario == "mcp-watchdog":
+                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log)
+                try:
+                    client.initialize()
+                    client.start("build")
+                    assert client.child.wait(timeout=15) == 71
+                    assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
+                finally:
+                    client.close()
+            else:
+                cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
+                                     stdout=subprocess.PIPE, stderr=log, text=True, timeout=45)
+                assert cli.returncode == 71, cli.stdout + pathlib.Path(log.name).read_text()
+        assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
+        assert not endpoint.exists(), "The forced exit left its attachment capability behind"
+        if args.scenario == "cli-watchdog":
+            # Reuse the exact endpoint path and project after forced exit, with the original operation body.
+            integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
+            common = ["--project", str(project), "--environment", args.environment, "--integrity", integrity, "--registry-dir", args.registry]
+            installed = subprocess.run([args.driver, *common, "--", "install"], capture_output=True, text=True, timeout=120)
+            assert installed.returncode == 0, installed.stdout + installed.stderr
+            relaunched = subprocess.run([args.agent, *common, "--listen", str(endpoint), "--allow", "build", "--operation", "build"],
+                                        capture_output=True, text=True, timeout=45)
+            assert relaunched.returncode == 0, relaunched.stdout + relaunched.stderr
+            assert not endpoint.exists()
+    print(f"{args.scenario}: blocked renderer, native deadline, EOF and private endpoint cleanup passed")
+
+
 def main():
     parser = argparse.ArgumentParser()
     for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "cli-watchdog"), default="session")
     args = parser.parse_args()
+    if args.scenario != "session":
+        watchdog(args)
+        return
     integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="session-") as temporary:
         check_startup_backoff(args.agent, pathlib.Path(temporary))
+        check_startup_backoff(args.agent, pathlib.Path(temporary), late_ready=True)
         project = pathlib.Path(temporary) / "project"
         shutil.copytree(args.fixture, project)
         command = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,
@@ -291,40 +375,7 @@ def main():
                     owner.kill()
                     owner.wait()
 
-        # A short operation deadline must not expire during a deliberately slow bootstrap.
-        delayed = pathlib.Path(temporary) / "delayed-environment.tgz"
-        with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(delayed, "w:gz") as output:
-            for member in archive.getmembers():
-                data = archive.extractfile(member).read() if member.isfile() else None
-                if member.name == "package/runtime.mjs":
-                    data = b"await new Promise(resolve => setTimeout(resolve,17000));\n" + data
-                    member.size = len(data)
-                output.addfile(member, io.BytesIO(data) if data is not None else None)
-        delayed_command = list(command)
-        delayed_command[delayed_command.index("--environment") + 1] = str(delayed)
-        delayed_command[delayed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(delayed.read_bytes()).digest()).decode()
-        with (pathlib.Path(temporary) / "hang.log").open("w") as log:
-            client = Client([args.agent, *delayed_command, "--mcp", "--startup-timeout", "30", "--timeout", "15", "--allow", "test"], log)
-            try:
-                client.initialize()
-                client.start("test", {"pattern": "blocks the renderer"})
-                assert client.child.wait(timeout=25) == 71
-                assert (project / "renderer.started").is_file(), "The native deadline expired before the blocked spec actually started"
-            finally:
-                client.close()
-        (project / "renderer.started").unlink()
-        forced_endpoint = pathlib.Path(temporary) / "forced-window"
-        cli = subprocess.run([args.agent, *delayed_command, "--listen", str(forced_endpoint), "--startup-timeout", "30", "--timeout", "15",
-                              "--allow", "test", "--operation", "test", "--pattern", "blocks the renderer"],
-                             capture_output=True, text=True, timeout=60)
-        assert cli.returncode == 71, cli.stdout + cli.stderr
-        assert (project / "renderer.started").is_file(), "The CLI deadline expired before the blocked spec started"
-        assert not forced_endpoint.exists(), "The forced exit left its attachment capability behind"
-        relaunched = subprocess.run([args.agent, *command, "--listen", str(forced_endpoint), "--allow", "build", "--operation", "build"],
-                                    capture_output=True, text=True, timeout=45)
-        assert relaunched.returncode == 0, relaunched.stdout + relaunched.stderr
-        assert not forced_endpoint.exists()
-    print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/native watchdog/authenticated shared-window attachment")
+    print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/authenticated shared-window attachment")
 
 
 if __name__ == "__main__":

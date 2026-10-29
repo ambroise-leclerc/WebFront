@@ -264,7 +264,13 @@ Catch2 covers native grants, cross-session rejection, path/option refusal, cance
 deadline revocation, MCP lifecycle/IDs and hostile JSON. Browser Jasmine specs cover shared
 dispatch arbitration and the runner. `AutomationMcpWindow` drives a real embedded window through
 stdio: structured errors, file correction, check/build/test, preview inspection/actions,
-cross-frame rejection, cancellation and a synchronous renderer hang with native termination.
+cross-frame rejection and cancellation. Separate `AutomationMcpWatchdog` and
+`AutomationCliWatchdog` cases block a real renderer inside a test-archive operation body,
+without loading/compiling Jasmine just to provoke that hang. They exercise the production signed
+callback/runner, native two-second deadline, five-second close grace, stdio EOF and endpoint removal;
+the CLI case also reuses the endpoint after forced exit. The MCP case delays bootstrap by three
+seconds to verify that its shorter operation deadline starts only after startup. The cases retain
+separate private projects/profiles and ephemeral ports; only the two spinning renderers share a lock.
 That regression uses Python's standard library as a test client; Python is not a runtime
 dependency of the launcher. It is registered when a Python interpreter and embedded test engine
 are available; without xvfb-run on Linux the optional window tests are skipped with a warning.

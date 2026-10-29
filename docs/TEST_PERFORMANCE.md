@@ -70,6 +70,13 @@ root/cache profile; its default beside the executable would otherwise forward a 
 singleton even with independent HTTP ports. Nested builds retain that lock
 and `webfront_build_tree` to protect shared browser DLLs and build outputs on Windows, while unrelated unit tests can run.
 
+Automation follows the same independent-port/profile rule. Its functional MCP scenario does not
+hold `webfront_port_9002`. The two watchdog cases alone share `webfront_automation_watchdog`, limiting
+deliberately spinning renderers without blocking unrelated browser work. Their test archive replaces
+only the operation body with a marker followed by a synchronous loop; signed dispatch, the native
+deadline, shutdown grace and process/endpoint cleanup stay real. A single three-second startup delay
+exceeds their two-second operation budget, avoiding repeated long bootstrap/Jasmine waits.
+
 ## Visible windows and retained lifecycle contracts
 
 Driver, embedded-distribution and compatible lifecycle windows use `visible=false` on WebView2/WKWebView. They still

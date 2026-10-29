@@ -132,7 +132,14 @@ int runCli(Backend&                                   controller,
     while (!stop.stop_requested()) {
         if (std::chrono::steady_clock::now() > deadline)
             throw OperationError("timeout", "Developer startup timed out");
-        const Object snapshot{controller.describe()};
+        const Object snapshot{[&] {
+            if constexpr (requires { controller.describe(deadline); })
+                return controller.describe(deadline);
+            else
+                return controller.describe();
+        }()};
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw OperationError("timeout", "Developer startup timed out");
         if (snapshot.string("state") == "closed")
             throw OperationError("disconnected", "Developer session is closed");
         if (snapshot.string("state") != "starting") {

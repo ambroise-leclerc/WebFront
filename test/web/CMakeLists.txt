@@ -78,16 +78,29 @@ if(_browser_tests_available AND TARGET webfront-agent)
         set(_agent_command "$<TARGET_FILE:webfront-agent>")
         # The client launches both native processes on the display supplied to the whole test.
         set(_agent_prefix "${_window_test_prefix}")
-        add_test(NAME AutomationMcpWindow COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/test/tools/AutomationClient.py"
-            --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
-            --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
-            --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
-            --work "${CMAKE_CURRENT_BINARY_DIR}/automation-client")
-        set_tests_properties(AutomationMcpWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
-            LABELS web-integration TIMEOUT 240 RESOURCE_LOCK webfront_port_9002)
-        # Short watchdog deadlines must not measure competing native renderer startups.
-        webfront_use_own_profile(AutomationMcpWindow automation)
+        foreach(_scenario session mcp-watchdog cli-watchdog)
+            if(_scenario STREQUAL "session")
+                set(_case AutomationMcpWindow)
+            elseif(_scenario STREQUAL "mcp-watchdog")
+                set(_case AutomationMcpWatchdog)
+            else()
+                set(_case AutomationCliWatchdog)
+            endif()
+            add_test(NAME ${_case} COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/test/tools/AutomationClient.py"
+                --scenario "${_scenario}"
+                --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
+                --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
+                --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
+                --work "${CMAKE_CURRENT_BINARY_DIR}/automation-${_scenario}")
+            set_tests_properties(${_case} PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
+                LABELS web-integration TIMEOUT 120)
+            webfront_use_own_profile(${_case} "automation-${_scenario}")
+            if(NOT _scenario STREQUAL "session")
+                # One deliberately spinning renderer at a time, without serializing unrelated browser tests.
+                set_tests_properties(${_case} PROPERTIES RESOURCE_LOCK webfront_automation_watchdog)
+            endif()
+        endforeach()
         execute_process(COMMAND "${Python3_EXECUTABLE}" -c
             "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
             RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)
@@ -99,7 +112,7 @@ if(_browser_tests_available AND TARGET webfront-agent)
                 --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
                 --work "${CMAKE_CURRENT_BINARY_DIR}/automation-sdk")
             set_tests_properties(AutomationSdkWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
-                LABELS web-integration TIMEOUT 240 RESOURCE_LOCK webfront_port_9002)
+                LABELS web-integration TIMEOUT 120)
             webfront_use_own_profile(AutomationSdkWindow automation-sdk)
         endif()
     endif()

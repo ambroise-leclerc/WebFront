@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Split functional MCP coverage from short native watchdog process regressions, with private ports
+  and profiles and a lock limited to spinning renderers. Bound attachment startup IO by its remaining
+  deadline and preserve diagnostic paths through the producer's 256-character limit.
+
 - Select the automation window with a single-use launcher URL claim instead of connection order,
   create profiles with private permissions atomically, keep queued output separate from previous
   runs, and complete unexpected busy runner starts as errors. Document strict counter failure and

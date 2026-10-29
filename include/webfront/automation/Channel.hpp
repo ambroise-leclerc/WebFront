@@ -268,10 +268,14 @@ inline std::string readEndpoint(const std::filesystem::path& directory) {
     return {bytes.data(), static_cast<std::size_t>(count)};
 #endif
 }
-inline void send(Handle socket, std::string_view bytes) {
-    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+inline bool waitUntil(Handle socket, short events, std::chrono::steady_clock::time_point deadline) {
+    const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+    return remaining.count() > 0 && wait(socket, events, static_cast<int>(std::min(remaining, std::chrono::milliseconds{20}).count()));
+}
+inline void
+send(Handle socket, std::string_view bytes, std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds{2}) {
     while (!bytes.empty() && std::chrono::steady_clock::now() < until) {
-        if (!wait(socket, POLLOUT, 20))
+        if (!waitUntil(socket, POLLOUT, until))
             continue;
 #ifdef _WIN32
         const auto written = ::send(socket, bytes.data(), static_cast<int>(bytes.size()), 0);
@@ -289,11 +293,11 @@ inline void send(Handle socket, std::string_view bytes) {
     if (!bytes.empty())
         throw TransportError("Native attachment send deadline exceeded");
 }
-inline std::string receive(Handle socket, std::size_t limit) {
-    const auto  until = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+inline std::string
+receive(Handle socket, std::size_t limit, std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now() + std::chrono::seconds{2}) {
     std::string text;
     while (std::chrono::steady_clock::now() < until) {
-        if (!wait(socket, POLLIN, 20))
+        if (!waitUntil(socket, POLLIN, until))
             continue;
         char       bytes[4096];
         const auto count = ::recv(socket, bytes, sizeof bytes, 0);
@@ -468,6 +472,15 @@ public:
     std::string describe() const {
         return request("describe", "{}");
     }
+    std::string describe(std::chrono::steady_clock::time_point deadline) const {
+        try {
+            return request("describe", "{}", deadline);
+        } catch (const TransportError&) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                throw OperationError("timeout", "Developer startup timed out");
+            throw;
+        }
+    }
     std::string start(const Object& arguments) const {
         return request("start", objectJson(arguments.members()));
     }
@@ -485,13 +498,17 @@ private:
     [[maybe_unused]] channel::Runtime runtime;
     unsigned short                    port = 0;
     std::string                       token;
-    std::string                       request(std::string_view method, std::string_view arguments) const {
+    std::string                       request(std::string_view                      method,
+                                              std::string_view                      arguments,
+                                              std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max()) const {
+        const auto      until = std::min(deadline, std::chrono::steady_clock::now() + std::chrono::seconds{2});
         channel::Socket peer{channel::createSocket()};
         const auto      address = channel::address(port);
         // Loopback connect has no remote address or DNS lookup. Bound the following IO independently.
         channel::nonblocking(peer.value);
         const auto connected = ::connect(peer.value, reinterpret_cast<const sockaddr*>(&address), sizeof address);
-        if (connected != 0 && !channel::wait(peer.value, POLLOUT, 2000))
+        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(until - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0 || (connected != 0 && !channel::wait(peer.value, POLLOUT, static_cast<int>(remaining))))
             throw TransportError("Native attachment connect deadline exceeded");
         int status = 0;
 #ifdef _WIN32
@@ -510,8 +527,9 @@ private:
                           { "method",    json::quote(method)},
                           { "params", std::string(arguments)}
         })
-                          + "\n");
-        const Object response{channel::receive(peer.value, 256000), 256000};
+                          + "\n",
+                      until);
+        const Object response{channel::receive(peer.value, 256000, until), 256000};
         if (response.has("error"))
             throw OperationError(response.string("code", "not_authorized"), response.string("error"));
         return response.raw("result");

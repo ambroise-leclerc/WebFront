@@ -143,6 +143,29 @@ describe('Developer automation', () => {
         expect(limited.truncated).toBeTrue();
     });
 
+    it('preserves diagnostic paths up to the producer limit for build and check shapes', async () => {
+        setManifestDirectory();
+        const path='nested/'+ 'segment-'.repeat(22)+'main.ts';
+        const {bridge}=memoryBridge(new Map([['webfront.project.json',new TextEncoder().encode(JSON.stringify({
+            format:1,name:'diagnostics',version:'0.1.0',entries:{main:'main.ts'}
+        }))]]));
+        const previousWorker=globalThis.Worker;
+        globalThis.Worker=class {
+            postMessage() { queueMicrotask(() => this.onmessage({data:{type:'error',error:'compile failed',diagnostics:[
+                {text:'syntax',location:{file:'project:'+path,line:1,column:0}},
+                {text:'type',file:path,line:2,column:1}
+            ]}})); }
+            terminate() {}
+        };
+        try {
+            const result=await runNonInteractive(['build'],{bridge,onExit:() => {}});
+            expect(result.exitCode).toBe(1);
+            expect(result.diagnostics.map(item => item.file)).toEqual([path,path]);
+        } finally {
+            if(previousWorker===undefined) delete globalThis.Worker; else globalThis.Worker=previousWorker;
+        }
+    });
+
     it('refuses absent previews instead of inspecting the developer terminal', () => {
         const inspector=createPreviewInspector(null);
         expect(() => inspector.inspect()).toThrowError(/No ready application preview/);
