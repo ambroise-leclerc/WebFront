@@ -30,10 +30,10 @@ test configurations also build the launcher for their regression tests. Without 
 embedded engine, requesting the launcher fails configure instead of opening a system browser.
 The implementation is native C++23; no Node.js, npm or Python is required to run the launcher.
 
-Provision an environment built from sources that export automation API v1. The currently pinned
-0.6.2 release predates that API; passing an older environment produces a bootstrap error with
-status 70. The launcher requires an explicit archive and its independently trusted SHA-512 SRI
-until a compatible environment is published and pinned. To build one in this repository:
+Provision an environment containing automation API v1 (0.6.3 or later). Environment 0.6.2
+predates that API; passing an older environment produces a bootstrap error with status 70.
+The launcher takes an explicit archive and its independently trusted SHA-512 SRI. Use a verified
+published distribution or build one in this repository:
 
 ```sh
 build-agent/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer -- restore

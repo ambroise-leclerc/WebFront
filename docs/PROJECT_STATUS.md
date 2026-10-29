@@ -12,7 +12,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   WKWebView, WebKitGTK or CEF; the standalone examples detect the platform's native engine
   when its dependencies are available. See [frontends](FRONTENDS.md).
 - **Developer environment.** `NativeApp::bootstrap("developer")` loads the verified, pinned
-  environment (0.6.2). Its terminal provides `wf init`, `create`, `install`, `restore`, `run`,
+  environment selected by `DeveloperReleaseData.hpp`. Its terminal provides `wf init`, `create`, `install`, `restore`, `run`,
   `exec`, `check`, `test`, `build`, `dev`, `preview`, `embed`, `list` and `help`. The manifest and lock describe
   dependencies, entries, providers, scripts and permissions. TypeScript/TSX compilation uses
   esbuild-wasm; type checking uses the project's locked TypeScript. Application commands use
@@ -24,8 +24,8 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
 - **Developer automation (opt-in).** `webfront-agent` provides local stdio MCP and a JSON CLI
   for an explicitly launched developer window. Native grants select check/build/test/preview,
   bounded inspection and semantic actions. [Automation](AUTOMATION.md) documents provisioning,
-  lifecycle, limits and the supported MCP profile. It requires a rebuilt compatible environment;
-  the pinned 0.6.2 archive predates the API. Explicitly shared human windows support authenticated
+  lifecycle, limits and the supported MCP profile. It requires a compatible environment (0.6.3 or later),
+  supplied as a rebuilt archive or verified published distribution. Explicitly shared human windows support authenticated
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
