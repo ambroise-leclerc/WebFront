@@ -45,18 +45,12 @@ struct Files {
 };
 
 struct Profile {
-    Profile() {
-        std::random_device random;
-        do {
-            path = std::filesystem::temp_directory_path() / ("webfront-agent-" + std::to_string(random()));
-        } while (!std::filesystem::create_directory(path));
-        std::filesystem::permissions(path, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
-    }
+    channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
+    const std::filesystem::path path{directory.path};
     ~Profile() {
         std::error_code ignored;
         std::filesystem::remove_all(path, ignored);
     }
-    std::filesystem::path path;
 };
 
 struct WebViewOptions {
@@ -378,7 +372,7 @@ int main(int argc, char** argv) {
             }
             session->close();
         });
-        app.show();
+        app.show(binding.launchPage());
         if (!session->wasReady() && !Object(session->describe()).string("failure").empty() && status.load() == 0)
             status.store(70);
         session->close("Developer window closed");

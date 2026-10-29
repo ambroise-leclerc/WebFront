@@ -32,7 +32,7 @@
     #include <sys/socket.h>
     #include <sys/stat.h>
     #include <unistd.h>
-    #if defined(__APPLE__)
+    #if defined(__APPLE__) || defined(__linux__)
         #include <sys/random.h>
     #endif
 #endif

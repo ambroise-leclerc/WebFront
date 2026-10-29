@@ -56,16 +56,20 @@ describe('Developer automation', () => {
         expect(completed).toEqual(['one','two']);
     });
 
-    it('rejects a busy start asynchronously and remains reusable', async () => {
+    it('completes a busy start with an error while preserving the active runner', async () => {
         let release;
-        const runner=createAutomationRunner({context:{},exclusive,inspector:{},complete:async () => {},
+        const completed=[];
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},complete:async (id,result) => {completed.push({id,result});},
             run:() => new Promise(resolve => {release=() => resolve({exitCode:0,output:'',report:null});})});
         const first=runner.start({runId:'one',operation:'build'});
         let second;
         expect(() => {second=runner.start({runId:'two',operation:'build'});}).not.toThrow();
-        await rejects(second,/busy/);
+        expect((await second).exitCode).toBe(1);
+        expect(completed).toEqual([{id:'two',result:{exitCode:1,output:'Automation runner is busy',report:null}}]);
         release();
         await first;
+        expect(completed[1].id).toBe('one');
+        expect(completed[1].result.exitCode).toBe(0);
     });
 
     it('releases an interrupted lease even if the command never resolves, without releasing its successor', async () => {

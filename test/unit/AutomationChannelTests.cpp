@@ -9,6 +9,22 @@
 extern char** environ;
 #endif
 
+#ifndef _WIN32
+SCENARIO("Private automation directories are born owner-only under a permissive umask") {
+    webfront::test::TemporaryDirectory root;
+    struct RestoreMask {
+        mode_t previous = ::umask(0);
+        ~RestoreMask() {
+            ::umask(previous);
+        }
+    } restore;
+    webfront::automation::channel::PrivateDirectory directory{root.path() / "profile"};
+    struct stat                                     info{};
+    REQUIRE(::stat(directory.path.c_str(), &info) == 0);
+    REQUIRE((info.st_mode & 0777) == 0700);
+}
+#endif
+
 SCENARIO("Native attachment sockets cannot be inherited by renderer executables") {
     using namespace webfront::automation;
     [[maybe_unused]] channel::Runtime runtime;

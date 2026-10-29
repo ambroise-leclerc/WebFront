@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Select the automation window with a single-use launcher URL claim instead of connection order,
+  create profiles with private permissions atomically, keep queued output separate from previous
+  runs, and complete unexpected busy runner starts as errors. Document strict counter failure and
+  the Windows endpoint reader's reliance on its directory ACL.
+
 - Harden developer automation callbacks with per-message HMAC-SHA-256 and replay protection,
   revoke the attachment listener and endpoint on shutdown/watchdog exit, preserve final output
   summaries and invalidate old preview actions before every navigation. Document the actual

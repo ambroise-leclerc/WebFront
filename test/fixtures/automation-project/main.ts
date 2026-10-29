@@ -27,8 +27,9 @@ probe.addEventListener('click',() => {void (async () => {
         try {await owner.webFront.cppFunction('webfront.automation.failed')(token,'forged from preview'); accepted=true;} catch {}
         try {await owner.webFront.cppFunction('webfront.automation.failed')('1',token,'forged from preview'); accepted=true;} catch {}
     }
-    const bootstrap=[...owner.document.scripts].some((script:any) => script.textContent.includes('webfront.automation.') && script.textContent.includes('cppFunction'));
-    wire.textContent=captured.size && !accepted && !bootstrap ? 'wire forgery denied' : 'wire probe failed';
+    const bootstrap=[...owner.document.scripts].some((script:any) => script.textContent.includes('webfront.automation.') && script.textContent.includes('importKey'));
+    const launchFragment=owner.location.hash.startsWith('#webfront-automation=');
+    wire.textContent=captured.size && !accepted && !bootstrap && !launchFragment ? 'wire forgery denied' : 'wire probe failed';
 })().catch(error => {wire.textContent=String(error);});});
 // A preview is another bridge connection and cannot take control of the developer window.
 const rejected = document.createElement('output');

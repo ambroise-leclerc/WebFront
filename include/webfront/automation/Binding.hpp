@@ -76,7 +76,8 @@ class Binding {
         std::mutex                         mutex;
         std::optional<AppUI>               browser;
         authentication::PageAuthentication pageAuthentication;
-        bool                               closing = false;
+        std::string                        launchToken = channel::nonce();
+        bool                               closing     = false;
         void
         authorize(const AppUI& ui, std::string_view sequence, std::string_view mac, std::string_view method, std::initializer_list<std::string_view> args) {
             if (!browser || browser->id() != ui.id())
@@ -93,10 +94,19 @@ class Binding {
     };
 
 public:
-    /// Retain until after application shutdown. Only the first connected window is selected.
+    /// Retain until after application shutdown. Only a browser proving the launch URL's secret is selected.
     Binding(App& app, std::shared_ptr<Session> session) : state(std::make_shared<State>()) {
         state->session   = std::move(session);
         const auto owned = state;
+        app.cppFunction("webfront.automation.claim", [owned](AppUI ui, std::string token) {
+            std::scoped_lock lock{owned->mutex};
+            if (owned->browser || !channel::sameToken(token, owned->launchToken))
+                throw std::runtime_error("Automation window claim rejected");
+            owned->browser.emplace(ui);
+            owned->launchToken.clear();  // one successful claim; later connections cannot replace the selected browser
+            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret()));
+            return std::string{"null"};
+        });
         app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string sequence, std::string mac, std::string output) {
             std::scoped_lock lock{owned->mutex};
             owned->authorize(ui, sequence, mac, "poll", {output});
@@ -118,14 +128,26 @@ public:
             std::scoped_lock lock{owned->mutex};
             if (owned->browser)
                 return;
-            owned->browser.emplace(ui);
-            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret()));
+            // The fragment is delivered only to the launched frontend, never in HTTP/WebSocket requests.
+            // A connection racing the real window gets no page key and cannot consume the claim.
+            ui.addScript(R"JS(void (async () => {
+                const prefix='#webfront-automation=';
+                if (!location.hash.startsWith(prefix)) return;
+                const token=location.hash.slice(prefix.length);
+                history.replaceState(null,'',location.pathname+location.search);
+                try { await webFront.ready; await webFront.cppFunction('webfront.automation.claim')(token); }
+                catch { window.close(); }
+            })();)JS");
         });
         closed  = app.subscribeUIClosed([owned](AppUI ui) {
             std::scoped_lock lock{owned->mutex};
             if (owned->browser && owned->browser->id() == ui.id())
                 owned->session->close("Developer window disconnected");
         });
+    }
+    std::string launchPage() const {
+        std::scoped_lock lock{state->mutex};
+        return "webfront-bootstrap.html#webfront-automation=" + state->launchToken;
     }
     void closeBrowser() {
         std::scoped_lock lock{state->mutex};

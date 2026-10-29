@@ -2,6 +2,7 @@
 #pragma once
 #include "Json.hpp"
 
+#include <cerrno>
 #include <chrono>
 #include <stop_token>
 #include <thread>

@@ -103,7 +103,8 @@ public:
         auto& run = find(*active);
         if (output.size() > 8192)
             throw std::invalid_argument("Automation progress exceeds 8192 bytes");
-        run.output = std::move(output);
+        if (run.state == "running")
+            run.output = std::move(output);
         if (run.cancel) {
             if (run.state == "queued") {
                 run.state = "cancelled";

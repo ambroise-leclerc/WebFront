@@ -1,10 +1,38 @@
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <webfront/automation/Binding.hpp>
 #include <webfront/automation/Mcp.hpp>
 #include <webfront/automation/PageAuthentication.hpp>
 #include <webfront/automation/Stdio.hpp>
 
 namespace {
+struct BindingApp {
+    struct UI {
+        int                                       value;
+        std::shared_ptr<std::vector<std::string>> scripts = std::make_shared<std::vector<std::string>>();
+        int                                       id() const {
+            return value;
+        }
+        void addScript(std::string text) const {
+            scripts->push_back(std::move(text));
+        }
+    };
+    std::function<std::string(UI, std::string)> claim;
+    std::function<void(UI)>                     started, closed;
+    template <typename Handler>
+    void cppFunction(std::string_view, Handler handler) {
+        if constexpr (std::is_invocable_r_v<std::string, Handler, UI, std::string>)
+            claim = std::move(handler);
+    }
+    webfront::UISubscription subscribeUIStarted(std::function<void(UI)> handler) {
+        started = std::move(handler);
+        return {};
+    }
+    webfront::UISubscription subscribeUIClosed(std::function<void(UI)> handler) {
+        closed = std::move(handler);
+        return {};
+    }
+};
 using namespace webfront::automation;
 Object command(const Session& session, std::string operation, std::string args = "{}") {
     return Object(objectJson({
@@ -12,6 +40,34 @@ Object command(const Session& session, std::string operation, std::string args =
         {"operation",                                    webfront::json::quote(operation)},
         {"arguments",                                                                args}
     }));
+}
+
+SCENARIO("An earlier browser cannot claim the launched automation window") {
+    webfront::test::TemporaryDirectory directory;
+    auto                               session = std::make_shared<Session>(SessionOptions{directory.path(), {"build"}});
+    BindingApp                         app;
+    Binding                            binding{app, session};
+    const auto                         page  = binding.launchPage();
+    const auto                         token = page.substr(page.find('=') + 1);
+    REQUIRE(token.size() == 64);
+    BindingApp::UI earlier{1}, launched{2};
+    app.started(earlier);
+    REQUIRE(earlier.scripts->size() == 1);
+    REQUIRE(earlier.scripts->front().find(token) == std::string::npos);
+    REQUIRE(earlier.scripts->front().find("importKey") == std::string::npos);
+    REQUIRE_THROWS(app.claim(earlier, std::string(64, '0')));
+    app.closed(earlier);
+    REQUIRE_FALSE(session->isClosed());
+    app.started(launched);
+    REQUIRE_NOTHROW(app.claim(launched, token));
+    REQUIRE(launched.scripts->size() == 2);
+    REQUIRE(launched.scripts->back().find("importKey") != std::string::npos);
+    REQUIRE_THROWS(app.claim(earlier, token));
+    REQUIRE_THROWS(app.claim(launched, token));
+    app.closed(earlier);
+    REQUIRE_FALSE(session->isClosed());
+    app.closed(launched);
+    REQUIRE(session->isClosed());
 }
 Object query(const Session& session, std::string id) {
     return Object(objectJson({
@@ -30,6 +86,7 @@ SCENARIO("Page callback authentication matches RFC 4231 and refuses wire replay 
     const std::string  key(64, 'a');
     PageAuthentication auth{key};
     const auto         captured = hmac(key, payload("1", "poll", {"latest output é😀"}));
+    REQUIRE_THROWS(auth.authorize("2", hmac(key, payload("2", "failed", {"dropped first message"})), "failed", {"dropped first message"}));
     REQUIRE_THROWS(auth.authorize("1", captured, "failed", {"forged by a frame"}));
     REQUIRE_THROWS(auth.authorize("1", captured, "poll", {"tampered output"}));
     REQUIRE_NOTHROW(auth.authorize("1", captured, "poll", {"latest output é😀"}));
@@ -78,7 +135,7 @@ SCENARIO("MCP stdin drains buffered lines and preserves a partial line through E
 SCENARIO("Automation authorization stays native and binds requests to a project session") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-        {directory.path(), {"build", "test", "inspect"}}
+                                   {directory.path(), {"build", "test", "inspect"}}
     };
     Session other{
         {directory.path(), {"build"}}
@@ -110,7 +167,7 @@ SCENARIO("Automation authorization stays native and binds requests to a project 
 SCENARIO("Automation cancellation and native deadlines cannot reuse a stalled renderer") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-        {directory.path(), {"build"}, std::chrono::seconds{1}}
+                                   {directory.path(), {"build"}, std::chrono::seconds{1}}
     };
     session.poll();
     const auto id = Object(session.start(command(session, "build"))).string("runId");
@@ -140,7 +197,7 @@ SCENARIO("Automation cancellation and native deadlines cannot reuse a stalled re
 SCENARIO("MCP initialization, tool errors and request identifiers follow the supported profile") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-        {directory.path(), {}}
+                                   {directory.path(), {}}
     };
     Mcp mcp{session};
     REQUIRE(Object(*mcp.receive(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})")).has("error"));
@@ -205,7 +262,7 @@ SCENARIO("The versioned operation schema projects the same fields and permission
 SCENARIO("A completed automation snapshot replaces progress with the final bounded output") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-        {directory.path(), {"build"}}
+                                   {directory.path(), {"build"}}
     };
     session.poll();
     const auto id = Object(session.start(command(session, "build"))).string("runId");
@@ -220,12 +277,19 @@ SCENARIO("A completed automation snapshot replaces progress with the final bound
     const Object result{session.result(query(session, id))};
     REQUIRE(result.string("output") == output);
     REQUIRE(result.string("output") == Object(result.raw("result")).string("output"));
+
+    const auto next = Object(session.start(command(session, "build"))).string("runId");
+    REQUIRE(Object(session.result(query(session, next))).string("output").empty());
+    REQUIRE(Object(session.poll("previous runner output")).string("runId") == next);
+    REQUIRE(Object(session.result(query(session, next))).string("output").empty());
+    session.poll("new run progress");
+    REQUIRE(Object(session.result(query(session, next))).string("output") == "new run progress");
 }
 
 SCENARIO("A completion the native side cannot validate fails its run instead of wedging the session") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{
-        {directory.path(), {"build"}}
+                                   {directory.path(), {"build"}}
     };
     session.poll();
     GIVEN("a running operation") {

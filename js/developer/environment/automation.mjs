@@ -129,7 +129,11 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
         get output() { return clipText(output,2048,true); },
         cancel(id) { if (active?.id === id) active.controller.abort(new Error('Interrupted by automation')); },
         async start(request) {
-            if (active) throw new Error('Automation runner is busy');
+            if (active) {
+                const result={exitCode:1,output:'Automation runner is busy',report:null};
+                await complete(request.runId,result);
+                return result;
+            }
             const controller = new AbortController();
             const owned = active = {id:request.runId, controller};
             output = '';
