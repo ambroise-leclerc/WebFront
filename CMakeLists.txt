@@ -94,6 +94,11 @@ include(CPM)
 CPMAddPackage("gh:ambroise-leclerc/stdnet#8005774eabcba7e73188c02d2eeca2ff43c4ee3a")
 webfront_include_frontend_support()
 
+include(ModuleScan)
+if(NOT WEBFRONT_IS_TOP_LEVEL)
+    webfront_check_module_scan()
+endif()
+
 if(WEBFRONT_USE_MDDLOG)
     include(cmake/MddlogIntegration.cmake)
     webfront_add_mddlog()

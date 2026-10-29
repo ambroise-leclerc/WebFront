@@ -258,6 +258,16 @@ target_link_libraries(MyApp PRIVATE WebFront::WebFront)
 
 As a subproject, examples and tests are off by default and compiler settings do not leak into your targets. `WEBFRONT_BUILD_EXAMPLES=OFF` disables examples in a standalone build too.
 
+GCC 16 crashes inside stdexec (`internal compiler error: Segmentation fault` in `__query.hpp`) when CMake scans C++ modules and adds `-fmodules-ts`, which happens by default for C++20 and later targets (CMP0155, Ninja). WebFront is header-only and needs no module scan, so turn it off in your project, before your targets:
+
+```cmake
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+# or, per target:
+webfront_disable_module_scan(MyApp)
+```
+
+Configuring WebFront as a subproject with GCC 16 and scanning enabled prints a warning naming each affected target, with this workaround.
+
 `webfront::WebFront` always uses the system browser. For a native window with the same browser fallback as the examples, add this after linking your target (also works after `CPMAddPackage`):
 
 ```cmake
