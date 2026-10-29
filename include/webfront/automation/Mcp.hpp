@@ -113,9 +113,7 @@ private:
                 return false;
             }
         }
-        std::int64_t number      = 0;
-        const auto [end, status] = std::from_chars(value.data(), value.data() + value.size(), number);
-        return status == std::errc{} && end == value.data() + value.size();
+        return json::detail::isNumber(value);  // Preserve the exact JSON number spelling, without rounding or narrowing.
     }
     static std::string success(std::string_view id, std::string_view value) {
         std::string compact;

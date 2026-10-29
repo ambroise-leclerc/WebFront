@@ -12,7 +12,7 @@ import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
-import {build, dev} from './development.mjs';
+import {build, dev, showPreview} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
@@ -125,10 +125,7 @@ async function preview(args, {bridge, signal, preview: frame}) {
     const entry = resolveEntry(project.manifest, args[0], 'wf preview <entry.tsx>');
     const result = await compile(bridge, entry, signal);
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
-    frame.hidden = false;
-    frame.dispatchEvent(new Event('webfront-preview-navigating'));
-    // Replace transient builds without accumulating browser session history.
-    frame.contentWindow.location.replace(`/webfront/developer/preview/index.html?build=${Date.now()}`);
+    showPreview(frame);
     return syncNotice(project) + 'Preview ready.';
 }
 
@@ -313,7 +310,8 @@ export const connectAutomation = context => connectAgent({...context,run:runNonI
  * window). `report` is the structured report of wf test, null for other commands; the result is cut to fit a bridge string (see fitResult). A command that fails, or a result
  * that cannot be sent, ends with a non-zero code; it never stays open. Resolves with the result.
  */
-export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
+export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, outputLimit = Infinity, ...context}) {
+    if (outputLimit!==Infinity && (!Number.isSafeInteger(outputLimit) || outputLimit<0)) throw new Error('outputLimit must be a non-negative integer or Infinity');
     let exitCode = 0, output = '', report = null, truncated = false, diagnostics = [];
     const keepDiagnostics = values => {
         diagnostics = (values ?? []).slice(0,10).map(item => ({text:clipText(item.text ?? '',256),
@@ -323,9 +321,9 @@ export async function runNonInteractive(argv, {reporter, onExit = code => global
     };
     const append = text => {
         text = String(text ?? '');
-        const room = 16000-output.length;
-        truncated ||= text.length > room;
-        output += clipText(text,room);
+        const combined = output + text;
+        truncated ||= combined.length > outputLimit;
+        output = Number.isFinite(outputLimit) ? clipText(combined,outputLimit,true) : combined;
     };
     const collect = text => { append(text); write(text); };
     try {
@@ -338,7 +336,7 @@ export async function runNonInteractive(argv, {reporter, onExit = code => global
         if (error?.diagnostics) keepDiagnostics(error.diagnostics);
         append(error?.message ?? String(error));
     }
-    const result = fitResult({exitCode, output, report, ...(truncated ? {truncated:true} : {}), ...(diagnostics.length ? {diagnostics} : {})});
+    const result = {exitCode, output, report, ...(truncated ? {truncated:true} : {}), ...(diagnostics.length ? {diagnostics} : {})};
     try { await reporter?.(JSON.stringify(fitResult(result))); }
     catch (error) {
         result.exitCode = exitCode || 1;

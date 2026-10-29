@@ -1,6 +1,7 @@
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <webfront/automation/Mcp.hpp>
+#include <webfront/automation/PageAuthentication.hpp>
 #include <webfront/automation/Stdio.hpp>
 
 namespace {
@@ -19,6 +20,26 @@ Object query(const Session& session, std::string id) {
     }));
 }
 }  // namespace
+
+SCENARIO("Page callback authentication matches RFC 4231 and refuses wire replay or forgery") {
+    using namespace webfront::automation::authentication;
+    REQUIRE(hmac(std::string(20, '\x0b'), "Hi There") == "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
+    REQUIRE(hmac("Jefe", "what do ya want for nothing?") == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+    REQUIRE(hmac(std::string(131, static_cast<char>(0xaa)), "Test Using Larger Than Block-Size Key - Hash Key First")
+            == "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
+    const std::string  key(64, 'a');
+    PageAuthentication auth{key};
+    const auto         captured = hmac(key, payload("1", "poll", {"latest output é😀"}));
+    REQUIRE_THROWS(auth.authorize("1", captured, "failed", {"forged by a frame"}));
+    REQUIRE_THROWS(auth.authorize("1", captured, "poll", {"tampered output"}));
+    REQUIRE_NOTHROW(auth.authorize("1", captured, "poll", {"latest output é😀"}));
+    REQUIRE_THROWS(auth.authorize("1", captured, "poll", {"latest output é😀"}));
+    const auto completed = hmac(key, payload("2", "complete", {"run-1", R"({"exitCode":0})"}));
+    REQUIRE_THROWS(auth.authorize("2", completed, "complete", {"run-2", R"({"exitCode":0})"}));
+    REQUIRE_NOTHROW(auth.authorize("2", completed, "complete", {"run-1", R"({"exitCode":0})"}));
+    REQUIRE(hmac(key, payload("3", "complete", {"a", "bc"})) != hmac(key, payload("3", "complete", {"ab", "c"})));
+    REQUIRE(hmac(key, payload("3", "reply:poll", {"null"})) != hmac(key, payload("3", "poll", {"null"})));
+}
 
 #ifndef _WIN32
 SCENARIO("MCP stdin drains buffered lines and preserves a partial line through EOF") {
@@ -137,6 +158,11 @@ SCENARIO("MCP initialization, tool errors and request identifiers follow the sup
             .raw("result")};
     REQUIRE(tool.raw("isError") == "true");
     REQUIRE(Object(*mcp.receive(R"({"jsonrpc":"2.0","id":null,"method":"ping"})")).has("error"));
+    for (const auto id : {"1.0", "1e2", "-0.25", "123456789012345678901234567890"}) {
+        const Object reply{*mcp.receive(std::string{"{\"jsonrpc\":\"2.0\",\"id\":"} + id + ",\"method\":\"ping\"}")};
+        REQUIRE_FALSE(reply.has("error"));
+        REQUIRE(reply.raw("id") == id);
+    }
     REQUIRE(Object(*mcp.receive("{bad")).has("error"));
     REQUIRE_FALSE(mcp.receive(R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":42}})"));
     for (const auto notification : {R"({"jsonrpc":"1.0","method":"ping"})", R"({"jsonrpc":"2.0"})", R"({"method":"ping"})", R"({"jsonrpc":"2.0","method":17})"})

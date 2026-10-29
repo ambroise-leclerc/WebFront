@@ -1,5 +1,7 @@
 // Optional developer-window automation. Native code chooses the page and grants operations.
 // This module neither grants permissions nor exports arbitrary callbacks, eval or a shell.
+import {fitResult} from './testing.mjs';
+const parseMessage=JSON.parse.bind(JSON), serializeMessage=JSON.stringify.bind(JSON);
 
 /** Cuts text to at most `max` UTF-16 units, keeping its start or (fromEnd) its end, without splitting a surrogate pair:
  *  a lone surrogate cannot cross the bridge, and native code would refuse the whole message. */
@@ -70,7 +72,7 @@ export function createPreviewInspector(frame) {
             const title=field(doc.title,256);
             const result={pageId, ready:true, title, elements, errors:[...errors], truncated};
             const encoder=new TextEncoder();
-            while (encoder.encode(JSON.stringify(result)).length>30000) {
+            while (encoder.encode(serializeMessage(result)).length>30000) {
                 if (result.errors.length) result.errors.pop();
                 else if (result.elements.length) result.elements.pop();
                 else break;
@@ -108,16 +110,21 @@ const resultBytes = 56000;  // under the 60,000-byte native message limit and th
 /** Shrinks a result's output until its JSON, which escapes control characters to six bytes each, fits one bridge string. */
 export function fitCompletion(result) {
     const encoder = new TextEncoder();
-    const size = value => encoder.encode(JSON.stringify(value)).length;
-    result = {...result, output: clipText(result.output ?? '', 16000)};
-    while (size(result) > resultBytes && result.output.length) result = {...result, output: clipText(result.output, result.output.length >> 1), truncated: true};
+    const size = value => encoder.encode(serializeMessage(value)).length;
+    const output = String(result.output ?? '');
+    result = {...result, output: clipText(output,16000,true), ...(output.length>16000 ? {truncated:true} : {})};
+    if (size(result)>resultBytes && result.report) {
+        const report=fitResult({...result,output:''},resultBytes/2);
+        result={...report,output:result.output,truncated:true};
+    }
+    while (size(result) > resultBytes && result.output.length) result = {...result, output: clipText(result.output, result.output.length >> 1,true), truncated: true};
     return size(result) > resultBytes ? {exitCode: result.exitCode, output: 'The result is too large to report', truncated: true} : result;
 }
 
 /** One active native run, cooperatively cancellable; poll stays responsive while a command runs. */
 export function createAutomationRunner({run, exclusive, context, inspector, onState = () => {}, complete}) {
     let active = null, output = '';
-    const clip = value => clipText(value,16000);
+    const clip = value => clipText(value,16000,true);
     return {
         get output() { return clipText(output,2048,true); },
         cancel(id) { if (active?.id === id) active.controller.abort(new Error('Interrupted by automation')); },
@@ -139,7 +146,7 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                         const argv = [request.operation];
                         if (args.entry) argv.push(args.entry);
                         if (args.pattern) argv.push(args.pattern);
-                        result = await run(argv, {...context, signal:controller.signal, onExit:() => {},
+                        result = await run(argv, {...context, signal:controller.signal, onExit:() => {}, outputLimit:16000,
                             write:text => { output = clip(output + text); }, reporter:undefined});
                         // A command that stopped because of the cancellation reports it, whatever code it chose.
                         if (controller.signal.aborted && result.exitCode !== 0) result = {...result, exitCode:130};
@@ -173,13 +180,13 @@ export function connectAutomation({bridge, call, preview, run, exclusive, ...con
     document.querySelector('header')?.append(panel);
     const inspector = createPreviewInspector(preview);
     const runner = createAutomationRunner({run, exclusive, context:{...context,bridge,preview,automation:true}, inspector,
-        onState:text => {status.textContent=text;}, complete:(id,result) => call('complete',id,JSON.stringify(result))});
+        onState:text => {status.textContent=text;}, complete:(id,result) => call('complete',id,serializeMessage(result))});
     let stopped = false, timer, activeId;
     stop.addEventListener('click', () => { if (activeId) runner.cancel(activeId); });
     const close = () => { stopped=true; clearTimeout(timer); runner.stop(); inspector.dispose(); panel.remove(); };
     const poll = async () => {
         try {
-            const request = JSON.parse(await call('poll',runner.output));
+            const request = parseMessage(await call('poll',runner.output));
             if (request?.close) { close(); globalThis.close(); return; }
             if (request?.cancel) runner.cancel(request.cancel);
             else if (request?.runId) {
@@ -187,7 +194,11 @@ export function connectAutomation({bridge, call, preview, run, exclusive, ...con
                 // Completion is always observed, including disconnect/revocation reporting failures.
                 void runner.start(request).catch(error => {status.textContent=String(error?.message ?? error);});
             }
-        } catch (error) { status.textContent=`Automation disconnected: ${error?.message ?? error}`; close(); return; }
+        } catch (error) {
+            status.textContent=`Automation disconnected: ${error?.message ?? error}`;
+            await call('failed',clipText(error?.message ?? error,1024)).catch(() => {});
+            close(); globalThis.close(); return;
+        }
         if (!stopped) timer=setTimeout(poll,50);
     };
     void poll();

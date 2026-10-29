@@ -4,6 +4,7 @@ import {rejects} from '../support.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
 import {setManifestDirectory} from '../../../js/developer/environment/manifest.mjs';
 import {withTimers} from '../timers.mjs';
+import {showPreview} from '../../../js/developer/environment/development.mjs';
 
 describe('Developer automation', () => {
     it('arbitrates human and agent commands but permits nested wf execution', async () => {
@@ -126,10 +127,67 @@ describe('Developer automation', () => {
         expect((await runNonInteractive(['help'],{onExit:() => {}})).exitCode).toBe(0);
     });
 
+    it('preserves the unbounded non-interactive return contract unless a limit is requested', async () => {
+        const command='unknown-'+ 'x'.repeat(24000)+'FINAL SUMMARY';
+        const full=await runNonInteractive([command],{onExit:() => {}});
+        expect(full.output.length).toBeGreaterThan(24000);
+        expect(full.output.endsWith('FINAL SUMMARY')).toBeTrue();
+        expect(full.truncated).toBeUndefined();
+        const limited=await runNonInteractive([command],{onExit:() => {},outputLimit:16000});
+        expect(limited.output.length).toBeLessThanOrEqual(16000);
+        expect(limited.output.endsWith('FINAL SUMMARY')).toBeTrue();
+        expect(limited.truncated).toBeTrue();
+    });
+
     it('refuses absent previews instead of inspecting the developer terminal', () => {
         const inspector=createPreviewInspector(null);
         expect(() => inspector.inspect()).toThrowError(/No ready application preview/);
         inspector.dispose();
+    });
+
+    it('invalidates old page actions synchronously before a dev rebuild navigates', () => {
+        const doc=document.implementation.createHTMLDocument('preview');
+        Object.defineProperty(doc,'URL',{value:location.origin+'/webfront/developer/preview/index.html'});
+        Object.defineProperty(doc,'readyState',{value:'complete'});
+        const frame=new EventTarget();
+        Object.assign(frame,{hidden:false,contentDocument:doc});
+        const inspector=createPreviewInspector(frame);
+        const old=inspector.inspect().pageId;
+        frame.contentWindow={location:{replace() {
+            expect(() => inspector.inspect()).toThrowError(/No ready/);
+            expect(() => inspector.action('click',{pageId:old,elementId:'anything'})).toThrowError(/No ready/);
+        }}};
+        try {
+            showPreview(frame);
+            frame.dispatchEvent(new Event('load'));
+            expect(inspector.inspect().pageId).not.toBe(old);
+            expect(() => inspector.action('click',{pageId:old,elementId:'anything'})).toThrowError(/Preview changed/);
+        } finally {inspector.dispose();}
+    });
+
+    it('keeps the final summary and a moving progress tail within automation limits', async () => {
+        const completed=[];
+        let progress;
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},
+            run:async (_args,context) => {
+                expect(context.outputLimit).toBe(16000);
+                context.write('a'.repeat(20000));
+                context.write('latest progress');
+                progress=runner.output;
+                return {exitCode:0,output:'a'.repeat(20000)+'Found 42 errors',report:null};
+            },complete:async (_id,result) => {completed.push(result);}});
+        await runner.start({runId:'one',operation:'check'});
+        expect(progress.endsWith('latest progress')).toBeTrue();
+        expect(completed[0].output.endsWith('Found 42 errors')).toBeTrue();
+        expect(completed[0].truncated).toBeTrue();
+        expect(fitCompletion({exitCode:1,output:'\u0001'.repeat(16000)+'Jasmine totals'}).output.endsWith('Jasmine totals')).toBeTrue();
+        const crowded={status:'failed',exitCode:1,jasmine:'7',total:42,passed:1,failed:41,pending:0,excluded:0,durationMs:1,
+            failures:Array.from({length:50},() => ({messages:[{message:'m'.repeat(10000),stack:'s'.repeat(10000)}]})),
+            suites:[],global:[],pendingSpecs:[]};
+        const fitted=fitCompletion({exitCode:1,output:'n'.repeat(20000)+'Jasmine totals',report:crowded});
+        expect(fitted.output.endsWith('Jasmine totals')).toBeTrue();
+        expect(fitted.report.failed).toBe(41);
+        expect(new TextEncoder().encode(JSON.stringify(fitted)).length).toBeLessThanOrEqual(56000);
     });
 
     it('bounds hostile preview text in UTF-8 JSON bytes', () => {

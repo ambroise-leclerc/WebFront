@@ -11,8 +11,8 @@ bridge as MCP. Applications can explicitly integrate `automation::Binding` with 
 A session ID routes operations and prevents accidental cross-session requests; it is not an
 authentication secret. The opt-in native attachment channel uses a separate OS-generated capability.
 
-For testing a consumer's own page through CTest, see #402 and the consumer testing guide when
-that independent change is integrated. MCP is unnecessary for CI to run Jasmine.
+For testing a consumer's own page through CTest, see [consumer testing](CONSUMER_TESTING.md).
+That independent API is available in this tree; MCP is unnecessary for CI to run Jasmine.
 
 ## Building and provisioning
 
@@ -72,8 +72,18 @@ tools, then asks WebFront to verify them.
 `--manifest-dir` selects a project-relative manifest directory. `--registry-dir` serves an
 explicit local registry for bootstrap/project tooling. `--timeout` sets the native per-operation limit and `--startup-timeout` separately bounds
 bootstrap (both default to 120 seconds, 1–3600); progress does not extend either deadline. Each process owns
-an isolated temporary browser profile, removed on normal exit. Forced termination may leave that
-temporary directory for OS cleanup. Use `xvfb-run -a` around the client/launcher on headless Linux.
+an automation session, but browser storage isolation depends on the frontend:
+
+| Frontend | Browser storage used by the launcher |
+| --- | --- |
+| CEF on Linux | Separate temporary profile directory |
+| WebView2 on Windows | Separate temporary user-data directory |
+| WKWebView on macOS | Engine's default shared website data store; no per-process storage isolation |
+| WebKitGTK on Linux | Default WebFront XDG data/cache directories; shared between launches |
+
+The launcher's temporary directory is used as a profile only by CEF/WebView2. Cleanup is attempted
+on normal and watchdog exits; this does not erase WKWebView/WebKitGTK's shared stores. An independent
+process is not a browser-storage or hostile-code sandbox. Use `xvfb-run -a` on headless Linux.
 
 ## Sharing a window already open for a human
 
@@ -119,12 +129,17 @@ Stdout contains only one JSON-RPC message per line in MCP mode. Diagnostics go t
 The client owns the stdio adapter and closes stdin to end its connection. In owned-window mode
 this also closes the window; attached mode leaves its owner running. No native attachment socket
 is created unless `--listen` is explicit. A blocked renderer is revoked at its native deadline; the
-supervisor requests window closure, then exits forcibly after a five-second grace period.
+supervisor requests window closure, then exits forcibly after a five-second grace period. It first
+stops the attachment worker, closes its listener and removes the endpoint files and empty private
+directory. Active attachment IO may take up to its two-second deadline to join. Once a session
+closes, its listener is revoked instead of accepting clients that nobody will serve. Attached CLI
+startup discovery backs off from 100 ms to one second, rather than opening a connection every 20 ms.
 
 For a single CLI operation, replace `--mcp` with `--operation build [--entry main]` or
 `--operation test [--pattern text]`. Check, build, test, preview and inspect use the same
 controller and permissions. The CLI waits, emits one final JSON run snapshot and returns 0
-on success, 1 on operation failure, 64 on configuration errors, 70 on bootstrap failure,
+on success, 1 on operation failure, 64 on configuration errors, 69 when an attachment is unavailable
+(the outcome of an in-flight mutation may be unknown), 70 on bootstrap failure,
 71 on the native deadline. Closing a window without a command result does not imply success.
 MCP operation failures are returned as tool errors or failed run states; clients must inspect
 the result instead of interpreting successful JSON-RPC delivery as a successful build.
@@ -174,6 +189,11 @@ success or locate the structured diagnostics. Output is bounded in memory and on
 `truncated` records a cut. Only the latest 64 runs are retained in process memory. An expired ID
 is reported explicitly and is never silently re-executed.
 
+`runNonInteractive` keeps its full returned output by default. Automation explicitly requests a
+16,000 UTF-16-unit rolling tail; progress exposes its latest 2,048 units. A noisy command therefore
+keeps fresh progress and its final summary. Serialization may reduce the tail further to fit the
+bridge byte limit, with `truncated: true`; it does not replace the tail with an old prefix.
+
 `notifications/cancelled` refers to an MCP request. Start requests finish immediately, so those
 notifications cannot cancel a later background operation; use `webfront.cancel` with its run ID.
 Cancellation is cooperative and cannot undo committed publications or effects in page code.
@@ -193,10 +213,15 @@ because they broaden disclosure and require engine-specific qualification.
 Launching the server grants the client authority over the explicitly selected trusted project.
 The native controller checks its grant on every start. Only the first developer-window connection
 can poll or complete its operations; preview/test frames that open their own WebSocket are refused by
-connection identity. A preview frame shares the developer page's origin and bridge, so each callback also
-needs a capability that only the connection script's closure and the native binder hold. It is not a
-sandbox: build, test and preview execute trusted project code, which can still tamper with the page it
-runs in.
+connection identity. Callback packets carry HMAC-SHA-256 proofs over a monotonic counter, method and
+UTF-8 length-delimited arguments; replies are also authenticated and exact replays are refused.
+The bootstrap key is imported as a non-extractable WebCrypto key and its injection script removes
+itself from the DOM before yielding. Later callback packets do not contain that reusable secret.
+The native implementation is checked against [RFC 4231 vectors](https://www.rfc-editor.org/rfc/rfc4231).
+This prevents reusing a credential observed on the callback wire. It does **not** turn same-origin
+preview/test frames into isolated security principals: project code can still alter the parent's
+DOM and JavaScript runtime, influence tool execution, or deny service. Trusted project code remains
+a precondition; this is not a sandbox or a guarantee of trustworthy results from a hostile page.
 Session identifiers are not credentials. Input is limited to 60,000 UTF-8 bytes and JSON depth 32,
 with duplicate keys refused. Browser reads/writes still use the existing developer store's path
 and transactional-publication checks. Untrusted project text cannot modify the native grant list.
@@ -226,8 +251,15 @@ stdio: structured errors, file correction, check/build/test, preview inspection/
 cross-frame rejection, cancellation and a synchronous renderer hang with native termination.
 That regression uses Python's standard library as a test client; Python is not a runtime
 dependency of the launcher. It is registered when a Python interpreter and embedded test engine
-are available. A separate interoperability check uses the official MCP Python SDK; its version
-and platform are recorded with the PR evidence, rather than advertised as all-client compliance.
+are available; without xvfb-run on Linux the optional window tests are skipped with a warning.
+The maintained [official SDK regression](../test/tools/AutomationSdkClient.py) uses `mcp==2.3.0`
+in a separate test environment. It checks initialization, catalogue, structured results, an operation
+failure, a real build and detachment from a shared window. It accepts the same path arguments as
+`AutomationClient.py`. Configure registers `AutomationSdkWindow` when the selected Python already
+has that exact SDK installed; no SDK or package is installed by configure or by a test. To run it
+manually, use that Python with `test/tools/AutomationSdkClient.py --agent ... --driver ...
+--environment ... --provision ... --registry ... --fixture ... --work ...`. This is tested interop,
+not a claim of compliance with every MCP client.
 
 ### Optional local-model qualification
 

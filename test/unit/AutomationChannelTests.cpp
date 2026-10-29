@@ -86,6 +86,10 @@ SCENARIO("A private native attachment grants only the already running controller
         REQUIRE_THROWS(ChannelServer(controller, endpoint));
         attached.shutdown();
         REQUIRE(controller->isClosed());
+        owner.stop();
+        REQUIRE_FALSE(std::filesystem::exists(endpoint));
+        REQUIRE_THROWS_AS(attached.describe(), TransportError);
+        REQUIRE_THROWS_AS(ChannelClient(endpoint), TransportError);
     }
     REQUIRE_FALSE(std::filesystem::exists(endpoint));
 }

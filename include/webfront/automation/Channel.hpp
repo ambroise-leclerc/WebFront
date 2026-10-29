@@ -134,8 +134,11 @@ struct Socket {
 #endif
     }
     ~Socket() {
+        reset();
+    }
+    void reset() noexcept {
         if (value != invalid)
-            close(value);
+            close(std::exchange(value, invalid));
     }
     Socket(const Socket&)            = delete;
     Socket& operator=(const Socket&) = delete;
@@ -201,6 +204,9 @@ public:
 #endif
     }
     ~PrivateDirectory() {
+        cleanup();
+    }
+    void cleanup() const noexcept {
         std::error_code ignored;
         std::filesystem::remove(path / "endpoint.json", ignored);
         std::filesystem::remove(path / "endpoint.json.new", ignored);
@@ -289,12 +295,8 @@ inline std::string receive(Handle socket, std::size_t limit) {
     while (std::chrono::steady_clock::now() < until) {
         if (!wait(socket, POLLIN, 20))
             continue;
-        char bytes[4096];
-#ifdef _WIN32
+        char       bytes[4096];
         const auto count = ::recv(socket, bytes, sizeof bytes, 0);
-#else
-        const auto count = ::recv(socket, bytes, sizeof bytes, 0);
-#endif
         if (count <= 0)
             throw TransportError("Native attachment connection closed");
         text.append(bytes, static_cast<std::size_t>(count));
@@ -346,7 +348,14 @@ public:
         });
     }
     ~ChannelServer() {
+        stop();
+    }
+    // Explicit revocation is also used before _Exit, which skips C++ destructors.
+    void stop() {
         worker.request_stop();
+        if (worker.joinable())
+            worker.join();
+        privateDirectory.cleanup();
     }
 
 private:
@@ -365,6 +374,13 @@ private:
     static constexpr std::size_t maxConnections = 32;
     void                         serve(std::stop_token stop) {
         std::list<Connection> connections;  // joined when this function returns, each bounded by the IO deadlines
+        struct Revoke {
+            ChannelServer& owner;
+            ~Revoke() {
+                owner.listener.reset();
+                owner.privateDirectory.cleanup();
+            }
+        } revoke{*this};  // revoke the endpoint before joining pending connection handlers
         while (!stop.stop_requested() && !session->isClosed()) {
             std::erase_if(connections, [](const Connection& connection) {
                 return connection.finished.load();
@@ -432,6 +448,9 @@ private:
 class ChannelClient {
 public:
     explicit ChannelClient(const std::filesystem::path& directory) {
+        std::error_code unavailable;
+        if (!std::filesystem::is_regular_file(directory / "endpoint.json", unavailable))
+            throw TransportError("Native attachment endpoint is unavailable");
         const Object endpoint{channel::readEndpoint(directory)};
         endpoint.only({"version", "port", "token"});
         if (endpoint.raw("version") != "1")

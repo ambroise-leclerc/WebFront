@@ -244,6 +244,23 @@ function(webfront_find_xvfb out)
     endif()
 endfunction()
 
+# Optional repository window regressions must not make configuration depend on a display runner.
+function(webfront_optional_window_test_runner out_prefix out_available)
+    set(prefix "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        webfront_find_xvfb(display)
+        if(NOT display)
+            message(WARNING "Skipping optional browser window regressions, including AutomationMcpWindow: xvfb-run was not found")
+            set(${out_prefix} "" PARENT_SCOPE)
+            set(${out_available} OFF PARENT_SCOPE)
+            return()
+        endif()
+        set(prefix "${display}" -a)
+    endif()
+    set(${out_prefix} "${prefix}" PARENT_SCOPE)
+    set(${out_available} ON PARENT_SCOPE)
+endfunction()
+
 function(webfront_set_browser_test_properties name assets_directory timeout)
     set_tests_properties(${name} PROPERTIES
         LABELS "web-integration" TIMEOUT "${timeout}"

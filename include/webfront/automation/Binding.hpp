@@ -1,17 +1,42 @@
 /// @brief Explicitly bind an automation controller to one developer window. No callbacks in normal applications.
 #pragma once
 #include "../WebFront.hpp"
-#include "Channel.hpp"
+#include "PageAuthentication.hpp"
 
 namespace webfront::automation {
-// The capability is known only to this script's closure and to the native binder: a callback also needs it, because
-// the bridge identifies a connection, not a frame, and the preview frame shares this page's origin and bridge.
+// The bootstrap secret is removed from the DOM before yielding. Later packets carry a one-use MAC, never that secret.
 inline constexpr std::string_view connectionScriptTemplate = R"JS(
 void (async () => {
-    const capability = '__CAPABILITY__';
+    document.currentScript?.remove();
+    const encode = TextEncoder.prototype.encode.bind(new TextEncoder());
+    const parse = JSON.parse.bind(JSON);
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    const verify = crypto.subtle.verify.bind(crypto.subtle);
+    let key;
     const cppFunction = webFront.cppFunction.bind(webFront);
-    const call = (name,...args) => cppFunction('webfront.automation.'+name)(capability,...args);
+    const payload = (sequence,method,args) => {
+        let value='webfront.automation.v1\n'+sequence+'\n'+method+'\n';
+        for (const argument of args) value+=encode(argument).length+':'+argument;
+        return encode(value);
+    };
+    let sequence=0n, pending=Promise.resolve();
+    const call = (name,...args) => {
+        const next=pending.then(async () => {
+            const id=''+(++sequence);
+            const bytes=new Uint8Array(await sign('HMAC',key,payload(id,name,args)));
+            let mac=''; for(const byte of bytes) mac+=byte.toString(16).padStart(2,'0');
+            const reply=parse(await cppFunction('webfront.automation.'+name)(id,mac,...args));
+            if(typeof reply.value!=='string' || !/^[0-9a-f]{64}$/.test(reply.mac)) throw new Error('Invalid authenticated reply');
+            const proof=new Uint8Array(32);
+            for(let i=0;i<32;++i) proof[i]=parseInt(reply.mac.slice(i*2,i*2+2),16);
+            if(!await verify('HMAC',key,proof,payload(id,'reply:'+name,[reply.value]))) throw new Error('Invalid authenticated reply');
+            return reply.value;
+        });
+        pending=next.catch(() => {});
+        return next;
+    };
     try {
+        key = await crypto.subtle.importKey('raw',encode('__CAPABILITY__'),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
         await webFront.ready;
         await new Promise((resolve,reject) => {
             const observer = new MutationObserver(check);
@@ -47,46 +72,54 @@ template <typename App>
 class Binding {
     using AppUI = typename App::UI;
     struct State {
-        std::shared_ptr<Session> session;
-        std::mutex               mutex;
-        std::optional<AppUI>     browser;
-        std::string              capability;
-        bool                     closing = false;
-        void                     authorize(const AppUI& ui, std::string_view presented) const {
+        std::shared_ptr<Session>           session;
+        std::mutex                         mutex;
+        std::optional<AppUI>               browser;
+        authentication::PageAuthentication pageAuthentication;
+        bool                               closing = false;
+        void
+        authorize(const AppUI& ui, std::string_view sequence, std::string_view mac, std::string_view method, std::initializer_list<std::string_view> args) {
             if (!browser || browser->id() != ui.id())
                 throw std::runtime_error("Automation callback belongs to another page");
-            if (!channel::sameToken(presented, capability))
-                throw std::runtime_error("Automation callback lacks the page capability");
+            pageAuthentication.authorize(sequence, mac, method, args);
+        }
+        std::string reply(std::string_view sequence, std::string_view method, std::string value) const {
+            return objectJson({
+                {"value", json::quote(value)},
+                {"mac",
+                 json::quote(authentication::hmac(pageAuthentication.secret(), authentication::payload(sequence, "reply:" + std::string(method), {value})))}
+            });
         }
     };
 
 public:
     /// Retain until after application shutdown. Only the first connected window is selected.
     Binding(App& app, std::shared_ptr<Session> session) : state(std::make_shared<State>()) {
-        state->session    = std::move(session);
-        state->capability = channel::nonce();
-        const auto owned  = state;
-        app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string capability, std::string output) {
+        state->session   = std::move(session);
+        const auto owned = state;
+        app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string sequence, std::string mac, std::string output) {
             std::scoped_lock lock{owned->mutex};
-            owned->authorize(ui, capability);
-            return owned->session->poll(std::move(output));
+            owned->authorize(ui, sequence, mac, "poll", {output});
+            return owned->reply(sequence, "poll", owned->session->poll(std::move(output)));
         });
-        app.cppFunction("webfront.automation.complete", [owned](AppUI ui, std::string capability, std::string id, std::string result) {
+        app.cppFunction("webfront.automation.complete", [owned](AppUI ui, std::string sequence, std::string mac, std::string id, std::string result) {
             std::scoped_lock lock{owned->mutex};
-            owned->authorize(ui, capability);
+            owned->authorize(ui, sequence, mac, "complete", {id, result});
             owned->session->complete(id, std::move(result));
+            return owned->reply(sequence, "complete", "null");
         });
-        app.cppFunction("webfront.automation.failed", [owned](AppUI ui, std::string capability, std::string reason) {
+        app.cppFunction("webfront.automation.failed", [owned](AppUI ui, std::string sequence, std::string mac, std::string reason) {
             std::scoped_lock lock{owned->mutex};
-            owned->authorize(ui, capability);
+            owned->authorize(ui, sequence, mac, "failed", {reason});
             owned->session->close(reason.substr(0, 1024));
+            return owned->reply(sequence, "failed", "null");
         });
         started = app.subscribeUIStarted([owned](AppUI ui) {
             std::scoped_lock lock{owned->mutex};
             if (owned->browser)
                 return;
             owned->browser.emplace(ui);
-            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->capability));
+            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret()));
         });
         closed  = app.subscribeUIClosed([owned](AppUI ui) {
             std::scoped_lock lock{owned->mutex};

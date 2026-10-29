@@ -19,6 +19,7 @@ import time
 class Client:
     def __init__(self, command, stderr, timeout=30):
         self.timeout = timeout  # seconds for the session to become ready and for one operation to finish
+        self.log_path = pathlib.Path(stderr.name) if isinstance(getattr(stderr, "name", None), str) else None
         self.child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=stderr, text=True, encoding="utf-8")
         self.messages = queue.Queue()
@@ -46,6 +47,9 @@ class Client:
             return None
         message = self.messages.get(timeout=30)
         if isinstance(message, Exception):
+            if isinstance(message, EOFError):
+                details = self.log_path.read_text()[-2000:] if self.log_path and self.log_path.exists() else ""
+                raise EOFError(f"MCP stdout closed (status {self.child.poll()}); native stderr: {details}")
             raise message
         assert message["id"] == self.counter, message
         assert "error" not in message, message
@@ -106,6 +110,50 @@ class Client:
         self.reader.join(timeout=2)
 
 
+def check_startup_backoff(agent, root):
+    """The attach-only path needs no renderer and must not create 50 connections per second."""
+    endpoint = root / "starting-owner"
+    endpoint.mkdir(mode=0o700)
+    stopped = threading.Event()
+    calls = []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(0.1)
+        (endpoint / "endpoint.json").write_text(json.dumps({"version": 1, "port": listener.getsockname()[1], "token": "f" * 64}))
+        (endpoint / "endpoint.json").chmod(0o600)
+        def serve():
+            while not stopped.is_set():
+                try:
+                    peer, _ = listener.accept()
+                except socket.timeout:
+                    continue
+                with peer:
+                    peer.settimeout(2)
+                    message = b""
+                    while b"\n" not in message:
+                        chunk = peer.recv(4096)
+                        if not chunk:
+                            break
+                        message += chunk
+                    if b"\n" not in message:
+                        continue
+                    request = json.loads(message)
+                    calls.append(request["method"])
+                    peer.sendall(b'{"result":{"session":"starting","state":"starting"}}\n')
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        try:
+            result = subprocess.run([agent, "--attach", str(endpoint), "--operation", "build", "--startup-timeout", "1"],
+                                    capture_output=True, text=True, timeout=5)
+            assert result.returncode == 71, result.stdout + result.stderr
+            assert 1 <= len(calls) <= 6 and set(calls) == {"describe"}, calls
+        finally:
+            stopped.set()
+            worker.join(timeout=3)
+            assert not worker.is_alive()
+
+
 def main():
     parser = argparse.ArgumentParser()
     for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
@@ -114,6 +162,7 @@ def main():
     integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="session-") as temporary:
+        check_startup_backoff(args.agent, pathlib.Path(temporary))
         project = pathlib.Path(temporary) / "project"
         shutil.copytree(args.fixture, project)
         command = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,
@@ -142,6 +191,8 @@ def main():
                 client.run("build")
                 assert (project / ".webfront/developer/build/app.js").is_file()
                 client.run("test", {"pattern": "passes"})
+                unicode_failure = client.run("test", {"pattern": "no-spec-é😀"}, state="failed")
+                assert unicode_failure["report"]["pattern"] == "no-spec-é😀", unicode_failure
                 client.run("preview")
                 for attempt in range(50):
                     snapshot_run = client.wait(client.start("inspect"))
@@ -155,6 +206,14 @@ def main():
                 updated = client.run("inspect")["data"]
                 assert any(item["id"] == "value" and item["text"] == "1" for item in updated["elements"]), updated
                 assert any(item["id"] == "authorization" and item["text"] == "denied" for item in updated["elements"]), updated
+                client.run("click", {"pageId": updated["pageId"], "elementId": "probe-wire"})
+                for _ in range(50):
+                    proof = client.run("inspect")["data"]
+                    if any(item["id"] == "wire-authorization" and item["text"] == "wire forgery denied" for item in proof["elements"]):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(proof)
                 client.run("fill", {"pageId": updated["pageId"], "elementId": "name", "value": "secret-not-to-export"})
                 assert "secret-not-to-export" not in json.dumps(client.run("inspect"))
                 client.run("preview")
@@ -224,6 +283,9 @@ def main():
                 assert shutdown.returncode == 0, shutdown.stderr
                 assert owner.wait(timeout=10) == 0
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
+                unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
+                                             capture_output=True, text=True, timeout=5)
+                assert unavailable.returncode == 69, unavailable.stderr
             finally:
                 if owner.poll() is None:
                     owner.kill()
@@ -235,27 +297,33 @@ def main():
             for member in archive.getmembers():
                 data = archive.extractfile(member).read() if member.isfile() else None
                 if member.name == "package/runtime.mjs":
-                    data = b"await new Promise(resolve => setTimeout(resolve,7000));\n" + data
+                    data = b"await new Promise(resolve => setTimeout(resolve,17000));\n" + data
                     member.size = len(data)
                 output.addfile(member, io.BytesIO(data) if data is not None else None)
         delayed_command = list(command)
         delayed_command[delayed_command.index("--environment") + 1] = str(delayed)
         delayed_command[delayed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(delayed.read_bytes()).digest()).decode()
         with (pathlib.Path(temporary) / "hang.log").open("w") as log:
-            client = Client([args.agent, *delayed_command, "--mcp", "--startup-timeout", "30", "--timeout", "5", "--allow", "test"], log)
+            client = Client([args.agent, *delayed_command, "--mcp", "--startup-timeout", "30", "--timeout", "15", "--allow", "test"], log)
             try:
                 client.initialize()
                 client.start("test", {"pattern": "blocks the renderer"})
-                assert client.child.wait(timeout=15) == 71
+                assert client.child.wait(timeout=25) == 71
                 assert (project / "renderer.started").is_file(), "The native deadline expired before the blocked spec actually started"
             finally:
                 client.close()
         (project / "renderer.started").unlink()
-        cli = subprocess.run([args.agent, *delayed_command, "--startup-timeout", "30", "--timeout", "5",
+        forced_endpoint = pathlib.Path(temporary) / "forced-window"
+        cli = subprocess.run([args.agent, *delayed_command, "--listen", str(forced_endpoint), "--startup-timeout", "30", "--timeout", "15",
                               "--allow", "test", "--operation", "test", "--pattern", "blocks the renderer"],
-                             capture_output=True, text=True, timeout=45)
+                             capture_output=True, text=True, timeout=60)
         assert cli.returncode == 71, cli.stdout + cli.stderr
         assert (project / "renderer.started").is_file(), "The CLI deadline expired before the blocked spec started"
+        assert not forced_endpoint.exists(), "The forced exit left its attachment capability behind"
+        relaunched = subprocess.run([args.agent, *command, "--listen", str(forced_endpoint), "--allow", "build", "--operation", "build"],
+                                    capture_output=True, text=True, timeout=45)
+        assert relaunched.returncode == 0, relaunched.stdout + relaunched.stderr
+        assert not forced_endpoint.exists()
     print("MCP real-window regression passed: diagnostics/correction/check/build/test/preview/actions/cancellation/native watchdog/authenticated shared-window attachment")
 
 

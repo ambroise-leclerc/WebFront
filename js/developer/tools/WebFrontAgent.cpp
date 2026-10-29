@@ -132,13 +132,25 @@ int runCli(Backend&                                   controller,
            const std::map<std::string, std::string>& arguments,
            std::chrono::seconds                       startupTimeout,
            std::stop_token                            stop = {}) {
-    const auto deadline = std::chrono::steady_clock::now() + startupTimeout;
-    while (!stop.stop_requested() && Object(controller.describe()).string("state") == "starting") {
+    const auto  deadline = std::chrono::steady_clock::now() + startupTimeout;
+    auto        delay    = std::chrono::milliseconds{100};
+    std::string identity;
+    while (!stop.stop_requested()) {
         if (std::chrono::steady_clock::now() > deadline)
-            throw std::runtime_error("Developer startup timed out");
-        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            throw OperationError("timeout", "Developer startup timed out");
+        const Object snapshot{controller.describe()};
+        if (snapshot.string("state") == "closed")
+            throw OperationError("disconnected", "Developer session is closed");
+        if (snapshot.string("state") != "starting") {
+            identity = snapshot.string("session");
+            break;
+        }
+        std::this_thread::sleep_for(
+            std::min(delay, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now())));
+        delay = std::min(delay * 2, std::chrono::milliseconds{1000});
     }
-    const auto   identity = Object(controller.describe()).string("session");
+    if (stop.stop_requested())
+        return 1;
     const Object request{
         objectJson({{"session", json::quote(identity)}, {"operation", json::quote(operation)}, {"arguments", objectJson(arguments)}}
         )
@@ -299,9 +311,6 @@ int main(int argc, char** argv) {
         // Dispatch CEF renderer processes before parsing flags or creating a
         // profile.
         webfront::detail::ensureFrontendInitialized<Selected>();
-#ifndef _WIN32
-        std::signal(SIGPIPE, SIG_IGN);
-#endif
         const auto options = parse(argc, argv);
         Profile    profile;
         sources.profile = profile.path;
@@ -338,6 +347,8 @@ int main(int argc, char** argv) {
                     if (!stop.stop_requested() && !done.load()) {
                         // A normal ending keeps its own status; only an abnormal one is reported as stuck.
                         const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
+                        if (channel)
+                            channel->stop();
                         std::error_code ignored;
                         std::filesystem::remove_all(profile.path, ignored);  // _Exit skips the destructors
                         std::_Exit(code);
@@ -378,6 +389,12 @@ int main(int argc, char** argv) {
         done.store(true);
         supervisor.request_stop();
         return status.load();
+    } catch (const TransportError& error) {
+        std::cerr << "webfront-agent: " << error.what() << "; request outcome may be unknown\n";
+        return 69;
+    } catch (const OperationError& error) {
+        std::cerr << "webfront-agent: " << error.what() << '\n';
+        return error.code == "timeout" ? 71 : error.code == "disconnected" ? 69 : 1;
     } catch (const std::exception& error) {
         std::cerr << "webfront-agent: " << error.what() << '\n';
         return 64;

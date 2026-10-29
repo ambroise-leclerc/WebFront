@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Harden developer automation callbacks with per-message HMAC-SHA-256 and replay protection,
+  revoke the attachment listener and endpoint on shutdown/watchdog exit, preserve final output
+  summaries and invalidate old preview actions before every navigation. Document the actual
+  frontend storage limits and add a maintained optional official MCP SDK regression.
+
 - Consumer Jasmine/CTest integration (#402): opt-in instrumentation runs classic JavaScript
   specs in an application's own page with its existing DOM and callbacks. The public CMake
   helper provisions verified Jasmine, passes application arguments and checks a fresh JSON

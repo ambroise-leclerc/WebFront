@@ -61,9 +61,11 @@ include(WebFrontRegistry)
 set(_browser_tests_available OFF)
 if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
    AND CMAKE_SYSTEM_NAME IN_LIST WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_TEST_PLATFORMS)
-    set(_browser_tests_available ON)
-    webfront_provision_registry(_registry_archives "${CMAKE_CURRENT_SOURCE_DIR}/registry-packages.json"
-        "${CMAKE_BINARY_DIR}/registry-archives")
+    webfront_optional_window_test_runner(_window_test_prefix _browser_tests_available)
+    if(_browser_tests_available)
+        webfront_provision_registry(_registry_archives "${CMAKE_CURRENT_SOURCE_DIR}/registry-packages.json"
+            "${CMAKE_BINARY_DIR}/registry-archives")
+    endif()
 endif()
 # A copy of the sources that the scripts of the repository run on (#315); the registry and the environment are built in it.
 set(_self_project "${CMAKE_CURRENT_BINARY_DIR}/self-build-project")
@@ -75,14 +77,7 @@ if(_browser_tests_available AND TARGET webfront-agent)
     if(Python3_Interpreter_FOUND)
         set(_agent_command "$<TARGET_FILE:webfront-agent>")
         # The client launches both native processes on the display supplied to the whole test.
-        set(_agent_prefix "")
-        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-            webfront_find_xvfb(_agent_display)
-            if(NOT _agent_display)
-                message(FATAL_ERROR "Automation regression requires xvfb-run on Linux")
-            endif()
-            set(_agent_prefix "${_agent_display}" -a)
-        endif()
+        set(_agent_prefix "${_window_test_prefix}")
         add_test(NAME AutomationMcpWindow COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/test/tools/AutomationClient.py"
             --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
@@ -90,7 +85,23 @@ if(_browser_tests_available AND TARGET webfront-agent)
             --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
             --work "${CMAKE_CURRENT_BINARY_DIR}/automation-client")
         set_tests_properties(AutomationMcpWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
-            LABELS web-integration TIMEOUT 240)
+            LABELS web-integration TIMEOUT 240 RESOURCE_LOCK webfront_port_9002)
+        # Short watchdog deadlines must not measure competing native renderer startups.
+        webfront_use_own_profile(AutomationMcpWindow automation)
+        execute_process(COMMAND "${Python3_EXECUTABLE}" -c
+            "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
+            RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)
+        if(_sdk_available EQUAL 0)
+            add_test(NAME AutomationSdkWindow COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/test/tools/AutomationSdkClient.py"
+                --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
+                --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
+                --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/automation-project"
+                --work "${CMAKE_CURRENT_BINARY_DIR}/automation-sdk")
+            set_tests_properties(AutomationSdkWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
+                LABELS web-integration TIMEOUT 240 RESOURCE_LOCK webfront_port_9002)
+            webfront_use_own_profile(AutomationSdkWindow automation-sdk)
+        endif()
     endif()
 endif()
 # The Jasmine suite is a WebFront project (suite/) that webtest runs with `wf test` in the pinned bootstrap environment;

@@ -115,6 +115,8 @@ add_test(NAME NewcomerDocsMatchExamples
 add_test(NAME FrontendSelection
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendSelection.cmake)
+add_test(NAME OptionalWindowDisplay COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckOptionalWindowDisplay.cmake)
 add_test(NAME NativeAutodetectReconfiguration
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-autodetect
