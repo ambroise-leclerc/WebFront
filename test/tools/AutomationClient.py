@@ -382,10 +382,11 @@ def main():
 
         # A human-owned window is already running before either agent attaches. Native grants remain the owner's.
         endpoint = pathlib.Path(temporary) / "shared-window"
-        profiles = (pathlib.Path(temporary) / "profiles").resolve()
-        profiles.mkdir()
-        owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
-        with (pathlib.Path(temporary) / "shared.log").open("w") as log:
+        # Keep Chromium's temporary Unix socket paths below sockaddr_un's limit, independently
+        # of the checkout/work path length. The agent still creates its own private child profile.
+        with tempfile.TemporaryDirectory(prefix="wf-profile-") as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
+            profiles = pathlib.Path(profile_root).resolve()
+            owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             owner = subprocess.Popen([args.agent, *command, "--serve", "--listen", str(endpoint),
                                       "--allow", "build", "--allow", "test", "--timeout", "20"],
                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log, text=True, env=owner_environment)
@@ -444,6 +445,9 @@ def main():
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)
                 assert unavailable.returncode == 69, unavailable.stderr
+            except BaseException:
+                print(pathlib.Path(log.name).read_text(), flush=True)
+                raise
             finally:
                 if owner.poll() is None:
                     owner.kill()

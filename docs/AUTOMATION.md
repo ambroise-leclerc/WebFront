@@ -126,7 +126,7 @@ it before any operation executes. Web requests and incorrect capabilities are re
 this file to a shared location. The server removes its file/directory on normal closure and catchable SIGINT/SIGTERM, without
 recursively deleting caller-owned content. Independent processes without a shared endpoint file
 remain inaccessible to the attachment client. Catchable interrupts also remove the temporary
-native profile; SIGKILL, forced OS termination and power loss cannot run cleanup. Same-user compromise remains outside this boundary.
+native profile (Windows retries transient browser file locks for up to two seconds); SIGKILL, forced OS termination and power loss cannot run cleanup. Same-user compromise remains outside this boundary.
 Unauthenticated peers are multiplexed in a bounded queue (64, with oldest-peer eviction and a
 two-second handshake deadline); they do not consume the 32 authenticated request worker slots.
 This prevents silent connections from exhausting that worker pool. A sustained local flood can

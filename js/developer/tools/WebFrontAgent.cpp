@@ -48,9 +48,30 @@ struct Files {
 struct Profile {
     channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
     const std::filesystem::path path{directory.path};
+    void cleanup() const noexcept {
+        // WebView2 closes its browser process asynchronously after the controller is released.
+        // Retry only sharing violations during that short exit; POSIX can unlink open files.
+#ifdef _WIN32
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+#endif
+        for (;;) {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+            if (!error)
+                return;
+#ifdef _WIN32
+            if ((error.value() == ERROR_SHARING_VIOLATION || error.value() == ERROR_ACCESS_DENIED || error.value() == ERROR_DIR_NOT_EMPTY)
+                && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{20});
+                continue;
+            }
+#endif
+            std::cerr << "Automation: cannot remove temporary profile: " << error.message() << '\n';
+            return;
+        }
+    }
     ~Profile() {
-        std::error_code ignored;
-        std::filesystem::remove_all(path, ignored);
+        cleanup();
     }
 };
 
@@ -359,8 +380,7 @@ int main(int argc, char** argv) {
                         const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
                         if (channel)
                             channel->stop();
-                        std::error_code ignored;
-                        std::filesystem::remove_all(profile.path, ignored);  // _Exit skips the destructors
+                        profile.cleanup();  // _Exit skips the destructors
                         std::_Exit(code);
                     }
                     return;
