@@ -77,6 +77,9 @@ deliberately spinning renderers without blocking unrelated browser work. Their t
 only the operation body with a marker followed by a synchronous loop; signed dispatch, the native
 deadline, shutdown grace and process/endpoint cleanup stay real. A single three-second startup delay
 exceeds their two-second operation budget, avoiding repeated long bootstrap/Jasmine waits.
+Mutated test archives use gzip level 1 to reduce fixture-generation CPU cost. The CLI restart checks
+endpoint reuse and Unicode bootstrap error delivery together; successful builds remain covered by
+the functional owned/shared-window scenario.
 
 ## Visible windows and retained lifecycle contracts
 

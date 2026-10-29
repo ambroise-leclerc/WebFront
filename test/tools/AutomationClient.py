@@ -186,7 +186,7 @@ def watchdog(args):
             while(true) {}
         };"""
         replaced = False
-        with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(environment, "w:gz") as output:
+        with tarfile.open(args.environment, "r:gz") as archive, tarfile.open(environment, "w:gz", compresslevel=1) as output:
             for member in archive.getmembers():
                 data = archive.extractfile(member).read() if member.isfile() else None
                 if member.name == "package/runtime.mjs":
@@ -227,17 +227,11 @@ def watchdog(args):
         assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
         assert not endpoint.exists(), "The forced exit left its attachment capability behind"
         if args.scenario == "cli-watchdog":
-            # Reuse the exact endpoint path and project after forced exit, with the original operation body.
-            integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
-            common = ["--project", str(project), "--environment", args.environment, "--integrity", integrity, "--registry-dir", args.registry]
-            installed = subprocess.run([args.driver, *common, "--", "install"], capture_output=True, text=True, timeout=120)
-            assert installed.returncode == 0, installed.stdout + installed.stderr
-            relaunched = subprocess.run([args.agent, *common, "--listen", str(endpoint), "--allow", "build", "--operation", "build"],
-                                        capture_output=True, text=True, timeout=45)
-            assert relaunched.returncode == 0, relaunched.stdout + relaunched.stderr
-            assert not endpoint.exists()
+            # This same-path relaunch must reach its authenticated page before the intentional error.
+            # It checks directory reuse and Unicode failure reporting in one process; normal builds
+            # are exercised by the functional MCP/shared-window scenario.
             failed_environment = root / "failed-bootstrap.tgz"
-            with tarfile.open(environment, "r:gz") as archive, tarfile.open(failed_environment, "w:gz") as output:
+            with tarfile.open(environment, "r:gz") as archive, tarfile.open(failed_environment, "w:gz", compresslevel=1) as output:
                 for member in archive.getmembers():
                     data = archive.extractfile(member).read() if member.isfile() else None
                     if member.name == "package/runtime.mjs":
