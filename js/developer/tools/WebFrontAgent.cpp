@@ -95,7 +95,7 @@ struct CEFAgentFrontend : frontend::CEFFrontend {
         webfront::cef::detail::openWindow(frontend::detail::applicationUrl(address, port, page),
                                           webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
                                           nullptr,
-                                          sources.profile);
+                                          sources.profile, true);
 #else
         frontend::CEFFrontend::open(address, port, page, policy);
 #endif

@@ -539,7 +539,8 @@ private:
 namespace detail {
 
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
-                       CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {}) {
+                       CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
+                       bool preserveSignalHandlers = false) {
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -555,6 +556,8 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     );
     CefSettings settings;
     settings.no_sandbox = true;
+    // An embedder owning native shutdown must keep its SIGINT/SIGTERM handlers.
+    settings.disable_signal_handlers = preserveSignalHandlers;
     // Common settings for all platforms
     settings.multi_threaded_message_loop = false;
     settings.log_severity                = LOGSEVERITY_INFO;

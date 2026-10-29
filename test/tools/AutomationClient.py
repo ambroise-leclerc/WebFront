@@ -434,7 +434,8 @@ def main():
                 assert list(profiles.glob("webfront-agent-*")), "The test must observe the actual native profile"
                 if os.name == "posix":
                     owner.send_signal(signal.SIGTERM)
-                    assert owner.wait(timeout=15) == 128 + signal.SIGTERM, pathlib.Path(log.name).read_text()
+                    status = owner.wait(timeout=15)
+                    assert status == 128 + signal.SIGTERM, (status, pathlib.Path(log.name).read_text())
                 else:
                     shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
                                               capture_output=True, text=True, timeout=10)
