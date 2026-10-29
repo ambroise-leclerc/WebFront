@@ -145,8 +145,7 @@ int runCli(Backend&                                   controller,
             identity = snapshot.string("session");
             break;
         }
-        std::this_thread::sleep_for(
-            std::min(delay, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now())));
+        std::this_thread::sleep_until(std::min(deadline, std::chrono::steady_clock::now() + delay));
         delay = std::min(delay * 2, std::chrono::milliseconds{1000});
     }
     if (stop.stop_requested())
