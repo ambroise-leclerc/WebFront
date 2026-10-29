@@ -63,13 +63,13 @@ void workerThread() {
 
 void repeatedShow() {
     for (const auto page : {"no-bridge.html", "no-bridge.html?early-close"}) {
-        App app("9002", std::filesystem::current_path());
+        App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.show(page);
     }
 }
 
 void httpError() {
-    App app("9002", std::filesystem::current_path());
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     expectFailure(
         [&] {
             app.show("missing-webkitgtk-page.html");
@@ -123,7 +123,7 @@ struct NativeClosingFrontend : Frontend {
 
 void nativeClose() {
     using NativeApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, NativeClosingFrontend>;
-    NativeApp app("9002", std::filesystem::current_path());
+    NativeApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     app.show("no-bridge.html");
 }
 
