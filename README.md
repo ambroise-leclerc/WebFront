@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/webfront-swallow.svg" width="240" height="137" alt="WebFront — tricolour swallow logo">
+</p>
+
 # WebFront
 
 [![CI](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml/badge.svg?branch=develop)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
