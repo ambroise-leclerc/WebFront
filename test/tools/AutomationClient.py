@@ -433,6 +433,7 @@ def main():
                 assert cli.returncode == 0 and json.loads(cli.stdout)["state"] == "succeeded", cli.stdout + cli.stderr
                 assert list(profiles.glob("webfront-agent-*")), "The test must observe the actual native profile"
                 if os.name == "posix":
+                    assert owner.poll() is None, ("Owner exited before SIGTERM", owner.returncode, pathlib.Path(log.name).read_text())
                     owner.send_signal(signal.SIGTERM)
                     status = owner.wait(timeout=15)
                     assert status == 128 + signal.SIGTERM, (status, pathlib.Path(log.name).read_text())
