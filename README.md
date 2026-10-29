@@ -204,8 +204,8 @@ The type packages come next: `wf install typescript@5.9.3 @types/react@19.3.0 @t
 
 An optional native [automation launcher](docs/AUTOMATION.md) exposes the developer window through
 local stdio MCP or a JSON CLI, with explicit permissions for check/build/test/preview and bounded
-UI inspection/actions. It requires a compatible environment built from the sources; the pinned
-0.6.2 archive predates this API.
+UI inspection/actions. It requires an environment containing automation API v1 (0.6.3 or later),
+built from the sources or obtained from a verified published distribution.
 
 ### 5. Try the result
 

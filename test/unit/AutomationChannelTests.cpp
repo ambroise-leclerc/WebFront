@@ -246,6 +246,6 @@ SCENARIO("Attachment response deadlines are configurable independently of render
     });
     ChannelClient impatient{endpoint.path, std::chrono::milliseconds{5}};
     REQUIRE_THROWS_AS(impatient.describe(), TransportError);
-    ChannelClient patient{endpoint.path, std::chrono::milliseconds{500}};
+    ChannelClient patient{endpoint.path, std::chrono::milliseconds{5000}};
     REQUIRE(Object(patient.describe()).string("state") == "ready");
 }

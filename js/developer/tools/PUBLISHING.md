@@ -58,6 +58,10 @@ the same version; a publication (a `developer-v*` tag or a dispatch with `publis
 sources are ahead, `wf run pin` requires the header to be exactly the one generated for its version and the deployed
 archive at its URL to have its integrity.
 
+A release preparation branch may carry the new pin before the archive exists (for instance
+[0.6.3](../../docs/validation/developer-0.6.3-release.md)). Keep its pull request as a draft and
+merge it only after the deployed bytes and headers are verified.
+
 1. Merge the changes with the header still on the previous version.
 2. On a release branch, run `wf run build build-distribution --refresh-bootstrap` and commit the new header (and the
    checksums of `bundles.json`, which cover it).
