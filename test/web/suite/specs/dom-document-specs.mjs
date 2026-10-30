@@ -91,6 +91,37 @@ describe('C++ DOM document API', () => {
         } finally { frame.remove(); }
     });
 
+    it('lets a C++ coroutine await successive events and cancels its pending wait', async () => {
+        const frame = await connectedFrame();
+        try {
+            const page = frame.contentWindow, root = page.document.getElementById('root');
+            await call(frame, 'domDocumentBuild');
+            await until(() => root.querySelector('input'));
+            const input = root.querySelector('input'), results = [];
+            page.documentAwaitResult = key => results.push(key);
+            // The flag declared by next() shows that the browser subscription is installed: exactly one event is delivered.
+            const press = key => {
+                const event = new page.KeyboardEvent('keydown', {key, cancelable: true});
+                input.dispatchEvent(event);
+                return event.defaultPrevented;
+            };
+            await call(frame, 'domDocumentAwait');
+            await until(() => press('Enter'));
+            await until(() => results.length === 1);
+            await until(() => press('Escape'));
+            await until(() => results.length === 2);
+            expect(results).toEqual(['Enter', 'Escape']);
+            expect(await call(frame, 'domDocumentAwaitCancelled')).toBeFalse();
+            // The third wait subscribes keydown with the same flag. The cancellation first flushes that subscription, then
+            // its removal: the first keydown afterwards is no longer prevented, and the coroutine never resumes.
+            await call(frame, 'domDocumentCancelAwait');
+            expect(press('Tab')).toBeFalse();
+            await until(() => call(frame, 'domDocumentAwaitCancelled'));
+            await call(frame, 'domDocumentAwaitCancelled'); // Round trip after an event nobody awaits.
+            expect(results).toEqual(['Enter', 'Escape']);
+        } finally { frame.remove(); }
+    });
+
     it('isolates browsers and invalidates handles on disconnect and reload', async () => {
         const first = await connectedFrame(), second = await connectedFrame();
         try {

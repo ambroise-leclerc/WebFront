@@ -482,6 +482,10 @@ private:
             if (auto shared = weak.lock())
                 static_cast<void>(spawn(flushDomAfter(UI{*this, id}, std::move(shared))));
         };
+        // Called under the document's release lock, which close() takes before the application releases it.
+        state->post = [this, weak = std::weak_ptr(state)] {
+            static_cast<void>(spawn(releaseDomWaits(weak)));
+        };
         domDocuments.emplace(id, state);
         return state;
     }
@@ -687,6 +691,17 @@ private:
         } catch (const std::exception& error) {
             state->reject(state->batchId, error.what());
         }
+    }
+
+    static Task releaseDomWaits(std::weak_ptr<dom::detail::State> weak) {
+        if (auto state = weak.lock(); state && state->alive) {
+            try {
+                state->sweep();
+            } catch (const std::exception& error) {
+                state->reject(state->batchId, error.what());
+            }
+        }
+        co_return;
     }
 
     bool domCall(const WebLinkEvent& event, WebLink<Net, Policy>& link) {

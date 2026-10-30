@@ -8,6 +8,8 @@
 | 1.1 | 2026-10-27 | Proposée, partiellement remplacée | Ambroise Leclerc | Le transport du prototype est remplacé par ADR-003 1.10 et suivantes ; l’API document/nœuds reste proposée (#381). | — |
 | 1.2 | 2026-10-27 | Proposée, partiellement livrée | Ambroise Leclerc | API document/nœuds, cycle de 1 ms, événements et lectures groupées (#381). | — |
 | 1.3 | 2026-10-27 | Proposée, partiellement livrée | Ambroise Leclerc | Adaptateur React hors du cœur, store fusionné et variante Life (#382). | — |
+| 1.4 | 2026-10-30 | Proposée, partiellement livrée | Ambroise Leclerc | Descripteurs de types C++23, formulaires, inspecteurs et déclarations TypeScript vérifiées par `wf check` ; couche de réflexion C++26 facultative compilée en CI par GCC 16 (#383). | — |
+| 1.5 | 2026-10-30 | Proposée, partiellement livrée | Ambroise Leclerc | Événements attendables `co_await node.next(event)` (#384), sans changement du format binaire. | — |
 
 ## État et chronologie
 
@@ -15,8 +17,9 @@
 Le transport DOM est désormais livré par l'[ADR-003, version 1.10 et suivantes](ADR-003-protocole-binaire-et-bornes.md),
 avec la commande `domBatch` et `/webfront-dom.mjs` (#380). L'appel `wfDom.apply` par `jsFunction` décrit
 ci-dessous est uniquement le protocole historique des prototypes ; il ne décrit pas le transport livré.
-L’API document/nœuds est livrée par #381 ([DOM.md](../DOM.md)) ; l’adaptateur React et le store fusionné sont livrés par #382 ([REACT.md](../REACT.md)).
-Les autres adaptateurs, la réflexion et les événements attendables restent proposés (#383 et #384). Le point d’envoi retenu est un cycle serveur de 1 ms
+L’API document/nœuds est livrée par #381 ([DOM.md](../DOM.md)) ; l’adaptateur React et le store fusionné sont livrés par #382 ([REACT.md](../REACT.md)) ;
+les descripteurs de types, les formulaires générés et la couche de réflexion facultative sont livrés par #383 ([FORMS.md](../FORMS.md)) ;
+les événements attendables sont livrés par #384 ([DOM.md](../DOM.md#awaiting-an-event)). Les autres adaptateurs restent proposés. Le point d’envoi retenu est un cycle serveur de 1 ms
 après la première écriture en attente, au sein d’une tâche possédée et drainée.
 `flush()` et les lectures explicites peuvent envoyer plus tôt. `SET_TEXT` reste limité
 aux nœuds texte. Une révocation invalide le sous-arbre ; avec des écritures en attente,
@@ -257,7 +260,10 @@ membres par `obj.[:m:]`. Points relevés :
 - **Événements : callbacks d'abord, attente ensuite.** Un callback suffit au cas courant. Un événement attendable
   (`co_await button.next("click")`) sert les dialogues séquentiels et les assistants, où la coroutine est la machine à
   états ; il s'annule par le `TaskHandle` et se termine arrêté à la déconnexion. Il n'a pas été prototypé et n'est pas une
-  condition d'acceptation du noyau.
+  condition d'acceptation du noyau. Livré par #384 : le sender s'abonne à son démarrage avec les drapeaux déclarés par
+  `next()`, se désabonne à l'événement et se termine arrêté dès que l'événement ne peut plus survenir (jeton d'arrêt,
+  `unlisten()`, retrait ou révocation du nœud, rejet, déconnexion, arrêt). Un seul abonnement, callback ou attente,
+  par élément et par événement ; les événements survenus entre deux attentes ne sont pas mis en file.
 - **Décisions synchrones déclarées à l'avance.** `preventDefault` et `stopPropagation` ne peuvent pas attendre C++ : ils
   sont déclarés à l'abonnement (prototype : `submit` annulé).
 - **Un lot est une transaction.** Il est validé en entier avant d'être appliqué ; les noms qu'il définit restent acquis
@@ -336,6 +342,9 @@ Chacun est rattaché à une issue dérivée :
    déconnexion, rechargement de page, plusieurs navigateurs, arrêt ([ADR-006](ADR-006-taches-structurees-et-arret.md)).
 4. (#382) Une variante du Game of Life montre un panneau construit en C++ dans l'interface React, avec le store fusionné.
 5. (#383) La couche de réflexion est facultative, avec un repli C++23 par descripteurs, et compilée en CI par GCC 16.
+   Livré : `include/webfront/components/forms/` ; `FormsReflectionTests` compare les descripteurs, la déclaration et le
+   lot du formulaire réfléchis à ceux écrits à la main, et le job Linux exige sa compilation
+   (`WEBFRONT_REQUIRE_REFLECTION_TESTS`).
 6. (#380) Les mesures de cette ADR sont reprises sous CEF et WebView2, et avec un client distant, avec l'interpréteur
    embarqué.
 

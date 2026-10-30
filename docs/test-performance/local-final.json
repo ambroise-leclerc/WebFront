@@ -1,0 +1,34 @@
+{
+  "commit": "92d9baf5e330bd9ffe66f2908aca0ee66114fb49",
+  "platform": "Linux GCC 16 Release WebKitGTK / GCC 15 Release CEF",
+  "developer_specs": 97,
+  "cef_off": {
+    "cases": 381,
+    "wall_seconds": 92.63,
+    "failures": 0
+  },
+  "cef": {
+    "cases": 74,
+    "wall_seconds": 87.66,
+    "failures": 0
+  },
+  "sampled_resources_cef_off": {
+    "command": [
+      "cmake",
+      "-DBUILD_DIR=build-388",
+      "-DREPEAT=1",
+      "-DPARALLEL=4",
+      "-P",
+      "test/cmake/RunTestSuite.cmake"
+    ],
+    "platform": "linux",
+    "exit_code": 0,
+    "wall_seconds": 92.81084763299441,
+    "sample_interval_seconds": 0.25,
+    "sampled_peak_family_rss_bytes": 4291428352,
+    "sampled_peak_processes": 41,
+    "sampled_processes_seen": 407,
+    "sampled_cpu_seconds": 387.07,
+    "limitation": "Sampled bounds: short-lived children may be missed; shared pages count in each process RSS."
+  }
+}

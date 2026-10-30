@@ -8,6 +8,22 @@
   The lifetime contract is unchanged: a `UI` is valid while its application exists, so a value kept after its
   application is destroyed is not comparable with those of a later application.
 
+- Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
+  the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
+  the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,
+  `unlisten()`, node removal or revocation, rejection, disconnection and shutdown; every end of a wait
+  but a rejection, which closes the document until the page reloads, removes its browser subscription
+  and flags, also after a stop from another thread. One callback or
+  wait per element and event. No wire format change.
+
+- Add optional [type descriptors and generated forms](FORMS.md) (#383, ADR-018 criterion 5):
+  `forms::Description<T>` (name, label, kind, bounds, choices, accessors) written by hand in C++23,
+  `forms::form()` and `forms::inspector()` built in a DOM document from them, and
+  `forms::typescriptDeclaration()`, whose output the developer journey type-checks with `wf check`.
+  The optional `forms::describe<T>()` produces the same descriptors by C++26 reflection from
+  `Label`/`Range` annotations; its tests build with GCC 16 and are required on the Linux CI job
+  (`WEBFRONT_REQUIRE_REFLECTION_TESTS`). The library stays C++23.
+
 - Warn at the end of a consumer's configuration, with GCC 16, about each target linking
   `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
   stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is
