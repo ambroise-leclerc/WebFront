@@ -1,4 +1,7 @@
-﻿cmake_minimum_required (VERSION 3.31)
+﻿# The embedding project's CMP0155 setting (module scanning by default), read before this file's own
+# cmake_minimum_required resets the policies; empty when unknown or set.
+cmake_policy(GET CMP0155 WEBFRONT_PARENT_CMP0155)
+cmake_minimum_required (VERSION 3.31)
 
 # Top-level detection must precede project(): an embedding parent project owns global settings.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -93,6 +96,11 @@ endif()
 include(CPM)
 CPMAddPackage("gh:ambroise-leclerc/stdnet#8005774eabcba7e73188c02d2eeca2ff43c4ee3a")
 webfront_include_frontend_support()
+
+include(ModuleScan)
+if(NOT WEBFRONT_IS_TOP_LEVEL)
+    webfront_check_module_scan()
+endif()
 
 if(WEBFRONT_USE_MDDLOG)
     include(cmake/MddlogIntegration.cmake)
