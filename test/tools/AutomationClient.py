@@ -268,7 +268,7 @@ def watchdog(args):
             else:
                 cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
                                      stdout=subprocess.PIPE, stderr=log, text=True, timeout=45)
-                assert cli.returncode == 71, (cli.returncode, cli.stdout, pathlib.Path(log.name).read_text())
+                assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
         assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
         assert not endpoint.exists(), "The forced exit left its attachment capability behind"
         if args.scenario == "cli-watchdog":
@@ -375,7 +375,7 @@ def main():
                     time.sleep(0.02)
                 client.tool("cancel", {"session": client.session, "runId": run})
                 cancelled = client.wait(run)
-                assert cancelled["state"] == "cancelled", cancelled
+                assert cancelled["state"] == "cancelled", f"Unexpected run state: {cancelled}"
                 client.run("test", {"pattern": "passes"})
             finally:
                 client.close()
@@ -425,7 +425,7 @@ def main():
                     second.tool("start", {"session": second.session, "operation": "build"}, error=True)
                     second.tool("cancel", {"session": second.session, "runId": run})
                     cancelled = first.wait(run)
-                    assert cancelled["state"] == "cancelled", cancelled
+                    assert cancelled["state"] == "cancelled", f"Unexpected run state: {cancelled}"
                 finally:
                     first.close()
                     second.close()
@@ -435,18 +435,21 @@ def main():
                 assert cli.returncode == 0 and json.loads(cli.stdout)["state"] == "succeeded", cli.stdout + cli.stderr
                 assert list(profiles.glob("webfront-agent-*")), "The test must observe the actual native profile"
                 if os.name == "posix":
-                    assert owner.poll() is None, ("Owner exited before SIGTERM", owner.returncode, pathlib.Path(log.name).read_text())
+                    assert owner.poll() is None, f"Owner exited before SIGTERM: {owner.returncode}\n{pathlib.Path(log.name).read_text()}"
                     owner.send_signal(signal.SIGTERM)
                     status = owner.wait(timeout=15)
-                    assert status == 128 + signal.SIGTERM, (status, pathlib.Path(log.name).read_text())
+                    assert status == 128 + signal.SIGTERM, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
                 else:
                     shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
                                               capture_output=True, text=True, timeout=10)
                     assert shutdown.returncode == 0, shutdown.stderr
                     # The owner retries removing the WebView2 profile for up to 10 s after the browser exits.
                     assert owner.wait(timeout=30) == 0, pathlib.Path(log.name).read_text()
-                left = list(profiles.glob("webfront-agent-*"))
-                assert not left, ("The owner left its native profile behind", left, pathlib.Path(log.name).read_text())
+                # The browser process may outlive the owner by a moment: poll instead of reading the directory once.
+                profile_deadline = time.monotonic() + 10
+                while (left := list(profiles.glob("webfront-agent-*"))) and time.monotonic() < profile_deadline:
+                    time.sleep(0.1)
+                assert not left, f"The owner left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)

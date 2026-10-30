@@ -3,8 +3,8 @@
 ## Unreleased
 
 - Stabilise the desktop-native tier (#416): the automation owner retries removing its temporary
-  WebView2 profile for up to 10 s (was 2 s; 1 s after a forced exit) while the browser process exits, the automation tests wait
-  for that cleanup instead of assuming it is immediate, their failure messages report the observed run
+  WebView2 profile for up to 10 s (was 2 s, also after a forced exit; a refused access is retried for 2 s only) while the
+  browser process exits, the automation tests poll for that cleanup instead of assuming it is immediate, their failure messages report the observed run
   state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout.
 
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
