@@ -6,11 +6,16 @@
   `WEBFRONT_ENABLE_COVERAGE` and `WEBFRONT_ENABLE_SANITIZER_{ADDRESS,LEAK,UNDEFINED_BEHAVIOR,THREAD,MEMORY}` replace
   the unprefixed `ENABLE_*` names (still `OFF` by default). A parent project's own generic variables no longer build
   WebFront's tests or fuzzers, instrument it for coverage or sanitizers, or disable its native detection; a consumer
-  that wants WebFront's tests sets the prefixed option. At the top level the former names still work until WebFront
-  0.7.0 and are removed from the cache: a prefixed option already in the cache decides, and a true former value is
-  then ignored with a warning; otherwise a true former value is moved to the prefixed option with a deprecation
-  warning. The `OFF` defaults left in older build trees are dropped silently. CI, the documentation and
-  `TestOptionsConfiguration` use the new names.
+  that wants WebFront's tests sets the prefixed option, and its build then keeps the explicit engine selection, as a
+  top-level test build does. A parent configured with an earlier WebFront keeps the unused `ENABLE_COVERAGE` and
+  `ENABLE_SANITIZER_*=OFF` entries in its cache; WebFront no longer reads them and leaves the parent's cache alone.
+  At the top level the former names, from the command line, a toolchain file or the cache, still work until WebFront
+  0.7.0, which refuses to configure while the migration remains, and are removed from the cache. A prefixed name given
+  by the same configure decides, and a former name of another value is then ignored with a warning that
+  `-Wno-deprecated` does not hide; otherwise a former name given by this configure is moved to the prefixed option,
+  even over a value an earlier configure left. A true former value left by an older build tree is moved unless the
+  prefixed option is already cached; the `OFF` defaults left there are dropped silently. Moving or repeating a former
+  name prints a deprecation warning. CI, the documentation and `TestOptionsConfiguration` use the new names.
 
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
   waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced

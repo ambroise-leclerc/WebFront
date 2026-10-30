@@ -136,7 +136,7 @@ Les prototypes ne font pas partie du dépôt : ils sont consultables dans le com
 - `DomPrototype.cpp` et `dom-prototype.html` : les scénarios, les vérifications du DOM et le rapport. Le programme
   échoue sur un DOM faux ou un rapport absent, jamais sur une durée.
 
-Exécution dans ce commit (build `-DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_ENABLE_TESTING=ON`, Release) : construire la cible
+Exécution dans ce commit (build `-DWEBFRONT_EMBED_WEBKITGTK=ON -DENABLE_TESTING=ON`, Release) : construire la cible
 `webkitgtk_dom_prototype`, extraire les archives `react-19.3.1`, `react-dom-19.3.1` et `scheduler-0.28.0` de
 `build/registry-archives/` dans un répertoire de paquets, puis lancer le programme sous Xvfb depuis `test/web/dom`
 avec ce répertoire en argument.

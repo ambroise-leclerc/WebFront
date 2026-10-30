@@ -1,13 +1,21 @@
 cmake_minimum_required(VERSION 3.31)
 if(OLD_TREE)
-    # A build tree configured before the rename: Sanitizers.cmake declared these former options with option().
+    # A build tree configured before the rename: the root declared ENABLE_TESTING and Sanitizers.cmake the other
+    # former options with option(), so their cache entries are typed BOOL.
+    option(ENABLE_TESTING "Enable Test Builds" OFF)
     option(ENABLE_COVERAGE "Enable coverage reporting for gcc/clang" FALSE)
     option(ENABLE_SANITIZER_ADDRESS "Enable address sanitizer" OFF)
+    message(STATUS "Former options of ${ROOT} declared")
     return()
 endif()
+if(FIXTURE_VERSION)
+    project(TestOptions VERSION ${FIXTURE_VERSION} LANGUAGES NONE)
+else()
+    project(TestOptions LANGUAGES NONE)
+endif()
+# As in the root CMakeLists.txt, after project(), which reads CMAKE_TOOLCHAIN_FILE (test-options/Toolchain.cmake).
 include("${ROOT}/cmake/WebFrontTestOptions.cmake")
 webfront_declare_test_options(${TOP_LEVEL})
-project(TestOptions LANGUAGES NONE)
 foreach(name TESTING FUZZING COVERAGE SANITIZER_ADDRESS SANITIZER_LEAK SANITIZER_UNDEFINED_BEHAVIOR
         SANITIZER_THREAD SANITIZER_MEMORY)
     if(DEFINED CACHE{ENABLE_${name}})

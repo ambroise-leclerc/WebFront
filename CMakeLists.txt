@@ -11,8 +11,6 @@ else()
 endif()
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/WebFrontTestOptions.cmake)
-webfront_declare_test_options(${WEBFRONT_IS_TOP_LEVEL})
 option(WEBFRONT_BUILD_AUTOMATION "Build the optional local developer CLI/MCP launcher" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(WEBFRONT_GZIP_DIFFERENTIAL "Build test-only gzip/zlib differential checks" OFF)
@@ -27,6 +25,9 @@ set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/webfront/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
+# After project(): a toolchain file's variables are then visible, as they were to the former option() calls.
+include(cmake/WebFrontTestOptions.cmake)
+webfront_declare_test_options(${WEBFRONT_IS_TOP_LEVEL})
 
 include(cmake/Frontends.cmake)
 # Applications need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window

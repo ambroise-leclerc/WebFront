@@ -4,9 +4,10 @@ if(NOT ROOT OR NOT WORK_DIR)
     message(FATAL_ERROR "ROOT and WORK_DIR are required")
 endif()
 file(REMOVE_RECURSE "${WORK_DIR}")
-# MIGRATED and IGNORED count the deprecation warnings of former names moved to, or overridden by, the prefixed ones.
+# MIGRATED, KEPT and IGNORED count the messages of former names moved to the prefixed ones (deprecation), repeating a
+# prefixed value (deprecation) and overridden by a prefixed one (a warning, which -Wno-deprecated does not hide).
 function(configure name directory)
-    cmake_parse_arguments(PARSE_ARGV 2 arg "" "MIGRATED;IGNORED" "EXPECT;OPTIONS")
+    cmake_parse_arguments(PARSE_ARGV 2 arg "" "MIGRATED;KEPT;IGNORED" "EXPECT;OPTIONS")
     execute_process(COMMAND "${CMAKE_COMMAND}" -S "${ROOT}/test/cmake/test-options" -B "${WORK_DIR}/${directory}"
         "-DROOT=${ROOT}" ${arg_OPTIONS}
         RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
@@ -19,23 +20,28 @@ function(configure name directory)
             message(FATAL_ERROR "${name}: expected '${expected}'\n${log}")
         endif()
     endforeach()
-    # CMake wraps warning text: compare it on one line.
-    string(REGEX REPLACE "\n +" " " flat "${log}")
-    foreach(kind MIGRATED IGNORED)
-        if(kind STREQUAL "MIGRATED")
-            set(pattern "ENABLE_[A-Z_]+ is deprecated and will be removed in WebFront 0\\.7\\.0: its value")
-        else()
-            set(pattern "ENABLE_[A-Z_]+ is deprecated and ignored")
-        endif()
-        string(REGEX MATCHALL "${pattern}" matches "${flat}")
+    # CMake wraps warning text: compare it with single spaces.
+    string(REGEX REPLACE "[\n ]+" " " flat "${log}")
+    set(prefix "\\(message\\): ENABLE_[A-Z_]+")
+    set(pattern_MIGRATED "CMake Deprecation Warning at [^ ]+ ${prefix} is deprecated and will be removed in WebFront 0\\.7\\.0: its value")
+    set(pattern_KEPT "CMake Deprecation Warning at [^ ]+ ${prefix} is deprecated [^:]+: use WEBFRONT_ENABLE_[A-Z_]+, which already has this value")
+    set(pattern_IGNORED "CMake Warning at [^ ]+ ${prefix} is ignored: WEBFRONT_ENABLE_[A-Z_]+ is set")
+    foreach(kind MIGRATED KEPT IGNORED)
+        string(REGEX MATCHALL "${pattern_${kind}}" matches "${flat}")
         list(LENGTH matches count)
         if(NOT arg_${kind})
             set(arg_${kind} 0)
         endif()
         if(NOT count EQUAL arg_${kind})
-            message(FATAL_ERROR "${name}: expected ${arg_${kind}} ${kind} warnings, got ${count}\n${log}")
+            message(FATAL_ERROR "${name}: expected ${arg_${kind}} ${kind} messages, got ${count}\n${log}")
         endif()
     endforeach()
+    string(REGEX MATCHALL "CMake (Deprecation )?Warning" all "${flat}")
+    list(LENGTH all total)
+    math(EXPR expected_total "${arg_MIGRATED} + ${arg_KEPT} + ${arg_IGNORED}")
+    if(NOT total EQUAL expected_total)
+        message(FATAL_ERROR "${name}: expected ${expected_total} warnings in all, got ${total}\n${log}")
+    endif()
 endfunction()
 
 configure("defaults" defaults
@@ -44,28 +50,55 @@ configure("defaults" defaults
 configure("prefixed names at the top level" prefixed
     EXPECT "TESTING=ON LEGACY=<unset>" "FUZZING=ON LEGACY=<unset>" "COVERAGE=ON LEGACY=<unset>"
     OPTIONS -DTOP_LEVEL=ON -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_ENABLE_FUZZING=ON -DWEBFRONT_ENABLE_COVERAGE=ON)
+
+# A configured tree, then former names given on later command lines.
 configure("former names at the top level are migrated" legacy MIGRATED 3
     EXPECT "TESTING=ON LEGACY=<unset>" "FUZZING=ON LEGACY=<unset>" "COVERAGE=ON LEGACY=<unset>"
     OPTIONS -DTOP_LEVEL=ON -DENABLE_TESTING=ON -DENABLE_FUZZING=ON -DENABLE_COVERAGE=ON)
 configure("a migrated value is kept without warning" legacy
     EXPECT "TESTING=ON LEGACY=<unset>" "COVERAGE=ON LEGACY=<unset>")
-configure("the prefixed name then decides alone" legacy
+configure("the prefixed name then decides" legacy
     EXPECT "TESTING=OFF LEGACY=<unset>" "FUZZING=ON LEGACY=<unset>"
     OPTIONS -DWEBFRONT_ENABLE_TESTING=OFF)
-configure("a former name given again is ignored once the prefixed one exists" legacy IGNORED 1
-    EXPECT "TESTING=OFF LEGACY=<unset>" "FUZZING=ON LEGACY=<unset>"
+configure("a former name given later switches a cached prefixed value" legacy MIGRATED 2
+    EXPECT "TESTING=ON LEGACY=<unset>" "FUZZING=OFF LEGACY=<unset>"
     OPTIONS -DENABLE_TESTING=ON -DENABLE_FUZZING=OFF)
+configure("the same command again only reports the deprecation" legacy KEPT 2
+    EXPECT "TESTING=ON LEGACY=<unset>" "FUZZING=OFF LEGACY=<unset>"
+    OPTIONS -DENABLE_TESTING=ON -DENABLE_FUZZING=OFF)
+
+# Both names on one command line: the prefixed one decides.
 configure("the prefixed name wins when both are given" both IGNORED 1
     EXPECT "TESTING=OFF LEGACY=<unset>"
     OPTIONS -DTOP_LEVEL=ON -DENABLE_TESTING=ON -DWEBFRONT_ENABLE_TESTING=OFF)
-# An old tree holds ENABLE_TESTING=ON and the FALSE/OFF defaults of the former sanitizer module.
+configure("-Wno-deprecated does not hide an ignored value" both-quiet IGNORED 1
+    EXPECT "TESTING=OFF LEGACY=<unset>"
+    OPTIONS -Wno-deprecated -DTOP_LEVEL=ON -DENABLE_TESTING=ON -DWEBFRONT_ENABLE_TESTING=OFF)
+configure("both names with one value only report the deprecation" both-same KEPT 1
+    EXPECT "TESTING=ON LEGACY=<unset>"
+    OPTIONS -DTOP_LEVEL=ON -DENABLE_TESTING=ON -DWEBFRONT_ENABLE_TESTING=ON)
+
+# An old tree holds typed entries: ENABLE_TESTING=ON and the FALSE/OFF defaults of the former sanitizer module.
 configure("an old build tree" upgraded OPTIONS -DOLD_TREE=ON -DENABLE_TESTING=ON)
 configure("an old tree's former defaults never override a new prefixed option" upgraded MIGRATED 1
     EXPECT "TESTING=ON LEGACY=<unset>" "COVERAGE=ON LEGACY=<unset>" "SANITIZER_ADDRESS=ON LEGACY=<unset>"
     OPTIONS -DOLD_TREE=OFF -DTOP_LEVEL=ON -DWEBFRONT_ENABLE_COVERAGE=ON -DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON)
-configure("the former OFF defaults of an old build tree are dropped silently" old-tree
-    EXPECT "TESTING=OFF LEGACY=<unset>" "SANITIZER_THREAD=OFF LEGACY=<unset>"
-    OPTIONS -DTOP_LEVEL=ON -DENABLE_TESTING=OFF -DENABLE_SANITIZER_THREAD=OFF)
+configure("an old tree's OFF defaults" old-defaults OPTIONS -DOLD_TREE=ON)
+configure("an old tree's OFF defaults are dropped silently" old-defaults
+    EXPECT "TESTING=OFF LEGACY=<unset>" "COVERAGE=OFF LEGACY=<unset>" "SANITIZER_ADDRESS=OFF LEGACY=<unset>"
+    OPTIONS -DOLD_TREE=OFF -DTOP_LEVEL=ON)
+
+# A toolchain file sets normal variables, read after project() as the former option() calls did.
+set(toolchain "-DCMAKE_TOOLCHAIN_FILE=${ROOT}/test/cmake/test-options/Toolchain.cmake")
+configure("a toolchain file's former name is migrated" toolchain MIGRATED 1
+    EXPECT "TESTING=ON LEGACY=<unset>"
+    OPTIONS -DTOP_LEVEL=ON "${toolchain}" -DTOOLCHAIN_LEGACY=ON)
+configure("the same toolchain file only reports the deprecation afterwards" toolchain KEPT 1
+    EXPECT "TESTING=ON LEGACY=<unset>")
+configure("a toolchain file's prefixed variable wins over its former name" toolchain-both IGNORED 1
+    EXPECT "TESTING=OFF LEGACY=<unset>"
+    OPTIONS -DTOP_LEVEL=ON "${toolchain}" -DTOOLCHAIN_LEGACY=ON -DTOOLCHAIN_PREFIXED=OFF)
+
 configure("a parent's generic names are ignored" subproject
     EXPECT "TESTING=OFF LEGACY=ON" "FUZZING=OFF LEGACY=ON" "COVERAGE=OFF LEGACY=ON"
     OPTIONS -DTOP_LEVEL=OFF -DENABLE_TESTING=ON -DENABLE_FUZZING=ON -DENABLE_COVERAGE=ON)
@@ -81,4 +114,13 @@ configure("former sanitizer names at the top level are migrated" sanitizers MIGR
 configure("a parent's generic sanitizer names are ignored" subproject-sanitizers
     EXPECT "SANITIZER_ADDRESS=OFF LEGACY=ON" "SANITIZER_UNDEFINED_BEHAVIOR=OFF LEGACY=ON"
     OPTIONS -DTOP_LEVEL=OFF -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON)
+
+# The announced removal cannot be forgotten: from 0.7.0 on, the migration refuses to configure.
+execute_process(COMMAND "${CMAKE_COMMAND}" -S "${ROOT}/test/cmake/test-options" -B "${WORK_DIR}/removal"
+    "-DROOT=${ROOT}" -DTOP_LEVEL=ON -DFIXTURE_VERSION=0.7.0
+    RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
+string(REGEX REPLACE "[\n ]+" " " flat "${output}${error}")
+if(status EQUAL 0 OR NOT flat MATCHES "must no longer read the former ENABLE_\\* test options")
+    message(FATAL_ERROR "The migration of the former names must fail from WebFront 0.7.0 on: ${output}${error}")
+endif()
 message(STATUS "WebFront's test options ignore a parent's generic names and migrate the former ones")
