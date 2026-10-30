@@ -155,6 +155,14 @@ public:
         return std::search(written.begin(), written.end(), first, first + text.size()) != written.end();
     }
 
+    /// Where the server first sent these bytes, or npos when it did not.
+    static std::size_t writtenAt(std::string_view text) {
+        std::lock_guard lock(mutex);
+        const auto*     first = reinterpret_cast<const std::byte*>(text.data());
+        const auto      found = std::search(written.begin(), written.end(), first, first + text.size());
+        return found == written.end() ? std::string_view::npos : static_cast<std::size_t>(found - written.begin());
+    }
+
     static void failWrites(std::error_code error) {
         std::lock_guard lock(mutex);
         writeError = error;

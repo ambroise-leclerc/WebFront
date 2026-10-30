@@ -4,6 +4,7 @@
 /// @brief WebFront UI main objet
 #pragma once
 
+#include "Broadcast.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
@@ -20,6 +21,7 @@
 #include "weblink/WebLink.hpp"
 
 #include <chrono>
+#include <concepts>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -34,6 +36,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace webfront {
 
@@ -369,7 +372,7 @@ public:
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{link, std::this_thread::get_id(), false});
+                webLinks.emplace(id, Connection{.link = link, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -462,6 +465,39 @@ public:
 private:
     template <typename>
     friend class BasicUI;
+    template <typename>
+    friend class Broadcast;
+
+    /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
+    /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
+    /// limit, and sent on the server thread as soon as they return, after what they sent and in the order of the calls.
+    /// Returns once `call` is queued or kept for every browser: a call that follows it (same thread, or synchronized
+    /// after it) comes after it. Overlapping calls are not ordered: holding linksMutex while writing would not order
+    /// them either, and would hold a WebFront lock while the write starts.
+    void sendToStartedLinks(const detail::BroadcastCall<Net>& call) {
+        std::vector<std::shared_ptr<WebLink<Net, Policy>>> started;
+        {
+            std::scoped_lock lock{linksMutex};
+            started.reserve(webLinks.size());
+            for (auto& [id, connection] : webLinks) {
+                if (connection.closed)
+                    continue;
+                if (connection.stage == Connection::Stage::started)
+                    started.push_back(connection.link);
+                else if (connection.stage == Connection::Stage::starting)
+                    call.deferInto(connection.deferred);
+            }
+        }
+        // A browser whose send fails must not deprive the next ones of the call.
+        for (const auto& link : started) {
+            try {
+                call.sendTo(*link);
+            } catch (const std::exception& error) {
+                log::error("A broadcast to a browser failed: {}", error.what());
+            }
+        }
+    }
+
     /// Internal DOM document storage, confined to the server thread.
     std::shared_ptr<dom::detail::State> domState(WebLinkId id) {
         std::shared_ptr<WebLink<Net, Policy>> link;
@@ -497,10 +533,34 @@ private:
     }
 
 public:
-    /// The browsers connected now: a closed connection is released shortly after its closure.
+    /// The browsers connected now: a closed connection is released shortly after its closure. Counts connections still
+    /// in their handshake or onUIStarted handlers too: not the number of browsers a broadcast or forEachUI reaches.
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
         return webLinks.size();
+    }
+
+    /// Calls `function(ui)` for each browser not reported closed whose onUIStarted handlers had returned when the call
+    /// started; a browser whose handlers are running is not visited. Callable from any thread; `function` runs on the
+    /// calling thread, outside every WebFront lock, so it may call the UI, but ui.document() needs the server thread.
+    /// A starting browser that is skipped misses the call: send states that every browser must follow with broadcast().
+    template <std::invocable<UI> Function>
+    void forEachUI(Function&& function) {
+        std::vector<WebLinkId> started;
+        {
+            std::scoped_lock lock{linksMutex};
+            for (const auto& [id, connection] : webLinks)
+                if (!connection.closed && connection.stage == Connection::Stage::started)
+                    started.push_back(id);
+        }
+        for (const auto id : started)
+            std::invoke(function, UI{*this, id});
+    }
+
+    /// A function object calling `functionName` on every started browser, fire-and-forget, from any thread; see
+    /// BroadcastOptions for slow browsers.
+    [[nodiscard]] Broadcast<BasicWF> broadcast(std::string_view functionName, BroadcastOptions options = {}) {
+        return Broadcast<BasicWF>{functionName, *this, options};
     }
 
     /// Whether a C++ function of that name is registered.
@@ -676,6 +736,9 @@ private:
         std::shared_ptr<WebLink<Net, Policy>> link;
         std::thread::id                       thread;
         bool                                  closed;
+        enum class Stage { handshaking, starting, started };
+        Stage                                  stage = Stage::handshaking;  // starting while its onUIStarted handlers run
+        std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -751,21 +814,66 @@ private:
         return true;
     }
 
+    // After the onUIStarted handlers: the sends deferred meanwhile run in order, those arriving while they run too,
+    // and only then do new sends reach the browser directly.
+    void finishStarting(WebLinkId id) noexcept {
+        for (;;) {
+            std::vector<detail::BroadcastCall<Net>> deferred;
+            std::shared_ptr<WebLink<Net, Policy>>   link;
+            {
+                std::scoped_lock lock{linksMutex};
+                const auto       found = webLinks.find(id);
+                if (found == webLinks.end())
+                    return;
+                if (found->second.deferred.empty() || found->second.closed) {
+                    found->second.deferred.clear();
+                    found->second.stage = Connection::Stage::started;
+                    return;
+                }
+                deferred.swap(found->second.deferred);
+                link = found->second.link;
+            }
+            for (const auto& call : deferred) {
+                try {
+                    call.sendTo(*link);
+                } catch (const std::exception& error) {
+                    log::error("A broadcast to a starting browser failed: {}", error.what());
+                }
+            }
+        }
+    }
+
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
-            case WebLinkEvent::Code::linked:
+            case WebLinkEvent::Code::linked: {
+                {
+                    std::scoped_lock lock{linksMutex};
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
+                        found->second.stage = Connection::Stage::starting;
+                }
+                // Even when a handler throws: the browser must not keep collecting deferred sends.
+                struct Started {
+                    BasicWF*  app;
+                    WebLinkId id;
+                    ~Started() {
+                        app->finishStarting(id);
+                    }
+                } started{this, event.webLinkId};
                 if (uiStartedHandler)
                     uiStartedHandler(UI{*this, event.webLinkId});
                 uiSubscribers->notify(UI{*this, event.webLinkId});
                 break;
+            }
             case WebLinkEvent::Code::closed:
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
                 {
                     std::scoped_lock lock{linksMutex};
-                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.closed = true;
+                        found->second.deferred.clear();
+                    }
                 }
                 if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
                     found->second->close();

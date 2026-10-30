@@ -1,6 +1,7 @@
 /// @brief Lazy, cancellable C++ to browser calls using C++26 sender completions.
 #pragma once
 #include "http/WebSocket.hpp"
+#include "weblink/CallFrame.hpp"
 #include "weblink/PendingCalls.hpp"
 
 #include <cstddef>
@@ -247,10 +248,7 @@ public:
 
     auto operator()(auto&&... arguments) const {
         msg::FunctionCall<Policy> command;
-        websocket::Frame<Net>     frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
-        command.encodeParameter(name, frame);
-        (command.encodeParameter(std::forward<decltype(arguments)>(arguments), frame), ...);
-        command.setParametersCount(static_cast<std::uint8_t>(1 + sizeof...(arguments)));
+        const auto                frame = detail::encodeCall<Net>(command, name, std::forward<decltype(arguments)>(arguments)...);
         std::vector<std::byte> payload;
         payload.reserve(frame.size());
         auto buffers = frame.toBuffers();
