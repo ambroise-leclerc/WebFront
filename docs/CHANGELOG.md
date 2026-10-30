@@ -8,6 +8,15 @@
   when it optimizes, GCC builds also compile `ReactStoreTests.cpp` at -O3 (`react_store_optimized`), so the Debug CI
   job sees it too.
 
+- Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
+  whose `onUIStarted` handlers have returned, from any thread, with no table of browsers kept by the
+  application. A broadcast made while those handlers run follows what they sent. Each call is encoded
+  once into a frame shared by every browser. `BroadcastOptions::maxPendingWrites` holds a call back
+  for a browser that has that many calls of the function waiting, and keeps only the latest for it,
+  in the browser's connection; such a held call may follow other functions' later calls. `forEachUI`
+  skips a starting browser, so states go through `broadcast`. Document the threads of callbacks and
+  browser calls ([threads](ASYNC_EXECUTION.md#threads)). No wire format change.
+
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
   waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
   exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.

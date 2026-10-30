@@ -4,6 +4,7 @@
 #pragma once
 #include "http/WebSocket.hpp"
 #include "tooling/HexDump.hpp"
+#include "weblink/CallFrame.hpp"
 #include "weblink/WebLink.hpp"
 
 #include <algorithm>
@@ -32,10 +33,7 @@ public:
 
     auto operator()(auto&&... ts) {
         msg::FunctionCall<typename WebFront::BufferPolicy> command;
-        websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
-        command.encodeParameter(name, frame);
-        (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
-        command.setParametersCount(static_cast<std::uint8_t>(1 + sizeof...(ts)));
+        auto                                               frame = detail::encodeCall<typename WebFront::Net>(command, name, std::forward<decltype(ts)>(ts)...);
 
         // A browser whose connection closed is gone: a call to it is dropped, and a typed call fails.
         // The link is shared while used: a release on the server thread cannot destroy it meanwhile.
