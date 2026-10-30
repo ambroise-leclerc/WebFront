@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import socket
+import sys
 import os
 import base64
 import contextlib
@@ -118,23 +119,34 @@ class Client:
 def profile_directory():
     """A private directory in the system temporary directory, whose removal tolerates what the agent still removes.
 
-    tempfile.TemporaryDirectory takes ignore_cleanup_errors only from Python 3.10."""
-    path = tempfile.mkdtemp(prefix="wf-profile-")
+    tempfile.TemporaryDirectory takes ignore_cleanup_errors only from Python 3.10. On Linux, the directory is in /tmp
+    rather than an inherited TMPDIR, which may be long: Chromium's singleton socket path must stay below sockaddr_un's
+    limit."""
+    root = "/tmp" if sys.platform.startswith("linux") and os.access("/tmp", os.W_OK | os.X_OK) else None
+    path = tempfile.mkdtemp(prefix="wf-profile-", dir=root)
     try:
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def remaining_profiles(profiles, timeout=10):
-    """The agent profiles left in `profiles`, once removed or after `timeout` seconds, with what they contain.
+def remaining_profiles(profiles, timeout=10, settle=2.5):
+    """The agent profiles left in `profiles`, once absent for `settle` seconds or after `timeout` more, with what
+    they contain.
 
     On Linux, the CEF browser runs inside the agent and may write until it exits: the agent then leaves the
-    last removal to a process that waits for its exit."""
-    deadline = time.monotonic() + timeout
+    last removal to a process that waits for its exit and repeats it for 2 s against a helper relaunched meanwhile.
+    A profile is gone only once absent for longer than that."""
+    deadline = time.monotonic() + timeout + settle
+    absent_since = None
     while True:
         left = list(profiles.glob("webfront-agent-*"))
-        if not left or time.monotonic() >= deadline:
+        now = time.monotonic()
+        if left:
+            absent_since = None
+        elif absent_since is None:
+            absent_since = now
+        if (absent_since is not None and now - absent_since >= settle) or now >= deadline:
             # os.walk skips a directory removed while it is listed: the removal may still be under way. Only the
             # first 40 entries are walked.
             contents = (str(pathlib.Path(directory, name).relative_to(profiles))

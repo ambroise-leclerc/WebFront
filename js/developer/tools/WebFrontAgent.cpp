@@ -202,7 +202,7 @@ std::vector<pid_t> browserHelpers() {
 
 // A pidfd keeps designating the process it was opened on, even once its identifier is reused; -1 with errno ESRCH for
 // a process that is gone, ENOSYS without pidfds.
-int openProcess(pid_t pid) noexcept {
+int openProcess([[maybe_unused]] pid_t pid) noexcept {
 #ifdef SYS_pidfd_open
     return static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
 #else
@@ -215,7 +215,10 @@ struct Helper {
     pid_t pid;
     int   descriptor;
     bool  killed = false;
+    bool  gone   = false;  // without a pidfd, its identifier no longer designates one of the helpers
     bool  exited() const {
+        if (gone)
+            return true;
         if (descriptor < 0) {
             const auto stat = processStat(pid);
             return !stat || stat->second == 'Z' || stat->second == 'X';
@@ -247,9 +250,10 @@ void releaseBrowserProcesses(std::chrono::milliseconds grace) noexcept {
         helpers.reserve(listed.size());
         for (const auto pid : listed) {
             // A helper gone since the scan needs nothing more, and its identifier may already designate another
-            // process: only a kernel without pidfds (before Linux 5.3) leaves the identifier to signal.
+            // process. Without a pidfd (a kernel before Linux 5.3, a seccomp filter, no descriptor left), the helper is
+            // still followed by its identifier, which is checked before it is signalled.
             const int descriptor = openProcess(pid);
-            if (descriptor >= 0 || errno == ENOSYS)
+            if (descriptor >= 0 || errno != ESRCH)
                 helpers.push_back({pid, descriptor});
         }
         // Opened after the scan: a pidfd designates one of our helpers only if its identifier still is one.
@@ -266,10 +270,20 @@ void releaseBrowserProcesses(std::chrono::milliseconds grace) noexcept {
             const auto now = std::chrono::steady_clock::now();
             if (std::ranges::all_of(helpers, &Helper::exited) || now >= terminated)
                 break;
-            if (now >= ended)
-                for (auto& helper : helpers)
+            if (now >= ended) {
+                // An identifier without a pidfd is signalled only if a scan just before, while none is ended yet,
+                // still finds it among the helpers: otherwise it may designate another process.
+                const auto unverified = [](const Helper& helper) {
+                    return helper.descriptor < 0 && !helper.killed && !helper.exited();
+                };
+                const auto current = std::ranges::any_of(helpers, unverified) ? browserHelpers() : std::vector<pid_t>{};
+                for (auto& helper : helpers) {
+                    if (unverified(helper) && std::ranges::find(current, helper.pid) == current.end())
+                        helper.gone = true;
                     if (!helper.exited())
                         helper.kill();
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds{20});
         }
     } catch (...) {
