@@ -36,12 +36,13 @@ separate_arguments(pids)
 foreach(pid IN LISTS pids)
     # The group's SIGKILL is sent before the runner returns, but an orphan may take a moment to exit on a loaded
     # machine: only one still running after 5 s survived the deadline.
-    foreach(attempt RANGE 50)
+    foreach(attempt RANGE 1 50)
         execute_process(COMMAND kill -0 ${pid} RESULT_VARIABLE alive OUTPUT_QUIET ERROR_QUIET)
         # A killed orphan stays a zombie when the container's PID 1 does not reap it: it holds nothing and is dead.
-        if(alive STREQUAL "0" AND EXISTS "/proc/${pid}/stat")
-            file(READ "/proc/${pid}/stat" stat)
-            if(stat MATCHES "\\) Z ")
+        # The process may also be reaped between the two checks: a stat that cannot be read means it is gone.
+        if(alive STREQUAL "0")
+            execute_process(COMMAND cat "/proc/${pid}/stat" OUTPUT_VARIABLE stat RESULT_VARIABLE unreadable ERROR_QUIET)
+            if(NOT unreadable STREQUAL "0" OR stat MATCHES "\\) Z ")
                 set(alive 1)
             endif()
         endif()

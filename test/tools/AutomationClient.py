@@ -271,7 +271,7 @@ def watchdog(args):
         # A private temporary directory isolates the native profile, which the forced exit must still remove. It is
         # created in the system temporary directory, not under the work path: Chromium puts its singleton Unix socket
         # there, and sockaddr_un limits that path to about 108 bytes whatever the checkout's depth.
-        with tempfile.TemporaryDirectory(prefix="wf-profile-") as profile_root:
+        with tempfile.TemporaryDirectory(prefix="wf-profile-", ignore_cleanup_errors=True) as profile_root:
             profiles = pathlib.Path(profile_root).resolve()
             forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
@@ -410,7 +410,7 @@ def main():
         endpoint = pathlib.Path(temporary) / "shared-window"
         # Keep Chromium's temporary Unix socket paths below sockaddr_un's limit, independently
         # of the checkout/work path length. The agent still creates its own private child profile.
-        with tempfile.TemporaryDirectory(prefix="wf-profile-") as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
+        with tempfile.TemporaryDirectory(prefix="wf-profile-", ignore_cleanup_errors=True) as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
             profiles = pathlib.Path(profile_root).resolve()
             owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             owner = subprocess.Popen([args.agent, *command, "--serve", "--listen", str(endpoint),

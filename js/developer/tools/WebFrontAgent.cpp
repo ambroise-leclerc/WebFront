@@ -196,6 +196,21 @@ void releaseBrowserProcesses() noexcept {
     }
 }
 
+// Closes every descriptor from 3 in the spawned process. glibc 2.34 has a dedicated action; elsewhere the open
+// descriptors are listed from /proc/self/fd, after the listing has closed its own.
+bool closeInheritedDescriptors(posix_spawn_file_actions_t& actions) {
+#if defined(__GLIBC__) && __GLIBC_PREREQ(2, 34)
+    return ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
+#else
+    std::vector<int> open;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc/self/fd"))
+        open.push_back(std::stoi(entry.path().filename().string()));
+    return std::ranges::all_of(open, [&](int descriptor) {
+        return descriptor < 3 || ::fcntl(descriptor, F_GETFD) < 0 || ::posix_spawn_file_actions_addclose(&actions, descriptor) == 0;
+    });
+#endif
+}
+
 // The CEF browser runs inside the agent: until the agent exits, its threads may write into the profile again, and
 // relaunch the helpers ended above. A shell outside the agent's descriptors removes the profile once the agent is gone
 // (exited, even if not reaped yet); false when it cannot be started.
@@ -208,12 +223,18 @@ bool removeAfterExit(const std::filesystem::path& path) noexcept {
         bool       prepared = ::posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0
                      && ::posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0) == 0
                      && ::posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0) == 0
-                     && ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
+                     && closeInheritedDescriptors(actions);
         const auto agent   = std::to_string(::getpid());
         const auto profile = path.string();
-        // Waits while the agent runs ('Z' once exited), then removes the profile.
-        const char* script = "while [ -r \"/proc/$0/stat\" ] && [ \"$(sed 's/.*) //' \"/proc/$0/stat\" | cut -c1)\" != Z ]; do "
-                             "sleep 0.05; done; rm -rf -- \"$1\"";
+        // Waits while the agent runs: its stat fields after the command name start with the state ('Z' once exited) and
+        // have its start time 20th, which tells a reused PID apart. A helper relaunched just before the agent's exit
+        // ends once the browser is gone, but may recreate the profile meanwhile: the removal is repeated for 2 s.
+        const char* script = "fields() { sed 's/.*) //' \"/proc/$0/stat\" 2>/dev/null; }; "
+                             "started=$(fields | cut -d' ' -f20); "
+                             "while current=$(fields) && [ \"${current%% *}\" != Z ] "
+                             "&& [ \"$(echo \"$current\" | cut -d' ' -f20)\" = \"$started\" ]; do sleep 0.05; done; "
+                             "rm -rf -- \"$1\"; i=0; while [ $i -lt 20 ]; do sleep 0.1; "
+                             "if [ -e \"$1\" ]; then rm -rf -- \"$1\"; fi; i=$((i + 1)); done";
         char* const arguments[] = {const_cast<char*>("sh"), const_cast<char*>("-c"), const_cast<char*>(script),
                                    const_cast<char*>(agent.c_str()), const_cast<char*>(profile.c_str()), nullptr};
         pid_t cleaner{};
@@ -229,20 +250,26 @@ bool removeAfterExit(const std::filesystem::path& path) noexcept {
 struct Profile {
     channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
     const std::filesystem::path path{directory.path};
+#ifdef __linux__
+    mutable std::atomic<bool> released{false};
+#endif
     /// @param grace how long the WebView2 browser may take to exit on its own before it is ended (Windows only)
     void cleanup([[maybe_unused]] std::chrono::milliseconds grace) const noexcept {
-        // POSIX can unlink open files. On Windows, the files of a process that has just exited can stay pending
-        // deletion for a moment, which reports a sharing violation, a refused access or a non-empty directory.
-#ifdef _WIN32
-        releaseWebView(grace);
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-#elif defined(__linux__)
+#ifdef __linux__
+        // A forced exit that loses the race with a normal one cleans up twice: the second would end the first's shell.
+        if (released.exchange(true))
+            return;
         releaseBrowserProcesses();  // the browser's helpers would otherwise recreate the profile
         std::error_code ignored;
         std::filesystem::remove_all(path, ignored);  // what the browser still writes goes after the agent's exit
         if (!removeAfterExit(path))
             std::cerr << "Automation: cannot schedule the removal of the temporary profile\n";
-        return;
+#else
+        // POSIX can unlink open files. On Windows, the files of a process that has just exited can stay pending
+        // deletion for a moment, which reports a sharing violation, a refused access or a non-empty directory.
+#ifdef _WIN32
+        releaseWebView(grace);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
 #endif
         for (;;) {
             std::error_code error;
@@ -259,6 +286,7 @@ struct Profile {
             std::cerr << "Automation: cannot remove temporary profile: " << error.message() << '\n';
             return;
         }
+#endif
     }
     ~Profile() {
         cleanup(std::chrono::seconds{5});
