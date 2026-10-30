@@ -458,6 +458,9 @@ private:
     /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
     /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
     /// limit, and sent on the server thread as soon as they return, after what they sent and in the order of the calls.
+    /// Returns once `call` is queued or kept for every browser: a call that follows it (same thread, or synchronized
+    /// after it) comes after it. Overlapping calls are not ordered: holding linksMutex while writing would not order
+    /// them either, and would hold a WebFront lock while the write starts.
     void sendToStartedLinks(const detail::BroadcastCall<Net>& call) {
         std::vector<std::shared_ptr<WebLink<Net, Policy>>> started;
         {

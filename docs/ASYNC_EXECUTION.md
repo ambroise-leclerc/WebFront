@@ -227,9 +227,12 @@ writes. A call is queued for a browser only while fewer calls of the same functi
 its network. Otherwise the call is held back, and a newer call of that function replaces it. The
 held call is queued as soon as the browser catches up, so the browser skips the intermediate
 states but always receives the latest one. Calls of a function reach each browser in the order
-they were made. Other frames, such as logs or other functions' calls, do not count toward the
-limit and are never held back. Order across functions is therefore not kept: a held call reaches
-the browser after the frames written meanwhile. If the browser must see a state before a later
+they were made: one call returns after it is queued, so a later call on the same thread, or on a
+thread that the application synchronizes after it, follows it. Calls that overlap on several
+threads have no order between them: serialize them in the application if it needs one. Other
+frames, such as logs or other functions' calls, do not count toward the limit and are never held
+back. Order across functions is therefore not kept: a held call reaches the browser after the
+frames written meanwhile. If the browser must see a state before a later
 call of another function, send both through the same function or without a limit. Calls of one
 function made with different limits share the browser's queue, and each call applies its own
 limit. While a browser's handlers run, at most `maxPendingWrites` calls of the function are kept
