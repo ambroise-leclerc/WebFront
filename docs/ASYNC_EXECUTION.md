@@ -226,16 +226,22 @@ onState(stateJson);
 writes. A call is queued for a browser only while fewer calls of the same function than that await
 its network. Otherwise the call is held back, and a newer call of that function replaces it. The
 held call is queued as soon as the browser catches up, so the browser skips the intermediate
-states but always receives the latest one. Calls of a function reach each browser in the order
-they were made: one call returns after it is queued, so a later call on the same thread, or on a
-thread that the application synchronizes after it, follows it. Calls that overlap on several
+states but always receives the latest one. The calls that reach a browser arrive in the order they
+were made (those that a newer call replaced never arrive): one call returns after it is queued, so
+a later call on the same thread, or on a thread that the application synchronizes after it,
+follows it. Calls that overlap on several
 threads have no order between them: serialize them in the application if it needs one. Other
 frames, such as logs or other functions' calls, do not count toward the limit and are never held
 back. Order across functions is therefore not kept: a held call reaches the browser after the
 frames written meanwhile. If the browser must see a state before a later
-call of another function, send both through the same function or without a limit. Calls of one
-function made with different limits share the browser's queue, and each call applies its own
-limit. While a browser's handlers run, at most `maxPendingWrites` calls of the function are kept
+call of another function, send both through the same function or without a limit.
+
+The limit is counted per function name, and the name is the only key: calls of
+`ui.jsFunction(name)` with the same name are other frames and do not count. A browser holds at most
+one call back per function. Calls of one function made with different limits share the browser's
+queue and its single held call, and each call applies its own limit: a call that must be held
+replaces the held call even if another limit held that one. A send that fails for one browser is
+logged and does not prevent the others from receiving the call. While a browser's handlers run, at most `maxPendingWrites` calls of the function are kept
 for it, the newest replacing the last one kept. Without the option, every call is queued for
 every browser. The held calls belong to each browser's connection and go with it, so the
 function object holds no state and may be a temporary.

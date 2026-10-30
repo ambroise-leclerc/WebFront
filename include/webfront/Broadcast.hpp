@@ -26,7 +26,8 @@ struct BroadcastOptions {
     /// back for that browser, queued as soon as fewer await: a slow browser skips intermediate calls but always
     /// receives the latest. Other frames, such as other functions' calls, do not count, and a held call may reach the
     /// browser after them. Calls of one function with different limits share the browser's queue: each call applies
-    /// its own. Must be > 0.
+    /// its own, and a browser holds at most one call per function, which a call to hold replaces whatever limit held
+    /// the previous one. Only broadcasts count: `ui.jsFunction` calls of the same name are other frames. Must be > 0.
     std::optional<std::size_t> maxPendingWrites{};
 };
 

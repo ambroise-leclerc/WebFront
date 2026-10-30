@@ -475,8 +475,14 @@ private:
                     call.deferInto(connection.deferred);
             }
         }
-        for (const auto& link : started)
-            call.sendTo(*link);
+        // A browser whose send fails must not deprive the next ones of the call.
+        for (const auto& link : started) {
+            try {
+                call.sendTo(*link);
+            } catch (const std::exception& error) {
+                log::error("A broadcast to a browser failed: {}", error.what());
+            }
+        }
     }
 
     /// Internal DOM document storage, confined to the server thread.
