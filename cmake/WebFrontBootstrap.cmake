@@ -3,12 +3,13 @@
 # It is distinct from include/webfront/system/DeveloperReleaseData.hpp (the environment applications start from) and is
 # updated by an explicit pull request, once a published environment can build and test itself without interaction.
 # 0.6.0 is the first published environment that runs a wf command without interaction (runNonInteractive); 0.6.1 also returns the
-# output of a script, and 0.6.2 reads the archives of @types packages and a manifest directory chosen by the application.
+# output of a script, 0.6.2 reads the archives of @types packages and a manifest directory chosen by the application, and
+# 0.6.3 exports the automation API v1.
 # The driver tests also
 # run the environment built from the current sources (the "environment under test"), which may be ahead of this pin.
-set(WEBFRONT_BOOTSTRAP_VERSION "0.6.2")
-set(WEBFRONT_BOOTSTRAP_URL "https://ambroise-leclerc.github.io/WebFront/developer/0.6.2/environment.tgz")
-set(WEBFRONT_BOOTSTRAP_INTEGRITY "sha512-SYnS6iRdK0VZM1PLECwK9Iwm/I6wxVlpM+1a0IXDs/lZN0y7lSB6hnv4+gSsX+U+aZ600WDXniF4w0LtHJFH/A==")
+set(WEBFRONT_BOOTSTRAP_VERSION "0.6.3")
+set(WEBFRONT_BOOTSTRAP_URL "https://ambroise-leclerc.github.io/WebFront/developer/0.6.3/environment.tgz")
+set(WEBFRONT_BOOTSTRAP_INTEGRITY "sha512-3AVF2xKsUfHys5VREA6DmkjiEDKjx9VQtPTrsjdiazzfpNQvbKEjW2ox5Kd2hPeOP5MfcMvbDHQ4SZoO97P5Xg==")
 
 # A directory holding environment.tgz (the pinned archive) replaces the download on a machine without network access.
 set(WEBFRONT_BOOTSTRAP_DIR "" CACHE PATH "Directory with the pinned bootstrap environment.tgz, instead of downloading it")
