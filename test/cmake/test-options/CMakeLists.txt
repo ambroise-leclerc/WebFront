@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.31)
+if(OLD_TREE)
+    # A build tree configured before the rename: Sanitizers.cmake declared these former options with option().
+    option(ENABLE_COVERAGE "Enable coverage reporting for gcc/clang" FALSE)
+    option(ENABLE_SANITIZER_ADDRESS "Enable address sanitizer" OFF)
+    return()
+endif()
 include("${ROOT}/cmake/WebFrontTestOptions.cmake")
 webfront_declare_test_options(${TOP_LEVEL})
 project(TestOptions LANGUAGES NONE)
