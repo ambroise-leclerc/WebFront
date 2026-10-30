@@ -34,20 +34,24 @@ jobs:
       - id: matrix
         env:
           REQUESTED: ${{ inputs.variants }}
+          MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
           all_variants = ['base-all-j2', 'base-all-j4', 'base-j2', 'base-j4', 'unity-heavy-b2',
                           'unity-heavy-b3', 'unity-heavy-b4', 'unity-heavy-b6', 'unity-heavy-b12', 'pch', 'pch-unity-heavy-b4',
-                          'pch-unity-heavy-b12', 'unity-all-b16']
-          requested = [v for v in os.environ.get('REQUESTED', '').replace(' ', '').split(',') if v] or all_variants
+                          'pch-unity-heavy-b12', 'unity-all-b16', 'noanalyze', 'noanalyze-pch', 'noanalyze-unity-heavy-b4',
+                          'noanalyze-pch-unity-heavy-b4']
+          import re
+          tagged = re.search(r'\[variants:([^\]]*)\]', os.environ.get('MESSAGE', ''))  # a push selects variants this way
+          requested = [v for v in (tagged.group(1) if tagged else os.environ.get('REQUESTED', '')).replace(' ', '').split(',') if v] or all_variants
           print('matrix=' + json.dumps({'os': ['windows', 'linux'], 'variant': requested}))
           PY
 
   study:
     needs: image
     # A commit message with [profile-only] skips the measurements and runs only the profile job.
-    if: ${{ !contains(github.event.head_commit.message, '[profile-only]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[profile-only]') && !(matrix.os == 'linux' && startsWith(matrix.variant, 'noanalyze')) }}
     permissions:
       contents: read
       packages: read
@@ -98,6 +102,10 @@ jobs:
             base-j2)            jobs=2; target=tests; extra="" ;;
             base-j4)            jobs=4; target=tests; extra="" ;;
             pch)                jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON" ;;
+            noanalyze)          jobs=4; target=tests; extra="-DWEBFRONT_MSVC_ANALYZE=OFF" ;;
+            noanalyze-pch)      jobs=4; target=tests; extra="-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_TEST_PCH=ON" ;;
+            noanalyze-unity-heavy-b4)     jobs=4; target=tests; extra="-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            noanalyze-pch-unity-heavy-b4) jobs=4; target=tests; extra="-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
             unity-heavy-b*)     jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-heavy-b} -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
             pch-unity-heavy-b*) jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=${v#pch-unity-heavy-b} -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
             unity-all-b*)       jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-all-b}" ;;
@@ -124,6 +132,7 @@ jobs:
   # Where does the compile time of one heavy unit go? MSVC /d1reportTime, GCC -ftime-report, Clang -ftime-trace.
   profile:
     needs: image
+    if: ${{ !contains(github.event.head_commit.message, '[variants:') }}
     permissions:
       contents: read
       packages: read
