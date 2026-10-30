@@ -268,7 +268,7 @@ def watchdog(args):
             else:
                 cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
                                      stdout=subprocess.PIPE, stderr=log, text=True, timeout=45)
-                assert cli.returncode == 71, cli.stdout + pathlib.Path(log.name).read_text()
+                assert cli.returncode == 71, (cli.returncode, cli.stdout, pathlib.Path(log.name).read_text())
         assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
         assert not endpoint.exists(), "The forced exit left its attachment capability behind"
         if args.scenario == "cli-watchdog":
@@ -374,7 +374,8 @@ def main():
                         break
                     time.sleep(0.02)
                 client.tool("cancel", {"session": client.session, "runId": run})
-                assert client.wait(run)["state"] == "cancelled"
+                cancelled = client.wait(run)
+                assert cancelled["state"] == "cancelled", cancelled
                 client.run("test", {"pattern": "passes"})
             finally:
                 client.close()
@@ -423,7 +424,8 @@ def main():
                     run = first.start("test", {"pattern": "waits for cancellation"})
                     second.tool("start", {"session": second.session, "operation": "build"}, error=True)
                     second.tool("cancel", {"session": second.session, "runId": run})
-                    assert first.wait(run)["state"] == "cancelled"
+                    cancelled = first.wait(run)
+                    assert cancelled["state"] == "cancelled", cancelled
                 finally:
                     first.close()
                     second.close()
@@ -441,8 +443,10 @@ def main():
                     shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
                                               capture_output=True, text=True, timeout=10)
                     assert shutdown.returncode == 0, shutdown.stderr
-                    assert owner.wait(timeout=10) == 0
-                assert not list(profiles.glob("webfront-agent-*")), "The owner left its native profile behind"
+                    # The owner retries removing the WebView2 profile for up to 10 s after the browser exits.
+                    assert owner.wait(timeout=30) == 0, pathlib.Path(log.name).read_text()
+                left = list(profiles.glob("webfront-agent-*"))
+                assert not left, ("The owner left its native profile behind", left, pathlib.Path(log.name).read_text())
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)

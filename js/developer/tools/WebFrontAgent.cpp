@@ -53,7 +53,7 @@ struct Profile {
         // WebView2 closes its browser process asynchronously after the controller is released.
         // Retry only sharing violations during that short exit; POSIX can unlink open files.
 #ifdef _WIN32
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
 #endif
         for (;;) {
             std::error_code error;
