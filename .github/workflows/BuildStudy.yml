@@ -46,7 +46,11 @@ jobs:
           tagged = re.search(r'\[variants:([^\]]*)\]', os.environ.get('MESSAGE', ''))  # a push selects variants this way
           requested = [v for v in (tagged.group(1) if tagged else os.environ.get('REQUESTED', '')).replace(' ', '').split(',') if v] or all_variants
           # /analyze exists on MSVC only: its variants have no Linux counterpart.
-          include = [{'os': o, 'variant': v} for v in requested for o in ('windows', 'linux') if not (o == 'linux' and v.startswith('noanalyze'))]
+          reps = re.search(r'\[windows-reps:(\d+)\]', os.environ.get('MESSAGE', ''))
+          # Hosted Windows runners vary a lot from one job to the next: repeat there, Linux is stable.
+          count = {'windows': int(reps.group(1)) if reps else 1, 'linux': 1}
+          include = [{'os': o, 'variant': v, 'rep': r} for v in requested for o in ('windows', 'linux') for r in range(1, count[o] + 1)
+                     if not (o == 'linux' and v.startswith('noanalyze'))]
           print('matrix=' + json.dumps({'include': include}))
           PY
 
@@ -60,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.image.outputs.matrix) }}
-    name: ${{ matrix.os }} ${{ matrix.variant }}
+    name: ${{ matrix.os }} ${{ matrix.variant }} #${{ matrix.rep }}
     runs-on: ${{ matrix.os == 'windows' && 'windows-2025' || 'ubuntu-26.04' }}
     container: ${{ matrix.os == 'linux' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.image.outputs.image, github.actor, github.token)) || '' }}
     timeout-minutes: 240
@@ -122,12 +126,12 @@ jobs:
           fi
           # shellcheck disable=SC2086
           python3 test/tools/BuildStudy.py --name "${{ matrix.os }}-${{ matrix.variant }}" --build-dir study/build \
-            --jobs "$jobs" --target "$target" --config "$config" --output "study/${{ matrix.os }}-${{ matrix.variant }}.json" \
+            --jobs "$jobs" --target "$target" --config "$config" --rep ${{ matrix.rep }} --output "study/${{ matrix.os }}-${{ matrix.variant }}-r${{ matrix.rep }}.json" \
             -- $platform $extra
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: study-${{ matrix.os }}-${{ matrix.variant }}
+          name: study-${{ matrix.os }}-${{ matrix.variant }}-r${{ matrix.rep }}
           path: study/*.json
           if-no-files-found: ignore
 

@@ -60,13 +60,14 @@ def main():
     parser.add_argument('--target', default='tests')
     parser.add_argument('--config', default='Release')
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--rep', type=int, default=1)
     parser.add_argument('--scenarios', default=','.join(name for name, _ in SCENARIOS))
     parser.add_argument('cmake_args', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     cmake_args = args.cmake_args[1:] if args.cmake_args[:1] == ['--'] else args.cmake_args
     build = args.build_dir.resolve()
     wanted = args.scenarios.split(',')
-    results = {'name': args.name, 'jobs': args.jobs, 'target': args.target, 'config': args.config,
+    results = {'name': args.name, 'rep': args.rep, 'jobs': args.jobs, 'target': args.target, 'config': args.config,
                'cmake_args': cmake_args, 'platform': sys.platform, 'scenarios': {}}
 
     def write():
@@ -77,7 +78,7 @@ def main():
     configure = measure_command(['cmake', '-S', str(ROOT), '-B', str(build), '-G', 'Ninja', f'-DCMAKE_BUILD_TYPE={args.config}',
                                  '-DENABLE_TESTING=ON', '-DWEBFRONT_EMBED_CEF=OFF', '-DENABLE_CACHE=OFF',
                                  '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache', '-DCMAKE_CXX_SCAN_FOR_MODULES=OFF'] + cmake_args,
-                                build.parent / (args.name + '-configure.json'))
+                                build.parent / (args.name + f'-r{args.rep}-configure.json'))
     results['configure_seconds'] = configure['wall_seconds']
     if configure['exit_code']:
         results['error'] = 'configure failed'
@@ -98,7 +99,7 @@ def main():
             subprocess.run(['sccache', '--zero-stats'], capture_output=True, check=True)
             command = ['cmake', '--build', str(build), '--config', args.config, '--target', args.target,
                        '--parallel', str(args.jobs), '--clean-first']
-            report = measure_command(command, build.parent / (args.name + '-' + name + '.json'))
+            report = measure_command(command, build.parent / (args.name + f'-r{args.rep}-' + name + '.json'))
             counts = sccache_counts()
             units = sorted(ninja_units(build), key=lambda unit: -unit[1])
             report.update({'sccache': counts, 'units': len(units),
