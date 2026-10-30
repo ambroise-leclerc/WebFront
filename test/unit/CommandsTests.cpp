@@ -557,7 +557,7 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
             CHECK(subscription.active());
         }
-        THEN("a UI is a regular value usable in containers") {
+        THEN("a UI is an assignable value usable in containers") {
             static_assert(std::is_copy_assignable_v<RealApp::UI>);
             static_assert(std::is_nothrow_move_assignable_v<RealApp::UI>);
             static_assert(std::equality_comparable<RealApp::UI>);
