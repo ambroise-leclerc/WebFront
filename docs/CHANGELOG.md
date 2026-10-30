@@ -6,7 +6,10 @@
   reference, so it is copy- and move-assignable and usable in `std::vector` with `std::erase_if` and in
   `std::optional`. Two values compare equal when they belong to the same application and have the same `id()`.
   The lifetime contract is unchanged: a `UI` is valid while its application exists, so a value kept after its
-  application is destroyed is not comparable with those of a later application.
+  application is destroyed is not comparable with those of a later application. A value only identifies its
+  connection until that connection closes: once the identifier is reused, a value kept after the close reaches the
+  later browser and equals its value, so applications remove kept values in `subscribeUIClosed`. `BasicWF` now
+  declares itself non-copyable and non-movable, which the pointer requires.
 
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with

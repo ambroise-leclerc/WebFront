@@ -561,6 +561,8 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             static_assert(std::is_copy_assignable_v<RealApp::UI>);
             static_assert(std::is_nothrow_move_assignable_v<RealApp::UI>);
             static_assert(std::equality_comparable<RealApp::UI>);
+            static_assert(!std::is_copy_constructible_v<RealApp> && !std::is_move_constructible_v<RealApp>);
+            static_assert(!std::is_copy_assignable_v<RealApp> && !std::is_move_assignable_v<RealApp>);
             std::vector<RealApp::UI> clients{RealApp::UI(app, 1), RealApp::UI(app, 2), RealApp::UI(app, 3)};
             std::erase_if(clients, [](const RealApp::UI& ui) { return ui.id() == 2; });
             REQUIRE(clients.size() == 2);

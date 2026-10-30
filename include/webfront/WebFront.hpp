@@ -56,9 +56,11 @@ public:
         return webLinkId;
     }
 
-    /// Two values are equal when they identify the same connection of the same application. A value only identifies
-    /// a connection while its application lives: a stale value can equal one of a later application built at the
-    /// same address.
+    /// Two values are equal when they belong to the same application and have the same id(). A value only identifies
+    /// its connection until that connection closes: once its identifier is reused, a value kept after the close equals
+    /// the later connection's and reaches that other browser, so remove kept values in subscribeUIClosed. A value kept
+    /// after its application is destroyed can equal one of a later application built at the same address. Assigning a
+    /// value is not atomic: a container of values shared between threads needs a lock.
     [[nodiscard]] friend bool operator==(const BasicUI& a, const BasicUI& b) noexcept {
         return a.webFront == b.webFront && a.webLinkId == b.webLinkId;
     }
@@ -377,6 +379,10 @@ public:
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
         : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
+
+    // Each UI and the server callbacks hold the application's address: it never moves.
+    BasicWF(const BasicWF&)            = delete;
+    BasicWF& operator=(const BasicWF&) = delete;
 
     /** @brief The listening port, including the OS-assigned TCPStdnet port when configured with "0". */
     std::string_view port() const noexcept { return httpPort; }
