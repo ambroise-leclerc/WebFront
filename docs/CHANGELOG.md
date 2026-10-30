@@ -5,8 +5,10 @@
 - Warn at the end of a consumer's configuration, with GCC 16, about each target linking
   `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
   stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is
-  `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)`. The reduced case is a translation unit that only includes
-  `<stdexec/execution.hpp>` and is compiled with `g++ -std=gnu++23 -fmodules-ts`.
+  `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)`. GCC 16.1 and 16.2 both crash, GCC 13 and 15 do not. The
+  reduced case needs no stdexec: `extern const int t; inline constexpr int t = 0;` compiled with
+  `g++ -std=gnu++23 -fmodules-ts` crashes in `transfer_defining_module`. stdexec declares
+  `forwarding_query` this way.
 
 - Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native
   window when the platform engine is compiled in and a session exists, the system browser otherwise,

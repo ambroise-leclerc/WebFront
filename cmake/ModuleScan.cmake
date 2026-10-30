@@ -1,7 +1,7 @@
-# GCC 16 crashes inside stdexec (an internal compiler error in __query.hpp, reproduced by including
-# <stdexec/execution.hpp> alone under -fmodules-ts) when CMake adds -fmodules-ts, which it does for every
-# C++20+ target while module scanning is not OFF (CMP0155). WebFront consumers include headers only, so
-# module scanning is never needed for the targets that link WebFront::WebFront.
+# GCC 16 crashes inside stdexec (an internal compiler error in __query.hpp, reduced to an extern const
+# variable redeclared inline constexpr under -fmodules-ts) when CMake adds -fmodules-ts, which it does
+# for every C++20+ target while module scanning is not OFF (CMP0155). WebFront consumers include headers
+# only, so module scanning is never needed for the targets that link WebFront::WebFront.
 # Limits: source-level CXX_SCAN_FOR_MODULES and CXX_MODULES file sets still make CMake scan a target, and
 # neither the check nor webfront_disable_module_scan() covers them. The check only sees targets that link
 # WebFront::WebFront directly, not those reaching it through another library of the project.
