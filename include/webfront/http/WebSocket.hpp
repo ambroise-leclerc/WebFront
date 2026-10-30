@@ -2,11 +2,11 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
-#include "../networking/Tasks.hpp"
-#include "../tooling/HexDump.hpp"
-#include "../tooling/Logger.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
+#include "../tooling/HexDump.hpp"
+#include "../networking/Tasks.hpp"
+#include "../tooling/Logger.hpp"
 
 #include <array>
 #include <atomic>

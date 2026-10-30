@@ -455,10 +455,10 @@ private:
     template <typename>
     friend class Broadcast;
 
-    /// Calls `send(link)` for each browser not reported closed whose onUIStarted handlers have returned: at once, on
-    /// the calling thread and outside every lock. For a browser whose handlers are running, `send` is kept and called
-    /// on the server thread as soon as they return, after what they sent and in the order of the calls.
-    void sendToStartedLinks(std::function<void(WebLink<Net, Policy>&)> send) {
+    /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
+    /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
+    /// limit, and sent on the server thread as soon as they return, after what they sent and in the order of the calls.
+    void sendToStartedLinks(const detail::BroadcastCall<Net>& call) {
         std::vector<std::shared_ptr<WebLink<Net, Policy>>> started;
         {
             std::scoped_lock lock{linksMutex};
@@ -469,11 +469,11 @@ private:
                 if (connection.stage == Connection::Stage::started)
                     started.push_back(connection.link);
                 else if (connection.stage == Connection::Stage::starting)
-                    connection.deferred.push_back(send);
+                    call.deferInto(connection.deferred);
             }
         }
         for (const auto& link : started)
-            send(*link);
+            call.sendTo(*link);
     }
 
     /// Internal DOM document storage, confined to the server thread.
@@ -713,8 +713,8 @@ private:
         std::thread::id                       thread;
         bool                                  closed;
         enum class Stage { handshaking, starting, started };
-        Stage                                                   stage = Stage::handshaking;  // starting while its onUIStarted handlers run
-        std::vector<std::function<void(WebLink<Net, Policy>&)>> deferred;                    // sendToStartedLinks() calls while starting
+        Stage                                  stage = Stage::handshaking;  // starting while its onUIStarted handlers run
+        std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -794,8 +794,8 @@ private:
     // and only then do new sends reach the browser directly.
     void finishStarting(WebLinkId id) noexcept {
         for (;;) {
-            std::vector<std::function<void(WebLink<Net, Policy>&)>> deferred;
-            std::shared_ptr<WebLink<Net, Policy>>                   link;
+            std::vector<detail::BroadcastCall<Net>> deferred;
+            std::shared_ptr<WebLink<Net, Policy>>   link;
             {
                 std::scoped_lock lock{linksMutex};
                 const auto       found = webLinks.find(id);
@@ -809,9 +809,9 @@ private:
                 deferred.swap(found->second.deferred);
                 link = found->second.link;
             }
-            for (auto& send : deferred) {
+            for (const auto& call : deferred) {
                 try {
-                    send(*link);
+                    call.sendTo(*link);
                 } catch (const std::exception& error) {
                     log::error("A broadcast to a starting browser failed: {}", error.what());
                 }

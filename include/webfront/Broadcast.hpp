@@ -6,12 +6,16 @@
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
 
+#include <algorithm>
 #include <cstddef>
+#include <iterator>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace webfront {
 
@@ -20,17 +24,50 @@ struct BroadcastOptions {
     /// Without a value, every call is queued for every browser. With one, a call is queued for a browser only while
     /// fewer calls of this function than that await its network; otherwise it replaces the call of this function held
     /// back for that browser, queued as soon as fewer await: a slow browser skips intermediate calls but always
-    /// receives the latest. Other frames, such as other functions' calls, do not count. Must be > 0.
+    /// receives the latest. Other frames, such as other functions' calls, do not count, and a held call may reach the
+    /// browser after them. Calls of one function with different limits share the browser's queue: each call applies
+    /// its own. Must be > 0.
     std::optional<std::size_t> maxPendingWrites{};
 };
+
+namespace detail {
+/// One broadcast call: its frame, shared by every browser, and how to send it.
+template <typename Net>
+struct BroadcastCall {
+    std::shared_ptr<const websocket::Frame<Net>> frame;
+    std::string                                  function;
+    std::optional<std::size_t>                   maxPendingWrites;
+
+    void sendTo(auto& link) const {
+        if (maxPendingWrites)
+            link.sendLatest(frame, function, *maxPendingWrites);
+        else
+            link.sendFrame(frame);
+    }
+
+    /// Keeps the call for a browser whose onUIStarted handlers run. With a limit, at most that many calls of the
+    /// function are kept: the newest replaces the last one kept, at the end of the calls.
+    void deferInto(std::vector<BroadcastCall>& deferred) const {
+        if (maxPendingWrites) {
+            const auto sameFunction = [this](const BroadcastCall& call) {
+                return call.function == function;
+            };
+            if (static_cast<std::size_t>(std::ranges::count_if(deferred, sameFunction)) >= *maxPendingWrites) {
+                const auto last = std::ranges::find_if(deferred.rbegin(), deferred.rend(), sameFunction);
+                deferred.erase(std::next(last).base());
+            }
+        }
+        deferred.push_back(*this);
+    }
+};
+}  // namespace detail
 
 /// Calls a JavaScript function on each started browser, fire-and-forget, from any thread. Each call encodes its
 /// arguments once into a frame that every browser shares. The calls held back for a slow browser belong to its
 /// connection, so the object holds no state: it may be a temporary, but must not outlive its application.
 template <typename WebFront>
 class Broadcast {
-    using Net  = typename WebFront::Net;
-    using Link = WebLink<Net, typename WebFront::BufferPolicy>;
+    using Net = typename WebFront::Net;
 
 public:
     Broadcast(std::string_view functionName, WebFront& wf, BroadcastOptions options = {})
@@ -43,12 +80,7 @@ public:
         msg::FunctionCall<typename WebFront::BufferPolicy> command;
         auto                                               frame = detail::encodeCall<Net>(command, name, std::forward<decltype(ts)>(ts)...);
         // The sending may be deferred until a starting browser's onUIStarted handlers return: it owns what it uses.
-        webFront.sendToStartedLinks([shared = std::move(frame).share(), key = name, limit = maxPending](Link& link) {
-            if (limit)
-                link.sendLatest(shared, key, *limit);
-            else
-                link.sendFrame(shared);
-        });
+        webFront.sendToStartedLinks(detail::BroadcastCall<Net>{std::move(frame).share(), name, maxPending});
     }
 
 private:

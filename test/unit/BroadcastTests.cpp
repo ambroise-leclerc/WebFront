@@ -185,6 +185,91 @@ SCENARIO("A browser receives a broadcast made while its onUIStarted handlers run
     Socket::reset();
 }
 
+SCENARIO("A browser whose onUIStarted handlers run keeps only the latest calls within the limit", "[broadcast]") {
+    using Socket = testing::InjectableSocket;
+    using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    App  app{WebFrontConfig{.port = "0"}};
+    auto latest = app.broadcast("onState", {.maxPendingWrites = 1});
+    auto pair   = app.broadcast("onState", {.maxPendingWrites = 2});
+    auto every  = app.broadcast("onEvent");
+    app.onUIStarted([&](App::UI) {
+        latest(std::string{"starting-1"});
+        every(std::string{"event-1"});
+        latest(std::string{"starting-2"});
+        every(std::string{"event-2"});
+        latest(std::string{"starting-3"});
+    });
+    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+
+    WHEN("the browser completes its handshake") {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        THEN("only the latest limited call made meanwhile is sent, after the unlimited ones made before it") {
+            REQUIRE(Socket::wrote("starting-3"));
+            REQUIRE_FALSE(Socket::wrote("starting-1"));
+            REQUIRE_FALSE(Socket::wrote("starting-2"));
+            REQUIRE(Socket::wrote("event-1"));
+            REQUIRE(Socket::wrote("event-2"));
+            REQUIRE(Socket::writtenAt("event-2") < Socket::writtenAt("starting-3"));
+        }
+    }
+    WHEN("calls of one function use different limits while the first is still being written") {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        Socket::deferWrites();
+        Socket::completeDeferredWrites();  // the handshake acknowledgement
+        while (Socket::completeDeferredWrites() != 0) { }
+        pair(std::string{"pair-1"});
+        pair(std::string{"pair-2"});
+        latest(std::string{"single-3"});
+        latest(std::string{"single-4"});
+        pair(std::string{"pair-5"});
+        while (Socket::completeDeferredWrites() != 0) { }
+        THEN("each call applies its own limit within the browser's queue of that function") {
+            REQUIRE(Socket::wrote("pair-1"));
+            REQUIRE(Socket::wrote("pair-2"));
+            REQUIRE_FALSE(Socket::wrote("single-3"));
+            REQUIRE_FALSE(Socket::wrote("single-4"));
+            REQUIRE(Socket::wrote("pair-5"));
+            REQUIRE(Socket::writtenAt("pair-2") < Socket::writtenAt("pair-5"));
+        }
+        Socket::deferWrites(false);
+        while (Socket::completeDeferredWrites() != 0) { }
+    }
+    app.shutdown();
+    Socket::reset();
+}
+
+SCENARIO("A held broadcast reaches the browser after a later call of another function", "[broadcast]") {
+    using Socket = testing::InjectableSocket;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+    auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
+    auto                                  every  = app.broadcast("onReset");
+    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+    msg::Handshake handshake;
+    Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+    Socket::deferWrites();
+    Socket::completeDeferredWrites();  // the handshake acknowledgement
+
+    WHEN("a state is held back, then another function is called") {
+        latest(std::string{"state-1"});
+        latest(std::string{"state-2"});
+        every(std::string{"reset-after-state-2"});
+        while (Socket::completeDeferredWrites() != 0) { }
+        THEN("the other function's call is written before the held state, as documented") {
+            REQUIRE(Socket::writtenAt("reset-after-state-2") < Socket::writtenAt("state-2"));
+        }
+    }
+    Socket::deferWrites(false);
+    while (Socket::completeDeferredWrites() != 0) { }
+    app.shutdown();
+    Socket::reset();
+}
+
 namespace {
 using Stdnet = networking::TCPStdnet;
 

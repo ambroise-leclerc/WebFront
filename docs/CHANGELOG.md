@@ -7,7 +7,7 @@
   application. A broadcast made while those handlers run follows what they sent. Each call is encoded
   once into a frame shared by every browser. `BroadcastOptions::maxPendingWrites` holds a call back
   for a browser that has that many calls of the function waiting, and keeps only the latest for it,
-  in the browser's connection. Document the threads of callbacks and browser calls
+  in the browser's connection; such a held call may follow other functions' later calls. Document the threads of callbacks and browser calls
   ([threads](ASYNC_EXECUTION.md#threads)). No wire format change.
 
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
