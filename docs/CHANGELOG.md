@@ -8,8 +8,9 @@
   The lifetime contract is unchanged: a `UI` is valid while its application exists, so a value kept after its
   application is destroyed is not comparable with those of a later application. A value only identifies its
   connection until that connection closes: once the identifier is reused, a value kept after the close reaches the
-  later browser and equals its value, so applications remove kept values in `subscribeUIClosed`. `BasicWF` now
-  declares itself non-copyable and non-movable, which the pointer requires.
+  later browser and equals its value, so applications remove kept values in `subscribeUIClosed` (#428 tracks
+  rejecting such stale values). `BasicWF` now declares itself non-copyable and non-movable, which the pointer
+  requires.
 
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
