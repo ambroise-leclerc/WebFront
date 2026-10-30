@@ -407,7 +407,7 @@ public:
         std::scoped_lock lock{mutex};
         if (browser)
             return;  // Commands and wf test create their own connected frames; inject only the native page.
-        browser.emplace(std::move(ui));
+        browser = std::move(ui);
         browser->addScript(closing ? "window.close()" : driverScript);
     }
     void close() {

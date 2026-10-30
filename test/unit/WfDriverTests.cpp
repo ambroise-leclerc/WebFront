@@ -3,9 +3,9 @@
 
 namespace {
 struct DriverUI {
-    std::vector<std::string>& scripts;
+    std::vector<std::string>* scripts;
     void                      addScript(std::string_view script) const {
-        scripts.emplace_back(script);
+        scripts->emplace_back(script);
     }
 };
 webfront::testdriver::Options parseDriver(std::initializer_list<std::string> extra) {
@@ -22,7 +22,7 @@ SCENARIO("The driver deadline closes both connected and late browsers without lo
     std::vector<std::string>                      scripts;
     webfront::testdriver::DriverBrowser<DriverUI> browser;
     GIVEN("the browser connects before the deadline") {
-        browser.connected(DriverUI{scripts});
+        browser.connected(DriverUI{&scripts});
         REQUIRE(scripts == std::vector<std::string>{webfront::testdriver::driverScript});
         WHEN("the watchdog closes it twice") {
             browser.close();
@@ -37,7 +37,7 @@ SCENARIO("The driver deadline closes both connected and late browsers without lo
         browser.close();
         REQUIRE(scripts.empty());
         WHEN("the handshake arrives afterward") {
-            browser.connected(DriverUI{scripts});
+            browser.connected(DriverUI{&scripts});
             THEN("the page closes without starting the command runner") {
                 REQUIRE(scripts == std::vector<std::string>{"window.close()"});
             }

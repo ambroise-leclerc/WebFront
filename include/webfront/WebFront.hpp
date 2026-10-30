@@ -44,16 +44,25 @@ using ConnectionError = std::runtime_error;
 
 template <typename WebFront>
 class BasicUI {
-    WebFront& webFront;
+    WebFront* webFront; ///< Never null: the only constructor takes a reference, and there is no default constructor.
     WebLinkId webLinkId;
 
 public:
-    BasicUI(WebFront& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
+    BasicUI(WebFront& wf, WebLinkId id) : webFront(&wf), webLinkId(id) {}
 
     /// Identifies this browser's connection among those connected. The 16-bit identifier of a released connection
     /// is only reused after 65,536 later connections.
     [[nodiscard]] WebLinkId id() const noexcept {
         return webLinkId;
+    }
+
+    /// Two values are equal when they belong to the same application and have the same id(). A value only identifies
+    /// its connection until that connection closes: once its identifier is reused, a value kept after the close equals
+    /// the later connection's and reaches that other browser (#428), so remove kept values in subscribeUIClosed. A value
+    /// must not outlive its application: comparing or using it afterwards reads a dangling application address, whose
+    /// result is meaningless. Assigning a value is not atomic: a container of values shared between threads needs a lock.
+    [[nodiscard]] friend bool operator==(const BasicUI& a, const BasicUI& b) noexcept {
+        return a.webFront == b.webFront && a.webLinkId == b.webLinkId;
     }
 
     /**
@@ -62,7 +71,7 @@ public:
      * @param script
      */
     void addScript(std::string_view script) const {
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront->findLink(webLinkId);
         if (!link)
             throw ConnectionError("Connection with client lost");
         link->sendCommand(msg::TextCommand(msg::TxtOpcode::injectScript, script));
@@ -70,7 +79,7 @@ public:
 
     /// Queues one DOM command on the bridge context. Rejections arrive at wfDom.rejected(batchId, reason).
     void sendDomBatch(const msg::DomBatch& batch) const {
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront->findLink(webLinkId);
         if (!link) throw ConnectionError("Connection with client lost");
         link->sendCommand(batch);
     }
@@ -84,13 +93,13 @@ private:
     template <typename>
     friend class dom::Document;
     [[nodiscard]] auto domState() const {
-        return webFront.domState(webLinkId);
+        return webFront->domState(webLinkId);
     }
 
 public:
     /// The frames queued for this browser and not yet written to the network; 0 once its connection is gone.
     [[nodiscard]] std::size_t pendingWrites() const {
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront->findLink(webLinkId);
         return link ? link->pendingWrites() : 0;
     }
 
@@ -101,37 +110,37 @@ public:
      * @return JsFunction<WebFront>
      */
     [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const {
-        return JsFunction{functionName, webFront, webLinkId};
+        return JsFunction{functionName, *webFront, webLinkId};
     }
 
     template <typename R>
     [[nodiscard]] JsFunction<WebFront, R> jsFunction(std::string_view functionName) const {
-        return JsFunction<WebFront, R>{functionName, webFront, webLinkId};
+        return JsFunction<WebFront, R>{functionName, *webFront, webLinkId};
     }
 
     /** @brief Starts a coroutine owned by the application; the returned handle can cancel it. */
     TaskHandle spawn(Task task) const {
-        return webFront.spawn(std::move(task));
+        return webFront->spawn(std::move(task));
     }
 
     /// A sender completing once at most `limit` frames await the network for this browser, or at once when it is gone;
     /// co_await propagates the task's stop token. It paces output to a browser that reads slower than it is written.
     [[nodiscard]] auto writesAtMost(std::size_t limit) const {
-        using Link = typename decltype(webFront.findLink(webLinkId))::element_type;
-        return detail::WritesAtMost<Link>{webFront.findLink(webLinkId), limit};
+        using Link = typename decltype(webFront->findLink(webLinkId))::element_type;
+        return detail::WritesAtMost<Link>{webFront->findLink(webLinkId), limit};
     }
 
     /// A sender completing on the server context after the duration; see BasicWF::resumeAfter.
     template <typename Rep, typename Period>
     [[nodiscard]] auto resumeAfter(std::chrono::duration<Rep, Period> duration) const {
-        return webFront.resumeAfter(duration);
+        return webFront->resumeAfter(duration);
     }
 
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
     /// stops waiting locally; a JavaScript function already dispatched keeps running.
     template <typename R = void>
     [[nodiscard]] JsFunctionSender<WebFront, R> jsFunctionSender(std::string_view functionName) const {
-        return JsFunctionSender<WebFront, R>{functionName, webFront, webLinkId};
+        return JsFunctionSender<WebFront, R>{functionName, *webFront, webLinkId};
     }
 };
 
@@ -370,6 +379,10 @@ public:
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
         : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
+
+    // Each UI and the server callbacks hold the application's address: it never moves.
+    BasicWF(const BasicWF&)            = delete;
+    BasicWF& operator=(const BasicWF&) = delete;
 
     /** @brief The listening port, including the OS-assigned TCPStdnet port when configured with "0". */
     std::string_view port() const noexcept { return httpPort; }

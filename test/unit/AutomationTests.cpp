@@ -17,6 +17,9 @@ struct BindingApp {
         void addScript(std::string text) const {
             scripts->push_back(std::move(text));
         }
+        friend bool operator==(const UI& a, const UI& b) {
+            return a.value == b.value;
+        }
     };
     std::function<std::string(UI, std::string)> claim;
     std::function<void(UI)>                     started, closed;

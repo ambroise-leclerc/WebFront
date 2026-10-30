@@ -21,6 +21,17 @@
   the specs cause. The trace comes from the specs only; the published environment is unchanged. `docs/TEST_TIERS.md`
   explains how to follow a test live.
 
+- Make `BasicUI` (`UI`) an assignable value type (#400): it holds a pointer to the application instead of a
+  reference, so it is copy- and move-assignable and usable in `std::vector` with `std::erase_if` and in
+  `std::optional`. It has no default constructor, so it does not satisfy `std::regular`. Two values compare equal
+  when they belong to the same application and have the same `id()`. The lifetime contract is unchanged: a `UI` is
+  valid while its application exists and must not be used, compared included, after it is destroyed. A value only
+  identifies its connection until that connection closes: once the identifier is reused, a value kept after the close
+  reaches the later browser and equals its value, so applications remove kept values in `subscribeUIClosed` (#428
+  tracks rejecting such stale values). `BasicWF` now declares itself non-copyable and non-movable, which the pointer
+  requires. The automation binding and the Jasmine session identify their browser by this equality, and assign it
+  instead of re-emplacing an optional. `docs/ASYNC_EXECUTION.md` describes the value semantics.
+
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
   the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,

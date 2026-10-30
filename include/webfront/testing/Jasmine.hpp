@@ -5,6 +5,7 @@
 #include "../WebFront.hpp"
 
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -163,7 +164,9 @@ inline std::string jasmineScript() {
     return "const CHUNK = " + std::to_string(jasmineChunkSize) + ";\n" + std::string(jasmineScriptBody);
 }
 
-/// The state shared by the bridge callbacks of one test run. Independent of the application type so it can be tested alone.
+/// The state shared by the bridge callbacks of one test run. The caller is the application's UI, compared by its
+/// equality; any equality-comparable value (a bare WebLinkId by default) tests it without an application.
+template <std::equality_comparable Caller = WebLinkId>
 class JasmineSession {
 public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
@@ -172,23 +175,23 @@ public:
         : files(std::move(contents)), report(std::move(reportPath)) {}
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
-    bool attach(WebLinkId id) {
+    bool attach(const Caller& caller) {
         std::scoped_lock lock{mutex};
         if (completed)
             return false;
-        if (browser && *browser != id)
+        if (browser && *browser != caller)
             std::cerr << "Jasmine: a new page replaced the instrumented one\n";
-        browser = id;
+        browser = caller;
         return true;
     }
 
-    [[nodiscard]] double count(WebLinkId caller) {
+    [[nodiscard]] double count(const Caller& caller) {
         std::scoped_lock lock{mutex};
         authorize(caller);
         return static_cast<double>(files.size());
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> read(WebLinkId caller, double index, double offset) {
+    [[nodiscard]] std::vector<std::uint8_t> read(const Caller& caller, double index, double offset) {
         std::scoped_lock lock{mutex};
         authorize(caller);
         if (!std::isfinite(index) || index < 0 || index >= static_cast<double>(files.size()) || std::floor(index) != index)
@@ -200,7 +203,7 @@ public:
         return std::vector<std::uint8_t>(part.begin(), part.end());
     }
 
-    void result(WebLinkId caller, const std::string& text) {
+    void result(const Caller& caller, const std::string& text) {
         std::scoped_lock lock{mutex};
         authorize(caller);
         if (completed)
@@ -234,14 +237,14 @@ public:
     }
 
 private:
-    void authorize(WebLinkId caller) const {
+    void authorize(const Caller& caller) const {
         if (!browser || *browser != caller)
             throw std::runtime_error("Jasmine callback belongs to another page");
     }
 
     std::vector<std::string> files;
     std::filesystem::path    report;
-    std::optional<WebLinkId> browser;
+    std::optional<Caller>    browser;
     std::mutex               mutex;
     bool                     completed = false;
     int                      status    = 1;
@@ -261,6 +264,9 @@ inline namespace jasmine_enabled {
  */
 template <typename App>
 class JasmineTest {
+    using AppUI   = typename App::UI;
+    using Session = detail::JasmineSession<AppUI>;
+
 public:
     explicit JasmineTest(App& app) {
         const auto path = detail::jasmineConfigurationPath();
@@ -270,14 +276,13 @@ public:
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
-        session          = std::make_shared<detail::JasmineSession>(std::move(contents), config.report);
-        using AppUI      = typename App::UI;
+        session          = std::make_shared<Session>(std::move(contents), config.report);
         const auto owned = session;
-        app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui.id()); });
-        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui.id(), index, offset); });
-        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui.id(), result); });
+        app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
+        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
+        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
         subscription = app.subscribeUIStarted([owned](AppUI ui) {
-            if (owned->attach(ui.id()))
+            if (owned->attach(ui))
                 ui.addScript(detail::jasmineScript());
         });
     }
@@ -287,8 +292,8 @@ public:
     }
 
 private:
-    std::shared_ptr<detail::JasmineSession> session;
-    UISubscription                          subscription;
+    std::shared_ptr<Session> session;
+    UISubscription           subscription;
 };
 }  // namespace jasmine_enabled
 #else
