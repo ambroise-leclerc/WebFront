@@ -108,8 +108,8 @@ struct ContractFrontend {
 
 template <frontend::Action onReturn, Failure failure = Failure::none>
 void checkSession() {
-    using App = BasicWFWithFrontend<ContractNet, MockFileSystem<>, ContractFrontend<onReturn, failure>>;
-    App                app;
+    using ContractApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, ContractFrontend<onReturn, failure>>;
+    ContractApp                app;
     const auto         state = ContractIoContext::current;
     std::exception_ptr error;
     std::jthread       caller([&] {
@@ -164,8 +164,8 @@ void checkSession() {
 
 template <frontend::Action onReturn>
 void checkStartupFailure() {
-    using App = BasicWFWithFrontend<ContractNet, MockFileSystem<>, ContractFrontend<onReturn, Failure::beforeWindow>>;
-    App        app;
+    using ContractApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, ContractFrontend<onReturn, Failure::beforeWindow>>;
+    ContractApp        app;
     const auto state = ContractIoContext::current;
     REQUIRE_THROWS_WITH(app.show(), "frontend failed before window creation");
     std::lock_guard lock(state->mutex);
@@ -250,9 +250,9 @@ struct WindowRecorder {
 };
 
 WindowOptions windowReceivedBy(WebFrontConfig config) {
-    using App = BasicWFWithFrontend<ContractNet, MockFileSystem<>, WindowRecorder>;
+    using ContractApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, WindowRecorder>;
     WindowRecorder::received = {.title = "unset", .width = -1, .height = -1};
-    App app(std::move(config));
+    ContractApp app(std::move(config));
     app.show();
     app.stop();
     return WindowRecorder::received;

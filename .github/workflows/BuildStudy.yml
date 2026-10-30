@@ -37,8 +37,9 @@ jobs:
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
-          all_variants = ['base-all-j2', 'base-all-j4', 'base-j2', 'base-j4', 'unity-b2', 'unity-b4', 'unity-b8', 'unity-b16',
-                          'unity-heavy-b4', 'unity-heavy-b13', 'pch', 'pch-unity-heavy-b4']
+          all_variants = ['base-all-j2', 'base-all-j4', 'base-j2', 'base-j4', 'unity-heavy-b2',
+                          'unity-heavy-b3', 'unity-heavy-b4', 'unity-heavy-b6', 'unity-heavy-b12', 'pch', 'pch-unity-heavy-b4',
+                          'pch-unity-heavy-b12', 'unity-all-b16']
           requested = [v for v in os.environ.get('REQUESTED', '').replace(' ', '').split(',') if v] or all_variants
           print('matrix=' + json.dumps({'os': ['windows', 'linux'], 'variant': requested}))
           PY
@@ -88,19 +89,16 @@ jobs:
       - name: Measure
         shell: bash
         run: |
-          case "${{ matrix.variant }}" in
+          v="${{ matrix.variant }}"
+          case "$v" in
             base-all-j2)        jobs=2; target=all;   extra="" ;;
             base-all-j4)        jobs=4; target=all;   extra="" ;;
             base-j2)            jobs=2; target=tests; extra="" ;;
             base-j4)            jobs=4; target=tests; extra="" ;;
-            unity-b2)           jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=2" ;;
-            unity-b4)           jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=4" ;;
-            unity-b8)           jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=8" ;;
-            unity-b16)          jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=16" ;;
-            unity-heavy-b4)     jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
-            unity-heavy-b13)    jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=13 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
             pch)                jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON" ;;
-            pch-unity-heavy-b4) jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            unity-heavy-b*)     jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-heavy-b} -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            pch-unity-heavy-b*) jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=${v#pch-unity-heavy-b} -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            unity-all-b*)       jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-all-b}" ;;
             *) echo "unknown variant"; exit 1 ;;
           esac
           if [ "${{ matrix.os }}" = windows ]; then

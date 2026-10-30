@@ -294,7 +294,7 @@ SCENARIO("Typed browser senders can be awaited in a tracked task") {
 
 SCENARIO("Cancelled correlation IDs cannot be reused before a late reply") {
     GIVEN("a registry with one cancelled call") {
-        detail::PendingCalls<CorrelationPolicy> calls;
+        webfront::detail::PendingCalls<CorrelationPolicy> calls;
         auto                                    retained  = std::make_shared<int>(42);
         std::weak_ptr<int>                      released  = retained;
         const auto                              cancelled = calls.add({[retained](const auto&) { }, [retained](auto) { }});
@@ -407,7 +407,7 @@ SCENARIO("Browser senders reject inconsistent return envelopes") {
 
 SCENARIO("Correlation exhaustion fails until an outstanding reply releases an ID") {
     GIVEN("a registry with every ID reserved by an unanswered cancelled call") {
-        detail::PendingCalls<CorrelationPolicy> calls;
+        webfront::detail::PendingCalls<CorrelationPolicy> calls;
         for (std::size_t i = 0; i < std::numeric_limits<msg::CallId>::max(); ++i) {
             const auto id = calls.add({});
             calls.cancel(id);
@@ -430,9 +430,9 @@ SCENARIO("Correlation exhaustion fails until an outstanding reply releases an ID
 
 SCENARIO("A sender reports a socket expiring independently of its correlation registry") {
     GIVEN("an expired socket and a still-owned registry") {
-        auto                   calls = std::make_shared<detail::PendingCalls<http::DefaultBuffersPolicy>>();
+        auto                   calls = std::make_shared<webfront::detail::PendingCalls<http::DefaultBuffersPolicy>>();
         std::vector<std::byte> payload(sizeof(msg::FunctionCallHeader<msg::Command::callFunction>));
-        detail::BrowserCallSender<InjectableNetworking, http::DefaultBuffersPolicy, std::string> sender{calls, {}, std::move(payload)};
+        webfront::detail::BrowserCallSender<InjectableNetworking, http::DefaultBuffersPolicy, std::string> sender{calls, {}, std::move(payload)};
         Observed                                                                                 observed;
         ex::inplace_stop_source                                                                  stop;
         auto operation = ex::connect(std::move(sender), Receiver{observed, stop.get_token()});
@@ -448,7 +448,7 @@ SCENARIO("A sender reports a socket expiring independently of its correlation re
 
 SCENARIO("An obsolete registration cannot cancel a replacement with the same wire ID") {
     GIVEN("a completed call whose operation is still delivering an error") {
-        detail::PendingCalls<CorrelationPolicy> calls;
+        webfront::detail::PendingCalls<CorrelationPolicy> calls;
         int                                     originalOwner{};
         int                                     replacementOwner{};
         const auto                              old = calls.add({.complete = [](const auto&) { }, .reject = {}, .owner = &originalOwner});
