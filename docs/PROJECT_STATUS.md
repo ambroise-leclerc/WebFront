@@ -102,7 +102,8 @@ are retained for investigation; diagnostics alone do not establish a correction.
   fixed-version runtime packaging, application installers and accessibility remain application work.
 - The low-level DOM batch command and optional embedded interpreter are implemented; see
   [the wire contract](adr/ADR-003-protocole-binaire-et-bornes.md#commande-dom-dombatch-code-5-version-1).
-  The per-connection document/node API, events and grouped sender reads are available; see
+  The per-connection document/node API, events (callbacks or `co_await node.next(name)`) and grouped
+  sender reads are available; see
   [DOM from C++](DOM.md). A direct engine transport remains future work.
   The optional [React adapter](REACT.md) provides a coalesced C++ store and a StrictMode-safe
   `Island`, demonstrated in the Life variant. Its npm archive is prepared locally; public

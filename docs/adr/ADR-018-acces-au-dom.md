@@ -9,6 +9,7 @@
 | 1.2 | 2026-10-27 | Proposée, partiellement livrée | Ambroise Leclerc | API document/nœuds, cycle de 1 ms, événements et lectures groupées (#381). | — |
 | 1.3 | 2026-10-27 | Proposée, partiellement livrée | Ambroise Leclerc | Adaptateur React hors du cœur, store fusionné et variante Life (#382). | — |
 | 1.4 | 2026-10-30 | Proposée, partiellement livrée | Ambroise Leclerc | Descripteurs de types C++23, formulaires, inspecteurs et déclarations TypeScript vérifiées par `wf check` ; couche de réflexion C++26 facultative compilée en CI par GCC 16 (#383). | — |
+| 1.5 | 2026-10-30 | Proposée, partiellement livrée | Ambroise Leclerc | Événements attendables `co_await node.next(event)` (#384), sans changement du format binaire. | — |
 
 ## État et chronologie
 
@@ -17,8 +18,8 @@ Le transport DOM est désormais livré par l'[ADR-003, version 1.10 et suivantes
 avec la commande `domBatch` et `/webfront-dom.mjs` (#380). L'appel `wfDom.apply` par `jsFunction` décrit
 ci-dessous est uniquement le protocole historique des prototypes ; il ne décrit pas le transport livré.
 L’API document/nœuds est livrée par #381 ([DOM.md](../DOM.md)) ; l’adaptateur React et le store fusionné sont livrés par #382 ([REACT.md](../REACT.md)) ;
-les descripteurs de types, les formulaires générés et la couche de réflexion facultative sont livrés par #383 ([FORMS.md](../FORMS.md)).
-Les autres adaptateurs restent proposés ; les événements attendables relèvent de #384. Le point d’envoi retenu est un cycle serveur de 1 ms
+les descripteurs de types, les formulaires générés et la couche de réflexion facultative sont livrés par #383 ([FORMS.md](../FORMS.md)) ;
+les événements attendables sont livrés par #384 ([DOM.md](../DOM.md#awaiting-an-event)). Les autres adaptateurs restent proposés. Le point d’envoi retenu est un cycle serveur de 1 ms
 après la première écriture en attente, au sein d’une tâche possédée et drainée.
 `flush()` et les lectures explicites peuvent envoyer plus tôt. `SET_TEXT` reste limité
 aux nœuds texte. Une révocation invalide le sous-arbre ; avec des écritures en attente,
@@ -259,7 +260,10 @@ membres par `obj.[:m:]`. Points relevés :
 - **Événements : callbacks d'abord, attente ensuite.** Un callback suffit au cas courant. Un événement attendable
   (`co_await button.next("click")`) sert les dialogues séquentiels et les assistants, où la coroutine est la machine à
   états ; il s'annule par le `TaskHandle` et se termine arrêté à la déconnexion. Il n'a pas été prototypé et n'est pas une
-  condition d'acceptation du noyau.
+  condition d'acceptation du noyau. Livré par #384 : le sender s'abonne à son démarrage avec les drapeaux déclarés par
+  `next()`, se désabonne à l'événement et se termine arrêté dès que l'événement ne peut plus survenir (jeton d'arrêt,
+  `unlisten()`, retrait ou révocation du nœud, rejet, déconnexion, arrêt). Un seul abonnement, callback ou attente,
+  par élément et par événement ; les événements survenus entre deux attentes ne sont pas mis en file.
 - **Décisions synchrones déclarées à l'avance.** `preventDefault` et `stopPropagation` ne peuvent pas attendre C++ : ils
   sont déclarés à l'abonnement (prototype : `submit` annulé).
 - **Un lot est une transaction.** Il est validé en entier avant d'être appliqué ; les noms qu'il définit restent acquis

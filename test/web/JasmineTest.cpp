@@ -42,6 +42,7 @@ constexpr string_view jsToCppToken{"js-to-cpp-token"};
 struct TestState {
     atomic<bool> browserReady{false};
     atomic<bool> domDocumentObserved{false};
+    atomic<bool> domAwaitObserved{false};
     atomic<bool> domBatchSent{false};
     atomic<bool> domRejectionObserved{false};
     atomic<bool> domEventsObserved{false};
@@ -149,6 +150,8 @@ private:
     };
     std::map<WebLinkId, FormsFixture>    formsFixtures;
     std::map<WebLinkId, bool>            documentCancelled;
+    std::map<WebLinkId, TaskHandle>      documentAwaits;
+    std::map<WebLinkId, bool>            awaitCancelled;
     optional<dom::Document<TestWF::UI>>  shutdownDocument;
     dom::Node                            shutdownNode;
     optional<TestWF::UI> connectedUI;
@@ -337,6 +340,29 @@ private:
         }
     }
 
+    // Each awaited keydown completes one wait; the third ends only by cancellation, which must remove its listener.
+    Task awaitDocument(TestWF::UI ui) {
+        awaitCancelled[ui.id()] = false;
+        DocumentReadNotice notice{awaitCancelled[ui.id()]};
+        try {
+            const auto              input = documentInputs.at(ui.id());
+            const dom::EventOptions prevent{.preventDefault = true, .stopPropagation = false};
+            for (int step = 0; step < 2; ++step) {
+                auto sender = input.next("keydown", prevent);
+                auto key    = co_await std::move(sender);
+                ui.jsFunction("documentAwaitResult")(key);
+            }
+            state.domAwaitObserved = true;
+            auto cancelled         = input.next("keydown", prevent);
+            co_await std::move(cancelled);
+            ui.jsFunction("documentAwaitResult")("resumed after cancellation");
+            notice.pending = false;
+        } catch (...) {
+            notice.pending = false;
+            throw;
+        }
+    }
+
     void registerCallbacks() {
         closedDomSubscription = webFront->subscribeUIClosed([this](TestWF::UI ui) {
             try {
@@ -437,6 +463,19 @@ private:
         });
         webFront->cppFunction("domDocumentCancelled", [this](TestWF::UI ui) {
             return documentCancelled[ui.id()];
+        });
+        webFront->cppFunction("domDocumentAwait", [this](TestWF::UI ui) {
+            documentAwaits.insert_or_assign(ui.id(), ui.spawn(awaitDocument(ui)));
+        });
+        webFront->cppFunction("domDocumentCancelAwait", [this](TestWF::UI ui) {
+            // The first flush sends the subscription alone, so the unsubscription of the stop travels in a later batch:
+            // the browser applies both, in order, before this call resolves.
+            ui.document().flush();
+            documentAwaits.at(ui.id()).requestStop();
+            ui.document().flush();
+        });
+        webFront->cppFunction("domDocumentAwaitCancelled", [this](TestWF::UI ui) {
+            return awaitCancelled[ui.id()];
         });
         webFront->cppFunction("domDocumentNodeValid", [this](uint32_t id) {
             return documentTexts.at(static_cast<WebLinkId>(id)).valid();
@@ -620,7 +659,7 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.domDocumentObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
+        if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
               && state.subscriberNotified && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;

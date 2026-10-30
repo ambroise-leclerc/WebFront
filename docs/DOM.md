@@ -117,6 +117,57 @@ encoding, transport and callback errors. There is no C++ event-error notificatio
 the document stays usable and an explicit grouped read can retrieve a larger value
 within its separate 1 MiB result budget.
 
+### Awaiting an event
+
+Callbacks remain the usual way to handle events. For sequential dialogs and wizards,
+where the coroutine is the state machine, `node.next(name, options)` returns a sender
+of the next event's value, the string a `listen()` callback would receive:
+
+```cpp
+webfront::Task wizard(webfront::dom::Node forward, webfront::dom::Node back) {
+    for (;;) {
+        co_await forward.next("click"); // step 1 confirmed
+        // ... show step 2 ...
+        co_await back.next("click");
+        // ... show step 1 again ...
+    }
+}
+// In onUIStarted or a bridge callback: retain the handle to cancel the wizard.
+auto handle = ui.spawn(wizard(forwardButton, backButton));
+```
+
+`next()` requires a C++-owned element, as `listen()` does, and throws
+`std::invalid_argument` otherwise. Creating the sender subscribes nothing. Starting
+it, on the server context, queues the browser subscription with the flags declared by
+`next()`; `preventDefault` and `stopPropagation` therefore remain decided at
+subscription time. The first matching event delivered to C++ completes the wait and
+queues the unsubscription. Events are not queued while no wait is started, including
+between two `co_await`s, and the subscription follows the batching cadence above, so an
+event can be missed before it reaches the browser. Use `listen()` for a stream.
+
+One subscription exists per element and event name: starting a wait while a
+`listen()` callback or another wait holds that event completes with a
+`std::logic_error`, and `listen()` throws `std::logic_error` while a wait is pending.
+A wait completes stopped when it can no longer be satisfied: through the receiver's
+stop token (`TaskHandle::requestStop()`, application shutdown), `unlisten()`, removal
+or revocation of the node, a browser rejection that closes the document, and
+disconnection or reload. A stopped coroutine unwinds without resuming after its
+`co_await`. Starting off the server thread or on an invalid node completes with an
+error. Every end of a wait queues the browser unsubscription, so its
+`preventDefault` and `stopPropagation` stop applying once that batch is applied. Two ends
+do not: removal or revocation of the node, which removes its listeners with it, and a
+browser rejection, which closes the document without queueing any unsubscription: the
+listeners then keep their flags until the page reloads. Disconnection and reload need none.
+A stop requested on the server thread queues it at once. A stop requested from
+another thread completes on that thread, as for `jsFunctionSender`, and posts the
+unsubscription to the server context; it is lost only if the application is
+shutting down, which closes the document anyway. An unsubscription that does not
+fit a full batch opens the next one. A wait started while the current batch is full cannot queue its subscription and
+completes with `std::length_error`, as `listen()` throws it; start it again once the batch is sent. Event and stopped completions caused by the
+document run on the server thread.
+
+### Grouped reads
+
 Reads are explicit and grouped in one request. For example, in an owned coroutine:
 
 ```cpp
