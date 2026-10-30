@@ -7,10 +7,13 @@ import re
 import shutil
 import subprocess
 import socket
+import sys
 import os
 import base64
+import contextlib
 import hashlib
 import io
+import itertools
 import tarfile
 import tempfile
 import threading
@@ -110,6 +113,46 @@ class Client:
                 self.child.wait()
                 raise
         self.reader.join(timeout=2)
+
+
+@contextlib.contextmanager
+def profile_directory():
+    """A private directory in the system temporary directory, whose removal tolerates what the agent still removes.
+
+    tempfile.TemporaryDirectory takes ignore_cleanup_errors only from Python 3.10. On Linux, the directory is in /tmp
+    rather than an inherited TMPDIR, which may be long: Chromium's singleton socket path must stay below sockaddr_un's
+    limit."""
+    root = "/tmp" if sys.platform.startswith("linux") and os.access("/tmp", os.W_OK | os.X_OK) else None
+    path = tempfile.mkdtemp(prefix="wf-profile-", dir=root)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def remaining_profiles(profiles, timeout=10, settle=2.5):
+    """The agent profiles left in `profiles`, once absent for `settle` seconds or after `timeout` more, with what
+    they contain.
+
+    On Linux, the CEF browser runs inside the agent and may write until it exits: the agent then leaves the
+    last removal to a process that waits for its exit and repeats it for 2 s against a helper relaunched meanwhile.
+    A profile is gone only once absent for longer than that."""
+    deadline = time.monotonic() + timeout + settle
+    absent_since = None
+    while True:
+        left = list(profiles.glob("webfront-agent-*"))
+        now = time.monotonic()
+        if left:
+            absent_since = None
+        elif absent_since is None:
+            absent_since = now
+        if (absent_since is not None and now - absent_since >= settle) or now >= deadline:
+            # os.walk skips a directory removed while it is listed: the removal may still be under way. Only the
+            # first 40 entries are walked.
+            contents = (str(pathlib.Path(directory, name).relative_to(profiles))
+                        for profile in left for directory, folders, files in os.walk(profile) for name in folders + files)
+            return left, list(itertools.islice(contents, 40))
+        time.sleep(0.05)
 
 
 def check_startup_backoff(agent, root, ready_delay=0):
@@ -255,32 +298,34 @@ def watchdog(args):
                    "--integrity", "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode(),
                    "--registry-dir", args.registry, "--startup-timeout", "30", "--timeout", "2", "--allow", "build"]
         endpoint = root / "forced-window"
-        # A private temporary directory isolates the native profile, which the forced exit must still remove.
-        profiles = root / "profiles"
-        profiles.mkdir()
-        forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
-        with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
-            if args.scenario == "mcp-watchdog":
-                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
-                try:
-                    client.initialize()
-                    client.start("build")
+        # A private temporary directory isolates the native profile, which the forced exit must still remove. It is
+        # created in the system temporary directory, not under the work path: Chromium puts its singleton Unix socket
+        # there, and sockaddr_un limits that path to about 108 bytes whatever the checkout's depth.
+        with profile_directory() as profile_root:
+            profiles = pathlib.Path(profile_root).resolve()
+            forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
+            with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
+                if args.scenario == "mcp-watchdog":
+                    client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
                     try:
-                        status = client.child.wait(timeout=30)
-                    except subprocess.TimeoutExpired:
-                        raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
-                    assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
-                    assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
-                finally:
-                    client.close()
-            else:
-                cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
-                                     stdout=subprocess.PIPE, stderr=log, text=True, timeout=45, env=forced_environment)
-                assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
-        assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
-        assert not endpoint.exists(), "The forced exit left its attachment capability behind"
-        left = list(profiles.glob("webfront-agent-*"))
-        assert not left, f"The forced exit left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
+                        client.initialize()
+                        client.start("build")
+                        try:
+                            status = client.child.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
+                        assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
+                        assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
+                    finally:
+                        client.close()
+                else:
+                    cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
+                                         stdout=subprocess.PIPE, stderr=log, text=True, timeout=45, env=forced_environment)
+                    assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
+            assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
+            assert not endpoint.exists(), "The forced exit left its attachment capability behind"
+            left, contents = remaining_profiles(profiles)
+            assert not left, f"The forced exit left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
         if args.scenario == "cli-watchdog":
             # This same-path relaunch must reach its authenticated page before the intentional error.
             # It checks directory reuse and Unicode failure reporting in one process; normal builds
@@ -395,7 +440,7 @@ def main():
         endpoint = pathlib.Path(temporary) / "shared-window"
         # Keep Chromium's temporary Unix socket paths below sockaddr_un's limit, independently
         # of the checkout/work path length. The agent still creates its own private child profile.
-        with tempfile.TemporaryDirectory(prefix="wf-profile-") as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
+        with profile_directory() as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
             profiles = pathlib.Path(profile_root).resolve()
             owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             owner = subprocess.Popen([args.agent, *command, "--serve", "--listen", str(endpoint),
@@ -455,9 +500,9 @@ def main():
                     assert shutdown.returncode == 0, shutdown.stderr
                     # Before it exits, the owner waits up to 5 s for the WebView2 browser, ends it, then removes the profile.
                     assert owner.wait(timeout=30) == 0, pathlib.Path(log.name).read_text()
-                # Only the owner removes the profile: once it has exited, the directory no longer changes.
-                left = list(profiles.glob("webfront-agent-*"))
-                assert not left, f"The owner left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
+                # Only the owner removes the profile, at the latest just after it has exited.
+                left, contents = remaining_profiles(profiles)
+                assert not left, f"The owner left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)
