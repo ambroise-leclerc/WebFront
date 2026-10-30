@@ -58,9 +58,9 @@ public:
 
     /// Two values are equal when they belong to the same application and have the same id(). A value only identifies
     /// its connection until that connection closes: once its identifier is reused, a value kept after the close equals
-    /// the later connection's and reaches that other browser, so remove kept values in subscribeUIClosed. A value kept
-    /// after its application is destroyed can equal one of a later application built at the same address. Assigning a
-    /// value is not atomic: a container of values shared between threads needs a lock.
+    /// the later connection's and reaches that other browser (#428), so remove kept values in subscribeUIClosed. A value
+    /// must not outlive its application: comparing or using it afterwards reads a dangling application address, whose
+    /// result is meaningless. Assigning a value is not atomic: a container of values shared between threads needs a lock.
     [[nodiscard]] friend bool operator==(const BasicUI& a, const BasicUI& b) noexcept {
         return a.webFront == b.webFront && a.webLinkId == b.webLinkId;
     }

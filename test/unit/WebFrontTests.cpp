@@ -8,13 +8,16 @@
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <concepts>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <list>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -965,6 +968,53 @@ SCENARIO("Sending a DOM batch through a lost UI link throws ConnectionError") {
         THEN("sending fails synchronously without queuing a frame") {
             REQUIRE_THROWS_AS(ui.sendDomBatch(batch), ConnectionError);
             REQUIRE(ui.pendingWrites() == 0);
+        }
+    }
+}
+
+SCENARIO("A UI is an assignable value identifying one browser of one application") {
+    using App = BasicWF<networking::NetworkingMock, fs::DefaultFS>;
+    GIVEN("an application over the networking mock") {
+        App app(WebFrontConfig{.port = "0"});
+        THEN("a UI is an assignable value usable in containers") {
+            static_assert(std::is_copy_assignable_v<App::UI>);
+            static_assert(std::is_nothrow_move_assignable_v<App::UI>);
+            static_assert(std::equality_comparable<App::UI>);
+            static_assert(!std::is_copy_constructible_v<App> && !std::is_move_constructible_v<App>);
+            static_assert(!std::is_copy_assignable_v<App> && !std::is_move_assignable_v<App>);
+            std::vector<App::UI> clients{App::UI(app, 1), App::UI(app, 2), App::UI(app, 3)};
+            std::erase_if(clients, [](const App::UI& ui) { return ui.id() == 2; });
+            REQUIRE(clients.size() == 2);
+            CHECK(clients[0] == App::UI(app, 1));
+            CHECK(clients[0] != clients[1]);
+            CHECK(clients[1].id() == 3);
+            std::optional<App::UI> current;
+            current = clients[1];
+            CHECK(current->id() == 3);
+        }
+        THEN("a UI of another application is never equal, even with the same identifier") {
+            struct Application { } first, second;
+            using StubUI = BasicUI<Application>;
+            CHECK(StubUI(first, 1) != StubUI(second, 1));
+            StubUI ui(first, 1);
+            ui = StubUI(second, 1);
+            CHECK(ui == StubUI(second, 1));
+        }
+        THEN("a UI has no default state and a reassigned one acts on its new value") {
+            static_assert(!std::is_default_constructible_v<App::UI>);
+            App::UI       ui(app, 1);
+            const App::UI gone(app, 42);
+            ui = gone;
+            CHECK(ui == gone);
+            CHECK_THROWS_AS(ui.addScript("1"), ConnectionError);
+            CHECK(ui.pendingWrites() == 0);
+            CHECK_NOTHROW(ui.jsFunction("console.log")("dropped"));
+            auto result = ui.jsFunction<int>("Math.abs")(-1);
+            CHECK_THROWS_WITH(result.get(), "Browser connection closed");
+            CHECK_NOTHROW(ui.writesAtMost(0));
+            App::UI moved(std::move(ui));
+            CHECK(moved.id() == 42);
+            CHECK_THROWS_AS(moved.addScript("1"), ConnectionError);
         }
     }
 }

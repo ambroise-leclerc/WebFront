@@ -531,7 +531,7 @@ private:
         });
         webFront->cppFunction("browserReady", [this](TestWF::UI ui) {
             // Raw origin probes create extra sessions; bind calls to the document reporting ready.
-            connectedUI.emplace(ui);
+            connectedUI = ui;
             browserReady();
         });
         webFront->cppFunction<void, string>("recordFromJs", [this](const string& token) {

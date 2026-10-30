@@ -44,7 +44,7 @@ struct ReportFile {
 }  // namespace
 
 SCENARIO("A Jasmine session serves its files in bounded chunks to the instrumented page only") {
-    constexpr auto chunk = JasmineSession::chunkSize;
+    constexpr auto chunk = JasmineSession<>::chunkSize;
     ReportFile     report{"chunks"};
     GIVEN("a file that is an exact multiple of the chunk size, an empty file and a short one") {
         JasmineSession session{{std::string(chunk * 2, 'a'), "", "short"}, report.path};
@@ -120,7 +120,7 @@ SCENARIO("A Jasmine session validates and records exactly one result") {
 
 SCENARIO("The injected script reads in the same chunk size the session serves and reports load errors") {
     const auto script = webfront::testing::detail::jasmineScript();
-    REQUIRE(script.starts_with("const CHUNK = " + std::to_string(JasmineSession::chunkSize) + ";"));
+    REQUIRE(script.starts_with("const CHUNK = " + std::to_string(JasmineSession<>::chunkSize) + ";"));
     REQUIRE(script.find("49152", script.find("49152") + 1) == std::string::npos);  // the number appears only in the CHUNK definition
     REQUIRE(script.find("failed to load") != std::string_view::npos);
 }

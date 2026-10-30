@@ -97,6 +97,15 @@ a `jsFunctionSender` completes with an error when started, and `addScript` throw
 `ConnectionError`. The 16-bit identifier of a released connection is reused only
 after 65,536 later connections.
 
+A `UI` is an assignable value: it can be kept in a `std::vector` (removed with
+`std::erase_if`) or a `std::optional`, and assigned. Two values are equal when they
+belong to the same application and have the same `id()`. A value identifies its
+connection only until that connection closes: once the identifier is reused, a value
+kept after the close equals the later browser's and reaches that browser (#428 tracks
+rejecting such stale values). Remove kept values in the `subscribeUIClosed` handler.
+A value must not outlive its application, and assigning one is not atomic: a
+container of values shared between threads needs a lock.
+
 `app.spawn(task)` and `ui.spawn(task)` may be called from any thread while the
 application object remains alive, including concurrently with stop/shutdown.
 Coroutine bodies and their resumptions execute on the server context. Synchronize

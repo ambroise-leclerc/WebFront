@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -556,46 +555,6 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             CHECK(RealApp::UI(app, 5).id() == 5);
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
             CHECK(subscription.active());
-        }
-        THEN("a UI is an assignable value usable in containers") {
-            static_assert(std::is_copy_assignable_v<RealApp::UI>);
-            static_assert(std::is_nothrow_move_assignable_v<RealApp::UI>);
-            static_assert(std::equality_comparable<RealApp::UI>);
-            static_assert(!std::is_copy_constructible_v<RealApp> && !std::is_move_constructible_v<RealApp>);
-            static_assert(!std::is_copy_assignable_v<RealApp> && !std::is_move_assignable_v<RealApp>);
-            std::vector<RealApp::UI> clients{RealApp::UI(app, 1), RealApp::UI(app, 2), RealApp::UI(app, 3)};
-            std::erase_if(clients, [](const RealApp::UI& ui) { return ui.id() == 2; });
-            REQUIRE(clients.size() == 2);
-            CHECK(clients[0] == RealApp::UI(app, 1));
-            CHECK(clients[0] != clients[1]);
-            CHECK(clients[1].id() == 3);
-            std::optional<RealApp::UI> current;
-            current = clients[1];
-            CHECK(current->id() == 3);
-        }
-        THEN("a UI of another application is never equal, even with the same identifier") {
-            struct Application { } first, second;
-            using StubUI = BasicUI<Application>;
-            CHECK(StubUI(first, 1) != StubUI(second, 1));
-            StubUI ui(first, 1);
-            ui = StubUI(second, 1);
-            CHECK(ui == StubUI(second, 1));
-        }
-        THEN("a UI has no default state and a reassigned one acts on its new value") {
-            static_assert(!std::is_default_constructible_v<RealApp::UI>);
-            RealApp::UI       ui(app, 1);
-            const RealApp::UI gone(app, 42);
-            ui = gone;
-            CHECK(ui == gone);
-            CHECK_THROWS_AS(ui.addScript("1"), ConnectionError);
-            CHECK(ui.pendingWrites() == 0);
-            CHECK_NOTHROW(ui.jsFunction("console.log")("dropped"));
-            auto result = ui.jsFunction<int>("Math.abs")(-1);
-            CHECK_THROWS_WITH(result.get(), "Browser connection closed");
-            CHECK_NOTHROW(ui.writesAtMost(0));
-            RealApp::UI moved(std::move(ui));
-            CHECK(moved.id() == 42);
-            CHECK_THROWS_AS(moved.addScript("1"), ConnectionError);
         }
         THEN("a second Commands object is refused, and cppFunction tells a taken name") {
             Commands<RealApp> commands{app};
