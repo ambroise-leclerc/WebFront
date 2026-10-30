@@ -282,7 +282,8 @@ def watchdog(args):
             assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
             assert not endpoint.exists(), "The forced exit left its attachment capability behind"
             left = list(profiles.glob("webfront-agent-*"))
-            assert not left, f"The forced exit left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
+            contents = [str(path.relative_to(profiles)) for profile in left for path in profile.rglob("*")][:40]
+            assert not left, f"The forced exit left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
         if args.scenario == "cli-watchdog":
             # This same-path relaunch must reach its authenticated page before the intentional error.
             # It checks directory reuse and Unicode failure reporting in one process; normal builds

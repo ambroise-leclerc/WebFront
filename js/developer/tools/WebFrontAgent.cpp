@@ -25,6 +25,15 @@
 #else
 #include <fcntl.h>
 #endif
+#ifdef __linux__
+#include <fstream>
+#include <map>
+#include <signal.h>
+#include <sstream>
+#include <string>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 namespace {
 using namespace webfront;
@@ -123,6 +132,68 @@ void releaseWebView(std::chrono::milliseconds grace) noexcept {
         // Without the process list, the removal below still retries the transient errors.
     }
 }
+#elif defined(__linux__)
+// The parent and state ('Z' for a zombie) of a process, from /proc/<pid>/stat; nothing when it is gone.
+std::optional<std::pair<pid_t, char>> processStat(pid_t pid) {
+    std::ifstream input("/proc/" + std::to_string(pid) + "/stat");
+    std::string   stat;
+    if (!std::getline(input, stat))
+        return std::nullopt;
+    // The command name may contain spaces and parentheses: the fields resume after its last ')'.
+    const auto end = stat.rfind(") ");
+    if (end == std::string::npos || end + 4 >= stat.size())
+        return std::nullopt;
+    std::istringstream fields(stat.substr(end + 2));
+    char               state{};
+    pid_t              parent{};
+    if (!(fields >> state >> parent))
+        return std::nullopt;
+    return std::pair{parent, state};
+}
+
+bool running(pid_t pid) {
+    const auto stat = processStat(pid);
+    return stat && stat->second != 'Z' && stat->second != 'X';
+}
+
+// Every process descending from the agent, listed before any is ended: an orphan is reparented and leaves the tree.
+std::vector<pid_t> descendants() {
+    std::map<pid_t, std::vector<pid_t>> children;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+        const auto name = entry.path().filename().string();
+        if (name.empty() || !std::ranges::all_of(name, [](char c) { return c >= '0' && c <= '9'; }))
+            continue;
+        const auto pid = static_cast<pid_t>(std::stol(name));
+        if (const auto stat = processStat(pid))
+            children[stat->first].push_back(pid);
+    }
+    std::vector<pid_t> result{::getpid()};
+    for (std::size_t next = 0; next != result.size(); ++next)
+        if (const auto found = children.find(result[next]); found != children.end())
+            result.insert(result.end(), found->second.begin(), found->second.end());
+    result.erase(result.begin());
+    return result;
+}
+
+// The CEF helper processes (zygote, renderers, GPU and network services) descend from the agent and outlive _Exit: one
+// still writing into the profile after its removal recreates it. The profile is about to go, so nothing they could
+// still save matters: end them and wait until they are gone.
+void releaseBrowserProcesses() noexcept {
+    try {
+        const auto processes = descendants();
+        const auto anyRunning = [&] {
+            return std::ranges::any_of(processes, running);
+        };
+        for (const auto pid : processes)
+            if (running(pid))
+                ::kill(pid, SIGKILL);
+        const auto terminated = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        while (anyRunning() && std::chrono::steady_clock::now() < terminated)
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    } catch (...) {
+        // Without the process list, the removal below still runs.
+    }
+}
 #endif
 
 struct Profile {
@@ -135,6 +206,8 @@ struct Profile {
 #ifdef _WIN32
         releaseWebView(grace);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+#elif defined(__linux__)
+        releaseBrowserProcesses();  // the browser's helpers would otherwise recreate the profile
 #endif
         for (;;) {
             std::error_code error;
