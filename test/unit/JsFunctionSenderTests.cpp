@@ -18,7 +18,7 @@ struct SenderApp {
     using Net          = InjectableNetworking;
     using BufferPolicy = http::DefaultBuffersPolicy;
     WebLink<Net>& link;
-    auto          findLink(WebLinkId) {
+    auto          findLink(WebLinkId, WebLinkGeneration) {
         return std::shared_ptr<WebLink<Net>>(std::shared_ptr<WebLink<Net>>{}, &link);  // not owned
     }
 };
@@ -82,7 +82,7 @@ SCENARIO("Typed browser senders are lazy and own their arguments") {
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
     SenderApp                     app{link};
-    BasicUI<SenderApp>            ui{app, 1};
+    BasicUI<SenderApp>            ui{app, 1, 1};
     ex::inplace_stop_source       stop;
     Observed                      observed;
     GIVEN("a sender encoded from a temporary string view") {
@@ -121,7 +121,7 @@ SCENARIO("Typed browser senders report errors without escaping the receive loop"
     InlineTaskScope         scope;
     auto                    link = std::make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{1}, [](WebLinkEvent) { }, scope);
     SenderApp               app{*link};
-    BasicUI<SenderApp>      ui{app, 1};
+    BasicUI<SenderApp>      ui{app, 1, 1};
     Observed                observed;
     ex::inplace_stop_source stop;
     auto                    sender = ui.jsFunctionSender<std::string>("result")();
@@ -176,7 +176,7 @@ SCENARIO("Typed browser calls propagate receiver cancellation") {
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
     SenderApp                     app{link};
-    BasicUI<SenderApp>            ui{app, 1};
+    BasicUI<SenderApp>            ui{app, 1, 1};
     ex::inplace_stop_source       stop;
     Observed                      observed;
     GIVEN("a receiver already stopped at start") {
@@ -235,7 +235,7 @@ SCENARIO("Browser result and cancellation can race") {
                     InlineTaskScope               scope;
                     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
                     SenderApp                     app{link};
-                    BasicUI<SenderApp>            ui{app, 1};
+                    BasicUI<SenderApp>            ui{app, 1, 1};
                     ex::inplace_stop_source       stop;
                     Observed                      observed;
                     auto                          operation = ex::connect(ui.jsFunctionSender<std::string>("race")(), Receiver{observed, stop.get_token()});
@@ -270,7 +270,7 @@ SCENARIO("Typed browser senders can be awaited in a tracked task") {
     GIVEN("a coroutine awaiting a browser sender in its own scope") {
         auto               lifetime = std::make_shared<int>(42);
         std::weak_ptr<int> frame    = lifetime;
-        networking::Spawn(calls, ex::inline_scheduler{}, awaitBrowser(BasicUI<SenderApp>{app, 1}, observed, std::move(lifetime)));
+        networking::Spawn(calls, ex::inline_scheduler{}, awaitBrowser(BasicUI<SenderApp>{app, 1, 1}, observed, std::move(lifetime)));
         REQUIRE_FALSE(frame.expired());
         WHEN("the browser replies") {
             stringReply(1, "awaited result");
@@ -346,7 +346,7 @@ SCENARIO("Browser senders reject inconsistent return envelopes") {
     InlineTaskScope               scope;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, scope};
     SenderApp                     app{link};
-    BasicUI<SenderApp>            ui{app, 1};
+    BasicUI<SenderApp>            ui{app, 1, 1};
     ex::inplace_stop_source       stop;
     Observed                      observed;
     GIVEN("a pending string call") {
