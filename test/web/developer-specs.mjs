@@ -26,38 +26,57 @@ async function writeFile(path, text) {
     await call('write', id, 'output', 0, new TextEncoder().encode(text));
     await call('commit', id);
 }
-// The terminal of the page: the harness shows there each wf command it runs, as if it had been typed.
-let traceTerminal, traceWarned = false;
+// The page shows each wf command the harness runs, as if it had been typed. The bootstrap keeps its xterm.js terminal to
+// itself, so the trace is a text view put in its place; the trace must never fail a test.
+let traceView, traceWarned = false;
+const traceFailed = error => {
+    if (!traceWarned) { traceWarned = true; console.warn(`The command trace is unavailable: ${error?.message ?? error}`); }
+};
+const showTrace = () => {
+    try {
+        const terminal = document.getElementById('terminal');
+        const view = document.createElement('pre');
+        view.style.cssText = 'margin:0;height:100%;overflow:auto;font:13px monospace;color:#9aa3b2';
+        for (const child of terminal.children) child.style.display = 'none';
+        if (terminal.contains(document.activeElement)) document.activeElement.blur();  // no key may reach the hidden session
+        terminal.append(view);
+        traceView = view;
+    } catch (error) { traceFailed(error); }
+};
 const echo = text => {
-    try { traceTerminal?.write(`\x1b[2m${text}\x1b[0m\r\n`); }
-    catch (error) { if (!traceWarned) { traceWarned = true; console.warn(`The command trace is unavailable: ${error?.message ?? error}`); } }  // it must never fail a test
+    try { traceView?.append(`${text}\n`); if (traceView) traceView.scrollTop = traceView.scrollHeight; }
+    catch (error) { traceFailed(error); }
 };
-// Only the wf subcommand is shown (never an argument, an option value or a path). Only the deliberate waits are named as
-// such: many specs also expect a rejection, which the trace cannot tell from a defect.
-const outcomeOf = error => !error ? 'done' : error.exitCode === 124 ? 'timeout (expected)' : error.exitCode === 130 ? 'cancelled (expected)' : 'rejected';
-const traced = async (line, run) => {
-    const started = profileNow();
-    echo(`$ ${line}`);
-    let error;
-    try { return await run(); }
-    catch (thrown) { error = thrown; throw thrown; }
-    finally { echo(`  ${outcomeOf(error)} in ${((profileNow() - started) / 1000).toFixed(1)}s`); }
-};
-// Every actual command has a matching end marker, including expected failures.
-const execute = async (args, context) => {
-    const name = `command ${args.slice(0, 3).join(' ')}`;
+// Only the wf subcommand is shown, never an argument, an option value or a path; `execute` runs help for no argument.
+const subcommand = ([command = 'help']) => /^[a-z][a-z-]*$/.test(command) ? command : '?';
+// A wait is labelled expected only when the spec caused it: it pressed Ctrl+C (aborted its signal), or announced the time
+// limit it fires. Many specs also expect a rejection, which the trace cannot tell from a defect.
+const outcomeOf = (exitCode, {signal, expect}) =>
+    exitCode === 0 ? 'done'
+    : exitCode === 124 ? (expect === 'timeout' ? 'timeout (expected)' : 'timeout')
+    : exitCode === 130 ? (signal?.aborted ? 'cancelled (expected)' : 'cancelled')
+    : exitCode === undefined ? 'rejected' : `rejected (exit ${exitCode})`;
+// Every actual command has a matching end marker, including expected failures, and its line in the trace.
+const measured = async (name, line, context, expect, run) => {
     const started = profileNow();
     await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin ${name}`);
-    try { return await traced(`wf ${args[0] ?? ''}`, () => runtimeExecute(args, context)); }
-    finally { await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end ${name} durationMs=${(profileNow() - started).toFixed(3)}`); }
+    echo(`$ ${line}`);
+    let exitCode;
+    try { const result = await run(); exitCode = result?.exitCode ?? 0; return result; }
+    catch (error) { exitCode = error?.exitCode; throw error; }
+    finally {
+        const duration = profileNow() - started;
+        echo(`  ${outcomeOf(exitCode, {signal: context?.signal, expect})} in ${(duration / 1000).toFixed(1)}s`);
+        await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end ${name} durationMs=${duration.toFixed(3)}`);
+    }
 };
+// `expect: 'timeout'` names a time limit the spec fires on purpose.
+const execute = (args, context, {expect} = {}) =>
+    measured(`command ${args.slice(0, 3).join(' ')}`, `wf ${subcommand(args)}`, context, expect, () => runtimeExecute(args, context));
 let runtimeExecute, runtimeNonInteractive;
-const nonInteractive = async (args, context) => {
-    const started = profileNow();
-    await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin non-interactive ${args.join(' ')}`);
-    try { return await traced(`wf ${args[0] ?? ''} (non-interactive)`, () => runtimeNonInteractive(args, context)); }
-    finally { await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end non-interactive ${args.join(' ')} durationMs=${(profileNow() - started).toFixed(3)}`); }
-};
+// runNonInteractive never rejects for a failed command: it resolves with its exitCode.
+const nonInteractive = (args, context, {expect} = {}) =>
+    measured(`non-interactive ${args.join(' ')}`, `wf ${subcommand(args)} (non-interactive)`, context, expect, () => runtimeNonInteractive(args, context));
 // Ends the --public smoke test, which has no local registry for the checks that follow the generated headers.
 class PublicSmokeDone extends Error {}
 try {
@@ -85,14 +104,7 @@ try {
     runtimeExecute = runtime.execute;
     runtimeNonInteractive = runtime.runNonInteractive;
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
-    // The bootstrap's terminal is not reachable: mount the same one again, without a second resize observer or stylesheet,
-    // and clear its prompt, to write the trace of the commands in it.
-    const terminalElement = document.getElementById('terminal');
-    const styleSheets = document.querySelectorAll('link[rel=stylesheet][href$="xterm.css"]').length;
-    terminalElement.replaceChildren();
-    traceTerminal = (await runtime.mount({bridge: webFront, config, terminal: terminalElement, preview: document.getElementById('preview'), fitToElement: false})).terminal;
-    [...document.querySelectorAll('link[rel=stylesheet][href$="xterm.css"]')].slice(styleSheets).forEach(link => link.remove());
-    traceTerminal.reset();
+    showTrace();
     const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
     const currentDistribution = !config.environment.startsWith('https:');
     if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['life']), 'Only the Life starter must be shipped');
@@ -380,7 +392,7 @@ try {
     for (const target of ['loop', 'nested']) {
         scriptOutput.length = 0;
         await withTimers([60000, 2000], async clock => {
-            const running = failure(execute(['run', '--timeout', '60', target], runContext()));
+            const running = failure(execute(['run', '--timeout', '60', target], runContext(), {expect: 'timeout'}));
             await printed('looping');
             clock.fire(60000);
             clock.fire(2000);
@@ -512,13 +524,13 @@ try {
     const testOutput = [];
     let testRun = 0;
     await progress('Jasmine runs');
-    const tested = async (args = [], extra = {}) => {
+    const tested = async (args = [], extra = {}, expectation = {}) => {
         const label = `wf test #${++testRun} ${args.join(' ')}`;
         const started = profileNow();
         await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin ${label}`);
         testOutput.length = 0;
         let report = null;
-        const result = await execute(['test', ...args], {...runContext(), write: text => testOutput.push(text), onReport: value => { report = value; }, ...extra})
+        const result = await execute(['test', ...args], {...runContext(), write: text => testOutput.push(text), onReport: value => { report = value; }, ...extra}, expectation)
             .then(text => ({text}), error => ({error}));
         await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end ${label} durationMs=${(profileNow() - started).toFixed(3)} status=${report?.status ?? result.error?.message ?? 'done'}`);
         return {...result, report, output: testOutput.join('')};
@@ -607,7 +619,7 @@ try {
     await withTimers([60000], async clock => {
         const started = hangingStarted();
         try {
-            const hanging = tested(['--timeout', '60']);
+            const hanging = tested(['--timeout', '60'], {}, {expect: 'timeout'});
             await untilReady(started.ready, hanging);
             assert(clock.pending() === 1, 'Only the frame deadline must remain after preparation');
             clock.fire(60000);
@@ -636,7 +648,7 @@ try {
     await specsOf(['tests/pass.spec.js']);
     await withTimers([60000], async clock => {
         const blocked = blockedRead();
-        const running = tested(['--timeout', '60'], {bridge: blocked.bridge});
+        const running = tested(['--timeout', '60'], {bridge: blocked.bridge}, {expect: 'timeout'});
         await untilReady(blocked.ready, running);
         clock.fire(60000);
         const result = await running;
@@ -663,7 +675,7 @@ try {
             `An already aborted signal must report interruption without AbortSignal.any: ${legacyStopped.error}`);
         await withTimers([60000], async clock => {
             const blocked = blockedRead();
-            const running = tested(['--timeout', '60'], {bridge: blocked.bridge, signal: new AbortController().signal});
+            const running = tested(['--timeout', '60'], {bridge: blocked.bridge, signal: new AbortController().signal}, {expect: 'timeout'});
             await untilReady(blocked.ready, running);
             clock.fire(60000);
             const result = await running;
@@ -694,7 +706,7 @@ try {
                 if (++reads > 2) { started(); return new Promise(() => {}); }
                 return webFront.cppFunction(name)(...args);
             } : webFront.cppFunction(name)};
-        const running = execute(['run', '--timeout', '60', 'specs'], {...runContext(), bridge, onReport: () => {}}).then(() => null, error => error);
+        const running = execute(['run', '--timeout', '60', 'specs'], {...runContext(), bridge, onReport: () => {}}, {expect: 'timeout'}).then(() => null, error => error);
         await untilReady(ready, running);
         clock.fire(60000);
         const inherited = await running;

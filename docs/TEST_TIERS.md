@@ -31,11 +31,12 @@ ctest --test-dir build -R DeveloperBrowserIntegration -N -V     # prints the com
 ```
 
 The process prints a `Developer integration: <time>ms begin|end <step> durationMs=...` line for each phase and each
-command. The window of `DeveloperBrowserIntegration` also shows, in its terminal, every `wf` command the specs run with
-its outcome and duration, as if it had been typed. Only the `wf` subcommand is shown, never an argument, an option value
-or a path. A deliberate wait is labelled `timeout (expected)` for a time limit and `cancelled (expected)` for Ctrl+C; a
-command a spec expects to be refused appears as `rejected`. This trace
-comes from the specs (`test/web/developer-specs.mjs`), not from the published environment.
+command. The window of `DeveloperBrowserIntegration` also shows, in place of its terminal, every `wf` command the specs
+run with its outcome and duration, as if it had been typed. Only the `wf` subcommand is shown, never an argument, an
+option value or a path. A failed command appears as `rejected`, with its exit code when it has one, whether or not the
+spec expected the refusal. A wait is labelled `timeout (expected)` only for a time limit the spec announces and fires,
+and `cancelled (expected)` only when the spec pressed Ctrl+C; any other time limit or cancellation appears as `timeout`
+or `cancelled`. This trace comes from the specs (`test/web/developer-specs.mjs`), not from the published environment.
 
 ## Advanced checks
 
