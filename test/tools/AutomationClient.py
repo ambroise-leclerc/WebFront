@@ -112,6 +112,19 @@ class Client:
         self.reader.join(timeout=2)
 
 
+def remaining_profiles(profiles, timeout=10):
+    """The agent profiles left in `profiles`, once removed or after `timeout` seconds, with what they contain.
+
+    On Linux, the CEF browser runs inside the agent and may write until it exits: the agent then leaves the
+    last removal to a process that waits for its exit."""
+    deadline = time.monotonic() + timeout
+    while True:
+        left = list(profiles.glob("webfront-agent-*"))
+        if not left or time.monotonic() >= deadline:
+            return left, [str(path.relative_to(profiles)) for profile in left for path in profile.rglob("*")][:40]
+        time.sleep(0.05)
+
+
 def check_startup_backoff(agent, root, ready_delay=0):
     """The attach-only path needs no renderer and must not create 50 connections per second."""
     endpoint = root / f"owner-{ready_delay}"
@@ -281,8 +294,7 @@ def watchdog(args):
                     assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
             assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
             assert not endpoint.exists(), "The forced exit left its attachment capability behind"
-            left = list(profiles.glob("webfront-agent-*"))
-            contents = [str(path.relative_to(profiles)) for profile in left for path in profile.rglob("*")][:40]
+            left, contents = remaining_profiles(profiles)
             assert not left, f"The forced exit left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
         if args.scenario == "cli-watchdog":
             # This same-path relaunch must reach its authenticated page before the intentional error.
@@ -458,9 +470,9 @@ def main():
                     assert shutdown.returncode == 0, shutdown.stderr
                     # Before it exits, the owner waits up to 5 s for the WebView2 browser, ends it, then removes the profile.
                     assert owner.wait(timeout=30) == 0, pathlib.Path(log.name).read_text()
-                # Only the owner removes the profile: once it has exited, the directory no longer changes.
-                left = list(profiles.glob("webfront-agent-*"))
-                assert not left, f"The owner left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
+                # Only the owner removes the profile, at the latest just after it has exited.
+                left, contents = remaining_profiles(profiles)
+                assert not left, f"The owner left its native profile behind: {left} {contents}\n{pathlib.Path(log.name).read_text()}"
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)

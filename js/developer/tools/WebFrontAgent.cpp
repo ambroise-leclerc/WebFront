@@ -29,6 +29,7 @@
 #include <fstream>
 #include <map>
 #include <signal.h>
+#include <spawn.h>
 #include <sstream>
 #include <string>
 #include <sys/types.h>
@@ -194,6 +195,35 @@ void releaseBrowserProcesses() noexcept {
         // Without the process list, the removal below still runs.
     }
 }
+
+// The CEF browser runs inside the agent: until the agent exits, its threads may write into the profile again, and
+// relaunch the helpers ended above. A shell outside the agent's descriptors removes the profile once the agent is gone
+// (exited, even if not reaped yet); false when it cannot be started.
+bool removeAfterExit(const std::filesystem::path& path) noexcept {
+    try {
+        posix_spawn_file_actions_t actions;
+        if (::posix_spawn_file_actions_init(&actions) != 0)
+            return false;
+        // Neither the CLI/MCP pipes, whose EOF the clients wait for, nor the agent's sockets go to the shell.
+        bool       prepared = ::posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0
+                     && ::posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0) == 0
+                     && ::posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0) == 0
+                     && ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
+        const auto agent   = std::to_string(::getpid());
+        const auto profile = path.string();
+        // Waits while the agent runs ('Z' once exited), then removes the profile.
+        const char* script = "while [ -r \"/proc/$0/stat\" ] && [ \"$(sed 's/.*) //' \"/proc/$0/stat\" | cut -c1)\" != Z ]; do "
+                             "sleep 0.05; done; rm -rf -- \"$1\"";
+        char* const arguments[] = {const_cast<char*>("sh"), const_cast<char*>("-c"), const_cast<char*>(script),
+                                   const_cast<char*>(agent.c_str()), const_cast<char*>(profile.c_str()), nullptr};
+        pid_t cleaner{};
+        prepared = prepared && ::posix_spawn(&cleaner, "/bin/sh", &actions, nullptr, arguments, environ) == 0;
+        ::posix_spawn_file_actions_destroy(&actions);
+        return prepared;
+    } catch (...) {
+        return false;
+    }
+}
 #endif
 
 struct Profile {
@@ -208,6 +238,11 @@ struct Profile {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
 #elif defined(__linux__)
         releaseBrowserProcesses();  // the browser's helpers would otherwise recreate the profile
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);  // what the browser still writes goes after the agent's exit
+        if (!removeAfterExit(path))
+            std::cerr << "Automation: cannot schedule the removal of the temporary profile\n";
+        return;
 #endif
         for (;;) {
             std::error_code error;
