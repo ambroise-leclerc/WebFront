@@ -42,6 +42,10 @@ target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings We
 if(WIN32)
   target_link_libraries(tests PRIVATE ws2_32 bcrypt advapi32)
 endif()
+if(MSVC)
+  # The templates of the DOM, forms and bridge tests exceed the section limit of one MSVC object file.
+  target_compile_options(tests PRIVATE /bigobj)
+endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
