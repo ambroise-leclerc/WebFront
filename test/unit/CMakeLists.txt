@@ -47,6 +47,30 @@ if(MSVC)
   target_compile_options(tests PRIVATE /bigobj)
 endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+# Build-time study (#435), measurements only (docs/BUILD_TIME_STUDY.md): both knobs default to the regular build.
+#  WEBFRONT_TEST_UNITY_BATCH=N  groups the translation units of `tests` by N (0: no unity build);
+#  WEBFRONT_TEST_UNITY_HEAVY=ON limits the grouping to the heavy units (those instantiating a full application);
+#  WEBFRONT_TEST_PCH=ON         precompiles the headers every test includes.
+set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Study (#435): UNITY_BUILD_BATCH_SIZE of the tests target, 0 disables it")
+option(WEBFRONT_TEST_UNITY_HEAVY "Study (#435): group only the heavy translation units of the tests target" OFF)
+option(WEBFRONT_TEST_PCH "Study (#435): precompiled headers for the tests target" OFF)
+if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
+  set_target_properties(tests PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE ${WEBFRONT_TEST_UNITY_BATCH})
+  if(WEBFRONT_TEST_UNITY_HEAVY)
+    set(_heavy WebFrontTests BroadcastTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests
+        JsFunctionSenderTests AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
+    foreach(_source IN LISTS TESTS_LIST)
+      cmake_path(GET _source STEM _stem)
+      if(NOT _stem IN_LIST _heavy)
+        set_source_files_properties(${_source} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+      endif()
+    endforeach()
+  endif()
+endif()
+if(WEBFRONT_TEST_PCH)
+  target_precompile_headers(tests PRIVATE <catch2/catch_test_macros.hpp> <catch2/generators/catch_generators.hpp> <catch2/matchers/catch_matchers.hpp> <webfront/WebFront.hpp>)
+endif()
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 

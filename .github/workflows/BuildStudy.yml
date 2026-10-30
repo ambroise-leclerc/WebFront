@@ -1,0 +1,142 @@
+name: Build time study
+
+# Measurements for #435, run by hand: each job times one configuration of the tests under the compiler-cache scenarios of a
+# pull request (test/tools/BuildStudy.py) and the report job tabulates them. Nothing here gates a merge.
+on:
+  # Temporary: a workflow absent from the default branch cannot be dispatched, so the study branch runs it on push.
+  push:
+    branches: [435-ci-build-time]
+    paths: ['.github/workflows/BuildStudy.yml', 'test/tools/BuildStudy*.py', 'test/unit/CMakeLists.txt']
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: 'Comma-separated variants to run (empty: all)'
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: tag
+        run: |
+          hash=$(sha256sum .github/docker/linux-ci.Dockerfile | cut -c1-16)
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/linux-ci:$hash" >> "$GITHUB_OUTPUT"
+      - id: matrix
+        env:
+          REQUESTED: ${{ inputs.variants }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          all_variants = ['base-all-j2', 'base-all-j4', 'base-j2', 'base-j4', 'unity-b2', 'unity-b4', 'unity-b8', 'unity-b16',
+                          'unity-heavy-b4', 'unity-heavy-b13', 'pch', 'pch-unity-heavy-b4']
+          requested = [v for v in os.environ.get('REQUESTED', '').replace(' ', '').split(',') if v] or all_variants
+          print('matrix=' + json.dumps({'os': ['windows', 'linux'], 'variant': requested}))
+          PY
+
+  study:
+    needs: image
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.image.outputs.matrix) }}
+    name: ${{ matrix.os }} ${{ matrix.variant }}
+    runs-on: ${{ matrix.os == 'windows' && 'windows-2025' || 'ubuntu-26.04' }}
+    container: ${{ matrix.os == 'linux' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.image.outputs.image, github.actor, github.token)) || '' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - name: Point the CPM cache at the workspace
+        shell: bash
+        run: echo "CPM_SOURCE_CACHE=$GITHUB_WORKSPACE/.cache/CPM" >> "$GITHUB_ENV"
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-study-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/unit/CMakeLists.txt') }}
+          restore-keys: cpm-study-${{ runner.os }}-
+      - name: Initialize MSVC environment
+        if: matrix.os == 'windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Local-disk compiler cache
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-study" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=20G" >> "$GITHUB_ENV"
+      - name: Machine
+        shell: bash
+        run: |
+          cmake --version | head -1
+          (nproc || sysctl -n hw.ncpu || echo "$NUMBER_OF_PROCESSORS") 2>/dev/null
+          (cl 2>&1 | head -1) || g++ --version | head -1
+      - name: Measure
+        shell: bash
+        run: |
+          case "${{ matrix.variant }}" in
+            base-all-j2)        jobs=2; target=all;   extra="" ;;
+            base-all-j4)        jobs=4; target=all;   extra="" ;;
+            base-j2)            jobs=2; target=tests; extra="" ;;
+            base-j4)            jobs=4; target=tests; extra="" ;;
+            unity-b2)           jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=2" ;;
+            unity-b4)           jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=4" ;;
+            unity-b8)           jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=8" ;;
+            unity-b16)          jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=16" ;;
+            unity-heavy-b4)     jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            unity-heavy-b13)    jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=13 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            pch)                jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON" ;;
+            pch-unity-heavy-b4) jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
+            *) echo "unknown variant"; exit 1 ;;
+          esac
+          if [ "${{ matrix.os }}" = windows ]; then
+            config=Release
+            platform="-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2"
+          else
+            config=Debug
+            platform="-DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON"
+          fi
+          # shellcheck disable=SC2086
+          python3 test/tools/BuildStudy.py --name "${{ matrix.os }}-${{ matrix.variant }}" --build-dir study/build \
+            --jobs "$jobs" --target "$target" --config "$config" --output "study/${{ matrix.os }}-${{ matrix.variant }}.json" \
+            -- $platform $extra
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: study-${{ matrix.os }}-${{ matrix.variant }}
+          path: study/*.json
+          if-no-files-found: ignore
+
+  report:
+    needs: study
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: study-*
+          path: study-results
+          merge-multiple: true
+      - name: Tabulate
+        run: python3 test/tools/BuildStudyReport.py study-results | tee -a "$GITHUB_STEP_SUMMARY" > study-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: study-report
+          path: |
+            study-report.md
+            study-results/
