@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Stabilise the desktop-native tier (#416): the automation owner retries removing its temporary
-  WebView2 profile for up to 10 s (was 2 s) while the browser process exits, the automation tests wait
+  WebView2 profile for up to 10 s (was 2 s; 1 s after a forced exit) while the browser process exits, the automation tests wait
   for that cleanup instead of assuming it is immediate, their failure messages report the observed run
   state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout.
 

@@ -49,11 +49,11 @@ struct Files {
 struct Profile {
     channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
     const std::filesystem::path path{directory.path};
-    void cleanup() const noexcept {
+    void cleanup(std::chrono::seconds patience = std::chrono::seconds{10}) const noexcept {
         // WebView2 closes its browser process asynchronously after the controller is released.
         // Retry only sharing violations during that short exit; POSIX can unlink open files.
 #ifdef _WIN32
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+        const auto deadline = std::chrono::steady_clock::now() + patience;
 #endif
         for (;;) {
             std::error_code error;
@@ -384,7 +384,7 @@ int main(int argc, char** argv) {
                         const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
                         if (channel)
                             channel->stop();
-                        profile.cleanup();  // _Exit skips the destructors
+                        profile.cleanup(std::chrono::seconds{1});  // _Exit skips the destructors; the deadline is already spent
                         std::_Exit(code);
                     }
                     return;
