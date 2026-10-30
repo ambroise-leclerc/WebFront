@@ -203,6 +203,14 @@ public:
 
     void sendCommand(const auto& message) { ws->write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
+    /// A frame shared with other links (websocket::Frame::share()), never copied.
+    void sendFrame(std::shared_ptr<const websocket::Frame<Net>> frame) {
+        ws->write(std::move(frame));
+    }
+    /// Keeps at most `maxPending` frames of `key` queued and only the latest of the others: see WebSocket::writeLatest.
+    void sendLatest(std::shared_ptr<const websocket::Frame<Net>> frame, std::string_view key, std::size_t maxPending) {
+        ws->writeLatest(std::move(frame), key, maxPending);
+    }
 
     template<typename Result>
     std::pair<msg::CallId, std::future<Result>> expectResult() {

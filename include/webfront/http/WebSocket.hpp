@@ -2,11 +2,11 @@
 /// @author Ambroise Leclerc
 /// @brief WebSocket protocol implementation - RFC6455
 #pragma once
+#include "../networking/Tasks.hpp"
+#include "../tooling/HexDump.hpp"
+#include "../tooling/Logger.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
-#include "../tooling/HexDump.hpp"
-#include "../networking/Tasks.hpp"
-#include "../tooling/Logger.hpp"
 
 #include <array>
 #include <atomic>
@@ -14,11 +14,14 @@
 #include <deque>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <span>
+#include <string>
+#include <string_view>
 #include <system_error>
 
 namespace webfront::websocket {
@@ -165,6 +168,12 @@ struct Frame : public Header {
         ownedBuffers.reserve(borrowedBuffers.size());
         for (const auto buffer : borrowedBuffers) ownedBuffers.emplace_back(buffer.begin(), buffer.end());
         borrowedBuffers.clear();
+    }
+
+    /// Owns the payload once, then shares the frame: several connections may write it, none copies it.
+    [[nodiscard]] std::shared_ptr<const Frame> share() && {
+        freeze();
+        return std::make_shared<const Frame>(std::move(*this));
     }
 
     /// @return size of added buffer
@@ -345,6 +354,34 @@ public:
     void write(std::span<const std::byte> data) { writeData(Frame<Net>(data)); }
     void write(std::span<const std::byte> data, std::span<const std::byte> data2) { writeData(Frame<Net>(data, data2)); }
     void write(Frame<Net> frame) { writeData(std::move(frame)); }
+    /// Queue a frame made by Frame::share(), without copying it.
+    void write(std::shared_ptr<const Frame<Net>> frame) {
+        static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max()));
+    }
+    /// Queue a shared frame while fewer than `maxPending` frames of the same `key` await the network. Otherwise it
+    /// replaces the frame held back for that key, which is queued as soon as fewer do: the network skips intermediate
+    /// frames of a key but always gets the latest, and the frames of a key keep their order. Frames of other keys,
+    /// and the other writes, neither count nor are held. `maxPending` must be at least 1.
+    void writeLatest(std::shared_ptr<const Frame<Net>> frame, std::string_view key, std::size_t maxPending) {
+        {
+            std::lock_guard lock(writeMutex);
+            auto            group = latestGroups.find(key);
+            if (group == latestGroups.end())
+                group = latestGroups.emplace(std::string(key), LatestGroup{}).first;
+            auto& latest = group->second;
+            latest.limit = maxPending;
+            if (latest.queued >= maxPending) {
+                latest.held = std::move(frame);
+                return;
+            }
+            latest.held = nullptr;  // superseded, if a smaller limit held it back
+            ++latest.queued;
+            writeQueue.push_back({std::move(frame), &*group});
+            if (writeQueue.size() > 1)
+                return;  // the running writeFrames() task will get to it
+        }
+        spawn(writeFrames(this->shared_from_this()));
+    }
     /// Queue a droppable frame (a diagnostic) only while fewer than maxPending frames await the
     /// network, which may stop reading; false when refused. Other writes are never refused.
     [[nodiscard]] bool tryWrite(std::span<const std::byte> data, std::span<const std::byte> data2, std::size_t maxPending) {
@@ -365,7 +402,18 @@ private:
     std::function<void(std::error_code)> writeErrorHandler;
     std::function<void()> writtenHandler;
     mutable std::mutex writeMutex;
-    std::deque<std::shared_ptr<Frame<Net>>> writeQueue;  // the first frame is the one being written
+    // The frames of a writeLatest() key that are queued, and the one held back; guarded by writeMutex.
+    struct LatestGroup {
+        std::size_t                       queued = 0;
+        std::size_t                       limit  = 0;
+        std::shared_ptr<const Frame<Net>> held;
+    };
+    std::map<std::string, LatestGroup, std::less<>> latestGroups;  // a key is forgotten once nothing is queued for it
+    struct PendingFrame {
+        std::shared_ptr<const Frame<Net>>                                     frame;
+        typename std::map<std::string, LatestGroup, std::less<>>::value_type* group = nullptr;  // for writeLatest()
+    };
+    std::deque<PendingFrame>                             writeQueue;                            // the first frame is the one being written
     networking::TaskScope&                               taskScope;
     std::shared_ptr<networking::ex::inplace_stop_source> stopSource{std::make_shared<networking::ex::inplace_stop_source>()};
     struct StopConnection {
@@ -520,12 +568,14 @@ private:
     void writeData(Frame<Net> frame) { static_cast<void>(enqueue(std::move(frame), std::numeric_limits<std::size_t>::max())); }
 
     bool enqueue(Frame<Net> frame, std::size_t maxPending) {
-        frame.freeze();
-        auto pendingFrame = std::make_shared<Frame<Net>>(std::move(frame));
+        return enqueue(std::move(frame).share(), maxPending);
+    }
+
+    bool enqueue(std::shared_ptr<const Frame<Net>> frame, std::size_t maxPending) {
         {
             std::lock_guard lock(writeMutex);
             if (writeQueue.size() >= maxPending) return false;
-            writeQueue.push_back(std::move(pendingFrame));
+            writeQueue.push_back({std::move(frame)});
             if (writeQueue.size() > 1) return true;  // the running writeFrames() task will get to it
         }
         spawn(writeFrames(this->shared_from_this()));
@@ -546,17 +596,31 @@ private:
             {
                 std::lock_guard lock(writeMutex);
                 writeQueue.clear();
+                latestGroups.clear();     // nothing will be written any more: the frames held back go too
             }
             onWriteFailed(error.code());  // reports the closure before the waiters for the queue resume
             if (writtenHandler) writtenHandler();
         }
     }
 
-    // The frame to write, after having removed the written one if `written`; null when none remains.
-    std::shared_ptr<Frame<Net>> nextFrame(bool written) {
+    // The frame to write, after having removed the written one if `written`; null when none remains. A frame held
+    // back by writeLatest() is queued once its key has room.
+    std::shared_ptr<const Frame<Net>> nextFrame(bool written) {
         std::lock_guard lock(writeMutex);
-        if (written) writeQueue.pop_front();
-        return writeQueue.empty() ? nullptr : writeQueue.front();
+        if (written) {
+            const auto group = writeQueue.front().group;
+            writeQueue.pop_front();
+            if (group) {
+                auto& latest = group->second;
+                --latest.queued;
+                if (latest.held && latest.queued < latest.limit) {
+                    ++latest.queued;
+                    writeQueue.push_back({std::move(latest.held), group});
+                } else if (latest.queued == 0)
+                    latestGroups.erase(latestGroups.find(group->first));
+            }
+        }
+        return writeQueue.empty() ? nullptr : writeQueue.front().frame;
     }
 
     /// The producer is detached before the diagnostic; the flag only gates the close sequence.

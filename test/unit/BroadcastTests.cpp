@@ -96,6 +96,30 @@ SCENARIO("A broadcast keeps only the latest call for a browser with too many pen
                 }
             }
         }
+        WHEN("states are broadcast through temporary function objects while the first one is still being written") {
+            app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-1"});
+            app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-2"});
+            app.broadcast("onState", {.maxPendingWrites = 1})(std::string{"temporary-3"});
+            while (Socket::completeDeferredWrites() != 0) { }
+            THEN("they share the browser's held call: the intermediate one was skipped") {
+                REQUIRE(Socket::wrote("temporary-1"));
+                REQUIRE(Socket::wrote("temporary-3"));
+                REQUIRE_FALSE(Socket::wrote("temporary-2"));
+            }
+        }
+        WHEN("states are broadcast while an event of another function is still being written") {
+            every(std::string{"event-0"});
+            latest(std::string{"state-1"});
+            latest(std::string{"state-2"});
+            latest(std::string{"state-3"});
+            while (Socket::completeDeferredWrites() != 0) { }
+            THEN("the event does not count toward the limit of the states") {
+                REQUIRE(Socket::wrote("event-0"));
+                REQUIRE(Socket::wrote("state-1"));
+                REQUIRE(Socket::wrote("state-3"));
+                REQUIRE_FALSE(Socket::wrote("state-2"));
+            }
+        }
         WHEN("events are broadcast without a limit while the first one is still being written") {
             every(std::string{"event-1"});
             every(std::string{"event-2"});
@@ -115,8 +139,50 @@ SCENARIO("A broadcast keeps only the latest call for a browser with too many pen
 }
 
 SCENARIO("A broadcast limit must allow at least one pending write", "[broadcast]") {
+    testing::InjectableSocket::reset();
+    OneBrowserNet::accepted = false;
     BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
     REQUIRE_THROWS_AS(app.broadcast("onState", {.maxPendingWrites = 0}), std::invalid_argument);
+    app.shutdown();
+    testing::InjectableSocket::reset();
+}
+
+SCENARIO("A browser receives a broadcast made while its onUIStarted handlers run after what they sent", "[broadcast]") {
+    using Socket = testing::InjectableSocket;
+    using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
+    Socket::reset();
+    OneBrowserNet::accepted = false;
+    App         app{WebFrontConfig{.port = "0"}};
+    auto        onState = app.broadcast("onState", {.maxPendingWrites = 1});
+    std::size_t visitedWhileStarting{};
+    app.onUIStarted([&](App::UI ui) {
+        onState(std::string{"broadcast-while-starting"});
+        app.forEachUI([&](App::UI) {
+            ++visitedWhileStarting;
+        });
+        ui.jsFunction("initial")(std::string{"initial-state"});
+    });
+    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+
+    WHEN("the browser completes its handshake") {
+        msg::Handshake handshake;
+        Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+        THEN("the handler's initial state comes first, then the broadcast") {
+            REQUIRE(Socket::wrote("initial-state"));
+            REQUIRE(Socket::wrote("broadcast-while-starting"));
+            REQUIRE(Socket::writtenAt("initial-state") < Socket::writtenAt("broadcast-while-starting"));
+        }
+        THEN("forEachUI skipped the browser while its handlers ran, and visits it afterwards") {
+            REQUIRE(visitedWhileStarting == 0);
+            std::size_t visited{};
+            app.forEachUI([&](App::UI) {
+                ++visited;
+            });
+            REQUIRE(visited == 1);
+        }
+    }
+    app.shutdown();
+    Socket::reset();
 }
 
 namespace {
@@ -247,12 +313,18 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
     }
     WHEN("another thread calls each browser through forEachUI") {
         std::vector<WebLinkId> visited;
+        bool                   documentRefused = true;
         app.forEachUI([&](App::UI ui) {
             visited.push_back(ui.id());
             ui.jsFunction("each")(std::string{"each-ui-" + std::to_string(ui.id())});
+            try {
+                static_cast<void>(ui.document());
+                documentRefused = false;
+            } catch (const std::logic_error&) { }
         });
-        THEN("each started browser is visited once and receives its call") {
+        THEN("each started browser is visited once and receives its call, but its document needs the server thread") {
             REQUIRE(visited.size() == 2);
+            REQUIRE(documentRefused);
             REQUIRE(first->receiveUntil("each-ui-"));
             REQUIRE(second->receiveUntil("each-ui-"));
         }

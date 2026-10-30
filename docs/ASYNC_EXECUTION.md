@@ -200,10 +200,12 @@ Inside a task, await `jsFunctionSender<R>` instead.
 ## Broadcasting to every browser
 
 `app.broadcast(name)` returns a function object that calls the JavaScript function `name` on every
-browser whose handshake has completed (those `onUIStarted` was called for) and whose closure was
+browser whose `onUIStarted` and `subscribeUIStarted` handlers have returned and whose closure was
 not reported yet. Like the untyped `jsFunction`, the call is fire-and-forget. The application keeps
 no table of its browsers: those that connect later receive the next calls, and a browser that
-closes stops receiving them. The arguments are encoded once for all the browsers.
+closes stops receiving them. A call made while a browser's handlers run reaches it right after
+them, so what the handlers send, such as the initial state, arrives first. Each call encodes its
+arguments once, into a frame that all the browsers share.
 
 ```cpp
 auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 2});
@@ -212,14 +214,19 @@ onState(stateJson);
 ```
 
 `BroadcastOptions::maxPendingWrites` protects a browser that reads slower than the application
-writes. A call is queued for a browser only while fewer frames than that await its network. Otherwise
-the call is held back, and a newer call replaces it. The held call is queued as soon as the browser
-catches up, so the browser skips the intermediate states but always receives the latest one. Calls
-made one after the other reach each browser in that order. Without the option, every call is queued for every browser. Keep
-the function object between calls, because it holds the calls that are waiting. Copies share them.
+writes. A call is queued for a browser only while fewer calls of the same function than that await
+its network. Otherwise the call is held back, and a newer call of that function replaces it. The
+held call is queued as soon as the browser catches up, so the browser skips the intermediate
+states but always receives the latest one. Calls of a function reach each browser in the order
+they were made. Other frames, such as logs or other functions' calls, do not count toward the
+limit and are never held back. Without the option, every call is queued for every browser. The
+held calls belong to each browser's connection and go with it, so the function object holds no
+state and may be a temporary.
 
-`app.forEachUI(function)` calls `function(ui)` for the same browsers, on the calling thread, outside
-every WebFront lock, for per-browser arguments or typed calls.
+`app.forEachUI(function)` calls `function(ui)` on the calling thread, outside every WebFront lock,
+for per-browser arguments or typed calls. It visits the browsers whose handlers had returned when
+it started: unlike a broadcast, it skips a browser whose handlers are still running. As anywhere
+else, `ui.document()` throws `std::logic_error` outside the server thread.
 
 ## HTTP gzip CPU work
 
