@@ -46,6 +46,8 @@ jobs:
 
   study:
     needs: image
+    # A commit message with [profile-only] skips the measurements and runs only the profile job.
+    if: ${{ !contains(github.event.head_commit.message, '[profile-only]') }}
     permissions:
       contents: read
       packages: read
@@ -154,7 +156,7 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.os }}" in
-            windows) flags="/d1reportTime"; config=Release ;;
+            windows) flags="-d1reportTime"; config=Release ;;
             linux)   flags="-ftime-report"; config=Debug ;;
             macos)   flags="-ftime-trace -ftime-trace-granularity=2000"; config=Release ;;
           esac
@@ -178,7 +180,7 @@ jobs:
 
   report:
     needs: study
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && !contains(github.event.head_commit.message, '[profile-only]') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
