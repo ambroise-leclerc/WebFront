@@ -44,7 +44,7 @@ using ConnectionError = std::runtime_error;
 
 template <typename WebFront>
 class BasicUI {
-    WebFront* webFront;
+    WebFront* webFront; ///< Never null: the only constructor takes a reference, and there is no default constructor.
     WebLinkId webLinkId;
 
 public:
@@ -56,7 +56,9 @@ public:
         return webLinkId;
     }
 
-    /// Two values are equal when they identify the same connection of the same application.
+    /// Two values are equal when they identify the same connection of the same application. A value only identifies
+    /// a connection while its application lives: a stale value can equal one of a later application built at the
+    /// same address.
     [[nodiscard]] friend bool operator==(const BasicUI& a, const BasicUI& b) noexcept {
         return a.webFront == b.webFront && a.webLinkId == b.webLinkId;
     }

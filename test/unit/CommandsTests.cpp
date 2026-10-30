@@ -572,11 +572,28 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             CHECK(current->id() == 3);
         }
         THEN("a UI of another application is never equal, even with the same identifier") {
-            RealApp other(WebFrontConfig{.port = "0"});
-            CHECK(RealApp::UI(app, 1) != RealApp::UI(other, 1));
-            RealApp::UI ui(app, 1);
-            ui = RealApp::UI(other, 1);
-            CHECK(ui == RealApp::UI(other, 1));
+            struct Application { } first, second;
+            using StubUI = BasicUI<Application>;
+            CHECK(StubUI(first, 1) != StubUI(second, 1));
+            StubUI ui(first, 1);
+            ui = StubUI(second, 1);
+            CHECK(ui == StubUI(second, 1));
+        }
+        THEN("a UI has no default state and a reassigned one acts on its new value") {
+            static_assert(!std::is_default_constructible_v<RealApp::UI>);
+            RealApp::UI       ui(app, 1);
+            const RealApp::UI gone(app, 42);
+            ui = gone;
+            CHECK(ui == gone);
+            CHECK_THROWS_AS(ui.addScript("1"), ConnectionError);
+            CHECK(ui.pendingWrites() == 0);
+            CHECK_NOTHROW(ui.jsFunction("console.log")("dropped"));
+            auto result = ui.jsFunction<int>("Math.abs")(-1);
+            CHECK_THROWS_WITH(result.get(), "Browser connection closed");
+            CHECK_NOTHROW(ui.writesAtMost(0));
+            RealApp::UI moved(std::move(ui));
+            CHECK(moved.id() == 42);
+            CHECK_THROWS_AS(moved.addScript("1"), ConnectionError);
         }
         THEN("a second Commands object is refused, and cppFunction tells a taken name") {
             Commands<RealApp> commands{app};
