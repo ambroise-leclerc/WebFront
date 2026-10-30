@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Reject a stale `UI` after its connection identifier is reused (#428): each connection gets a 64-bit
+  generation, never reused, kept in the application next to its link. `UI`, `JsFunction` and
+  `JsFunctionSender` carry it with the 16-bit identifier, so a value kept after its connection closed finds no
+  link even once a later browser receives the same `id()`: calls are dropped, typed calls fail,
+  `addScript` throws `ConnectionError`, `pendingWrites()` is 0, and the value equals no later connection's.
+  `operator==` compares application, identifier and generation. Removing kept values in `subscribeUIClosed`
+  becomes a recommendation, not a safety requirement. The generation never crosses the wire: no change to the
+  binary format or `WebFront.js`.
+
 - Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
   whose `onUIStarted` handlers have returned, from any thread, with no table of browsers kept by the
   application. A broadcast made while those handlers run follows what they sent. Each call is encoded

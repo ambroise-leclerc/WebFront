@@ -239,8 +239,8 @@ class JsFunctionSender {
 
 public:
     /// The connection of a browser that is gone leaves the references empty: started calls report an error.
-    JsFunctionSender(std::string_view functionName, WebFront& wf, WebLinkId id) : name(functionName) {
-        if (const auto link = wf.findLink(id)) {
+    JsFunctionSender(std::string_view functionName, WebFront& wf, WebLinkId id, WebLinkGeneration generation) : name(functionName) {
+        if (const auto link = wf.findLink(id, generation)) {
             pending = link->pendingResults();
             socket  = link->socket();
         }

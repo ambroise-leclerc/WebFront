@@ -86,7 +86,7 @@ struct WebLinkMock {
 struct WebFrontMock {
     using Net          = networking::NetworkingMock;
     using BufferPolicy = http::DefaultBuffersPolicy;
-    std::shared_ptr<WebLinkMock<WebFrontMock>> findLink(WebLinkId id) {
+    std::shared_ptr<WebLinkMock<WebFrontMock>> findLink(WebLinkId id, WebLinkGeneration) {
         return std::make_shared<WebLinkMock<WebFrontMock>>(id, *this);
     }
 };
@@ -96,7 +96,7 @@ SCENARIO("JsFunction") {
     WebLinkId    id{1};
 
     GIVEN("A print JsFunction") {
-        JsFunction  print("print", webFront, id);
+        JsFunction  print("print", webFront, id, 1);
         std::string text{"maFunction"};
 
         WHEN("print is called with a boolean (true) parameter") {

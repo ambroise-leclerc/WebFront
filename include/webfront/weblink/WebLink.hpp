@@ -32,6 +32,8 @@
 namespace webfront {
 
 using WebLinkId = uint16_t;
+/// Serial number of a connection, never reused (0 is assigned to none): tells apart the connections that share an identifier over time.
+using WebLinkGeneration = uint64_t;
 
 struct WebLinkEvent {
     enum class Code { linked, closed, cppFunctionCalled };

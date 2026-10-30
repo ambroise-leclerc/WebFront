@@ -962,7 +962,7 @@ SCENARIO("Sending a DOM batch through a lost UI link throws ConnectionError") {
     using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
     GIVEN("a UI handle whose connection is absent from the application") {
         App           app("9161");
-        App::UI       ui(app, 42);
+        App::UI       ui(app, 42, 1);
         msg::DomBatch batch(7);
         batch.add({msg::DomOp::text, 1, 0, 0, "unreachable"});
         THEN("sending fails synchronously without queuing a frame") {
@@ -982,10 +982,10 @@ SCENARIO("A UI is an assignable value identifying one browser of one application
             static_assert(std::equality_comparable<App::UI>);
             static_assert(!std::is_copy_constructible_v<App> && !std::is_move_constructible_v<App>);
             static_assert(!std::is_copy_assignable_v<App> && !std::is_move_assignable_v<App>);
-            std::vector<App::UI> clients{App::UI(app, 1), App::UI(app, 2), App::UI(app, 3)};
+            std::vector<App::UI> clients{App::UI(app, 1, 1), App::UI(app, 2, 1), App::UI(app, 3, 1)};
             std::erase_if(clients, [](const App::UI& ui) { return ui.id() == 2; });
             REQUIRE(clients.size() == 2);
-            CHECK(clients[0] == App::UI(app, 1));
+            CHECK(clients[0] == App::UI(app, 1, 1));
             CHECK(clients[0] != clients[1]);
             CHECK(clients[1].id() == 3);
             std::optional<App::UI> current;
@@ -995,15 +995,16 @@ SCENARIO("A UI is an assignable value identifying one browser of one application
         THEN("a UI of another application is never equal, even with the same identifier") {
             struct Application { } first, second;
             using StubUI = BasicUI<Application>;
-            CHECK(StubUI(first, 1) != StubUI(second, 1));
-            StubUI ui(first, 1);
-            ui = StubUI(second, 1);
-            CHECK(ui == StubUI(second, 1));
+            CHECK(StubUI(first, 1, 1) != StubUI(second, 1, 1));
+            CHECK(StubUI(first, 1, 1) != StubUI(first, 1, 2));  // same identifier, later connection
+            StubUI ui(first, 1, 1);
+            ui = StubUI(second, 1, 1);
+            CHECK(ui == StubUI(second, 1, 1));
         }
         THEN("a UI has no default state and a reassigned one acts on its new value") {
             static_assert(!std::is_default_constructible_v<App::UI>);
-            App::UI       ui(app, 1);
-            const App::UI gone(app, 42);
+            App::UI       ui(app, 1, 1);
+            const App::UI gone(app, 42, 1);
             ui = gone;
             CHECK(ui == gone);
             CHECK_THROWS_AS(ui.addScript("1"), ConnectionError);

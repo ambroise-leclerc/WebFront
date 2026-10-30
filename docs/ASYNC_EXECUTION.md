@@ -94,16 +94,17 @@ on the server context; a call made meanwhile on another thread keeps the link al
 until it returns (`findLink` shares it). Afterwards, an untyped `jsFunction` call to that UI is
 dropped, a typed call returns a future that throws `Browser connection closed`,
 a `jsFunctionSender` completes with an error when started, and `addScript` throws
-`ConnectionError`. The 16-bit identifier of a released connection is reused only
-after 65,536 later connections.
+`ConnectionError`. The 16-bit identifier of a released connection is reused after
+65,536 later connections, but each connection also has a 64-bit generation, never reused,
+that the `UI` carries with it (#428). It never crosses the wire.
 
 A `UI` is an assignable value: it can be kept in a `std::vector` (removed with
 `std::erase_if`) or a `std::optional`, and assigned. Two values are equal when they
-belong to the same application and have the same `id()`. A value identifies its
-connection only until that connection closes: once the identifier is reused, a value
-kept after the close equals the later browser's and reaches that browser (#428 tracks
-rejecting such stale values). Remove kept values in the `subscribeUIClosed` handler.
-A value must not outlive its application, and assigning one is not atomic: a
+belong to the same application and have the same `id()` and connection generation. A
+value kept after its connection closed reaches no browser even once its identifier is
+reused, and equals no later connection's value. Removing kept values in the
+`subscribeUIClosed` handler is still advisable, to free them. A value
+must not outlive its application, and assigning one is not atomic: a
 container of values shared between threads needs a lock.
 
 `app.spawn(task)` and `ui.spawn(task)` may be called from any thread while the

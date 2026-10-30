@@ -487,3 +487,93 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
         }));
     }
 }
+
+namespace webfront::testing {
+template <typename Application>
+struct ConnectionIds {
+    static void startAt(Application& app, WebLinkId id) {
+        std::scoped_lock lock{app.linksMutex};
+        app.idsCounter = id;
+    }
+};
+}  // namespace webfront::testing
+
+SCENARIO("A UI kept after its connection closed reaches no browser once its identifier is reused", "[broadcast][ui]") {
+    using App = BasicWF<Stdnet, fs::DefaultFS>;
+    App                                app{WebFrontConfig{.port = "0"}};
+    std::mutex                         mutex;
+    std::vector<App::UI>               started;
+    std::atomic<int>                   closed{0};
+    auto                               startedSubscription = app.subscribeUIStarted([&](App::UI ui) {
+        std::scoped_lock lock{mutex};
+        started.push_back(ui);
+    });
+    auto                               closedSubscription = app.subscribeUIClosed([&](App::UI) {
+        ++closed;
+    });
+    std::thread                        server([&] {
+        app.run();
+    });
+    const auto startedCount = [&] {
+        std::scoped_lock lock{mutex};
+        return started.size();
+    };
+
+    webfront::testing::ConnectionIds<App>::startAt(app, 65535);
+    auto first = std::make_unique<Browser>(app.port());
+    waitUntil([&] {
+        return startedCount() == 1;
+    });
+    REQUIRE(startedCount() == 1);
+    const App::UI stale = started.front();
+    REQUIRE(stale.id() == 65535);
+
+    first.reset();
+    waitUntil([&] {
+        return closed == 1 && app.connectedBrowsers() == 0;
+    });
+    REQUIRE(app.connectedBrowsers() == 0);
+
+    // The identifier counter wraps back to the identifier the closed connection had.
+    webfront::testing::ConnectionIds<App>::startAt(app, 65535);
+    auto second = std::make_unique<Browser>(app.port());
+    waitUntil([&] {
+        return startedCount() == 2;
+    });
+    REQUIRE(startedCount() == 2);
+    const App::UI current = started.back();
+
+    GIVEN("a later browser that received the identifier of the closed one") {
+        REQUIRE(current.id() == stale.id());
+        THEN("the stale value does not equal it, and the value of the live connection does") {
+            REQUIRE_FALSE(stale == current);
+            REQUIRE(current == current);
+        }
+        THEN("the stale value drops calls, fails typed calls, and has nothing pending") {
+            stale.jsFunction("onStale")(std::string{"stale-call"});
+            auto typed = stale.jsFunction<std::string>("typedStale")();
+            REQUIRE_THROWS_AS(typed.get(), std::runtime_error);
+            REQUIRE_THROWS_AS(stale.addScript("stale-script"), ConnectionError);
+            REQUIRE(stale.pendingWrites() == 0);
+            current.jsFunction("onCurrent")(std::string{"current-call"});
+            REQUIRE(second->receiveUntil("current-call"));
+            REQUIRE_FALSE(second->receiveUntil("stale-call", 100ms));
+        }
+        THEN("forEachUI visits the later connection's value only") {
+            std::vector<App::UI> visited;
+            app.forEachUI([&](App::UI ui) {
+                visited.push_back(ui);
+            });
+            REQUIRE(visited.size() == 1);
+            REQUIRE(visited.front() == current);
+            REQUIRE_FALSE(visited.front() == stale);
+        }
+    }
+    second.reset();
+    waitUntil([&] {
+        return app.connectedBrowsers() == 0;
+    });
+    app.stop();
+    server.join();
+    app.shutdown();
+}
