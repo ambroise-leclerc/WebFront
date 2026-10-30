@@ -2,6 +2,7 @@
 // application that registers the C++ callbacks they call. Usage is that of webfront-wf (test/driver/WfDriver.hpp), e.g.
 //   webtest --project <copy of test/web/suite, after wf install> --registry-dir <registry> -- test --timeout 120
 // The status is that of `wf test`, and 1 when the specs passed but C++ did not observe every call they make.
+#include <webfront/components/forms/Form.hpp>
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>
@@ -9,6 +10,7 @@
 #include "../driver/WfDriver.hpp"
 #include "../../examples/life/react/LifeReact.hpp"
 #include "RejectedWebSocketServer.hpp"
+#include "../unit/FormsSettings.hpp"
 
 #include <array>
 #include <atomic>
@@ -44,6 +46,7 @@ struct TestState {
     atomic<bool> domBatchSent{false};
     atomic<bool> domRejectionObserved{false};
     atomic<bool> domEventsObserved{false};
+    atomic<bool> formsObserved{false};
     atomic<bool> jsToCppObserved{false};
     atomic<bool> jsExtendedFrameObserved{false};
     atomic<bool> jsArraysObserved{false};
@@ -139,6 +142,13 @@ private:
     std::array<std::uint32_t, 6> domEventCounts{};
     std::map<WebLinkId, dom::Node>       documentTexts, documentInputs;
     std::map<WebLinkId, TaskHandle>      documentReads;
+    // The forms of #383 built for each browser, with the object their events write.
+    struct FormsFixture {
+        std::shared_ptr<forms_fixture::Settings>        object;
+        forms::Form<forms_fixture::Settings>            form;
+        forms::Inspector<forms_fixture::Settings>       inspector;
+    };
+    std::map<WebLinkId, FormsFixture>    formsFixtures;
     std::map<WebLinkId, bool>            documentCancelled;
     std::map<WebLinkId, TaskHandle>      documentAwaits;
     std::map<WebLinkId, bool>            awaitCancelled;
@@ -416,6 +426,35 @@ private:
             documentInputs[ui.id()] = input;
             return static_cast<uint32_t>(ui.id());
         });
+        webFront->cppFunction("formsBuild", [this](TestWF::UI ui) {
+            auto doc    = ui.document();
+            auto root   = doc.island();
+            auto object = std::make_shared<forms_fixture::Settings>();
+            auto form   = forms::form(doc, root, object, forms_fixture::settingsDescription());
+            auto table  = forms::inspector(doc, root, object, forms_fixture::settingsDescription());
+            formsFixtures.erase(ui.id());
+            formsFixtures.emplace(ui.id(), FormsFixture{object, form, table});
+        });
+        // The members that the browser's events wrote, as the description formats them.
+        webFront->cppFunction("formsState", [this](TestWF::UI ui) {
+            const auto& object = *formsFixtures.at(ui.id()).object;
+            string      result;
+            for (const auto& field : forms_fixture::settingsDescription().fields)
+                result += (result.empty() ? "" : ";") + field.name + "=" + field.read(object);
+            return result;
+        });
+        // C++ changes the object, then refreshes the form and the inspector.
+        webFront->cppFunction("formsChange", [this](TestWF::UI ui) {
+            auto& fixture          = formsFixtures.at(ui.id());
+            fixture.object->speed   = 9;
+            fixture.object->density = 0.5;
+            fixture.object->wrap    = true;
+            fixture.object->pattern = forms_fixture::Pattern::pulsar;
+            fixture.object->title   = "From C++";
+            fixture.form.refresh();
+            fixture.inspector.refresh();
+            state.formsObserved = true;
+        });
         webFront->cppFunction("domDocumentRead", [this](TestWF::UI ui) {
             documentReads.insert_or_assign(ui.id(), ui.spawn(readDocument(ui)));
         });
@@ -429,8 +468,11 @@ private:
             documentAwaits.insert_or_assign(ui.id(), ui.spawn(awaitDocument(ui)));
         });
         webFront->cppFunction("domDocumentCancelAwait", [this](TestWF::UI ui) {
+            // The first flush sends the subscription alone, so the unsubscription of the stop travels in a later batch:
+            // the browser applies both, in order, before this call resolves.
+            ui.document().flush();
             documentAwaits.at(ui.id()).requestStop();
-            ui.document().flush();  // The browser applies the batch the stop queued before this call resolves.
+            ui.document().flush();
         });
         webFront->cppFunction("domDocumentAwaitCancelled", [this](TestWF::UI ui) {
             return awaitCancelled[ui.id()];
@@ -617,7 +659,7 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.browserReady
+        if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
               && state.subscriberNotified && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;

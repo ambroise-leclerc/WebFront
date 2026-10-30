@@ -379,8 +379,15 @@ if(_browser_tests_available)
             "install|react@19.3.1|react-dom@19.3.1|typescript@5.9.3|@types/react@19.3.0|@types/react-dom@19.3.0|jasmine-core@7.0.2"
             OUTPUT "Installed 8 packages" REQUIRES JourneyInitialized PROVIDES JourneyInstalled)
         webfront_add_journey_files(JourneyFiles JourneyInstalled JourneyConfigured)
-        webfront_add_journey_step(JourneyCheck 0 "check" OUTPUT "No type errors in 1 project file \\(TypeScript 5\\.9\\.3\\)"
-            REQUIRES JourneyConfigured PROVIDES JourneyChecked)
+        # The TypeScript declaration that C++ generates from a type description (#383), which ui/settings.ts imports:
+        # wf check verifies the starter's module, that one and the declaration.
+        # Built with webtest: the CEF job and the documented commands build only webtest and the driver.
+        add_dependencies(webtest forms_declaration)
+        add_test(NAME JourneyDeclaration COMMAND $<TARGET_FILE:forms_declaration> "${_journey}/ui/generated/settings.d.ts")
+        set_tests_properties(JourneyDeclaration PROPERTIES FIXTURES_REQUIRED JourneyConfigured FIXTURES_SETUP JourneyDeclared
+            LABELS "web-integration" TIMEOUT 30)
+        webfront_add_journey_step(JourneyCheck 0 "check" OUTPUT "No type errors in 3 project files \\(TypeScript 5\\.9\\.3\\)"
+            REQUIRES JourneyDeclared PROVIDES JourneyChecked)
         webfront_add_journey_step(JourneyTest 0 "test" OUTPUT "PASSED: 2 specs" REQUIRES JourneyChecked PROVIDES JourneyTested)
         webfront_add_journey_step(JourneyBuild 0 "build" OUTPUT "Build ready" REQUIRES JourneyTested PROVIDES JourneyBuilt)
         webfront_add_journey_step(JourneyEmbed 0 "embed|LifeUI" OUTPUT "Generated generated/LifeUI.hpp" REQUIRES JourneyBuilt PROVIDES JourneyEmbedded)

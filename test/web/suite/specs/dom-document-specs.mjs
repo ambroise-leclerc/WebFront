@@ -112,8 +112,8 @@ describe('C++ DOM document API', () => {
             await until(() => results.length === 2);
             expect(results).toEqual(['Enter', 'Escape']);
             expect(await call(frame, 'domDocumentAwaitCancelled')).toBeFalse();
-            // The third wait subscribes keydown with the same flag. Cancelling it flushes its subscription and removes it:
-            // the first keydown afterwards is no longer prevented, and the coroutine never resumes.
+            // The third wait subscribes keydown with the same flag. The cancellation first flushes that subscription, then
+            // its removal: the first keydown afterwards is no longer prevented, and the coroutine never resumes.
             await call(frame, 'domDocumentCancelAwait');
             expect(press('Tab')).toBeFalse();
             await until(() => call(frame, 'domDocumentAwaitCancelled'));

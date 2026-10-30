@@ -25,7 +25,7 @@ endif()
 
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
-list(APPEND TESTS_LIST ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
+list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
@@ -49,6 +49,80 @@ target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 # Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
 catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+
+# The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
+add_executable(forms_declaration FormsDeclaration.cpp)
+target_link_libraries(forms_declaration PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+
+# The optional C++26 layer of the forms (ADR-018, #383): reflection needs GCC 16 with -std=c++26 -freflection. The library
+# stays C++23; only this test executable is compiled as C++26. CI requires it on Linux so that it cannot be skipped there.
+option(WEBFRONT_REQUIRE_REFLECTION_TESTS "Fail the configuration when the C++26 reflection tests cannot be compiled" OFF)
+set(_reflection_flags "-std=c++26 -freflection")
+set(_reflection_supported OFF)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  include(CheckCXXSourceCompiles)
+  # The probe sets the standard as the test target does: a CMAKE_CXX_STANDARD of the project (23 under WEBFRONT_USE_MDDLOG)
+  # would otherwise add its own -std=c++23 after CMAKE_REQUIRED_FLAGS and hide reflection.
+  # WEBFRONT_HAS_REFLECTION is a cache entry, so it leaves the block.
+  block(SCOPE_FOR VARIABLES)
+  set(CMAKE_CXX_STANDARD 26)
+  set(CMAKE_CXX_EXTENSIONS OFF)
+  set(CMAKE_REQUIRED_FLAGS "${_reflection_flags}")
+  check_cxx_source_compiles([=[
+#include <meta>
+#if !defined(__cpp_impl_reflection) || !defined(__cpp_expansion_statements)
+#error no reflection
+#endif
+struct S { [[=1]] int m; };
+static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
+int main() { return 0; }
+]=] WEBFRONT_HAS_REFLECTION)
+  endblock()
+  set(_reflection_supported ${WEBFRONT_HAS_REFLECTION})
+endif()
+if(_reflection_supported)
+  # Catch2 is compiled again with the flags of the test: the C++23 Catch2 objects would mix the inline standard-library
+  # definitions of both standards in one executable (std::to_string(double) differs, P2587).
+  get_target_property(_catch2_sources Catch2 SOURCES)
+  get_target_property(_catch2_dir Catch2 SOURCE_DIR)
+  set(_catch2_absolute)
+  foreach(_source IN LISTS _catch2_sources)
+    cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${_catch2_dir}" NORMALIZE OUTPUT_VARIABLE _source)
+    list(APPEND _catch2_absolute "${_source}")
+  endforeach()
+  set(_catch2_sources ${_catch2_absolute})
+  add_library(Catch2_reflection STATIC ${_catch2_sources} ${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp)
+  target_include_directories(Catch2_reflection PUBLIC ${Catch2_SOURCE_DIR}/src ${Catch2_BINARY_DIR}/generated-includes)
+  target_link_libraries(Catch2_reflection PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
+  add_executable(forms_reflection_tests FormsReflectionTests.cpp)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2_reflection WebFront)
+  foreach(_target IN ITEMS Catch2_reflection forms_reflection_tests)
+    set_target_properties(${_target} PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_compile_options(${_target} PRIVATE -freflection)
+  endforeach()
+  catch_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+  # Misplaced annotations do not compile: each case must fail with the message of describe<T>().
+  foreach(_case IN ITEMS "RANGE_ON_BOOL|Range applies to numeric members only" "RANGE_ON_STRING|Range applies to numeric members only"
+                         "RANGE_ON_ENUM|Range applies to numeric members only" "REPEATED_LABEL|Label is repeated on a member"
+                         "REPEATED_RANGE|Range is repeated on a member")
+    string(REPLACE "|" ";" _case "${_case}")
+    list(GET _case 0 _name)
+    list(GET _case 1 _message)
+    add_test(NAME C++26.FormsReflectionRejects.${_name}
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -freflection -fsyntax-only -I${PROJECT_SOURCE_DIR}/include
+            -DREJECT_${_name} ${CMAKE_CURRENT_SOURCE_DIR}/FormsReflectionRejects.cpp)
+    set_tests_properties(C++26.FormsReflectionRejects.${_name} PROPERTIES PASS_REGULAR_EXPRESSION "${_message}" TIMEOUT 60 LABELS fast)
+  endforeach()
+  # Without a misplaced annotation the same file compiles: the cases above fail only on their assertion.
+  add_test(NAME C++26.FormsReflectionRejects.NONE COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -freflection -fsyntax-only
+      -I${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/FormsReflectionRejects.cpp)
+  set_tests_properties(C++26.FormsReflectionRejects.NONE PROPERTIES TIMEOUT 60 LABELS fast)
+elseif(WEBFRONT_REQUIRE_REFLECTION_TESTS)
+  message(FATAL_ERROR "WEBFRONT_REQUIRE_REFLECTION_TESTS: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} "
+      "does not compile C++26 reflection with ${_reflection_flags} (GCC 16 or later is required)")
+else()
+  message(STATUS "Skipping the C++26 reflection tests of the forms: GCC 16 with -freflection is required")
+endif()
 
 add_test(NAME ReleaseVersionConsistency
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DEXPECTED_VERSION=${PROJECT_VERSION}
@@ -112,6 +186,10 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
+add_test(NAME ModuleScanWarning
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/module-scan
+        "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}" -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckModuleScan.cmake)
+set_tests_properties(ModuleScanWarning PROPERTIES TIMEOUT 120 LABELS fast)
 add_test(NAME FrontendSelection
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendSelection.cmake)

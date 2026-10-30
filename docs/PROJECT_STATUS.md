@@ -108,5 +108,8 @@ are retained for investigation; diagnostics alone do not establish a correction.
   The optional [React adapter](REACT.md) provides a coalesced C++ store and a StrictMode-safe
   `Island`, demonstrated in the Life variant. Its npm archive is prepared locally; public
   registry publication is a separate action. Solid, Svelte, Vue and Lit adapters remain future work.
+  Optional [forms and inspectors](FORMS.md) are generated from C++23 type descriptors, which also
+  produce TypeScript declarations for `wf check`; an optional C++26 layer reflects the descriptors
+  from annotations and is compiled and tested only with GCC 16 (`-std=c++26 -freflection`).
   [ADR-018](adr/ADR-018-acces-au-dom.md) describes DOM islands;
   [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) retains transport experiments and acceptance criteria.

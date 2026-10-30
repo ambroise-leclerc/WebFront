@@ -21,6 +21,9 @@ app.onUIStarted([](auto ui) {
 });
 ```
 
+Optional [forms and inspectors](FORMS.md) are generated in a document from
+descriptions of C++ types, written by hand or reflected in C++26.
+
 The optional [`@webfront/react` adapter](REACT.md) lends empty React `Island` components
 and provides coalesced C++ stores; it is installed separately with `wf`.
 
@@ -156,7 +159,8 @@ A stop requested on the server thread queues it at once. A stop requested from
 another thread completes on that thread, as for `jsFunctionSender`, and posts the
 unsubscription to the server context; it is lost only if the application is
 shutting down, which closes the document anyway. An unsubscription that does not
-fit a full batch opens the next one. Event and stopped completions caused by the
+fit a full batch opens the next one. A wait started while the current batch is full cannot queue its subscription and
+completes with `std::length_error`, as `listen()` throws it; start it again once the batch is sent. Event and stopped completions caused by the
 document run on the server thread.
 
 ### Grouped reads

@@ -335,7 +335,7 @@ bool comReleased() {
 int showTwice(std::string_view page, bool earlyClose = false) {
     // Repeated show() checks that WM_QUIT cannot poison the next loop.
     for (int iteration = 0; iteration < 2; ++iteration) {
-        App               app("9002", std::filesystem::current_path());
+        App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         std::atomic<bool> connected = false;
         app.onUIStarted([&](App::UI) {
             connected = true;

@@ -272,6 +272,8 @@ struct State : std::enable_shared_from_this<State> {
             if (!post)
                 return;  // closed, or no server context: nothing remains to release
             releases.emplace_back(key, std::move(waiter));
+            // Only the first pending release posts a sweep. A post refused by a shutting-down application leaves
+            // them queued, which is harmless: shutdown closes the document and clears them.
             if (releases.size() == 1) {
                 try {
                     post();
@@ -283,6 +285,9 @@ struct State : std::enable_shared_from_this<State> {
         } catch (const std::exception& error) {
             if (validOnCurrentThread())
                 reject(batchId, error.what());
+        } catch (...) {
+            if (validOnCurrentThread())
+                reject(batchId, "unknown error releasing a DOM event wait");
         }
     }
     /// Runs the releases requested off the server thread.
