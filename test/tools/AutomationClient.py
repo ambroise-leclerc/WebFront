@@ -255,32 +255,34 @@ def watchdog(args):
                    "--integrity", "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode(),
                    "--registry-dir", args.registry, "--startup-timeout", "30", "--timeout", "2", "--allow", "build"]
         endpoint = root / "forced-window"
-        # A private temporary directory isolates the native profile, which the forced exit must still remove.
-        profiles = root / "profiles"
-        profiles.mkdir()
-        forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
-        with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
-            if args.scenario == "mcp-watchdog":
-                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
-                try:
-                    client.initialize()
-                    client.start("build")
+        # A private temporary directory isolates the native profile, which the forced exit must still remove. It is
+        # created in the system temporary directory, not under the work path: Chromium puts its singleton Unix socket
+        # there, and sockaddr_un limits that path to about 108 bytes whatever the checkout's depth.
+        with tempfile.TemporaryDirectory(prefix="wf-profile-") as profile_root:
+            profiles = pathlib.Path(profile_root).resolve()
+            forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
+            with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
+                if args.scenario == "mcp-watchdog":
+                    client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
                     try:
-                        status = client.child.wait(timeout=30)
-                    except subprocess.TimeoutExpired:
-                        raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
-                    assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
-                    assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
-                finally:
-                    client.close()
-            else:
-                cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
-                                     stdout=subprocess.PIPE, stderr=log, text=True, timeout=45, env=forced_environment)
-                assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
-        assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
-        assert not endpoint.exists(), "The forced exit left its attachment capability behind"
-        left = list(profiles.glob("webfront-agent-*"))
-        assert not left, f"The forced exit left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
+                        client.initialize()
+                        client.start("build")
+                        try:
+                            status = client.child.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
+                        assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
+                        assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
+                    finally:
+                        client.close()
+                else:
+                    cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
+                                         stdout=subprocess.PIPE, stderr=log, text=True, timeout=45, env=forced_environment)
+                    assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
+            assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
+            assert not endpoint.exists(), "The forced exit left its attachment capability behind"
+            left = list(profiles.glob("webfront-agent-*"))
+            assert not left, f"The forced exit left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
         if args.scenario == "cli-watchdog":
             # This same-path relaunch must reach its authenticated page before the intentional error.
             # It checks directory reuse and Unicode failure reporting in one process; normal builds
