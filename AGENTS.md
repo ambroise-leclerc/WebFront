@@ -16,6 +16,7 @@ The README introduces WebFront through the Game of Life walkthrough, demonstrati
 
 - `include/webfront/`: public header-only library, included as `<webfront/...>`. `WebFront.hpp` is the main orchestration API; `Commands.hpp` adds an application's C++ commands to the developer environment's terminal.
 - `include/webfront/components/react/`: optional C++ snapshot stores coalesced per browser; the React adapter is installed separately with `wf` and documented in `docs/REACT.md`.
+- `include/webfront/components/forms/`: optional type descriptors (C++23), forms, inspectors and TypeScript declarations generated from them, and an optional C++26 reflection layer (`Reflection.hpp`, GCC 16 only) documented in `docs/FORMS.md`.
 - `include/webfront/http/`: HTTP and WebSocket protocol implementation.
 - `include/webfront/weblink/`: bridge message encoding and routing.
 - `include/webfront/system/`: layered virtual filesystems and the embedded web resources, a closed list guarded by the `MinimalCoreAssets` CTest case (normative list and 150 KiB decoded budget in ADR-016; changing it means amending the ADR and `test/cmake/CheckMinimalCoreAssets.cmake` together).

@@ -77,7 +77,8 @@ jobs:
             use_image: true
             build_type: Debug
             test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
-            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON
+            # GCC 16 compiles the optional C++26 reflection layer of the forms (#383): its tests must not be skipped here.
+            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON
     runs-on: ${{ matrix.os }}
     # Only the Linux job runs in the prebuilt toolchain image; an empty value means no container.
     container: ${{ matrix.use_image && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.linux-image.outputs.image, github.actor, github.token)) || '' }}

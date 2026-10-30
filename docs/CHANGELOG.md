@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add optional [type descriptors and generated forms](FORMS.md) (#383, ADR-018 criterion 5):
+  `forms::Description<T>` (name, label, kind, bounds, choices, accessors) written by hand in C++23,
+  `forms::form()` and `forms::inspector()` built in a DOM document from them, and
+  `forms::typescriptDeclaration()`, whose output the developer journey type-checks with `wf check`.
+  The optional `forms::describe<T>()` produces the same descriptors by C++26 reflection from
+  `Label`/`Range` annotations; its tests build with GCC 16 and are required on the Linux CI job
+  (`WEBFRONT_REQUIRE_REFLECTION_TESTS`). The library stays C++23.
+
 - Warn at the end of a consumer's configuration, with GCC 16, about each target linking
   `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
   stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is

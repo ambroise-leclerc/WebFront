@@ -1,6 +1,7 @@
 import './react-specs.mjs';
 import './fallback-specs.mjs';
 import './dom-document-specs.mjs';
+import './forms-specs.mjs';
 import './content-policy-specs.mjs';
 import './dom-specs.mjs';
 import { importedValue } from './module-fixture.mjs';

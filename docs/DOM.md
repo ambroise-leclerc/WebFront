@@ -21,6 +21,9 @@ app.onUIStarted([](auto ui) {
 });
 ```
 
+Optional [forms and inspectors](FORMS.md) are generated in a document from
+descriptions of C++ types, written by hand or reflected in C++26.
+
 The optional [`@webfront/react` adapter](REACT.md) lends empty React `Island` components
 and provides coalesced C++ stores; it is installed separately with `wf`.
 
