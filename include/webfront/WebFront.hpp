@@ -363,7 +363,7 @@ public:
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{.link = link, .thread = std::this_thread::get_id(), .closed = false});
+                webLinks.emplace(id, Connection{.link = link, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
