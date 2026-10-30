@@ -6,7 +6,8 @@
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
   the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,
   `unlisten()`, node removal or revocation, rejection, disconnection and shutdown; every end of a wait
-  removes its browser subscription and flags, also after a stop from another thread. One callback or
+  but a rejection, which closes the document until the page reloads, removes its browser subscription
+  and flags, also after a stop from another thread. One callback or
   wait per element and event. No wire format change.
 
 - Add optional [type descriptors and generated forms](FORMS.md) (#383, ADR-018 criterion 5):

@@ -154,7 +154,10 @@ or revocation of the node, a browser rejection that closes the document, and
 disconnection or reload. A stopped coroutine unwinds without resuming after its
 `co_await`. Starting off the server thread or on an invalid node completes with an
 error. Every end of a wait queues the browser unsubscription, so its
-`preventDefault` and `stopPropagation` stop applying once that batch is applied.
+`preventDefault` and `stopPropagation` stop applying once that batch is applied. Two ends
+do not: removal or revocation of the node, which removes its listeners with it, and a
+browser rejection, which closes the document without queueing any unsubscription: the
+listeners then keep their flags until the page reloads. Disconnection and reload need none.
 A stop requested on the server thread queues it at once. A stop requested from
 another thread completes on that thread, as for `jsFunctionSender`, and posts the
 unsubscription to the server context; it is lost only if the application is
