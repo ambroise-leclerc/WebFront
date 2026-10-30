@@ -4,7 +4,7 @@
 
 - Make `BasicUI` (`UI`) a regular value type (#400): it holds a pointer to the application instead of a
   reference, so it is copy- and move-assignable and usable in `std::vector` with `std::erase_if` and in
-  `std::optional`. Two values compare equal when they have the same `id()`. The lifetime contract is
+  `std::optional`. Two values compare equal when they belong to the same application and have the same `id()`. The lifetime contract is
   unchanged: a `UI` is valid while its application exists.
 
 - Warn at the end of a consumer's configuration, with GCC 16, about each target linking
