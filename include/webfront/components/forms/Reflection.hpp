@@ -7,6 +7,8 @@
 
 #if defined(__cpp_impl_reflection) && defined(__cpp_expansion_statements)
 
+    #include <concepts>
+    #include <cstddef>
     #include <meta>
     #include <optional>
     #include <string>
@@ -31,6 +33,12 @@ struct Range {
 
 namespace detail {
 
+template <typename Annotation, std::meta::info member>
+consteval std::size_t annotationCount() {
+    return std::meta::annotations_of_with_type(member, ^^Annotation).size();
+}
+
+// The annotation of a member, which describe() requires to be unique.
 template <typename Annotation, std::meta::info member>
 consteval std::optional<Annotation> annotation() {
     for (auto value : std::meta::annotations_of_with_type(member, ^^Annotation))
@@ -57,6 +65,9 @@ Description<T> describe() {
     static_assert(std::is_class_v<T> && std::meta::has_identifier(^^T), "forms::describe needs a named class type");
     Description<T> result{.name = std::string(std::meta::identifier_of(^^T)), .fields = {}};
     template for (constexpr auto member : std::define_static_array(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()))) {
+        // A repeated annotation would silently lose all but its first value.
+        static_assert(detail::annotationCount<Label, member>() <= 1, "forms::Label is repeated on a member");
+        static_assert(detail::annotationCount<Range, member>() <= 1, "forms::Range is repeated on a member");
         constexpr auto label = detail::annotation<Label, member>();
         constexpr auto range = detail::annotation<Range, member>();
         std::string    name(std::meta::identifier_of(member));
@@ -64,8 +75,8 @@ Description<T> describe() {
         // GCC 16.1 rejects `using F = [:type_of(member):]` followed by a splice in a discarded branch: name the type
         // through decltype of an access instead.
         using F = std::remove_cvref_t<decltype(std::declval<T&>().[:member:])>;
+        static_assert(!range.has_value() || (std::is_arithmetic_v<F> && !std::same_as<F, bool>), "forms::Range applies to numeric members only");
         if constexpr (std::is_enum_v<F>) {
-            static_assert(!range.has_value(), "forms::Range applies to numeric members only");
             result.fields.push_back(choice(std::move(name), &[:member:], detail::enumerators<F>(), std::move(text)));
         } else {
             std::optional<Bounds> bounds;

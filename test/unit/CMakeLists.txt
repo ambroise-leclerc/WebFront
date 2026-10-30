@@ -81,11 +81,35 @@ int main() { return 0; }
   set(_reflection_supported ${WEBFRONT_HAS_REFLECTION})
 endif()
 if(_reflection_supported)
+  # Catch2 is compiled again with the flags of the test: the C++23 Catch2 objects would mix the inline standard-library
+  # definitions of both standards in one executable (std::to_string(double) differs, P2587).
+  get_target_property(_catch2_sources Catch2 SOURCES)
+  add_library(Catch2_reflection STATIC ${_catch2_sources} ${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp)
+  target_include_directories(Catch2_reflection PUBLIC ${Catch2_SOURCE_DIR}/src ${Catch2_BINARY_DIR}/generated-includes)
+  target_link_libraries(Catch2_reflection PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
   add_executable(forms_reflection_tests FormsReflectionTests.cpp)
-  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
-  set_target_properties(forms_reflection_tests PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-  target_compile_options(forms_reflection_tests PRIVATE -freflection)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2_reflection WebFront)
+  foreach(_target IN ITEMS Catch2_reflection forms_reflection_tests)
+    set_target_properties(${_target} PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_compile_options(${_target} PRIVATE -freflection)
+  endforeach()
   catch_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+  # Misplaced annotations do not compile: each case must fail with the message of describe<T>().
+  foreach(_case IN ITEMS "RANGE_ON_BOOL|Range applies to numeric members only" "RANGE_ON_STRING|Range applies to numeric members only"
+                         "RANGE_ON_ENUM|Range applies to numeric members only" "REPEATED_LABEL|Label is repeated on a member"
+                         "REPEATED_RANGE|Range is repeated on a member")
+    string(REPLACE "|" ";" _case "${_case}")
+    list(GET _case 0 _name)
+    list(GET _case 1 _message)
+    add_test(NAME C++26.FormsReflectionRejects.${_name}
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -freflection -fsyntax-only -I${PROJECT_SOURCE_DIR}/include
+            -DREJECT_${_name} ${CMAKE_CURRENT_SOURCE_DIR}/FormsReflectionRejects.cpp)
+    set_tests_properties(C++26.FormsReflectionRejects.${_name} PROPERTIES PASS_REGULAR_EXPRESSION "${_message}" TIMEOUT 60 LABELS fast)
+  endforeach()
+  # Without a misplaced annotation the same file compiles: the cases above fail only on their assertion.
+  add_test(NAME C++26.FormsReflectionRejects.NONE COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -freflection -fsyntax-only
+      -I${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/FormsReflectionRejects.cpp)
+  set_tests_properties(C++26.FormsReflectionRejects.NONE PROPERTIES TIMEOUT 60 LABELS fast)
 elseif(WEBFRONT_REQUIRE_REFLECTION_TESTS)
   message(FATAL_ERROR "WEBFRONT_REQUIRE_REFLECTION_TESTS: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} "
       "does not compile C++26 reflection with ${_reflection_flags} (GCC 16 or later is required)")

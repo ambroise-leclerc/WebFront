@@ -18,7 +18,7 @@ avec la commande `domBatch` et `/webfront-dom.mjs` (#380). L'appel `wfDom.apply`
 ci-dessous est uniquement le protocole historique des prototypes ; il ne décrit pas le transport livré.
 L’API document/nœuds est livrée par #381 ([DOM.md](../DOM.md)) ; l’adaptateur React et le store fusionné sont livrés par #382 ([REACT.md](../REACT.md)) ;
 les descripteurs de types, les formulaires générés et la couche de réflexion facultative sont livrés par #383 ([FORMS.md](../FORMS.md)).
-Les autres adaptateurs et les événements attendables restent proposés (#384). Le point d’envoi retenu est un cycle serveur de 1 ms
+Les autres adaptateurs restent proposés ; les événements attendables relèvent de #384. Le point d’envoi retenu est un cycle serveur de 1 ms
 après la première écriture en attente, au sein d’une tâche possédée et drainée.
 `flush()` et les lectures explicites peuvent envoyer plus tôt. `SET_TEXT` reste limité
 aux nœuds texte. Une révocation invalide le sous-arbre ; avec des écritures en attente,

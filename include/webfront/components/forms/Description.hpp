@@ -5,6 +5,7 @@
 #include "../../utils/Json.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <concepts>
@@ -69,25 +70,33 @@ std::optional<F> parseFloating(std::string_view text) {
     stream.imbue(std::locale::classic());
     if (!(stream >> value) || stream.peek() != std::char_traits<char>::eof() || !std::isfinite(value))
         return std::nullopt;
+    // Underflow is refused whatever the standard library: libc++ fails the stream on ERANGE, libstdc++ returns a
+    // subnormal or zero. A zero is accepted only when every digit of its mantissa is zero.
+    const auto mantissa = text.substr(0, text.find_first_of("eE"));
+    if (value == 0 ? mantissa.find_first_of("123456789") != std::string_view::npos : !std::isnormal(value))
+        return std::nullopt;
     return value;
 }
 
-// The shortest decimal text that reads back as the same value, in the classic locale, so that the result never depends
-// on the application's global locale, nor on the standard: C++26 formats std::to_string(double) like std::format (P2587).
-// A bound or a value shown in the browser is therefore the one C++ compares with.
+// The shortest decimal text that reads back as the same value, independent of the global locale and of the standard:
+// C++26 formats std::to_string(double) like std::format (P2587). A bound or a value shown in the browser is therefore
+// the one C++ compares with.
 template <std::floating_point F>
 std::string formatNumber(F value) {
-    std::string text;
-    for (int precision = std::numeric_limits<F>::digits10; precision <= std::numeric_limits<F>::max_digits10; ++precision) {
-        std::ostringstream stream;
-        stream.imbue(std::locale::classic());
-        stream.precision(precision);
-        stream << value;
-        text = stream.str();
-        if (!std::isfinite(value) || parseFloating<F>(text) == value)
-            break;
-    }
-    return text;
+    std::array<char, 64> digits{};
+    const auto           end = std::to_chars(digits.data(), digits.data() + digits.size(), value).ptr;
+    return {digits.data(), end};
+}
+
+// A bound in the type of a floating-point member: the value that the browser text of the bound parses to, so that the
+// bound itself is accepted (0.1f is above the double 0.1). Beyond the range of F every finite value is inside.
+template <std::floating_point F>
+F boundAs(double bound) {
+    if (bound > static_cast<double>(std::numeric_limits<F>::max()))
+        return std::numeric_limits<F>::infinity();
+    if (bound < static_cast<double>(std::numeric_limits<F>::lowest()))
+        return -std::numeric_limits<F>::infinity();
+    return static_cast<F>(bound);
 }
 
 template <typename F>
@@ -141,7 +150,7 @@ bool inside(M value, const std::optional<Bounds>& range) {
     if constexpr (std::integral<M>)
         return atLeast(value, range->min) && atMost(value, range->max);
     else
-        return value >= range->min && value <= range->max;
+        return value >= boundAs<M>(range->min) && value <= boundAs<M>(range->max);
 }
 
 inline bool identifier(std::string_view name) {

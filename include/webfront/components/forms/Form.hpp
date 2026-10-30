@@ -27,6 +27,20 @@ struct FormState {
     std::vector<bool>                     invalid;
     std::function<void(std::string_view)> changed;
 
+    // The control shows the member through its properties, when it is built and on refresh(). A value missing from the
+    // choices selects nothing rather than the first option.
+    void show(std::size_t index) const {
+        const auto& field   = description.fields[index];
+        const auto  value   = field.read(*object);
+        const auto& control = controls[index];
+        if (field.kind == Kind::boolean)
+            control.property("checked", value);
+        else if (field.kind == Kind::choice) {
+            const auto found = std::ranges::find(field.choices, value);
+            control.property("selectedIndex", found == field.choices.end() ? "-1" : std::to_string(found - field.choices.begin()));
+        } else
+            control.property("value", value);
+    }
     // aria-invalid marks an input whose value was refused; the member keeps its previous value.
     void mark(std::size_t index, bool refused) {
         if (invalid[index] == refused)
@@ -64,6 +78,15 @@ inline std::size_t indexOf(const auto& fields, std::string_view name) {
     throw std::out_of_range("No form field named " + std::string(name));
 }
 
+// Removes a component that could not be built: every node is attached under its root as soon as it is created, so the
+// document keeps none of them, nor their listeners and their share of the object. The caller rethrows.
+inline void discard(const dom::Node& root) noexcept {
+    try {
+        if (root.valid())
+            root.remove();
+    } catch (...) { }
+}
+
 }  // namespace detail
 
 /** @brief A form built in a document: one labelled input per field. A valid browser value writes the member at once;
@@ -86,33 +109,25 @@ public:
     dom::Node control(std::string_view name) const {
         return state->controls[detail::indexOf(state->description.fields, name)];
     }
-    /// Called with the field name after the browser has changed a member.
+    /// Called with the field name after the browser has changed a member. Server thread only, like every method.
     void onChange(std::function<void(std::string_view)> callback) const {
+        // The server thread dispatches events, which read the callback without a lock: id() throws on another thread.
+        static_cast<void>(root.id());
         state->changed = std::move(callback);
     }
     /// Shows the object's current values, after C++ has changed them, and clears the invalid marks.
     void refresh() const {
         for (std::size_t i = 0; i < state->controls.size(); ++i) {
-            const auto& field = state->description.fields[i];
-            const auto  value = field.read(*state->object);
-            const auto& input = state->controls[i];
-            if (field.kind == Kind::boolean)
-                input.property("checked", value);
-            else if (field.kind == Kind::choice) {
-                std::ptrdiff_t selected = -1;
-                for (std::size_t c = 0; c < field.choices.size(); ++c)
-                    if (field.choices[c] == value)
-                        selected = static_cast<std::ptrdiff_t>(c);
-                input.property("selectedIndex", std::to_string(selected));
-            } else
-                input.property("value", value);
+            state->show(i);
             state->mark(i, false);
         }
     }
 };
 
 /** @brief Builds a form for object in parent and returns it. The form shares ownership of the object, which its event
- * callbacks write on the server context. Throws std::invalid_argument for an invalid description (see validate()).
+ * callbacks write on the server context. Throws std::invalid_argument for an invalid description (see validate()); when
+ * an accessor or the document throws during the construction, the elements already created are removed with their
+ * listeners and the exception propagates.
  */
 template <typename UI, typename T>
 Form<T> form(const dom::Document<UI>& doc, dom::Node parent, std::shared_ptr<T> object, Description<T> description) {
@@ -122,41 +137,32 @@ Form<T> form(const dom::Document<UI>& doc, dom::Node parent, std::shared_ptr<T> 
     auto state = std::make_shared<detail::FormState<T>>(
         detail::FormState<T>{.object = std::move(object), .description = std::move(description), .controls = {}, .invalid = {}, .changed = {}});
     auto root = doc.element("form");
-    root.attribute("class", "wf-form");
-    // Enter in a text input submits the form: the page must not navigate.
-    root.listen("submit", [](std::string) { }, {.preventDefault = true, .stopPropagation = false});
-    for (std::size_t i = 0; i < state->description.fields.size(); ++i) {
-        const auto& field   = state->description.fields[i];
-        const auto  value   = field.read(*state->object);
-        auto        row     = doc.element("label");
-        auto        caption = doc.element("span");
-        row.attribute("class", "wf-field");
-        caption.append(doc.text(field.label));
-        row.append(caption);
-        dom::Node control;
-        if (field.kind == Kind::choice) {
-            control = doc.element("select");
-            for (const auto& choice : field.choices) {
-                auto option = doc.element("option");
-                option.attribute("value", choice);
-                if (choice == value)
-                    option.attribute("selected", "");
-                option.append(doc.text(choice));
-                control.append(option);
-            }
-            // A value missing from the choices selects nothing, as refresh() does, rather than the first option.
-            if (std::ranges::find(field.choices, value) == field.choices.end())
-                control.property("selectedIndex", "-1");
-        } else {
-            control = doc.element("input");
-            if (field.kind == Kind::boolean) {
+    try {
+        root.attribute("class", "wf-form");
+        // Enter in a text input submits the form: the page must not navigate.
+        root.listen("submit", [](std::string) { }, {.preventDefault = true, .stopPropagation = false});
+        for (std::size_t i = 0; i < state->description.fields.size(); ++i) {
+            const auto& field = state->description.fields[i];
+            auto        row   = doc.element("label");
+            root.append(row);
+            row.attribute("class", "wf-field");
+            auto caption = doc.element("span");
+            row.append(caption);
+            caption.append(doc.text(field.label));
+            auto control = doc.element(field.kind == Kind::choice ? "select" : "input");
+            row.append(control);
+            if (field.kind == Kind::choice)
+                for (const auto& choice : field.choices) {
+                    auto option = doc.element("option");
+                    control.append(option);
+                    option.attribute("value", choice);
+                    option.append(doc.text(choice));
+                }
+            else if (field.kind == Kind::boolean)
                 control.attribute("type", "checkbox");
-                if (value == "true")
-                    control.attribute("checked", "");
-            } else {
+            else {
                 const bool numeric = field.kind == Kind::integer || field.kind == Kind::number;
                 control.attribute("type", numeric ? "number" : "text");
-                control.attribute("value", value);
                 if (numeric)
                     control.attribute("step", field.kind == Kind::integer ? "1" : "any");
                 if (field.range) {
@@ -164,18 +170,20 @@ Form<T> form(const dom::Document<UI>& doc, dom::Node parent, std::shared_ptr<T> 
                     control.attribute("max", detail::formatNumber(field.range->max));
                 }
             }
+            control.attribute("name", field.name);
+            const bool changeEvent = field.kind == Kind::boolean || field.kind == Kind::choice;
+            control.listen(changeEvent ? "change" : "input", [state, i](std::string text) {
+                state->input(i, text);
+            });
+            state->controls.push_back(control);
+            state->invalid.push_back(false);
+            state->show(i);
         }
-        control.attribute("name", field.name);
-        const bool changeEvent = field.kind == Kind::boolean || field.kind == Kind::choice;
-        control.listen(changeEvent ? "change" : "input", [state, i](std::string text) {
-            state->input(i, text);
-        });
-        row.append(control);
-        root.append(row);
-        state->controls.push_back(control);
-        state->invalid.push_back(false);
+        parent.append(root);
+    } catch (...) {
+        detail::discard(root);
+        throw;
     }
-    parent.append(root);
     return Form<T>{std::move(state), root};
 }
 
@@ -209,7 +217,8 @@ public:
     }
 };
 
-/// Builds an inspector of object in parent. Throws std::invalid_argument for an invalid description.
+/// Builds an inspector of object in parent. Throws std::invalid_argument for an invalid description; a construction
+/// that throws later removes the elements it created.
 template <typename UI, typename T>
 Inspector<T> inspector(const dom::Document<UI>& doc, dom::Node parent, std::type_identity_t<std::shared_ptr<const T>> object, Description<T> description) {
     validate(description);
@@ -218,24 +227,29 @@ Inspector<T> inspector(const dom::Document<UI>& doc, dom::Node parent, std::type
     auto state = std::make_shared<detail::InspectorState<T>>(
         detail::InspectorState<T>{.object = std::move(object), .description = std::move(description), .values = {}, .shown = {}});
     auto root = doc.element("table");
-    auto body = doc.element("tbody");
-    root.attribute("class", "wf-inspector");
-    root.append(body);
-    for (const auto& field : state->description.fields) {
-        auto row   = doc.element("tr");
-        auto label = doc.element("th");
-        auto cell  = doc.element("td");
-        label.append(doc.text(field.label));
-        auto shown = field.read(*state->object);
-        auto value = doc.text(shown);
-        cell.append(value);
-        row.append(label);
-        row.append(cell);
-        body.append(row);
-        state->values.push_back(value);
-        state->shown.push_back(std::move(shown));
+    try {
+        root.attribute("class", "wf-inspector");
+        auto body = doc.element("tbody");
+        root.append(body);
+        for (const auto& field : state->description.fields) {
+            auto row = doc.element("tr");
+            body.append(row);
+            auto label = doc.element("th");
+            row.append(label);
+            label.append(doc.text(field.label));
+            auto cell = doc.element("td");
+            row.append(cell);
+            auto shown = field.read(*state->object);
+            auto value = doc.text(shown);
+            cell.append(value);
+            state->values.push_back(value);
+            state->shown.push_back(std::move(shown));
+        }
+        parent.append(root);
+    } catch (...) {
+        detail::discard(root);
+        throw;
     }
-    parent.append(root);
     return Inspector<T>{std::move(state), root};
 }
 

@@ -45,15 +45,21 @@ webfront::forms::Description<Settings> describeSettings() {
 fixed set use `choice()`. The label defaults to the name. Bounds apply to numbers only. A description
 can also be written field by field with custom accessors, for computed or nested values.
 
-Numbers are formatted in the classic locale with the precision of their type (`0.25`, `1`), never
-with `std::to_string`, whose C++26 output differs from C++23 (P2587). Integers parse with
-`std::from_chars`; a value with trailing characters, out of range for the member type or outside
-the bounds is refused. Floating-point values must be finite.
+Floating-point numbers are formatted by `std::to_chars` as the shortest text that reads back as
+the same value (`0.25`, `1`), independent of the locale, never with `std::to_string`, whose C++26
+output differs from C++23 (P2587). Integers parse with `std::from_chars`; a value with trailing
+characters, out of range for the member type or outside the bounds is refused. Floating-point
+values must be finite and must not underflow: a subnormal result, or a zero from non-zero digits
+(`1e-400`), is refused with every standard library. The bounds of a `float` member are compared in
+`float`, so the bound that the form shows (`0.1`) is itself accepted.
 
 `forms::validate(description)` throws `std::invalid_argument` unless the type and field names are
 identifiers (they become TypeScript members and input names) and unique, every field has both
 accessors, bounds are finite, ordered and only on numbers, and choices are present, non-empty and
 unique exactly for choice fields. The generators call it first and change nothing when it throws.
+When an accessor or the document throws later, while a form or an inspector is built, the elements
+already created are removed with their listeners and their share of the object, and the exception
+propagates: the browser receives them followed by their removal.
 
 ## Forms
 
@@ -74,8 +80,10 @@ choices to `change`; `submit` is declared with `preventDefault`, so Enter never 
 
 A valid browser value writes the member at once, on the server context, then calls the `onChange`
 callback with the field name. A refused value keeps the member and sets `aria-invalid="true"` on the
-control; the next valid value removes it. After C++ changes the object, `form.refresh()` shows the
-current values through the `value`, `checked` and `selectedIndex` properties and clears the marks.
+control; the next valid value removes it. The controls show the values through the `value`,
+`checked` and `selectedIndex` properties, when the form is built and on `form.refresh()`, which
+C++ calls after changing the object and which also clears the marks. A choice value missing from
+the choices selects nothing (`selectedIndex` `-1`) rather than the first option.
 
 The form, and the listeners of its controls, share ownership of the object: removing the form
 element (`form.node().remove()`) or closing the document releases them. `form.control(name)` returns
@@ -138,10 +146,13 @@ auto form = webfront::forms::form(doc, doc.island(), settings, webfront::forms::
 
 `describe<T>()` lists the public non-static data members of a named class in declaration order.
 The type and member names come from their identifiers, labels from `Label` (or the name), bounds
-from `Range` (numbers only), and an enumeration becomes a choice named after its enumerators. The
+from `Range`, and an enumeration becomes a choice named after its enumerators. A `Range` on a
+member that is not a number (a `bool`, a string, an enumeration) and a repeated `Label` or `Range`
+do not compile; the `C++26.FormsReflectionRejects` tests check each message. The
 result is an ordinary `Description<T>`: forms, inspectors and declarations do not depend on how it
 was produced. The `FormsReflectionTests` executable checks that the reflected description, its
-declaration and its form batch equal the hand-written ones. CMake builds it only when the compiler
+declaration and its form batch equal the hand-written ones; it links a Catch2 compiled with the
+same C++26 flags, so that no executable mixes objects of both standards. CMake builds it only when the compiler
 supports reflection; the Linux CI job sets `-DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON`, so that it
 cannot be skipped there.
 

@@ -12,6 +12,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -127,6 +128,39 @@ SCENARIO("Hand-written descriptors parse and format the values of the browser", 
             REQUIRE(object.count == 9007199254740992);
             REQUIRE_FALSE(precise.fields[1].write(object, "-1"));
         }
+        THEN("a value that underflows is refused whatever the standard library, and an exact zero is accepted") {
+            for (auto text : {"1e-320", "1e-400", "-2.5e-310"})
+                REQUIRE_FALSE(precise.fields[0].write(object, text));
+            REQUIRE(object.ratio == 0.12345678901234567);
+            REQUIRE(precise.fields[0].write(object, "0e-400"));
+            REQUIRE(object.ratio == 0);
+        }
+    }
+    GIVEN("float members whose decimal bounds are not exact in binary") {
+        struct Gains {
+            float gain{};
+            float wide{};
+        };
+        forms::Description<Gains> gains{
+            .name   = "Gains",
+            .fields = {forms::field("gain", &Gains::gain, "Gain", forms::Bounds{0.1, 0.3}),
+                       forms::field("wide", &Gains::wide, "Wide", forms::Bounds{-1e300, 1e300})}
+        };
+        Gains object;
+        THEN("the bounds the form shows are accepted, and only what lies beyond them is refused") {
+            REQUIRE(gains.fields[0].write(object, "0.1"));
+            REQUIRE(object.gain == 0.1f);
+            REQUIRE(gains.fields[0].write(object, "0.3"));
+            REQUIRE(object.gain == 0.3f);
+            for (auto text : {"0.0999", "0.3001", "1e-40"})
+                REQUIRE_FALSE(gains.fields[0].write(object, text));
+            REQUIRE(object.gain == 0.3f);
+        }
+        THEN("bounds beyond the range of float accept every finite float") {
+            REQUIRE(gains.fields[1].write(object, "-3e38"));
+            REQUIRE(gains.fields[1].write(object, "3e38"));
+            REQUIRE_FALSE(gains.fields[1].write(object, "4e38"));
+        }
     }
 }
 
@@ -231,43 +265,55 @@ SCENARIO("A form is built in a document and writes the object from browser event
         using Attributes = std::map<std::string, std::string>;
         REQUIRE(on(recorder, ops, form.control("speed"), msg::DomOp::attribute)
                 == Attributes{
-                    { "type", "number"},
-                    {"value",      "5"},
-                    { "step",      "1"},
-                    {  "min",      "1"},
-                    {  "max",     "10"},
-                    { "name",  "speed"}
+                    {"type", "number"},
+                    {"step",      "1"},
+                    { "min",      "1"},
+                    { "max",     "10"},
+                    {"name",  "speed"}
         });
         REQUIRE(on(recorder, ops, form.control("density"), msg::DomOp::attribute)
                 == Attributes{
-                    { "type",  "number"},
-                    {"value",    "0.25"},
-                    { "step",     "any"},
-                    {  "min",       "0"},
-                    {  "max",       "1"},
-                    { "name", "density"}
+                    {"type",  "number"},
+                    {"step",     "any"},
+                    { "min",       "0"},
+                    { "max",       "1"},
+                    {"name", "density"}
         });
         REQUIRE(on(recorder, ops, form.control("wrap"), msg::DomOp::attribute)
                 == Attributes{
-                    {   "type", "checkbox"},
-                    {"checked",         ""},
-                    {   "name",     "wrap"}
+                    {"type", "checkbox"},
+                    {"name",     "wrap"}
         });
         REQUIRE(on(recorder, ops, form.control("title"), msg::DomOp::attribute)
                 == Attributes{
-                    { "type",  "text"},
-                    {"value",  "Life"},
-                    { "name", "title"}
+                    {"type",  "text"},
+                    {"name", "title"}
         });
         REQUIRE(on(recorder, ops, form.control("pattern"), msg::DomOp::attribute)
                 == Attributes{
                     {"name", "pattern"}
         });
-        REQUIRE(std::ranges::count_if(ops,
-                                      [&](const auto& op) {
-                                          return op.code == msg::DomOp::attribute && recorder.name(op.b) == "selected";
-                                      })
-                == 1);
+        // The values are shown through the same properties as refresh().
+        REQUIRE(on(recorder, ops, form.control("speed"), msg::DomOp::property)
+                == Attributes{
+                    {"value", "5"}
+        });
+        REQUIRE(on(recorder, ops, form.control("density"), msg::DomOp::property)
+                == Attributes{
+                    {"value", "0.25"}
+        });
+        REQUIRE(on(recorder, ops, form.control("wrap"), msg::DomOp::property)
+                == Attributes{
+                    {"checked", "true"}
+        });
+        REQUIRE(on(recorder, ops, form.control("title"), msg::DomOp::property)
+                == Attributes{
+                    {"value", "Life"}
+        });
+        REQUIRE(on(recorder, ops, form.control("pattern"), msg::DomOp::property)
+                == Attributes{
+                    {"selectedIndex", "0"}
+        });
         REQUIRE(on(recorder, ops, form.node(), msg::DomOp::listen)
                 == Attributes{
                     {"submit", "1"}
@@ -397,6 +443,35 @@ SCENARIO("A form is built in a document and writes the object from browser event
             });
         }
     }
+    WHEN("an accessor throws while a form is built") {
+        auto failing           = forms_fixture::settingsDescription();
+        failing.fields[2].read = [](const Settings&) -> std::string {
+            throw std::runtime_error("unreadable");
+        };
+        const auto nodes     = recorder.state->nodes.size();
+        const auto listeners = recorder.state->listeners.size();
+        auto       other     = std::make_shared<Settings>();
+        REQUIRE_THROWS_AS(forms::form(recorder.doc, root, other, failing), std::runtime_error);
+        THEN("the elements already created are removed with their listeners and their share of the object") {
+            REQUIRE(recorder.state->nodes.size() == nodes);
+            REQUIRE(recorder.state->listeners.size() == listeners);
+            REQUIRE(other.use_count() == 1);
+        }
+    }
+    WHEN("onChange is called from another thread") {
+        bool        refused = false;
+        std::thread worker([&] {
+            try {
+                form.onChange([](std::string_view) { });
+            } catch (const std::logic_error&) {
+                refused = true;
+            }
+        });
+        worker.join();
+        THEN("it throws like the other methods instead of racing with event dispatch") {
+            REQUIRE(refused);
+        }
+    }
     WHEN("a field name is unknown or the description is invalid") {
         REQUIRE_THROWS_AS(form.control("missing"), std::out_of_range);
         auto invalid = forms_fixture::settingsDescription();
@@ -433,6 +508,17 @@ SCENARIO("An inspector shows an object and updates only what changed", "[forms][
             REQUIRE(first[0].a == inspector.value("title").id());
             REQUIRE(first[0].value == "Gun");
             REQUIRE(recorder.take().empty());
+        }
+    }
+    WHEN("an accessor throws while another inspector is built") {
+        auto failing           = forms_fixture::settingsDescription();
+        failing.fields[3].read = [](const Settings&) -> std::string {
+            throw std::runtime_error("unreadable");
+        };
+        const auto nodes = recorder.state->nodes.size();
+        REQUIRE_THROWS_AS(forms::inspector(recorder.doc, recorder.doc.island(), settings, failing), std::runtime_error);
+        THEN("its elements are removed") {
+            REQUIRE(recorder.state->nodes.size() == nodes);
         }
     }
 }
