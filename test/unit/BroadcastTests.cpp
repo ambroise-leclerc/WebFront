@@ -525,7 +525,10 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
         return startedCount() == 1;
     });
     REQUIRE(startedCount() == 1);
-    const App::UI stale = started.front();
+    const App::UI stale = [&] {
+        std::scoped_lock lock{mutex};
+        return started.front();
+    }();
     REQUIRE(stale.id() == 65535);
 
     first.reset();
@@ -541,7 +544,10 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
         return startedCount() == 2;
     });
     REQUIRE(startedCount() == 2);
-    const App::UI current = started.back();
+    const App::UI current = [&] {
+        std::scoped_lock lock{mutex};
+        return started.back();
+    }();
 
     GIVEN("a later browser that received the identifier of the closed one") {
         REQUIRE(current.id() == stale.id());

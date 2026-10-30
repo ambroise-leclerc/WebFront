@@ -9,7 +9,9 @@
   `addScript` throws `ConnectionError`, `pendingWrites()` is 0, and the value equals no later connection's.
   `operator==` compares application, identifier and generation. Removing kept values in `subscribeUIClosed`
   becomes a recommendation, not a safety requirement. The generation never crosses the wire: no change to the
-  binary format or `WebFront.js`.
+  binary format or `WebFront.js`. The public constructors of `UI`, `JsFunction` and `JsFunctionSender` take the
+  generation as an extra argument, so code that builds one by hand no longer compiles: use the `UI` that
+  `onUIStarted`, `subscribeUIStarted` or a callback hands over.
 
 - Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
   whose `onUIStarted` handlers have returned, from any thread, with no table of browsers kept by the

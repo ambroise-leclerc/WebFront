@@ -518,6 +518,15 @@ private:
         return found == webLinks.end() ? WebLinkGeneration{0} : found->second.generation;
     }
 
+    /// The link and generation of the connection that now owns `id`, read under one lock (null and 0 when none does).
+    std::pair<std::shared_ptr<WebLink<Net, Policy>>, WebLinkGeneration> linkAndGeneration(WebLinkId id) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        if (found == webLinks.end())
+            return {nullptr, WebLinkGeneration{0}};
+        return {found->second.link, found->second.generation};
+    }
+
     /// The UI of the connection that now owns `id` (generation 0, reaching nothing, when none does).
     UI uiOf(WebLinkId id) {
         return UI{*this, id, generationOf(id)};
@@ -773,6 +782,8 @@ private:
     std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::shared_ptr<detail::UISubscribers<UI>>                               uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>, std::less<>> cppFunctions;
+    // Keyed by identifier alone: a document is closed and erased on its connection's closed event, before the link is
+    // released and its identifier can be reused, so two connections never share an entry.
     std::map<WebLinkId, std::shared_ptr<dom::detail::State>>                                                                    domDocuments;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
@@ -913,8 +924,7 @@ private:
                 break;
             case WebLinkEvent::Code::cppFunctionCalled: {
                 // Links are registered before they read, and released after their closure: the caller is registered.
-                const auto generation = generationOf(event.webLinkId);
-                const auto link       = findLink(event.webLinkId, generation);
+                const auto [link, generation] = linkAndGeneration(event.webLinkId);
                 if (!link)
                     break;
                 if constexpr (requires(typename Net::Acceptor& acceptor) { Net::ResumeAfter(acceptor, std::chrono::milliseconds(1)); }) {
