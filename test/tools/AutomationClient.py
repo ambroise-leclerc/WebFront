@@ -11,6 +11,7 @@ import os
 import base64
 import hashlib
 import io
+import itertools
 import tarfile
 import tempfile
 import threading
@@ -121,7 +122,11 @@ def remaining_profiles(profiles, timeout=10):
     while True:
         left = list(profiles.glob("webfront-agent-*"))
         if not left or time.monotonic() >= deadline:
-            return left, [str(path.relative_to(profiles)) for profile in left for path in profile.rglob("*")][:40]
+            # os.walk skips a directory removed while it is listed: the removal may still be under way. Only the
+            # first 40 entries are walked.
+            contents = (str(pathlib.Path(directory, name).relative_to(profiles))
+                        for profile in left for directory, folders, files in os.walk(profile) for name in folders + files)
+            return left, list(itertools.islice(contents, 40))
         time.sleep(0.05)
 
 

@@ -7,11 +7,13 @@
   exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.
   The watchdog tests check that a forced exit removes the profile, the automation failure messages report the observed
   run state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout. On Linux, the
-  automation agent ends the CEF helper processes descending from it, removes the profile, and leaves a last removal
-  to a shell that waits for its exit, since the CEF browser inside the agent writes into the profile until then, and
+  automation agent gives the CEF helpers descending from it (the processes running its own executable) the same
+  grace, then kills them through pidfds, removes the profile, and leaves a last removal to a shell in its own session
+  that waits for its exit, since the CEF browser inside the agent writes into the profile until then, and
   repeats it for 2 s against a helper relaunched meanwhile; the tests wait up to 10 s for that removal and keep the
   watchdog profile in a short system temporary path. The deadline check of the Jasmine runner waits up to 5 s for a
-  killed orphan to exit and treats one reaped while it reads its state as gone.
+  killed orphan to exit and treats one reaped while it reads its state as gone, reading that state with `ps` where
+  there is no `/proc` (macOS).
 
 - Show the `wf` commands of the developer browser test in its window (#415): `DeveloperBrowserIntegration` shows, in
   place of its terminal, each command it runs with its outcome and duration, labelling the timeouts and cancellations

@@ -28,10 +28,13 @@
 #ifdef __linux__
 #include <fstream>
 #include <map>
+#include <poll.h>
+#include <ranges>
 #include <signal.h>
 #include <spawn.h>
 #include <sstream>
 #include <string>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -152,13 +155,10 @@ std::optional<std::pair<pid_t, char>> processStat(pid_t pid) {
     return std::pair{parent, state};
 }
 
-bool running(pid_t pid) {
-    const auto stat = processStat(pid);
-    return stat && stat->second != 'Z' && stat->second != 'X';
-}
-
-// Every process descending from the agent, listed before any is ended: an orphan is reparented and leaves the tree.
-std::vector<pid_t> descendants() {
+// The CEF helpers (zygote, renderers, GPU and network services) are the descendants running the agent's own
+// executable, listed before any is ended (an orphan is reparented and leaves the tree): a WebKitGTK web process or a
+// command the developer application started is not one of them.
+std::vector<pid_t> browserHelpers() {
     std::map<pid_t, std::vector<pid_t>> children;
     for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
         const auto name = entry.path().filename().string();
@@ -168,38 +168,95 @@ std::vector<pid_t> descendants() {
         if (const auto stat = processStat(pid))
             children[stat->first].push_back(pid);
     }
-    std::vector<pid_t> result{::getpid()};
-    for (std::size_t next = 0; next != result.size(); ++next)
-        if (const auto found = children.find(result[next]); found != children.end())
-            result.insert(result.end(), found->second.begin(), found->second.end());
-    result.erase(result.begin());
+    std::vector<pid_t> tree{::getpid()};
+    for (std::size_t next = 0; next != tree.size(); ++next)
+        if (const auto found = children.find(tree[next]); found != children.end())
+            tree.insert(tree.end(), found->second.begin(), found->second.end());
+    std::vector<pid_t> result;
+    for (const auto pid : tree | std::views::drop(1)) {
+        std::error_code error;
+        if (std::filesystem::equivalent("/proc/" + std::to_string(pid) + "/exe", "/proc/self/exe", error))
+            result.push_back(pid);
+    }
     return result;
 }
 
-// The CEF helper processes (zygote, renderers, GPU and network services) descend from the agent and outlive _Exit: one
-// still writing into the profile after its removal recreates it. The profile is about to go, so nothing they could
-// still save matters: end them and wait until they are gone.
-void releaseBrowserProcesses() noexcept {
+// A pidfd keeps designating the process it was opened on, even once its identifier is reused; -1 without pidfds.
+int openProcess(pid_t pid) noexcept {
+#ifdef SYS_pidfd_open
+    return static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+#else
+    return -1;
+#endif
+}
+
+struct Helper {
+    pid_t pid;
+    int   descriptor;
+    bool  killed = false;
+    bool  exited() const {
+        if (descriptor < 0) {
+            const auto stat = processStat(pid);
+            return !stat || stat->second == 'Z' || stat->second == 'X';
+        }
+        pollfd readable{.fd = descriptor, .events = POLLIN, .revents = 0};
+        return ::poll(&readable, 1, 0) > 0;
+    }
+    void kill() {
+        if (std::exchange(killed, true))
+            return;
+#ifdef SYS_pidfd_send_signal
+        if (descriptor >= 0) {
+            ::syscall(SYS_pidfd_send_signal, descriptor, SIGKILL, nullptr, 0);
+            return;
+        }
+#endif
+        ::kill(pid, SIGKILL);
+    }
+};
+
+// The CEF helpers outlive _Exit: one still writing into the profile after its removal recreates it. Let them exit
+// during the grace, then end them and wait until they are gone, for 2 s more at most. They are listed once: the
+// browser relaunches an ended GPU process, and aborts after a few, so a helper started later is left to the removal
+// after the agent's exit.
+void releaseBrowserProcesses(std::chrono::milliseconds grace) noexcept {
+    std::vector<Helper> helpers;
     try {
-        const auto processes = descendants();
-        const auto anyRunning = [&] {
-            return std::ranges::any_of(processes, running);
-        };
-        for (const auto pid : processes)
-            if (running(pid))
-                ::kill(pid, SIGKILL);
-        const auto terminated = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-        while (anyRunning() && std::chrono::steady_clock::now() < terminated)
+        for (const auto pid : browserHelpers())
+            helpers.push_back({pid, openProcess(pid)});
+        // Opened after the scan: a pidfd designates one of our helpers only if its identifier still is one.
+        const auto confirmed = browserHelpers();
+        std::erase_if(helpers, [&](const Helper& helper) {
+            if (helper.descriptor < 0 || std::ranges::find(confirmed, helper.pid) != confirmed.end())
+                return false;
+            ::close(helper.descriptor);
+            return true;
+        });
+        const auto ended      = std::chrono::steady_clock::now() + grace;
+        const auto terminated = ended + std::chrono::seconds{2};
+        for (;;) {
+            const auto now = std::chrono::steady_clock::now();
+            if (std::ranges::all_of(helpers, &Helper::exited) || now >= terminated)
+                break;
+            if (now >= ended)
+                for (auto& helper : helpers)
+                    if (!helper.exited())
+                        helper.kill();
             std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        }
     } catch (...) {
         // Without the process list, the removal below still runs.
     }
+    for (const auto& helper : helpers)
+        if (helper.descriptor >= 0)
+            ::close(helper.descriptor);
 }
 
 // Closes every descriptor from 3 in the spawned process. glibc 2.34 has a dedicated action; elsewhere the open
 // descriptors are listed from /proc/self/fd, after the listing has closed its own.
 bool closeInheritedDescriptors(posix_spawn_file_actions_t& actions) {
-#if defined(__GLIBC__) && __GLIBC_PREREQ(2, 34)
+// Another libc has no __GLIBC_PREREQ, which the preprocessor would still have to parse.
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
     return ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
 #else
     std::vector<int> open;
@@ -212,13 +269,29 @@ bool closeInheritedDescriptors(posix_spawn_file_actions_t& actions) {
 }
 
 // The CEF browser runs inside the agent: until the agent exits, its threads may write into the profile again, and
-// relaunch the helpers ended above. A shell outside the agent's descriptors removes the profile once the agent is gone
-// (exited, even if not reaped yet); false when it cannot be started.
+// relaunch the helpers ended above. A shell outside the agent's descriptors and process group removes the profile once
+// the agent is gone (exited, even if not reaped yet); false when it cannot be started.
 bool removeAfterExit(const std::filesystem::path& path) noexcept {
     try {
         posix_spawn_file_actions_t actions;
         if (::posix_spawn_file_actions_init(&actions) != 0)
             return false;
+        const auto destroyActions = [](posix_spawn_file_actions_t* initialized) {
+            ::posix_spawn_file_actions_destroy(initialized);
+        };
+        const std::unique_ptr<posix_spawn_file_actions_t, decltype(destroyActions)> actionsGuard{&actions, destroyActions};
+        posix_spawnattr_t attributes;
+        if (::posix_spawnattr_init(&attributes) != 0)
+            return false;
+        const auto destroyAttributes = [](posix_spawnattr_t* initialized) {
+            ::posix_spawnattr_destroy(initialized);
+        };
+        const std::unique_ptr<posix_spawnattr_t, decltype(destroyAttributes)> attributesGuard{&attributes, destroyAttributes};
+#ifdef POSIX_SPAWN_SETSID
+        // A kill of the agent's process group, by a harness or a CTest timeout, must not prevent the removal.
+        if (::posix_spawnattr_setflags(&attributes, static_cast<short>(POSIX_SPAWN_SETSID)) != 0)
+            return false;
+#endif
         // Neither the CLI/MCP pipes, whose EOF the clients wait for, nor the agent's sockets go to the shell.
         bool       prepared = ::posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0
                      && ::posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0) == 0
@@ -238,9 +311,7 @@ bool removeAfterExit(const std::filesystem::path& path) noexcept {
         char* const arguments[] = {const_cast<char*>("sh"), const_cast<char*>("-c"), const_cast<char*>(script),
                                    const_cast<char*>(agent.c_str()), const_cast<char*>(profile.c_str()), nullptr};
         pid_t cleaner{};
-        prepared = prepared && ::posix_spawn(&cleaner, "/bin/sh", &actions, nullptr, arguments, environ) == 0;
-        ::posix_spawn_file_actions_destroy(&actions);
-        return prepared;
+        return prepared && ::posix_spawn(&cleaner, "/bin/sh", &actions, &attributes, arguments, environ) == 0;
     } catch (...) {
         return false;
     }
@@ -253,13 +324,14 @@ struct Profile {
 #ifdef __linux__
     mutable std::atomic<bool> released{false};
 #endif
-    /// @param grace how long the WebView2 browser may take to exit on its own before it is ended (Windows only)
+    /// @param grace how long the browser processes may take to exit on their own before they are ended (Windows and
+    /// Linux)
     void cleanup([[maybe_unused]] std::chrono::milliseconds grace) const noexcept {
 #ifdef __linux__
         // A forced exit that loses the race with a normal one cleans up twice: the second would end the first's shell.
         if (released.exchange(true))
             return;
-        releaseBrowserProcesses();  // the browser's helpers would otherwise recreate the profile
+        releaseBrowserProcesses(grace);  // the browser's helpers would otherwise recreate the profile
         std::error_code ignored;
         std::filesystem::remove_all(path, ignored);  // what the browser still writes goes after the agent's exit
         if (!removeAfterExit(path))
