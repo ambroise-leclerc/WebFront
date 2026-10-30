@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #endif
 #ifdef __linux__
+#include <cerrno>
 #include <fstream>
 #include <map>
 #include <poll.h>
@@ -155,6 +156,25 @@ std::optional<std::pair<pid_t, char>> processStat(pid_t pid) {
     return std::pair{parent, state};
 }
 
+// The command name of a process, from /proc/<process>/comm, which stays readable when its executable link is not.
+std::string commandName(const std::string& process) {
+    std::ifstream input("/proc/" + process + "/comm");
+    std::string   name;
+    std::getline(input, name);
+    return name;
+}
+
+// Whether a process runs the agent's executable. Chromium makes its sandboxed helpers non-dumpable, which hides their
+// executable link from a process without CAP_SYS_PTRACE: such a helper is recognized by its command name, which
+// Chromium does not rename for a process's main thread.
+bool runsAgent(pid_t pid, const std::string& agentName) {
+    const auto      process = std::to_string(pid);
+    std::error_code error;
+    if (std::filesystem::equivalent("/proc/" + process + "/exe", "/proc/self/exe", error))
+        return true;
+    return error == std::errc::permission_denied && !agentName.empty() && commandName(process) == agentName;
+}
+
 // The CEF helpers (zygote, renderers, GPU and network services) are the descendants running the agent's own
 // executable, listed before any is ended (an orphan is reparented and leaves the tree): a WebKitGTK web process or a
 // command the developer application started is not one of them.
@@ -172,20 +192,21 @@ std::vector<pid_t> browserHelpers() {
     for (std::size_t next = 0; next != tree.size(); ++next)
         if (const auto found = children.find(tree[next]); found != children.end())
             tree.insert(tree.end(), found->second.begin(), found->second.end());
+    const auto         agentName = commandName("self");
     std::vector<pid_t> result;
-    for (const auto pid : tree | std::views::drop(1)) {
-        std::error_code error;
-        if (std::filesystem::equivalent("/proc/" + std::to_string(pid) + "/exe", "/proc/self/exe", error))
+    for (const auto pid : tree | std::views::drop(1))
+        if (runsAgent(pid, agentName))
             result.push_back(pid);
-    }
     return result;
 }
 
-// A pidfd keeps designating the process it was opened on, even once its identifier is reused; -1 without pidfds.
+// A pidfd keeps designating the process it was opened on, even once its identifier is reused; -1 with errno ESRCH for
+// a process that is gone, ENOSYS without pidfds.
 int openProcess(pid_t pid) noexcept {
 #ifdef SYS_pidfd_open
     return static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
 #else
+    errno = ENOSYS;
     return -1;
 #endif
 }
@@ -222,8 +243,15 @@ struct Helper {
 void releaseBrowserProcesses(std::chrono::milliseconds grace) noexcept {
     std::vector<Helper> helpers;
     try {
-        for (const auto pid : browserHelpers())
-            helpers.push_back({pid, openProcess(pid)});
+        const auto listed = browserHelpers();
+        helpers.reserve(listed.size());
+        for (const auto pid : listed) {
+            // A helper gone since the scan needs nothing more, and its identifier may already designate another
+            // process: only a kernel without pidfds (before Linux 5.3) leaves the identifier to signal.
+            const int descriptor = openProcess(pid);
+            if (descriptor >= 0 || errno == ENOSYS)
+                helpers.push_back({pid, descriptor});
+        }
         // Opened after the scan: a pidfd designates one of our helpers only if its identifier still is one.
         const auto confirmed = browserHelpers();
         std::erase_if(helpers, [&](const Helper& helper) {
@@ -253,7 +281,9 @@ void releaseBrowserProcesses(std::chrono::milliseconds grace) noexcept {
 }
 
 // Closes every descriptor from 3 in the spawned process. glibc 2.34 has a dedicated action; elsewhere the open
-// descriptors are listed from /proc/self/fd, after the listing has closed its own.
+// descriptors are listed from /proc/self/fd, after the listing has closed its own. That list is a snapshot: a
+// descriptor another thread opens without O_CLOEXEC before the spawn still reaches the shell. Chromium opens its
+// descriptors with O_CLOEXEC, and the shell holds them for its bounded wait at most.
 bool closeInheritedDescriptors(posix_spawn_file_actions_t& actions) {
 // Another libc has no __GLIBC_PREREQ, which the preprocessor would still have to parse.
 #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
@@ -299,13 +329,15 @@ bool removeAfterExit(const std::filesystem::path& path) noexcept {
                      && closeInheritedDescriptors(actions);
         const auto agent   = std::to_string(::getpid());
         const auto profile = path.string();
-        // Waits while the agent runs: its stat fields after the command name start with the state ('Z' once exited) and
-        // have its start time 20th, which tells a reused PID apart. A helper relaunched just before the agent's exit
-        // ends once the browser is gone, but may recreate the profile meanwhile: the removal is repeated for 2 s.
-        const char* script = "fields() { sed 's/.*) //' \"/proc/$0/stat\" 2>/dev/null; }; "
-                             "started=$(fields | cut -d' ' -f20); "
-                             "while current=$(fields) && [ \"${current%% *}\" != Z ] "
-                             "&& [ \"$(echo \"$current\" | cut -d' ' -f20)\" = \"$started\" ]; do sleep 0.05; done; "
+        // Waits while the agent runs, for about a minute at most: its stat fields after the command name start with the
+        // state ('Z' once exited) and have its start time 20th, which tells a reused PID apart. They are read with
+        // builtins, so a poll only starts sleep. A helper relaunched just before the agent's exit ends once the browser
+        // is gone, but may recreate the profile meanwhile: the removal is repeated for 2 s.
+        const char* script = "probe() { read -r line 2>/dev/null < \"/proc/$0/stat\" || return 1; "
+                             "set -- ${line##*\") \"}; state=$1; start=${20}; }; "
+                             "probe && started=$start; i=0; "
+                             "while [ $i -lt 1200 ] && probe && [ \"$state\" != Z ] && [ \"$start\" = \"$started\" ]; "
+                             "do sleep 0.05; i=$((i + 1)); done; "
                              "rm -rf -- \"$1\"; i=0; while [ $i -lt 20 ]; do sleep 0.1; "
                              "if [ -e \"$1\" ]; then rm -rf -- \"$1\"; fi; i=$((i + 1)); done";
         char* const arguments[] = {const_cast<char*>("sh"), const_cast<char*>("-c"), const_cast<char*>(script),
@@ -326,14 +358,20 @@ struct Profile {
 #endif
     /// @param grace how long the browser processes may take to exit on their own before they are ended (Windows and
     /// Linux)
-    void cleanup([[maybe_unused]] std::chrono::milliseconds grace) const noexcept {
+    /// @param browserRunning whether the browser may still write into the profile until the agent exits (a forced exit;
+    /// Linux only)
+    void cleanup([[maybe_unused]] std::chrono::milliseconds grace, [[maybe_unused]] bool browserRunning = false) const noexcept {
 #ifdef __linux__
         // A forced exit that loses the race with a normal one cleans up twice: the second would end the first's shell.
         if (released.exchange(true))
             return;
         releaseBrowserProcesses(grace);  // the browser's helpers would otherwise recreate the profile
-        std::error_code ignored;
-        std::filesystem::remove_all(path, ignored);  // what the browser still writes goes after the agent's exit
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+        // After a normal exit, CefShutdown has returned: a removed profile stays removed. Otherwise, what the browser
+        // still writes goes after the agent's exit.
+        if (!browserRunning && !error && !std::filesystem::exists(path, error) && !error)
+            return;
         if (!removeAfterExit(path))
             std::cerr << "Automation: cannot schedule the removal of the temporary profile\n";
 #else
@@ -674,7 +712,7 @@ int main(int argc, char** argv) {
                         if (channel)
                             channel->stop();
                         // _Exit skips the destructors. The browser already had the close grace above: end it now.
-                        profile.cleanup(std::chrono::milliseconds{0});
+                        profile.cleanup(std::chrono::milliseconds{0}, true);
                         // Ending the browser can release a blocked main thread: an exit completed meanwhile keeps its
                         // own status and destructors.
                         if (!done.load())

@@ -9,6 +9,7 @@ import subprocess
 import socket
 import os
 import base64
+import contextlib
 import hashlib
 import io
 import itertools
@@ -111,6 +112,18 @@ class Client:
                 self.child.wait()
                 raise
         self.reader.join(timeout=2)
+
+
+@contextlib.contextmanager
+def profile_directory():
+    """A private directory in the system temporary directory, whose removal tolerates what the agent still removes.
+
+    tempfile.TemporaryDirectory takes ignore_cleanup_errors only from Python 3.10."""
+    path = tempfile.mkdtemp(prefix="wf-profile-")
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def remaining_profiles(profiles, timeout=10):
@@ -276,7 +289,7 @@ def watchdog(args):
         # A private temporary directory isolates the native profile, which the forced exit must still remove. It is
         # created in the system temporary directory, not under the work path: Chromium puts its singleton Unix socket
         # there, and sockaddr_un limits that path to about 108 bytes whatever the checkout's depth.
-        with tempfile.TemporaryDirectory(prefix="wf-profile-", ignore_cleanup_errors=True) as profile_root:
+        with profile_directory() as profile_root:
             profiles = pathlib.Path(profile_root).resolve()
             forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
@@ -415,7 +428,7 @@ def main():
         endpoint = pathlib.Path(temporary) / "shared-window"
         # Keep Chromium's temporary Unix socket paths below sockaddr_un's limit, independently
         # of the checkout/work path length. The agent still creates its own private child profile.
-        with tempfile.TemporaryDirectory(prefix="wf-profile-", ignore_cleanup_errors=True) as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
+        with profile_directory() as profile_root, (pathlib.Path(temporary) / "shared.log").open("w") as log:
             profiles = pathlib.Path(profile_root).resolve()
             owner_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
             owner = subprocess.Popen([args.agent, *command, "--serve", "--listen", str(endpoint),
