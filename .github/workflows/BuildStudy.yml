@@ -45,13 +45,15 @@ jobs:
           import re
           tagged = re.search(r'\[variants:([^\]]*)\]', os.environ.get('MESSAGE', ''))  # a push selects variants this way
           requested = [v for v in (tagged.group(1) if tagged else os.environ.get('REQUESTED', '')).replace(' ', '').split(',') if v] or all_variants
-          print('matrix=' + json.dumps({'os': ['windows', 'linux'], 'variant': requested}))
+          # /analyze exists on MSVC only: its variants have no Linux counterpart.
+          include = [{'os': o, 'variant': v} for v in requested for o in ('windows', 'linux') if not (o == 'linux' and v.startswith('noanalyze'))]
+          print('matrix=' + json.dumps({'include': include}))
           PY
 
   study:
     needs: image
     # A commit message with [profile-only] skips the measurements and runs only the profile job.
-    if: ${{ !contains(github.event.head_commit.message, '[profile-only]') && !(matrix.os == 'linux' && startsWith(matrix.variant, 'noanalyze')) }}
+    if: ${{ !contains(github.event.head_commit.message, '[profile-only]') }}
     permissions:
       contents: read
       packages: read
