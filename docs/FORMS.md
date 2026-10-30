@@ -47,15 +47,17 @@ can also be written field by field with custom accessors, for computed or nested
 
 Floating-point numbers are formatted by `std::to_chars` as the shortest text that reads back as
 the same value (`0.25`, `1`), independent of the locale, never with `std::to_string`, whose C++26
-output differs from C++23 (P2587). Integers parse with `std::from_chars`; a value with trailing
-characters, out of range for the member type or outside the bounds is refused. Floating-point
+output differs from C++23 (P2587). Integers parse with `std::from_chars`; an integer input may also
+report `5.0` or `1e1`, which is accepted when the value is whole and exact. Any other value with
+trailing characters, out of range for the member type or outside the bounds is refused. Floating-point
 values must be finite and must not underflow: a subnormal result, or a zero from non-zero digits
 (`1e-400`), is refused with every standard library. The bounds of a `float` member are compared in
 `float`, so the bound that the form shows (`0.1`) is itself accepted.
 
 `forms::validate(description)` throws `std::invalid_argument` unless the type and field names are
-identifiers (they become TypeScript members and input names) and unique, every field has both
-accessors, bounds are finite, ordered and only on numbers, and choices are present, non-empty and
+identifiers (they become TypeScript members and input names) and unique, the type name is not a
+word that TypeScript refuses for an interface, every field has both accessors, bounds are finite,
+ordered, only on numbers and whole on integers, and choices are present, non-empty and
 unique exactly for choice fields. The generators call it first and change nothing when it throws.
 When an accessor or the document throws later, while a form or an inspector is built, the elements
 already created are removed with their listeners and their share of the object, and the exception
@@ -145,6 +147,8 @@ auto form = webfront::forms::form(doc, doc.island(), settings, webfront::forms::
 ```
 
 `describe<T>()` lists the public non-static data members of a named class in declaration order.
+Members of base classes are not listed, and a bit-field does not compile: describe such a type by
+hand with `field()`.
 The type and member names come from their identifiers, labels from `Label` (or the name), bounds
 from `Range`, and an enumeration becomes a choice named after its enumerators. A `Range` on a
 member that is not a number (a `bool`, a string, an enumeration) and a repeated `Label` or `Range`

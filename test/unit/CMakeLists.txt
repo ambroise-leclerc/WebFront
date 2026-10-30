@@ -84,6 +84,13 @@ if(_reflection_supported)
   # Catch2 is compiled again with the flags of the test: the C++23 Catch2 objects would mix the inline standard-library
   # definitions of both standards in one executable (std::to_string(double) differs, P2587).
   get_target_property(_catch2_sources Catch2 SOURCES)
+  get_target_property(_catch2_dir Catch2 SOURCE_DIR)
+  set(_catch2_absolute)
+  foreach(_source IN LISTS _catch2_sources)
+    cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${_catch2_dir}" NORMALIZE OUTPUT_VARIABLE _source)
+    list(APPEND _catch2_absolute "${_source}")
+  endforeach()
+  set(_catch2_sources ${_catch2_absolute})
   add_library(Catch2_reflection STATIC ${_catch2_sources} ${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp)
   target_include_directories(Catch2_reflection PUBLIC ${Catch2_SOURCE_DIR}/src ${Catch2_BINARY_DIR}/generated-includes)
   target_link_libraries(Catch2_reflection PRIVATE WebFront_test_hardening WebFront_test_sanitizers)

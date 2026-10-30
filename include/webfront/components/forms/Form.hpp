@@ -98,6 +98,12 @@ class Form {
     std::shared_ptr<detail::FormState<T>> state;
     dom::Node                             root;
 
+    // The server thread dispatches events, which read the callback without a lock. Any document call checks the thread
+    // and throws on another one: id() is the cheapest, and has no other effect.
+    void requireServerThread() const {
+        static_cast<void>(root.id());
+    }
+
 public:
     /// Built by forms::form().
     Form(std::shared_ptr<detail::FormState<T>> s, dom::Node r) : state(std::move(s)), root(r) { }
@@ -111,8 +117,7 @@ public:
     }
     /// Called with the field name after the browser has changed a member. Server thread only, like every method.
     void onChange(std::function<void(std::string_view)> callback) const {
-        // The server thread dispatches events, which read the callback without a lock: id() throws on another thread.
-        static_cast<void>(root.id());
+        requireServerThread();
         state->changed = std::move(callback);
     }
     /// Shows the object's current values, after C++ has changed them, and clears the invalid marks.

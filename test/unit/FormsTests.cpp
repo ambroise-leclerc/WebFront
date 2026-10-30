@@ -178,7 +178,7 @@ SCENARIO("Descriptors are validated before generation", "[forms]") {
         REQUIRE_THROWS_AS(forms::typescriptDeclaration(repeated), std::invalid_argument);
     }
     WHEN("the type name is one TypeScript refuses for an interface") {
-        for (auto name : {"number", "string", "any", "boolean", "var", "let", "interface"}) {
+        for (auto name : {"number", "string", "any", "boolean", "var", "let", "interface", "eval", "arguments"}) {
             auto reserved = description;
             reserved.name = name;
             REQUIRE_THROWS_AS(forms::validate(reserved), std::invalid_argument);
