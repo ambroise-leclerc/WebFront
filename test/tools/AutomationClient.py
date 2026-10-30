@@ -19,11 +19,11 @@ import signal
 
 
 class Client:
-    def __init__(self, command, stderr, timeout=30):
+    def __init__(self, command, stderr, timeout=30, env=None):
         self.timeout = timeout  # seconds for the session to become ready and for one operation to finish
         self.log_path = pathlib.Path(stderr.name) if isinstance(getattr(stderr, "name", None), str) else None
         self.child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=stderr, text=True, encoding="utf-8")
+                                        stderr=stderr, text=True, encoding="utf-8", env=env)
         self.messages = queue.Queue()
         self.counter = 0
         def read():
@@ -255,22 +255,32 @@ def watchdog(args):
                    "--integrity", "sha512-" + base64.b64encode(hashlib.sha512(environment.read_bytes()).digest()).decode(),
                    "--registry-dir", args.registry, "--startup-timeout", "30", "--timeout", "2", "--allow", "build"]
         endpoint = root / "forced-window"
+        # A private temporary directory isolates the native profile, which the forced exit must still remove.
+        profiles = root / "profiles"
+        profiles.mkdir()
+        forced_environment = dict(os.environ, TMPDIR=str(profiles), TEMP=str(profiles), TMP=str(profiles))
         with (pathlib.Path(args.work) / "watchdog.log").open("w") as log:
             if args.scenario == "mcp-watchdog":
-                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log)
+                client = Client([args.agent, *command, "--mcp", "--listen", str(endpoint)], log, env=forced_environment)
                 try:
                     client.initialize()
                     client.start("build")
-                    assert client.child.wait(timeout=15) == 71
+                    try:
+                        status = client.child.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        raise AssertionError(f"The forced exit did not happen\n{pathlib.Path(log.name).read_text()}") from None
+                    assert status == 71, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
                     assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
                 finally:
                     client.close()
             else:
                 cli = subprocess.run([args.agent, *command, "--listen", str(endpoint), "--operation", "build"],
-                                     stdout=subprocess.PIPE, stderr=log, text=True, timeout=45)
-                assert cli.returncode == 71, cli.stdout + pathlib.Path(log.name).read_text()
+                                     stdout=subprocess.PIPE, stderr=log, text=True, timeout=45, env=forced_environment)
+                assert cli.returncode == 71, f"exit {cli.returncode}\n{cli.stdout}\n{pathlib.Path(log.name).read_text()}"
         assert (project / "renderer.started").is_file(), "The deadline expired before the renderer actually blocked"
         assert not endpoint.exists(), "The forced exit left its attachment capability behind"
+        left = list(profiles.glob("webfront-agent-*"))
+        assert not left, f"The forced exit left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
         if args.scenario == "cli-watchdog":
             # This same-path relaunch must reach its authenticated page before the intentional error.
             # It checks directory reuse and Unicode failure reporting in one process; normal builds
@@ -374,7 +384,8 @@ def main():
                         break
                     time.sleep(0.02)
                 client.tool("cancel", {"session": client.session, "runId": run})
-                assert client.wait(run)["state"] == "cancelled"
+                cancelled = client.wait(run)
+                assert cancelled["state"] == "cancelled", f"Unexpected run state: {cancelled}"
                 client.run("test", {"pattern": "passes"})
             finally:
                 client.close()
@@ -423,7 +434,8 @@ def main():
                     run = first.start("test", {"pattern": "waits for cancellation"})
                     second.tool("start", {"session": second.session, "operation": "build"}, error=True)
                     second.tool("cancel", {"session": second.session, "runId": run})
-                    assert first.wait(run)["state"] == "cancelled"
+                    cancelled = first.wait(run)
+                    assert cancelled["state"] == "cancelled", f"Unexpected run state: {cancelled}"
                 finally:
                     first.close()
                     second.close()
@@ -433,16 +445,19 @@ def main():
                 assert cli.returncode == 0 and json.loads(cli.stdout)["state"] == "succeeded", cli.stdout + cli.stderr
                 assert list(profiles.glob("webfront-agent-*")), "The test must observe the actual native profile"
                 if os.name == "posix":
-                    assert owner.poll() is None, ("Owner exited before SIGTERM", owner.returncode, pathlib.Path(log.name).read_text())
+                    assert owner.poll() is None, f"Owner exited before SIGTERM: {owner.returncode}\n{pathlib.Path(log.name).read_text()}"
                     owner.send_signal(signal.SIGTERM)
                     status = owner.wait(timeout=15)
-                    assert status == 128 + signal.SIGTERM, (status, pathlib.Path(log.name).read_text())
+                    assert status == 128 + signal.SIGTERM, f"exit {status}\n{pathlib.Path(log.name).read_text()}"
                 else:
                     shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
                                               capture_output=True, text=True, timeout=10)
                     assert shutdown.returncode == 0, shutdown.stderr
-                    assert owner.wait(timeout=10) == 0
-                assert not list(profiles.glob("webfront-agent-*")), "The owner left its native profile behind"
+                    # Before it exits, the owner waits up to 5 s for the WebView2 browser, ends it, then removes the profile.
+                    assert owner.wait(timeout=30) == 0, pathlib.Path(log.name).read_text()
+                # Only the owner removes the profile: once it has exited, the directory no longer changes.
+                left = list(profiles.glob("webfront-agent-*"))
+                assert not left, f"The owner left its native profile behind: {left}\n{pathlib.Path(log.name).read_text()}"
                 assert not endpoint.exists(), "The owner left its attachment capability behind"
                 unavailable = subprocess.run([args.agent, "--attach", str(endpoint), "--operation", "build"],
                                              capture_output=True, text=True, timeout=5)

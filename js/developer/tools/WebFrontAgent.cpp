@@ -9,10 +9,20 @@
 #include <webfront/automation/Stdio.hpp>
 #include <webfront/DeveloperApp.hpp>
 
+#include <webfront/automation/Platform.hpp>
+
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <iostream>
-#ifndef _WIN32
+#include <memory>
+#include <thread>
+#include <vector>
+#ifdef _WIN32
+#include <tlhelp32.h>
+#else
 #include <fcntl.h>
 #endif
 
@@ -46,13 +56,84 @@ struct Files {
     }
 };
 
+#ifdef _WIN32
+using ProcessHandle = std::unique_ptr<void, decltype(&CloseHandle)>;
+
+std::uint64_t creationTime(HANDLE process) noexcept {
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(process, &created, &exited, &kernel, &user))
+        return 0;
+    return (std::uint64_t{created.dwHighDateTime} << 32) | created.dwLowDateTime;
+}
+
+// The WebView2 browser processes this agent launched, then their descendants. A process created before its recorded
+// parent belongs to an unrelated process that reused the parent's identifier.
+std::vector<ProcessHandle> webViewProcesses() {
+    std::vector<ProcessHandle> result;
+    const HANDLE               raw = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (raw == INVALID_HANDLE_VALUE)
+        return result;
+    const ProcessHandle          snapshot{raw, CloseHandle};
+    std::vector<PROCESSENTRY32W> entries;
+    PROCESSENTRY32W              entry{.dwSize = sizeof(PROCESSENTRY32W)};
+    for (bool more = Process32FirstW(raw, &entry); more; more = Process32NextW(raw, &entry))
+        entries.push_back(entry);
+    struct Parent {
+        DWORD         id;
+        std::uint64_t created;
+    };
+    std::vector<Parent> parents{{GetCurrentProcessId(), creationTime(GetCurrentProcess())}};
+    for (std::size_t next = 0; next < parents.size(); ++next) {
+        for (const auto& candidate : entries) {
+            if (candidate.th32ParentProcessID != parents[next].id)
+                continue;
+            if (next == 0 && CompareStringOrdinal(candidate.szExeFile, -1, L"msedgewebview2.exe", -1, TRUE) != CSTR_EQUAL)
+                continue;
+            ProcessHandle process{OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, candidate.th32ProcessID),
+                                  CloseHandle};
+            if (!process)
+                continue;
+            const auto created = creationTime(process.get());
+            if (created < parents[next].created)
+                continue;
+            parents.push_back({candidate.th32ProcessID, created});
+            result.push_back(std::move(process));
+        }
+    }
+    return result;
+}
+
+// WebView2 closes its browser process asynchronously after the controller is released, and that process keeps the
+// profile open until it exits. Retrying the removal cannot outlast it: let it exit during the grace, then end it.
+void releaseWebView(std::chrono::milliseconds grace) noexcept {
+    try {
+        const auto processes = webViewProcesses();
+        const auto remaining = [](std::chrono::steady_clock::time_point deadline) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+            return static_cast<DWORD>(std::max<std::chrono::milliseconds::rep>(left.count(), 0));
+        };
+        const auto exited = std::chrono::steady_clock::now() + grace;
+        for (const auto& process : processes)
+            if (WaitForSingleObject(process.get(), remaining(exited)) != WAIT_OBJECT_0)
+                TerminateProcess(process.get(), 1);
+        const auto terminated = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        for (const auto& process : processes)
+            WaitForSingleObject(process.get(), remaining(terminated));
+    } catch (...) {
+        // Without the process list, the removal below still retries the transient errors.
+    }
+}
+#endif
+
 struct Profile {
     channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
     const std::filesystem::path path{directory.path};
-    void cleanup() const noexcept {
-        // WebView2 closes its browser process asynchronously after the controller is released.
-        // Retry only sharing violations during that short exit; POSIX can unlink open files.
+    /// @param grace how long the WebView2 browser may take to exit on its own before it is ended (Windows only)
+    void cleanup([[maybe_unused]] std::chrono::milliseconds grace) const noexcept {
+        // POSIX can unlink open files. On Windows, the files of a process that has just exited can stay pending
+        // deletion for a moment, which reports a sharing violation, a refused access or a non-empty directory.
 #ifdef _WIN32
+        releaseWebView(grace);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
 #endif
         for (;;) {
@@ -72,7 +153,7 @@ struct Profile {
         }
     }
     ~Profile() {
-        cleanup();
+        cleanup(std::chrono::seconds{5});
     }
 };
 
@@ -384,8 +465,12 @@ int main(int argc, char** argv) {
                         const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
                         if (channel)
                             channel->stop();
-                        profile.cleanup();  // _Exit skips the destructors
-                        std::_Exit(code);
+                        // _Exit skips the destructors. The browser already had the close grace above: end it now.
+                        profile.cleanup(std::chrono::milliseconds{0});
+                        // Ending the browser can release a blocked main thread: an exit completed meanwhile keeps its
+                        // own status and destructors.
+                        if (!done.load())
+                            std::_Exit(code);
                     }
                     return;
                 }

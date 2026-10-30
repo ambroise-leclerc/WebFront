@@ -203,7 +203,8 @@ add_test(NAME NativeAutodetectReconfiguration
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-autodetect
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNativeAutodetect.cmake)
-set_tests_properties(NativeAutodetectReconfiguration PROPERTIES TIMEOUT 60)
+# The test takes about 5 s; the wide bound only absorbs a loaded runner (one unexplained stall at 60 s, #416).
+set_tests_properties(NativeAutodetectReconfiguration PROPERTIES TIMEOUT 180)
 # Exercise configuration-dependent CTest discovery and generator switches on single-config CI hosts.
 # The fixture configures no compiler and builds nothing; Ninja is optional for contributor builds.
 find_program(WEBFRONT_TEST_NINJA_EXECUTABLE ninja)
