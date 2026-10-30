@@ -77,6 +77,11 @@ const callerCall = new Promise((resolve) => {
     resolveCallerCall = resolve;
 });
 
+let resolveBroadcast;
+const broadcastCall = new Promise((resolve) => {
+    resolveBroadcast = resolve;
+});
+
 let resolveCppResult;
 const cppResultCall = new Promise((resolve) => {
     resolveCppResult = resolve;
@@ -135,6 +140,10 @@ globalThis.webfrontTests = {
 
     receiveFromCaller(token) {
         resolveCallerCall(token);
+    },
+
+    receiveBroadcast(token, number) {
+        resolveBroadcast([token, number]);
     },
 
     returnToCpp(value) {
@@ -271,6 +280,11 @@ describe('WebFront browser integration', () => {
         await expectAsync(webFront.cppFunction('callBackCaller')('caller-token'))
             .toBeResolvedTo('cpp-result:caller-token');
         await expectAsync(callerCall).toBeResolvedTo('caller-token');
+    });
+
+    it('receives a call that C++ broadcast to every browser from another thread', async () => {
+        await expectAsync(webFront.cppFunction('broadcastFromThread')('broadcast-token')).toBeResolved();
+        await expectAsync(broadcastCall).toBeResolvedTo(['broadcast-token', 401]);
     });
 
     it('allows C++ to await a JavaScript result', async () => {

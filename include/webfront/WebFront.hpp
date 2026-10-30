@@ -4,6 +4,7 @@
 /// @brief WebFront UI main objet
 #pragma once
 
+#include "Broadcast.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
@@ -20,6 +21,7 @@
 #include "weblink/WebLink.hpp"
 
 #include <chrono>
+#include <concepts>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -34,6 +36,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace webfront {
 
@@ -360,7 +363,7 @@ public:
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{link, std::this_thread::get_id(), false});
+                webLinks.emplace(id, Connection{link, std::this_thread::get_id(), false, false});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -449,6 +452,20 @@ public:
 private:
     template <typename>
     friend class BasicUI;
+    template <typename>
+    friend class Broadcast;
+
+    /// The links of the browsers whose handshake completed and that were not reported closed, shared with the caller.
+    [[nodiscard]] std::vector<std::pair<WebLinkId, std::shared_ptr<WebLink<Net, Policy>>>> connectedLinks() const {
+        std::vector<std::pair<WebLinkId, std::shared_ptr<WebLink<Net, Policy>>>> links;
+        std::scoped_lock                                                         lock{linksMutex};
+        links.reserve(webLinks.size());
+        for (const auto& [id, connection] : webLinks)
+            if (connection.linked && !connection.closed)
+                links.emplace_back(id, connection.link);
+        return links;
+    }
+
     /// Internal DOM document storage, confined to the server thread.
     std::shared_ptr<dom::detail::State> domState(WebLinkId id) {
         std::shared_ptr<WebLink<Net, Policy>> link;
@@ -488,6 +505,20 @@ public:
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
         return webLinks.size();
+    }
+
+    /// Calls `function(ui)` for each browser started (see onUIStarted) and not reported closed when the call starts. Callable from
+    /// any thread; `function` runs on the calling thread, outside every WebFront lock, so it may call the UI.
+    template <std::invocable<UI> Function>
+    void forEachUI(Function&& function) {
+        for (const auto& [id, link] : connectedLinks())
+            std::invoke(function, UI{*this, id});
+    }
+
+    /// A function object calling `functionName` on every connected browser, fire-and-forget, from any thread; see
+    /// BroadcastOptions for slow browsers. Keep it between calls: it holds what it keeps back for them.
+    [[nodiscard]] Broadcast<BasicWF> broadcast(std::string_view functionName, BroadcastOptions options = {}) {
+        return Broadcast<BasicWF>{functionName, *this, options};
     }
 
     /// Whether a C++ function of that name is registered.
@@ -663,6 +694,7 @@ private:
         std::shared_ptr<WebLink<Net, Policy>> link;
         std::thread::id                       thread;
         bool                                  closed;
+        bool                                  linked;  // its handshake completed: onUIStarted was called
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -741,6 +773,11 @@ private:
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
             case WebLinkEvent::Code::linked:
+                {
+                    std::scoped_lock lock{linksMutex};
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
+                        found->second.linked = true;
+                }
                 if (uiStartedHandler)
                     uiStartedHandler(UI{*this, event.webLinkId});
                 uiSubscribers->notify(UI{*this, event.webLinkId});

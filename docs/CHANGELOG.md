@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
+  whose handshake completed, from any thread, with no table of browsers kept by the application.
+  `BroadcastOptions::maxPendingWrites` holds a call back for a browser that has that many frames
+  waiting, and keeps only the latest for it. Document the threads of callbacks and browser calls
+  ([threads](ASYNC_EXECUTION.md#threads)). No wire format change.
+
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
   the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,

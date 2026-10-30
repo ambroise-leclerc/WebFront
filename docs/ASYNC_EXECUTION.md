@@ -164,6 +164,63 @@ cancellation API. The untyped `ui.jsFunction(name)` remains fire-and-forget.
 JavaScript-to-C++ calls still always return Promises. None of these changes adds
 richer bridge result types or remote Promise cancellation.
 
+## Threads
+
+WebFront runs its HTTP/WebSocket server on one thread: the thread `show()` starts, or the thread
+that calls `run()` or `runOne()`. That server thread is the only one that runs:
+
+- `cppFunction` callbacks, `onUIStarted`, `subscribeUIStarted` and `subscribeUIClosed` handlers;
+- DOM event callbacks and the bodies of tasks started with `app.spawn` or `ui.spawn`.
+
+They run one at a time, in the order of the events that cause them, and never in parallel with one
+another. A long callback delays every browser, so do blocking work on another thread or in a task.
+
+From any thread, while the application lives, you can call:
+
+- `ui.jsFunction(name)(...)`, `ui.jsFunction<R>(name)(...)` and starting a `jsFunctionSender`;
+- `ui.addScript`, `ui.pendingWrites`, `ui.writesAtMost` and `ui.spawn`;
+- `app.broadcast(name)(...)`, `app.forEachUI`, `app.connectedBrowsers`, `app.spawn` and `app.stop`.
+
+These calls never wait for the server thread. They take short internal locks, queue the frame,
+and the server thread writes it. Only `ui.document()` and its nodes are confined to the server
+thread. Register `cppFunction` callbacks and set `onUIStarted` before the server starts. You can
+add or remove subscriptions at any time.
+
+WebFront never holds one of its own locks while it calls application code. A thread can therefore
+call WebFront while it holds an application lock that a `cppFunction` callback also takes. The
+callback waits for that lock, and the call it waits for does not depend on the callback. What
+deadlocks is waiting for the server thread itself:
+
+- the `get()` of a `jsFunction<R>` future inside a callback (the server thread reads the reply);
+- the same wait on another thread under a lock that a callback takes;
+- `app.shutdown()` or the destruction of the application under such a lock.
+
+Inside a task, await `jsFunctionSender<R>` instead.
+
+## Broadcasting to every browser
+
+`app.broadcast(name)` returns a function object that calls the JavaScript function `name` on every
+browser whose handshake has completed (those `onUIStarted` was called for) and whose closure was
+not reported yet. Like the untyped `jsFunction`, the call is fire-and-forget. The application keeps
+no table of its browsers: those that connect later receive the next calls, and a browser that
+closes stops receiving them. The arguments are encoded once for all the browsers.
+
+```cpp
+auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 2});
+// On a thread of the application, about 30 times per second:
+onState(stateJson);
+```
+
+`BroadcastOptions::maxPendingWrites` protects a browser that reads slower than the application
+writes. A call is queued for a browser only while fewer frames than that await its network. Otherwise
+the call is held back, and a newer call replaces it. The held call is queued as soon as the browser
+catches up, so the browser skips the intermediate states but always receives the latest one. Calls
+made one after the other reach each browser in that order. Without the option, every call is queued for every browser. Keep
+the function object between calls, because it holds the calls that are waiting. Copies share them.
+
+`app.forEachUI(function)` calls `function(ui)` for the same browsers, on the calling thread, outside
+every WebFront lock, for per-browser arguments or typed calls.
+
 ## HTTP gzip CPU work
 
 Cold gzip identity fallback is a sender backed by one lazy, owned worker per HTTP server.
