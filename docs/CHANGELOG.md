@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show the `wf` commands of the developer browser test in its terminal (#415): `DeveloperBrowserIntegration` writes
+  each command it runs with its outcome and duration, labelling deliberate timeouts and cancellations. The trace comes
+  from the specs only; the published environment is unchanged. `docs/TEST_TIERS.md` explains how to follow a test live.
+
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
   the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,

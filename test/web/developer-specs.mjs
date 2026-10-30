@@ -26,19 +26,32 @@ async function writeFile(path, text) {
     await call('write', id, 'output', 0, new TextEncoder().encode(text));
     await call('commit', id);
 }
+// The terminal of the page: the harness shows there each wf command it runs, as if it had been typed.
+let traceTerminal;
+const echo = text => { try { traceTerminal?.write(`\x1b[2m${text}\x1b[0m\r\n`); } catch { /* the trace must never fail a test */ } };
+// Only the command words are shown (never an option value or a path), and a deliberate wait is named as such.
+const outcomeOf = error => !error ? 'done' : error.exitCode === 124 ? 'timeout (expected)' : error.exitCode === 130 ? 'cancelled (expected)' : 'failed';
+const traced = async (line, run) => {
+    const started = profileNow();
+    echo(`$ ${line}`);
+    let error;
+    try { return await run(); }
+    catch (thrown) { error = thrown; throw thrown; }
+    finally { echo(`  ${outcomeOf(error)} in ${((profileNow() - started) / 1000).toFixed(1)}s`); }
+};
 // Every actual command has a matching end marker, including expected failures.
 const execute = async (args, context) => {
     const name = `command ${args.slice(0, 3).join(' ')}`;
     const started = profileNow();
     await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin ${name}`);
-    try { return await runtimeExecute(args, context); }
+    try { return await traced(`wf ${args.slice(0, 3).join(' ')}`, () => runtimeExecute(args, context)); }
     finally { await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end ${name} durationMs=${(profileNow() - started).toFixed(3)}`); }
 };
 let runtimeExecute, runtimeNonInteractive;
 const nonInteractive = async (args, context) => {
     const started = profileNow();
     await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin non-interactive ${args.join(' ')}`);
-    try { return await runtimeNonInteractive(args, context); }
+    try { return await traced(`wf ${args.slice(0, 3).join(' ')} (non-interactive)`, () => runtimeNonInteractive(args, context)); }
     finally { await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end non-interactive ${args.join(' ')} durationMs=${(profileNow() - started).toFixed(3)}`); }
 };
 // Ends the --public smoke test, which has no local registry for the checks that follow the generated headers.
@@ -68,6 +81,10 @@ try {
     runtimeExecute = runtime.execute;
     runtimeNonInteractive = runtime.runNonInteractive;
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
+    // The bootstrap's terminal is not reachable: mount the same one again to write the trace of the commands in it.
+    const terminalElement = document.getElementById('terminal');
+    terminalElement.replaceChildren();
+    traceTerminal = (await runtime.mount({bridge: webFront, config, terminal: terminalElement, preview: document.getElementById('preview')})).terminal;
     const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
     const currentDistribution = !config.environment.startsWith('https:');
     if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['life']), 'Only the Life starter must be shipped');
