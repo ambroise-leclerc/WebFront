@@ -28,7 +28,7 @@ the guard reports current sizes.
 
 ## Maintenance
 
-CMake 3.31 or newer is the only tool: regeneration and the asset checks of `ENABLE_TESTING=ON` are CMake scripts, and
+CMake 3.31 or newer is the only tool: regeneration and the asset checks of `WEBFRONT_ENABLE_TESTING=ON` are CMake scripts, and
 normal library consumers need neither. From the repository root:
 
 ```sh

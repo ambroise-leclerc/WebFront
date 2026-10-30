@@ -25,7 +25,7 @@ runs:
     - name: Build webfront-wf
       shell: bash
       run: |
-        cmake -S . -B build-driver -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON \
+        cmake -S . -B build-driver -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON \
           -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK \
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
         cmake --build build-driver --target webfront-wf --parallel 2

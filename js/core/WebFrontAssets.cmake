@@ -12,7 +12,7 @@ function(_webfront_add_embedded_asset source header struct test_name)
         COMMENT "Regenerating ${header}"
         VERBATIM
     )
-    if(ENABLE_TESTING)
+    if(WEBFRONT_ENABLE_TESTING)
         add_test(NAME ${test_name}
             COMMAND ${CMAKE_COMMAND} -DINPUT=${source} -DCHECK=${header} -DSTRUCT=${struct}
                 -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -P ${_WEBFRONT_ASSETS_DIR}/EmbedAsset.cmake
@@ -47,7 +47,7 @@ function(webfront_add_embedded_assets)
         "${root}/js/core/bootstrap/bootstrap.bundle.mjs" "${root}/include/webfront/system/DeveloperBootstrapData.hpp"
         DeveloperBootstrapData DeveloperBootstrapAssetFresh)
 
-    if(ENABLE_TESTING)
+    if(WEBFRONT_ENABLE_TESTING)
         add_test(NAME MinimalCoreAssets
             COMMAND ${CMAKE_COMMAND} -DROOT=${root} -P ${root}/test/cmake/CheckMinimalCoreAssets.cmake)
         # The guard must fail on an asset header outside the normative list.

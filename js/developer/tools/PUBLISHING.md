@@ -16,7 +16,7 @@ The driver `webfront-wf` runs one `wf` command without interaction on a project 
 works; WebKitGTK on Linux is the one CI uses.
 
 ```sh
-cmake -S . -B build-driver -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
+cmake -S . -B build-driver -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_ENABLE_TESTING=ON \
   -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
 cmake --build build-driver --target webfront-wf
 wf() { xvfb-run -a build-driver/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer -- "$@"; }

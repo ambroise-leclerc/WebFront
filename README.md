@@ -122,7 +122,7 @@ When the engine is missing, configuration still succeeds. CMake prints a `Native
 
 **Advanced options.**
 
-- Choose the engine yourself with `-DWEBFRONT_EMBED_WEBVIEW2=ON|OFF`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON|OFF` or `-DWEBFRONT_EMBED_WEBKITGTK=ON|OFF`; an explicit value is never replaced by the detection. `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it. Test builds (`-DENABLE_TESTING=ON`) keep the explicit selection.
+- Choose the engine yourself with `-DWEBFRONT_EMBED_WEBVIEW2=ON|OFF`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON|OFF` or `-DWEBFRONT_EMBED_WEBKITGTK=ON|OFF`; an explicit value is never replaced by the detection. `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it. Test builds (`-DWEBFRONT_ENABLE_TESTING=ON`) keep the explicit selection.
 - Automatic engine choices are recalculated on each configuration and do not create an engine option in the cache. To return from an explicit macOS choice to automatic detection, run `cmake .. -UWEBFRONT_EMBED_WKWEBVIEW` (or remove the corresponding engine option on another platform).
 - Another project directory, and another environment archive, can be passed: `examples/WebFrontLifeDeveloper <project> [<environment-url> <sha512-integrity>]`, for instance an environment [built from the sources](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
@@ -295,7 +295,7 @@ int main() {
 
 To get a native window when one can be opened and the system browser otherwise (for example over SSH, in a container or in CI, where no display exists), use `WebFrontWithFrontend<webfront::frontend::NativeOrBrowserFrontend>`: no `#if` is needed, and the reason for a fallback is printed once. See [docs/FRONTENDS.md](docs/FRONTENDS.md).
 
-Native engines are detected by default for consumer builds, whatever variables the parent project defines, and for standalone builds except with `ENABLE_TESTING=ON` or `ENABLE_FUZZING=ON`. The helper applies the native engine's target setup and defines `WEBFRONT_NATIVE_WINDOW` only when that engine is enabled; otherwise CMake prints installation advice and the application uses the default browser. On Windows, detection requires an MSVC-compatible compiler and downloads the pinned WebView2 SDK; the Evergreen runtime must be installed separately. Linux needs WebKitGTK 6.0 development files, and macOS needs Clang and macOS 13.3 or later. Explicit `WEBFRONT_EMBED_<ENGINE>=ON|OFF` values take precedence; `WEBFRONT_AUTODETECT_NATIVE=OFF` disables detection. No option needs to be set before `add_subdirectory`/CPM for the default path.
+Native engines are detected by default, except in WebFront's own test and fuzzing builds (`WEBFRONT_ENABLE_TESTING=ON` or `WEBFRONT_ENABLE_FUZZING=ON`); a parent project's own `ENABLE_TESTING` or `ENABLE_FUZZING` affects neither the detection nor WebFront's tests. The helper applies the native engine's target setup and defines `WEBFRONT_NATIVE_WINDOW` only when that engine is enabled; otherwise CMake prints installation advice and the application uses the default browser. On Windows, detection requires an MSVC-compatible compiler and downloads the pinned WebView2 SDK; the Evergreen runtime must be installed separately. Linux needs WebKitGTK 6.0 development files, and macOS needs Clang and macOS 13.3 or later. Explicit `WEBFRONT_EMBED_<ENGINE>=ON|OFF` values take precedence; `WEBFRONT_AUTODETECT_NATIVE=OFF` disables detection. No option needs to be set before `add_subdirectory`/CPM for the default path.
 
 For explicit engine selection, `webfront_native_frontend_option(out)` and `webfront_setup_frontends_for_target(MyApp)` are also callable from the parent or other directories. The latter applies setup for all enabled engines; the native helper selects only the platform's native engine and never CEF. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
 
@@ -303,7 +303,7 @@ For explicit engine selection, `webfront_native_frontend_option(out)` and `webfr
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure --parallel 4
 ```

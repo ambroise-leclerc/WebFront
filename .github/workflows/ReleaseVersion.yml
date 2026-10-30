@@ -22,7 +22,7 @@ jobs:
         with:
           version: '4.4.4'
       - name: Detect project version with CMake
-        run: cmake -S . -B build -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
+        run: cmake -S . -B build -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_BUILD_EXAMPLES=OFF
       - name: Compare release tag with header and CMake
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}

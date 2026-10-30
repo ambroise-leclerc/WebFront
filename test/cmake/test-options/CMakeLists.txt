@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.31)
+include("${ROOT}/cmake/WebFrontTestOptions.cmake")
+webfront_declare_test_options(${TOP_LEVEL})
+project(TestOptions LANGUAGES NONE)
+foreach(name TESTING FUZZING COVERAGE SANITIZER_ADDRESS SANITIZER_LEAK SANITIZER_UNDEFINED_BEHAVIOR
+        SANITIZER_THREAD SANITIZER_MEMORY)
+    if(DEFINED CACHE{ENABLE_${name}})
+        set(legacy "$CACHE{ENABLE_${name}}")
+    else()
+        set(legacy "<unset>")
+    endif()
+    message(STATUS "${name}=${WEBFRONT_ENABLE_${name}} LEGACY=${legacy}")
+endforeach()

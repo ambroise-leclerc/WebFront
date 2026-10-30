@@ -153,7 +153,7 @@ if(UNIX)
     endif()
 endif()
 
-if(ENABLE_COVERAGE)
+if(WEBFRONT_ENABLE_COVERAGE)
   target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)
   target_link_options(tests PUBLIC -fprofile-arcs -ftest-coverage)
 endif()
@@ -161,7 +161,7 @@ endif()
 # Replaces the global operator new to count allocations: kept out of Catch2 and TSan builds.
 # Clang's TSan C++ runtime defines the same operators, so this executable cannot link with it.
 # Ordinary and ASan/UBSan builds retain this regression; the rest of the suite still runs under TSan.
-if(NOT ENABLE_SANITIZER_THREAD)
+if(NOT WEBFRONT_ENABLE_SANITIZER_THREAD)
   add_executable(frame_allocation FrameAllocationTest.cpp)
   target_link_libraries(frame_allocation PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
   add_test(NAME FrameBufferNotFormattedWhenDebugDisabled COMMAND frame_allocation)
@@ -205,6 +205,12 @@ add_test(NAME NativeAutodetectReconfiguration
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNativeAutodetect.cmake)
 # The test takes about 5 s; the wide bound only absorbs a loaded runner (one unexplained stall at 60 s, #416).
 set_tests_properties(NativeAutodetectReconfiguration PROPERTIES TIMEOUT 180)
+# WebFront's prefixed test options, the migration of the former names and their isolation from a parent (#412).
+add_test(NAME TestOptionsConfiguration
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-options
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestOptions.cmake)
+set_tests_properties(TestOptionsConfiguration PROPERTIES TIMEOUT 120 LABELS fast)
 # Exercise configuration-dependent CTest discovery and generator switches on single-config CI hosts.
 # The fixture configures no compiler and builds nothing; Ninja is optional for contributor builds.
 find_program(WEBFRONT_TEST_NINJA_EXECUTABLE ninja)
@@ -302,7 +308,7 @@ target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFr
 add_test(NAME TransportBenchmarksAreManual COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckManualTransportBenchmarks.cmake)
 
-if(NOT ENABLE_SANITIZER_THREAD)
+if(NOT WEBFRONT_ENABLE_SANITIZER_THREAD)
   add_executable(gzip_decoder_benchmark EXCLUDE_FROM_ALL GzipDecoderBenchmark.cpp)
   target_link_libraries(gzip_decoder_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
 endif()

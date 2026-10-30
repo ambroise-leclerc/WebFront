@@ -78,7 +78,7 @@ jobs:
             build_type: Debug
             test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
             # GCC 16 compiles the optional C++26 reflection layer of the forms (#383): its tests must not be skipped here.
-            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON
+            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DWEBFRONT_ENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON
     runs-on: ${{ matrix.os }}
     # Only the Linux job runs in the prebuilt toolchain image; an empty value means no container.
     container: ${{ matrix.use_image && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.linux-image.outputs.image, github.actor, github.token)) || '' }}
@@ -123,7 +123,7 @@ jobs:
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
@@ -323,7 +323,7 @@ jobs:
       # No compiler cache: a new user compiles everything.
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
       - name: Portability tests
         shell: bash
         run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
@@ -375,9 +375,9 @@ jobs:
       - name: Configure hardened sanitizer tests
         run: >-
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
-          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
+          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DWEBFRONT_ENABLE_SANITIZER_THREAD=ON' || '-DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON -DWEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DWEBFRONT_ENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
       - name: Run full CEF-off suite
@@ -459,7 +459,7 @@ jobs:
 
       # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
 
       - name: Build browser test
         run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2

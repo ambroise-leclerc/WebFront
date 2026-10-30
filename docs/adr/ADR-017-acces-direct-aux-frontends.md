@@ -417,7 +417,7 @@ Chacun fera l'objet d'une issue dédiée :
 - Benchmark WKWebView : [WKWebViewTransportBenchmark.cpp](../../test/web/WKWebViewTransportBenchmark.cpp),
   [sondes d'API](../../test/web/wkwebview-transport-contracts.html), enregistrement dans
   [WKWebViewSupport.cmake](../../cmake/WKWebViewSupport.cmake). Configuration macOS :
-  `-DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DENABLE_TESTING=ON` ;
+  `-DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DWEBFRONT_ENABLE_TESTING=ON` ;
   `ctest --test-dir <build> -R '^WKWebViewTransport(Benchmark|Contracts)$' --output-on-failure`.
 - API publiques Apple (documentation et en-têtes du SDK macOS, vérifiés le 2026-10-25) :
   [corps des messages](https://developer.apple.com/documentation/webkit/wkscriptmessage/body),

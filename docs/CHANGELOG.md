@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Prefix WebFront's test options (#412): `WEBFRONT_ENABLE_TESTING`, `WEBFRONT_ENABLE_FUZZING`,
+  `WEBFRONT_ENABLE_COVERAGE` and `WEBFRONT_ENABLE_SANITIZER_{ADDRESS,LEAK,UNDEFINED_BEHAVIOR,THREAD,MEMORY}` replace
+  the unprefixed `ENABLE_*` names (still `OFF` by default). A parent project's own generic variables no longer build
+  WebFront's tests or fuzzers, instrument it for coverage or sanitizers, or disable its native detection; a consumer that wants WebFront's tests sets the prefixed option. At the top level the
+  former names still work until WebFront 0.7.0: a value given is moved to the new option, with a deprecation warning,
+  and removed from the cache. CI, the documentation and `TestOptionsConfiguration` use the new names.
+
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
   waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
   exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.

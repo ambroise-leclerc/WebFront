@@ -48,7 +48,7 @@ cmake --build . --parallel 2
 
 # Fast, portable C++ baseline (no CEF download)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+  -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure --parallel 4
 
@@ -58,13 +58,13 @@ ctest --test-dir build --output-on-failure --parallel 4
 # Linux real-browser integration test: configure downloads and verifies the pinned bootstrap environment and the packages
 # of the local npm registry; the tests build the rest with wf
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_CEF=ON -DENABLE_TESTING=ON
+  -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build-cef --target webtest webfront-wf --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
 
 ```
 
-Build the developer environment with wf (the driver comes from any build with `ENABLE_TESTING=ON`), as
+Build the developer environment with wf (the driver comes from any build with `WEBFRONT_ENABLE_TESTING=ON`), as
 `js/developer/tools/PUBLISHING.md` describes:
 
 ```bash
@@ -78,7 +78,7 @@ Important CMake options:
 
 The headers of the embedded assets are generated, and checked by CTest, in pure CMake (`js/core/EmbedAsset.cmake`; the
 `webfront-embedded-assets` target regenerates them). Normal C++ builds consume the versioned headers. Configuring with
-`ENABLE_TESTING=ON` downloads the pinned bootstrap environment and the packages of the test registry, each verified
+`WEBFRONT_ENABLE_TESTING=ON` downloads the pinned bootstrap environment and the packages of the test registry, each verified
 against its SHA-512; `-DWEBFRONT_BOOTSTRAP_DIR` and `-DWEBFRONT_REGISTRY_DIR` replace those downloads on a machine
 without network access.
 
@@ -86,9 +86,9 @@ without network access.
 - `WEBFRONT_EMBED_WEBVIEW2=OFF` (default): Windows-only opt-in SDK and static loader for `WebView2Frontend`; requires the separately installed Evergreen runtime. Select it explicitly with `WebFrontWithFrontend<frontend::WebView2Frontend>`. With tests enabled, `WEBFRONT_WEBTEST_FRONTEND=WebView2` runs the shared Jasmine suite and lifecycle cases.
 - `WEBFRONT_EMBED_WKWEBVIEW=OFF` (default): macOS 13.3+ opt-in Cocoa/WebKit frontend, with no engine download. Select `WebFrontWithFrontend<frontend::WKWebViewFrontend>` on the main thread; `WEBFRONT_WEBTEST_FRONTEND=WKWebView` runs Jasmine and lifecycle coverage.
 
-- `ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly.
+- `WEBFRONT_ENABLE_TESTING=ON` (default `OFF`): build Catch2 and Jasmine test targets. CI and contributor commands must pass it explicitly. The test, fuzzing, coverage and sanitizer options (`WEBFRONT_ENABLE_SANITIZER_*`) carry the `WEBFRONT_` prefix so that a parent's own `ENABLE_TESTING` or `ENABLE_SANITIZER_ADDRESS` never builds or instruments WebFront's tests; the former unprefixed names are accepted, with a deprecation warning, only at the top level and until 0.7.0 (`cmake/WebFrontTestOptions.cmake`).
 - `WEBFRONT_BUILD_EXAMPLES` (default `ON` only for the top-level project): build the examples. As a subproject (`add_subdirectory`), link `WebFront::WebFront`; no examples, tests or global compiler settings are added.
-- `ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
+- `WEBFRONT_ENABLE_COVERAGE=ON`: add GCC/Clang coverage instrumentation to the C++ tests.
 
 If the environment provides a read-only default ccache directory, set `CCACHE_DIR` to a writable temporary directory for local builds. Do not encode machine-specific cache paths in project files. In CI, `ENABLE_CACHE=OFF` disables automatic cache discovery while `CMAKE_CXX_COMPILER_LAUNCHER=sccache` explicitly enables sccache; a PATH/version probe runs on all three platforms. The combined Linux job uses Debug with GCC coverage on every PR; Windows and macOS use Release. The WebKitGTK sandbox opt-out is confined to the Linux test step and trusted fixtures.
 
