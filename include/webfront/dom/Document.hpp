@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace webfront::dom {
@@ -44,7 +45,12 @@ struct EventWaiter {
     virtual void stop() noexcept                     = 0;
     virtual bool done() noexcept                     = 0;
 };
-using Waiters = std::map<std::pair<std::uint32_t, std::uint32_t>, std::weak_ptr<EventWaiter>>;
+using Subscription = std::pair<std::uint32_t, std::uint32_t>;
+using Waiters      = std::map<Subscription, std::weak_ptr<EventWaiter>>;
+
+inline bool sameWaiter(const std::weak_ptr<EventWaiter>& a, const std::weak_ptr<EventWaiter>& b) noexcept {
+    return !a.owner_before(b) && !b.owner_before(a);
+}
 
 inline void stopAll(Waiters& waiters) noexcept {
     for (auto& [key, weak] : waiters)
@@ -65,9 +71,14 @@ struct State : std::enable_shared_from_this<State> {
     std::map<std::string, std::uint32_t, std::less<>>                                   islands;
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::function<void(std::string)>> listeners;
     Waiters                                                                             waiters;
+    std::set<Subscription>                                                              unsubscriptions;  // did not fit a full batch
     std::function<void(const msg::DomBatch&)>                                           send;
     std::function<void()>                                                               schedule;
     std::function<void(std::uint32_t, std::string)>                                     onError;
+    // Waits stopped off the server thread; post is thread-safe and runs sweep() on the server thread.
+    std::mutex                                                       releaseMutex;
+    std::vector<std::pair<Subscription, std::weak_ptr<EventWaiter>>> releases;
+    std::function<void()>                                            post;
 
     bool validOnCurrentThread() const noexcept {
         return alive.load() && thread == std::this_thread::get_id();
@@ -157,9 +168,15 @@ struct State : std::enable_shared_from_this<State> {
     }
     void close() {
         alive = false;
+        {
+            std::lock_guard lock(releaseMutex);
+            releases.clear();
+            post = {};
+        }
         nodes.clear();
         listeners.clear();
         islands.clear();
+        unsubscriptions.clear();
         auto stopped = std::move(waiters);
         waiters.clear();
         send     = {};
@@ -189,9 +206,20 @@ struct State : std::enable_shared_from_this<State> {
             throw std::length_error("DOM batch identifiers exhausted");
         }
         pending = msg::DomBatch(++batchId);
+        for (const auto key : std::exchange(unsubscriptions, {}))
+            unsubscribe(key);
     }
-    /// Whether a started wait for this subscription has not completed yet. A completed one is only an obsolete entry.
-    bool awaited(std::pair<std::uint32_t, std::uint32_t> key) {
+    /// Queues the browser unsubscription, or the first one of the next batch when this one is full.
+    void unsubscribe(Subscription key) {
+        try {
+            add({msg::DomOp::unlisten, key.first, key.second});
+        } catch (const std::length_error&) {
+            unsubscriptions.insert(key);
+        }
+    }
+    /// Whether a started wait for this subscription has not completed yet. A completed one is only an obsolete entry
+    /// until its release reaches the server thread; a new subscription replaces its browser listener.
+    bool awaited(Subscription key) {
         const auto found = waiters.find(key);
         if (found == waiters.end())
             return false;
@@ -200,8 +228,9 @@ struct State : std::enable_shared_from_this<State> {
         waiters.erase(found);
         return false;
     }
-    /// Subscribes one wait. Nothing changes when this throws.
-    void await(std::uint32_t node, std::string_view event, EventOptions options, std::weak_ptr<EventWaiter> waiter) {
+    /// Subscribes one wait and returns its event name index. When this throws, nothing is subscribed; a new event
+    /// name may stay interned.
+    std::uint32_t await(std::uint32_t node, std::string_view event, EventOptions options, std::weak_ptr<EventWaiter> waiter) {
         const auto& entry = get(node);
         if (entry.text || entry.island)
             throw std::invalid_argument("Operation requires a C++-owned DOM element");
@@ -211,9 +240,71 @@ struct State : std::enable_shared_from_this<State> {
             if (awaited({node, found->second}))
                 throw std::logic_error("DOM event is already awaited");
         }
-        const auto name = intern(event);
-        add({msg::DomOp::listen, node, name, eventFlags(options)});
-        waiters.insert_or_assign({node, name}, std::move(waiter));
+        const Subscription key{node, intern(event)};
+        waiters.emplace(key, std::move(waiter));
+        try {
+            add({msg::DomOp::listen, node, key.second, eventFlags(options)});
+        } catch (...) {
+            waiters.erase(key);
+            throw;
+        }
+        unsubscriptions.erase(key);
+        return key.second;
+    }
+    /// Removes the subscription of a wait that ended without its event, unless another subscription replaced it.
+    void drop(Subscription key, const std::weak_ptr<EventWaiter>& waiter) {
+        if (!validOnCurrentThread())
+            return;
+        const auto found = waiters.find(key);
+        if (found == waiters.end() || !sameWaiter(found->second, waiter))
+            return;
+        waiters.erase(found);
+        unsubscribe(key);
+    }
+    /// Called from any thread by a wait that ended without its event.
+    void release(Subscription key, std::weak_ptr<EventWaiter> waiter) noexcept {
+        try {
+            if (validOnCurrentThread()) {
+                drop(key, waiter);
+                return;
+            }
+            std::lock_guard lock(releaseMutex);
+            if (!post)
+                return;  // closed, or no server context: nothing remains to release
+            releases.emplace_back(key, std::move(waiter));
+            if (releases.size() == 1) {
+                try {
+                    post();
+                } catch (...) {
+                    releases.clear();  // a later release posts again
+                    throw;
+                }
+            }
+        } catch (const std::exception& error) {
+            if (validOnCurrentThread())
+                reject(batchId, error.what());
+        }
+    }
+    /// Runs the releases requested off the server thread.
+    void sweep() {
+        check();
+        std::vector<std::pair<Subscription, std::weak_ptr<EventWaiter>>> released;
+        {
+            std::lock_guard lock(releaseMutex);
+            released.swap(releases);
+        }
+        for (const auto& [key, waiter] : released)
+            drop(key, waiter);
+    }
+    /// Ends the pending wait of this subscription, if any; the caller has already unsubscribed it.
+    void stopWaiter(Subscription key) {
+        const auto found = waiters.find(key);
+        if (found == waiters.end())
+            return;
+        const auto waiter = found->second.lock();
+        waiters.erase(found);
+        if (waiter)
+            waiter->stop();
     }
     void event(std::uint32_t node, std::uint32_t name, std::string value) {
         check();
@@ -223,11 +314,7 @@ struct State : std::enable_shared_from_this<State> {
         } else if (auto waiting = waiters.find({node, name}); waiting != waiters.end()) {
             auto waiter = waiting->second.lock();
             waiters.erase(waiting);
-            try {
-                add({msg::DomOp::unlisten, node, name});
-            } catch (const std::length_error&) {
-                // A full batch keeps the browser listener: its later events find no waiter and are ignored.
-            }
+            unsubscribe({node, name});
             if (waiter)
                 waiter->deliver(std::move(value));  // a stopped wait ignores it
         }
@@ -255,14 +342,15 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
     Outcome                                                           outcome{Outcome::pending};
     std::string                                                       value;
     std::exception_ptr                                                error;
+    std::optional<std::uint32_t>                                      name;  // event name index once subscribed
     std::optional<networking::ex::stop_callback_for_t<Token, OnStop>> stopCallback;
 
-    void finish(Outcome completion, std::string result = {}, std::exception_ptr failure = {}) noexcept {
+    bool finish(Outcome completion, std::string result = {}, std::exception_ptr failure = {}) noexcept {
         bool ready{};
         {
             std::lock_guard lock(mutex);
             if (outcome != Outcome::pending)
-                return;
+                return false;
             outcome = completion;
             value   = std::move(result);
             error   = std::move(failure);
@@ -270,6 +358,7 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
         }
         if (ready)
             complete();
+        return true;
     }
     void complete() noexcept {
         // Exactly one completion won under the mutex; a concurrent stop callback may still be waiting for it.
@@ -297,7 +386,15 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
         const auto state = owner.lock();
         if (!state)
             throw std::runtime_error("DOM document is gone");
-        state->await(node, event, options, this->weak_from_this());
+        const auto index = state->await(node, event, options, this->weak_from_this());
+        bool       ended{};
+        {
+            std::lock_guard lock(mutex);
+            name  = index;
+            ended = outcome != Outcome::pending;
+        }
+        if (ended)
+            state->drop({node, index}, this->weak_from_this());  // stopped from another thread while subscribing
     }
 
 public:
@@ -324,7 +421,16 @@ public:
         finish(Outcome::value, std::move(result));
     }
     void stop() noexcept override {
-        finish(Outcome::stopped);
+        if (!finish(Outcome::stopped))
+            return;
+        std::optional<std::uint32_t> subscribed;
+        {
+            std::lock_guard lock(mutex);
+            subscribed = name;
+        }
+        // A stop from the document has already removed the subscription; one from the stop token releases it.
+        if (const auto state = owner.lock(); state && subscribed)
+            state->release({node, *subscribed}, this->weak_from_this());
     }
     bool done() noexcept override {
         std::lock_guard lock(mutex);
@@ -364,7 +470,9 @@ public:
         : owner(std::move(document)), node(id), event(std::move(name)), options(flags) { }
     template <typename Receiver>
     auto connect(Receiver receiver) const {
-        return Operation<Receiver>{std::make_shared<EventOperationState<Receiver>>(std::move(receiver), owner, node, event, options)};
+        // Not make_shared: an obsolete weak entry must not keep the receiver's storage allocated.
+        return Operation<Receiver>{
+            std::shared_ptr<EventOperationState<Receiver>>(new EventOperationState<Receiver>(std::move(receiver), owner, node, event, options))};
     }
 };
 }  // namespace detail
@@ -472,6 +580,7 @@ public:
         const auto name = s->intern(event);
         s->add({msg::DomOp::listen, identifier, name, detail::eventFlags(options)});
         s->listeners[{identifier, name}] = std::move(callback);
+        s->unsubscriptions.erase({identifier, name});
     }
     /// Also ends a pending next() for this event, which completes stopped.
     void unlisten(std::string_view event) const {
@@ -479,12 +588,8 @@ public:
         const auto name = s->intern(event);
         s->add({msg::DomOp::unlisten, identifier, name});
         s->listeners.erase({identifier, name});
-        if (const auto found = s->waiters.find({identifier, name}); found != s->waiters.end()) {
-            const auto waiter = found->second.lock();
-            s->waiters.erase(found);
-            if (waiter)
-                waiter->stop();
-        }
+        s->unsubscriptions.erase({identifier, name});
+        s->stopWaiter({identifier, name});
     }
     /**
      * @brief A sender of the value of this element's next event, as a listen() callback would receive it.

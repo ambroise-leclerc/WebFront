@@ -5,7 +5,8 @@
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
   the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,
-  `unlisten()`, node removal or revocation, rejection, disconnection and shutdown. One callback or
+  `unlisten()`, node removal or revocation, rejection, disconnection and shutdown; every end of a wait
+  removes its browser subscription and flags, also after a stop from another thread. One callback or
   wait per element and event. No wire format change.
 
 - Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native

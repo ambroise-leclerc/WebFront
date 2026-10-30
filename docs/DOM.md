@@ -150,9 +150,14 @@ stop token (`TaskHandle::requestStop()`, application shutdown), `unlisten()`, re
 or revocation of the node, a browser rejection that closes the document, and
 disconnection or reload. A stopped coroutine unwinds without resuming after its
 `co_await`. Starting off the server thread or on an invalid node completes with an
-error. A stop requested from another thread completes on that thread, as for
-`jsFunctionSender`; the server context later releases the obsolete subscription.
-Event and stopped completions caused by the document run on the server thread.
+error. Every end of a wait queues the browser unsubscription, so its
+`preventDefault` and `stopPropagation` stop applying once that batch is applied.
+A stop requested on the server thread queues it at once. A stop requested from
+another thread completes on that thread, as for `jsFunctionSender`, and posts the
+unsubscription to the server context; it is lost only if the application is
+shutting down, which closes the document anyway. An unsubscription that does not
+fit a full batch opens the next one. Event and stopped completions caused by the
+document run on the server thread.
 
 ### Grouped reads
 

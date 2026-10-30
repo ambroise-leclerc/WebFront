@@ -646,3 +646,141 @@ SCENARIO("A coroutine is the state machine of a sequential DOM dialog", "[dom]")
     REQUIRE(steps == std::vector<std::string>{"name: 1", "back: 2", "done: 3"});
     REQUIRE(document.state->waiters.empty());
 }
+
+namespace {
+// Fills the pending batch until not even an unsubscription fits.
+void fillBatch(dom::detail::State& state, std::uint32_t node) {
+    try {
+        for (;;)
+            state.add({msg::DomOp::unlisten, node, 0});
+    } catch (const std::length_error&) { }
+}
+}  // namespace
+
+SCENARIO("A cancelled DOM event wait releases its browser subscription", "[dom]") {
+    ReadyDocument           document;
+    auto&                   state  = document.state;
+    auto                    button = document.doc.element("button");
+    ex::inplace_stop_source source;
+    Awaited                 awaited;
+    auto operation = ex::connect(button.next("click", {.preventDefault = true, .stopPropagation = true}), EventReceiver{&awaited, source.get_token()});
+    ex::start(operation);
+    const auto name = state->names.at("click");
+    document.doc.flush();
+    GIVEN("a stop requested on the server thread") {
+        source.request_stop();
+        THEN("the wait stops and its browser listener is removed at once") {
+            REQUIRE(awaited.stopped);
+            REQUIRE(state->waiters.empty());
+            const auto operations = msg::DomBatch::decode(state->pending.data()).second;
+            REQUIRE(operations.size() == 1);
+            REQUIRE(operations[0].code == msg::DomOp::unlisten);
+            REQUIRE(operations[0].a == button.id());
+            REQUIRE(operations[0].b == name);
+        }
+        AND_WHEN("the event was already on its way") {
+            state->event(button.id(), name, "");
+            THEN("it is ignored") {
+                REQUIRE(awaited.completions == 1);
+                REQUIRE(pendingCodes(*state) == std::vector{msg::DomOp::unlisten});
+            }
+        }
+    }
+    GIVEN("stops requested from another thread") {
+        unsigned posts{};
+        state->post = [&] {
+            ++posts;
+        };
+        ex::inplace_stop_source otherSource;
+        Awaited                 other;
+        auto                    second = ex::connect(button.next("keydown"), EventReceiver{&other, otherSource.get_token()});
+        ex::start(second);
+        document.doc.flush();
+        std::thread([&] {
+            source.request_stop();
+            otherSource.request_stop();
+        }).join();
+        THEN("one release is posted to the server context") {
+            REQUIRE(awaited.stopped);
+            REQUIRE(other.stopped);
+            REQUIRE(posts == 1);
+            REQUIRE(pendingCodes(*state).empty());
+        }
+        AND_WHEN("the server context runs it") {
+            state->sweep();
+            THEN("both browser listeners are removed") {
+                REQUIRE(state->waiters.empty());
+                REQUIRE(pendingCodes(*state) == std::vector{msg::DomOp::unlisten, msg::DomOp::unlisten});
+            }
+        }
+        AND_WHEN("a new wait subscribes the same event before it runs") {
+            Awaited again;
+            auto    next = ex::connect(button.next("click"), EventReceiver{&again, {}});
+            ex::start(next);
+            state->sweep();
+            THEN("the new subscription is kept") {
+                REQUIRE(pendingCodes(*state) == std::vector{msg::DomOp::listen, msg::DomOp::unlisten});
+                state->event(button.id(), name, "later");
+                REQUIRE(again.value == "later");
+            }
+        }
+    }
+    GIVEN("a document closed before a stop from another thread") {
+        unsigned posts{};
+        state->post = [&] {
+            ++posts;
+        };
+        state->close();
+        THEN("the wait stopped with the document and nothing is posted") {
+            REQUIRE(awaited.stopped);
+            std::thread([&] {
+                source.request_stop();
+            }).join();
+            REQUIRE(posts == 0);
+            REQUIRE(awaited.completions == 1);
+        }
+    }
+}
+
+SCENARIO("A DOM unsubscription that does not fit a full batch opens the next one", "[dom]") {
+    ReadyDocument           document;
+    auto&                   state  = document.state;
+    auto                    button = document.doc.element("button");
+    ex::inplace_stop_source source;
+    Awaited                 awaited;
+    auto operation = ex::connect(button.next("click", {.preventDefault = true, .stopPropagation = false}), EventReceiver{&awaited, source.get_token()});
+    ex::start(operation);
+    const auto name = state->names.at("click");
+    document.doc.flush();
+    fillBatch(*state, button.id());
+    WHEN("the awaited event arrives") {
+        state->event(button.id(), name, "value");
+        REQUIRE(awaited.value == "value");
+    }
+    WHEN("the wait is cancelled") {
+        source.request_stop();
+        REQUIRE(awaited.stopped);
+    }
+    REQUIRE(state->waiters.empty());
+    document.doc.flush();
+    const auto operations = msg::DomBatch::decode(state->pending.data()).second;
+    REQUIRE(operations.size() == 1);
+    REQUIRE(operations[0].code == msg::DomOp::unlisten);
+    REQUIRE(operations[0].a == button.id());
+    REQUIRE(operations[0].b == name);
+}
+
+SCENARIO("A DOM event wait that cannot be queued subscribes nothing", "[dom]") {
+    ReadyDocument document;
+    auto&         state  = document.state;
+    auto          button = document.doc.element("button");
+    state->intern("click");
+    fillBatch(*state, button.id());
+    Awaited awaited;
+    auto    operation = ex::connect(button.next("click"), EventReceiver{&awaited, {}});
+    ex::start(operation);
+    THEN("it fails without a waiter") {
+        REQUIRE_FALSE(awaited.error.empty());
+        REQUIRE(state->waiters.empty());
+    }
+}

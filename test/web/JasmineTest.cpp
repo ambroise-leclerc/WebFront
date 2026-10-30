@@ -330,7 +330,7 @@ private:
         }
     }
 
-    // Each awaited keydown completes one wait; the final wait for a click ends only by cancellation.
+    // Each awaited keydown completes one wait; the third ends only by cancellation, which must remove its listener.
     Task awaitDocument(TestWF::UI ui) {
         awaitCancelled[ui.id()] = false;
         DocumentReadNotice notice{awaitCancelled[ui.id()]};
@@ -343,8 +343,9 @@ private:
                 ui.jsFunction("documentAwaitResult")(key);
             }
             state.domAwaitObserved = true;
-            auto click             = input.next("click");
-            co_await std::move(click);
+            auto cancelled         = input.next("keydown", prevent);
+            co_await std::move(cancelled);
+            ui.jsFunction("documentAwaitResult")("resumed after cancellation");
             notice.pending = false;
         } catch (...) {
             notice.pending = false;
@@ -429,6 +430,7 @@ private:
         });
         webFront->cppFunction("domDocumentCancelAwait", [this](TestWF::UI ui) {
             documentAwaits.at(ui.id()).requestStop();
+            ui.document().flush();  // The browser applies the batch the stop queued before this call resolves.
         });
         webFront->cppFunction("domDocumentAwaitCancelled", [this](TestWF::UI ui) {
             return awaitCancelled[ui.id()];
