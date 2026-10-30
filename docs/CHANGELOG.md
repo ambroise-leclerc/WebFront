@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-- Stabilise the desktop-native tier (#416): the automation owner retries removing its temporary
-  WebView2 profile for up to 10 s (was 2 s; 5 s after a forced exit; a refused access is retried for 2 s only) while the
-  browser process exits, the automation tests poll for that cleanup instead of assuming it is immediate, their failure messages report the observed run
-  state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout.
+- Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
+  waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
+  exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.
+  The watchdog tests check that a forced exit removes the profile, the automation failure messages report the observed
+  run state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout.
 
 - Show the `wf` commands of the developer browser test in its window (#415): `DeveloperBrowserIntegration` shows, in
   place of its terminal, each command it runs with its outcome and duration, labelling the timeouts and cancellations
