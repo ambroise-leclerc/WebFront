@@ -119,6 +119,63 @@ jobs:
           path: study/*.json
           if-no-files-found: ignore
 
+  # Where does the compile time of one heavy unit go? MSVC /d1reportTime, GCC -ftime-report, Clang -ftime-trace.
+  profile:
+    needs: image
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows, linux, macos]
+    name: profile ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'windows' && 'windows-2025' || matrix.os == 'macos' && 'macos-26' || 'ubuntu-26.04' }}
+    container: ${{ matrix.os == 'linux' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.image.outputs.image, github.actor, github.token)) || '' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - name: Point the CPM cache at the workspace
+        shell: bash
+        run: echo "CPM_SOURCE_CACHE=$GITHUB_WORKSPACE/.cache/CPM" >> "$GITHUB_ENV"
+      - name: Initialize MSVC environment
+        if: matrix.os == 'windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Setup Xcode
+        if: matrix.os == 'macos'
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest
+      - name: Profile the compilation
+        shell: bash
+        run: |
+          case "${{ matrix.os }}" in
+            windows) flags="/d1reportTime"; config=Release ;;
+            linux)   flags="-ftime-report"; config=Debug ;;
+            macos)   flags="-ftime-trace -ftime-trace-granularity=2000"; config=Release ;;
+          esac
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=$config -DENABLE_TESTING=ON -DWEBFRONT_EMBED_CEF=OFF \
+            -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF "-DCMAKE_CXX_FLAGS=$flags"
+          mkdir -p profile
+          # One minimal application (HelloWorld) and the two heaviest units of the tests, one at a time (-j1: clean timings).
+          for object in examples/CMakeFiles/HelloWorld.dir/hello-world/HelloWorld.cpp test/unit/CMakeFiles/tests.dir/WebFrontTests.cpp test/unit/CMakeFiles/tests.dir/DeveloperTests.cpp; do
+            suffix=o; [ "${{ matrix.os }}" = windows ] && suffix=obj
+            name=$(basename "$object")
+            ( cd build && ninja -j1 -v "$object.$suffix" ) > "profile/$name.log" 2>&1 || tail -n 30 "profile/$name.log"
+          done
+          find build -name '*.json' -path '*CMakeFiles*' -newer build/CMakeCache.txt -exec cp {} profile/ \; 2>/dev/null || true
+          ls -la profile
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: profile-${{ matrix.os }}
+          path: profile/
+          if-no-files-found: ignore
+
   report:
     needs: study
     if: ${{ !cancelled() }}
