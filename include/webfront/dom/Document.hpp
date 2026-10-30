@@ -206,7 +206,7 @@ struct State : std::enable_shared_from_this<State> {
             throw std::length_error("DOM batch identifiers exhausted");
         }
         pending = msg::DomBatch(++batchId);
-        for (const auto key : std::exchange(unsubscriptions, {}))
+        for (const auto& key : std::exchange(unsubscriptions, {}))
             unsubscribe(key);
     }
     /// Queues the browser unsubscription, or the first one of the next batch when this one is full.
@@ -342,7 +342,7 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
     Outcome                                                           outcome{Outcome::pending};
     std::string                                                       value;
     std::exception_ptr                                                error;
-    std::optional<std::uint32_t>                                      name;  // event name index once subscribed
+    std::optional<std::uint32_t>                                      nameIndex;  // once subscribed
     std::optional<networking::ex::stop_callback_for_t<Token, OnStop>> stopCallback;
 
     bool finish(Outcome completion, std::string result = {}, std::exception_ptr failure = {}) noexcept {
@@ -390,7 +390,7 @@ class EventOperationState : public EventWaiter, public std::enable_shared_from_t
         bool       ended{};
         {
             std::lock_guard lock(mutex);
-            name  = index;
+            nameIndex = index;
             ended = outcome != Outcome::pending;
         }
         if (ended)
@@ -426,7 +426,7 @@ public:
         std::optional<std::uint32_t> subscribed;
         {
             std::lock_guard lock(mutex);
-            subscribed = name;
+            subscribed = nameIndex;
         }
         // A stop from the document has already removed the subscription; one from the stop token releases it.
         if (const auto state = owner.lock(); state && subscribed)
