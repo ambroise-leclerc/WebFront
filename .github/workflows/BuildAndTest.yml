@@ -128,7 +128,7 @@ jobs:
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
       - name: Build
-        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 2
+        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 4
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
