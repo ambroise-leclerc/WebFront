@@ -16,7 +16,7 @@ report and architecture decision are in PR #411.
   pass against these exact candidate bytes. The source baseline passes 357 CEF-off CTest.
 - Public 0.6.3 provision was HTTP 404 during preparation. Existing versions are not overwritten.
   Pages is configured for gh-pages, root. No publication or tag has been made by this preparation.
-- The test bootstrap remains the separately verified published 0.6.2; it is not advanced here.
+- The test bootstrap was still the separately verified published 0.6.2 when this release was prepared; a later pull request (#403) advances it to the published 0.6.3.
 
 | Archive | Bytes | SHA-256 |
 |---|---:|---|

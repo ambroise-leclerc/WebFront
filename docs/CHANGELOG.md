@@ -10,6 +10,12 @@
   `Label`/`Range` annotations; its tests build with GCC 16 and are required on the Linux CI job
   (`WEBFRONT_REQUIRE_REFLECTION_TESTS`). The library stays C++23.
 
+- Warn at the end of a consumer's configuration, with GCC 16, about each target linking
+  `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
+  stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is
+  `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)`. The reduced case is a translation unit that only includes
+  `<stdexec/execution.hpp>` and is compiled with `g++ -std=gnu++23 -fmodules-ts`.
+
 - Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native
   window when the platform engine is compiled in and a session exists, the system browser otherwise,
   with the reason printed once and available from `fallbackReason()`. An application needs neither a
@@ -220,7 +226,7 @@
   native window engine of the platform is enabled automatically when its dependencies are found (top-level builds with examples,
   without `ENABLE_TESTING`; `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it, an explicit `WEBFRONT_EMBED_*` value always wins).
   A missing engine does not fail the configuration: CMake explains how to install it and the Life examples are built for the default browser instead. The README Game of Life walkthrough builds with `mkdir build`, `cd build`,
-  `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (unpublished, the pin stays on 0.6.2).
+  `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (published as 0.6.3; the test bootstrap pin moves to it in #403).
   Automatic engine values stay outside the cache so an explicit choice equal to the previous detection is still respected;
   removing an explicit engine cache entry resumes detection. Platforms without a registered engine configure the browser fallback.
 

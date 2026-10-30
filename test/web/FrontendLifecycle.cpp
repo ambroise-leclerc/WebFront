@@ -20,7 +20,7 @@ using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, we
 static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOpen);
 
 int show(std::string_view page) {
-    App               app("9002", std::filesystem::current_path());
+    App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     std::atomic<bool> connected = false;
     app.onUIStarted([&](App::UI) {
         connected = true;
@@ -140,7 +140,7 @@ int checkContentPolicy(bool allowNavigation) {
     if (allowNavigation)
         policy.navigationAllowedOrigins = {"http://localhost:9002"};
     using PolicyApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, PolicyLifecycleFrontend>;
-    PolicyApp         app(webfront::WebFrontConfig{.address = "0.0.0.0", .documentRoot = std::filesystem::current_path(), .contentPolicy = policy});
+    PolicyApp         app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .contentPolicy = policy});
     std::atomic<bool> completed = false;
     std::atomic<bool> escaped   = false;
     std::atomic<bool> navigated = false;
