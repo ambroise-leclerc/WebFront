@@ -49,7 +49,7 @@ struct Files {
 struct Profile {
     channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
     const std::filesystem::path path{directory.path};
-    void cleanup(std::chrono::seconds patience = std::chrono::seconds{10}) const noexcept {
+    void cleanup([[maybe_unused]] std::chrono::seconds patience = std::chrono::seconds{10}) const noexcept {
         // WebView2 closes its browser process asynchronously after the controller is released.
         // Retry only sharing violations during that short exit; POSIX can unlink open files.
         // A refused access is rarely transient: it gets a shorter patience so that a profile which can never be
