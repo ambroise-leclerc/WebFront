@@ -411,7 +411,7 @@ if(_browser_tests_available)
             --config $<CONFIG> --target life_journey --parallel 2)
         # Serialize nested builds and browser executables sharing this output directory, while independent unit tests may run.
         set_tests_properties(JourneyEmbeddedBuild PROPERTIES FIXTURES_REQUIRED JourneyEmbedded
-            FIXTURES_SETUP JourneyApplication LABELS "web-integration" TIMEOUT 180 RESOURCE_LOCK "webfront_port_9002;webfront_build_tree" PROCESSORS 2)
+            FIXTURES_SETUP JourneyApplication LABELS "web-integration" TIMEOUT 180 RESOURCE_LOCK "webfront_build_tree" PROCESSORS 2)
         set(_journey_command "$<TARGET_FILE:life_journey>")
         if(_developer_xvfb)
             set(_journey_command "${_developer_xvfb}" -a ${_journey_command})
@@ -576,7 +576,7 @@ if(_browser_tests_available)
     # Protect the shared build tree and browser DLLs/executables, especially on Windows.
     set_tests_properties(LifeEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
         FIXTURES_SETUP LifeEmbedded LABELS "web-integration" TIMEOUT 180
-        RESOURCE_LOCK "webfront_port_9002;webfront_build_tree" PROCESSORS 2)
+        RESOURCE_LOCK "webfront_build_tree" PROCESSORS 2)
     set(_life_command "$<TARGET_FILE:life_embedded>")
     if(_developer_xvfb)
         set(_life_command "${_developer_xvfb}" -a ${_life_command})
