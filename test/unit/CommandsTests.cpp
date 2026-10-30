@@ -565,10 +565,18 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             std::erase_if(clients, [](const RealApp::UI& ui) { return ui.id() == 2; });
             REQUIRE(clients.size() == 2);
             CHECK(clients[0] == RealApp::UI(app, 1));
+            CHECK(clients[0] != clients[1]);
             CHECK(clients[1].id() == 3);
             std::optional<RealApp::UI> current;
             current = clients[1];
             CHECK(current->id() == 3);
+        }
+        THEN("a UI of another application is never equal, even with the same identifier") {
+            RealApp other(WebFrontConfig{.port = "0"});
+            CHECK(RealApp::UI(app, 1) != RealApp::UI(other, 1));
+            RealApp::UI ui(app, 1);
+            ui = RealApp::UI(other, 1);
+            CHECK(ui == RealApp::UI(other, 1));
         }
         THEN("a second Commands object is refused, and cppFunction tells a taken name") {
             Commands<RealApp> commands{app};

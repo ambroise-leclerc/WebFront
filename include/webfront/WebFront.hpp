@@ -56,9 +56,9 @@ public:
         return webLinkId;
     }
 
-    /// Two values are equal when they identify the same connection.
+    /// Two values are equal when they identify the same connection of the same application.
     [[nodiscard]] friend bool operator==(const BasicUI& a, const BasicUI& b) noexcept {
-        return a.webLinkId == b.webLinkId;
+        return a.webFront == b.webFront && a.webLinkId == b.webLinkId;
     }
 
     /**
