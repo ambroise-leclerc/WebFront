@@ -558,6 +558,7 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
         THEN("the stale value drops calls, fails typed calls, and has nothing pending") {
             stale.jsFunction("onStale")(std::string{"stale-call"});
             auto typed = stale.jsFunction<std::string>("typedStale")();
+            REQUIRE(typed.wait_for(0s) == std::future_status::ready);  // failed at once: the later browser never replies
             REQUIRE_THROWS_AS(typed.get(), std::runtime_error);
             REQUIRE_THROWS_AS(stale.addScript("stale-script"), ConnectionError);
             REQUIRE(stale.pendingWrites() == 0);

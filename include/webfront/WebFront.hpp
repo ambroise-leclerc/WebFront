@@ -43,6 +43,7 @@ namespace webfront {
 inline constexpr std::string_view version = "0.5.0";
 
 namespace testing {
+/// Test-only access to the connection identifiers of an application; not part of the API.
 template <typename Application>
 struct ConnectionIds;
 }  // namespace testing
@@ -513,9 +514,7 @@ private:
 
     /// The generation of the connection that now owns `id`: 0, which no connection has, when none does.
     WebLinkGeneration generationOf(WebLinkId id) const {
-        std::scoped_lock lock{linksMutex};
-        const auto       found = webLinks.find(id);
-        return found == webLinks.end() ? WebLinkGeneration{0} : found->second.generation;
+        return linkAndGeneration(id).second;
     }
 
     /// The link and generation of the connection that now owns `id`, read under one lock (null and 0 when none does).
@@ -897,9 +896,10 @@ private:
                         app->finishStarting(id);
                     }
                 } started{this, event.webLinkId};
+                const auto ui = uiOf(event.webLinkId);
                 if (uiStartedHandler)
-                    uiStartedHandler(uiOf(event.webLinkId));
-                uiSubscribers->notify(uiOf(event.webLinkId));
+                    uiStartedHandler(ui);
+                uiSubscribers->notify(ui);
                 break;
             }
             case WebLinkEvent::Code::closed:
