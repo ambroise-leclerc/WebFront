@@ -165,6 +165,9 @@ add_test(NAME BootstrapProvisioning
 
 # Windows bash.exe may be the WSL launcher rather than a native Bash runtime.
 if(UNIX)
+    add_test(NAME RunWithDeadline COMMAND ${CMAKE_COMMAND} -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/RunWithDeadline.sh
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRunWithDeadline.cmake)
+    set_tests_properties(RunWithDeadline PROPERTIES TIMEOUT 60 LABELS fast)
     find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
     find_package(Git QUIET)
     if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)

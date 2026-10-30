@@ -6,7 +6,7 @@ on:
   # Temporary: a workflow absent from the default branch cannot be dispatched, so the study branch runs it on push.
   push:
     branches: [435-ci-build-time]
-    paths: ['.github/workflows/BuildStudy.yml', 'test/tools/BuildStudy*.py', 'test/unit/CMakeLists.txt']
+    paths: ['.github/workflows/BuildStudy.yml', 'test/tools/BuildStudy*.py']
   workflow_dispatch:
     inputs:
       variants:
