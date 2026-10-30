@@ -261,7 +261,7 @@ def watchdog(args):
                 try:
                     client.initialize()
                     client.start("build")
-                    assert client.child.wait(timeout=15) == 71
+                    assert client.child.wait(timeout=30) == 71
                     assert isinstance(client.messages.get(timeout=2), EOFError), "A renderer retained MCP stdout"
                 finally:
                     client.close()

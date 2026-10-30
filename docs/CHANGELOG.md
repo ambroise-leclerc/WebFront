@@ -3,9 +3,14 @@
 ## Unreleased
 
 - Stabilise the desktop-native tier (#416): the automation owner retries removing its temporary
-  WebView2 profile for up to 10 s (was 2 s, also after a forced exit; a refused access is retried for 2 s only) while the
+  WebView2 profile for up to 10 s (was 2 s; 5 s after a forced exit; a refused access is retried for 2 s only) while the
   browser process exits, the automation tests poll for that cleanup instead of assuming it is immediate, their failure messages report the observed run
   state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout.
+
+- Show the `wf` commands of the developer browser test in its window (#415): `DeveloperBrowserIntegration` shows, in
+  place of its terminal, each command it runs with its outcome and duration, labelling the timeouts and cancellations
+  the specs cause. The trace comes from the specs only; the published environment is unchanged. `docs/TEST_TIERS.md`
+  explains how to follow a test live.
 
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
@@ -26,8 +31,10 @@
 - Warn at the end of a consumer's configuration, with GCC 16, about each target linking
   `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
   stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is
-  `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)`. The reduced case is a translation unit that only includes
-  `<stdexec/execution.hpp>` and is compiled with `g++ -std=gnu++23 -fmodules-ts`.
+  `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)`. GCC 16.1 and 16.2 both crash, GCC 13.4 and 15.2 do not
+  (reported upstream as GCC bug 128318). The reduced case needs no stdexec:
+  `extern const int t; inline constexpr int t = 0;` compiled with `g++ -std=gnu++23 -fmodules-ts`
+  crashes in `transfer_defining_module`. stdexec declares `forwarding_query` this way.
 
 - Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native
   window when the platform engine is compiled in and a session exists, the system browser otherwise,

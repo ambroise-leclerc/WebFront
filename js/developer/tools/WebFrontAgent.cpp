@@ -49,15 +49,15 @@ struct Files {
 struct Profile {
     channel::PrivateDirectory   directory{std::filesystem::temp_directory_path() / ("webfront-agent-" + channel::nonce())};
     const std::filesystem::path path{directory.path};
-    void cleanup() const noexcept {
+    void cleanup(std::chrono::seconds patience = std::chrono::seconds{10}) const noexcept {
         // WebView2 closes its browser process asynchronously after the controller is released.
         // Retry only sharing violations during that short exit; POSIX can unlink open files.
         // A refused access is rarely transient: it gets a shorter patience so that a profile which can never be
         // removed does not delay the exit for the whole window.
 #ifdef _WIN32
         const auto start = std::chrono::steady_clock::now();
-        const auto deadline = start + std::chrono::seconds{10};
-        const auto accessDeadline = start + std::chrono::seconds{2};
+        const auto deadline = start + patience;
+        const auto accessDeadline = start + std::min(patience, std::chrono::seconds{2});
 #endif
         for (;;) {
             std::error_code error;
@@ -389,7 +389,7 @@ int main(int argc, char** argv) {
                         const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
                         if (channel)
                             channel->stop();
-                        profile.cleanup();  // _Exit skips the destructors
+                        profile.cleanup(std::chrono::seconds{5});  // _Exit skips the destructors; the watchdog tests allow for this bound
                         std::_Exit(code);
                     }
                     return;
