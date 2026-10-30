@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -555,6 +556,19 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             CHECK(RealApp::UI(app, 5).id() == 5);
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
             CHECK(subscription.active());
+        }
+        THEN("a UI is a regular value usable in containers") {
+            static_assert(std::is_copy_assignable_v<RealApp::UI>);
+            static_assert(std::is_nothrow_move_assignable_v<RealApp::UI>);
+            static_assert(std::equality_comparable<RealApp::UI>);
+            std::vector<RealApp::UI> clients{RealApp::UI(app, 1), RealApp::UI(app, 2), RealApp::UI(app, 3)};
+            std::erase_if(clients, [](const RealApp::UI& ui) { return ui.id() == 2; });
+            REQUIRE(clients.size() == 2);
+            CHECK(clients[0] == RealApp::UI(app, 1));
+            CHECK(clients[1].id() == 3);
+            std::optional<RealApp::UI> current;
+            current = clients[1];
+            CHECK(current->id() == 3);
         }
         THEN("a second Commands object is refused, and cppFunction tells a taken name") {
             Commands<RealApp> commands{app};

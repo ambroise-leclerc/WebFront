@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make `BasicUI` (`UI`) a regular value type (#400): it holds a pointer to the application instead of a
+  reference, so it is copy- and move-assignable and usable in `std::vector` with `std::erase_if` and in
+  `std::optional`. Two values compare equal when they have the same `id()`. The lifetime contract is
+  unchanged: a `UI` is valid while its application exists.
+
 - Warn at the end of a consumer's configuration, with GCC 16, about each target linking
   `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
   stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is
