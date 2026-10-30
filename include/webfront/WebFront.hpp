@@ -511,7 +511,8 @@ private:
     }
 
 public:
-    /// The browsers connected now: a closed connection is released shortly after its closure.
+    /// The browsers connected now: a closed connection is released shortly after its closure. Counts connections still
+    /// in their handshake or onUIStarted handlers too: not the number of browsers a broadcast or forEachUI reaches.
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
         return webLinks.size();
@@ -520,6 +521,7 @@ public:
     /// Calls `function(ui)` for each browser not reported closed whose onUIStarted handlers had returned when the call
     /// started; a browser whose handlers are running is not visited. Callable from any thread; `function` runs on the
     /// calling thread, outside every WebFront lock, so it may call the UI, but ui.document() needs the server thread.
+    /// A starting browser that is skipped misses the call: send states that every browser must follow with broadcast().
     template <std::invocable<UI> Function>
     void forEachUI(Function&& function) {
         std::vector<WebLinkId> started;

@@ -376,7 +376,7 @@ public:
             }
             latest.held = nullptr;  // superseded, if a smaller limit held it back
             ++latest.queued;
-            writeQueue.push_back({std::move(frame), &*group});
+            writeQueue.push_back({std::move(frame), group});
             if (writeQueue.size() > 1)
                 return;  // the running writeFrames() task will get to it
         }
@@ -408,10 +408,11 @@ private:
         std::size_t                       limit  = 0;
         std::shared_ptr<const Frame<Net>> held;
     };
-    std::map<std::string, LatestGroup, std::less<>> latestGroups;  // a key is forgotten once nothing is queued for it
+    using LatestGroups = std::map<std::string, LatestGroup, std::less<>>;
+    LatestGroups latestGroups;  // a key is forgotten once nothing is queued for it
     struct PendingFrame {
-        std::shared_ptr<const Frame<Net>>                                     frame;
-        typename std::map<std::string, LatestGroup, std::less<>>::value_type* group = nullptr;  // for writeLatest()
+        std::shared_ptr<const Frame<Net>>             frame;
+        std::optional<typename LatestGroups::iterator> group{};  // for writeLatest(): valid while the frame is queued
     };
     std::deque<PendingFrame>                             writeQueue;                            // the first frame is the one being written
     networking::TaskScope&                               taskScope;
@@ -611,13 +612,13 @@ private:
             const auto group = writeQueue.front().group;
             writeQueue.pop_front();
             if (group) {
-                auto& latest = group->second;
+                auto& latest = (*group)->second;
                 --latest.queued;
                 if (latest.held && latest.queued < latest.limit) {
                     ++latest.queued;
                     writeQueue.push_back({std::move(latest.held), group});
                 } else if (latest.queued == 0)
-                    latestGroups.erase(latestGroups.find(group->first));
+                    latestGroups.erase(*group);
             }
         }
         return writeQueue.empty() ? nullptr : writeQueue.front().frame;

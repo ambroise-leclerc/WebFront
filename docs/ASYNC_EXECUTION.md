@@ -186,6 +186,15 @@ and the server thread writes it. Only `ui.document()` and its nodes are confined
 thread. Register `cppFunction` callbacks and set `onUIStarted` before the server starts. You can
 add or remove subscriptions at any time.
 
+"While the application lives" is stricter than "before it is destroyed": no such call may still
+be running when `app.shutdown()` or the application's destructor starts. A `UI` or a broadcast
+function object kept by a worker thread refers to the application. Stop that thread, or make sure
+it no longer calls them, before shutting the application down.
+
+`app.connectedBrowsers()` counts every connection the server holds, including those still
+completing their handshake or running their `onUIStarted` handlers, and those closed but not yet
+released. It is not the number of browsers a broadcast or `forEachUI` reaches.
+
 WebFront never holds one of its own locks while it calls application code. A thread can therefore
 call WebFront while it holds an application lock that a `cppFunction` callback also takes. The
 callback waits for that lock, and the call it waits for does not depend on the callback. What
@@ -232,6 +241,13 @@ function object holds no state and may be a temporary.
 for per-browser arguments or typed calls. It visits the browsers whose handlers had returned when
 it started: unlike a broadcast, it skips a browser whose handlers are still running. As anywhere
 else, `ui.document()` throws `std::logic_error` outside the server thread.
+
+So `forEachUI` does not keep a state in sync. Suppose a handler sends the state S0, and another
+thread changes the state to S1 and calls `forEachUI` before the browser counts as started. That
+browser is skipped and keeps S0 until the next change. The window ends inside WebFront, after the
+handlers return, so no application lock can close it. Send states with `broadcast`: a call made
+during that window reaches the browser after what its handlers sent. Keep `forEachUI` for calls
+that a browser may miss while it starts, or that `onUIStarted` already covers.
 
 ## HTTP gzip CPU work
 

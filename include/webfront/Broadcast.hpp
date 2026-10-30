@@ -64,7 +64,8 @@ struct BroadcastCall {
 
 /// Calls a JavaScript function on each started browser, fire-and-forget, from any thread. Each call encodes its
 /// arguments once into a frame that every browser shares. The calls held back for a slow browser belong to its
-/// connection, so the object holds no state: it may be a temporary, but must not outlive its application.
+/// connection, so the object holds no state: it may be a temporary. It refers to its application: no call may still
+/// run when the application's shutdown() or destructor starts.
 template <typename WebFront>
 class Broadcast {
     using Net = typename WebFront::Net;
