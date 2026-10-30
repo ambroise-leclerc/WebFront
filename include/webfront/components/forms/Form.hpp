@@ -4,6 +4,7 @@
 #include "../../dom/Document.hpp"
 #include "Description.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -40,8 +41,11 @@ struct FormState {
         const auto& field    = description.fields[index];
         const bool  accepted = field.write(*object, value);
         mark(index, !accepted);
-        if (accepted && changed)
-            changed(field.name);
+        // A copy: the callback may replace itself through onChange() while it runs.
+        if (accepted && changed) {
+            const auto callback = changed;
+            callback(field.name);
+        }
     }
 };
 
@@ -140,6 +144,9 @@ Form<T> form(const dom::Document<UI>& doc, dom::Node parent, std::shared_ptr<T> 
                 option.append(doc.text(choice));
                 control.append(option);
             }
+            // A value missing from the choices selects nothing, as refresh() does, rather than the first option.
+            if (std::ranges::find(field.choices, value) == field.choices.end())
+                control.property("selectedIndex", "-1");
         } else {
             control = doc.element("input");
             if (field.kind == Kind::boolean) {

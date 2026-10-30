@@ -381,6 +381,8 @@ if(_browser_tests_available)
         webfront_add_journey_files(JourneyFiles JourneyInstalled JourneyConfigured)
         # The TypeScript declaration that C++ generates from a type description (#383), which ui/settings.ts imports:
         # wf check verifies the starter's module, that one and the declaration.
+        # Built with webtest: the CEF job and the documented commands build only webtest and the driver.
+        add_dependencies(webtest forms_declaration)
         add_test(NAME JourneyDeclaration COMMAND $<TARGET_FILE:forms_declaration> "${_journey}/ui/generated/settings.d.ts")
         set_tests_properties(JourneyDeclaration PROPERTIES FIXTURES_REQUIRED JourneyConfigured FIXTURES_SETUP JourneyDeclared
             LABELS "web-integration" TIMEOUT 30)

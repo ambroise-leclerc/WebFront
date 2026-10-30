@@ -6,6 +6,7 @@
 #include <webfront/components/forms/Reflection.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <map>
 #include <memory>
@@ -93,6 +94,39 @@ SCENARIO("Hand-written descriptors parse and format the values of the browser", 
             REQUIRE(settings.wrap);
             REQUIRE(settings.pattern == Pattern::glider);
         }
+        THEN("an integer accepts the other forms that an integer input reports") {
+            REQUIRE(fieldNamed(description, "speed").write(settings, "1e1"));
+            REQUIRE(settings.speed == 10);
+            REQUIRE(fieldNamed(description, "speed").write(settings, "5.0"));
+            REQUIRE(settings.speed == 5);
+            for (auto text : {"5.5", "1e-1", "1e400", "-1e20"})
+                REQUIRE_FALSE(fieldNamed(description, "speed").write(settings, text));
+        }
+    }
+    GIVEN("numbers that need every significant digit, and 64-bit integers beyond 2^53") {
+        struct Precise {
+            double       ratio{0.12345678901234567};
+            std::int64_t count{};
+        };
+        constexpr double            ratioMax = 0.1234567890123456;
+        forms::Description<Precise> precise{
+            .name   = "Precise",
+            .fields = {forms::field("ratio", &Precise::ratio, "Ratio", forms::Bounds{0, 0.5}),
+                       forms::field("count", &Precise::count, "Count", forms::Bounds{0, 9007199254740992.0})}
+        };
+        Precise object;
+        THEN("formatted values read back as the same number") {
+            REQUIRE(std::stod(precise.fields[0].read(object)) == object.ratio);
+            REQUIRE(forms::detail::formatNumber(ratioMax) == "0.1234567890123456");
+            REQUIRE(forms::detail::formatNumber(0.1) == "0.1");
+            REQUIRE(forms::detail::formatNumber(0.1f) == "0.1");
+        }
+        THEN("an integer is compared exactly with its bounds") {
+            REQUIRE(precise.fields[1].write(object, "9007199254740992"));
+            REQUIRE_FALSE(precise.fields[1].write(object, "9007199254740993"));
+            REQUIRE(object.count == 9007199254740992);
+            REQUIRE_FALSE(precise.fields[1].write(object, "-1"));
+        }
     }
 }
 
@@ -108,6 +142,21 @@ SCENARIO("Descriptors are validated before generation", "[forms]") {
         auto repeated           = description;
         repeated.fields[1].name = "speed";
         REQUIRE_THROWS_AS(forms::typescriptDeclaration(repeated), std::invalid_argument);
+    }
+    WHEN("the type name is one TypeScript refuses for an interface") {
+        for (auto name : {"number", "string", "any", "boolean", "var", "let", "interface"}) {
+            auto reserved = description;
+            reserved.name = name;
+            REQUIRE_THROWS_AS(forms::validate(reserved), std::invalid_argument);
+        }
+    }
+    WHEN("an integer has fractional bounds, which would shift the browser's steps") {
+        auto fractional            = description;
+        fractional.fields[0].range = forms::Bounds{0.5, 10};
+        REQUIRE_THROWS_AS(forms::validate(fractional), std::invalid_argument);
+        auto number            = description;
+        number.fields[1].range = forms::Bounds{0.5, 0.75};
+        REQUIRE_NOTHROW(forms::validate(number));
     }
     WHEN("bounds are inverted, not finite or on a member that is not a number") {
         auto inverted            = description;
@@ -257,6 +306,22 @@ SCENARIO("A form is built in a document and writes the object from browser event
             REQUIRE(recorder.take().empty());
         }
     }
+    WHEN("the change callback replaces itself while it runs") {
+        std::vector<std::string> changed;
+        auto                     tag = std::make_shared<std::string>("first");
+        form.onChange([&, tag](std::string_view name) {
+            form.onChange([&](std::string_view next) {
+                changed.emplace_back("second:" + std::string(next));
+            });
+            // The replaced callback still runs, with its captures alive.
+            changed.emplace_back(*tag + ":" + std::string(name));
+        });
+        recorder.event(form.control("speed"), "input", "8");
+        recorder.event(form.control("speed"), "input", "7");
+        THEN("the first call completes and the next change reaches the new callback") {
+            REQUIRE(changed == std::vector<std::string>{"first:speed", "second:speed"});
+        }
+    }
     WHEN("the browser sends a refused value, then a valid one") {
         recorder.event(form.control("speed"), "input", "42");
         auto refused = recorder.take();
@@ -315,6 +380,21 @@ SCENARIO("A form is built in a document and writes the object from browser event
         THEN("its listeners, and their share of the object, are released") {
             REQUIRE(other.use_count() == 1);
             REQUIRE_FALSE(node.valid());
+        }
+    }
+    WHEN("a choice member holds a value missing from its choices") {
+        auto unlisted     = std::make_shared<Settings>();
+        unlisted->pattern = static_cast<Pattern>(42);
+        auto other        = forms::form(recorder.doc, root, unlisted, forms_fixture::settingsDescription());
+        auto built        = recorder.take();
+        THEN("no option is selected, as after a refresh, instead of the first one") {
+            REQUIRE(std::ranges::none_of(built, [&](const auto& op) {
+                return op.code == msg::DomOp::attribute && recorder.name(op.b) == "selected";
+            }));
+            REQUIRE(on(recorder, built, other.control("pattern"), msg::DomOp::property)
+                    == std::map<std::string, std::string>{
+                        {"selectedIndex", "-1"}
+            });
         }
     }
     WHEN("a field name is unknown or the description is invalid") {

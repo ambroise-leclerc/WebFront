@@ -61,6 +61,12 @@ set(_reflection_flags "-std=c++26 -freflection")
 set(_reflection_supported OFF)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
   include(CheckCXXSourceCompiles)
+  # The probe sets the standard as the test target does: a CMAKE_CXX_STANDARD of the project (23 under WEBFRONT_USE_MDDLOG)
+  # would otherwise add its own -std=c++23 after CMAKE_REQUIRED_FLAGS and hide reflection.
+  # WEBFRONT_HAS_REFLECTION is a cache entry, so it leaves the block.
+  block(SCOPE_FOR VARIABLES)
+  set(CMAKE_CXX_STANDARD 26)
+  set(CMAKE_CXX_EXTENSIONS OFF)
   set(CMAKE_REQUIRED_FLAGS "${_reflection_flags}")
   check_cxx_source_compiles([=[
 #include <meta>
@@ -71,7 +77,7 @@ struct S { [[=1]] int m; };
 static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
 int main() { return 0; }
 ]=] WEBFRONT_HAS_REFLECTION)
-  unset(CMAKE_REQUIRED_FLAGS)
+  endblock()
   set(_reflection_supported ${WEBFRONT_HAS_REFLECTION})
 endif()
 if(_reflection_supported)

@@ -59,38 +59,89 @@ struct Description {
 
 namespace detail {
 
-// Decimal text in the classic locale, so that the result never depends on the application's global locale, nor on the
-// standard: C++26 formats std::to_string(double) like std::format (P2587).
+template <std::floating_point F>
+std::optional<F> parseFloating(std::string_view text) {
+    // std::from_chars for floating point is missing from older libc++; a classic-locale stream is portable.
+    if (text.empty() || text.find_first_not_of("+-.0123456789eE") != std::string_view::npos)
+        return std::nullopt;
+    F                  value{};
+    std::istringstream stream{std::string(text)};
+    stream.imbue(std::locale::classic());
+    if (!(stream >> value) || stream.peek() != std::char_traits<char>::eof() || !std::isfinite(value))
+        return std::nullopt;
+    return value;
+}
+
+// The shortest decimal text that reads back as the same value, in the classic locale, so that the result never depends
+// on the application's global locale, nor on the standard: C++26 formats std::to_string(double) like std::format (P2587).
+// A bound or a value shown in the browser is therefore the one C++ compares with.
 template <std::floating_point F>
 std::string formatNumber(F value) {
-    std::ostringstream stream;
-    stream.imbue(std::locale::classic());
-    stream.precision(std::numeric_limits<F>::digits10);
-    stream << value;
-    return stream.str();
+    std::string text;
+    for (int precision = std::numeric_limits<F>::digits10; precision <= std::numeric_limits<F>::max_digits10; ++precision) {
+        std::ostringstream stream;
+        stream.imbue(std::locale::classic());
+        stream.precision(precision);
+        stream << value;
+        text = stream.str();
+        if (!std::isfinite(value) || parseFloating<F>(text) == value)
+            break;
+    }
+    return text;
 }
 
 template <typename F>
 std::optional<F> parseNumber(std::string_view text) {
-    F value{};
-    if constexpr (std::floating_point<F>) {
-        // std::from_chars for floating point is missing from older libc++; a classic-locale stream is portable.
-        if (text.empty() || text.find_first_not_of("+-.0123456789eE") != std::string_view::npos)
-            return std::nullopt;
-        std::istringstream stream{std::string(text)};
-        stream.imbue(std::locale::classic());
-        if (!(stream >> value) || stream.peek() != std::char_traits<char>::eof() || !std::isfinite(value))
-            return std::nullopt;
-    } else {
+    if constexpr (std::floating_point<F>)
+        return parseFloating<F>(text);
+    else {
+        F value{};
         const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-        if (error != std::errc{} || end != text.data() + text.size())
+        if (error == std::errc{} && end == text.data() + text.size())
+            return value;
+        // An <input type=number step=1> also reports integers as "5.0" or "1e1". Beyond 2^53 a double is no longer
+        // exact, so only the plain decimal form is accepted there.
+        const auto       number = parseFloating<double>(text);
+        constexpr double exact  = 9007199254740992.0;
+        if (!number || std::trunc(*number) != *number || std::fabs(*number) > exact || *number < static_cast<double>(std::numeric_limits<F>::lowest())
+            || *number > static_cast<double>(std::numeric_limits<F>::max()))
             return std::nullopt;
+        return static_cast<F>(*number);
     }
-    return value;
 }
 
-inline bool inside(double value, const std::optional<Bounds>& range) {
-    return !range || (value >= range->min && value <= range->max);
+// The exact comparisons of an integer with a bound: converting a 64-bit integer to double would round it onto the bound.
+// 2^digits is one past the largest value of I and exact as a double, as is the lowest value.
+template <std::integral I>
+bool atLeast(I value, double bound) {
+    const double limit = std::ldexp(1.0, std::numeric_limits<I>::digits);
+    bound              = std::ceil(bound);
+    if (bound >= limit)
+        return false;
+    if (bound <= static_cast<double>(std::numeric_limits<I>::lowest()))
+        return true;
+    return value >= static_cast<I>(bound);
+}
+
+template <std::integral I>
+bool atMost(I value, double bound) {
+    const double limit = std::ldexp(1.0, std::numeric_limits<I>::digits);
+    bound              = std::floor(bound);
+    if (bound < static_cast<double>(std::numeric_limits<I>::lowest()))
+        return false;
+    if (bound >= limit)
+        return true;
+    return value <= static_cast<I>(bound);
+}
+
+template <typename M>
+bool inside(M value, const std::optional<Bounds>& range) {
+    if (!range)
+        return true;
+    if constexpr (std::integral<M>)
+        return atLeast(value, range->min) && atMost(value, range->max);
+    else
+        return value >= range->min && value <= range->max;
 }
 
 inline bool identifier(std::string_view name) {
@@ -98,6 +149,17 @@ inline bool identifier(std::string_view name) {
     return !name.empty() && first.find(name.front()) != std::string_view::npos && std::ranges::all_of(name, [first](char c) {
         return first.find(c) != std::string_view::npos || (c >= '0' && c <= '9');
     });
+}
+
+// The names TypeScript refuses for an interface: its predefined types and the words reserved in a module (strict mode).
+inline bool reservedTypeName(std::string_view name) {
+    static constexpr std::string_view reserved[] = {
+        "any",       "bigint",  "boolean", "never",   "number",    "object",   "string",   "symbol",  "undefined", "unknown",    "void", "await",
+        "break",     "case",    "catch",   "class",   "const",     "continue", "debugger", "default", "delete",    "do",         "else", "enum",
+        "export",    "extends", "false",   "finally", "for",       "function", "if",       "import",  "in",        "instanceof", "new",  "null",
+        "return",    "super",   "switch",  "this",    "throw",     "true",     "try",      "typeof",  "var",       "while",      "with", "implements",
+        "interface", "let",     "package", "private", "protected", "public",   "static",   "yield"};
+    return std::ranges::find(reserved, name) != std::ranges::end(reserved);
 }
 
 // A comment cannot end early: "*/" in a label becomes "*\/".
@@ -142,7 +204,7 @@ Field<T> field(std::string name, M T::* member, std::string label = {}, std::opt
         };
         result.write = [member, range](T& object, std::string_view text) {
             const auto parsed = detail::parseNumber<M>(text);
-            if (!parsed || !detail::inside(static_cast<double>(*parsed), range))
+            if (!parsed || !detail::inside(*parsed, range))
                 return false;
             object.*member = *parsed;
             return true;
@@ -192,12 +254,13 @@ Field<T> choice(std::string name, M T::* member, std::vector<std::pair<std::stri
 }
 
 /** @brief Checks what the generators rely on, and throws std::invalid_argument otherwise: identifier names (they become
- * TypeScript members and input names), unique fields and choices, accessors present, finite ordered bounds on numbers only.
+ * TypeScript members and input names) and a type name TypeScript accepts for an interface, unique fields and choices,
+ * accessors present, finite ordered bounds on numbers only, whole bounds on integers (the browser steps from the minimum).
  */
 template <typename T>
 void validate(const Description<T>& description) {
-    if (!detail::identifier(description.name))
-        throw std::invalid_argument("Form description name is not an identifier: " + description.name);
+    if (!detail::identifier(description.name) || detail::reservedTypeName(description.name))
+        throw std::invalid_argument("Form description name is not an interface name: " + description.name);
     std::set<std::string_view> names;
     for (const auto& field : description.fields) {
         if (!detail::identifier(field.name) || !names.insert(field.name).second)
@@ -210,6 +273,9 @@ void validate(const Description<T>& description) {
             throw std::invalid_argument("Form field " + field.name + " has bounds but is not a number");
         if (field.range && !(std::isfinite(field.range->min) && std::isfinite(field.range->max) && field.range->min <= field.range->max))
             throw std::invalid_argument("Form field " + field.name + " has invalid bounds");
+        if (field.range && field.kind == Kind::integer
+            && (std::trunc(field.range->min) != field.range->min || std::trunc(field.range->max) != field.range->max))
+            throw std::invalid_argument("Form field " + field.name + " is an integer with fractional bounds");
         if ((field.kind == Kind::choice) == field.choices.empty())
             throw std::invalid_argument("Form field " + field.name + " must list choices exactly when it is a choice");
         std::set<std::string_view> choices;
