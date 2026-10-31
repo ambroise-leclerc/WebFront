@@ -38,13 +38,21 @@ spec expected the refusal. A wait is labelled `timeout (expected)` only for a ti
 and `cancelled (expected)` only when the spec pressed Ctrl+C; any other time limit or cancellation appears as `timeout`
 or `cancelled`. This trace comes from the specs (`test/web/developer-specs.mjs`), not from the published environment.
 
+## What the desktop jobs compile
+
+A pull request into `develop` builds the library, the tests and the test applications, with the MSVC code analysis (`/analyze`)
+off and without the examples (`WEBFRONT_MSVC_ANALYZE=OFF`, `WEBFRONT_BUILD_EXAMPLES=OFF`): about 22 % and 190 s of compiler
+time on Windows (docs/BUILD_TIME_STUDY.md). The advanced checks below turn both on again, so a warning that only the analysis
+reports, or an example that no longer compiles, is found by the weekly run, by the pull request into `master` or by a manual
+dispatch with `repeat_desktop_tests`, not by a pull request into `develop`. A local build has both by default.
+
 ## Advanced checks
 
 These run on the weekly schedule (Monday 04:23 UTC), on every pull request whose base is `master`, and on a manual
 dispatch with `repeat_desktop_tests`:
 
-- the complete desktop suite on the three desktop platforms, repeated three times with its fixtures reset on each pass,
-  including the portability tests;
+- the complete desktop suite on the three desktop platforms, built with the MSVC code analysis and the examples, repeated
+  three times with its fixtures reset on each pass, including the portability tests;
 - the `portability` job: the consumer project configured with Ninja (GCC on Linux, MSVC on Windows, Apple clang on macOS),
   with Unix Makefiles (Clang 23) and, reported but never blocking until it has run on a hosted runner, the Visual Studio
   2026 generator. There is no compiler cache: a new user compiles everything;

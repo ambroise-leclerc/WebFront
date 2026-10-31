@@ -113,7 +113,7 @@ its cost on `tests` with `-j4`:
 
 The analysis costs about 22 % of a Windows build. It is a quality gate (warnings are errors), so removing it from the
 desktop job is a decision for the maintainers, not a build-time tweak. One way to keep the gate and the speed is to run it
-in the portability job on pull requests into `master` only. **Not adopted; the option remains for measuring.**
+in the portability job on pull requests into `master` only. **Moved to the master tier** (see "What is left"); the option stays for measuring.
 
 ### The pull request that touches a core header
 

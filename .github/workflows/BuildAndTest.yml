@@ -25,6 +25,9 @@ concurrency:
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
   SCCACHE_GHA_ENABLED: 'true'
+  # The full tier of the desktop jobs (weekly, pull requests into and pushes to master, manual dispatch with repeat_desktop_tests)
+  # also runs the MSVC code analysis and compiles the examples; a pull request into develop does neither (#435, docs/BUILD_TIME_STUDY.md).
+  FULL_TIER: ${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'true' || 'false' }}
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
@@ -128,6 +131,7 @@ jobs:
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON
+          ${{ env.FULL_TIER == 'true' && '' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build
         run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 4
