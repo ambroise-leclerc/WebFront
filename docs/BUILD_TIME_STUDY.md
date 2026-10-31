@@ -208,3 +208,22 @@ The compiler-cache probe after the suite (a clean rebuild of `life_embedded`, `l
   own project, installs what it needs and listens on a port the system picks, so none holds `webfront_port_9002`; with no
   `--part` the executable plays them all in one session as before. Locally on macOS (WKWebView) the four cases other than `app`
   take 3 to 6 s each once the environment is built.
+
+### What the cut gained
+
+Pull-request runs of the same jobs, before the cut (run 41177164644) and after it (run 41184083189):
+
+| | Linux before | Linux after | Windows before | Windows after |
+|---|---|---|---|---|
+| `DeveloperBrowserIntegration` | 113 s | 56 s (`app`), 33, 31, 30 and 17 s for the others | 38 s | 22 s (`app`), 15, 14 and 13 s for the others |
+| Dependency chain | 186 s | 130 s | 104 s | 89 s |
+| Worker time (sum of cases) | 671 s | 735 s | 636 s | 665 s |
+| Suite wall time | 194 s | 195 s | 162 s | 212 s |
+
+The chain is shorter, as intended, and the suite is no faster: with four workers the suite is bound by its worker time divided by
+four (735 s / 4 = 184 s on Linux, a lower bound of 184 s against a wall time of 195 s), not by its chain. The parts add worker time
+(each repeats the bootstrap, `wf create` and `wf init`, and five browsers contend for four cores), and the Windows wall time moved
+by more than the runner-to-runner spread. The cut pays when more cores are available (a larger runner, a developer machine) and
+it makes a failing part easier to run alone; on a 4-vCPU hosted runner the only way to shorten the suite further is to remove
+worker time. The largest cases on Linux are `AutomationMcpWindow` (62 s), `SelfBuildSession` (59 s), `SelfBuildRefresh` (34 s)
+and `JourneyBuildSession` (31 s).
