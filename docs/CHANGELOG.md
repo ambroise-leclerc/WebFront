@@ -15,6 +15,9 @@
   dash, and gives the command its own process group (`setsid`, or a walk of its descendants) where the shell has no job
   control. `docs/BUILD_TIME_STUDY.md` holds the measurements and the decisions.
 
+- Include `developer_integration` in the documented Linux CEF build commands (#434), preparing the developer journey
+  and its dependent Life tests. Check the browser targets in both guides and CI with `NewcomerDocsMatchExamples`.
+
 - Prefix WebFront's test options (#412): `WEBFRONT_ENABLE_TESTING`, `WEBFRONT_ENABLE_FUZZING`,
   `WEBFRONT_ENABLE_COVERAGE` and `WEBFRONT_ENABLE_SANITIZER_{ADDRESS,LEAK,UNDEFINED_BEHAVIOR,THREAD,MEMORY}` replace
   the unprefixed `ENABLE_*` names (still `OFF` by default). A parent project's own generic variables no longer build

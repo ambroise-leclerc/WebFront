@@ -82,8 +82,9 @@ Registry order determines the initial cache default: the first enabled embedded 
 - `navigation-allow-list`: permit the same top-level destination through the explicit navigation allow-list.
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
-`web-integration` label and the same port lock as Jasmine. Linux CEF and WebKitGTK cases use Xvfb. Build `webtest`
-to build both shared runners on a validated test platform, or build all targets to include engine-specific runners as well. Run
+`web-integration` label and the same port lock as Jasmine. Linux CEF and WebKitGTK cases use Xvfb. On Linux CEF, run
+`cmake --build <build> --target webtest developer_integration webfront-wf --parallel` to prepare the complete browser suite.
+For other validated test platforms, build all targets to include engine-specific runners as well. Run
 `ctest --test-dir <build> -L web-integration --output-on-failure` for the complete browser suite.
 A missing Xvfb skips both shared suites. A new frontend inherits this coverage through its registry
 entry; no engine-specific lifecycle runner is required.
