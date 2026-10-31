@@ -59,7 +59,7 @@ ctest --test-dir build --output-on-failure --parallel 4
 # of the local npm registry; the tests build the rest with wf
 cmake -S . -B build-cef -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_ENABLE_TESTING=ON
-cmake --build build-cef --target webtest webfront-wf --parallel
+cmake --build build-cef --target webtest developer_integration webfront-wf --parallel
 ctest --test-dir build-cef -L web-integration --output-on-failure --parallel 4
 
 ```
