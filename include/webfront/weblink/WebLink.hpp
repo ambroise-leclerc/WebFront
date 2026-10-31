@@ -32,6 +32,8 @@
 namespace webfront {
 
 using WebLinkId = uint16_t;
+/// Serial number of a connection, never reused (0 is assigned to none): tells apart the connections that share an identifier over time.
+using WebLinkGeneration = uint64_t;
 
 struct WebLinkEvent {
     enum class Code { linked, closed, cppFunctionCalled };
@@ -203,6 +205,14 @@ public:
 
     void sendCommand(const auto& message) { ws->write(message.header(), message.payload()); }
     void sendFrame(websocket::Frame<Net> frame) { ws->write(std::move(frame)); }
+    /// A frame shared with other links (websocket::Frame::share()), never copied.
+    void sendFrame(std::shared_ptr<const websocket::Frame<Net>> frame) {
+        ws->write(std::move(frame));
+    }
+    /// Keeps at most `maxPending` frames of `key` queued and only the latest of the others: see WebSocket::writeLatest.
+    void sendLatest(std::shared_ptr<const websocket::Frame<Net>> frame, std::string_view key, std::size_t maxPending) {
+        ws->writeLatest(std::move(frame), key, maxPending);
+    }
 
     template<typename Result>
     std::pair<msg::CallId, std::future<Result>> expectResult() {

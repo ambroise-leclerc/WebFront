@@ -28,7 +28,7 @@ list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServe
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
-list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
+list(APPEND TESTS_LIST BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
 list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
@@ -57,7 +57,7 @@ set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "UNITY_BUILD_BATCH_SIZE of the test
 option(WEBFRONT_TEST_UNITY_HEAVY "Group only the heavy translation units of the tests target" OFF)
 option(WEBFRONT_TEST_PCH "Precompiled headers for the heavy units of the tests target" OFF)
 # The heavy units instantiate a full application; the others are light and keep the regular build.
-set(_heavy WebFrontTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
+set(_heavy WebFrontTests BroadcastTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
     AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
 if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
   set_target_properties(tests PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE ${WEBFRONT_TEST_UNITY_BATCH})

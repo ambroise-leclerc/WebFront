@@ -552,7 +552,7 @@ SCENARIO("BasicWF provides the application facilities of commands") {
     GIVEN("an application over the networking mock") {
         RealApp app(WebFrontConfig{.port = "0"});
         THEN("browsers have identifiers and disconnections can be subscribed to") {
-            CHECK(RealApp::UI(app, 5).id() == 5);
+            CHECK(RealApp::UI(app, 5, 1).id() == 5);
             auto subscription = app.subscribeUIClosed([](RealApp::UI) { });
             CHECK(subscription.active());
         }
@@ -563,7 +563,7 @@ SCENARIO("BasicWF provides the application facilities of commands") {
             CHECK(app.cppFunction("another", [] { return 0; }));
         }
         THEN("calls to a browser that is gone are dropped, and typed calls fail") {
-            const RealApp::UI gone(app, 42);
+            const RealApp::UI gone(app, 42, 1);
             CHECK(app.connectedBrowsers() == 0);
             CHECK_NOTHROW(gone.jsFunction("console.log")("dropped"));
             auto result = gone.jsFunction<int>("Math.abs")(-1);

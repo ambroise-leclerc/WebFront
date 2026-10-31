@@ -2,13 +2,33 @@
 
 ## Unreleased
 
-- Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 12 heavy unit-test files in
+- Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 13 heavy unit-test files in
   groups of four (`WEBFRONT_TEST_UNITY_BATCH`, `WEBFRONT_TEST_UNITY_HEAVY`; the default build keeps one object per file),
   `JourneyEmbeddedBuild` and `LifeEmbeddedBuild` no longer hold the `webfront_port_9002` lock while they compile, and
   `RunWithDeadline.sh` returns when its command does instead of at the deadline, which took 30 s from each of the six
   `ConsumerJasmine-*` cases under dash. It also gives the command its own process group when the shell has no job
   control. `WEBFRONT_MSVC_ANALYZE` (default ON) and `WEBFRONT_TEST_PCH` exist to measure `/analyze` and precompiled headers.
   The `Build time study` workflow and `docs/BUILD_TIME_STUDY.md` hold the measurements and the decisions.
+
+- Reject a stale `UI` after its connection identifier is reused (#428): each connection gets a 64-bit
+  generation, never reused, kept in the application next to its link. `UI`, `JsFunction` and
+  `JsFunctionSender` carry it with the 16-bit identifier, so a value kept after its connection closed finds no
+  link even once a later browser receives the same `id()`: calls are dropped, typed calls fail,
+  `addScript` throws `ConnectionError`, `pendingWrites()` is 0, and the value equals no later connection's.
+  `operator==` compares application, identifier and generation. Removing kept values in `subscribeUIClosed`
+  becomes a recommendation, not a safety requirement. The generation never crosses the wire: no change to the
+  binary format or `WebFront.js`. The public constructors of `UI`, `JsFunction` and `JsFunctionSender` take the
+  generation as an extra argument, so code that builds one by hand no longer compiles: use the `UI` that
+  `onUIStarted`, `subscribeUIStarted` or a callback hands over.
+
+- Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
+  whose `onUIStarted` handlers have returned, from any thread, with no table of browsers kept by the
+  application. A broadcast made while those handlers run follows what they sent. Each call is encoded
+  once into a frame shared by every browser. `BroadcastOptions::maxPendingWrites` holds a call back
+  for a browser that has that many calls of the function waiting, and keeps only the latest for it,
+  in the browser's connection; such a held call may follow other functions' later calls. `forEachUI`
+  skips a starting browser, so states go through `broadcast`. Document the threads of callbacks and
+  browser calls ([threads](ASYNC_EXECUTION.md#threads)). No wire format change.
 
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
   waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
