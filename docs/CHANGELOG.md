@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-31
+
 - Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
   `react::Store::flush()`, where the check throws first, as a call on a null pointer (`-Werror=nonnull`), and the unit
   tests did not compile. The store now reaches its state through a checked reference. As GCC only runs this analysis
