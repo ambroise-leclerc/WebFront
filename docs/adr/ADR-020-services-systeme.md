@@ -4,12 +4,12 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
 **Proposée** le **2026-10-31**. Aucun code n'est livré avec cette version : elle fixe le cadre des services
-système avant l'implémentation du premier d'entre eux (sélection de fichiers). Elle passera à « Acceptée » quand les
+système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). Elle passera à « Acceptée » quand les
 critères de la section dédiée seront démontrés.
 
 ## Contexte
@@ -41,7 +41,18 @@ différentes.
 
 - Le serveur HTTP ne traite que `GET` et `HEAD` ; les écritures passent par le pont, par morceaux séquentiels
   (modèle de l'installation `wf`, ADR-010).
-- Les chaînes du pont sont bornées à 65 535 octets ; les tableaux typés transportent des octets (ADR-003).
+- Les chaînes du pont sont bornées à 65 535 octets par leur en-tête (longueur sur 16 bits, `maxStringBytes`) ; ce
+  n'est pas une limite de WebSocket. Les tableaux typés ont une longueur sur 32 bits et un message est borné à 64 Mio
+  par défaut (`BuffersPolicy`). Le pont ne transporte ni liste de chaînes ni liste d'enregistrements, et un rejet ne
+  porte qu'un message (ADR-003, ADR-004).
+- `cppFunction` encode immédiatement le résultat du callback et `webfront::Task` (`ex::task<void>`) n'est pas un
+  template : un callback ne peut pas différer sa réponse jusqu'à la fin d'une coroutine, d'un dialogue ou d'une lecture.
+- Un fournisseur (ADR-002) ne voit que `open(path)` et rend un `fs::File` ; il ne voit ni la requête (`Range`), ni la
+  connexion, ni des jetons émis à l'exécution. Le serveur copie le fichier entier dans la réponse avant l'envoi
+  (`readFile`) : la mémoire croît avec la taille du fichier, ce qui interdit les gros fichiers sur cible embarquée.
+- Une connexion `UI` n'est associée à aucune vue : rien ne distingue la page d'un frontend intégré d'un autre client.
+- Aucun frontend n'expose son thread d'interface ni sa fenêtre native ; avec le navigateur système, aucune boucle de
+  toolkit ne tourne sur le thread principal.
 - Aucun adaptateur ne traite `<input type="file">` : ni `WKUIDelegate runOpenPanelWithParameters` pour WKWebView (sans
   lui, l'élément ne fait rien sous macOS), ni `CefDialogHandler` pour CEF, ni le signal `run-file-chooser` de WebKitGTK
   (son gestionnaire par défaut ouvre un dialogue GTK). WebView2 affiche le dialogue du système par lui-même. Ce
@@ -164,8 +175,12 @@ Le code C++ de l'application, lui, reçoit l'autorisation complète : il fait pa
 Un service de fichiers déclare ses backends dans un ordre de préférence ; pour chaque appel, le premier **utilisable
 pour cette connexion** est retenu :
 
-1. **Natif** — utilisable seulement si le client est local (frontend intégré, ou navigateur système sur boucle locale
-   pour la même session utilisateur) et si l'hôte a un affichage. Windows : `IFileOpenDialog`/`IFileSaveDialog` ;
+1. **Natif** — utilisable seulement si la connexion est **associée explicitement à la vue d'un frontend intégré** de
+   l'application (secret propre au lancement, présenté par la vue lors de la poignée de main) et si l'hôte a un
+   affichage. Une adresse de boucle locale ne suffit jamais : un navigateur distant derrière un proxy local ou un
+   tunnel, ou un autre utilisateur de la machine, y arrivent aussi. Avec le navigateur système, aucune association
+   n'est possible ; le natif n'y est utilisable que par une configuration de confiance explicite de l'application,
+   documentée comme non sûre sur une machine partagée. Windows : `IFileOpenDialog`/`IFileSaveDialog` ;
    macOS : `NSOpenPanel`/`NSSavePanel` par le runtime Objective-C déjà employé par WKWebView ; Linux : **portail XDG**
    `org.freedesktop.portal.FileChooser` par D-Bus, puis GTK quand WebKitGTK est déjà lié ; Android et iOS : sélecteurs du
    système, lors de leurs frontends. Le dialogue s'ouvre sur le thread de l'interface, avec la fenêtre de l'adaptateur
@@ -187,27 +202,40 @@ lève).
 
 ### 4. Le contenu des fichiers ne passe pas par des chaînes du pont
 
-- Lecture : une poignée produit une URL `GET` à **jeton à usage unique ou à durée courte**, liée à la connexion, servie
-  par un fournisseur dédié (ADR-002) qui gère `Range` et le type MIME ; le contenu peut alimenter `<img>`, `fetch` ou un
-  téléchargement.
+- Lecture : une poignée produit une URL `GET` à **jeton à usage unique ou à durée courte**, liée à la connexion ; le
+  contenu peut alimenter `<img>`, `<video>`, `fetch` ou un téléchargement. Un fournisseur de l'ADR-002 ne suffit pas :
+  il ne voit ni la requête ni les jetons. Cette lecture exige une **extension du traitement HTTP** : des routes
+  dynamiques dont le gestionnaire reçoit la requête complète et produit statut, en-têtes et corps ; un envoi **en flux**
+  par morceaux bornés, à la place de la copie du fichier entier dans la réponse, pour que la mémoire ne dépende pas de
+  la taille du fichier, sur poste comme sur cible embarquée ; les plages `Range`/`206`/`Content-Range` traitées par le
+  serveur sur un `fs::File` capable de se positionner, ou par le gestionnaire de la route.
 - Écriture : tant que le serveur ne traite que `GET`/`HEAD`, par morceaux de tableaux typés sur le pont, écrits dans un
   fichier temporaire puis validés par renommage, comme l'installation `wf` (ADR-010). L'ajout de `PUT`/`POST` au serveur
   relèvera de sa propre décision.
-- Listage : paginé, chaque élément borné par les limites de l'ADR-003 ; pas de type filaire nouveau tant que les
-  tuples et chaînes existants suffisent.
+- Listage : paginé, par un type filaire « liste » de chaînes et de tuples à ajouter à l'ADR-003 ; le codage d'une
+  liste en JSON dans une chaîne est écarté.
 
 ### 5. Appels depuis C++ et depuis JavaScript
 
-Esquisse ; les noms ne sont pas contractuels avant l'implémentation :
+Esquisse ; les noms ne sont pas contractuels avant l'implémentation. `cppFunction` répond aujourd'hui dès le retour
+du callback : la forme ci-dessous suppose la **réponse différée** des préalables (un callback qui renvoie une tâche à
+résultat, `ex::task<R>`). La Promise JavaScript se résout quand la tâche se termine, avec la valeur encodée ; elle se
+rejette si la tâche lève (message et code d'erreur typé) ou se termine arrêtée (code d'annulation), et à la
+déconnexion, qui demande l'arrêt de la tâche et écarte sa réponse.
 
 ```cpp
-webfront::services::Files files{app, {.roots = {{"Données", app.dataDirectory()}}, .backends = Backends::automatic}};
+webfront::services::Files files{app, {.roots = {{"Données", dataDirectory}}, .backends = Backends::automatic}};
 
-app.cppFunction("importer", [&](App::UI ui) -> webfront::Task<void> {
+app.cppFunction("importer", [&](App::UI ui) -> ex::task<int> {
     auto picked = co_await files.open(ui, {.title = "Importer", .filters = {{"Images", {"*.png", "*.jpg"}}}});
     for (auto& grant : picked) load(grant.path());   // C++ : autorisation complète
+    co_return static_cast<int>(picked.size());       // résout la Promise de la page
 });
 ```
+
+Sans cette extension, une application peut seulement lancer le travail avec `ui.spawn(task)` et répondre aussitôt ;
+la Promise se résout alors avant la fin du dialogue, et le résultat comme les erreurs doivent revenir par un appel
+`ui.jsFunction` séparé. Cette forme dégradée ne sert pas de contrat aux services.
 
 ```ts
 import { files } from "@webfront/services/files";
@@ -226,6 +254,24 @@ Avant tout service nouveau, chaque adaptateur doit traiter le sélecteur standar
 WKWebView, `CefDialogHandler` ou l'implémentation par défaut qualifiée pour CEF, le signal `run-file-chooser` (portail
 sous Wayland/Flatpak) pour WebKitGTK, la gestion de WebView2 vérifiée. Un scénario de la suite partagée l'atteste.
 C'est le service minimal qu'attend tout développeur web, et il est gratuit pour les fichiers du client.
+
+## Préalables
+
+Le code vérifié le 2026-10-31 ne permet pas encore d'implémenter ces règles. Les préalables sont regroupés en cinq
+épiques, dans l'ordre ; les étapes 1 et 2 sont indépendantes et peuvent avancer en parallèle.
+
+| Étape | Épique | Tâches | Débloque |
+| --- | --- | --- | --- |
+| 1 | [#446](https://github.com/ambroise-leclerc/WebFront/issues/446) Comportements web standard dans les frontends intégrés | [#451](https://github.com/ambroise-leclerc/WebFront/issues/451) `<input type="file">` et téléchargements ; [#452](https://github.com/ambroise-leclerc/WebFront/issues/452) `alert`/`confirm`/`prompt` | fichiers du client (règle 6) ; corrige un défaut existant |
+| 2 | [#447](https://github.com/ambroise-leclerc/WebFront/issues/447) Connexions et routes du serveur HTTP | [#453](https://github.com/ambroise-leclerc/WebFront/issues/453) association explicite d'une `UI` à la vue d'un frontend ; [#454](https://github.com/ambroise-leclerc/WebFront/issues/454) routes dynamiques et envoi en flux ; [#455](https://github.com/ambroise-leclerc/WebFront/issues/455) `Range` (206) | choix du backend (règle 3), lecture par jeton (règle 4) |
+| 3 | [#448](https://github.com/ambroise-leclerc/WebFront/issues/448) Types et contrats du pont | [#456](https://github.com/ambroise-leclerc/WebFront/issues/456) chaînes longues (32 bits) ; [#457](https://github.com/ambroise-leclerc/WebFront/issues/457) listes de chaînes et de tuples ; [#458](https://github.com/ambroise-leclerc/WebFront/issues/458) erreurs typées ; [#459](https://github.com/ambroise-leclerc/WebFront/issues/459) réponse différée des callbacks C++ | listages (règle 4), appels (règle 5) |
+| 4 | [#449](https://github.com/ambroise-leclerc/WebFront/issues/449) Stockage modifiable et livraison des services | [#460](https://github.com/ambroise-leclerc/WebFront/issues/460) stockage sous racines déclarées (révision de l'ADR-002) ; [#461](https://github.com/ambroise-leclerc/WebFront/issues/461) paquet `@webfront/services` | sélecteur HTML et écritures (règles 2 à 4) |
+| 5 | [#450](https://github.com/ambroise-leclerc/WebFront/issues/450) Intégration native des frontends | [#462](https://github.com/ambroise-leclerc/WebFront/issues/462) exécuteur du thread d'interface, y compris le navigateur système ; [#463](https://github.com/ambroise-leclerc/WebFront/issues/463) fenêtre native et correspondance avec les connexions | backend natif seulement |
+
+Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
+épique ; les dialogues natifs suivront l'étape 5. `PUT`/`POST` ne sont pas des préalables : les écritures passent par
+des tableaux typés en morceaux ; leur ajout au serveur, utile aux très gros envois en flux et aux formulaires sans
+JavaScript vers un équipement, relèvera de sa propre décision.
 
 ## Autres services du système
 
@@ -257,17 +303,20 @@ autorisations explicites, backend par connexion).
 
 ## Critères d'acceptation
 
-1. **Préalable** : `<input type="file">`, `alert`/`confirm` et un téléchargement fonctionnent dans CEF, WebView2,
+0. **Préalables** : les épiques #446 à #450 nécessaires au backend concerné sont terminées.
+1. **Comportements web standard** : `<input type="file">`, `alert`/`confirm` et un téléchargement fonctionnent dans CEF, WebView2,
    WKWebView et WebKitGTK ; scénario de la suite partagée, sélection simulée par le moteur quand il le permet.
 2. **Sélecteur HTML** : listage paginé borné, refus de toute sortie des racines (`..`, liens symboliques, chemins
    absolus, noms Windows réservés : `SafePath`), poignée inutilisable par une autre connexion, jeton expiré refusé,
    écriture atomique ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
-3. **Choix du backend** : client distant → jamais natif ; sans racine → pas de HTML ; annulation → liste vide ; aucun
+3. **Choix du backend** : connexion non associée à la vue d'un frontend → jamais natif, y compris depuis la boucle
+   locale (tunnel, autre utilisateur) ; sans racine → pas de HTML ; annulation → liste vide ; aucun
    backend → erreur documentée côté C++ et JavaScript ; backends simulés pour les tests.
 4. **Natif** : un backend au moins par plateforme de bureau (portail XDG sous Linux), vérifié manuellement et par un
    test de construction ; dialogue sur le thread de l'interface, parent connu avec un frontend intégré ; fermeture de
    l'application pendant un dialogue ouvert sans blocage ni accès après destruction.
-5. **Lecture par jeton** : `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL.
+5. **Lecture par jeton** : `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
+   mémoire du serveur indépendante de la taille du fichier servi.
 6. **Ressources** : aucune ressource ajoutée au cœur (cas `MinimalCoreAssets`) ; sélecteur HTML chargé seulement si le
    service est instancié.
 7. Documentation `docs/SERVICES.md` : backends par configuration, limites, absence d'isolation (ADR-008 inchangée).
@@ -287,8 +336,11 @@ autorisations explicites, backend par connexion).
 - **Lancer `zenity`, `kdialog` ou `osascript`** : dépend des programmes installés, sensible à l'injection de commandes.
 - **Dépendre de Qt, GTK ou d'une bibliothèque compilée dans le cœur** : contraire au cœur en en-têtes (ADR-001) et au
   parcours par défaut sans dépendance (ADR-007) ; reste possible derrière le concept de backend, côté application.
-- **Transporter le contenu des fichiers en chaînes du pont** : limité à 64 Kio, coûteux en mémoire ; HTTP et les
-  tableaux typés par morceaux conviennent.
+- **Transporter le contenu des fichiers en chaînes du pont** : une chaîne est bornée à 64 Kio par son en-tête (pas par
+  WebSocket), un message entier à 64 Mio, et la conversion coûte en mémoire ; la lecture HTTP en flux et l'écriture par
+  tableaux typés en morceaux conviennent.
+- **Déduire la session locale de l'adresse réseau** : un tunnel, un proxy local ou un autre utilisateur de la machine
+  arrivent sur la boucle locale ; seule l'association explicite à la vue d'un frontend fait foi.
 
 ## Conséquences
 
@@ -301,14 +353,17 @@ autorisations explicites, backend par connexion).
   sur l'arborescence de l'hôte.
 - **Risque :** le contrôle d'origine (ADR-008) reste la seule frontière du pont ; un script admis peut ouvrir des
   dialogues et lire les fichiers accordés. Les autorisations limitent la portée, pas la confiance.
-- **Risque :** la détection « client local » se fonde sur le frontend et l'adresse de la connexion ; une erreur de
-  détection ouvrirait un dialogue sur l'écran de l'hôte. Le défaut en cas de doute est HTML.
+- **Risque :** la configuration de confiance du navigateur système réintroduit la déduction par adresse ; elle reste
+  explicite, désactivée par défaut et documentée comme non sûre. Sans association, le défaut est HTML.
 
 ## Prescriptions d'implémentation et de génération de code
 
 - Ne jamais transmettre à JavaScript un chemin de l'hôte sans demande explicite de l'application ; ne jamais accepter
   de JavaScript un chemin à ouvrir : seulement une poignée émise pour cette connexion.
 - Résoudre tout chemin sous une racine avec les règles de `SafePath`, après résolution des liens symboliques.
+- Ne jamais fonder une autorisation sur l'adresse de la connexion ; seule l'association à la vue d'un frontend, ou la
+  configuration de confiance explicite, rend le backend natif utilisable.
+- Servir le contenu des fichiers en flux borné, jamais par copie complète en mémoire.
 - Ouvrir les dialogues natifs sur le thread de l'interface, avec le parent de l'adaptateur quand il existe ; la tâche
   qui attend le résultat est possédée et annulable (ADR-006).
 - Préférer le portail XDG sous Linux ; ne pas lancer de programme externe pour afficher un dialogue.
