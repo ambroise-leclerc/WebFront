@@ -131,7 +131,8 @@ containing the packed grid, generation and population. Each browser owns a separ
 simulation, released on disconnect. The original Life starter remains available.
 
 Build the `WebFrontLifeReact` CMake target and run it with a writable copy of
-`main.tsx` and `webfront.project.json` from that directory as its project argument.
+`main.tsx` and `webfront.project.json` from that directory as its project argument
+(without argument it uses `./life-project`, created when missing).
 In its terminal, run `wf install`, then `wf preview`. The configured registry must
 carry `@webfront/react@0.1.0`; this change prepares the archive but does not publish
 to npm. The repository's test registry already carries the package. For a local
