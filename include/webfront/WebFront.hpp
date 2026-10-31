@@ -4,6 +4,7 @@
 /// @brief WebFront UI main objet
 #pragma once
 
+#include "Broadcast.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
@@ -20,6 +21,7 @@
 #include "weblink/WebLink.hpp"
 
 #include <chrono>
+#include <concepts>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -34,26 +36,46 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace webfront {
 
-inline constexpr std::string_view version = "0.5.0";
+inline constexpr std::string_view version = "0.6.0";
+
+namespace testing {
+/// Test-only access to the connection identifiers of an application; not part of the API.
+template <typename Application>
+struct ConnectionIds;
+}  // namespace testing
 
 using NetProvider     = networking::TCPStdnet;
 using ConnectionError = std::runtime_error;
 
 template <typename WebFront>
 class BasicUI {
-    WebFront& webFront;
+    WebFront* webFront; ///< Never null: the only constructor takes a reference, and there is no default constructor.
     WebLinkId webLinkId;
+    WebLinkGeneration generation;
 
 public:
-    BasicUI(WebFront& wf, WebLinkId id) : webFront(wf), webLinkId(id) {}
+    BasicUI(WebFront& wf, WebLinkId id, WebLinkGeneration connectionGeneration) : webFront(&wf), webLinkId(id), generation(connectionGeneration) {}
 
     /// Identifies this browser's connection among those connected. The 16-bit identifier of a released connection
-    /// is only reused after 65,536 later connections.
+    /// is reused after 65,536 later connections; the value also carries the connection's generation, which is never
+    /// reused, so id() alone does not tell two connections apart over time: compare values instead.
     [[nodiscard]] WebLinkId id() const noexcept {
         return webLinkId;
+    }
+
+    /// Two values are equal when they belong to the same application, have the same id() and the same connection
+    /// generation. A value never refers to a connection other than its own: once that connection closes, the value
+    /// reaches no browser (calls are dropped, typed calls fail, pendingWrites() is 0), even after its identifier is
+    /// reused, and it equals no later connection's value. Removing values in subscribeUIClosed is still advisable, to
+    /// free them and keep stale ones out of an "authorized clients" list. A value must not outlive its application:
+    /// comparing or using it afterwards reads a dangling application address, whose result is meaningless. Assigning a
+    /// value is not atomic: a container of values shared between threads needs a lock.
+    [[nodiscard]] friend bool operator==(const BasicUI& a, const BasicUI& b) noexcept {
+        return a.webFront == b.webFront && a.webLinkId == b.webLinkId && a.generation == b.generation;
     }
 
     /**
@@ -62,7 +84,7 @@ public:
      * @param script
      */
     void addScript(std::string_view script) const {
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront->findLink(webLinkId, generation);
         if (!link)
             throw ConnectionError("Connection with client lost");
         link->sendCommand(msg::TextCommand(msg::TxtOpcode::injectScript, script));
@@ -70,7 +92,7 @@ public:
 
     /// Queues one DOM command on the bridge context. Rejections arrive at wfDom.rejected(batchId, reason).
     void sendDomBatch(const msg::DomBatch& batch) const {
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront->findLink(webLinkId, generation);
         if (!link) throw ConnectionError("Connection with client lost");
         link->sendCommand(batch);
     }
@@ -84,13 +106,13 @@ private:
     template <typename>
     friend class dom::Document;
     [[nodiscard]] auto domState() const {
-        return webFront.domState(webLinkId);
+        return webFront->domState(webLinkId, generation);
     }
 
 public:
     /// The frames queued for this browser and not yet written to the network; 0 once its connection is gone.
     [[nodiscard]] std::size_t pendingWrites() const {
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront->findLink(webLinkId, generation);
         return link ? link->pendingWrites() : 0;
     }
 
@@ -101,37 +123,37 @@ public:
      * @return JsFunction<WebFront>
      */
     [[nodiscard]] JsFunction<WebFront> jsFunction(std::string_view functionName) const {
-        return JsFunction{functionName, webFront, webLinkId};
+        return JsFunction{functionName, *webFront, webLinkId, generation};
     }
 
     template <typename R>
     [[nodiscard]] JsFunction<WebFront, R> jsFunction(std::string_view functionName) const {
-        return JsFunction<WebFront, R>{functionName, webFront, webLinkId};
+        return JsFunction<WebFront, R>{functionName, *webFront, webLinkId, generation};
     }
 
     /** @brief Starts a coroutine owned by the application; the returned handle can cancel it. */
     TaskHandle spawn(Task task) const {
-        return webFront.spawn(std::move(task));
+        return webFront->spawn(std::move(task));
     }
 
     /// A sender completing once at most `limit` frames await the network for this browser, or at once when it is gone;
     /// co_await propagates the task's stop token. It paces output to a browser that reads slower than it is written.
     [[nodiscard]] auto writesAtMost(std::size_t limit) const {
-        using Link = typename decltype(webFront.findLink(webLinkId))::element_type;
-        return detail::WritesAtMost<Link>{webFront.findLink(webLinkId), limit};
+        using Link = typename decltype(webFront->findLink(webLinkId, generation))::element_type;
+        return detail::WritesAtMost<Link>{webFront->findLink(webLinkId, generation), limit};
     }
 
     /// A sender completing on the server context after the duration; see BasicWF::resumeAfter.
     template <typename Rep, typename Period>
     [[nodiscard]] auto resumeAfter(std::chrono::duration<Rep, Period> duration) const {
-        return webFront.resumeAfter(duration);
+        return webFront->resumeAfter(duration);
     }
 
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
     /// stops waiting locally; a JavaScript function already dispatched keeps running.
     template <typename R = void>
     [[nodiscard]] JsFunctionSender<WebFront, R> jsFunctionSender(std::string_view functionName) const {
-        return JsFunctionSender<WebFront, R>{functionName, webFront, webLinkId};
+        return JsFunctionSender<WebFront, R>{functionName, *webFront, webLinkId, generation};
     }
 };
 
@@ -348,19 +370,21 @@ public:
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
-            WebLinkId id{};
+            WebLinkId         id{};
+            WebLinkGeneration generation{};
             {
                 std::scoped_lock lock{linksMutex};
                 while (webLinks.contains(idsCounter))
                     ++idsCounter;
-                id = idsCounter++;
+                id         = idsCounter++;
+                generation = ++generationCounter;
             }
             auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
                 onEvent(event);
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{link, std::this_thread::get_id(), false});
+                webLinks.emplace(id, Connection{.link = link, .generation = generation, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -370,6 +394,10 @@ public:
     // loopback-by-default WebFrontConfig constructor above.
     explicit BasicWF(std::string_view port, std::filesystem::path docRoot = ".")
         : BasicWF(WebFrontConfig{.address = "0.0.0.0", .port = std::string(port), .documentRoot = std::move(docRoot)}) {}
+
+    // Each UI and the server callbacks hold the application's address: it never moves.
+    BasicWF(const BasicWF&)            = delete;
+    BasicWF& operator=(const BasicWF&) = delete;
 
     /** @brief The listening port, including the OS-assigned TCPStdnet port when configured with "0". */
     std::string_view port() const noexcept { return httpPort; }
@@ -439,23 +467,77 @@ public:
         return uiClosedSubscribers->subscribe(std::move(handler));
     }
     /// The link of a connected browser, shared with the caller so that it stays valid while used, from any thread;
-    /// null once its connection closed and was released.
-    [[nodiscard]] std::shared_ptr<WebLink<Net, Policy>> findLink(WebLinkId id) const {
+    /// null once its connection closed and was released, or when `id` now belongs to a later connection (another generation).
+    [[nodiscard]] std::shared_ptr<WebLink<Net, Policy>> findLink(WebLinkId id, WebLinkGeneration generation) const {
         std::scoped_lock lock{linksMutex};
         const auto       found = webLinks.find(id);
-        return found == webLinks.end() ? nullptr : found->second.link;
+        return found == webLinks.end() || found->second.generation != generation ? nullptr : found->second.link;
     }
 
 private:
     template <typename>
     friend class BasicUI;
+    template <typename>
+    friend class Broadcast;
+    template <typename>
+    friend struct testing::ConnectionIds;  // lets a test start the identifiers near their wrap
+
+    /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
+    /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
+    /// limit, and sent on the server thread as soon as they return, after what they sent and in the order of the calls.
+    /// Returns once `call` is queued or kept for every browser: a call that follows it (same thread, or synchronized
+    /// after it) comes after it. Overlapping calls are not ordered: holding linksMutex while writing would not order
+    /// them either, and would hold a WebFront lock while the write starts.
+    void sendToStartedLinks(const detail::BroadcastCall<Net>& call) {
+        std::vector<std::shared_ptr<WebLink<Net, Policy>>> started;
+        {
+            std::scoped_lock lock{linksMutex};
+            started.reserve(webLinks.size());
+            for (auto& [id, connection] : webLinks) {
+                if (connection.closed)
+                    continue;
+                if (connection.stage == Connection::Stage::started)
+                    started.push_back(connection.link);
+                else if (connection.stage == Connection::Stage::starting)
+                    call.deferInto(connection.deferred);
+            }
+        }
+        // A browser whose send fails must not deprive the next ones of the call.
+        for (const auto& link : started) {
+            try {
+                call.sendTo(*link);
+            } catch (const std::exception& error) {
+                log::error("A broadcast to a browser failed: {}", error.what());
+            }
+        }
+    }
+
+    /// The generation of the connection that now owns `id`: 0, which no connection has, when none does.
+    WebLinkGeneration generationOf(WebLinkId id) const {
+        return linkAndGeneration(id).second;
+    }
+
+    /// The link and generation of the connection that now owns `id`, read under one lock (null and 0 when none does).
+    std::pair<std::shared_ptr<WebLink<Net, Policy>>, WebLinkGeneration> linkAndGeneration(WebLinkId id) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        if (found == webLinks.end())
+            return {nullptr, WebLinkGeneration{0}};
+        return {found->second.link, found->second.generation};
+    }
+
+    /// The UI of the connection that now owns `id` (generation 0, reaching nothing, when none does).
+    UI uiOf(WebLinkId id) {
+        return UI{*this, id, generationOf(id)};
+    }
+
     /// Internal DOM document storage, confined to the server thread.
-    std::shared_ptr<dom::detail::State> domState(WebLinkId id) {
+    std::shared_ptr<dom::detail::State> domState(WebLinkId id, WebLinkGeneration generation) {
         std::shared_ptr<WebLink<Net, Policy>> link;
         {
             std::scoped_lock lock{linksMutex};
             const auto       found = webLinks.find(id);
-            if (found == webLinks.end() || found->second.closed)
+            if (found == webLinks.end() || found->second.generation != generation || found->second.closed)
                 throw ConnectionError("Connection with client lost");
             if (found->second.thread != std::this_thread::get_id())
                 throw std::logic_error("DOM document requires the server thread");
@@ -471,9 +553,9 @@ private:
                 throw ConnectionError("Connection with client lost");
             connection->sendCommand(batch);
         };
-        state->schedule = [this, id, weak = std::weak_ptr(state)] {
+        state->schedule = [this, id, generation, weak = std::weak_ptr(state)] {
             if (auto shared = weak.lock())
-                static_cast<void>(spawn(flushDomAfter(UI{*this, id}, std::move(shared))));
+                static_cast<void>(spawn(flushDomAfter(UI{*this, id, generation}, std::move(shared))));
         };
         // Called under the document's release lock, which close() takes before the application releases it.
         state->post = [this, weak = std::weak_ptr(state)] {
@@ -484,10 +566,34 @@ private:
     }
 
 public:
-    /// The browsers connected now: a closed connection is released shortly after its closure.
+    /// The browsers connected now: a closed connection is released shortly after its closure. Counts connections still
+    /// in their handshake or onUIStarted handlers too: not the number of browsers a broadcast or forEachUI reaches.
     [[nodiscard]] std::size_t connectedBrowsers() const {
         std::scoped_lock lock{linksMutex};
         return webLinks.size();
+    }
+
+    /// Calls `function(ui)` for each browser not reported closed whose onUIStarted handlers had returned when the call
+    /// started; a browser whose handlers are running is not visited. Callable from any thread; `function` runs on the
+    /// calling thread, outside every WebFront lock, so it may call the UI, but ui.document() needs the server thread.
+    /// A starting browser that is skipped misses the call: send states that every browser must follow with broadcast().
+    template <std::invocable<UI> Function>
+    void forEachUI(Function&& function) {
+        std::vector<UI> started;
+        {
+            std::scoped_lock lock{linksMutex};
+            for (const auto& [id, connection] : webLinks)
+                if (!connection.closed && connection.stage == Connection::Stage::started)
+                    started.emplace_back(*this, id, connection.generation);
+        }
+        for (const auto& ui : started)
+            std::invoke(function, ui);
+    }
+
+    /// A function object calling `functionName` on every started browser, fire-and-forget, from any thread; see
+    /// BroadcastOptions for slow browsers.
+    [[nodiscard]] Broadcast<BasicWF> broadcast(std::string_view functionName, BroadcastOptions options = {}) {
+        return Broadcast<BasicWF>{functionName, *this, options};
     }
 
     /// Whether a C++ function of that name is registered.
@@ -661,15 +767,22 @@ private:
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
+        WebLinkGeneration                     generation;
         std::thread::id                       thread;
         bool                                  closed;
+        enum class Stage { handshaking, starting, started };
+        Stage                                  stage = Stage::handshaking;  // starting while its onUIStarted handlers run
+        std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
+    WebLinkGeneration                                                      generationCounter{0};  // guarded by linksMutex; the first connection is 1
     std::function<void(UI)>                                                uiStartedHandler;
     std::shared_ptr<detail::UISubscribers<UI>>                               uiSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::shared_ptr<detail::UISubscribers<UI>>                               uiClosedSubscribers = std::make_shared<detail::UISubscribers<UI>>();
     std::map<std::string, std::function<void(std::span<const std::byte>, WebLink<Net, Policy>&, msg::CallId, UI)>, std::less<>> cppFunctions;
+    // Keyed by identifier alone: a document is closed and erased on its connection's closed event, before the link is
+    // released and its identifier can be reused, so two connections never share an entry.
     std::map<WebLinkId, std::shared_ptr<dom::detail::State>>                                                                    domDocuments;
     std::thread                                                            serverThread;  // Background thread running the HTTP server
 
@@ -699,8 +812,8 @@ private:
 
     bool domCall(const WebLinkEvent& event, WebLink<Net, Policy>& link) {
         if (event.text == "wfDom.ready") {
-            auto handler = detail::makeCppFunctionHandler<Policy, void>([this, id = event.webLinkId] {
-                auto state = domState(id);
+            auto handler = detail::makeCppFunctionHandler<Policy, void>([this, id = event.webLinkId, generation = generationOf(event.webLinkId)] {
+                auto state = domState(id, generation);
                 state->check();
                 if (state->ready)
                     return;  // Retrying a lost readiness acknowledgement must not reset the document.
@@ -738,34 +851,80 @@ private:
         return true;
     }
 
+    // After the onUIStarted handlers: the sends deferred meanwhile run in order, those arriving while they run too,
+    // and only then do new sends reach the browser directly.
+    void finishStarting(WebLinkId id) noexcept {
+        for (;;) {
+            std::vector<detail::BroadcastCall<Net>> deferred;
+            std::shared_ptr<WebLink<Net, Policy>>   link;
+            {
+                std::scoped_lock lock{linksMutex};
+                const auto       found = webLinks.find(id);
+                if (found == webLinks.end())
+                    return;
+                if (found->second.deferred.empty() || found->second.closed) {
+                    found->second.deferred.clear();
+                    found->second.stage = Connection::Stage::started;
+                    return;
+                }
+                deferred.swap(found->second.deferred);
+                link = found->second.link;
+            }
+            for (const auto& call : deferred) {
+                try {
+                    call.sendTo(*link);
+                } catch (const std::exception& error) {
+                    log::error("A broadcast to a starting browser failed: {}", error.what());
+                }
+            }
+        }
+    }
+
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
-            case WebLinkEvent::Code::linked:
+            case WebLinkEvent::Code::linked: {
+                {
+                    std::scoped_lock lock{linksMutex};
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
+                        found->second.stage = Connection::Stage::starting;
+                }
+                // Even when a handler throws: the browser must not keep collecting deferred sends.
+                struct Started {
+                    BasicWF*  app;
+                    WebLinkId id;
+                    ~Started() {
+                        app->finishStarting(id);
+                    }
+                } started{this, event.webLinkId};
+                const auto ui = uiOf(event.webLinkId);
                 if (uiStartedHandler)
-                    uiStartedHandler(UI{*this, event.webLinkId});
-                uiSubscribers->notify(UI{*this, event.webLinkId});
+                    uiStartedHandler(ui);
+                uiSubscribers->notify(ui);
                 break;
+            }
             case WebLinkEvent::Code::closed:
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
                 {
                     std::scoped_lock lock{linksMutex};
-                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.closed = true;
+                        found->second.deferred.clear();
+                    }
                 }
                 if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
                     found->second->close();
                     domDocuments.erase(found);
                 }
-                uiClosedSubscribers->notify(UI{*this, event.webLinkId});
+                uiClosedSubscribers->notify(uiOf(event.webLinkId));
                 // The link is running this handler: it is released afterwards, by a task on the server context.
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
             case WebLinkEvent::Code::cppFunctionCalled: {
                 // Links are registered before they read, and released after their closure: the caller is registered.
-                const auto link = findLink(event.webLinkId);
+                const auto [link, generation] = linkAndGeneration(event.webLinkId);
                 if (!link)
                     break;
                 if constexpr (requires(typename Net::Acceptor& acceptor) { Net::ResumeAfter(acceptor, std::chrono::milliseconds(1)); }) {
@@ -776,7 +935,7 @@ private:
                     break;
                 }
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
-                    function->second(event.data, *link, event.callId, UI{*this, event.webLinkId});
+                    function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
                     link->sendError(event.callId, "C++ function '" + event.text + "' was not found");
                 break;

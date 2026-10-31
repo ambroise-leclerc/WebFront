@@ -94,8 +94,18 @@ on the server context; a call made meanwhile on another thread keeps the link al
 until it returns (`findLink` shares it). Afterwards, an untyped `jsFunction` call to that UI is
 dropped, a typed call returns a future that throws `Browser connection closed`,
 a `jsFunctionSender` completes with an error when started, and `addScript` throws
-`ConnectionError`. The 16-bit identifier of a released connection is reused only
-after 65,536 later connections.
+`ConnectionError`. The 16-bit identifier of a released connection is reused after
+65,536 later connections, but each connection also has a 64-bit generation, never reused,
+that the `UI` carries with it (#428). It never crosses the wire.
+
+A `UI` is an assignable value: it can be kept in a `std::vector` (removed with
+`std::erase_if`) or a `std::optional`, and assigned. Two values are equal when they
+belong to the same application and have the same `id()` and connection generation. A
+value kept after its connection closed reaches no browser even once its identifier is
+reused, and equals no later connection's value. Removing kept values in the
+`subscribeUIClosed` handler is still advisable, to free them. A value
+must not outlive its application, and assigning one is not atomic: a
+container of values shared between threads needs a lock.
 
 `app.spawn(task)` and `ui.spawn(task)` may be called from any thread while the
 application object remains alive, including concurrently with stop/shutdown.
@@ -163,6 +173,100 @@ already-stopped token also completes safely, without dispatching.
 cancellation API. The untyped `ui.jsFunction(name)` remains fire-and-forget.
 JavaScript-to-C++ calls still always return Promises. None of these changes adds
 richer bridge result types or remote Promise cancellation.
+
+## Threads
+
+WebFront runs its HTTP/WebSocket server on one thread: the thread `show()` starts, or the thread
+that calls `run()` or `runOne()`. That server thread is the only one that runs:
+
+- `cppFunction` callbacks, `onUIStarted`, `subscribeUIStarted` and `subscribeUIClosed` handlers;
+- DOM event callbacks and the bodies of tasks started with `app.spawn` or `ui.spawn`.
+
+They run one at a time, in the order of the events that cause them, and never in parallel with one
+another. A long callback delays every browser, so do blocking work on another thread or in a task.
+
+From any thread, while the application lives, you can call:
+
+- `ui.jsFunction(name)(...)`, `ui.jsFunction<R>(name)(...)` and starting a `jsFunctionSender`;
+- `ui.addScript`, `ui.pendingWrites`, `ui.writesAtMost` and `ui.spawn`;
+- `app.broadcast(name)(...)`, `app.forEachUI`, `app.connectedBrowsers`, `app.spawn` and `app.stop`.
+
+These calls never wait for the server thread. They take short internal locks, queue the frame,
+and the server thread writes it. Only `ui.document()` and its nodes are confined to the server
+thread. Register `cppFunction` callbacks and set `onUIStarted` before the server starts. You can
+add or remove subscriptions at any time.
+
+"While the application lives" is stricter than "before it is destroyed": no such call may still
+be running when `app.shutdown()` or the application's destructor starts. A `UI` or a broadcast
+function object kept by a worker thread refers to the application. Stop that thread, or make sure
+it no longer calls them, before shutting the application down.
+
+`app.connectedBrowsers()` counts every connection the server holds, including those still
+completing their handshake or running their `onUIStarted` handlers, and those closed but not yet
+released. It is not the number of browsers a broadcast or `forEachUI` reaches.
+
+WebFront never holds one of its own locks while it calls application code. A thread can therefore
+call WebFront while it holds an application lock that a `cppFunction` callback also takes. The
+callback waits for that lock, and the call it waits for does not depend on the callback. What
+deadlocks is waiting for the server thread itself:
+
+- the `get()` of a `jsFunction<R>` future inside a callback (the server thread reads the reply);
+- the same wait on another thread under a lock that a callback takes;
+- `app.shutdown()` or the destruction of the application under such a lock.
+
+Inside a task, await `jsFunctionSender<R>` instead.
+
+## Broadcasting to every browser
+
+`app.broadcast(name)` returns a function object that calls the JavaScript function `name` on every
+browser whose `onUIStarted` and `subscribeUIStarted` handlers have returned and whose closure was
+not reported yet. Like the untyped `jsFunction`, the call is fire-and-forget. The application keeps
+no table of its browsers: those that connect later receive the next calls, and a browser that
+closes stops receiving them. A call made while a browser's handlers run reaches it right after
+them, so what the handlers send, such as the initial state, arrives first. Each call encodes its
+arguments once, into a frame that all the browsers share.
+
+```cpp
+auto onState = app.broadcast("siliconForge.onState", {.maxPendingWrites = 2});
+// On a thread of the application, about 30 times per second:
+onState(stateJson);
+```
+
+`BroadcastOptions::maxPendingWrites` protects a browser that reads slower than the application
+writes. A call is queued for a browser only while fewer calls of the same function than that await
+its network. Otherwise the call is held back, and a newer call of that function replaces it. The
+held call is queued as soon as the browser catches up, so the browser skips the intermediate
+states but always receives the latest one. The calls that reach a browser arrive in the order they
+were made (those that a newer call replaced never arrive): one call returns after it is queued, so
+a later call on the same thread, or on a thread that the application synchronizes after it,
+follows it. Calls that overlap on several
+threads have no order between them: serialize them in the application if it needs one. Other
+frames, such as logs or other functions' calls, do not count toward the limit and are never held
+back. Order across functions is therefore not kept: a held call reaches the browser after the
+frames written meanwhile. If the browser must see a state before a later
+call of another function, send both through the same function or without a limit.
+
+The limit is counted per function name, and the name is the only key: calls of
+`ui.jsFunction(name)` with the same name are other frames and do not count. A browser holds at most
+one call back per function. Calls of one function made with different limits share the browser's
+queue and its single held call, and each call applies its own limit: a call that must be held
+replaces the held call even if another limit held that one. A send that fails for one browser is
+logged and does not prevent the others from receiving the call. While a browser's handlers run, at most `maxPendingWrites` calls of the function are kept
+for it, the newest replacing the last one kept. Without the option, every call is queued for
+every browser. The held calls belong to each browser's connection and go with it, so the
+function object holds no state and may be a temporary.
+
+`app.forEachUI(function)` calls `function(ui)` on the calling thread, outside every WebFront lock,
+for per-browser arguments or typed calls. It visits the browsers whose handlers had returned when
+it started: unlike a broadcast, it skips a browser whose handlers are still running. As anywhere
+else, `ui.document()` throws `std::logic_error` outside the server thread.
+
+So `forEachUI` does not keep a state in sync. Suppose a handler sends the state S0, and another
+thread changes the state to S1 and calls `forEachUI` before the browser counts as started. That
+browser is skipped and keeps S0 until the next change. The window ends inside WebFront, after the
+handlers return, so no application lock can close it. Send states with `broadcast`: a call made
+during that window reaches the browser after what its handlers sent. Keep `forEachUI` for calls
+that a browser may miss while it starts, or that `onUIStarted` already covers.
 
 ## HTTP gzip CPU work
 

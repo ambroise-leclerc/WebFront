@@ -3,7 +3,8 @@ import json
 import sys
 import tempfile
 import unittest
-from MeasureCommand import measure, ps_seconds
+from unittest.mock import patch
+from MeasureCommand import measure, ps_seconds, snapshot
 from CompareCoverage import hits
 
 
@@ -11,7 +12,22 @@ class MeasurementTests(unittest.TestCase):
     def test_resources_and_failed_command_status_are_retained(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'resources.json'
-            self.assertEqual(measure([sys.executable, '-c', 'import time; time.sleep(1.0); raise SystemExit(7)'], output, 0.05), 7)
+            sampled = Path(directory) / 'sampled'
+            # Keep the child alive until a real sample includes it, even on a loaded runner.
+            child = """import pathlib, sys, time
+marker = pathlib.Path(sys.argv[1])
+deadline = time.monotonic() + 30
+while not marker.exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
+raise SystemExit(7 if marker.exists() else 8)
+"""
+            def record_sample(root):
+                processes = snapshot(root)
+                if root in processes:
+                    sampled.touch()
+                return processes
+            with patch('MeasureCommand.snapshot', side_effect=record_sample):
+                self.assertEqual(measure([sys.executable, '-c', child, str(sampled)], output, 0.05), 7)
             report = json.loads(output.read_text())
             self.assertEqual(report['exit_code'], 7)
             self.assertGreaterEqual(report['sampled_peak_processes'], 1)

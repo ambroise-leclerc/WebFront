@@ -130,7 +130,7 @@ SCENARIO("Applications own spawned coroutines and expose individual cancellation
         std::weak_ptr<int> firstFrame  = first;
         std::weak_ptr<int> secondFrame = second;
         auto               handle      = app.spawn(pendingTask(std::move(first)));
-        App::UI            ui(app, 0);
+        App::UI            ui(app, 0, 1);
         ui.spawn(pendingTask(std::move(second)));
         REQUIRE_FALSE(firstFrame.expired());
         REQUIRE_FALSE(secondFrame.expired());

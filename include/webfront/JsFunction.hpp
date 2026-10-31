@@ -4,6 +4,7 @@
 #pragma once
 #include "http/WebSocket.hpp"
 #include "tooling/HexDump.hpp"
+#include "weblink/CallFrame.hpp"
 #include "weblink/WebLink.hpp"
 
 #include <algorithm>
@@ -27,19 +28,16 @@ struct IgnoreJsResult {};
 template<typename WebFront, typename Result = detail::IgnoreJsResult>
 class JsFunction {
 public:
-    JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId)
-        : name(functionName), webFront(wf), webLinkId(linkId) {}
+    JsFunction(std::string_view functionName, WebFront& wf, WebLinkId linkId, WebLinkGeneration connectionGeneration)
+        : name(functionName), webFront(wf), webLinkId(linkId), generation(connectionGeneration) {}
 
     auto operator()(auto&&... ts) {
         msg::FunctionCall<typename WebFront::BufferPolicy> command;
-        websocket::Frame<typename WebFront::Net> frame{std::span(reinterpret_cast<const std::byte*>(command.header().data()), command.header().size())};
-        command.encodeParameter(name, frame);
-        (((command.encodeParameter(std::forward<decltype(ts)>(ts), frame))), ...);
-        command.setParametersCount(static_cast<std::uint8_t>(1 + sizeof...(ts)));
+        auto                                               frame = detail::encodeCall<typename WebFront::Net>(command, name, std::forward<decltype(ts)>(ts)...);
 
         // A browser whose connection closed is gone: a call to it is dropped, and a typed call fails.
         // The link is shared while used: a release on the server thread cannot destroy it meanwhile.
-        const auto link = webFront.findLink(webLinkId);
+        const auto link = webFront.findLink(webLinkId, generation);
         if constexpr (std::is_same_v<Result, detail::IgnoreJsResult>) {
             if (link)
                 link->sendFrame(std::move(frame));
@@ -63,6 +61,7 @@ private:
     std::string name;
     WebFront& webFront;
     WebLinkId webLinkId;
+    WebLinkGeneration generation;
 };
 
 } // namespace webfront

@@ -90,7 +90,7 @@ class Binding {
         bool                               closing     = false;
         void
         authorize(const AppUI& ui, std::string_view sequence, std::string_view mac, std::string_view method, std::initializer_list<std::string_view> args) {
-            if (!browser || browser->id() != ui.id())
+            if (!browser || *browser != ui)
                 throw std::runtime_error("Automation callback belongs to another page");
             pageAuthentication.authorize(sequence, mac, method, args);
         }
@@ -112,7 +112,7 @@ public:
             std::scoped_lock lock{owned->mutex};
             if (owned->browser || !channel::sameToken(token, owned->launchToken))
                 throw std::runtime_error("Automation window claim rejected");
-            owned->browser.emplace(ui);
+            owned->browser = ui;
             owned->launchToken.clear();  // one successful claim; later connections cannot replace the selected browser
             ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret()));
             return std::string{"null"};
@@ -157,7 +157,7 @@ public:
         });
         closed  = app.subscribeUIClosed([owned](AppUI ui) {
             std::scoped_lock lock{owned->mutex};
-            if (owned->browser && owned->browser->id() == ui.id())
+            if (owned->browser == ui)
                 owned->session->close("Developer window disconnected");
         });
     }

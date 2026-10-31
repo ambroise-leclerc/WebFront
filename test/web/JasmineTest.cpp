@@ -525,13 +525,21 @@ private:
         uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;
         });
+        // From another thread, which the callback joins: a broadcast does not wait for the server thread (#401).
+        webFront->cppFunction("broadcastFromThread", [this](const string& token) {
+            auto        onState = webFront->broadcast("webfrontTests.receiveBroadcast", {.maxPendingWrites = 1});
+            std::thread caller([&] {
+                onState(token, 401);
+            });
+            caller.join();
+        });
         webFront->cppFunction("callBackCaller", [](TestWF::UI caller, const string& token) {
             caller.jsFunction("webfrontTests.receiveFromCaller")(token);
             return "cpp-result:" + token;
         });
         webFront->cppFunction("browserReady", [this](TestWF::UI ui) {
             // Raw origin probes create extra sessions; bind calls to the document reporting ready.
-            connectedUI.emplace(ui);
+            connectedUI = ui;
             browserReady();
         });
         webFront->cppFunction<void, string>("recordFromJs", [this](const string& token) {

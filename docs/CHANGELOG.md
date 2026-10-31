@@ -17,6 +17,34 @@
   prefixed option is already cached; the `OFF` defaults left there are dropped silently. Moving or repeating a former
   name prints a deprecation warning. CI, the documentation and `TestOptionsConfiguration` use the new names.
 
+## 0.6.0 - 2026-10-31
+
+- Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
+  `react::Store::flush()`, where the check throws first, as a call on a null pointer (`-Werror=nonnull`), and the unit
+  tests did not compile. The store now reaches its state through a checked reference. As GCC only runs this analysis
+  when it optimizes, GCC builds also compile `ReactStoreTests.cpp` at -O3 (`react_store_optimized`), so the Debug CI
+  job sees it too.
+
+- Reject a stale `UI` after its connection identifier is reused (#428): each connection gets a 64-bit
+  generation, never reused, kept in the application next to its link. `UI`, `JsFunction` and
+  `JsFunctionSender` carry it with the 16-bit identifier, so a value kept after its connection closed finds no
+  link even once a later browser receives the same `id()`: calls are dropped, typed calls fail,
+  `addScript` throws `ConnectionError`, `pendingWrites()` is 0, and the value equals no later connection's.
+  `operator==` compares application, identifier and generation. Removing kept values in `subscribeUIClosed`
+  becomes a recommendation, not a safety requirement. The generation never crosses the wire: no change to the
+  binary format or `WebFront.js`. The public constructors of `UI`, `JsFunction` and `JsFunctionSender` take the
+  generation as an extra argument, so code that builds one by hand no longer compiles: use the `UI` that
+  `onUIStarted`, `subscribeUIStarted` or a callback hands over.
+
+- Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
+  whose `onUIStarted` handlers have returned, from any thread, with no table of browsers kept by the
+  application. A broadcast made while those handlers run follows what they sent. Each call is encoded
+  once into a frame shared by every browser. `BroadcastOptions::maxPendingWrites` holds a call back
+  for a browser that has that many calls of the function waiting, and keeps only the latest for it,
+  in the browser's connection; such a held call may follow other functions' later calls. `forEachUI`
+  skips a starting browser, so states go through `broadcast`. Document the threads of callbacks and
+  browser calls ([threads](ASYNC_EXECUTION.md#threads)). No wire format change.
+
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
   waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
   exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.
@@ -35,6 +63,17 @@
   place of its terminal, each command it runs with its outcome and duration, labelling the timeouts and cancellations
   the specs cause. The trace comes from the specs only; the published environment is unchanged. `docs/TEST_TIERS.md`
   explains how to follow a test live.
+
+- Make `BasicUI` (`UI`) an assignable value type (#400): it holds a pointer to the application instead of a
+  reference, so it is copy- and move-assignable and usable in `std::vector` with `std::erase_if` and in
+  `std::optional`. It has no default constructor, so it does not satisfy `std::regular`. Two values compare equal
+  when they belong to the same application and have the same `id()`. The lifetime contract is unchanged: a `UI` is
+  valid while its application exists and must not be used, compared included, after it is destroyed. A value only
+  identifies its connection until that connection closes: once the identifier is reused, a value kept after the close
+  reaches the later browser and equals its value, so applications remove kept values in `subscribeUIClosed` (#428
+  tracks rejecting such stale values). `BasicWF` now declares itself non-copyable and non-movable, which the pointer
+  requires. The automation binding and the Jasmine session identify their browser by this equality, and assign it
+  instead of re-emplacing an optional. `docs/ASYNC_EXECUTION.md` describes the value semantics.
 
 - Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
   the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with

@@ -28,7 +28,7 @@ list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServe
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
-list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
+list(APPEND TESTS_LIST BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
 list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
@@ -49,6 +49,15 @@ endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+# GCC reports -Wnonnull and -Wnull-dereference only when it optimizes, so the Debug CI job missed the false positive of
+# a Release build in the React store (#429; -O3, as in Release, is needed for the full test). Compile that test once
+# more at -O3; WebFront_options is left out because its coverage flags would restore -O0.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_library(react_store_optimized OBJECT ReactStoreTests.cpp)
+  target_link_libraries(react_store_optimized PRIVATE WebFront_test_hardening WebFront_warnings Catch2::Catch2 WebFront)
+  target_compile_options(react_store_optimized PRIVATE -O3)
+endif()
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 # Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.

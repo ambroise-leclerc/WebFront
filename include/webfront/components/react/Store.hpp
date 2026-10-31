@@ -44,10 +44,13 @@ class Store {
     };
     std::shared_ptr<State> state;
 
-    void check() const {
+    // Returns the checked state by reference: after `check(); state->...`, GCC 16 at -O2/-O3 still reported the
+    // moved-from path, where check() throws, as a null `this` (-Wnonnull, #429).
+    State& checked() const {
         if (!state)
             throw std::runtime_error("React store was moved from");
         state->check();
+        return *state;
     }
 
     static Task sendAfter(std::shared_ptr<State> state) {
@@ -84,32 +87,30 @@ public:
         return state && state->valid();
     }
     void set(T value) const {
-        check();
-        state->pending = std::move(value);
-        if (!state->scheduled) {
-            state->scheduled = true;
+        auto& current = checked();
+        current.pending = std::move(value);
+        if (!current.scheduled) {
+            current.scheduled = true;
             try {
-                static_cast<void>(state->ui.spawn(sendAfter(state)));
+                static_cast<void>(current.ui.spawn(sendAfter(state)));
             } catch (...) {
-                state->scheduled = false;
+                current.scheduled = false;
                 throw;
             }
         }
     }
     /// Queues the last snapshot immediately; it does not acknowledge browser rendering.
     void flush() const {
-        check();
-        state->flush();
+        checked().flush();
     }
     void onError(std::function<void(std::exception_ptr)> callback) const {
-        check();
-        state->onError = std::move(callback);
+        checked().onError = std::move(callback);
     }
     void close() const {
-        check();
-        state->closed = true;
-        state->pending.reset();
-        state->onError = nullptr;
+        auto& current = checked();
+        current.closed = true;
+        current.pending.reset();
+        current.onError = nullptr;
     }
 };
 }  // namespace webfront::react
