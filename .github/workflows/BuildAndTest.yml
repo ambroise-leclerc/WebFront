@@ -87,6 +87,23 @@ jobs:
     container: ${{ matrix.use_image && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.linux-image.outputs.image, github.actor, github.token)) || '' }}
     steps: &desktop-steps
       - uses: actions/checkout@v7
+        with:
+          # A pull request is checked out as a merge commit: its first parent is the base, so the changed files are one diff away.
+          fetch-depth: 2
+      # The builds that prove the self-built environment reproducible and equal to the checked-in bundles take about 45 s. A
+      # pull request into develop that changes none of their inputs (what PrepareSelfBuildProject.cmake copies, and the CMake and
+      # workflow files that drive them) leaves them to the push to develop and to the master tier (#435).
+      - name: Decide whether the reproducibility builds run
+        shell: bash
+        run: |
+          reproducibility=true
+          if [ "$FULL_TIER" != true ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if ! git diff --name-only HEAD^1 HEAD | grep -qE '^(js/|examples/life/ui/|test/developer/|test/web/(CMakeLists\.txt|registry/)|test/cmake/(PrepareSelfBuildProject|CompareFiles|CheckSelfBuildRefresh|AssembleDeveloperFixtures)|include/webfront/system/|LICENSE$|\.github/workflows/BuildAndTest\.yml)'; then
+              reproducibility=false
+            fi
+          fi
+          echo "Reproducibility builds: $reproducibility"
+          echo "WEBFRONT_REPRODUCIBILITY=$reproducibility" >> "$GITHUB_ENV"
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
@@ -131,6 +148,7 @@ jobs:
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON
+          -DWEBFRONT_TEST_REPRODUCIBILITY=${{ env.WEBFRONT_REPRODUCIBILITY }}
           ${{ env.FULL_TIER == 'true' && '' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build

@@ -227,3 +227,14 @@ by more than the runner-to-runner spread. The cut pays when more cores are avail
 it makes a failing part easier to run alone; on a 4-vCPU hosted runner the only way to shorten the suite further is to remove
 worker time. The largest cases on Linux are `AutomationMcpWindow` (62 s), `SelfBuildSession` (59 s), `SelfBuildRefresh` (34 s)
 and `JourneyBuildSession` (31 s).
+
+### The self-build session and the reproducibility builds
+
+`SelfBuildSession` (59 s on a loaded Linux runner, 44 s on a quiet machine) is five `wf` commands in one browser session:
+install 0.4 s, build the environment 8.5 s, run its 121 JavaScript specs 16.3 s, build it again to prove the bytes equal 11.7 s,
+and the refusal of a write outside the permissions 6.4 s. `SelfBuildRefresh` (34 s on Linux) builds a third time, from a refreshed
+bootstrap, to prove the checked-in bundles are what `wf` produces. Both extra builds are proofs about the sources of the
+environment, so they now run, in a pull request into `develop`, only when that pull request changes one of those sources
+(`WEBFRONT_TEST_REPRODUCIBILITY`, `docs/TEST_TIERS.md`); locally this takes `SelfBuildSession` from 44 s to 30 s. The first build
+is not skipped: the specs and `DeveloperFixtures` need its output, and caching it by a hash of its sources would save 8.5 s here at the
+price of a cache whose validity the tests could no longer check.

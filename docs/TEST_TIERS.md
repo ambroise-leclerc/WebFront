@@ -53,6 +53,13 @@ time on Windows (docs/BUILD_TIME_STUDY.md). The advanced checks below turn both 
 reports, or an example that no longer compiles, is found by the weekly run, by the pull request into `master` or by a manual
 dispatch with `repeat_desktop_tests`, not by a pull request into `develop`. A local build has both by default.
 
+The proofs that the self-built environment is reproducible and equal to the checked-in bundles (`SelfBuildRepeat`,
+`SelfBuildReproducible`, `SelfBuildRefresh`, `SelfBuildRefreshMatchesSources`) build it twice more, about 45 s on a hosted
+runner. A pull request into `develop` runs them only when it changes one of their inputs (`js/`, `examples/life/ui/`,
+`test/developer/`, `test/web/registry/` and `test/web/CMakeLists.txt`, `include/webfront/system/`, the CMake scripts that
+prepare, compare and assemble the self-build project, `LICENSE` and the workflow itself); a push to `develop` and the advanced
+checks always run them. `-DWEBFRONT_TEST_REPRODUCIBILITY=OFF` leaves them out locally; the default is ON.
+
 ## Advanced checks
 
 These run on the weekly schedule (Monday 04:23 UTC), on every pull request whose base is `master`, and on a manual
