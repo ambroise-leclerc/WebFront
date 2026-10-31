@@ -58,7 +58,7 @@ hosted runner. Adopted (`BuildAndTest.yml`, desktop jobs).
 
 ### Grouping the heavy units of `tests`
 
-`WEBFRONT_TEST_UNITY_BATCH=N` with `WEBFRONT_TEST_UNITY_HEAVY=ON` compiles the 12 heavy units of `tests` N to a file and
+`WEBFRONT_TEST_UNITY_BATCH=N` with `WEBFRONT_TEST_UNITY_HEAVY=ON` compiles the 13 heavy units of `tests` N to a file and
 leaves the 140 light units alone. The `header`, `heavy-test` and `light-test` columns are the cost of a pull request that
 changes `WebFront.hpp`, `WebFrontTests.cpp` or `MimeTypeTests.cpp` with a complete cache.
 
@@ -82,9 +82,9 @@ Linux (two runs, `-j4`):
 Groups of 4 win on both compilers in every scenario: the unit of work stays small enough to spread over four jobs, and a
 change to one heavy test recompiles at most three others. Groups of 12 put every heavy test behind one compilation, which is
 slowest when one of them changes. Grouping every unit instead of the heavy ones does not compile (`GzipExecutorTests.cpp`,
-`DeveloperTests.cpp` and others define the same names); the heavy units needed four qualifications (`detail::` made
-ambiguous by `using namespace webfront`, a local alias that shadowed a file-scope one, and a header without
-`#pragma once`) and the whole suite passes. Adopted for the desktop CI jobs only (`BuildAndTest.yml`): the default build
+`DeveloperTests.cpp` and others define the same names); the heavy units needed five changes (`detail::` made
+ambiguous by `using namespace webfront`, a local alias that shadowed a file-scope one, two helpers of `BroadcastTests.cpp`
+named like those of `StdnetShutdownTests.cpp`, and a header without `#pragma once`) and the whole suite passes. Adopted for the desktop CI jobs only (`BuildAndTest.yml`): the default build
 keeps one object per test file, and the portability and sanitizer jobs still compile each file alone, which would expose
 a clash that grouping hides.
 
@@ -114,6 +114,21 @@ its cost on `tests` with `-j4`:
 The analysis costs about 22 % of a Windows build. It is a quality gate (warnings are errors), so removing it from the
 desktop job is a decision for the maintainers, not a build-time tweak. One way to keep the gate and the speed is to run it
 in the portability job on pull requests into `master` only. **Not adopted; the option remains for measuring.**
+
+### The pull request that touches a core header
+
+The pull request's own run after merging `develop` (which changes `WebFront.hpp`, the situation of #400, #401 and #428), with
+the changes of this pull request in place (`-j4`, heavy units in groups of four), against run 41134609687 on the same kind of
+change:
+
+| | Linux | Windows |
+|---|---|---|
+| Build step | 328 s -> 85 s | 876 s -> 213 s |
+| Job | 12 min -> 6.8 min | about 20 min -> 7.7 min |
+
+A fully cached build takes 23 s (Linux) and 33 s (Windows) on this branch, so these builds did recompile the heavy units. The
+runs are single samples on runners that vary; the study tables above are the evidence, this is the check that they carry
+over to a real pull request.
 
 ### What the pull request gains
 
