@@ -180,9 +180,31 @@ The suite takes 256 s on Linux and 271 s on Windows (run 41134609687). Measured 
   each instantiates its own frontend type, so a merged executable would still instantiate every type once. The CTest cases
   would also lose their separate process, which is what several of them prove (exit status, hang, early close).
 
-## Left for later
+## What is left, and why it is not done
 
-- Split `DeveloperBrowserIntegration` (59 to 113 s, the longest case and on the dependency chain) into independent cases.
-- `/analyze` in one job instead of every MSVC compilation (about 22 % of a Windows build; a policy decision).
-- The examples (`HelloWorld`, `LifeDeveloper`, `LifeReact`, 61 to 67 s each on MSVC) are built by every desktop job; building
-  them in one job per pull request would save about 190 s of compiler time per job.
+After these changes a desktop job spends its time as follows (run 41177164644, a pull request that touches a core header):
+
+| Step | Linux | Windows |
+|---|---|---|
+| Container start / checkout and CMake | 53 s | 23 s |
+| Configure | | 20 s |
+| Build | 85 s | 214 s |
+| Fast tests | 15 s | 17 s |
+| Test suite | 195 s | 163 s |
+| Coverage (Linux only) | 42 s | |
+
+The compiler-cache probe after the suite (a clean rebuild of `life_embedded`, `life_journey` and the consumer, run for #388) costs
+1 to 2 s, so it is not worth removing.
+
+- **`DeveloperBrowserIntegration`** (59 to 113 s) is the longest case and ends the dependency chain (`SelfBuildSession` ->
+  `DeveloperBrowserIntegration` -> `LifeEmbeddedBuild`). It is one 1,061-line script (`test/web/developer-specs.mjs`) run in one
+  browser over one project: later sections rely on the packages, lock and files the earlier ones installed (`terminal and sessions`
+  32 s, `Life preview and bridge` 21 s, `Jasmine runs` 17 s, the TypeScript installs 12 + 8 s). Splitting it into parallel CTest
+  cases means giving each section its own project and setup, and it also produces the generated `LifeUI.hpp` that
+  `LifeEmbeddedBuild` compiles. That is a rewrite of the test, to be validated on all three frontends; it is not a build-time
+  tweak and was left alone.
+- **`/analyze`** and **the examples** (61 to 67 s each on MSVC) cost Windows compile time, but moving either to another job does
+  not shorten a pull request: a parallel job that compiles the same code takes as long, and the pull request waits for both.
+  Only dropping them from the pull-request path (`/analyze` into the `master` tier, the examples into one job) shortens it, and
+  that removes a check from every pull request into `develop`. The numbers are above (about 22 % of a Windows build for
+  `/analyze`, about 190 s of compiler time for the examples) so the maintainers can decide.
