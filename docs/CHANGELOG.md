@@ -16,6 +16,7 @@
   when its command does instead of at the deadline, which took 30 s from each of the six `ConsumerJasmine-*` cases under
   dash, and gives the command its own process group (`setsid`, or a walk of its descendants) where the shell has no job
   control. `docs/BUILD_TIME_STUDY.md` holds the measurements and the decisions.
+  The developer test parts are serialized for CEF because they share its default profile with other native browser tests.
 
 - Include `developer_integration` in the documented Linux CEF build commands (#434), preparing the developer journey
   and its dependent Life tests. Check the browser targets in both guides and CI with `NewcomerDocsMatchExamples`.
