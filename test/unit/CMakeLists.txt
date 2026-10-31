@@ -78,6 +78,15 @@ endif()
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
+# GCC reports -Wnonnull and -Wnull-dereference only when it optimizes, so the Debug CI job missed the false positive of
+# a Release build in the React store (#429; -O3, as in Release, is needed for the full test). Compile that test once
+# more at -O3; WebFront_options is left out because its coverage flags would restore -O0.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_library(react_store_optimized OBJECT ReactStoreTests.cpp)
+  target_link_libraries(react_store_optimized PRIVATE WebFront_test_hardening WebFront_warnings Catch2::Catch2 WebFront)
+  target_compile_options(react_store_optimized PRIVATE -O3)
+endif()
+
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 # Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
 catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
