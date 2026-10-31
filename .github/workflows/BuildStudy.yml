@@ -40,7 +40,7 @@ jobs:
           import json, os
           all_variants = ['base-all-j2', 'base-all-j4', 'base-j2', 'base-j4', 'unity-heavy-b2',
                           'unity-heavy-b3', 'unity-heavy-b4', 'unity-heavy-b6', 'unity-heavy-b12', 'pch', 'pch-unity-heavy-b4',
-                          'pch-unity-heavy-b12', 'unity-all-b16', 'noanalyze', 'noanalyze-pch', 'noanalyze-unity-heavy-b4',
+                          'pch-unity-heavy-b12', 'noanalyze', 'noanalyze-pch', 'noanalyze-unity-heavy-b4',
                           'noanalyze-pch-unity-heavy-b4']
           import re
           tagged = re.search(r'\[variants:([^\]]*)\]', os.environ.get('MESSAGE', ''))  # a push selects variants this way
@@ -123,7 +123,6 @@ jobs:
             noanalyze-pch-unity-heavy-b4) jobs=4; target=tests; extra="-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
             unity-heavy-b*)     jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-heavy-b} -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
             pch-unity-heavy-b*) jobs=4; target=tests; extra="-DWEBFRONT_TEST_PCH=ON -DWEBFRONT_TEST_UNITY_BATCH=${v#pch-unity-heavy-b} -DWEBFRONT_TEST_UNITY_HEAVY=ON" ;;
-            unity-all-b*)       jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-all-b}" ;;
             *) echo "unknown variant"; exit 1 ;;
           esac
           if [ "$STUDY_OS" = windows ]; then
