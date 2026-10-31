@@ -48,13 +48,14 @@ if(MSVC)
 endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-# Build-time study (#435), measurements only (docs/BUILD_TIME_STUDY.md): both knobs default to the regular build.
+# Build-time options (#435, docs/BUILD_TIME_STUDY.md). They default to one object per test file, which keeps rebuilds
+# fine-grained; the desktop CI jobs group the heavy units.
 #  WEBFRONT_TEST_UNITY_BATCH=N  groups the translation units of `tests` by N (0: no unity build);
 #  WEBFRONT_TEST_UNITY_HEAVY=ON limits the grouping to the heavy units (those instantiating a full application);
-#  WEBFRONT_TEST_PCH=ON         precompiles the headers every test includes.
-set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Study (#435): UNITY_BUILD_BATCH_SIZE of the tests target, 0 disables it")
-option(WEBFRONT_TEST_UNITY_HEAVY "Study (#435): group only the heavy translation units of the tests target" OFF)
-option(WEBFRONT_TEST_PCH "Study (#435): precompiled headers for the tests target" OFF)
+#  WEBFRONT_TEST_PCH=ON         precompiles the headers of the heavy units (measured, not adopted: sccache cannot cache it on MSVC).
+set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "UNITY_BUILD_BATCH_SIZE of the tests target, 0 disables it")
+option(WEBFRONT_TEST_UNITY_HEAVY "Group only the heavy translation units of the tests target" OFF)
+option(WEBFRONT_TEST_PCH "Precompiled headers for the heavy units of the tests target" OFF)
 # The heavy units instantiate a full application; the others are light and keep the regular build.
 set(_heavy WebFrontTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
     AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)

@@ -120,12 +120,14 @@ jobs:
           command -v sccache
           sccache --version
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
+      # The heavy unit tests are compiled four to a file (docs/BUILD_TIME_STUDY.md); the portability and sanitizer jobs keep one object per test file.
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          -DWEBFRONT_TEST_UNITY_BATCH=4 -DWEBFRONT_TEST_UNITY_HEAVY=ON
           ${{ matrix.options }}
       - name: Build
         run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 4

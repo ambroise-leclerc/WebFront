@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 12 heavy unit-test files in
+  groups of four (`WEBFRONT_TEST_UNITY_BATCH`, `WEBFRONT_TEST_UNITY_HEAVY`; the default build keeps one object per file),
+  `JourneyEmbeddedBuild` and `LifeEmbeddedBuild` no longer hold the `webfront_port_9002` lock while they compile, and
+  `RunWithDeadline.sh` returns when its command does instead of at the deadline, which took 30 s from each of the six
+  `ConsumerJasmine-*` cases under dash. It also gives the command its own process group when the shell has no job
+  control. `WEBFRONT_MSVC_ANALYZE` (default ON) and `WEBFRONT_TEST_PCH` exist to measure `/analyze` and precompiled headers.
+  The `Build time study` workflow and `docs/BUILD_TIME_STUDY.md` hold the measurements and the decisions.
+
 - Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
   waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
   exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.
