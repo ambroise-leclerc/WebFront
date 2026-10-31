@@ -4,6 +4,30 @@
 // rejects(promise, expected) and throws(callback, expected) check that the promise rejects or the callback throws, then
 // that the error satisfies `expected`: a RegExp tested against String(error), a function returning true for the error,
 // or nothing.
+// Optional diagnostics use browser monotonic time, including the time spent awaiting setup/cleanup.
+const now = performance.now.bind(performance);
+const starts = new Map();
+export async function reportSpecStarted(bridge, {fullName}) {
+    starts.set(fullName, now());
+    return reportSpecEvent(bridge, `begin ${fullName}`);
+}
+export async function reportSpecDone(bridge, {fullName, status}) {
+    const start = starts.get(fullName);
+    starts.delete(fullName);
+    return reportSpecEvent(bridge, `end ${fullName} status=${status} durationMs=${start === undefined ? 'unknown' : (now() - start).toFixed(3)}`);
+}
+async function reportSpecEvent(bridge, message) {
+    try {
+        await bridge.cppFunction('wf.progress')(`${now().toFixed(3)}ms ${message}`);
+    } catch {
+        // Ordinary developer applications have no driver callback; diagnostics are best effort.
+    }
+}
+if (globalThis.webFront) jasmine.getEnv().addReporter({
+    specStarted: result => reportSpecStarted(webFront, result),
+    specDone: result => reportSpecDone(webFront, result),
+});
+
 function satisfies(error, expected) {
     if (expected === undefined) return;
     if (expected instanceof RegExp) expect(String(error)).toMatch(expected);
@@ -94,7 +118,9 @@ export function esbuild() {
         const lock = JSON.parse(await projectText('js/developer/webfront-packages.lock.json'));
         const key = lock.packages[lock.roots['esbuild-wasm'].id].key;
         const wasmModule = await WebAssembly.compile(await projectBytes(`.webfront/developer/packages/${key}/esbuild.wasm`));
-        await esbuildWasm.initialize({wasmModule, worker: false});
+        // WebKit throttles Go's scheduler timers in an off-screen iframe. Keep esbuild in its own Worker,
+        // as the real developer environment does; the same real WASM compiler and assertions still run.
+        await esbuildWasm.initialize({wasmModule, worker: true});
         return esbuildWasm;
     })();
     return initialized;

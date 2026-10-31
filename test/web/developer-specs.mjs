@@ -2,6 +2,15 @@ import {withTimers, untilReady} from './timers.mjs';
 // Autonomous real-engine test: compiled WASM, npm graph, Life bridge, preview, cache and embedding.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const profileNow = performance.now.bind(performance);
+let lastPhase;
+const progress = async message => {
+    const time = profileNow();
+    if (lastPhase) await webFront.cppFunction('test.progress')(
+        `${time.toFixed(3)}ms end ${lastPhase.name} durationMs=${(time - lastPhase.time).toFixed(3)}`);
+    lastPhase = {name: message, time};
+    await webFront.cppFunction('test.progress')(`${time.toFixed(3)}ms begin ${message}`);
+};
 const call = (name, ...args) => webFront.cppFunction(`webfront.developer.${name}`)(...args);
 async function readFile(path) {
     const chunks = [];
@@ -17,6 +26,57 @@ async function writeFile(path, text) {
     await call('write', id, 'output', 0, new TextEncoder().encode(text));
     await call('commit', id);
 }
+// The page shows each wf command the harness runs, as if it had been typed. The bootstrap keeps its xterm.js terminal to
+// itself, so the trace is a text view put in its place; the trace must never fail a test.
+let traceView, traceWarned = false;
+const traceFailed = error => {
+    if (!traceWarned) { traceWarned = true; console.warn(`The command trace is unavailable: ${error?.message ?? error}`); }
+};
+const showTrace = () => {
+    try {
+        const terminal = document.getElementById('terminal');
+        const view = document.createElement('pre');
+        view.style.cssText = 'margin:0;height:100%;overflow:auto;font:13px monospace;color:#9aa3b2';
+        for (const child of terminal.children) child.style.display = 'none';
+        if (terminal.contains(document.activeElement)) document.activeElement.blur();  // no key may reach the hidden session
+        terminal.append(view);
+        traceView = view;
+    } catch (error) { traceFailed(error); }
+};
+const echo = text => {
+    try { traceView?.append(`${text}\n`); if (traceView) traceView.scrollTop = traceView.scrollHeight; }
+    catch (error) { traceFailed(error); }
+};
+// Only the wf subcommand is shown, never an argument, an option value or a path; `execute` runs help for no argument.
+const subcommand = ([command = 'help']) => /^[a-z][a-z-]*$/.test(command) ? command : '?';
+// A wait is labelled expected only when the spec caused it: it pressed Ctrl+C (aborted its signal), or announced the time
+// limit it fires. Many specs also expect a rejection, which the trace cannot tell from a defect.
+const outcomeOf = (exitCode, {signal, expect}) =>
+    exitCode === 0 ? 'done'
+    : exitCode === 124 ? (expect === 'timeout' ? 'timeout (expected)' : 'timeout')
+    : exitCode === 130 ? (signal?.aborted ? 'cancelled (expected)' : 'cancelled')
+    : exitCode === undefined ? 'rejected' : `rejected (exit ${exitCode})`;
+// Every actual command has a matching end marker, including expected failures, and its line in the trace.
+const measured = async (name, line, context, expect, run) => {
+    const started = profileNow();
+    await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin ${name}`);
+    echo(`$ ${line}`);
+    let exitCode;
+    try { const result = await run(); exitCode = result?.exitCode ?? 0; return result; }
+    catch (error) { exitCode = error?.exitCode; throw error; }
+    finally {
+        const duration = profileNow() - started;
+        echo(`  ${outcomeOf(exitCode, {signal: context?.signal, expect})} in ${(duration / 1000).toFixed(1)}s`);
+        await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end ${name} durationMs=${duration.toFixed(3)}`);
+    }
+};
+// `expect: 'timeout'` names a time limit the spec fires on purpose.
+const execute = (args, context, {expect} = {}) =>
+    measured(`command ${args.slice(0, 3).join(' ')}`, `wf ${subcommand(args)}`, context, expect, () => runtimeExecute(args, context));
+let runtimeExecute, runtimeNonInteractive;
+// runNonInteractive never rejects for a failed command: it resolves with its exitCode.
+const nonInteractive = (args, context, {expect} = {}) =>
+    measured(`non-interactive ${args.join(' ')}`, `wf ${subcommand(args)} (non-interactive)`, context, expect, () => runtimeNonInteractive(args, context));
 // Ends the --public smoke test, which has no local registry for the checks that follow the generated headers.
 class PublicSmokeDone extends Error {}
 try {
@@ -28,25 +88,40 @@ try {
         if (attempt === 299) throw new Error('Bootstrap readiness timed out');
         await delay(100);
     }
+    await progress('bootstrap ready');
+    const httpResponses = await Promise.all([
+        fetch('/fixtures/session.html', {cache: 'no-store'}),
+        fetch('/fixtures/session.html', {method: 'POST', cache: 'no-store'}),
+    ]);
+    assert(httpResponses[0].status === 200 && httpResponses[1].status === 501,
+        'Concurrent HTTP responses must retain their own status lines');
+    for (const response of httpResponses) {
+        assert(response.headers.get('Connection')?.toLowerCase() === 'close',
+            'HTTP responses must announce closure while the bridge WebSocket stays connected');
+        await response.arrayBuffer();
+    }
     const runtime = await import('/webfront/developer/environment/runtime.mjs');
+    runtimeExecute = runtime.execute;
+    runtimeNonInteractive = runtime.runNonInteractive;
     const config = JSON.parse(await webFront.cppFunction('webfront.developer.config')());
+    showTrace();
     const environment = await (await fetch('/webfront/developer/environment/environment.json')).json();
     const currentDistribution = !config.environment.startsWith('https:');
     if (currentDistribution) assert(JSON.stringify(Object.keys(environment.starters)) === JSON.stringify(['life']), 'Only the Life starter must be shipped');
     config.starters = Object.fromEntries(Object.entries(environment.starters).map(([name, value]) => [name, {url: new URL(value.archive, new URL(config.environment, location.href)).href, integrity: value.integrity}]));
     const context = {bridge: webFront, config, preview: document.getElementById('preview'), signal: new AbortController().signal,
         write: text => console.log(text)};
-    if (currentDistribution) assert(await runtime.execute(['create', 'pi'], context).then(() => false, error => /Unknown pinned starter/.test(error.message)),
+    if (currentDistribution) assert(await execute(['create', 'pi'], context).then(() => false, error => /Unknown pinned starter/.test(error.message)),
         'The retired PI starter must not be offered');
-    await runtime.execute(['create', 'life'], context);
-    const overwriteRefused = await runtime.execute(['create', 'life'], context).then(() => false, () => true);
+    await execute(['create', 'life'], context);
+    const overwriteRefused = await execute(['create', 'life'], context).then(() => false, () => true);
     assert(overwriteRefused, 'A starter must not replace an existing project');
-    const noManifest = await runtime.execute(['install', 'react@19.3.1'], context).then(() => false, error => /run wf init/.test(error.message));
+    const noManifest = await execute(['install', 'react@19.3.1'], context).then(() => false, error => /run wf init/.test(error.message));
     assert(noManifest, 'wf install must ask for a manifest first');
-    await runtime.execute(['init'], context);
-    const initRefused = await runtime.execute(['init'], context).then(() => false, () => true);
+    await execute(['init'], context);
+    const initRefused = await execute(['init'], context).then(() => false, () => true);
     assert(initRefused, 'wf init must not replace an existing manifest');
-    await runtime.execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
+    await execute(['install', 'react@19.3.1', 'react-dom@19.3.1'], context);
     let lock = await runtime.readLock(webFront);
     assert(lock.manifestDigest?.length === 64, 'The lock must record the digest of the manifest dependencies');
     const manifest = JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
@@ -55,9 +130,9 @@ try {
     manifest.entries = {main: 'ui/main.tsx'};
     manifest.providers = {LifeUI: {entry: 'main', output: 'generated/LifeUI.hpp'}};
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
-    assert(!(await runtime.execute(['list'], context)).includes('Warning'), 'Editing entries must not desynchronize the lock');
+    assert(!(await execute(['list'], context)).includes('Warning'), 'Editing entries must not desynchronize the lock');
     assert(Object.keys(lock.packages).length === 3, 'React, React DOM and scheduler must be resolved');
-    const listed = await runtime.execute(['list'], context);
+    const listed = await execute(['list'], context);
     assert(listed.split('\n').length === 3 && listed.includes('react@19.3.1'), 'wf list must name the installed packages');
     const historyLength = history.length;
     const frame = context.preview;
@@ -67,7 +142,8 @@ try {
         (await runtime.complete('wf dev m', context)).candidates.includes('main'), 'Build/dev completion must list manifest entries');
     const frameBeforeBuild = frame.contentDocument;
     const frameURLBeforeBuild = frame.contentWindow.location.href;
-    await runtime.execute(['build'], context);
+    await progress('build and incremental preview');
+    await execute(['build'], context);
     assert(frame.contentDocument === frameBeforeBuild && frame.contentWindow.location.href === frameURLBeforeBuild,
         'wf build must leave the preview alone');
     assert((await readFile('.webfront/developer/build/app.js')).length > 0, 'wf build must publish compiled JS');
@@ -87,7 +163,7 @@ try {
             await waitDev(() => clock.pending() > 0, 'Dev polling deadline was not armed');
             clock.fire(750);
         };
-        const devResult = runtime.execute(['dev', 'watch/main.ts'], {...context, signal: devStop.signal,
+        const devResult = execute(['dev', 'watch/main.ts'], {...context, signal: devStop.signal,
             write: text => { devOutput += text; }}).then(() => null, error => error);
         try {
             await waitDev(() => frame.contentDocument?.getElementById('root')?.textContent === 'watch-one', 'Initial dev preview did not mount');
@@ -123,18 +199,19 @@ try {
     });
     // Each named entry gets its own relative HTML/assets when building all manifest entries.
     await writeFile('webfront.project.json', JSON.stringify({...manifest, entries: {one: 'watch/value.ts', two: 'watch/created.ts'}}));
-    await runtime.execute(['build'], context);
+    await execute(['build'], context);
     for (const name of ['one', 'two']) assert((await readFile(`.webfront/developer/build/${name}/index.html`)).length > 0, `Missing build entry ${name}`);
     const firstEntryBuild = new TextDecoder().decode(await readFile('.webfront/developer/build/one/app.js'));
     const secondEntryBuild = new TextDecoder().decode(await readFile('.webfront/developer/build/two/app.js'));
     await writeFile('watch/created.ts', 'export const value = ;\n');
-    assert(await runtime.execute(['build'], context).then(() => false, () => true), 'A failed build must reject');
+    assert(await execute(['build'], context).then(() => false, () => true), 'A failed build must reject');
     assert(new TextDecoder().decode(await readFile('.webfront/developer/build/one/app.js')) === firstEntryBuild &&
         new TextDecoder().decode(await readFile('.webfront/developer/build/two/app.js')) === secondEntryBuild, 'Failure in a later entry must preserve the entire previous build');
     await writeFile('watch/created.ts', "export const value = 'must-not-rebuild';\n");
     await writeFile('webfront.project.json', JSON.stringify(manifest));
+    await progress('Life preview and bridge');
     // Exercise the maintained public application rather than the retired PI demo.
-    await runtime.execute(['preview'], context);
+    await execute(['preview'], context);
     for (let attempt = 0; !frame.contentDocument?.querySelector('[data-testid="pattern-blinker"]'); ++attempt) {
         if (attempt === 200) throw new Error('Life preview did not mount');
         await delay(50);
@@ -201,27 +278,27 @@ try {
     }
     assert(button('population').textContent === '5', 'C++ glider survives four steps');
     assert(life.querySelector('canvas').width > 0 && !life.querySelector('[role="alert"]').textContent, 'Life canvas rendered without errors');
-    await runtime.execute(['embed', 'LifeUI'], context);
+    await execute(['embed', 'LifeUI'], context);
     const lifeHeader = await webFront.cppFunction('test.header')('LifeUI');
-    await runtime.execute(['embed', 'ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
+    await execute(['embed', 'ui/main.tsx', '--output', 'generated/LifeUI.hpp'], context);
     assert(await webFront.cppFunction('test.header')('LifeUI') === lifeHeader, 'Life header must be deterministic');
     if (!config.registryExplicit) throw new PublicSmokeDone();
     // The application path above needs React DOM. Cache/command regressions do not: keep a small
     // real graph instead of repeatedly transferring React DOM's server/development files through the bridge.
     manifest.dependencies = {react: '19.3.1', 'webfront-fixture-lib': '1.0.0'};
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
-    await runtime.execute(['install', '--update'], context);
+    await execute(['install', '--update'], context);
     lock = await runtime.readLock(webFront);
     assert(Object.keys(lock.packages).length === 2 && !lock.roots['react-dom'], 'Command fixtures must not retain the application dependency graph');
     // A dependency added by hand desynchronizes the lock: commands say so and nothing is resolved implicitly.
     manifest.dependencies.scheduler = '*';
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
-    assert((await runtime.execute(['list'], context)).startsWith('Warning'), 'A desynchronized lock must be reported');
-    const refused = await runtime.execute(['install'], context).then(() => false, error => /wf install --update/.test(error.message));
+    assert((await execute(['list'], context)).startsWith('Warning'), 'A desynchronized lock must be reported');
+    const refused = await execute(['install'], context).then(() => false, error => /wf install --update/.test(error.message));
     assert(refused, 'wf install must not resolve a desynchronized manifest');
     delete manifest.dependencies.scheduler;
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
-    assert(/Installed 2 packages/.test(await runtime.execute(['install'], context)), 'A consistent lock must install its exact graph');
+    assert(/Installed 2 packages/.test(await execute(['install'], context)), 'A consistent lock must install its exact graph');
     // wf restore rebuilds an emptied cache from the lock alone, from the application's local registry although the
     // manifest names another one; --offline only checks the cache, without any request.
     const requests = [];
@@ -233,31 +310,32 @@ try {
     try {
         const emptied = await call('begin', '.webfront/developer/packages', true);
         await call('commit', emptied);
-        const missing = await runtime.execute(['restore', '--offline'], context).then(() => '', error => error.message);
+        const missing = await execute(['restore', '--offline'], context).then(() => '', error => error.message);
         assert(/react@19\.3\.1 \(missing\)/.test(missing) && requests.length === 0, 'An offline check must list missing packages without any request');
         await writeFile('webfront.project.json', JSON.stringify({...manifest, registry: 'https://registry.invalid/'}, null, 2));
-        const restored = await runtime.execute(['restore'], context);
+        const restored = await execute(['restore'], context);
         assert(/Restored 2 of 2 packages/.test(restored) && restored.includes('Registry: /fixtures/registry/ (application option)'), `wf restore must use and name the application registry: ${restored}`);
         assert(requests.length > 0 && requests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), 'wf restore must contact the application registry only');
         requests.length = 0;
-        assert(/Cache verified offline: 2 packages/.test(await runtime.execute(['restore', '--offline'], context)) && requests.length === 0, 'A complete cache must verify offline');
+        assert(/Cache verified offline: 2 packages/.test(await execute(['restore', '--offline'], context)) && requests.length === 0, 'A complete cache must verify offline');
     } finally {
         globalThis.fetch = pageFetch;
     }
     await writeFile('webfront.project.json', JSON.stringify(manifest, null, 2));
     const previous = frame.contentWindow.location.href;
     await writeFile('restore/main.js', "import value from 'webfront-fixture-lib'; document.getElementById('root').textContent = value;\n");
-    await runtime.execute(['preview', 'restore/main.js'], context);
+    await execute(['preview', 'restore/main.js'], context);
     const restoredMounted = () => frame.contentDocument?.getElementById('root')?.textContent === 'webfront-fixture-lib@1.0.0';
     for (let attempt = 0; frame.contentWindow.location.href === previous || !restoredMounted(); ++attempt) {
         if (attempt === 300) throw new Error('The preview did not build from the restored cache');
         await delay(50);
     }
-    const absent = await runtime.execute(['install', 'webfront-fixture-absent'], context).then(() => '', error => error.message);
+    const absent = await execute(['install', 'webfront-fixture-absent'], context).then(() => '', error => error.message);
     assert(/HTTP 404/.test(absent), 'A package absent from the registry must reject');
-    const failed = await runtime.execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
+    const failed = await execute(['install', 'INVALID-NPM-NAME'], context).then(() => false, () => true);
     assert(failed, 'Missing packages must reject');
     assert(JSON.stringify(await runtime.readLock(webFront)) === JSON.stringify(lock), 'A failed install must preserve the lock');
+    await progress('scripts and cancellation');
     // wf run and wf exec: WebFront scripts in a dedicated Worker, under the manifest permissions.
     const scriptOutput = [];
     const runContext = (signal = new AbortController().signal) => ({...context, signal, write: text => { scriptOutput.push(text); console.log(text); }});
@@ -285,24 +363,24 @@ try {
     const scriptManifest = {...manifest, permissions: {files: ['tools'], publish: ['generated/script']},
         scripts: Object.fromEntries([...Object.keys(scripts).map(path => [path.split('/')[1].split('.')[0], path]), ['listing', 'wf list'], ['nested', 'wf run --timeout 120 loop']])};
     await writeFile('webfront.project.json', JSON.stringify(scriptManifest, null, 2));
-    assert(/Script gen completed/.test(await runtime.execute(['run', 'gen', 'a', 'b'], runContext())), 'A TypeScript script must run');
+    assert(/Script gen completed/.test(await execute(['run', 'gen', 'a', 'b'], runContext())), 'A TypeScript script must run');
     assert(new TextDecoder().decode(await readFile('generated/script/out.txt')) === 'a+b' && scriptOutput.includes('wrote a+b\r\n'), 'The script must write an allowed file and stream its console');
-    assert(/react@19\.3\.1/.test(await runtime.execute(['run', 'listing'], runContext())), 'A script may run a wf command');
-    const denied = await failure(runtime.execute(['run', 'denied'], runContext()));
+    assert(/react@19\.3\.1/.test(await execute(['run', 'listing'], runContext())), 'A script may run a wf command');
+    const denied = await failure(execute(['run', 'denied'], runContext()));
     assert(/Permission denied: writing ui\/main\.tsx/.test(denied?.message) && denied.exitCode === 1, `A context operation outside the permissions must be refused: ${denied}`);
     assert(new TextDecoder().decode(await readFile('ui/main.tsx')) === new TextDecoder().decode(mainBefore), 'A refused write must not change the file');
-    const node = await failure(runtime.execute(['run', 'node'], runContext()));
+    const node = await failure(execute(['run', 'node'], runContext()));
     assert(/"fs" is a Node\.js API/.test(node?.message), `A Node.js import must be refused while loading: ${node}`);
-    const exited = await failure(runtime.execute(['run', 'fail'], runContext()));
+    const exited = await failure(execute(['run', 'fail'], runContext()));
     assert(exited?.exitCode === 3 && /exited with code 3/.test(exited.message), 'A non-zero exit code must be propagated');
     const cooperative = new AbortController();
-    const waiting = failure(runtime.execute(['run', 'coop'], runContext(cooperative.signal)));
+    const waiting = failure(execute(['run', 'coop'], runContext(cooperative.signal)));
     await printed('waiting');
     cooperative.abort(new Error('Interrupted'));
     const stopped = await waiting;
     assert(stopped?.exitCode === 130 && !/grace period/.test(stopped.message), `Ctrl+C must stop a cooperative script: ${stopped}`);
     const interrupt = new AbortController();
-    const looping = failure(runtime.execute(['run', 'loop'], runContext(interrupt.signal)));
+    const looping = failure(execute(['run', 'loop'], runContext(interrupt.signal)));
     await printed('looping');
     await withTimers([2000], async clock => {
         interrupt.abort(new Error('Interrupted'));
@@ -314,7 +392,7 @@ try {
     for (const target of ['loop', 'nested']) {
         scriptOutput.length = 0;
         await withTimers([60000, 2000], async clock => {
-            const running = failure(runtime.execute(['run', '--timeout', '60', target], runContext()));
+            const running = failure(execute(['run', '--timeout', '60', target], runContext(), {expect: 'timeout'}));
             await printed('looping');
             clock.fire(60000);
             clock.fire(2000);
@@ -322,16 +400,16 @@ try {
             assert(timedOut?.exitCode === 124 && /stopped at its time limit/.test(timedOut.message), `The inherited time limit must stop ${target}: ${timedOut}`);
         });
     }
-    assert(/react@19\.3\.1/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a termination');
-    assert(/completed/.test(await runtime.execute(['run', 'unawaited'], runContext())), 'A script that does not await its write must complete');
+    assert(/react@19\.3\.1/.test(await execute(['list'], context)), 'The terminal must stay usable after a termination');
+    assert(/completed/.test(await execute(['run', 'unawaited'], runContext())), 'A script that does not await its write must complete');
     assert(new TextDecoder().decode(await readFile('generated/script/unawaited.txt')) === 'done', 'A write the script did not await must be applied');
-    await runtime.execute(['run', 'root'], runContext());
+    await execute(['run', 'root'], runContext());
     assert(scriptOutput.includes('root ["generated/","tools/"]\r\n'), `The root must list the entries leading to granted paths: ${scriptOutput.filter(line => line.startsWith('root'))}`);
-    await runtime.execute(['run', 'jsx'], runContext());
+    await execute(['run', 'jsx'], runContext());
     assert(scriptOutput.includes('jsx b\r\n'), 'A TSX script must compile its JSX with the automatic runtime');
     // A stop during a large write: the file is either untouched or complete, and no staging is left.
     const writing = new AbortController();
-    const big = failure(runtime.execute(['run', 'big'], runContext(writing.signal)));
+    const big = failure(execute(['run', 'big'], runContext(writing.signal)));
     await printed('writing');
     writing.abort(new Error('Interrupted'));
     await big;
@@ -340,17 +418,20 @@ try {
     const staged = JSON.parse(new TextDecoder().decode(await call('list', '.webfront/developer/staging')));
     assert(staged.length === 0, `A stopped write must leave no staged files: ${staged}`);
     // wf exec runs the webfront.bin entry of an installed package, never an npm bin.
-    await runtime.execute(['install', 'webfront-fixture-tool', 'webfront-fixture-nodebin'], context);
-    assert(/completed/.test(await runtime.execute(['exec', 'webfront-fixture-tool', 'hello'], runContext())), 'wf exec must run a WebFront entry');
+    await execute(['install', 'webfront-fixture-tool', 'webfront-fixture-nodebin'], context);
+    assert(/completed/.test(await execute(['exec', 'webfront-fixture-tool', 'hello'], runContext())), 'wf exec must run a WebFront entry');
     assert(/^webfront-fixture-lib@1\.\d+\.\d+ hello$/.test(new TextDecoder().decode(await readFile('generated/script/tool.txt'))), 'The entry must bundle its locked dependency');
-    assert(/only declares an npm "bin"/.test((await failure(runtime.execute(['exec', 'webfront-fixture-nodebin'], runContext())))?.message), 'A package with only an npm bin must be refused');
-    assert(/no WebFront executable entry/.test((await failure(runtime.execute(['exec', 'webfront-fixture-lib'], runContext())))?.message), 'A browser package without an entry must be refused');
+    assert(/only declares an npm "bin"/.test((await failure(execute(['exec', 'webfront-fixture-nodebin'], runContext())))?.message), 'A package with only an npm bin must be refused');
+    assert(/no WebFront executable entry/.test((await failure(execute(['exec', 'webfront-fixture-lib'], runContext())))?.message), 'A browser package without an entry must be refused');
+    await progress('TypeScript checks');
     // wf check: a real TypeScript type check in a Worker, with the typescript and the declarations of the lock, all
     // served by the local registry.
     const checkRequests = [];
-    globalThis.fetch = (input, init) => {
-        checkRequests.push(new URL(input instanceof Request ? input.url : input, location.href).href);
-        return pageFetch(input, init);
+    globalThis.fetch = async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input, location.href).href;
+        checkRequests.push(url);
+        try { return await pageFetch(input, init); }
+        catch (error) { throw new Error(`Registry request failed: ${url}: ${error.message}`, {cause: error}); }
     };
     const checkFiles = {
         'tsconfig.json': JSON.stringify({compilerOptions: {strict: true, target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', lib: ['ES2022']}, include: ['check']}),
@@ -380,18 +461,21 @@ try {
     assert(new TextDecoder().decode(await retryRead(retryFile, 0)) === 'recovered', 'A rejected package read must be retried');
     const checked = async (args = [], extra = {}) => {
         scriptOutput.length = 0;
-        const result = await runtime.execute(['check', ...args], {...runContext(), bridge: checkBridge, ...extra}).then(text => ({text}), error => ({error}));
+        const result = await execute(['check', ...args], {...runContext(), bridge: checkBridge, ...extra}).then(text => ({text}), error => ({error}));
         return {...result, output: scriptOutput.join('')};
     };
     try {
         assert(/needs the typescript package: run wf install typescript@6/.test((await checked()).error?.message), 'wf check must ask for typescript');
-        await runtime.execute(['install', 'typescript@4.9.5'], context);
+        await progress('install TypeScript 4.9.5');
+        await execute(['install', 'typescript@4.9.5'], context);
         const old = await checked();
         assert(/supports typescript 5\.x and 6\.x .* not typescript@4\.9\.5/.test(old.error?.message), `An unsupported typescript must be refused: ${old.error}`);
-        await runtime.execute(['install', 'typescript@5.9.3', 'webfront-fixture-typed', 'webfront-fixture-legacy', 'webfront-fixture-untyped', '@types/webfront-fixture-untyped'], context);
+        await progress('install TypeScript 5.9.3 and declarations');
+        await execute(['install', 'typescript@5.9.3', 'webfront-fixture-typed', 'webfront-fixture-legacy', 'webfront-fixture-untyped', '@types/webfront-fixture-untyped'], context);
         const five = await checked();
         assert(five.text && five.output.includes('No type errors in 2 project files (TypeScript 5.9.3).'), `TypeScript 5.9 must accept the project: ${five.error}\n${five.output}`);
-        await runtime.execute(['install', 'typescript@6.0.3'], context);
+        await progress('install TypeScript 6.0.3');
+        await execute(['install', 'typescript@6.0.3'], context);
         const six = await checked();
         assert(/Type check completed/.test(six.text) && six.output.includes('No type errors in 2 project files (TypeScript 6.0.3).'), `TypeScript 6.0 must accept the project: ${six.error}\n${six.output}`);
         assert(checkRequests.length > 0 && checkRequests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), `typescript must come from the local registry: ${checkRequests}`);
@@ -424,7 +508,7 @@ try {
     const before = [await listing(''), await listing('check')];
     const stopCheck = new AbortController();
     scriptOutput.length = 0;
-    const longCheck = failure(runtime.execute(['check'], {...runContext(stopCheck.signal), bridge: checkBridge}));
+    const longCheck = failure(execute(['check'], {...runContext(stopCheck.signal), bridge: checkBridge}));
     await printed('Checking 3 root files');
     await withTimers([2000], async clock => {
         stopCheck.abort(new Error('Interrupted'));
@@ -435,18 +519,20 @@ try {
     });
     assert(JSON.stringify([await listing(''), await listing('check')]) === JSON.stringify(before), 'A check must not write any project file');
     assert(JSON.parse(await listing('.webfront/developer/staging')).length === 0, 'A check must leave no staged files');
-    assert(/typescript@6\.0\.3/.test(await runtime.execute(['list'], context)), 'The terminal must stay usable after a stopped check');
+    assert(/typescript@6\.0\.3/.test(await execute(['list'], context)), 'The terminal must stay usable after a stopped check');
     // wf test: the specs of the manifest under the locked jasmine-core, in a frame of this page.
     const testOutput = [];
     let testRun = 0;
-    const tested = async (args = [], extra = {}) => {
+    await progress('Jasmine runs');
+    const tested = async (args = [], extra = {}, expectation = {}) => {
         const label = `wf test #${++testRun} ${args.join(' ')}`;
-        await webFront.cppFunction('test.progress')(`${label}: starting`);
+        const started = profileNow();
+        await webFront.cppFunction('test.progress')(`${started.toFixed(3)}ms begin ${label}`);
         testOutput.length = 0;
         let report = null;
-        const result = await runtime.execute(['test', ...args], {...runContext(), write: text => testOutput.push(text), onReport: value => { report = value; }, ...extra})
+        const result = await execute(['test', ...args], {...runContext(), write: text => testOutput.push(text), onReport: value => { report = value; }, ...extra}, expectation)
             .then(text => ({text}), error => ({error}));
-        await webFront.cppFunction('test.progress')(`${label}: ${report?.status ?? result.error?.message ?? 'done'}`);
+        await webFront.cppFunction('test.progress')(`${profileNow().toFixed(3)}ms end ${label} durationMs=${(profileNow() - started).toFixed(3)} status=${report?.status ?? result.error?.message ?? 'done'}`);
         return {...result, report, output: testOutput.join('')};
     };
     const readManifest = async () => JSON.parse(new TextDecoder().decode(await readFile('webfront.project.json')));
@@ -461,7 +547,7 @@ try {
         testRequests.push(new URL(input instanceof Request ? input.url : input, location.href).href);
         return pageFetch(input, init);
     };
-    try { await runtime.execute(['install', 'jasmine-core'], context); } finally { globalThis.fetch = pageFetch; }
+    try { await execute(['install', 'jasmine-core'], context); } finally { globalThis.fetch = pageFetch; }
     assert(testRequests.length > 0 && testRequests.every(url => url.startsWith(`${location.origin}/fixtures/registry/`)), `jasmine-core must come from the local registry: ${testRequests}`);
     const testLock = await runtime.readLock(webFront);
     const jasmineVersion = testLock.packages[testLock.roots['jasmine-core'].id].version;
@@ -533,7 +619,7 @@ try {
     await withTimers([60000], async clock => {
         const started = hangingStarted();
         try {
-            const hanging = tested(['--timeout', '60']);
+            const hanging = tested(['--timeout', '60'], {}, {expect: 'timeout'});
             await untilReady(started.ready, hanging);
             assert(clock.pending() === 1, 'Only the frame deadline must remain after preparation');
             clock.fire(60000);
@@ -562,7 +648,7 @@ try {
     await specsOf(['tests/pass.spec.js']);
     await withTimers([60000], async clock => {
         const blocked = blockedRead();
-        const running = tested(['--timeout', '60'], {bridge: blocked.bridge});
+        const running = tested(['--timeout', '60'], {bridge: blocked.bridge}, {expect: 'timeout'});
         await untilReady(blocked.ready, running);
         clock.fire(60000);
         const result = await running;
@@ -589,7 +675,7 @@ try {
             `An already aborted signal must report interruption without AbortSignal.any: ${legacyStopped.error}`);
         await withTimers([60000], async clock => {
             const blocked = blockedRead();
-            const running = tested(['--timeout', '60'], {bridge: blocked.bridge, signal: new AbortController().signal});
+            const running = tested(['--timeout', '60'], {bridge: blocked.bridge, signal: new AbortController().signal}, {expect: 'timeout'});
             await untilReady(blocked.ready, running);
             clock.fire(60000);
             const result = await running;
@@ -620,7 +706,7 @@ try {
                 if (++reads > 2) { started(); return new Promise(() => {}); }
                 return webFront.cppFunction(name)(...args);
             } : webFront.cppFunction(name)};
-        const running = runtime.execute(['run', '--timeout', '60', 'specs'], {...runContext(), bridge, onReport: () => {}}).then(() => null, error => error);
+        const running = execute(['run', '--timeout', '60', 'specs'], {...runContext(), bridge, onReport: () => {}}, {expect: 'timeout'}).then(() => null, error => error);
         await untilReady(ready, running);
         clock.fire(60000);
         const inherited = await running;
@@ -634,26 +720,28 @@ try {
     // Without a terminal: the result reaches C++ through the bridge and the session ends with the command's status.
     await specsOf(['tests/pass.spec.js', 'tests/fail.spec.ts']);
     const exits = [];
-    const sent = await runtime.runNonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
+    const sent = await nonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
     const received = JSON.parse(await webFront.cppFunction('test.lastResult')());
     assert(sent.exitCode === 1 && exits.length === 1 && exits[0] === 1 && received.exitCode === 1 && received.report?.failed === 1 && received.report.total === 4 &&
         received.report.failures[0].name === 'failing fails with a message' && received.output.includes('FAILED: 4 specs, 1 failure'), `A non-interactive failure must reach C++ and end the session with 1: ${JSON.stringify(received)}`);
     await specsOf(['tests/pass.spec.js']);
-    await runtime.runNonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
+    await nonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
     const success = JSON.parse(await webFront.cppFunction('test.lastResult')());
     assert(exits[1] === 0 && success.exitCode === 0 && success.report.status === 'passed', `A non-interactive success must end the session with 0: ${JSON.stringify(success)}`);
-    // A report too large for a bridge string is cut, not lost: C++ still receives the counts and the exit status.
-    await writeFile('tests/big.spec.js', "describe('big', () => {\n    for (let index = 0; index < 4; ++index) it('fails with a long message ' + index, () => { throw new Error('x'.repeat(10000)); });\n});\n");
+    // Four 1500-NUL messages take at least 72000 JSON bytes across output + report, independently of stack format.
+    // This crosses the 65535-byte bridge limit with much smaller raw strings and preserves all four failures.
+    await writeFile('tests/big.spec.js', "describe('big', () => {\n    for (let index = 0; index < 4; ++index) it('fails with a long message ' + index, () => { throw new Error('\\0'.repeat(1500)); });\n});\n");
     await specsOf(['tests/big.spec.js']);
-    await runtime.runNonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
+    await nonInteractive(['test'], {...runContext(), reporter: json => webFront.cppFunction('test.result')(json), onExit: code => exits.push(code)});
     const cut = JSON.parse(await webFront.cppFunction('test.lastResult')());
     assert(exits[2] === 1 && cut.exitCode === 1 && cut.truncated === true && cut.report?.failed === 4 && cut.report.total === 4 && cut.report.failures.length === 4,
         `An oversized result must be cut to cross the bridge: ${JSON.stringify(cut).slice(0, 300)}`);
     exits.splice(2, 1);
-    await runtime.runNonInteractive(['test', '--timeout', 'x'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
+    await nonInteractive(['test', '--timeout', 'x'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
     assert(exits[2] === 1, 'A command that fails and a result that cannot be sent must both end non-zero');
-    await runtime.runNonInteractive(['list'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
+    await nonInteractive(['list'], {...runContext(), reporter: () => { throw new Error('bridge down'); }, onExit: code => exits.push(code)});
     assert(exits[3] === 1, 'A result that cannot be sent must not end the session with 0');
+    await progress('terminal and sessions');
     // The terminal: the application's C++ commands, run in this browser's session.
     assert(JSON.stringify([...runtime.builtinNames].sort()) === JSON.stringify([...runtime.reservedNames].sort()),
         `The terminal's own commands must be the names reserved to it: ${runtime.builtinNames}`);
@@ -967,5 +1055,7 @@ try {
         await webFront.cppFunction('test.report')(false, `${error.message ?? error}\n${error.stack ?? ''}`);
     }
 } finally {
+    if (lastPhase) await webFront.cppFunction('test.progress')(
+        `${profileNow().toFixed(3)}ms end ${lastPhase.name} durationMs=${(profileNow() - lastPhase.time).toFixed(3)}`);
     setTimeout(() => globalThis.close(), 0);
 }

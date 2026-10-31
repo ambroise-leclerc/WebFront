@@ -10,6 +10,7 @@ endif()
 
 # Normative list: header file name under include/webfront/system/.
 set(allowed
+    DomInterpreterData.hpp      # optional DOM interpreter
     WebFrontJsData.hpp          # bridge WebFront.js
     FallbackIndexHtmlData.hpp   # fallback page
     FallbackModuleData.hpp      # fallback module

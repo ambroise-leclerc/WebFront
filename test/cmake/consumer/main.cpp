@@ -12,10 +12,21 @@
 #endif
 
 #include <webfront/WebFront.hpp>
+#include <webfront/testing/Jasmine.hpp>
+
+#if defined(WEBFRONT_CONSUMER_EXPECT_NATIVE) && !defined(WEBFRONT_NATIVE_WINDOW)
+#error The native consumer must compile the native frontend branch
+#endif
+#if defined(WEBFRONT_NATIVE_WINDOW)
+using ConsumerApp = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
+#else
+using ConsumerApp = webfront::WebFront;
+#endif
 
 int main(int argc, char**) {
     if (argc > 1) {  // never taken by the smoke test: it only proves that the library compiles and links
-        webfront::WebFront app;
+        ConsumerApp app;
+        webfront::testing::JasmineTest tests{app};
         app.show();
     }
     return 0;

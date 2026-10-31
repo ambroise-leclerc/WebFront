@@ -1,4 +1,9 @@
+import './react-specs.mjs';
+import './fallback-specs.mjs';
+import './dom-document-specs.mjs';
+import './forms-specs.mjs';
 import './content-policy-specs.mjs';
+import './dom-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
 
 // The page of the application is covered by the lifecycle cases (path-encoding): these specs run in the frame of wf test.
@@ -72,6 +77,11 @@ const callerCall = new Promise((resolve) => {
     resolveCallerCall = resolve;
 });
 
+let resolveBroadcast;
+const broadcastCall = new Promise((resolve) => {
+    resolveBroadcast = resolve;
+});
+
 let resolveCppResult;
 const cppResultCall = new Promise((resolve) => {
     resolveCppResult = resolve;
@@ -130,6 +140,10 @@ globalThis.webfrontTests = {
 
     receiveFromCaller(token) {
         resolveCallerCall(token);
+    },
+
+    receiveBroadcast(token, number) {
+        resolveBroadcast([token, number]);
     },
 
     returnToCpp(value) {
@@ -262,9 +276,15 @@ describe('WebFront browser integration', () => {
             .toBeRejectedWithError(RangeError, 'WebFront strings cannot exceed 65535 UTF-8 bytes');
     });
 
-    it('lets a C++ callback call back the browser that called it', async () => {
-        await webFront.cppFunction('callBackCaller')('caller-token');
+    it('receives a callback message and then its return value on the same connection', async () => {
+        await expectAsync(webFront.cppFunction('callBackCaller')('caller-token'))
+            .toBeResolvedTo('cpp-result:caller-token');
         await expectAsync(callerCall).toBeResolvedTo('caller-token');
+    });
+
+    it('receives a call that C++ broadcast to every browser from another thread', async () => {
+        await expectAsync(webFront.cppFunction('broadcastFromThread')('broadcast-token')).toBeResolved();
+        await expectAsync(broadcastCall).toBeResolvedTo(['broadcast-token', 401]);
     });
 
     it('allows C++ to await a JavaScript result', async () => {

@@ -1,24 +1,37 @@
+#include "InjectableNetworking.hpp"
+#include "Mocks.hpp"
+#include "Version.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
-#include <webfront/tooling/Logger.hpp>
 #include <webfront/networking/NetworkingMock.hpp>
+#include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>
 
-#include "Mocks.hpp"
-#include "Version.hpp"
-
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <concepts>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <list>
+#include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    #include <sys/wait.h>
+    #include <unistd.h>
+#endif
 
 using namespace webfront;
 
@@ -362,6 +375,116 @@ SCENARIO("The frontend contract: open() runs on the calling thread and a closing
             }
         }
     }
+}
+
+struct FallbackNativeWindow {
+    static inline bool        displayAvailable = true;
+    static inline int         openCalls        = 0;
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+    static void               initialize() {
+        if (!displayAvailable)
+            throw std::runtime_error("cannot open a display; set DISPLAY or WAYLAND_DISPLAY");
+    }
+    static void open(std::string_view, std::string_view) { ++openCalls; }
+};
+
+struct FallbackBrowser {
+    static inline int initializeCalls = 0;
+    static inline int openCalls = 0;
+    static constexpr frontend::Action action{frontend::Action::keepServerRunning};
+    static void                       initialize() { ++initializeCalls; }
+    static void                       open(std::string_view, std::string_view) { ++openCalls; }
+};
+
+SCENARIO("Native window or browser, decided at run time") {
+    using Fallback = frontend::NativeOrBrowserFrontendFor<FallbackNativeWindow, FallbackBrowser>;
+    STATIC_REQUIRE(frontend::FrontendType<Fallback>);
+    STATIC_REQUIRE(frontend::FrontendType<frontend::NativeOrBrowserFrontend>);
+    STATIC_REQUIRE(std::is_same_v<webfront::WebFrontWithFrontend<frontend::NativeOrBrowserFrontend>::FrontendProvider, frontend::NativeOrBrowserFrontend>);
+
+    GIVEN("a native window that can open") {
+        FallbackNativeWindow::displayAvailable = true;
+        FallbackNativeWindow::openCalls        = 0;
+        FallbackBrowser::openCalls             = 0;
+        FallbackBrowser::initializeCalls       = 0;
+        Fallback::initialize();
+        THEN("the native window is used and closing it stops the server") {
+            REQUIRE(FallbackBrowser::initializeCalls == 0);
+            REQUIRE(Fallback::usesNativeWindow());
+            REQUIRE_FALSE(Fallback::fallbackReason().has_value());
+            REQUIRE(Fallback::closeServerAfterOpen());
+            Fallback::open("127.0.0.1", "9200", "index.html");
+            REQUIRE(FallbackNativeWindow::openCalls == 1);
+            REQUIRE(FallbackBrowser::openCalls == 0);
+        }
+    }
+    GIVEN("a session without a display") {
+        FallbackNativeWindow::displayAvailable = false;
+        FallbackNativeWindow::openCalls        = 0;
+        FallbackBrowser::openCalls             = 0;
+        FallbackBrowser::initializeCalls       = 0;
+        std::ostringstream captured;
+        auto* const        previous = std::cerr.rdbuf(captured.rdbuf());
+        Fallback::initialize();
+        std::cerr.rdbuf(previous);
+        THEN("the browser is used, the reason is kept and printed, and the server keeps running") {
+            REQUIRE_FALSE(Fallback::usesNativeWindow());
+            REQUIRE(FallbackBrowser::initializeCalls == 1);
+            REQUIRE(Fallback::fallbackReason().value_or("").find("display") != std::string::npos);
+            REQUIRE(captured.str().find("opening the system browser instead of a native window") != std::string::npos);
+            REQUIRE_FALSE(Fallback::closeServerAfterOpen());
+            Fallback::open("127.0.0.1", "9200", "index.html");
+            REQUIRE(FallbackNativeWindow::openCalls == 0);
+            REQUIRE(FallbackBrowser::openCalls == 1);
+        }
+        THEN("an application falling back does not stop the server after open()") {
+            using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, Fallback>;
+            App app("9203");
+            const auto previousStopCalls = WebFrontIoContextMock::stopCalls.load();
+            app.show();
+            REQUIRE(FallbackBrowser::openCalls == 1);
+            REQUIRE(WebFrontIoContextMock::stopCalls.load() == previousStopCalls);
+        }
+    }
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    GIVEN("the real WebKitGTK engine and no DISPLAY or WAYLAND_DISPLAY") {
+        // A child process: GTK may already be initialized in this one, and the environment must stay untouched.
+        const pid_t child = fork();
+        REQUIRE(child >= 0);
+        if (child == 0) {
+            unsetenv("DISPLAY");
+            unsetenv("WAYLAND_DISPLAY");
+            std::cerr.rdbuf(nullptr);
+            frontend::NativeOrBrowserFrontend::initialize();
+            const bool fellBack = !frontend::NativeOrBrowserFrontend::usesNativeWindow()
+                                  && frontend::NativeOrBrowserFrontend::fallbackReason().value_or("").find("display") != std::string::npos;
+            _exit(fellBack ? 0 : 1);
+        }
+        int status = 0;
+        REQUIRE(waitpid(child, &status, 0) == child);
+        THEN("the frontend falls back to the browser and names the missing display") {
+            REQUIRE(WIFEXITED(status));
+            REQUIRE(WEXITSTATUS(status) == 0);
+        }
+    }
+#endif
+}
+
+SCENARIO("The native engine availability is a constant") {
+    STATIC_REQUIRE(std::is_same_v<decltype(frontend::nativeWebViewAvailable), const bool>);
+#if defined(__linux__) && defined(WEBFRONT_EMBED_WEBKITGTK)
+    STATIC_REQUIRE(frontend::nativeWebViewAvailable);
+#elif defined(__linux__)
+    STATIC_REQUIRE_FALSE(frontend::nativeWebViewAvailable);
+    THEN("without an engine the fallback frontend always uses the browser") {
+        std::ostringstream captured;
+        auto* const        previous = std::cerr.rdbuf(captured.rdbuf());
+        frontend::NativeOrBrowserFrontend::initialize();
+        std::cerr.rdbuf(previous);
+        REQUIRE_FALSE(frontend::NativeOrBrowserFrontend::usesNativeWindow());
+        REQUIRE(frontend::NativeOrBrowserFrontend::fallbackReason().value_or("").find("WEBFRONT_EMBED_WEBKITGTK") != std::string::npos);
+    }
+#endif
 }
 
 SCENARIO("The frontend contract: a failing open() stops the server whatever its action") {
@@ -812,4 +935,130 @@ SCENARIO("WebFront passes per-application content rules to policy-aware frontend
         REQUIRE(PolicyFrontend::received.popups == PopupPolicy::systemBrowser);
         REQUIRE_FALSE(PolicyFrontend::received.devToolsEnabled);
     }
+}
+
+SCENARIO("Ephemeral ports are bound atomically and forwarded to the frontend") {
+    using App = BasicWFWithFrontend<NetProvider, TestFilesystem, AddressFrontend>;
+    App first{WebFrontConfig{.port = "0"}};
+    App second{WebFrontConfig{.port = "0"}};
+    first.openWindow("index.html");
+    const auto firstPort = AddressFrontend::lastPort;
+    second.openWindow("index.html");
+    REQUIRE(firstPort != "0");
+    REQUIRE(AddressFrontend::lastPort != "0");
+    REQUIRE(firstPort != AddressFrontend::lastPort);
+    REQUIRE(std::stoi(firstPort) > 0);
+    REQUIRE(std::stoi(AddressFrontend::lastPort) > 0);
+    REQUIRE(first.port() == firstPort);
+    REQUIRE(second.port() == AddressFrontend::lastPort);
+    GIVEN("a legacy provider without a bound-endpoint query") {
+        using MockApp = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, AddressFrontend>;
+        MockApp mock{WebFrontConfig{.port = "0"}};
+        REQUIRE(mock.port() == "0");
+    }
+}
+
+SCENARIO("Sending a DOM batch through a lost UI link throws ConnectionError") {
+    using App = BasicWFWithFrontend<WebFrontNetworkingMock, TestFilesystem, InitializingFrontend>;
+    GIVEN("a UI handle whose connection is absent from the application") {
+        App           app("9161");
+        App::UI       ui(app, 42, 1);
+        msg::DomBatch batch(7);
+        batch.add({msg::DomOp::text, 1, 0, 0, "unreachable"});
+        THEN("sending fails synchronously without queuing a frame") {
+            REQUIRE_THROWS_AS(ui.sendDomBatch(batch), ConnectionError);
+            REQUIRE(ui.pendingWrites() == 0);
+        }
+    }
+}
+
+SCENARIO("A UI is an assignable value identifying one browser of one application") {
+    using App = BasicWF<networking::NetworkingMock, fs::DefaultFS>;
+    GIVEN("an application over the networking mock") {
+        App app(WebFrontConfig{.port = "0"});
+        THEN("a UI is an assignable value usable in containers") {
+            static_assert(std::is_copy_assignable_v<App::UI>);
+            static_assert(std::is_nothrow_move_assignable_v<App::UI>);
+            static_assert(std::equality_comparable<App::UI>);
+            static_assert(!std::is_copy_constructible_v<App> && !std::is_move_constructible_v<App>);
+            static_assert(!std::is_copy_assignable_v<App> && !std::is_move_assignable_v<App>);
+            std::vector<App::UI> clients{App::UI(app, 1, 1), App::UI(app, 2, 1), App::UI(app, 3, 1)};
+            std::erase_if(clients, [](const App::UI& ui) { return ui.id() == 2; });
+            REQUIRE(clients.size() == 2);
+            CHECK(clients[0] == App::UI(app, 1, 1));
+            CHECK(clients[0] != clients[1]);
+            CHECK(clients[1].id() == 3);
+            std::optional<App::UI> current;
+            current = clients[1];
+            CHECK(current->id() == 3);
+        }
+        THEN("a UI of another application is never equal, even with the same identifier") {
+            struct Application { } first, second;
+            using StubUI = BasicUI<Application>;
+            CHECK(StubUI(first, 1, 1) != StubUI(second, 1, 1));
+            CHECK(StubUI(first, 1, 1) != StubUI(first, 1, 2));  // same identifier, later connection
+            StubUI ui(first, 1, 1);
+            ui = StubUI(second, 1, 1);
+            CHECK(ui == StubUI(second, 1, 1));
+        }
+        THEN("a UI has no default state and a reassigned one acts on its new value") {
+            static_assert(!std::is_default_constructible_v<App::UI>);
+            App::UI       ui(app, 1, 1);
+            const App::UI gone(app, 42, 1);
+            ui = gone;
+            CHECK(ui == gone);
+            CHECK_THROWS_AS(ui.addScript("1"), ConnectionError);
+            CHECK(ui.pendingWrites() == 0);
+            CHECK_NOTHROW(ui.jsFunction("console.log")("dropped"));
+            auto result = ui.jsFunction<int>("Math.abs")(-1);
+            CHECK_THROWS_WITH(result.get(), "Browser connection closed");
+            CHECK_NOTHROW(ui.writesAtMost(0));
+            App::UI moved(std::move(ui));
+            CHECK(moved.id() == 42);
+            CHECK_THROWS_AS(moved.addScript("1"), ConnectionError);
+        }
+    }
+}
+
+namespace {
+struct DomNoTimerNet : testing::InjectableNetworking {
+    static inline bool accepted{};
+    static auto        Accept(Acceptor&) {
+        return networking::ex::then(networking::ex::just(), []() -> Socket {
+            if (std::exchange(accepted, true))
+                throw std::system_error(std::make_error_code(std::errc::operation_canceled));
+            return Socket{};
+        });
+    }
+};
+}  // namespace
+
+SCENARIO("DOM readiness explains a missing network timer while the ordinary bridge remains usable", "[dom]") {
+    using Socket = testing::InjectableSocket;
+    Socket::reset();
+    DomNoTimerNet::accepted = false;
+    BasicWF<DomNoTimerNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
+    app.cppFunction("echo", [] {
+        return std::string{"bridge stays available"};
+    });
+    const std::string upgrade = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    Socket::receive(std::as_bytes(std::span(upgrade)));
+    msg::Handshake handshake;
+    Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
+    REQUIRE(app.connectedBrowsers() == 1);
+    auto call = [](std::string name, msg::CallId id) {
+        msg::FunctionCall<> message;
+        message.setCallId(id);
+        websocket::Frame<DomNoTimerNet> frame{std::span(reinterpret_cast<const std::byte*>(message.header().data()), message.header().size())};
+        message.encodeParameter(name, frame);
+        frame.freeze();
+        Socket::receive(testing::clientFrame(testing::messagePayload(frame)));
+    };
+    call("wfDom.ready", 21);
+    REQUIRE(Socket::wrote("DOM API requires Net::ResumeAfter"));
+    call("echo", 22);
+    REQUIRE(Socket::wrote("bridge stays available"));
+    REQUIRE(app.connectedBrowsers() == 1);
+    app.shutdown();
 }

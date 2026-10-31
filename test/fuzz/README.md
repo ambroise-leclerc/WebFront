@@ -51,7 +51,7 @@ bundle to compress. Generated supported streams check acceptance and content in 
 the fuzz target checks every WebFront-accepted stream, allowing intentional rejections of
 unsupported declarations. The oracle handles concatenated members and requires exact consumption,
 normalizing zlib consumers' permissive treatment of trailing padding. See
-[decoder measurements](../../docs/GZIP_DECODER_MEASUREMENTS.md) for sizes, limits and reproduction.
+[HTTP asset validation](../../docs/HTTP_ASSETS.md#manual-benchmarks-and-differential-validation) for limits and reproduction.
 
 On macOS with Apple Clang and an external libFuzzer archive, the standalone equivalent is:
 

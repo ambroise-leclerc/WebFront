@@ -12,7 +12,7 @@ namespace webfront::fs {
 
 namespace detail {
 
-/// Never touches disk: always serves the embedded, version-matched bridge script and nothing else.
+/// Never touches disk: serves the embedded, version-matched bridge script and optional DOM interpreter.
 /// Listed first in DefaultFS so a configured document root can never shadow it.
 class ProtectedWebFrontJsFS {
 public:
@@ -20,6 +20,7 @@ public:
 
     static std::optional<File> open(std::filesystem::path file) {
         if (file.relative_path().string() == "WebFront.js") return File{IndexFS::WebFrontJs{}};
+        if (file.relative_path().string() == "webfront-dom.mjs") return IndexFS::open(file);
         return {};
     }
 };
@@ -44,14 +45,14 @@ private:
 } // namespace detail
 
 /// Precedence (Multi<> serves the first provider that returns a file):
-///  1. The embedded, version-matched WebFront.js - always wins, never overridable.
+///  1. The embedded, version-matched WebFront.js and webfront-dom.mjs - never overridable.
 ///  2. Files under an explicitly configured document root - development only; no disk access at
 ///     all when unconfigured.
 ///  3. IndexFS's embedded fallback page, favicon, and WebFront.js copy.
 using DefaultFS = Multi<detail::ProtectedWebFrontJsFS, detail::OptionalDevRootFS, IndexFS>;
 
 /// DefaultFS with additional embedded providers, such as the assets an application generated with wf embed.
-/// They are consulted after the protected WebFront.js and before the document root, so a
+/// They are consulted after the protected bridge resources and before the document root, so a
 /// development root cannot shadow a component's files.
 template <Provider... Extra>
 using DefaultFSWith = Multi<detail::ProtectedWebFrontJsFS, Extra..., detail::OptionalDevRootFS, IndexFS>;

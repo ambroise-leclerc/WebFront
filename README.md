@@ -1,4 +1,4 @@
-# WebFront
+# <img src="docs/images/webfront-icon.svg" width="24" height="24" alt=""> WebFront
 
 [![CI](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml/badge.svg?branch=develop)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
 [![Windows · MSVC](https://img.shields.io/badge/CI-Windows%20%C2%B7%20MSVC-0078D4)](https://github.com/ambroise-leclerc/WebFront/actions/workflows/BuildAndTest.yml)
@@ -202,6 +202,11 @@ The builds remove TypeScript types without checking them; `wf check` runs the Ty
 
 The type packages come next: `wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0` then `wf check` type-check the starter. Both commands are described in the [developer environment reference](docs/DEVELOPER_ENVIRONMENT.md).
 
+An optional native [automation launcher](docs/AUTOMATION.md) exposes the developer window through
+local stdio MCP or a JSON CLI, with explicit permissions for check/build/test/preview and bounded
+UI inspection/actions. It requires an environment containing automation API v1 (0.6.3 or later),
+built from the sources or obtained from a verified published distribution.
+
 ### 5. Try the result
 
 ![Game of Life running in a native window](docs/images/life-preview.jpg)
@@ -238,7 +243,7 @@ app.show();
 
 Recompilation is explicit. The resulting application runs offline without the project directory, developer callbacks or downloaded tool cache. The selected native engine's deployment requirements still apply; this is not an application installer.
 
-The examples' [LifeFrontend.hpp](examples/life/LifeFrontend.hpp) selects the native engine or the default browser for both stages.
+The examples' [LifeFrontend.hpp](examples/life/LifeFrontend.hpp) selects `NativeOrBrowserFrontend` for both stages: a native window when the engine is built and a session exists, the default browser otherwise.
 Your own application can select `webfront::NativeApp` or `webfront::NativeAppWithAssets` explicitly when it requires a native window.
 
 ## Use WebFront in your project
@@ -253,7 +258,46 @@ target_link_libraries(MyApp PRIVATE WebFront::WebFront)
 
 As a subproject, examples and tests are off by default and compiler settings do not leak into your targets. `WEBFRONT_BUILD_EXAMPLES=OFF` disables examples in a standalone build too.
 
-`webfront::WebFront` always uses the system browser. Native adapters remain optional: the examples enable the one of your platform when its dependencies are found, while your own application selects its frontend explicitly; CEF is available when you need an embedded Chromium distribution. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
+GCC 16 crashes inside stdexec (`internal compiler error: Segmentation fault` in `__query.hpp`) when CMake scans C++ modules and adds `-fmodules-ts`, which happens by default for C++20 and later targets (CMP0155, Ninja). WebFront is header-only and needs no module scan. Turn it off for the targets that link WebFront and use no C++ modules, after creating them:
+
+```cmake
+add_executable(MyApp main.cpp)
+target_link_libraries(MyApp PRIVATE WebFront::WebFront)
+webfront_disable_module_scan(MyApp)
+```
+
+Alternatively, `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)` before creating your targets does it for all of them; use it only if no target of your project uses C++ modules, since CMake then cannot order their compilation. Targets with source-level scan properties or `CXX_MODULES` file sets are still scanned.
+
+Configuring WebFront as a subproject with GCC 16 and scanning enabled prints a warning naming each affected target, with these workarounds.
+
+`webfront::WebFront` always uses the system browser. For a native window with the same browser fallback as the examples, add this after linking your target (also works after `CPMAddPackage`):
+
+```cmake
+webfront_use_native_window(MyApp)
+```
+
+Select the application type in `main.cpp` using the definition supplied by the helper:
+
+```cpp
+#include <webfront/WebFront.hpp>
+
+#if defined(WEBFRONT_NATIVE_WINDOW)
+using App = webfront::WebFrontWithFrontend<webfront::frontend::NativeWebViewFrontend>;
+#else
+using App = webfront::WebFront;
+#endif
+
+int main() {
+    App app;
+    app.show();
+}
+```
+
+To get a native window when one can be opened and the system browser otherwise (for example over SSH, in a container or in CI, where no display exists), use `WebFrontWithFrontend<webfront::frontend::NativeOrBrowserFrontend>`: no `#if` is needed, and the reason for a fallback is printed once. See [docs/FRONTENDS.md](docs/FRONTENDS.md).
+
+Native engines are detected by default for consumer builds, whatever variables the parent project defines, and for standalone builds except with `ENABLE_TESTING=ON` or `ENABLE_FUZZING=ON`. The helper applies the native engine's target setup and defines `WEBFRONT_NATIVE_WINDOW` only when that engine is enabled; otherwise CMake prints installation advice and the application uses the default browser. On Windows, detection requires an MSVC-compatible compiler and downloads the pinned WebView2 SDK; the Evergreen runtime must be installed separately. Linux needs WebKitGTK 6.0 development files, and macOS needs Clang and macOS 13.3 or later. Explicit `WEBFRONT_EMBED_<ENGINE>=ON|OFF` values take precedence; `WEBFRONT_AUTODETECT_NATIVE=OFF` disables detection. No option needs to be set before `add_subdirectory`/CPM for the default path.
+
+For explicit engine selection, `webfront_native_frontend_option(out)` and `webfront_setup_frontends_for_target(MyApp)` are also callable from the parent or other directories. The latter applies setup for all enabled engines; the native helper selects only the platform's native engine and never CEF. See [WKWebView](docs/WKWEBVIEW.md), [WebKitGTK](docs/WEBKITGTK.md) and the [frontend architecture](docs/adr/README.md).
 
 ## Build and test
 
@@ -266,17 +310,32 @@ ctest --test-dir build --output-on-failure --parallel 4
 
 Configuring with tests enabled downloads, and verifies against their SHA-512, the pinned bootstrap environment and the packages of the test registry; the embedded assets are generated and checked by CMake alone (the `webfront-embedded-assets` target regenerates them). Normal C++ builds use versioned headers. Browser tests require an enabled engine; Linux CEF tests use Xvfb. See [AGENTS.md](AGENTS.md) for contributor commands and [developer environment testing](docs/DEVELOPER_ENVIRONMENT.md#environment-distribution-and-offline-tests-maintainers).
 
-CTest runs up to four tasks at a time; browser ports remain locked and embedded builds run serially.
+CTest runs up to four tasks at a time; independent driver sessions use OS-assigned ports, while
+shared projects and nested builds retain resource locks.
 See [test timings and parallelism](docs/TEST_PERFORMANCE.md) for measurements and constraints.
+`ctest -L fast` runs the unit tests in about a second; [test tiers](docs/TEST_TIERS.md) describes what CI runs on each pull request, weekly and before a merge into `master`.
 
-CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also collects and prints GCC line coverage (no external upload). Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly and on demand. Manual dispatch with `repeat_desktop_tests=true` also repeats each desktop CTest case three times for stability checks. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
+CI runs one combined C++ / native-browser job per desktop platform on each code change. The Linux job also collects and prints GCC line coverage (no external upload). Linux Clang, sanitizers, fuzzing and CEF compatibility run weekly, on demand and on pull requests into `master`. Manual dispatch with `repeat_desktop_tests=true` also runs the complete desktop CTest suite three times, recreating its fixtures on each pass. Workflow concurrency cancels superseded runs; dependency and compiler caches avoid repeated work. Platform badges above identify the configured matrix; the CI badge reports its aggregate status. Execution times depend on cache state and runner availability.
 
 ## Contracts and limitations
 
-- WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there; avoid blocking it. Native windows must be created and shown on the main thread. Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
+- WebFront owns an HTTP/WebSocket server on a background thread. Callbacks run there, one at a time; avoid blocking it. Browser calls (`jsFunction`, `app.broadcast(name)(...)`) can be made from any thread and never wait for it; see [threads](docs/ASYNC_EXECUTION.md#threads). Native windows must be created and shown on the main thread. Application coroutines use `app.spawn(task)` or `ui.spawn(task)`; see [execution and cancellation](docs/ASYNC_EXECUTION.md).
 - JavaScript calls to C++ always return Promises. C++ `ui.jsFunction(name)(...)` is fire-and-forget; `ui.jsFunction<R>(name)(...)` returns `std::future<R>`. Missing functions, exceptions, malformed replies and disconnects fail the typed call.
 - The binary bridge supports scalars, strings, tuples, numeric typed arrays and packed bitsets. Arbitrary objects do not cross it. Strings have a 16-bit encoded length limit.
 - Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority, and script permissions frame only the `context` API: neither is a sandbox. Only packages that run in a browser are supported; installation scripts and native add-ons are not executed. Builds transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
-- Packaging, accessibility and native-engine deployment still need application-specific work. General DOM abstractions remain future work. See [project status](docs/PROJECT_STATUS.md) for known limitations.
+- The optional [`@webfront/react` adapter](docs/REACT.md) supplies coalesced C++ stores and empty React islands. `WebFrontLifeReact` demonstrates a C++ panel within the Game of Life React UI; its package archive is prepared locally for registry publication.
+- Packaging, accessibility and native-engine deployment still need application-specific work. The optional [`ui.document()` API](docs/DOM.md) provides DOM islands, automatically batched writes, event callbacks and grouped sender reads. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
-[Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [UI components](docs/UI_COMPONENTS.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)
+## License
+
+WebFront is dual-licensed under **Apache-2.0 OR CECILL-B**, at your option.
+You may use, modify and redistribute WebFront under either license; you do not
+need to comply with both simultaneously. See [LICENSE](LICENSE) for the full
+Apache 2.0 and CeCILL-B version 1 texts, including the French and English
+versions of CeCILL-B.
+
+Third-party components retain their own licenses and notices. The WebFront
+license choice does not replace the licenses of its dependencies or bundled
+third-party code.
+
+[Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)

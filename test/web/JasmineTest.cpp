@@ -2,12 +2,15 @@
 // application that registers the C++ callbacks they call. Usage is that of webfront-wf (test/driver/WfDriver.hpp), e.g.
 //   webtest --project <copy of test/web/suite, after wf install> --registry-dir <registry> -- test --timeout 120
 // The status is that of `wf test`, and 1 when the specs passed but C++ did not observe every call they make.
+#include <webfront/components/forms/Form.hpp>
 #include <webfront/system/FileSystem.hpp>
 #include <webfront/tooling/Logger.hpp>
 #include <webfront/WebFront.hpp>
 
 #include "../driver/WfDriver.hpp"
+#include "../../examples/life/react/LifeReact.hpp"
 #include "RejectedWebSocketServer.hpp"
+#include "../unit/FormsSettings.hpp"
 
 #include <array>
 #include <atomic>
@@ -19,6 +22,7 @@
 #include <future>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -37,6 +41,12 @@ constexpr string_view jsToCppToken{"js-to-cpp-token"};
 
 struct TestState {
     atomic<bool> browserReady{false};
+    atomic<bool> domDocumentObserved{false};
+    atomic<bool> domAwaitObserved{false};
+    atomic<bool> domBatchSent{false};
+    atomic<bool> domRejectionObserved{false};
+    atomic<bool> domEventsObserved{false};
+    atomic<bool> formsObserved{false};
     atomic<bool> jsToCppObserved{false};
     atomic<bool> jsExtendedFrameObserved{false};
     atomic<bool> jsArraysObserved{false};
@@ -54,6 +64,10 @@ public:
     explicit TestPages(const filesystem::path& project) : root(project / "pages") { }
 
     optional<fs::File> open(filesystem::path file) const {
+        if (file.relative_path() == "embedded-fallback.html")
+            return fs::IndexFS::open("index.html");
+        if (file.relative_path().parent_path() == "nested-fallback")
+            return fs::IndexFS::open(file.filename());
         try {
             const auto path = developer::projectPath(root, file.relative_path().generic_string());
             ifstream   stream(path, ios::binary);
@@ -89,6 +103,7 @@ public:
         rejectedWebSocket.emplace();
         registerCallbacks();
         registerBitsetCallbacks();
+        lifeReactSubscription = demo::installLifeReact(app);
     }
 
     /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
@@ -98,6 +113,22 @@ public:
             log::error("wf test did not pass (status {})", status);
             return status;
         }
+        if (!shutdownDocument || shutdownDocument->valid() || shutdownNode.valid()) {
+            log::error("DOM handles remained valid after application shutdown");
+            return 1;
+        }
+        for (auto& [id, store] : reactStores) {
+            if (store.valid())
+                return 1;
+            try {
+                store.set({0, "after shutdown"});
+                return 1;
+            } catch (const std::runtime_error&) { }
+        }
+        try {
+            shutdownDocument->text("after shutdown");
+            return 1;
+        } catch (const std::runtime_error&) { }
         return result();
     }
 
@@ -106,8 +137,29 @@ private:
     optional<RejectedWebSocketServer> rejectedWebSocket;
     optional<TaskHandle>             cancelledTask;
     TestState            state;
+    // Accessed only by callbacks on the server context. finish() runs after WfDriver joins app.shutdown().
+    std::map<std::uint32_t, std::string> domRejections;
+    std::array<std::uint32_t, 6> domEventCounts{};
+    std::map<WebLinkId, dom::Node>       documentTexts, documentInputs;
+    std::map<WebLinkId, TaskHandle>      documentReads;
+    // The forms of #383 built for each browser, with the object their events write.
+    struct FormsFixture {
+        std::shared_ptr<forms_fixture::Settings>        object;
+        forms::Form<forms_fixture::Settings>            form;
+        forms::Inspector<forms_fixture::Settings>       inspector;
+    };
+    std::map<WebLinkId, FormsFixture>    formsFixtures;
+    std::map<WebLinkId, bool>            documentCancelled;
+    std::map<WebLinkId, TaskHandle>      documentAwaits;
+    std::map<WebLinkId, bool>            awaitCancelled;
+    optional<dom::Document<TestWF::UI>>  shutdownDocument;
+    dom::Node                            shutdownNode;
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
+    UISubscription                   lifeReactSubscription;
+    std::map<WebLinkId, react::Store<TestWF::UI, std::tuple<std::uint32_t, std::string>>> reactStores;
+    UISubscription                       closedDomSubscription;
+    std::map<WebLinkId, bool>            closedDocumentRejected;
     future<string> cppResult;
     jthread bitsetFutureThread;
     static constexpr chrono::seconds cppResultWaitTimeout{10};
@@ -261,7 +313,206 @@ private:
         });
     }
 
+    struct DocumentReadNotice {
+        bool& cancelled;
+        bool  pending{true};
+        ~DocumentReadNotice() {
+            if (pending)
+                cancelled = true;
+        }
+    };
+    Task readDocument(TestWF::UI ui) {
+        documentCancelled[ui.id()] = false;
+        DocumentReadNotice notice{documentCancelled[ui.id()]};
+        try {
+            // Keep initializer-list temporaries out of the co_await expression (GCC coroutine ICE).
+            std::vector<dom::ReadRequest> requests;
+            requests.push_back({documentTexts.at(ui.id()), dom::Read::text});
+            requests.push_back({documentInputs.at(ui.id()), dom::Read::value});
+            auto sender = ui.document().read(std::move(requests));
+            auto values = co_await std::move(sender);
+            ui.jsFunction("documentReadResult")(values.at(0) + "|" + values.at(1));
+            state.domDocumentObserved = true;
+            notice.pending            = false;
+        } catch (...) {
+            notice.pending = false;
+            throw;
+        }
+    }
+
+    // Each awaited keydown completes one wait; the third ends only by cancellation, which must remove its listener.
+    Task awaitDocument(TestWF::UI ui) {
+        awaitCancelled[ui.id()] = false;
+        DocumentReadNotice notice{awaitCancelled[ui.id()]};
+        try {
+            const auto              input = documentInputs.at(ui.id());
+            const dom::EventOptions prevent{.preventDefault = true, .stopPropagation = false};
+            for (int step = 0; step < 2; ++step) {
+                auto sender = input.next("keydown", prevent);
+                auto key    = co_await std::move(sender);
+                ui.jsFunction("documentAwaitResult")(key);
+            }
+            state.domAwaitObserved = true;
+            auto cancelled         = input.next("keydown", prevent);
+            co_await std::move(cancelled);
+            ui.jsFunction("documentAwaitResult")("resumed after cancellation");
+            notice.pending = false;
+        } catch (...) {
+            notice.pending = false;
+            throw;
+        }
+    }
+
     void registerCallbacks() {
+        closedDomSubscription = webFront->subscribeUIClosed([this](TestWF::UI ui) {
+            try {
+                static_cast<void>(ui.document());
+                closedDocumentRejected[ui.id()] = false;
+            } catch (const ConnectionError&) {
+                closedDocumentRejected[ui.id()] = true;
+            }
+        });
+        webFront->cppFunction("domClosedDocumentRejected", [this](uint32_t id) {
+            return closedDocumentRejected[static_cast<WebLinkId>(id)];
+        });
+        webFront->cppFunction("reactBurst", [this](TestWF::UI ui) {
+            auto [it, inserted] = reactStores.try_emplace(ui.id(), ui, "counter");
+            for (std::uint32_t i = 0; i < 1000; ++i)
+                it->second.set({i, "été 🌍"});
+            return static_cast<std::uint32_t>(ui.id());
+        });
+        webFront->cppFunction("reactStoreValid", [this](std::uint32_t id) {
+            return reactStores.at(static_cast<WebLinkId>(id)).valid();
+        });
+        webFront->cppFunction("reactPanel", [this](TestWF::UI ui) {
+            auto doc   = ui.document();
+            auto label = doc.text("C++ island");
+            doc.island("panel").append(label);
+            doc.flush();
+            documentTexts[ui.id()] = label;
+            return static_cast<std::uint32_t>(ui.id());
+        });
+        webFront->cppFunction("domDocumentOffThread", [](TestWF::UI ui) {
+            bool               rejected = false;
+            std::exception_ptr failure;
+            std::thread        caller([&] {
+                try {
+                    static_cast<void>(ui.document());
+                } catch (const std::logic_error&) {
+                    rejected = true;
+                } catch (...) {
+                    failure = std::current_exception();
+                }
+            });
+            caller.join();
+            if (failure)
+                std::rethrow_exception(failure);
+            return rejected;
+        });
+        webFront->cppFunction("domDocumentBuild", [this](TestWF::UI ui) {
+            auto doc   = ui.document();
+            auto root  = doc.island();
+            auto text  = doc.text("C++ été 🌍");
+            auto input = doc.element("input");
+            input.property("value", "initial");
+            input.listen("input",
+                         [text](std::string value) {
+                             text.setText(std::move(value));
+                         },
+                         {true, true});
+            root.append(text);
+            root.append(input);
+            documentTexts[ui.id()]  = text;
+            documentInputs[ui.id()] = input;
+            return static_cast<uint32_t>(ui.id());
+        });
+        webFront->cppFunction("formsBuild", [this](TestWF::UI ui) {
+            auto doc    = ui.document();
+            auto root   = doc.island();
+            auto object = std::make_shared<forms_fixture::Settings>();
+            auto form   = forms::form(doc, root, object, forms_fixture::settingsDescription());
+            auto table  = forms::inspector(doc, root, object, forms_fixture::settingsDescription());
+            formsFixtures.erase(ui.id());
+            formsFixtures.emplace(ui.id(), FormsFixture{object, form, table});
+        });
+        // The members that the browser's events wrote, as the description formats them.
+        webFront->cppFunction("formsState", [this](TestWF::UI ui) {
+            const auto& object = *formsFixtures.at(ui.id()).object;
+            string      result;
+            for (const auto& field : forms_fixture::settingsDescription().fields)
+                result += (result.empty() ? "" : ";") + field.name + "=" + field.read(object);
+            return result;
+        });
+        // C++ changes the object, then refreshes the form and the inspector.
+        webFront->cppFunction("formsChange", [this](TestWF::UI ui) {
+            auto& fixture          = formsFixtures.at(ui.id());
+            fixture.object->speed   = 9;
+            fixture.object->density = 0.5;
+            fixture.object->wrap    = true;
+            fixture.object->pattern = forms_fixture::Pattern::pulsar;
+            fixture.object->title   = "From C++";
+            fixture.form.refresh();
+            fixture.inspector.refresh();
+            state.formsObserved = true;
+        });
+        webFront->cppFunction("domDocumentRead", [this](TestWF::UI ui) {
+            documentReads.insert_or_assign(ui.id(), ui.spawn(readDocument(ui)));
+        });
+        webFront->cppFunction("domDocumentCancelRead", [this](TestWF::UI ui) {
+            documentReads.at(ui.id()).requestStop();
+        });
+        webFront->cppFunction("domDocumentCancelled", [this](TestWF::UI ui) {
+            return documentCancelled[ui.id()];
+        });
+        webFront->cppFunction("domDocumentAwait", [this](TestWF::UI ui) {
+            documentAwaits.insert_or_assign(ui.id(), ui.spawn(awaitDocument(ui)));
+        });
+        webFront->cppFunction("domDocumentCancelAwait", [this](TestWF::UI ui) {
+            // The first flush sends the subscription alone, so the unsubscription of the stop travels in a later batch:
+            // the browser applies both, in order, before this call resolves.
+            ui.document().flush();
+            documentAwaits.at(ui.id()).requestStop();
+            ui.document().flush();
+        });
+        webFront->cppFunction("domDocumentAwaitCancelled", [this](TestWF::UI ui) {
+            return awaitCancelled[ui.id()];
+        });
+        webFront->cppFunction("domDocumentNodeValid", [this](uint32_t id) {
+            return documentTexts.at(static_cast<WebLinkId>(id)).valid();
+        });
+        webFront->cppFunction("sendDomBatch", [this](TestWF::UI ui, const vector<uint8_t>& bytes) {
+            // A dormant document wrapper must not intercept the low-level event/rejection callbacks below.
+            static_cast<void>(ui.document());
+            const auto [id, operations] = msg::DomBatch::decode(std::as_bytes(std::span(bytes)));
+            msg::DomBatch batch(id);
+            for (const auto& operation : operations) batch.add(operation);
+            ui.sendDomBatch(batch);
+            state.domBatchSent = true;
+        });
+        webFront->cppFunction("wfDom.rejected", [this](uint32_t id, const string& reason) {
+            domRejections[id] = reason;
+            state.domRejectionObserved = true;
+        });
+        webFront->cppFunction("domBatchRejection", [this](uint32_t id) {
+            const auto found = domRejections.find(id);
+            return found == domRejections.end() ? string{} : found->second;
+        });
+
+        webFront->cppFunction("wfDom.event", [this](uint32_t node, uint32_t event, const string& value) {
+            using Event = tuple<uint32_t, uint32_t, string_view>;
+            static constexpr array<Event, 5> expected{
+                Event{10, 4, "hello"}, Event{11, 5, "true"}, Event{11, 5, "false"},
+                Event{10, 6, "Escape"}, Event{10, 7, ""}};
+            size_t index = 0;
+            while (index < expected.size() && expected[index] != Event{node, event, value})
+                ++index;
+            ++domEventCounts.at(index); // Last slot counts all unexpected identities or values.
+        });
+        webFront->cppFunction("domEventCounts", [this] {
+            if (domEventCounts == array<uint32_t, 6>{1, 1, 1, 1, 1, 0}) state.domEventsObserved = true;
+            return domEventCounts;
+        });
+
         webFront->cppFunction("cancelBrowserSender", [this] {
             if (cancelledTask)
                 cancelledTask->requestStop();
@@ -269,17 +520,26 @@ private:
         webFront->cppFunction("senderCancellationObserved", [this] {
             return state.senderCancellationObserved.load();
         });
-        webFront->cppFunction("plusPageUrl", [] { return frontend::detail::applicationUrl("9002", "a+b.html"); });
+        webFront->cppFunction("plusPageUrl", [this] { return frontend::detail::applicationUrl(webFront->port(), "a+b.html"); });
         webFront->cppFunction<string>("rejectedWebSocketUrl", [this] { return rejectedWebSocket->url(); });
         uiSubscription = webFront->subscribeUIStarted([this](TestWF::UI) {
             state.subscriberNotified = true;
         });
+        // From another thread, which the callback joins: a broadcast does not wait for the server thread (#401).
+        webFront->cppFunction("broadcastFromThread", [this](const string& token) {
+            auto        onState = webFront->broadcast("webfrontTests.receiveBroadcast", {.maxPendingWrites = 1});
+            std::thread caller([&] {
+                onState(token, 401);
+            });
+            caller.join();
+        });
         webFront->cppFunction("callBackCaller", [](TestWF::UI caller, const string& token) {
             caller.jsFunction("webfrontTests.receiveFromCaller")(token);
+            return "cpp-result:" + token;
         });
         webFront->cppFunction("browserReady", [this](TestWF::UI ui) {
             // Raw origin probes create extra sessions; bind calls to the document reporting ready.
-            connectedUI.emplace(ui);
+            connectedUI = ui;
             browserReady();
         });
         webFront->cppFunction<void, string>("recordFromJs", [this](const string& token) {
@@ -382,6 +642,8 @@ private:
 
     /// The last spec: everything the specs sent over this connection has been handled.
     void specsFinished() {
+        shutdownDocument.emplace(connectedUI->document());
+        shutdownNode            = shutdownDocument->text("pending at shutdown");
         state.cppResultObserved = cppResultMatches();
         state.specsFinished     = true;
     }
@@ -405,8 +667,8 @@ private:
             log::error("The specs did not report the end of the run");
             return 1;
         }
-        if (!(state.browserReady && state.subscriberNotified && browserCallsObserved() && cppCallsObserved()
-              && rejectedWebSocket->rejectedRequests() >= 2)) {
+        if (!(state.domDocumentObserved && state.domAwaitObserved && state.domBatchSent && state.domRejectionObserved && state.domEventsObserved && state.formsObserved && state.browserReady
+              && state.subscriberNotified && browserCallsObserved() && cppCallsObserved() && rejectedWebSocket->rejectedRequests() >= 2)) {
             log::error("The specs passed but one of the bridge-direction checks failed");
             return 1;
         }

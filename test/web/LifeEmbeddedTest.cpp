@@ -1,3 +1,4 @@
+#include "../driver/TestFrontend.hpp"
 #include <webfront/WebFront.hpp>
 #include WEBFRONT_LIFE_ASSETS_HEADER
 #include "../../examples/life/Life.hpp"
@@ -57,8 +58,10 @@ int main() {
         webfront::test::TemporaryDirectory empty;
         const auto                         original = std::filesystem::current_path();
         std::filesystem::current_path(empty.path());
-        using App = webfront::
-            BasicWF<webfront::NetProvider, webfront::fs::DefaultFSWith<webfront::fs::LifeUI>, webfront::http::DefaultBuffersPolicy, WEBFRONT_TEST_FRONTEND>;
+        using App = webfront::BasicWF<webfront::NetProvider,
+                                      webfront::fs::DefaultFSWith<webfront::fs::LifeUI>,
+                                      webfront::http::DefaultBuffersPolicy,
+                                      webfront::testdriver::QuietFrontend<WEBFRONT_TEST_FRONTEND>>;
         App               app;
         std::atomic<bool> passed{false};
         app.cppFunction("life.step", &webfront::demo::nextLife);

@@ -1,0 +1,5 @@
+if(NOT PROJECT)
+    message(FATAL_ERROR "PROJECT is required")
+endif()
+file(REMOVE_RECURSE "${PROJECT}")
+file(MAKE_DIRECTORY "${PROJECT}")

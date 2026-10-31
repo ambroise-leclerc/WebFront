@@ -2,19 +2,299 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-10-31
+
+- Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
+  `react::Store::flush()`, where the check throws first, as a call on a null pointer (`-Werror=nonnull`), and the unit
+  tests did not compile. The store now reaches its state through a checked reference. As GCC only runs this analysis
+  when it optimizes, GCC builds also compile `ReactStoreTests.cpp` at -O3 (`react_store_optimized`), so the Debug CI
+  job sees it too.
+
+- Reject a stale `UI` after its connection identifier is reused (#428): each connection gets a 64-bit
+  generation, never reused, kept in the application next to its link. `UI`, `JsFunction` and
+  `JsFunctionSender` carry it with the 16-bit identifier, so a value kept after its connection closed finds no
+  link even once a later browser receives the same `id()`: calls are dropped, typed calls fail,
+  `addScript` throws `ConnectionError`, `pendingWrites()` is 0, and the value equals no later connection's.
+  `operator==` compares application, identifier and generation. Removing kept values in `subscribeUIClosed`
+  becomes a recommendation, not a safety requirement. The generation never crosses the wire: no change to the
+  binary format or `WebFront.js`. The public constructors of `UI`, `JsFunction` and `JsFunctionSender` take the
+  generation as an extra argument, so code that builds one by hand no longer compiles: use the `UI` that
+  `onUIStarted`, `subscribeUIStarted` or a callback hands over.
+
+- Add `app.broadcast(name, options)(...)` and `app.forEachUI(function)` (#401): calls to every browser
+  whose `onUIStarted` handlers have returned, from any thread, with no table of browsers kept by the
+  application. A broadcast made while those handlers run follows what they sent. Each call is encoded
+  once into a frame shared by every browser. `BroadcastOptions::maxPendingWrites` holds a call back
+  for a browser that has that many calls of the function waiting, and keeps only the latest for it,
+  in the browser's connection; such a held call may follow other functions' later calls. `forEachUI`
+  skips a starting browser, so states go through `broadcast`. Document the threads of callbacks and
+  browser calls ([threads](ASYNC_EXECUTION.md#threads)). No wire format change.
+
+- Stabilise the desktop-native tier (#416): before removing its temporary WebView2 profile, the automation owner
+  waits up to 5 s for the browser processes it launched to exit and ends those still running (at once after a forced
+  exit, which also keeps the status of an exit that completes meanwhile), then retries files pending deletion for 2 s.
+  The watchdog tests check that a forced exit removes the profile, the automation failure messages report the observed
+  run state, exit status and owner log, and `NativeAutodetectReconfiguration` has a 180 s timeout. On Linux, the
+  automation agent gives the CEF helpers descending from it (the processes running its own executable, recognized by
+  their command name when the sandbox hides it) the same grace, then kills them through pidfds, removes the profile,
+  and after a forced exit leaves a last removal to a shell in its own session that waits for its exit (a minute at
+  most), since the CEF browser inside the agent writes into the profile until then, and repeats it for 2 s against a
+  helper relaunched meanwhile; the tests wait up to 10 s for that removal and keep the
+  watchdog profile in a short system temporary path. The deadline check of the Jasmine runner waits up to 5 s for a
+  killed orphan to exit and treats one reaped while it reads its state as gone, reading that state with `ps` where
+  there is no `/proc` (macOS).
+
+- Show the `wf` commands of the developer browser test in its window (#415): `DeveloperBrowserIntegration` shows, in
+  place of its terminal, each command it runs with its outcome and duration, labelling the timeouts and cancellations
+  the specs cause. The trace comes from the specs only; the published environment is unchanged. `docs/TEST_TIERS.md`
+  explains how to follow a test live.
+
+- Make `BasicUI` (`UI`) an assignable value type (#400): it holds a pointer to the application instead of a
+  reference, so it is copy- and move-assignable and usable in `std::vector` with `std::erase_if` and in
+  `std::optional`. It has no default constructor, so it does not satisfy `std::regular`. Two values compare equal
+  when they belong to the same application and have the same `id()`. The lifetime contract is unchanged: a `UI` is
+  valid while its application exists and must not be used, compared included, after it is destroyed. A value only
+  identifies its connection until that connection closes: once the identifier is reused, a value kept after the close
+  reaches the later browser and equals its value, so applications remove kept values in `subscribeUIClosed` (#428
+  tracks rejecting such stale values). `BasicWF` now declares itself non-copyable and non-movable, which the pointer
+  requires. The automation binding and the Jasmine session identify their browser by this equality, and assign it
+  instead of re-emplacing an optional. `docs/ASYNC_EXECUTION.md` describes the value semantics.
+
+- Add awaitable DOM events (#384): `co_await node.next(name, options)` completes with the value of
+  the element's next event, for sequential dialogs and wizards. Starting the sender subscribes with
+  the flags declared then; the event unsubscribes. It completes stopped through the task's stop token,
+  `unlisten()`, node removal or revocation, rejection, disconnection and shutdown; every end of a wait
+  but a rejection, which closes the document until the page reloads, removes its browser subscription
+  and flags, also after a stop from another thread. One callback or
+  wait per element and event. No wire format change.
+
+- Add optional [type descriptors and generated forms](FORMS.md) (#383, ADR-018 criterion 5):
+  `forms::Description<T>` (name, label, kind, bounds, choices, accessors) written by hand in C++23,
+  `forms::form()` and `forms::inspector()` built in a DOM document from them, and
+  `forms::typescriptDeclaration()`, whose output the developer journey type-checks with `wf check`.
+  The optional `forms::describe<T>()` produces the same descriptors by C++26 reflection from
+  `Label`/`Range` annotations; its tests build with GCC 16 and are required on the Linux CI job
+  (`WEBFRONT_REQUIRE_REFLECTION_TESTS`). The library stays C++23.
+
+- Warn at the end of a consumer's configuration, with GCC 16, about each target linking
+  `WebFront::WebFront` that CMake scans for C++ modules (`-fmodules-ts`), which makes GCC crash inside
+  stdexec (#399). Add `webfront_disable_module_scan(target...)`; the global workaround is
+  `set(CMAKE_CXX_SCAN_FOR_MODULES OFF)`. GCC 16.1 and 16.2 both crash, GCC 13.4 and 15.2 do not
+  (reported upstream as GCC bug 128318). The reduced case needs no stdexec:
+  `extern const int t; inline constexpr int t = 0;` compiled with `g++ -std=gnu++23 -fmodules-ts`
+  crashes in `transfer_defining_module`. stdexec declares `forwarding_query` this way.
+
+- Add `frontend::nativeWebViewAvailable` and `frontend::NativeOrBrowserFrontend` (#398): a native
+  window when the platform engine is compiled in and a session exists, the system browser otherwise,
+  with the reason printed once and available from `fallbackReason()`. An application needs neither a
+  `WEBFRONT_EMBED_*` macro nor a second application type. A frontend may define an optional
+  `static bool closeServerAfterOpen()` to override its `action` at run time.
+
+- Accept ADR-019 for the delivered local automation contract, shared window and native grants,
+  with consumer Jasmine coverage, the five-model qualification and the final PR #407 CI evidence.
+  Record the remaining distribution publication gate and deferred remote/browser transports.
+- Native-window detection is enabled by default for add_subdirectory/CPM consumers (#397).
+  On MSVC this downloads the pinned WebView2 SDK at configure time, including when no target
+  calls the helper; disable detection explicitly for offline or browser-only builds.
+  A parent's own `ENABLE_TESTING`/`ENABLE_FUZZING` do not disable it. Frontend metadata and detected
+  options are accessible from parent and sibling directories.
+  `webfront_use_native_window(target)` applies native setup and defines `WEBFRONT_NATIVE_WINDOW`
+  when available, with a configuration notice (printed once) for the browser fallback otherwise.
+
+- Let automation use an idle `wf dev` watcher started through nested `wf run` aliases, while
+  retaining exclusive compilation/publication and module-script execution. Accept manifest entry
+  labels such as `app:debug` and `app..debug` in native build/preview requests.
+
+- Keep automation CLI bootstrap failures at exit 70 regardless of transport completion order,
+  while preserving native deadline and signal exit statuses.
+
+- Record the [local-model MCP qualification](validation/automation-models-2026-10-29.md) on five
+  installed models through LM Studio: 30/30 final sources pass host verification, while 29/30
+  model conversations observe successful check/test results. Retain per-task data, measured token
+  costs, the incomplete Flint case and the distinction from the built-in Ollama benchmark.
+
+- Keep mandatory browser coverage enabled without silently falling back when xvfb is missing;
+  restrict optional display gating to automation. Retry transient native socket errors within the
+  deadline, accept authenticated sequence gaps while refusing replay, recover stalled preview
+  navigation, drain Windows stdin on pipe closure, preserve Unicode bootstrap failures and keep
+  the bounded audit focused on start-authorization decisions. Share native platform declarations.
+
+- Split functional MCP coverage from short native watchdog process regressions, with private ports
+  and profiles and a lock limited to spinning renderers. Bound attachment startup IO by its remaining
+  deadline and preserve diagnostic paths through the producer's 256-character limit.
+
+- Select the automation window with a single-use launcher URL claim instead of connection order,
+  create profiles with private permissions atomically, keep queued output separate from previous
+  runs, and complete unexpected busy runner starts as errors. Document strict counter failure and
+  the Windows endpoint reader's reliance on its directory ACL.
+
+- Harden developer automation callbacks with per-message HMAC-SHA-256 and replay protection,
+  revoke the attachment listener and endpoint on shutdown/watchdog exit, preserve final output
+  summaries and invalidate old preview actions before every navigation. Document the actual
+  frontend storage limits and add a maintained optional official MCP SDK regression.
+
+- The embedded native windows take their title and initial size from `WebFrontConfig::window`
+  (`WindowOptions`, #396). The default title is the executable's name (or "WebFront" if it cannot be determined) instead of
+  "WebFront Application"/"WebFront". The WebKitGTK lifecycle suite reads the native title back; a unit test
+  covers the dispatch to the frontend. Following `document.title` and an icon remain future work.
+
+- Consumer Jasmine/CTest integration (#402): opt-in instrumentation runs classic JavaScript
+  specs in an application's own page with its existing DOM and callbacks. The public CMake
+  helper provisions verified Jasmine, passes application arguments and checks a fresh JSON
+  report. An external process timeout bounds even a synchronously blocked renderer and, on POSIX,
+  kills its whole process group. `JasmineTest` is inert unless the target defines
+  `WEBFRONT_JASMINE_TESTING`; a spec file that fails to load fails the run.
+
+- The initial ADR-019 proposal (#404, now accepted above) compared developer automation paths: one versioned
+  operation contract (JSON Schema) projected onto the window, a public CLI with agent instructions and an
+  optional local MCP stdio adapter, with a threat model, local-model requirements and acceptance criteria.
+  The proposal itself introduced no server, driver or API; #402 remained an independent deliverable.
+
+- Optional React adapter (#382): an installable `@webfront/react` package with cached
+  `useSyncExternalStore` snapshots and empty `Island` components that tolerate StrictMode
+  effect replay. `webfront::react::Store` coalesces the last snapshot per 1 ms server cycle
+  without changing the wire format or core assets. A Game of Life variant constructs its
+  simulation panel in C++ inside React. Package assembly, wf installation, declarations,
+  batching and island lifecycle have regression coverage. Explicit flush failures retain the
+  pending snapshot; automatic error callbacks are contained and logged. Moved-from
+  store wrappers reject operations explicitly. Self-capturing error callbacks are released on
+  close and automatic failure; subscriber and island-release exceptions are logged and isolated.
+  The Life variant gates
+  cell edits until startup succeeds and bounds island readiness. Test installation uses the exact
+  archive bytes, with file-list and SHA-512 checks. Registry publication stays explicit.
+
+- Optional native developer automation (#403): `webfront-agent` drives its developer window
+  through stdio MCP or a JSON CLI, with native operation grants, asynchronous run IDs, bounded
+  structured diagnostics/results, preview inspection/actions, cooperative cancellation and
+  an external renderer deadline. Human commands share dispatch and arbitrate agent operations.
+  No MCP network endpoint or arbitrary callback/shell export is added. A compatible rebuilt
+  environment is required until a release is published and pinned.
+
+- License WebFront under Apache-2.0 OR CECILL-B, at the recipient's option.
+  Include both full license texts (CeCILL-B in French and English), document
+  contribution terms and carry the license into newly built developer and
+  Life starter archives. Third-party components retain their own licenses.
+
+- Per-browser DOM documents (#381): `ui.document()` shares node identities, name interning,
+  writes grouped on a 1 ms server cadence, event callbacks with declared browser flags, and
+  explicit grouped read senders with local cancellation. The fallback page lends `root`;
+  custom pages opt in through `dom.connect()`. Revocation, disconnection and shutdown
+  invalidate handles. Reject element-only operations on text nodes/islands locally; enforce
+  the connection thread before document lookup and refuse document creation during closure.
+  DOM connection attempts retry unacknowledged revocations after partial success, retaining
+  the acknowledged handshake; server readiness is idempotent for a lost acknowledgement.
+  Revocation notification failures are logged, and missing network timers report an explicit error.
+  Empty event callbacks fail locally; validity predicates are
+  nonthrowing and return false off the document thread. Document the single-thread context
+  requirement and the coordinated handoff needed before page-initiated island unmounts.
+  Missing form values are empty. Event values over 65,535 UTF-8 bytes are not delivered to C++
+  or truncated; their rejected delivery is logged in the browser console.
+  The fallback distinguishes bridge failures from DOM initialization failures. Batch-id exhaustion
+  notifies `onError`, and insert-before-self follows native no-op semantics. The server-thread
+  and rejection/reload contracts are in `docs/DOM.md`.
+
+- DOM batch protocol (#380): bounded command 5, canonical uint32 LEB128 and UTF-8 codec,
+  interned names and correlated rejection callbacks. The optional embedded `webfront-dom.mjs`
+  validates the evolving tree before applying mutations, protects page-owned islands, and
+  rejects executable content and normalized unsafe URLs. Catch2 and the shared Jasmine
+  suite cover encoding boundaries, hostile batches and real WebSocket dispatch. ADR-003
+  specifies the wire contract; ADR-016 adds the module within the existing 150 KiB budget.
+  Follow-up: validate against per-node and per-child-set deltas, cap retained UTF-8 name bytes at
+  1 MiB per interpreter, and document the trusted-content model, event values and recovery after
+  residual exceptions. Real WebSocket tests cover events and listener cleanup; a C++ regression
+  covers sending through a lost UI link. The manual DOM benchmark is described in embedded assets.
+  Reserve batch id zero for uncorrelated rejections and require explicit nonzero C++ ids. Index
+  subscriptions by node and revoke islands by subtree traversal. Both codecs limit each batch to
+  131,072 operations; C++ reserves the counted operation total and rejects unused operands.
+  Event integration checks count identities/values independently of arrival order.
+  Reject `PROPERTY value` on `output` before applying a batch, preserving tracked children;
+  update output text with `SET_TEXT`. Use checked event-count indexing for MSVC analysis.
+
+- The single-command test driver can set `--command-timeout` after browser/bootstrap startup,
+  within its unchanged overall `--timeout` deadline (#376). The watchdog regression deliberately
+  delays bootstrap beyond its command limit and requires the command's start marker before accepting
+  status 71; slow native browser startup can no longer satisfy the wrong timeout condition.
+
+- Repository cleanup (#376): consolidate the gzip benchmark and differential-validation commands
+  into [HTTP assets](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation); remove
+  `GZIP_CACHE_MEASUREMENTS.md`, `GZIP_DECODER_MEASUREMENTS.md` and the one-off profiles under
+  `docs/test-performance/`. The last revision containing these reports is
+  [cce1927](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs);
+  new CI reports are workflow artifacts.
+  `PROJECT_STATUS.md` now describes supported paths, contracts and outstanding limitations;
+  completed migration/qualification records remain in Git and this changelog. Remove the unreferenced
+  Hello World and retired Signal Studio screenshots. Active build, test, publication and animation
+  generation tools, plus the measurement evidence cited by proposed ADRs, are retained.
+
+- Tests are organized in tiers by CTest label: `fast` (unit tests, about one second), the standard tier and
+  `portability` (the consumer project). CI runs the fast tier first, excludes `portability` from pull requests into
+  `develop`, and runs the advanced tier (three suite repetitions, a portability matrix, sanitizers, fuzzers, CEF) weekly
+  and on pull requests into `master`. `RunTestSuite.cmake` accepts `LABEL_EXCLUDE`. See [TEST_TIERS](TEST_TIERS.md) (#388).
+
+- Compatible `wf` regression commands share browser sessions, with fresh command realms and individual CTest reports
+  (#388). The suite runner reuses one Xvfb display on Linux, supports bounded `PARALLEL`, and records detailed phase/spec
+  timings. Independent driver groups use OS-assigned ports; `WebFrontConfig::port = "0"` and `app.port()` expose this
+  with TCPStdnet. Native `WebView2Options::visible` / `WKWebViewOptions::visible` default to true and allow quiet tests.
+  Windows/macOS CI no longer wait for the Linux image, extended jobs use sccache, fuzzers have bounded concurrency,
+  and lcov verifies its fast JSON backend. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md). Local #388 measurements on Linux/GCC 16
+  Release/WebKitGTK (two build workers, four CTest workers) went from 172.43 s at baseline
+  [da0297f](https://github.com/ambroise-leclerc/WebFront/commit/da0297ff235642ccbe665a78e42873da9cde9c98)
+  (365 cases/97 specs, one pass) to a 93.41 s median (378 cases/97 specs, three passes), a 45.8%
+  reduction. These are local observations on a busy shared workstation, not a cross-platform guarantee;
+  [measurement details](https://github.com/ambroise-leclerc/WebFront/blob/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/TEST_PERFORMANCE.md#measurements) and
+  [raw profiles](https://github.com/ambroise-leclerc/WebFront/tree/cce1927ec952cb5d80b7bb130e9eaddbd1744885/docs/test-performance)
+  are preserved at cce1927.
+
+- Accepted stdnet connections enable `TCP_NODELAY`, including after WebSocket upgrade (#379).
+  This removes the Nagle/delayed-ACK interaction that could delay a callback's return
+  after it sent a browser message. A real-socket regression checks the option directly;
+  the shared browser suite checks a callback sending a message before returning a value.
+
+- The Linux desktop CI job runs in a prebuilt toolchain image (GCC 16, WebKitGTK, lcov, Xvfb; `.github/docker/linux-ci.Dockerfile`)
+  published to ghcr.io and tagged with the hash of its Dockerfile, instead of installing those packages from an Ubuntu mirror
+  on every run. Windows, macOS and the extended jobs are unchanged.
+
+- HTTP status-line buffers belong to each response until its asynchronous send ends (#376).
+  Ordinary responses announce `Connection: close`, matching the existing one-request-per-socket
+  server behavior; WebSocket upgrades remain open. Unit and real-browser regressions cover
+  pending response independence, closure headers and concurrent success/error responses.
+- Developer specs report each started spec to the native driver; self-build watchdogs expire
+  before CTest so a stalled page leaves useful output and a nonzero status (#376).
+- CI stability runs repeat the complete CTest fixture graph three times, retaining
+  a separate JUnit report per pass and stopping on the first failure (#376).
+  Reruns remove old numbered reports before starting, and optional spec-progress
+  diagnostics cannot fail specs when the driver callback is absent or disconnected.
+  Repeating each stateful journey step in isolation tried to initialize an already
+  initialized project; an offline CMake regression demonstrates the failure and
+  checks whole-suite repetition and failure propagation.
+- Isolate the GET/HEAD gzip failure tests from the one-job admission limit (#376):
+  receiving a response does not imply that its server-side lease has been released.
+  Browser integration reports its current phase, and failed macOS CI jobs retain WebKit
+  system logs and crash reports alongside CTest diagnostics.
+- Remove completed migration/audit notes and obsolete timing narratives, update their
+  references, and retain historical migration links at their original Git revision (#376).
+  Replace the unused 2,698-line Doxyfile template with CMake's generated configuration;
+  both documentation targets generate the public headers with the project version,
+  and Graphviz is optional. Active build, test and publication scripts remain in use.
+- ADR-018 (Proposed, #378) studies DOM access from C++: a batched, validated mutation stream into page-lent islands, React and
+  other UI libraries kept as owners of their DOM (external store, islands), optional C++26 reflection for generated
+  interfaces. Its measurements come from throwaway prototypes, kept out of the repository (commit `ef2bb25` of PR #385).
+  They also found a 40 ms delay on callbacks that call `ui.jsFunction` before returning
+  (`TCP_NODELAY` is not set); the fix is tracked by #379.
+
 ## 0.5.0 - 2026-10-26
 
 - Gzip identity fallback reuses a bounded validated-representation cache for GET and HEAD (#281).
   Cold decoding uses buffered bit reads and a small Huffman lookup (#282), with unchanged
   allocation behavior, strict stream validation and output budgets. Release benchmarks and
-  test-only zlib differential/sanitizer validation are recorded in `docs/GZIP_DECODER_MEASUREMENTS.md`.
+  test-only zlib differential/sanitizer validation are recorded in [HTTP asset validation](HTTP_ASSETS.md#manual-benchmarks-and-differential-validation).
 
 - `WebFrontLifeDeveloper` starts without argument on `./life-project` (created when missing, reused untouched otherwise) and the
   pinned environment; the explicit `<project> [<environment-url> <sha512-integrity>]` form remains. At configuration, the
   native window engine of the platform is enabled automatically when its dependencies are found (top-level builds with examples,
   without `ENABLE_TESTING`; `-DWEBFRONT_AUTODETECT_NATIVE=OFF` disables it, an explicit `WEBFRONT_EMBED_*` value always wins).
   A missing engine does not fail the configuration: CMake explains how to install it and the Life examples are built for the default browser instead. The README Game of Life walkthrough builds with `mkdir build`, `cd build`,
-  `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (unpublished, the pin stays on 0.6.2).
+  `cmake ..` and `cmake --build .` (#366). The developer terminal drops its redundant banner line; the sources advance to environment 0.6.3 (published as 0.6.3; the test bootstrap pin moves to it in #403).
   Automatic engine values stay outside the cache so an explicit choice equal to the previous detection is still respected;
   removing an explicit engine cache entry resumes detection. Platforms without a registered engine configure the browser fallback.
 
@@ -111,7 +391,7 @@
   v1.3), with a Catch2 scenario that decodes each of them. `NoNodeDependency` audits every file and
   `NoNodeDependencyRejectsInjections` proves the guard. The Node.js tools, `vendor/package*.json` and the comparison job
   of *Developer packages* are deleted; every CI job removes the JavaScript runtimes from the runner first. The record of
-  each former tool and test is `docs/NODE_TOOLS_MIGRATION.md`.
+  each former tool and test is [migration record](https://github.com/ambroise-leclerc/WebFront/blob/c9f5770273999ead7cff5e61f1d2a22a9ffbce89/docs/NODE_TOOLS_MIGRATION.md).
 
 - The developer environment builds itself (#315, distribution 0.6.1, published as `developer-v0.6.1` and pinned by `DeveloperReleaseData.hpp`, and by the bootstrap of the tests): the
   repository is a `wf` project (`webfront.project.json`, `webfront-packages.lock.json`) and the scripts of
@@ -122,7 +402,7 @@
   are those of the Node.js build, twice in a row (CTest `SelfBuild*`, job `wf-package` of *Developer packages*). The
   publication runs without Node.js (`pages.sh`, `archive-release.sh`, a shell tag check); `-DWEBFRONT_REQUIRE_NODE=OFF`
   configures a test build without it. The inventory of the Node.js tools and their destination is
-  `docs/NODE_TOOLS_MIGRATION.md`; the maintainer procedure is `js/developer/tools/PUBLISHING.md`.
+  [migration record](https://github.com/ambroise-leclerc/WebFront/blob/c9f5770273999ead7cff5e61f1d2a22a9ffbce89/docs/NODE_TOOLS_MIGRATION.md); the maintainer procedure is `js/developer/tools/PUBLISHING.md`.
 
 - `webfront-wf` test driver and bootstrap provisioning (#321, developer distribution 0.6.0 published as `developer-v0.6.0`, pinned by `DeveloperReleaseData.hpp` and by the bootstrap): runs one `wf` command without interaction on a project
   and exits with its status (64 usage, 70 bootstrap failure, 71 time limit, 72 no result), with an optional JSON report.
@@ -200,7 +480,7 @@
 - **Breaking:** the terminal component and the `wf` tool manager (#313): `webfront::Terminal`, `terminal::Shell`,
   `webfront::ToolManager`, `fs::TerminalFS`, `fs::ToolManagerFS`, `fs::ToolStore`, `fs::PackageFS`, their embedded
   modules, the embedded xterm.js copy, `third_party/xterm` and `cmake/UpdateXterm.cmake`. The developer environment's
-  terminal and `webfront::Commands` replace them; `docs/UI_COMPONENTS.md` describes the migration. xterm.js is a
+  terminal and `webfront::Commands` replace them; [migration record](https://github.com/ambroise-leclerc/WebFront/blob/c9f5770273999ead7cff5e61f1d2a22a9ffbce89/docs/UI_COMPONENTS.md) describes the migration. xterm.js is a
   locked dependency of the environment archive. `fs::tools::safeRelativePath` becomes `fs::safeRelativePath`
   (`<webfront/system/SafePath.hpp>`).
 

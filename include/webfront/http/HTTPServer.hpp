@@ -243,7 +243,6 @@ struct Response : Headers {
     template<typename Net>
     [[nodiscard]] std::vector<typename Net::ConstBuffer> toBuffers() const {
         std::vector<typename Net::ConstBuffer> buffers;
-        static std::string httpStatus;
         httpStatus = "HTTP/1.1 " + std::to_string(statusCode) + " " + toString(statusCode) + "\r\n";
         buffers.push_back(Net::Buffer(httpStatus));
 
@@ -255,6 +254,10 @@ struct Response : Headers {
             buffers.push_back(Net::Buffer(header.value));
             buffers.push_back(Net::Buffer(crlf));
         }
+        // This server handles one HTTP request per socket. Prevent a browser from
+        // reusing it before shutdown is observed; upgraded WebSockets remain open.
+        if (statusCode != switchingProtocols)
+            buffers.push_back(Net::Buffer(std::string_view{"Connection: close\r\n"}));
         buffers.push_back(Net::Buffer(crlf));
         if (!content.empty()) buffers.push_back(Net::Buffer(content));
 
@@ -262,6 +265,9 @@ struct Response : Headers {
     }
 
 private:
+    // Buffer views must stay valid independently until this response's asynchronous send ends.
+    mutable std::string httpStatus;
+
     [[nodiscard]] static std::string toString(StatusCode code) {
         static constexpr std::array<std::pair<StatusCode, std::string_view>, 10> names{
             {{switchingProtocols, "Switching Protocols"},
@@ -455,13 +461,10 @@ template<networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = D
 class Server {
 public:
     Server(std::string_view address, std::string_view port, std::filesystem::path docRoot = ".", ContentPolicy policy = {}, Decode decode = {})
-        : acceptor(ioContext), requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, port), std::move(policy)}),
+        : acceptor(ioContext),
+          listeningPort(bind(address, port)),
+          requestHandler(docRoot, detail::BoundContentPolicy{detail::applicationOrigin(address, listeningPort), std::move(policy)}),
           decodeExecutor(gzip::decodeLimits<Policy>(), std::move(decode)) {
-        const auto endpoint = Net::Resolve(address, port);
-        acceptor.open(endpoint.protocol());
-        acceptor.set_option(typename Net::Acceptor::reuse_address(true));
-        acceptor.bind(endpoint);
-        acceptor.listen();
         spawn(acceptConnections());
     }
     ~Server() noexcept {
@@ -471,6 +474,11 @@ public:
     Server(Server&&) = delete;
     Server& operator=(const Server&) = delete;
     Server& operator=(Server&&) = delete;
+
+    /// The bound port, including the OS-assigned port when constructed with "0".
+    const std::string& port() const noexcept {
+        return listeningPort;
+    }
 
     void run() { ioContext.run(); }
     void runOne() { ioContext.run_one(); }
@@ -534,10 +542,26 @@ public:
 private:
     typename Net::IoContext                     ioContext;
     typename Net::Acceptor                      acceptor;
+    std::string                                 listeningPort;
     networking::TaskScope                       tasks;
     RequestHandler<Net, FS, Policy>             requestHandler;
-    gzip::DecodeExecutor<Decode> decodeExecutor;
+    gzip::DecodeExecutor<Decode>                decodeExecutor;
     std::function<void(typename Net::Socket&&)> upgradeHandler;
+
+    std::string bind(std::string_view address, std::string_view requestedPort) {
+        const auto endpoint = Net::Resolve(address, requestedPort);
+        acceptor.open(endpoint.protocol());
+        acceptor.set_option(typename Net::Acceptor::reuse_address(true));
+        acceptor.bind(endpoint);
+        acceptor.listen();
+        // Only the literal "0" asks for an OS-assigned port; any other value is already the port.
+        if (requestedPort != "0")
+            return std::string(requestedPort);
+        if constexpr (requires { acceptor.local_endpoint().port(); })
+            return std::to_string(acceptor.local_endpoint().port());
+        else
+            return std::string(requestedPort); // Preserve legacy providers/mocks which have no endpoint query.
+    }
 
     void spawn(networking::Task task) {
         networking::Spawn(tasks, Net::Scheduler(acceptor), std::move(task));

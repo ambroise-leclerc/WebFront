@@ -11,13 +11,25 @@ target_link_libraries(Catch2WithMain PRIVATE WebFront_test_hardening WebFront_te
 find_package(Threads)
 include(CTest)
 
+add_test(NAME TestSuiteRepetition COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/suite-repetition -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestSuiteRepetition.cmake)
+set_tests_properties(TestSuiteRepetition PROPERTIES TIMEOUT 180)
+
+# Optional maintainer tooling: the default C++ build must not require Doxygen.
+find_program(WEBFRONT_TEST_DOXYGEN doxygen)
+if(WEBFRONT_TEST_DOXYGEN)
+  add_test(NAME DoxygenDocumentation COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+      -DWORK=${CMAKE_CURRENT_BINARY_DIR}/doxygen-test -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDoxygen.cmake)
+  set_tests_properties(DoxygenDocumentation PROPERTIES TIMEOUT 60)
+endif()
+
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
-list(APPEND TESTS_LIST JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
+list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
-list(APPEND TESTS_LIST WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
+list(APPEND TESTS_LIST BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
@@ -27,12 +39,103 @@ if(WEBFRONT_EMBED_WEBVIEW2)
 endif()
 add_executable(tests ${TESTS_LIST})
 target_link_libraries(tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2::Catch2WithMain WebFront)
+if(WIN32)
+  target_link_libraries(tests PRIVATE ws2_32 bcrypt advapi32)
+endif()
+if(MSVC)
+  # The templates of the DOM, forms and bridge tests exceed the section limit of one MSVC object file.
+  target_compile_options(tests PRIVATE /bigobj)
+endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
+# GCC reports -Wnonnull and -Wnull-dereference only when it optimizes, so the Debug CI job missed the false positive of
+# a Release build in the React store (#429; -O3, as in Release, is needed for the full test). Compile that test once
+# more at -O3; WebFront_options is left out because its coverage flags would restore -O0.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_library(react_store_optimized OBJECT ReactStoreTests.cpp)
+  target_link_libraries(react_store_optimized PRIVATE WebFront_test_hardening WebFront_warnings Catch2::Catch2 WebFront)
+  target_compile_options(react_store_optimized PRIVATE -O3)
+endif()
+
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
-catch_discover_tests(tests PROPERTIES TIMEOUT 60)
+# Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
+catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+
+# The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
+add_executable(forms_declaration FormsDeclaration.cpp)
+target_link_libraries(forms_declaration PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
+
+# The optional C++26 layer of the forms (ADR-018, #383): reflection needs GCC 16 with -std=c++26 -freflection. The library
+# stays C++23; only this test executable is compiled as C++26. CI requires it on Linux so that it cannot be skipped there.
+option(WEBFRONT_REQUIRE_REFLECTION_TESTS "Fail the configuration when the C++26 reflection tests cannot be compiled" OFF)
+set(_reflection_flags "-std=c++26 -freflection")
+set(_reflection_supported OFF)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  include(CheckCXXSourceCompiles)
+  # The probe sets the standard as the test target does: a CMAKE_CXX_STANDARD of the project (23 under WEBFRONT_USE_MDDLOG)
+  # would otherwise add its own -std=c++23 after CMAKE_REQUIRED_FLAGS and hide reflection.
+  # WEBFRONT_HAS_REFLECTION is a cache entry, so it leaves the block.
+  block(SCOPE_FOR VARIABLES)
+  set(CMAKE_CXX_STANDARD 26)
+  set(CMAKE_CXX_EXTENSIONS OFF)
+  set(CMAKE_REQUIRED_FLAGS "${_reflection_flags}")
+  check_cxx_source_compiles([=[
+#include <meta>
+#if !defined(__cpp_impl_reflection) || !defined(__cpp_expansion_statements)
+#error no reflection
+#endif
+struct S { [[=1]] int m; };
+static_assert(std::meta::nonstatic_data_members_of(^^S, std::meta::access_context::current()).size() == 1);
+int main() { return 0; }
+]=] WEBFRONT_HAS_REFLECTION)
+  endblock()
+  set(_reflection_supported ${WEBFRONT_HAS_REFLECTION})
+endif()
+if(_reflection_supported)
+  # Catch2 is compiled again with the flags of the test: the C++23 Catch2 objects would mix the inline standard-library
+  # definitions of both standards in one executable (std::to_string(double) differs, P2587).
+  get_target_property(_catch2_sources Catch2 SOURCES)
+  get_target_property(_catch2_dir Catch2 SOURCE_DIR)
+  set(_catch2_absolute)
+  foreach(_source IN LISTS _catch2_sources)
+    cmake_path(ABSOLUTE_PATH _source BASE_DIRECTORY "${_catch2_dir}" NORMALIZE OUTPUT_VARIABLE _source)
+    list(APPEND _catch2_absolute "${_source}")
+  endforeach()
+  set(_catch2_sources ${_catch2_absolute})
+  add_library(Catch2_reflection STATIC ${_catch2_sources} ${Catch2_SOURCE_DIR}/src/catch2/internal/catch_main.cpp)
+  target_include_directories(Catch2_reflection PUBLIC ${Catch2_SOURCE_DIR}/src ${Catch2_BINARY_DIR}/generated-includes)
+  target_link_libraries(Catch2_reflection PRIVATE WebFront_test_hardening WebFront_test_sanitizers)
+  add_executable(forms_reflection_tests FormsReflectionTests.cpp)
+  target_link_libraries(forms_reflection_tests PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options Catch2_reflection WebFront)
+  foreach(_target IN ITEMS Catch2_reflection forms_reflection_tests)
+    set_target_properties(${_target} PROPERTIES CXX_STANDARD 26 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    target_compile_options(${_target} PRIVATE -freflection)
+  endforeach()
+  catch_discover_tests(forms_reflection_tests TEST_PREFIX "C++26." PROPERTIES TIMEOUT 60 LABELS fast)
+  # Misplaced annotations do not compile: each case must fail with the message of describe<T>().
+  foreach(_case IN ITEMS "RANGE_ON_BOOL|Range applies to numeric members only" "RANGE_ON_STRING|Range applies to numeric members only"
+                         "RANGE_ON_ENUM|Range applies to numeric members only" "REPEATED_LABEL|Label is repeated on a member"
+                         "REPEATED_RANGE|Range is repeated on a member")
+    string(REPLACE "|" ";" _case "${_case}")
+    list(GET _case 0 _name)
+    list(GET _case 1 _message)
+    add_test(NAME C++26.FormsReflectionRejects.${_name}
+        COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -freflection -fsyntax-only -I${PROJECT_SOURCE_DIR}/include
+            -DREJECT_${_name} ${CMAKE_CURRENT_SOURCE_DIR}/FormsReflectionRejects.cpp)
+    set_tests_properties(C++26.FormsReflectionRejects.${_name} PROPERTIES PASS_REGULAR_EXPRESSION "${_message}" TIMEOUT 60 LABELS fast)
+  endforeach()
+  # Without a misplaced annotation the same file compiles: the cases above fail only on their assertion.
+  add_test(NAME C++26.FormsReflectionRejects.NONE COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -freflection -fsyntax-only
+      -I${PROJECT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/FormsReflectionRejects.cpp)
+  set_tests_properties(C++26.FormsReflectionRejects.NONE PROPERTIES TIMEOUT 60 LABELS fast)
+elseif(WEBFRONT_REQUIRE_REFLECTION_TESTS)
+  message(FATAL_ERROR "WEBFRONT_REQUIRE_REFLECTION_TESTS: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} "
+      "does not compile C++26 reflection with ${_reflection_flags} (GCC 16 or later is required)")
+else()
+  message(STATUS "Skipping the C++26 reflection tests of the forms: GCC 16 with -freflection is required")
+endif()
 
 add_test(NAME ReleaseVersionConsistency
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DEXPECTED_VERSION=${PROJECT_VERSION}
@@ -82,6 +185,10 @@ if(WEBFRONT_USE_MDDLOG)
   add_test(NAME MddlogHeaderConsumer COMMAND mddlog_header_consumer)
 endif()
 
+add_test(NAME ReactProjectPreparation COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-project-preparation -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckPrepareReactProject.cmake)
+set_tests_properties(ReactProjectPreparation PROPERTIES TIMEOUT 30)
+
 # The documented newcomer commands and snippets must keep matching the built examples and CI.
 add_test(NAME RepositoryLayout
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
@@ -92,14 +199,21 @@ add_test(NAME RepositoryLayoutRejectsVendoredSources
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRepositoryLayoutNegative.cmake)
 add_test(NAME NewcomerDocsMatchExamples
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNewcomerDocs.cmake)
+add_test(NAME ModuleScanWarning
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/module-scan
+        "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}" -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckModuleScan.cmake)
+set_tests_properties(ModuleScanWarning PROPERTIES TIMEOUT 120 LABELS fast)
 add_test(NAME FrontendSelection
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendSelection.cmake)
+add_test(NAME OptionalWindowDisplay COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+    -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckOptionalWindowDisplay.cmake)
 add_test(NAME NativeAutodetectReconfiguration
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/native-autodetect
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNativeAutodetect.cmake)
-set_tests_properties(NativeAutodetectReconfiguration PROPERTIES TIMEOUT 60)
+# The test takes about 5 s; the wide bound only absorbs a loaded runner (one unexplained stall at 60 s, #416).
+set_tests_properties(NativeAutodetectReconfiguration PROPERTIES TIMEOUT 180)
 # Exercise configuration-dependent CTest discovery and generator switches on single-config CI hosts.
 # The fixture configures no compiler and builds nothing; Ninja is optional for contributor builds.
 find_program(WEBFRONT_TEST_NINJA_EXECUTABLE ninja)
@@ -144,17 +258,51 @@ endif()
 if(DEFINED CMAKE_CXX_SCAN_FOR_MODULES)
     list(APPEND _consumer_dependency_args -DCMAKE_CXX_SCAN_FOR_MODULES:BOOL=${CMAKE_CXX_SCAN_FOR_MODULES})
 endif()
+# Exercise public frontend helpers across directory scopes and the default detection in a real parent project.
+add_test(NAME FrontendConsumerConfiguration
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-consumer
+        -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+        "-DDEPENDENCY_ARGS=${_consumer_dependency_args}"
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendConsumer.cmake)
+set_tests_properties(FrontendConsumerConfiguration PROPERTIES TIMEOUT 120)
 # Read the actual target's launcher at generation time, including an explicitly
 # configured or auto-discovered cache. Do not depend on Cache.cmake's local variable.
+# The build smoke test opts out of detection to avoid SDK downloads after configuration;
+# FrontendConsumerConfiguration tests the automatic path with deterministic support instead.
 add_test(NAME AddSubdirectoryConsumer
     COMMAND ${CMAKE_CTEST_COMMAND}
         --build-and-test ${PROJECT_SOURCE_DIR}/test/cmake/consumer ${CMAKE_CURRENT_BINARY_DIR}/consumer-build
         --build-generator ${CMAKE_GENERATOR}
         --build-config $<CONFIG>
-        --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} ${_consumer_dependency_args}
+        --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION} ${_consumer_dependency_args}
+            -DWEBFRONT_AUTODETECT_NATIVE=OFF
             -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
             -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
-set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600)
+set_tests_properties(AddSubdirectoryConsumer PROPERTIES TIMEOUT 600 LABELS portability)
+
+# Compile the real native frontend from a consuming project on the native desktop CI jobs.
+# Reuse the configured SDK source (including WebView2) and CPM bootstrap without network access.
+webfront_native_frontend_option(_consumer_native_option)
+set(_consumer_native_enabled OFF)
+if(_consumer_native_option)
+    set(_consumer_native_enabled "${${_consumer_native_option}}")
+endif()
+if(_consumer_native_enabled)
+    set(_consumer_native_dependency_args ${_consumer_dependency_args})
+    if(WEBFRONT_EMBED_WEBVIEW2)
+        list(APPEND _consumer_native_dependency_args -DCPM_WebView2SDK_SOURCE=${WebView2SDK_SOURCE_DIR})
+    endif()
+    add_test(NAME AddSubdirectoryNativeConsumer
+        COMMAND ${CMAKE_CTEST_COMMAND}
+            --build-and-test ${PROJECT_SOURCE_DIR}/test/cmake/consumer ${CMAKE_CURRENT_BINARY_DIR}/native-consumer-build
+            --build-generator ${CMAKE_GENERATOR} --build-config $<CONFIG>
+            --build-options -DWEBFRONT_SOURCE_DIR=${PROJECT_SOURCE_DIR} -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
+                ${_consumer_native_dependency_args} -DEXPECT_NATIVE=ON
+                -DENABLE_CACHE=OFF "-DCMAKE_CXX_COMPILER_LAUNCHER:STRING=$<TARGET_PROPERTY:tests,CXX_COMPILER_LAUNCHER>"
+                -DCMAKE_BUILD_TYPE=$<CONFIG> -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+    set_tests_properties(AddSubdirectoryNativeConsumer PROPERTIES TIMEOUT 600)
+endif()
 
 # Manual timing evidence for gzip cache/cold-decode work; never a timing-based test.
 add_executable(gzip_cache_benchmark EXCLUDE_FROM_ALL GzipCacheBenchmark.cpp)
@@ -174,4 +322,15 @@ if(WEBFRONT_GZIP_DIFFERENTIAL)
   target_link_libraries(gzip_differential PRIVATE WebFront_test_hardening WebFront_options WebFront ZLIB::ZLIB)
   add_test(NAME GzipZlibDifferential COMMAND gzip_differential)
   set_tests_properties(GzipZlibDifferential PROPERTIES TIMEOUT 60)
+endif()
+
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME TestPerformanceProfile COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestProfileTests.py")
+    add_test(NAME FuzzerConcurrency COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/fuzz/TestRunFuzzers.py")
+    set_tests_properties(TestPerformanceProfile FuzzerConcurrency PROPERTIES TIMEOUT 15 LABELS fast)
+endif()
+if(Python3_Interpreter_FOUND)
+    add_test(NAME TestResourceMeasurement COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestMeasurement.py")
+    set_tests_properties(TestResourceMeasurement PROPERTIES TIMEOUT 15 LABELS fast)
 endif()

@@ -1,0 +1,12 @@
+<!doctype html>
+<div id="root"></div>
+<script src="/WebFront.js"></script>
+<script type="module">
+import {installDomInterpreter} from '/webfront-dom.mjs';
+window.dom = installDomInterpreter(webFront);
+// Transport control belongs to this fixture, not to the adapter's public API.
+window.disconnectBridge = () => new Promise(resolve => {
+    webFront.socket.addEventListener('close', resolve, {once: true});
+    webFront.socket.close();
+});
+</script>

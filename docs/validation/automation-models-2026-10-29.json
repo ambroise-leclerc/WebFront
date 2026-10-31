@@ -1,0 +1,1060 @@
+{
+  "format": 1,
+  "baseSha": "b1fe8ac97ed5b5b3ca20e5c3ad7684e059d161a4",
+  "backend": "LM Studio / OpenAI-compatible API",
+  "runtime": "llama.cpp-linux-x86_64-amd-rocm-avx2@2.66.0",
+  "temperature": 0,
+  "contextLength": 16384,
+  "maxTokensPerResponse": 512,
+  "repeat": 3,
+  "turns": 24,
+  "gpu": "AMD Radeon AI PRO R9700; maximum offload; one model at a time",
+  "models": [
+    {
+      "name": "Devstral Small 2 24B",
+      "key": "mistralai/devstral-small-2-2512",
+      "id": "review407-devstral",
+      "quantization": "Q4_K_M",
+      "attempts": 6,
+      "sourceSuccesses": 6,
+      "modelVerifiedBoth": 6,
+      "averageTaskSeconds": 16.71,
+      "catalogueBytes": 1872,
+      "catalogueTokenDeltas": [
+        553
+      ],
+      "averagePromptTokens": 11603,
+      "averageGeneratedTokens": 355,
+      "toolErrors": {},
+      "truncatedResponses": 0,
+      "samples": [
+        {
+          "model": "review407-devstral",
+          "task": "type_error",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 16.23,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 553,
+          "promptTokensAcrossTurns": 11552,
+          "generatedTokens": 350,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-devstral",
+          "task": "failing_test",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 16.809,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 553,
+          "promptTokensAcrossTurns": 11618,
+          "generatedTokens": 354,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-devstral",
+          "task": "type_error",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 17.244,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 553,
+          "promptTokensAcrossTurns": 11672,
+          "generatedTokens": 370,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-devstral",
+          "task": "failing_test",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 16.871,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 553,
+          "promptTokensAcrossTurns": 11642,
+          "generatedTokens": 358,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-devstral",
+          "task": "type_error",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 16.25,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 553,
+          "promptTokensAcrossTurns": 11504,
+          "generatedTokens": 342,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-devstral",
+          "task": "failing_test",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 16.832,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 553,
+          "promptTokensAcrossTurns": 11628,
+          "generatedTokens": 358,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        }
+      ],
+      "conversationAnalysis": [
+        {
+          "task": "type_error",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        }
+      ]
+    },
+    {
+      "name": "Qwen 3.8 27B",
+      "key": "qwen/qwen3.8-27b",
+      "id": "review407-qwen38",
+      "quantization": "Q4_K_M",
+      "attempts": 6,
+      "sourceSuccesses": 6,
+      "modelVerifiedBoth": 6,
+      "averageTaskSeconds": 32.3,
+      "catalogueBytes": 1872,
+      "catalogueTokenDeltas": [
+        729
+      ],
+      "averagePromptTokens": 14556,
+      "averageGeneratedTokens": 1239,
+      "toolErrors": {
+        "busy": 6
+      },
+      "truncatedResponses": 0,
+      "samples": [
+        {
+          "model": "review407-qwen38",
+          "task": "type_error",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 35.361,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 729,
+          "promptTokensAcrossTurns": 14839,
+          "generatedTokens": 1383,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-qwen38",
+          "task": "failing_test",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 28.517,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 729,
+          "promptTokensAcrossTurns": 14037,
+          "generatedTokens": 1069,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-qwen38",
+          "task": "type_error",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 36.704,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 729,
+          "promptTokensAcrossTurns": 15070,
+          "generatedTokens": 1430,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-qwen38",
+          "task": "failing_test",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 29.272,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 729,
+          "promptTokensAcrossTurns": 14278,
+          "generatedTokens": 1110,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-qwen38",
+          "task": "type_error",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 35.023,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 729,
+          "promptTokensAcrossTurns": 14947,
+          "generatedTokens": 1353,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-qwen38",
+          "task": "failing_test",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 28.915,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 729,
+          "promptTokensAcrossTurns": 14166,
+          "generatedTokens": 1087,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        }
+      ],
+      "conversationAnalysis": [
+        {
+          "task": "type_error",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "busy": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "busy": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "busy": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "busy": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "busy": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "busy": 1
+          },
+          "truncatedResponses": 0
+        }
+      ]
+    },
+    {
+      "name": "Muse Glimmer 30B",
+      "key": "muse-glimmer-30b-q4km",
+      "id": "review407-muse",
+      "quantization": "Q4_K_M",
+      "attempts": 6,
+      "sourceSuccesses": 6,
+      "modelVerifiedBoth": 6,
+      "averageTaskSeconds": 64.98,
+      "catalogueBytes": 1872,
+      "catalogueTokenDeltas": [
+        837
+      ],
+      "averagePromptTokens": 20914,
+      "averageGeneratedTokens": 1210,
+      "toolErrors": {},
+      "truncatedResponses": 0,
+      "samples": [
+        {
+          "model": "review407-muse",
+          "task": "type_error",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 53.821,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 837,
+          "promptTokensAcrossTurns": 14507,
+          "generatedTokens": 1008,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-muse",
+          "task": "failing_test",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 58.533,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 837,
+          "promptTokensAcrossTurns": 14717,
+          "generatedTokens": 1149,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-muse",
+          "task": "type_error",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 55.155,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 837,
+          "promptTokensAcrossTurns": 14531,
+          "generatedTokens": 1056,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-muse",
+          "task": "failing_test",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 85.665,
+          "toolCalls": 11,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 837,
+          "promptTokensAcrossTurns": 33661,
+          "generatedTokens": 1552,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-muse",
+          "task": "type_error",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 56.126,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 837,
+          "promptTokensAcrossTurns": 14646,
+          "generatedTokens": 1072,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-muse",
+          "task": "failing_test",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 80.579,
+          "toolCalls": 11,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 837,
+          "promptTokensAcrossTurns": 33425,
+          "generatedTokens": 1421,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        }
+      ],
+      "conversationAnalysis": [
+        {
+          "task": "type_error",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 2
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 2
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        }
+      ]
+    },
+    {
+      "name": "Flint 40B",
+      "key": "recursivesi/flint",
+      "id": "review407-flint",
+      "quantization": "Q4_K_M",
+      "attempts": 6,
+      "sourceSuccesses": 6,
+      "modelVerifiedBoth": 5,
+      "averageTaskSeconds": 51.16,
+      "catalogueBytes": 1872,
+      "catalogueTokenDeltas": [
+        559
+      ],
+      "averagePromptTokens": 25674,
+      "averageGeneratedTokens": 1253,
+      "toolErrors": {
+        "wrong_session": 1
+      },
+      "truncatedResponses": 1,
+      "samples": [
+        {
+          "model": "review407-flint",
+          "task": "type_error",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 43.566,
+          "toolCalls": 9,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 559,
+          "promptTokensAcrossTurns": 21078,
+          "generatedTokens": 1021,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-flint",
+          "task": "failing_test",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 56.421,
+          "toolCalls": 11,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 559,
+          "promptTokensAcrossTurns": 31527,
+          "generatedTokens": 1420,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-flint",
+          "task": "type_error",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 52.676,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 559,
+          "promptTokensAcrossTurns": 18278,
+          "generatedTokens": 1605,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-flint",
+          "task": "failing_test",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 54.633,
+          "toolCalls": 11,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 559,
+          "promptTokensAcrossTurns": 30940,
+          "generatedTokens": 1218,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-flint",
+          "task": "type_error",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 45.15,
+          "toolCalls": 9,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 559,
+          "promptTokensAcrossTurns": 21306,
+          "generatedTokens": 1119,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-flint",
+          "task": "failing_test",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 54.53,
+          "toolCalls": 11,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 559,
+          "promptTokensAcrossTurns": 30915,
+          "generatedTokens": 1137,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        }
+      ],
+      "conversationAnalysis": [
+        {
+          "task": "type_error",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 2
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 1,
+          "observedSucceededOperations": [],
+          "modelVerifiedBoth": false,
+          "authorizedStarts": {
+            "check": 1
+          },
+          "toolErrors": {
+            "wrong_session": 1
+          },
+          "truncatedResponses": 1
+        },
+        {
+          "task": "failing_test",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 2
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 2,
+            "test": 2
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        }
+      ]
+    },
+    {
+      "name": "Nemotron Cascade 2 30B-A3B",
+      "key": "nvidia_nemotron-cascade-2-30b-a3b",
+      "id": "review407-nemotron",
+      "quantization": "Q4_K_M",
+      "attempts": 6,
+      "sourceSuccesses": 6,
+      "modelVerifiedBoth": 6,
+      "averageTaskSeconds": 18.81,
+      "catalogueBytes": 1872,
+      "catalogueTokenDeltas": [
+        811
+      ],
+      "averagePromptTokens": 20586,
+      "averageGeneratedTokens": 1379,
+      "toolErrors": {
+        "invalid_arguments": 6
+      },
+      "truncatedResponses": 0,
+      "samples": [
+        {
+          "model": "review407-nemotron",
+          "task": "type_error",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 19.178,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 811,
+          "promptTokensAcrossTurns": 20776,
+          "generatedTokens": 1364,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-nemotron",
+          "task": "failing_test",
+          "repetition": 0,
+          "success": true,
+          "wallSeconds": 20.979,
+          "toolCalls": 9,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 811,
+          "promptTokensAcrossTurns": 23724,
+          "generatedTokens": 1586,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-nemotron",
+          "task": "type_error",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 18.89,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 811,
+          "promptTokensAcrossTurns": 20703,
+          "generatedTokens": 1388,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-nemotron",
+          "task": "failing_test",
+          "repetition": 1,
+          "success": true,
+          "wallSeconds": 15.926,
+          "toolCalls": 7,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 811,
+          "promptTokensAcrossTurns": 17070,
+          "generatedTokens": 1130,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-nemotron",
+          "task": "type_error",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 18.22,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 811,
+          "promptTokensAcrossTurns": 20596,
+          "generatedTokens": 1368,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        },
+        {
+          "model": "review407-nemotron",
+          "task": "failing_test",
+          "repetition": 2,
+          "success": true,
+          "wallSeconds": 19.654,
+          "toolCalls": 8,
+          "catalogueBytes": 1872,
+          "hostToolCataloguePromptTokenDelta": 811,
+          "promptTokensAcrossTurns": 20644,
+          "generatedTokens": 1440,
+          "checkState": "succeeded",
+          "testState": "succeeded",
+          "verificationError": null
+        }
+      ],
+      "conversationAnalysis": [
+        {
+          "task": "type_error",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "invalid_arguments": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 0,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "invalid_arguments": 2
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "invalid_arguments": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 1,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {},
+          "truncatedResponses": 0
+        },
+        {
+          "task": "type_error",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "invalid_arguments": 1
+          },
+          "truncatedResponses": 0
+        },
+        {
+          "task": "failing_test",
+          "repetition": 2,
+          "observedSucceededOperations": [
+            "check",
+            "test"
+          ],
+          "modelVerifiedBoth": true,
+          "authorizedStarts": {
+            "check": 1,
+            "test": 1
+          },
+          "toolErrors": {
+            "invalid_arguments": 1
+          },
+          "truncatedResponses": 0
+        }
+      ]
+    }
+  ],
+  "measuredDate": "2026-10-29",
+  "implementation": "b1fe8ac plus the bootstrap exit-status correction included with this report",
+  "metricDefinitions": {
+    "sourceSuccesses": "Independent host check and test both succeeded after the model stopped.",
+    "modelVerifiedBoth": "Model received succeeded results for both check and test in its own tool conversation; excludes independent host verification.",
+    "averageTaskSeconds": "Mean wallSeconds; starts after model loading, browser bootstrap and catalogue measurement; includes independent host verification.",
+    "catalogueTokenDeltas": "Provider-reported prompt token difference with/without the four projected MCP tools, using identical baseline messages; excludes fixture tools.",
+    "averagePromptTokens": "Mean sum of provider prompt_tokens over task turns, including repeated context.",
+    "averageGeneratedTokens": "Mean sum of provider completion_tokens over task turns, including reasoning tokens."
+  }
+}

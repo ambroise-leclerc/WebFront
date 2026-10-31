@@ -22,6 +22,15 @@ A frontend is a type with:
 - **URL.** Built-in frontends also provide `open(address, port, file)`, which `BasicWF` prefers when available. Build the URL with `frontend::detail::applicationUrl(address, port, file)` in `frontend/Url.hpp`: it uses the configured address and preserves URI query/fragment syntax and existing percent escapes. Spaces and UTF-8 bytes are encoded. For literal filename delimiters use `%23`, `%3F` and `%25`. The two-argument overload uses `127.0.0.1`; wildcard binds open their matching loopback address.
 - **Selection.** `webfront::WebFront` always uses the system browser. An application opts into another frontend with `webfront::WebFrontWithFrontend<...>`; enabling an embedded engine at configuration time never changes the default.
 
+## Window title and size
+
+`WebFrontConfig::window` (`webfront::WindowOptions`: `title`, `width`, `height`) sets the initial window of the
+embedded frontends (WebKitGTK, CEF, WebView2, WKWebView); the system browser ignores it. An empty title selects the
+executable's name ("WebFront" if it cannot be determined), and a non-positive size selects 1200 x 800. `BasicWF` passes the
+options to a frontend that provides `open(address, port, file, policy, window)`; WebView2 and WKWebView also accept
+them in `WebView2Options::window` and `WKWebViewOptions::window`. The title is fixed at creation: following
+`document.title` is not implemented.
+
 ## Content policy
 
 The [shared content policy](CONTENT_POLICY.md) defines bridge-origin authorization, embedded navigation, popup handling, DevTools and context-menu settings, including defaults and opt-outs. The system browser cannot expose embedded navigation/UI hooks; its bridge is protected by the same server check.
@@ -90,6 +99,25 @@ their own CTest timeouts.
 WKWebView adds native main-thread, Quit/closure, repeated-opening, initial HTTP failure, stalled-loading
 deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEBVIEW.md#unattended-verification).
 
+## Native window with browser fallback
+
+`frontend::nativeWebViewAvailable` is `true` when this platform's native engine is compiled in. It says
+nothing about the session. `frontend::NativeOrBrowserFrontend` decides at run time: its `initialize()`
+tries the native engine and, if that throws (engine not compiled in, no `DISPLAY`/`WAYLAND_DISPLAY`,
+missing runtime), it initializes the browser frontend and uses the system browser for the whole process and prints the reason once to
+`std::cerr`. Only `initialize()` triggers the fallback: if the native `open()` throws, the exception
+propagates as for any frontend. `fallbackReason()` returns that reason and `usesNativeWindow()` tells which path was taken
+once the application is constructed.
+
+```cpp
+using App = webfront::WebFrontWithFrontend<webfront::frontend::NativeOrBrowserFrontend>;
+```
+
+A native window stops the server when it closes; the browser path leaves it running until Enter, as
+`DefaultBrowserFrontend` does. Because `action` is `constexpr`, the frontend reports this through the
+optional `closeServerAfterOpen()` hook, which `show()` consults after `open()` returns.
+`NativeOrBrowserFrontendFor<Native, Browser>` composes any two frontends the same way.
+
 ## Direct engine access
 
 Every frontend currently loads its page over HTTP and exchanges bridge messages over a WebSocket. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md)
@@ -132,15 +160,25 @@ do not change the production HTTP/WebSocket transport.
 Enabling an engine makes its adapter available; select it explicitly in your application.
 `webfront::NativeApp` chooses the native engine for the current platform.
 
-The options default to `OFF`. In a top-level build with examples and without `ENABLE_TESTING` or `ENABLE_FUZZING`, configuration first
-probes the native engine of the platform (registered with `NATIVE`: WebKitGTK through `pkg-config webkitgtk-6.0`, WKWebView on Clang with
-macOS 13.3+, WebView2 with an MSVC-compatible compiler) and sets `ON` or `OFF` in a normal variable, so `cmake ..` is enough to build the Life
+The options default to `OFF`. Configuration first probes the native engine of the platform (registered with `NATIVE`: WebKitGTK through
+`pkg-config webkitgtk-6.0`, WKWebView on Clang with macOS 13.3+, WebView2 with an MSVC-compatible compiler) and sets `ON` or `OFF` in a normal variable, so `cmake ..` is enough to build the Life
 example with a native window. Automatic values do not create engine cache entries and are probed again at the next configuration.
 An explicit normal or cached option is never replaced, even if it equals the last detected value. Remove the cache entry with
 `-UWEBFRONT_EMBED_WKWEBVIEW` (or the corresponding platform option) to resume automatic detection.
 A missing engine only prints a status; the Life examples then use the default browser and CMake explains what to install.
 Platforms without a registered native engine use the default browser as well. `-DWEBFRONT_AUTODETECT_NATIVE=OFF`
 turns the detection off. CEF is never detected.
+`ENABLE_TESTING` and `ENABLE_FUZZING` only disable the detection of a top-level WebFront build: a
+parent project that defines them for its own purposes does not change the detection of its consumers.
+
+Consumers can call `webfront_use_native_window(target)` after linking `WebFront::WebFront`.
+It applies the native engine's setup and defines `WEBFRONT_NATIVE_WINDOW` on that target when
+enabled. Application code uses that definition to select `NativeWebViewFrontend` or the
+default browser, as shown in the [README](../README.md#use-webfront-in-your-project).
+The registry and configured options are shared across directories: the lower-level
+`webfront_native_frontend_option(out)` and `webfront_setup_frontends_for_target(target)`
+also work from a parent or sibling directory. The latter sets up every enabled engine;
+the native helper never selects CEF.
 
 | Option | Default | Description |
 | --- | --- | --- |

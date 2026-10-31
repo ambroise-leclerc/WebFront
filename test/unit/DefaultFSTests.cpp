@@ -75,6 +75,7 @@ SCENARIO("DefaultFS layers a configured document root over the embedded fallback
     GIVEN("a document root that also contains a file named WebFront.js") {
         TemporaryRoot root;
         root.write("WebFront.js", "// not the real bridge script");
+        root.write("webfront-dom.mjs", "// wrong DOM version");
         fs::DefaultFS defaultFS{root.path()};
 
         WHEN("WebFront.js is requested") {
@@ -82,6 +83,9 @@ SCENARIO("DefaultFS layers a configured document root over the embedded fallback
             THEN("the embedded, version-matched script is served instead of the local file") {
                 REQUIRE(file.has_value());
                 REQUIRE(readAll(*file) != "// not the real bridge script");
+                auto dom = defaultFS.open("webfront-dom.mjs");
+                REQUIRE(dom.has_value());
+                REQUIRE(readAll(*dom) != "// wrong DOM version");
             }
         }
     }

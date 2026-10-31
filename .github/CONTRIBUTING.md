@@ -1,5 +1,13 @@
 # Contributing Guidelines
 
+## License of contributions
+
+Unless explicitly agreed otherwise, contributions submitted for inclusion in
+WebFront must be available under **Apache-2.0 OR CECILL-B**, at the recipient's
+option, as described in [LICENSE](../LICENSE). Submit only work you have the
+right to license on these terms, and retain existing third-party license and
+copyright notices.
+
 ## Coding Style
 
 We follow the **C++ Core Guidelines** to ensure conformance with modern C++23 generic programming. Please refer to the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) for detailed rules. Key points are summarized below:
@@ -32,6 +40,14 @@ We follow the **C++ Core Guidelines** to ensure conformance with modern C++23 ge
 ### Documentation
 
 We use **Doxygen** syntax for code documentation. Follow these guidelines:
+
+API documentation is optional: configure with `-DENABLE_DOXYGEN=ON`, then run
+`cmake --build <build-directory> --target doxygen-docs` (the previous
+`doc_doxygen` target remains available). CMake generates the configuration from
+the public headers and the project version; Graphviz is optional. The default
+build needs neither tool. Current build/test commands are in [AGENTS.md](../AGENTS.md),
+and developer-environment publication is described in
+[PUBLISHING.md](../js/developer/tools/PUBLISHING.md).
 
 - **File-level documentation:** Use `@brief` only, no `@file` or `@author` tags.
 - **Class documentation:** Include `@brief` with detailed description and usage examples.

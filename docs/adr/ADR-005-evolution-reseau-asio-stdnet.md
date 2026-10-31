@@ -11,12 +11,16 @@
 | 2.1 | 2026-10-13 | Acceptée | Ambroise Leclerc | Fermeture de l’acceptor et des connexions sur le thread du contexte. | [ad6f0a7](https://github.com/ambroise-leclerc/WebFront/commit/ad6f0a7863b12fb35e0851be5648539618231190) |
 | 3.0 | 2026-10-13 | Acceptée | Ambroise Leclerc | HTTP et WebSocket convertis en coroutines attendant les senders réseau. | [1e765ca](https://github.com/ambroise-leclerc/WebFront/commit/1e765ca4275e4cfb9b4e7d68b204ce7d9261582c) |
 | 3.1 | 2026-10-16 | Acceptée | Ambroise Leclerc | Centralisation des en-têtes sender avant les macros CEF. | [ca9c35d](https://github.com/ambroise-leclerc/WebFront/commit/ca9c35d2c7a0acb2bc426d4a932cc04b21470a7b) |
+| 3.2 | 2026-10-26 | Proposée | Ambroise Leclerc | TCP_NODELAY sur chaque socket acceptée (#379). | [b3227f7](https://github.com/ambroise-leclerc/WebFront/commit/b3227f75876d7002428b170af230194fd2725a93) |
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2022-01-21** (version 1.0).
-Dernière révision : **2026-10-16** (version 3.1).
-Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
+**Acceptée jusqu’à la version 3.1 ; version 3.2 proposée.**
+Décision initiale : **2022-01-21** (version 1.0).
+Dernière révision proposée : **2026-10-26** (version 3.2).
+Le présent texte décrit la révision proposée ; la version 3.1 demeure la référence
+intégrée jusqu’à l’intégration et la validation de la version 3.2. Le tableau conserve
+les états antérieurs.
 
 ## Contexte
 
@@ -48,6 +52,17 @@ migration ; il ne décrit pas l’implémentation ASIO initiale.
 Que le réseau demeure une dépendance injectée. `networking::TCPStdnet` adapte les opérations
 `Accept`, `Receive`, `Send` de stdnet ; les mocks fournissent le même contrat. Les boucles HTTP
 et WebSocket sont des `networking::Task` qui attendent les senders du provider.
+
+Que `TCPStdnet::Accept` active `stdnet::ip::tcp_no_delay(true)` avant de livrer
+chaque socket acceptée au serveur HTTP. L’option reste active après l’upgrade
+WebSocket : un message envoyé par un callback ne doit pas retenir son
+`functionReturn` en attendant un ACK retardé. Le réglage utilise la surcharge
+avec exception de `set_option` dans le sender d’acceptation. La propagation de cette
+erreur, la libération de la socket et la poursuite de la boucle suivent les mécanismes
+existants de stdnet, du sender et du serveur ; ce chemin de configuration en échec
+n’est pas couvert par un test de régression dédié.
+Les mocks ne transportant aucun paquet peuvent ignorer cette option ; aucune
+opération supplémentaire n’est imposée au contrat des providers.
 
 Que le vocabulaire des senders passe par `networking::ex = ::stdnet::ex`. Le choix de stdexec
 aujourd’hui, puis éventuellement de `std::execution`, appartient à stdnet. C++23 reste le

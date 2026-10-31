@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       repeat_desktop_tests:
-        description: 'Also run the desktop matrix, repeating each CTest case three times'
+        description: 'Also run the desktop matrix, repeating the complete CTest suite three times'
         type: boolean
         default: false
 
@@ -28,58 +28,87 @@ env:
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
-  desktop:
-    # Manual runs add extended checks; stability checks opt into desktops.
+  # The Linux toolchain image is tagged with the hash of its Dockerfile and built only when that tag is missing from ghcr.io,
+  # so a change of the Dockerfile is validated by the very run that carries it. A pull request from a fork cannot push it
+  # (read-only token): its Linux job then fails at the pull, which a maintainer re-run on a branch of this repository fixes.
+  linux-image:
     if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Name the image after its Dockerfile
+        id: tag
+        run: |
+          hash=$(sha256sum .github/docker/linux-ci.Dockerfile | cut -c1-16)
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/linux-ci:$hash" >> "$GITHUB_OUTPUT"
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push the image if its tag does not exist
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.image }}" > /dev/null 2>&1; then
+            echo "${{ steps.tag.outputs.image }} already exists"
+          else
+            docker build -f .github/docker/linux-ci.Dockerfile -t "${{ steps.tag.outputs.image }}" .github/docker
+            docker push "${{ steps.tag.outputs.image }}"
+          fi
+
+  desktop:
+    needs: linux-image
+    permissions:
+      contents: read
+      packages: read
+    # Only Linux waits for its image. Native desktops below start immediately and reuse these steps.
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests) }}
     # No `name:` expression: a skipped matrix job would display it unevaluated.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux-gcc-webkitgtk, windows-msvc-webview2, macos-clang-wkwebview]
+        platform: [linux-gcc-webkitgtk]
         include:
           - platform: linux-gcc-webkitgtk
             os: ubuntu-26.04
+            use_image: true
             build_type: Debug
             test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
-            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON
-          - platform: windows-msvc-webview2
-            os: windows-2025
-            build_type: Release
-            test_env: {}
-            options: -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2
-          - platform: macos-clang-wkwebview
-            os: macos-26
-            build_type: Release
-            test_env: {}
-            options: -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
+            # GCC 16 compiles the optional C++26 reflection layer of the forms (#383): its tests must not be skipped here.
+            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON
     runs-on: ${{ matrix.os }}
-    steps:
+    # Only the Linux job runs in the prebuilt toolchain image; an empty value means no container.
+    container: ${{ matrix.use_image && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.linux-image.outputs.image, github.actor, github.token)) || '' }}
+    steps: &desktop-steps
       - uses: actions/checkout@v7
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
         with:
           version: '4.4.4'
+      # In the container the workspace is mounted elsewhere than the host path that `github.workspace` expands to.
+      - name: Point the CPM cache at the workspace
+        if: matrix.use_image
+        run: echo "CPM_SOURCE_CACHE=$GITHUB_WORKSPACE/.cache/CPM" >> "$GITHUB_ENV"
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - uses: actions/cache@v4
         with:
           path: .cache/CPM
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake', 'test/unit/CMakeLists.txt') }}
           restore-keys: cpm-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/bootstrap
+            build/registry-archives
+          key: inputs-desktop-${{ runner.os }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
       - name: Initialize MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-      # Ubuntu 26.04 ships GCC 16 in its main archive (no flaky toolchain PPA). The image already
-      # provides CMake, Ninja, pkg-config and Xvfb, so install only the missing pieces.
-      - name: Install GCC 16, WebKitGTK and coverage tools
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
-            gcc-16 g++-16 libwebkitgtk-6.0-dev lcov
-          echo "CC=gcc-16" >> "$GITHUB_ENV"
-          echo "CXX=g++-16" >> "$GITHUB_ENV"
+      # GCC 16, WebKitGTK, lcov, Ninja and Xvfb come from the container image (.github/docker/linux-ci.Dockerfile).
       - name: Setup Xcode
         if: runner.os == 'macOS'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
@@ -99,7 +128,7 @@ jobs:
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.options }}
       - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} --parallel 2
+        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 2
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -127,33 +156,180 @@ jobs:
             if (-not $version) { throw "WebView2 runtime version is missing: $($executable.FullName)" }
             Write-Host "WebView2 runtime $version at $($executable.FullName)"
           }
+      # The fast tier (docs/TEST_TIERS.md): unit tests only, so a plain regression is reported before the browser suite starts.
+      - name: Fast tests
+        shell: bash
+        run: ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
+      - name: Capture CTest dependency graph
+        shell: bash
+        run: ctest --test-dir build --show-only=json-v1 > build/ctest-graph.json
       - name: Test C++ and native browser integration
         # Only Linux trusted fixtures need the sandbox opt-out on hosted runners.
         env: ${{ matrix.test_env }}
         run: >-
-          ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure --no-tests=error --parallel 4
-          --repeat until-fail:${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests && '3' || '1' }}
-          --output-junit "${{ github.workspace }}/build/test-results.xml"
+          python3 test/tools/MeasureCommand.py --output build/suite-resources.json --
+          cmake -DBUILD_DIR=build -DCONFIG=${{ matrix.build_type }}
+          -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
+          -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
+          -P test/cmake/RunTestSuite.cmake
+      - name: Analyze CTest timings
+        if: always()
+        shell: bash
+        run: python3 test/tools/ProfileTests.py build/ctest-graph.json build/test-results-*.xml --workers 4 --log build/Testing/Temporary/LastTest.log --ninja-log build/.ninja_log --output build/test-profile.txt
+      - name: Probe compiler cache on the embedded builds
+        # Diagnostic (#388): do the Life embedded translation units hit the compiler cache once the suite has warmed it?
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          {
+            echo "Before the probe (whole run):"
+            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
+            for target in life_embedded life_journey; do
+              sccache --zero-stats > /dev/null
+              start=$(date +%s)
+              cmake --build build --config ${{ matrix.build_type }} --target "$target" --clean-first > "build/probe-$target.log" 2>&1 || tail -n 20 "build/probe-$target.log"
+              echo "$target clean rebuild: $(( $(date +%s) - start )) s"
+              sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
+            done
+            # The consumer project of AddSubdirectoryConsumer: its single translation unit against the warm cache.
+            sccache --zero-stats > /dev/null
+            start=$(date +%s)
+            cmake --build build/test/unit/consumer-build --config ${{ matrix.build_type }} --clean-first > build/probe-consumer.log 2>&1 || tail -n 20 build/probe-consumer.log
+            echo "consumer clean rebuild: $(( $(date +%s) - start )) s"
+            sccache --show-stats | grep -E '^(Compile requests|Cache hits|Cache misses) '
+          } 2>&1 | tee build/embedded-cache-probe.txt
       - name: Collect coverage
         if: runner.os == 'Linux'
+        shell: bash
         working-directory: build
+        env:
+          BENCHMARK_COVERAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests }}
         run: |
+          set -euo pipefail
           # lcov 2 on Ubuntu 26.04 rejects the benign line/function hit inconsistencies GCC emits for templates.
-          lcov --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info
-          lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
-          lcov --list coverage.info
+          if [[ "$BENCHMARK_COVERAGE" == true ]]; then
+            /usr/bin/time -v -o coverage-pp-capture.txt lcov --rc lcov_json_module=JSON::PP --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage-pp.info
+          fi
+          perl -MJSON::XS -e 'print "Fast JSON backend JSON::XS $JSON::XS::VERSION\n"'
+          /usr/bin/time -v -o coverage-capture.txt lcov --verbose --rc lcov_json_module=JSON::XS --ignore-errors inconsistent,inconsistent --gcov-tool gcov-16 --capture --directory . --output-file coverage.info 2>&1 | tee coverage-capture.log
+          grep -F 'Using JSON module JSON::XS' coverage-capture.log
+          if [[ "$BENCHMARK_COVERAGE" == true ]]; then
+            python3 ../test/tools/CompareCoverage.py coverage-pp.info coverage.info
+          fi
+          /usr/bin/time -v -o coverage-filter.txt lcov --ignore-errors inconsistent,inconsistent --remove coverage.info '/usr/*' '*/examples/*' --output-file coverage.info
+          /usr/bin/time -v -o coverage-list.txt lcov --list coverage.info
+      - name: Collect macOS browser crash diagnostics
+        if: failure() && runner.os == 'macOS'
+        timeout-minutes: 1
+        shell: bash
+        run: |
+          mkdir -p build/diagnostics
+          /usr/bin/log show --last 15m --style compact \
+            --predicate 'process CONTAINS "WebKit" OR process == "developer_integration"' \
+            > build/diagnostics/webkit.log 2>&1 || true
+          shopt -s nullglob
+          for directory in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+            for report in "$directory"/*WebKit* "$directory"/*WebContent* "$directory"/*developer_integration*; do
+              if [ -f "$report" ]; then cp "$report" build/diagnostics/; fi
+            done
+          done
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: sccache --show-stats
       - name: Retain test timings and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-log-${{ runner.os }}
           path: |
-            build/test-results.xml
-            build/Testing/Temporary/LastTest.log
+            build/test-results-*.xml
+            build/ctest-graph.json
+            build/embedded-cache-probe.txt
+            build/test/unit/consumer-build/.ninja_log
+            build/test-profile*
+            build/*-resources.json
+            build/coverage-*.txt
+            build/coverage-capture.log
+            build/Testing/Temporary/LastTest*.log
+            build/diagnostics/
           if-no-files-found: ignore
 
+  desktop-native:
+    if: github.event_name != 'workflow_dispatch' || inputs.repeat_desktop_tests
+    permissions:
+      contents: read
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-msvc-webview2, macos-clang-wkwebview]
+        include:
+          - platform: windows-msvc-webview2
+            os: windows-2025
+            build_type: Release
+            test_env: {}
+            options: -DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2
+          - platform: macos-clang-wkwebview
+            os: macos-26
+            build_type: Release
+            test_env: {}
+            options: -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
+    runs-on: ${{ matrix.os }}
+    steps: *desktop-steps
+
+  # Portability tier: the library consumed from another project, across generators and compilers, with a cold compiler cache.
+  # It runs weekly and on pull requests into master, where it is a required check (docs/TEST_TIERS.md).
+  portability:
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)
+    name: portability (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-gcc-ninja, os: ubuntu-24.04, generator: Ninja}
+          - {name: linux-clang-makefiles, os: ubuntu-24.04, generator: Unix Makefiles, clang: true}
+          - {name: windows-msvc-ninja, os: windows-2025, generator: Ninja}
+          - {name: macos-appleclang-ninja, os: macos-26, generator: Ninja}
+          # Not yet exercised on a hosted runner: reported, never blocking.
+          - {name: windows-msvc-visual-studio, os: windows-2025, generator: Visual Studio 18 2026, experimental: true}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-
+      - name: Initialize MSVC environment
+        if: runner.os == 'Windows' && matrix.generator == 'Ninja'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Install Clang 23
+        if: matrix.clang
+        run: |
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /usr/share/keyrings/llvm-archive-keyring.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y clang-23 lld-23
+          echo "CC=clang-23" >> "$GITHUB_ENV"
+          echo "CXX=clang++-23" >> "$GITHUB_ENV"
+      # No compiler cache: a new user compiles everything.
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Portability tests
+        shell: bash
+        run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
+
   sanitizers:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -173,7 +349,16 @@ jobs:
           path: .cache/CPM
           key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-extended-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-sanitizers/bootstrap
+            build-sanitizers/registry-archives
+          key: inputs-sanitizers-${{ runner.os }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
       - uses: ./.github/actions/remove-node
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - name: Verify compiler cache launcher
+        run: sccache --version
       - uses: ./.github/actions/setup-cmake
         with:
           version: '4.4.4'
@@ -191,6 +376,7 @@ jobs:
         run: >-
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
           ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
@@ -204,6 +390,10 @@ jobs:
         run: |
           python3 test/fuzz/GenerateGzipCorpus.py build-sanitizers/gzip-corpus
           build-sanitizers/test/unit/gzip_differential build-sanitizers/gzip-corpus
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: sccache --show-stats
       - name: Retain test timings and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -217,16 +407,7 @@ jobs:
         if: matrix.sanitizer == 'address-undefined'
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p build-sanitizers/test/fuzz/artifacts
-          for decoder in messages http websocket gzip; do
-            build-sanitizers/test/fuzz/fuzz_$decoder build-sanitizers/test/fuzz/corpus/$decoder \
-              -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
-              -artifact_prefix=build-sanitizers/test/fuzz/artifacts/$decoder-
-          done
-          build-sanitizers/test/fuzz/fuzz_gzip_differential build-sanitizers/test/fuzz/corpus/gzip \
-            -max_total_time=30 -timeout=5 -max_len=65536 -rss_limit_mb=1024 \
-            -artifact_prefix=build-sanitizers/test/fuzz/artifacts/gzip-differential-
+          python3 test/fuzz/RunFuzzers.py build-sanitizers/test/fuzz --jobs 2 --seconds 30
       - name: Upload fuzz findings
         if: failure() && matrix.sanitizer == 'address-undefined'
         uses: actions/upload-artifact@v4
@@ -237,7 +418,7 @@ jobs:
 
   web-integration:
     timeout-minutes: 30
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
     strategy:
       fail-fast: false
       matrix:
@@ -251,7 +432,16 @@ jobs:
           path: .cache/CPM
           key: cpm-extended-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
           restore-keys: cpm-extended-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-cef/bootstrap
+            build-cef/registry-archives
+          key: inputs-web-integration-${{ runner.os }}-${{ hashFiles('cmake/WebFrontBootstrap.cmake', 'test/web/registry-packages.json') }}
       - uses: ./.github/actions/remove-node
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - name: Verify compiler cache launcher
+        run: sccache --version
 
       - uses: ./.github/actions/setup-cmake
         with:
@@ -269,7 +459,7 @@ jobs:
 
       # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
 
       - name: Build browser test
         run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2
@@ -290,6 +480,10 @@ jobs:
         run: |
           sudo iptables -F OUTPUT
           sudo ip6tables -F OUTPUT
+      - name: Compiler cache statistics
+        if: always()
+        shell: bash
+        run: sccache --show-stats
       - name: Retain test timings and diagnostics
         if: always()
         uses: actions/upload-artifact@v4

@@ -63,13 +63,13 @@ void workerThread() {
 
 void repeatedShow() {
     for (const auto page : {"no-bridge.html", "no-bridge.html?early-close"}) {
-        App app("9002", std::filesystem::current_path());
+        App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
         app.show(page);
     }
 }
 
 void httpError() {
-    App app("9002", std::filesystem::current_path());
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     expectFailure(
         [&] {
             app.show("missing-webkitgtk-page.html");
@@ -123,8 +123,25 @@ struct NativeClosingFrontend : Frontend {
 
 void nativeClose() {
     using NativeApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, NativeClosingFrontend>;
-    NativeApp app("9002", std::filesystem::current_path());
+    NativeApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     app.show("no-bridge.html");
+}
+
+void windowTitle() {
+    gtk::initialize();
+    const auto titleOf = [](webfront::WindowOptions window) {
+        gtk::Session session(webfront::detail::BoundContentPolicy{}, std::move(window));
+        session.create();
+        const char* native = session.a.windowGetTitle(session.window);
+        return std::string(native ? native : "");  // The session destructor tears the window down; no navigation is needed.
+    };
+    if (titleOf({.title = "SiliconForge"}) != "SiliconForge")
+        throw std::runtime_error("The application's window title was not applied");
+    const auto defaultTitle = titleOf({});
+    if (defaultTitle.empty() || defaultTitle == "WebFront Application")
+        throw std::runtime_error("The default window title must be the executable's name");
+    if (defaultTitle != "webkitgtk_lifecycle")
+        throw std::runtime_error("Unexpected default window title: " + defaultTitle);
 }
 
 void preRunFailure() {
@@ -159,7 +176,8 @@ void run(std::string_view mode) {
         {         "http-error",          httpError},
         {       "native-close",        nativeClose},
         {    "pre-run-failure",      preRunFailure},
-        {"profile-permissions", profilePermissions}
+        {"profile-permissions", profilePermissions},
+        {       "window-title",        windowTitle}
     };
     const auto selected = cases.find(mode);
     if (selected == cases.end())

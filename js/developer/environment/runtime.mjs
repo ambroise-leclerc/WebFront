@@ -12,10 +12,11 @@ import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
-import {build, dev} from './development.mjs';
+import {build, dev, showPreview} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
+import {connectAutomation as connectAgent, clipText} from './automation.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -48,7 +49,8 @@ async function readPackages(bridge, lock, signal) {
 async function onWorkerMessage(bridge, worker, finish, data) {
     if (data.type === 'read') worker.postMessage(await answerRead(bridge, data));
     else if (data.type === 'result') finish(null, data.files);
-    else if (data.type === 'error') finish(new Error(data.error));
+    else if (data.type === 'error')
+        finish(Object.assign(new Error(data.error), Array.isArray(data.diagnostics) ? {diagnostics: data.diagnostics} : {}));
 }
 
 function buildInWorker(bridge, message, signal) {
@@ -123,9 +125,7 @@ async function preview(args, {bridge, signal, preview: frame}) {
     const entry = resolveEntry(project.manifest, args[0], 'wf preview <entry.tsx>');
     const result = await compile(bridge, entry, signal);
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
-    frame.hidden = false;
-    // Replace transient builds without accumulating browser session history.
-    frame.contentWindow.location.replace(`/webfront/developer/preview/index.html?build=${Date.now()}`);
+    showPreview(frame);
     return syncNotice(project) + 'Preview ready.';
 }
 
@@ -165,14 +165,20 @@ async function loadManifest(bridge) {
 
 // wf run [--timeout <seconds>] <script> [args...]
 async function run(args, context) {
-    const {timeout, target, args: extra} = parseRunOptions(args, 'wf run [--timeout <seconds>] <script> [args...]');
-    const project = await loadManifest(context.bridge);
-    const depth = context.depth ?? 0;
-    // The limit covers the scripts this one runs through wf commands, whatever their own --timeout.
-    const deadline = runDeadline(timeout, context.deadline);
-    const command = scriptCommand(project.manifest, target, extra, tokenize, depth);
-    if (command.kind === 'wf') return execute(command.argv, {...context, depth: depth + 1, deadline});
-    return syncNotice(project) + await runModule(context, project, {label: `Script ${target}`, entry: command.entry, args: command.args, deadline});
+    const outcome = await exclusive(context, async owned => {
+        const {timeout, target, args: extra} = parseRunOptions(args, 'wf run [--timeout <seconds>] <script> [args...]');
+        const project = await loadManifest(owned.bridge);
+        const depth = context.depth ?? 0;
+        // The limit covers the scripts this one runs through wf commands, whatever their own --timeout.
+        const deadline = runDeadline(timeout, context.deadline);
+        const command = scriptCommand(project.manifest, target, extra, tokenize, depth);
+        if (command.kind === 'wf') return {argv:command.argv, context:{...context, depth:depth + 1, deadline}};
+        return {result:syncNotice(project) + await runModule(owned, project,
+            {label: `Script ${target}`, entry: command.entry, args: command.args, deadline})};
+    });
+    // Hand the lease to the resolved command: a dev alias must release it while watching, just like wf dev.
+    // Module scripts retain ownership through their complete execution and publication above.
+    return outcome.argv ? execute(outcome.argv, outcome.context) : outcome.result;
 }
 
 // wf exec [--timeout <seconds>] <package>[:<entry>] [args...]
@@ -187,7 +193,7 @@ const checkWorker = () => new Worker(new URL('./typecheck-worker.mjs', import.me
 
 // wf check [--timeout <seconds>]: a TypeScript type check with the locked typescript, in a Worker that writes nothing.
 // snapshotBounds lowers the snapshot's bounds for the integration test.
-async function check(args, {bridge, signal, write = () => {}, createWorker = checkWorker, deadline, snapshotBounds}) {
+async function check(args, {bridge, signal, write = () => {}, createWorker = checkWorker, deadline, snapshotBounds, onDiagnostics}) {
     const {timeout} = parseCheckOptions(args);
     const project = await loadManifest(bridge);
     const [typescript] = typescriptPackage(project.lock);
@@ -195,6 +201,7 @@ async function check(args, {bridge, signal, write = () => {}, createWorker = che
     const outcome = await runWorker({createWorker, host, signal, timeout: secondsLeft(runDeadline(timeout, deadline)), write,
         message: {lock: project.lock, typescript, entries: Object.values(project.manifest.entries ?? {}), bounds: snapshotBounds}});
     await host.stop();
+    onDiagnostics?.(outcome.diagnostics ?? []);
     return syncNotice(project) + runResult('Type check', outcome, host.publications);
 }
 
@@ -263,11 +270,50 @@ async function list(_args, {bridge}) {
 const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
+let executionToken = null, executionCount = 0, automationActive = false, cppActive = 0;
+export async function exclusive(context, action, {settlesOnAbort = false} = {}) {
+    const interruption = () => Object.assign(new Error(context.signal?.reason?.message ?? 'Interrupted'),{exitCode:130});
+    if (context.signal?.aborted && !settlesOnAbort) throw interruption();
+    const nested = executionToken !== null && context.executionToken === executionToken;
+    if (context.executionToken && !nested) throw new Error('Developer operation no longer owns its lease');
+    if (context.automation && cppActive) throw Object.assign(new Error('Developer environment is busy with an application command'),{code:'busy'});
+    if (executionToken !== null && !nested) throw Object.assign(new Error('Developer environment is busy; wait or stop the active operation'),{code:'busy'});
+    if (!nested) { executionToken = Symbol('developer operation'); automationActive = context.automation === true; }
+    const token = executionToken;
+    let abort, cancellationTimer;
+    const interrupted = new Promise((_,reject) => {
+        // Workers already have a two-second stop grace. Preserve their outcome and cleanup first,
+        // then bound an unresponsive preparation/command Promise as well.
+        abort = () => { cancellationTimer=setTimeout(() => reject(interruption()),2500); };
+        if (!settlesOnAbort) context.signal?.addEventListener('abort',abort,{once:true});
+    });
+    ++executionCount;
+    const release = () => {
+        if (executionToken===token && --executionCount===0) {executionToken=null; automationActive=false;}
+    };
+    let running;
+    try {
+        try { running=Promise.resolve(action({...context,executionToken:token})).finally(release); }
+        catch(error) {release(); throw error;}
+        return await (settlesOnAbort ? running : Promise.race([running,interrupted]));
+    }
+    finally {
+        clearTimeout(cancellationTimer);
+        if (!settlesOnAbort) context.signal?.removeEventListener('abort',abort);
+    }
+}
+
 export async function execute(args, context) {
     const [command = 'help', ...rest] = args;
     if (!Object.hasOwn(commands, command)) throw new Error(`Unknown wf command: ${command}`);
-    return commands[command](rest, context);
+    if (command === 'run') return run(rest,context);
+    // A watch keeps its compiler alive, but owns the shared window only while rebuilding/publishing.
+    if (command === 'dev') return commands[command](rest,{...context,withBuild:action => exclusive(context,action)});
+    // wf test already bounds cancellation and cleanup; retain its lease until that cleanup finishes.
+    return exclusive(context, async owned => commands[command](rest, owned),{settlesOnAbort:command==='test'});
 }
+
+export const connectAutomation = context => connectAgent({...context,run:runNonInteractive,exclusive});
 
 /**
  * Runs one wf command without a terminal, for a page that the application drives: the command's output goes to
@@ -276,19 +322,33 @@ export async function execute(args, context) {
  * window). `report` is the structured report of wf test, null for other commands; the result is cut to fit a bridge string (see fitResult). A command that fails, or a result
  * that cannot be sent, ends with a non-zero code; it never stays open. Resolves with the result.
  */
-export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, ...context}) {
-    let exitCode = 0, output = '', report = null;
-    const collect = text => { output += text; write(text); };
+export async function runNonInteractive(argv, {reporter, onExit = code => globalThis.close(code), write = () => {}, outputLimit = Infinity, ...context}) {
+    if (outputLimit!==Infinity && (!Number.isSafeInteger(outputLimit) || outputLimit<0)) throw new Error('outputLimit must be a non-negative integer or Infinity');
+    let exitCode = 0, output = '', report = null, truncated = false, diagnostics = [];
+    const keepDiagnostics = values => {
+        diagnostics = (values ?? []).slice(0,10).map(item => ({text:clipText(item.text ?? '',256),
+            ...(item.location ? {file:clipText(String(item.location.file ?? '').replace(/^project:/,''),256),line:item.location.line,column:item.location.column+1} : {}),
+            ...(!item.location && item.file ? {file:clipText(String(item.file).replace(/^project:/,''),256),line:item.line,column:item.column} : {}),
+            ...(item.code === undefined ? {} : {code:item.code})}));
+    };
+    const append = text => {
+        text = String(text ?? '');
+        const combined = output + text;
+        truncated ||= combined.length > outputLimit;
+        output = Number.isFinite(outputLimit) ? clipText(combined,outputLimit,true) : combined;
+    };
+    const collect = text => { append(text); write(text); };
     try {
         setManifestDirectory(context.config?.manifestDirectory);
         // Not `output += await ...`: the left side is read before the command runs, which would drop what it wrote.
-        const summary = await execute(argv, {...context, write: collect, onReport: value => { report = value; }});
-        output += summary;
+        const summary = await execute(argv, {...context, write: collect, onReport: value => { report = value; }, onDiagnostics:keepDiagnostics});
+        append(summary);
     } catch (error) {
         exitCode = error?.exitCode ?? 1;
-        output += error?.message ?? String(error);
+        if (error?.diagnostics) keepDiagnostics(error.diagnostics);
+        append(error?.message ?? String(error));
     }
-    const result = {exitCode, output, report};
+    const result = {exitCode, output, report, ...(truncated ? {truncated:true} : {}), ...(diagnostics.length ? {diagnostics} : {})};
     try { await reporter?.(JSON.stringify(fitResult(result))); }
     catch (error) {
         result.exitCode = exitCode || 1;
@@ -408,7 +468,12 @@ export async function runLine(line, context) {
     const write = text => context.write?.(toTerminalText(text));
     if (command === 'wf') return toTerminalText(await execute(args, {...context, write}));
     if (Object.hasOwn(builtins, command)) return toTerminalText(await builtins[command](args, context));
-    if (context.cppCommands?.has(command)) return runCommand(context.bridge, command, args, {signal: context.signal, write});
+    if (context.cppCommands?.has(command)) {
+        if (automationActive) throw new Error('Developer environment is busy with an automation operation');
+        ++cppActive;
+        try { return await runCommand(context.bridge, command, args, {signal: context.signal, write}); }
+        finally {--cppActive;}
+    }
     throw new Error(`Unknown command: ${command}. Type help to list the commands.`);
 }
 

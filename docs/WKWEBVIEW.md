@@ -189,3 +189,14 @@ These channels exist only in the manual benchmark and the contracts-only test ex
 Timed measurements are excluded from CTest and CI. [ADR-017](adr/ADR-017-acces-direct-aux-frontends.md) records
 their measurements and the consequences of Apple's public APIs for a future direct transport, including the
 Foundation type boundary, handler lifetime, origins and custom resource schemes. iOS remains unverified.
+
+## Quiet automated sessions
+
+The per-opening options include `visible` (default `true`). Setting it to `false` creates the real native window and
+engine without presenting or focusing the window. This retains the native event loop and startup/navigation deadlines;
+it does not provide a sandbox or a headless engine. On macOS a WindowServer session is still required. The test driver
+uses this option and supports `WEBFRONT_TEST_VISIBLE=1` for interactive diagnostics.
+See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for the visible-window budget and retained lifecycle cases.
+
+Hidden sessions require macOS 14+ and use the public `WKPreferences::inactiveSchedulingPolicy` value `None` so
+asynchronous bridge and Worker work continues after the load event. Visible sessions retain macOS 13.3 support.

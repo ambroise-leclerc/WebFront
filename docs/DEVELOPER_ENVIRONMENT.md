@@ -32,8 +32,10 @@ ship developer mode as the distribution configuration: `wf embed` produces the a
 `.d.ts` files and the type packages (`@types/*`, `types` and `typings` fields) of the locked graph. No external compiler is
 installed or required (see [Type checking](#type-checking-wf-check)).
 
-The latest published environment is **0.6.2**, published as `developer-v0.6.2` and pinned by the release data. Earlier published
-versions stay immutable; the sources advance to 0.6.3 (the terminal no longer prints its banner line), which is not published yet.
+The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
+versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
+lease; version 0.6.2 predates that API. Publication and pin changes follow
+[PUBLISHING](../js/developer/tools/PUBLISHING.md), with deployment verified before merging a new pin.
 
 ## Minimal C++ application
 
@@ -60,9 +62,13 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 `wf install` keep the versions of the installed lock, 0.4.1 changed the include of the generated provider, 0.5.0 added the
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
-The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp` and targets
-`https://ambroise-leclerc.github.io/WebFront/developer/0.6.2/environment.tgz`. This version (`wf build`, `wf dev`, `wf test` and the non-interactive entry, on top of the 0.5.0 manifest, `wf restore`, `wf run`, `wf check` and the complete terminal) is published and archived as `developer-v0.6.2`; it also installs the archives of `@types` packages and honours a manifest directory. Published 0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable; 0.4.0 and earlier target the former include layout. The configuration pins one version and
-its SHA-512 rather than resolving a mutable `latest` channel. An explicit
+The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
+an exact versioned environment URL and the trusted digest. The 0.6.3 release pin selects
+`https://ambroise-leclerc.github.io/WebFront/developer/0.6.3/environment.tgz`; the
+[publication gate](validation/developer-0.6.3-release.md) requires deployed verification before that pin is merged.
+Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
+0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable, while 0.4.0 and earlier target the former include layout.
+The configuration pins one version and its SHA-512 rather than resolving a mutable `latest` channel. An explicit
 `DeveloperBootstrapOptions{.environment = url, .integrity = trustedHash}` still selects a different
 HTTPS/CORS repository or a same-origin test fixture. Users install no JavaScript tooling.
 
@@ -379,8 +385,7 @@ open, Enter starts a new session. No system shell is exposed.
 - **Output streams** while a command runs, for `wf` and C++ commands alike, without a size limit: C++ output is
   sent in pieces below the 65,535-byte limit of bridge strings.
 
-An application adds its own commands with `webfront::Commands` (`<webfront/Commands.hpp>`), which replaces
-`terminal::Shell` of the removed terminal component ([migration](UI_COMPONENTS.md)). A command is a coroutine:
+An application adds its own commands with `webfront::Commands` (`<webfront/Commands.hpp>`). A command is a coroutine:
 
 ```cpp
 #include <webfront/Commands.hpp>
@@ -456,9 +461,14 @@ the Worker, cancels polling and aborts staged publication; a publication already
 the preview before stopping.
 The last successful preview stays available. Browser disconnection also stops the loop.
 
-`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0 and later; `DeveloperReleaseData.hpp` pins 0.6.2 (published as `developer-v0.6.2`).
+`wf build`, `wf dev` and `wf test` are in developer distribution 0.6.0 and later; the default
+version and integrity are selected by `DeveloperReleaseData.hpp`.
 
 ## Tests (`wf test`)
+
+To test an existing application's own page from a consuming CMake project, see
+[consumer Jasmine/CTest integration](CONSUMER_TESTING.md). That opt-in path is independent of
+the developer terminal and does not require a wf manifest.
 
 `wf test [--timeout <seconds>] [pattern]` runs the project's Jasmine specs in the browser. The project chooses
 the Jasmine: `wf install jasmine-core` resolves it from the registry like any package, and the lock pins its version
@@ -501,6 +511,10 @@ each per spec). `status` is `passed`, `failed`, `incomplete`, `error` (the specs
 
 ### Without a terminal
 
+For the optional native CLI/MCP controller of a live developer window, see
+[developer automation](AUTOMATION.md). It reuses this command dispatch with explicit native
+grants, structured diagnostics and watchdogs, without exporting scripts or application callbacks.
+
 An application that drives the environment from its own page (`webfront-wf`, below, is one) calls
 `runNonInteractive(argv, {bridge, config, preview, reporter, onExit})` from `runtime.mjs`:
 
@@ -523,7 +537,7 @@ one `wf` command through `runNonInteractive`, prints its output and exits with i
 
 ```sh
 webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512-...>] [--registry-dir <dir>] \
-            [--manifest-dir <dir>] [--report <file>] [--timeout <seconds>] [--] <wf command> [arguments...]
+            [--manifest-dir <dir>] [--report <file>] [--timeout <seconds>] [--command-timeout <seconds>] [--] <wf command> [arguments...]
 ```
 
 - Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
@@ -535,8 +549,11 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
   environment under test of #315). `--registry-dir` serves a local npm registry from the driver's origin and imposes it. `--manifest-dir` keeps the manifest and
   the lock in that directory of the project (usage error 64 when it is absolute, has an empty or dot component or leaves the project).
   The project is the directory `wf` reads and writes; run `wf install` once, then the other commands, on the same project.
+- `--timeout` bounds the whole invocation, including browser/bootstrap startup. For a single command,
+  `--command-timeout` optionally adds a shorter native watchdog starting after bootstrap, immediately before
+  `runNonInteractive`; it never extends the overall deadline. Suites use their per-case budgets instead.
 - Exit status: the command's own (`wf test`: 0, 1, 124, 130); **64** usage; **70** bootstrap failure (archive absent, wrong
-  integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's `--timeout` (default 600 s) elapsed,
+  integrity, incompatible protocol or API, no non-interactive mode); **71** the driver's overall `--timeout` (default 600 s) or optional command deadline elapsed,
   after asking the page to close; **72** the browser closed without a result. `--report` writes the JSON result
   `{exitCode, output, report}` of the command, cut to fit a bridge string as described above.
 
@@ -551,7 +568,9 @@ field). `webfront.developer.config` carries `supported: {protocol: [1], api: [1]
 `Incompatible WebFront developer environment: api version 2, this application supports 1`; it never falls back. A change
 to the callbacks increments `apiVersion` and requires publishing a new bootstrap environment.
 
-The pin, for the release and for the bootstrap of the tests (`cmake/WebFrontBootstrap.cmake`), is 0.6.2: 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), 0.6.1 fixed `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary, and 0.6.2 reads the archives of `@types` packages and the manifest directory. The other `WfDriver*` cases run the environment built from the current sources
+The release pin (`DeveloperReleaseData.hpp`) and test-bootstrap pin are independent;
+`cmake/WebFrontBootstrap.cmake` pins the verified published 0.6.3 as the test bootstrap.
+Historically, 0.6.0 was the first published environment with a non-interactive mode (`WfDriverPinned` runs `wf init` from it; the starters are not provisioned, only the archive), 0.6.1 fixed `runNonInteractive`, which dropped what a command wrote before it ended (a script's console output, install progress) and kept only its summary, 0.6.2 reads the archives of `@types` packages and the manifest directory, and 0.6.3 exports the automation API v1. The other `WfDriver*` cases run the environment built from the current sources
 (the `SelfBuild` cases, assembled by the fixture `DeveloperFixtures`), which may be ahead of the pin: `wf install` and `wf test` on a fixture project (pass, fail,
 report file), a starter, an entry module renamed in `environment.json`, an unknown command, the time limit, a wrong integrity,
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
@@ -677,3 +696,9 @@ The packaged-script permission rejection is also exercised end to end.
 
 The standard CEF-off suite also checks project transactions, path rejection, Life rules and boundaries, MIME types,
 bootstrap freshness, package resolution, gzip generation, interruption and offline cache reuse.
+
+## Repository test sessions
+
+The non-interactive test driver can run compatible commands in a shared browser session with fresh command frames and
+individual JSON reports. The production `wf` command API is unchanged. See [TEST_PERFORMANCE](TEST_PERFORMANCE.md) for
+`--suite`, isolated CTest filters, complete fixture repetition, quiet windows, profiling and concurrency constraints.

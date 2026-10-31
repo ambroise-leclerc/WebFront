@@ -281,6 +281,8 @@ public:
     }
 
 private:
+    // Keyed by identifier alone: closed() erases a browser's entries on its connection's closed event, before the
+    // application releases the link and its identifier can be reused, so two connections never share an entry.
     using Key = std::pair<std::remove_cvref_t<decltype(std::declval<const UI&>().id())>, std::uint32_t>;
 
     struct Command {

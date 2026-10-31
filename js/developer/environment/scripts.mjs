@@ -200,7 +200,8 @@ export function runWorker({createWorker, host, message, signal, timeout = defaul
         // A script that ends by itself after a stop request keeps the stop's code unless it chose another one.
         const handlers = {
             console: data => write(String(data.text).replace(/\r?\n/g, '\r\n') + '\r\n', data.stream),
-            exit: data => finish({code: stopping && data.code === 0 ? stoppedCode() : data.code}),
+            exit: data => finish({code: stopping && data.code === 0 ? stoppedCode() : data.code,
+                ...(Array.isArray(data.diagnostics) ? {diagnostics:data.diagnostics} : {})}),
             error: data => finish({code: stopping ? stoppedCode() : 1, error: data.error}),
             call: reply,
         };

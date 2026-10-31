@@ -1,6 +1,6 @@
 # Runs webfront-wf and checks its exit status and output.
 # Usage: cmake -DDRIVER=<exe> -DPROJECT=<dir> -DEXPECT_STATUS=<n> [-DENVIRONMENT=<archive> -DINTEGRITY=<sri>]
-#   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
+#   [-DREGISTRY=<dir>] [-DTIMEOUT=<s>] [-DCOMMAND_TIMEOUT=<s>] [-DEXPECT_OUTPUT=<regex>] [-DEXPECT_REPORT=<regex>] [-DFORGE=<protocol>:<api>
 #   -DWORK=<dir>] [-DRENAME_ENTRY=<module name>] [-DFRESH_PROJECT=<dir>: an empty project instead of PROJECT] -DCOMMAND=<word>|<word>... -P RunWfDriver.cmake
 # MANIFEST_DIR is passed as --manifest-dir; EXPECT_PRESENT and EXPECT_ABSENT are project paths (separated by |) that must
 # exist, or not, once the command ended.
@@ -11,8 +11,18 @@
 # modules it loaded by URL, and the first page that loads another environment through the same profile fails with
 # "Importing a module script failed". Every case then starts from nothing.
 # FORGE replaces ENVIRONMENT with an archive whose environment.json declares the given protocol and API versions.
+if(CASE_REPORT)
+    if(NOT EXISTS "${CASE_REPORT}")
+        message(FATAL_ERROR "No result for the suite case: ${CASE_REPORT}")
+    endif()
+    file(READ "${CASE_REPORT}" result)
+    string(JSON status GET "${result}" exitCode)
+    string(JSON output GET "${result}" output)
+    set(report "${CASE_REPORT}")
+else()
 if(PROFILE)
     file(REMOVE_RECURSE "${PROFILE}")
+    set(ENV{WEBFRONT_TEST_CEF_PROFILE} "${PROFILE}/cef")
     set(ENV{XDG_DATA_HOME} "${PROFILE}/data")
     set(ENV{XDG_CACHE_HOME} "${PROFILE}/cache")
     # A fresh native profile also isolates WebView2 HTTP/module caches and lingering
@@ -99,6 +109,9 @@ endif()
 if(TIMEOUT)
     list(APPEND arguments --timeout "${TIMEOUT}")
 endif()
+if(COMMAND_TIMEOUT)
+    list(APPEND arguments --command-timeout "${COMMAND_TIMEOUT}")
+endif()
 if(EXPECT_REPORT)
     set(report "${PROJECT}/report.json")
     file(REMOVE "${report}")
@@ -107,9 +120,16 @@ endif()
 if(EXPECT_FILE)
     file(REMOVE "${PROJECT}/${EXPECT_FILE}")
 endif()
-string(REPLACE "|" ";" command "${COMMAND}")
-execute_process(COMMAND "${DRIVER}" ${arguments} -- ${command}
+if(SUITE)
+    list(APPEND arguments --suite "${SUITE}" --report-dir "${REPORT_DIR}")
+    set(command)
+else()
+    string(REPLACE "|" ";" command "${COMMAND}")
+    list(APPEND arguments --)
+endif()
+execute_process(COMMAND "${DRIVER}" ${arguments} ${command}
     RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+endif()
 set(text "${output}${errors}")
 message(STATUS "exit status ${status}\n${text}")
 if(NOT status EQUAL EXPECT_STATUS)

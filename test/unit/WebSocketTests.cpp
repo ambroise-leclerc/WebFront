@@ -66,6 +66,59 @@ SCENARIO("A failed write closes the WebSocket") {
     }
 }
 
+SCENARIO("A WebSocket keeps only the latest frame of a key that has too many frames waiting") {
+    InjectableSocket::reset();
+    webfront::testing::InlineTaskScope scope;
+    auto                               ws = websocket::WebSocket<InjectableNetworking>::create(InjectableSocket{}, scope);
+    ws->start();
+    InjectableSocket::deferWrites();
+    const auto shared = [](std::string_view text) {
+        return websocket::Frame<InjectableNetworking>(text).share();
+    };
+
+    GIVEN("another frame being written and a limit of one frame for the key") {
+        ws->write("other-frame");
+        ws->writeLatest(shared("state-1"), "onState", 1);
+        const auto intermediate = shared("state-2");
+        ws->writeLatest(intermediate, "onState", 1);
+        ws->writeLatest(shared("state-3"), "onState", 1);
+
+        THEN("the other frame does not count, and the intermediate frame was released when replaced") {
+            REQUIRE(ws->pendingWrites() == 2);
+            REQUIRE(intermediate.use_count() == 1);
+        }
+        WHEN("the network completes the writes") {
+            while (InjectableSocket::completeDeferredWrites() != 0) { }
+            THEN("the first and latest frames are written in order, not the intermediate one") {
+                REQUIRE(InjectableSocket::wrote("other-frame"));
+                REQUIRE(InjectableSocket::wrote("state-1"));
+                REQUIRE(InjectableSocket::wrote("state-3"));
+                REQUIRE_FALSE(InjectableSocket::wrote("state-2"));
+                REQUIRE(ws->pendingWrites() == 0);
+            }
+        }
+    }
+    GIVEN("a frame held back behind a write that fails") {
+        InjectableSocket::failWrites(make_error_code(errc::broken_pipe));
+        ws->writeLatest(shared("state-1"), "onState", 1);
+        const auto held = shared("state-2");
+        ws->writeLatest(held, "onState", 1);
+        REQUIRE(held.use_count() == 2);
+
+        WHEN("the write fails") {
+            while (InjectableSocket::completeDeferredWrites() != 0) { }
+            THEN("the held frame is released with the queue") {
+                REQUIRE(held.use_count() == 1);
+                REQUIRE(ws->pendingWrites() == 0);
+            }
+        }
+    }
+    InjectableSocket::deferWrites(false);
+    while (InjectableSocket::completeDeferredWrites() != 0) { }
+    ws->stop();
+    InjectableSocket::reset();
+}
+
 SCENARIO("A WebSocket reassembles the messages a browser sends in several frames") {
     InjectableSocket::reset();
     vector<vector<byte>> binaryMessages;

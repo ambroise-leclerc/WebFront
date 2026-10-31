@@ -1,4 +1,7 @@
-﻿cmake_minimum_required (VERSION 3.31)
+﻿# The embedding project's CMP0155 setting (module scanning by default), read before this file's own
+# cmake_minimum_required resets the policies; empty when unknown or set.
+cmake_policy(GET CMP0155 WEBFRONT_PARENT_CMP0155)
+cmake_minimum_required (VERSION 3.31)
 
 # Top-level detection must precede project(): an embedding parent project owns global settings.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -9,6 +12,7 @@ endif()
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
 option(ENABLE_TESTING "Enable Test Builds" OFF)
+option(WEBFRONT_BUILD_AUTOMATION "Build the optional local developer CLI/MCP launcher" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
 option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
 option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
@@ -26,9 +30,10 @@ string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
 
 include(cmake/Frontends.cmake)
-# The examples need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window
+# Applications need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window
 # engine is enabled when its dependencies are present. Test and fuzzing builds keep explicit selection.
-if(WEBFRONT_IS_TOP_LEVEL AND WEBFRONT_BUILD_EXAMPLES AND NOT ENABLE_TESTING AND NOT ENABLE_FUZZING)
+# An embedding parent's variables of those names do not decide for its consumers.
+if(NOT WEBFRONT_IS_TOP_LEVEL OR (NOT ENABLE_TESTING AND NOT ENABLE_FUZZING))
     set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT ON)
 else()
     set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT OFF)
@@ -55,7 +60,7 @@ if(MSVC AND NOT WEBFRONT_USE_MDDLOG AND WEBFRONT_IS_TOP_LEVEL)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_CURRENT_LIST_DIR}/js/core ${CMAKE_CURRENT_LIST_DIR}/docs ${CMAKE_CURRENT_LIST_DIR}/test/cmake)
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake ${CMAKE_CURRENT_LIST_DIR}/js/core ${CMAKE_CURRENT_LIST_DIR}/test/cmake)
 if(WEBFRONT_IS_TOP_LEVEL)
     include(StandardProjectSettings)
     include(PreventInSourceBuilds)
@@ -83,7 +88,6 @@ include(Sanitizers)
 enable_sanitizers(WebFront_options)
 
 if(WEBFRONT_IS_TOP_LEVEL)
-    configure_file(docs/Doxyfile.in ${CMAKE_BINARY_DIR}/Doxyfile)
     include(Doxygen)
     enable_doxygen()
 
@@ -92,6 +96,11 @@ endif()
 include(CPM)
 CPMAddPackage("gh:ambroise-leclerc/stdnet#8005774eabcba7e73188c02d2eeca2ff43c4ee3a")
 webfront_include_frontend_support()
+
+include(ModuleScan)
+if(NOT WEBFRONT_IS_TOP_LEVEL)
+    webfront_check_module_scan()
+endif()
 
 if(WEBFRONT_USE_MDDLOG)
     include(cmake/MddlogIntegration.cmake)
@@ -115,6 +124,25 @@ endif()
 # Embedded asset regeneration target and CTest freshness checks.
 include(WebFrontAssets)
 webfront_add_embedded_assets()
+# Opt-in consumer test registration; inclusion alone downloads nothing and registers no tests.
+include(WebFrontJasmine)
+
+if(WEBFRONT_BUILD_AUTOMATION OR (ENABLE_TESTING AND
+    (WEBFRONT_EMBED_CEF OR WEBFRONT_EMBED_WKWEBVIEW OR WEBFRONT_EMBED_WEBVIEW2 OR WEBFRONT_EMBED_WEBKITGTK)))
+    webfront_default_embedded_frontend(_automation_default FALLBACK CEF)
+    webfront_select_frontend(WEBFRONT_AUTOMATION_FRONTEND "${_automation_default}"
+        "Developer automation frontend" EMBEDDED_ONLY REQUIRE_AVAILABLE)
+    if(NOT ${WEBFRONT_FRONTEND_${WEBFRONT_AUTOMATION_FRONTEND}_OPTION})
+        message(FATAL_ERROR "Automation needs an explicitly enabled embedded frontend")
+    endif()
+    add_executable(webfront-agent js/developer/tools/WebFrontAgent.cpp)
+    target_link_libraries(webfront-agent PRIVATE WebFront WebFront_options WebFront_warnings)
+    if(WIN32)
+        target_link_libraries(webfront-agent PRIVATE ws2_32 bcrypt advapi32)
+    endif()
+    target_compile_definitions(webfront-agent PRIVATE WEBFRONT_AUTOMATION_FRONTEND_TYPE=${WEBFRONT_AUTOMATION_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(webfront-agent)
+endif()
 
 if(ENABLE_TESTING OR ENABLE_FUZZING)
   include(TestHardening)
