@@ -100,6 +100,26 @@ configure("a toolchain file's prefixed variable wins over its former name" toolc
     EXPECT "TESTING=OFF LEGACY=<unset>"
     OPTIONS -DTOP_LEVEL=ON "${toolchain}" -DTOOLCHAIN_LEGACY=ON -DTOOLCHAIN_PREFIXED=OFF)
 
+# Normal variables still count as given when their values equal typed cache entries.
+configure("cache before toolchain overrides" toolchain-cached
+    EXPECT "TESTING=OFF LEGACY=<unset>" "CACHED_TESTING=OFF"
+    OPTIONS -DTOP_LEVEL=ON "${toolchain}" -DWEBFRONT_ENABLE_TESTING=OFF)
+configure("a matching prefixed normal variable preserves the cache" toolchain-cached IGNORED 1
+    EXPECT "TESTING=OFF LEGACY=<unset>" "CACHED_TESTING=OFF"
+    OPTIONS -DTOOLCHAIN_LEGACY=ON -DTOOLCHAIN_PREFIXED=OFF)
+configure("repeating the matching override preserves the cache" toolchain-cached IGNORED 1
+    EXPECT "TESTING=OFF LEGACY=<unset>" "CACHED_TESTING=OFF")
+configure("removing the toolchain overrides keeps tests disabled" toolchain-cached
+    EXPECT "TESTING=OFF LEGACY=<unset>" "CACHED_TESTING=OFF"
+    OPTIONS -UTOOLCHAIN_LEGACY -UTOOLCHAIN_PREFIXED)
+
+configure("cache before a matching former normal variable" toolchain-former-cached
+    EXPECT "TESTING=ON LEGACY=<unset>" "CACHED_TESTING=ON"
+    OPTIONS -DTOP_LEVEL=ON "${toolchain}" -DWEBFRONT_ENABLE_TESTING=ON)
+configure("a matching former normal variable still migrates" toolchain-former-cached MIGRATED 1
+    EXPECT "TESTING=OFF LEGACY=<unset>" "CACHED_TESTING=OFF"
+    OPTIONS -DENABLE_TESTING:BOOL=OFF -DTOOLCHAIN_LEGACY=OFF)
+
 configure("a parent's generic names are ignored" subproject
     EXPECT "TESTING=OFF LEGACY=ON" "FUZZING=OFF LEGACY=ON" "COVERAGE=OFF LEGACY=ON"
     OPTIONS -DTOP_LEVEL=OFF -DENABLE_TESTING=ON -DENABLE_FUZZING=ON -DENABLE_COVERAGE=ON)

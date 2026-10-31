@@ -24,4 +24,7 @@ foreach(name TESTING FUZZING COVERAGE SANITIZER_ADDRESS SANITIZER_LEAK SANITIZER
         set(legacy "<unset>")
     endif()
     message(STATUS "${name}=${WEBFRONT_ENABLE_${name}} LEGACY=${legacy}")
+    if(DEFINED CACHE{WEBFRONT_ENABLE_${name}})
+        message(STATUS "CACHED_${name}=$CACHE{WEBFRONT_ENABLE_${name}}")
+    endif()
 endforeach()

@@ -15,7 +15,9 @@
   `-Wno-deprecated` does not hide; otherwise a former name given by this configure is moved to the prefixed option,
   even over a value an earlier configure left. A true former value left by an older build tree is moved unless the
   prefixed option is already cached; the `OFF` defaults left there are dropped silently. Moving or repeating a former
-  name prints a deprecation warning. CI, the documentation and `TestOptionsConfiguration` use the new names.
+  name prints a deprecation warning. A toolchain's normal variable also counts as given when it equals the cached
+  value, so a conflicting former name cannot change that prefixed cache entry. CI, the documentation and
+  `TestOptionsConfiguration` use the new names.
 
 ## 0.6.0 - 2026-10-31
 

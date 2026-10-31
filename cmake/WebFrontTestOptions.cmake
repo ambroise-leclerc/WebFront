@@ -21,9 +21,22 @@ set(_WEBFRONT_FORMER_NAMES_REMOVAL 0.7.0)
 function(_webfront_option_given name out)
     set(given OFF)
     if(DEFINED CACHE{${name}})
+        set(resolved_value "${${name}}")
         get_property(type CACHE ${name} PROPERTY TYPE)
-        if(type STREQUAL "UNINITIALIZED" OR NOT "${${name}}" STREQUAL "$CACHE{${name}}")
+        if(type STREQUAL "UNINITIALIZED")
             set(given ON)
+        else()
+            # An equal value does not tell us whether a normal variable shadows the cache. Temporarily change
+            # only the cache value: a normal binding keeps its value, while a cache lookup sees the probe.
+            # Derive the probe from the resolved value so it cannot equal a normal binding; restore the cache
+            # before returning, preserving its type, help text and other properties.
+            set(cached_value "$CACHE{${name}}")
+            set(probe "${resolved_value};__webfront_option_probe")
+            set_property(CACHE ${name} PROPERTY VALUE "${probe}")
+            if(NOT "${${name}}" STREQUAL "${probe}")
+                set(given ON)
+            endif()
+            set_property(CACHE ${name} PROPERTY VALUE "${cached_value}")
         endif()
     elseif(DEFINED ${name})
         set(given ON)
