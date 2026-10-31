@@ -1,0 +1,11 @@
+# WebFront options are independent of an embedding project's generic ENABLE_* variables.
+function(webfront_declare_test_options is_top_level)
+    option(WEBFRONT_ENABLE_TESTING "Build WebFront's tests" OFF)
+    option(WEBFRONT_ENABLE_FUZZING "Build WebFront's fuzzers" OFF)
+    option(WEBFRONT_ENABLE_COVERAGE "Instrument WebFront's tests for GCC/Clang coverage" OFF)
+    option(WEBFRONT_ENABLE_SANITIZER_ADDRESS "Build WebFront's tests with the address sanitizer" OFF)
+    option(WEBFRONT_ENABLE_SANITIZER_LEAK "Build WebFront's tests with the leak sanitizer" OFF)
+    option(WEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR "Build WebFront's tests with the undefined behavior sanitizer" OFF)
+    option(WEBFRONT_ENABLE_SANITIZER_THREAD "Build WebFront's tests with the thread sanitizer" OFF)
+    option(WEBFRONT_ENABLE_SANITIZER_MEMORY "Build WebFront's tests with the memory sanitizer" OFF)
+endfunction()

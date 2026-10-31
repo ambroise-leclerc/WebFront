@@ -1,11 +1,11 @@
 # Decoder fuzzing
 
-`ENABLE_FUZZING=ON` builds `fuzz_messages`, `fuzz_http`, `fuzz_websocket`, and `fuzz_gzip` with
+`WEBFRONT_ENABLE_FUZZING=ON` builds `fuzz_messages`, `fuzz_http`, `fuzz_websocket`, and `fuzz_gzip` with
 Clang/libFuzzer, ASan, UBSan, standard library hardening and pattern initialization.
 Linux with Clang/compiler-rt is validated in CI. Apple Clang does not include libFuzzer;
 on macOS install it externally (for example as part of LLVM/compiler-rt) and use compatible
 ASan/UBSan runtimes. CMake rejects missing runtimes during configuration.
-It works independently of `ENABLE_TESTING`; no Catch2 or CEF is needed.
+It works independently of `WEBFRONT_ENABLE_TESTING`; no Catch2 or CEF is needed.
 
 The binary corpus files use the existing wire formats. Seeds derive from
 `MessagesTests.cpp` (handshake, print call, scalar, tuple, typed arrays and return),
@@ -35,8 +35,8 @@ file to the same executable, then add a unit regression before fixing it.
 ## Gzip/zlib differential checks
 
 Opt in with `-DWEBFRONT_GZIP_DIFFERENTIAL=ON`: tests link zlib, production headers do not.
-With `ENABLE_TESTING=ON`, `gzip_differential` compares the neutral fixtures in CTest;
-with `ENABLE_FUZZING=ON`, `fuzz_gzip_differential` additionally checks arbitrary accepted
+With `WEBFRONT_ENABLE_TESTING=ON`, `gzip_differential` compares the neutral fixtures in CTest;
+with `WEBFRONT_ENABLE_FUZZING=ON`, `fuzz_gzip_differential` additionally checks arbitrary accepted
 streams against zlib under ASan/UBSan:
 
 ```sh

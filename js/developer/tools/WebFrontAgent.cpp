@@ -137,6 +137,52 @@ void releaseWebView(std::chrono::milliseconds grace) noexcept {
         // Without the process list, the removal below still retries the transient errors.
     }
 }
+// A separate agent process can retry after a forced exit without interpreting the profile path as shell syntax.
+bool removeAfterExit(const std::filesystem::path& path) noexcept {
+    try {
+        std::wstring executable(32768, L'\0');
+        const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+        if (!length || length >= executable.size())
+            return false;
+        executable.resize(length);
+        const std::wstring original = L"\"" + executable + L"\" --cleanup-profile \"" + path.wstring() + L"\"";
+        STARTUPINFOW        startup{};
+        startup.cb = sizeof startup;
+        PROCESS_INFORMATION information{};
+        for (const DWORD breakaway : {DWORD{CREATE_BREAKAWAY_FROM_JOB}, DWORD{0}}) {
+            auto command = original;  // CreateProcessW may modify the command line even on failure.
+            if (CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
+                               CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | breakaway, nullptr, nullptr,
+                               &startup, &information)) {
+                CloseHandle(information.hThread);
+                CloseHandle(information.hProcess);
+                return true;
+            }
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+int cleanupProfile() {
+    // The launcher supplies a quoted path as the final argument. Read the Unicode command line directly: argv uses the
+    // process code page and cannot represent every Windows path.
+    const std::wstring command = GetCommandLineW();
+    const std::wstring marker = L" --cleanup-profile \"";
+    const auto begin = command.find(marker);
+    if (begin == std::wstring::npos || command.back() != L'"')
+        return 1;
+    const std::filesystem::path path{command.substr(begin + marker.size(), command.size() - begin - marker.size() - 1)};
+    for (int attempt = 0; attempt != 20; ++attempt) {
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+        if (!error)
+            return 0;
+        std::this_thread::sleep_for(std::chrono::seconds{1});
+    }
+    return 1;
+}
 #elif defined(__linux__)
 // The parent and state ('Z' for a zombie) of a process, from /proc/<pid>/stat; nothing when it is gone.
 std::optional<std::pair<pid_t, char>> processStat(pid_t pid) {
@@ -406,6 +452,8 @@ struct Profile {
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
                 continue;
             }
+            if (removeAfterExit(path))
+                return;
 #endif
             std::cerr << "Automation: cannot remove temporary profile: " << error.message() << '\n';
             return;
@@ -657,6 +705,10 @@ Options parse(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     try {
+#ifdef _WIN32
+        if (argc == 3 && std::string_view(argv[1]) == "--cleanup-profile")
+            return cleanupProfile();
+#endif
 #ifndef _WIN32
         std::signal(SIGPIPE, SIG_IGN);
 #endif

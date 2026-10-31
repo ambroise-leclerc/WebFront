@@ -32,7 +32,7 @@ C++, se ferme et fournit un statut de processus significatif. CTest borne les te
 timeouts. La CI Linux utilise CEF/Xvfb ; les moteurs natifs ont leurs suites de cycle de vie
 lorsque configurés.
 
-Le socle de validation est une configuration Release sans CEF avec `ENABLE_TESTING=ON`,
+Le socle de validation est une configuration Release sans CEF avec `WEBFRONT_ENABLE_TESTING=ON`,
 construction puis CTest. Les changements de bridge, cycle de vie navigateur, modules servis,
 assets Jasmine ou frontend CEF exigent aussi l’intégration CEF/Xvfb. Les voies natives
 complètent cette couverture selon la modification.

@@ -29,7 +29,7 @@ using namespace webfront;
 using namespace std::chrono_literals;
 
 namespace {
-const std::string upgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+const std::string broadcastUpgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
 
 // The payload of a browser's call to a C++ function, without a reply (call identifier 0).
@@ -61,7 +61,7 @@ SCENARIO("A broadcast keeps only the latest call for a browser with too many pen
     BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
     auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
     auto                                  every  = app.broadcast("onEvent");
-    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
     REQUIRE(app.connectedBrowsers() == 1);
 
     GIVEN("a browser whose handshake has not completed") {
@@ -162,7 +162,7 @@ SCENARIO("A browser receives a broadcast made while its onUIStarted handlers run
         });
         ui.jsFunction("initial")(std::string{"initial-state"});
     });
-    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
 
     WHEN("the browser completes its handshake") {
         msg::Handshake handshake;
@@ -201,7 +201,7 @@ SCENARIO("A browser whose onUIStarted handlers run keeps only the latest calls w
         every(std::string{"event-2"});
         latest(std::string{"starting-3"});
     });
-    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
 
     WHEN("the browser completes its handshake") {
         msg::Handshake handshake;
@@ -249,7 +249,7 @@ SCENARIO("A held broadcast reaches the browser after a later call of another fun
     BasicWF<OneBrowserNet, fs::DefaultFS> app{WebFrontConfig{.port = "0"}};
     auto                                  latest = app.broadcast("onState", {.maxPendingWrites = 1});
     auto                                  every  = app.broadcast("onReset");
-    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+    Socket::receive(std::as_bytes(std::span(broadcastUpgradeRequest)));
     msg::Handshake handshake;
     Socket::receive(testing::clientFrame(std::span(reinterpret_cast<const std::byte*>(handshake.header().data()), handshake.header().size())));
     Socket::deferWrites();
@@ -273,7 +273,7 @@ SCENARIO("A held broadcast reaches the browser after a later call of another fun
 namespace {
 using Stdnet = networking::TCPStdnet;
 
-void waitUntil(auto condition) {
+void broadcastWaitUntil(auto condition) {
     for (int i = 0; i < 500 && !condition(); ++i)
         std::this_thread::sleep_for(10ms);
 }
@@ -283,7 +283,7 @@ class Browser {
 public:
     explicit Browser(std::string_view port) : socket(context) {
         socket.connect(Stdnet::Resolve("127.0.0.1", port));
-        socket.send(std::as_bytes(std::span(upgradeRequest)));
+        socket.send(std::as_bytes(std::span(broadcastUpgradeRequest)));
         REQUIRE(receiveUntil("\r\n\r\n"));
         const std::array<unsigned char, 8>
             handshake{0x82, 0x82, 0, 0, 0, 0, static_cast<unsigned char>(msg::Command::handshake), static_cast<unsigned char>(msg::JSEndian::little)};
@@ -383,7 +383,7 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
 
     auto first  = std::make_unique<Browser>(app.port());
     auto second = std::make_unique<Browser>(app.port());
-    waitUntil([&] {
+    broadcastWaitUntil([&] {
         return observed.started == 2;
     });
     REQUIRE(observed.started == 2);
@@ -425,7 +425,7 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
                 ui.jsFunction("locked")(std::string{"locked-call"});
             });
         }
-        waitUntil([&] {
+        broadcastWaitUntil([&] {
             return observed.calls == 40;
         });
         THEN("no call deadlocks and the callbacks never overlap") {
@@ -437,7 +437,7 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
     }
     WHEN("a callback blocks the server thread") {
         first->call("block");
-        waitUntil([&] {
+        broadcastWaitUntil([&] {
             return blocking.load();
         });
         REQUIRE(blocking);
@@ -462,7 +462,7 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
 
     WHEN("a browser disconnects") {
         second.reset();
-        waitUntil([&] {
+        broadcastWaitUntil([&] {
             return observed.closed == 1;
         });
         THEN("its closure is reported, and a broadcast reaches the remaining browser") {
@@ -473,7 +473,7 @@ SCENARIO("Callbacks run one at a time on the server thread, and browser calls ar
     }
     first.reset();
     second.reset();
-    waitUntil([&] {
+    broadcastWaitUntil([&] {
         return app.connectedBrowsers() == 0;
     });
     app.stop();
@@ -521,7 +521,7 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
 
     webfront::testing::ConnectionIds<App>::startAt(app, 65535);
     auto first = std::make_unique<Browser>(app.port());
-    waitUntil([&] {
+    broadcastWaitUntil([&] {
         return startedCount() == 1;
     });
     REQUIRE(startedCount() == 1);
@@ -532,7 +532,7 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
     REQUIRE(stale.id() == 65535);
 
     first.reset();
-    waitUntil([&] {
+    broadcastWaitUntil([&] {
         return closed == 1 && app.connectedBrowsers() == 0;
     });
     REQUIRE(app.connectedBrowsers() == 0);
@@ -540,7 +540,7 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
     // The identifier counter wraps back to the identifier the closed connection had.
     webfront::testing::ConnectionIds<App>::startAt(app, 65535);
     auto second = std::make_unique<Browser>(app.port());
-    waitUntil([&] {
+    broadcastWaitUntil([&] {
         return startedCount() == 2;
     });
     REQUIRE(startedCount() == 2);
@@ -577,7 +577,7 @@ SCENARIO("A UI kept after its connection closed reaches no browser once its iden
         }
     }
     second.reset();
-    waitUntil([&] {
+    broadcastWaitUntil([&] {
         return app.connectedBrowsers() == 0;
     });
     app.stop();

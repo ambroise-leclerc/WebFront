@@ -82,8 +82,9 @@ Registry order determines the initial cache default: the first enabled embedded 
 - `navigation-allow-list`: permit the same top-level destination through the explicit navigation allow-list.
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
-`web-integration` label and the same port lock as Jasmine. Linux CEF and WebKitGTK cases use Xvfb. Build `webtest`
-to build both shared runners on a validated test platform, or build all targets to include engine-specific runners as well. Run
+`web-integration` label and the same port lock as Jasmine. Linux CEF and WebKitGTK cases use Xvfb. On Linux CEF, run
+`cmake --build <build> --target webtest developer_integration webfront-wf --parallel` to prepare the complete browser suite.
+For other validated test platforms, build all targets to include engine-specific runners as well. Run
 `ctest --test-dir <build> -L web-integration --output-on-failure` for the complete browser suite.
 A missing Xvfb skips both shared suites. A new frontend inherits this coverage through its registry
 entry; no engine-specific lifecycle runner is required.
@@ -130,7 +131,7 @@ Build one explicitly, then launch its executable (the macOS executable is inside
 For comparable Linux timings, use Release without coverage:
 
 ```bash
-cmake -S . -B build-performance -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=ON \
+cmake -S . -B build-performance -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_ENABLE_TESTING=ON \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK
 cmake --build build-performance --target webkitgtk_transport_benchmark --parallel 2
 cd test/web
@@ -168,8 +169,8 @@ An explicit normal or cached option is never replaced, even if it equals the las
 A missing engine only prints a status; the Life examples then use the default browser and CMake explains what to install.
 Platforms without a registered native engine use the default browser as well. `-DWEBFRONT_AUTODETECT_NATIVE=OFF`
 turns the detection off. CEF is never detected.
-`ENABLE_TESTING` and `ENABLE_FUZZING` only disable the detection of a top-level WebFront build: a
-parent project that defines them for its own purposes does not change the detection of its consumers.
+`WEBFRONT_ENABLE_TESTING` and `WEBFRONT_ENABLE_FUZZING` disable the detection. A parent project's own `ENABLE_TESTING` or
+`ENABLE_FUZZING` changes neither the detection nor WebFront's tests: only the prefixed options do.
 
 Consumers can call `webfront_use_native_window(target)` after linking `WebFront::WebFront`.
 It applies the native engine's setup and defines `WEBFRONT_NATIVE_WINDOW` on that target when

@@ -25,6 +25,9 @@ concurrency:
 env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
   SCCACHE_GHA_ENABLED: 'true'
+  # The full tier of the desktop jobs (weekly, pull requests into and pushes to master, manual dispatch with repeat_desktop_tests)
+  # also runs the MSVC code analysis and compiles the examples; a pull request into develop does neither (#435, docs/BUILD_TIME_STUDY.md).
+  FULL_TIER: ${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'true' || 'false' }}
 
 # Third-party actions are pinned to commit SHAs; GitHub-owned actions/* use version tags.
 jobs:
@@ -78,12 +81,29 @@ jobs:
             build_type: Debug
             test_env: {WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'}
             # GCC 16 compiles the optional C++26 reflection layer of the forms (#383): its tests must not be skipped here.
-            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON
+            options: -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DWEBFRONT_ENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON
     runs-on: ${{ matrix.os }}
     # Only the Linux job runs in the prebuilt toolchain image; an empty value means no container.
     container: ${{ matrix.use_image && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}},"options":"--shm-size=1g"}}', needs.linux-image.outputs.image, github.actor, github.token)) || '' }}
     steps: &desktop-steps
       - uses: actions/checkout@v7
+        with:
+          # A pull request is checked out as a merge commit: its first parent is the base, so the changed files are one diff away.
+          fetch-depth: 2
+      # The builds that prove the self-built environment reproducible and equal to the checked-in bundles take about 45 s. A
+      # pull request into develop that changes none of their inputs (what PrepareSelfBuildProject.cmake copies, and the CMake and
+      # workflow files that drive them) leaves them to the push to develop and to the master tier (#435).
+      - name: Decide whether the reproducibility builds run
+        shell: bash
+        run: |
+          reproducibility=true
+          if [ "$FULL_TIER" != true ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            if ! git diff --name-only HEAD^1 HEAD | grep -qE '^(js/|examples/life/ui/|test/developer/|test/web/(CMakeLists\.txt|registry/)|test/cmake/(PrepareSelfBuildProject|CompareFiles|CheckSelfBuildRefresh|AssembleDeveloperFixtures)|include/webfront/system/|LICENSE$|\.github/workflows/BuildAndTest\.yml)'; then
+              reproducibility=false
+            fi
+          fi
+          echo "Reproducibility builds: $reproducibility"
+          echo "WEBFRONT_REPRODUCIBILITY=$reproducibility" >> "$GITHUB_ENV"
       # No step of a build or of its tests needs a JavaScript runtime or package manager: the runner has none from here on.
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/setup-cmake
@@ -120,15 +140,19 @@ jobs:
           command -v sccache
           sccache --version
       # ENABLE_CACHE controls automatic ccache discovery; the explicit sccache launcher stays enabled.
+      # The heavy unit tests are compiled four to a file (docs/BUILD_TIME_STUDY.md); the portability and sanitizer jobs keep one object per test file.
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON
           -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          -DWEBFRONT_TEST_UNITY_BATCH=4
+          -DWEBFRONT_TEST_REPRODUCIBILITY=${{ env.WEBFRONT_REPRODUCIBILITY }}
+          ${{ env.FULL_TIER == 'true' && '' || '-DWEBFRONT_MSVC_ANALYZE=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF' }}
           ${{ matrix.options }}
       - name: Build
-        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 2
+        run: python3 test/tools/MeasureCommand.py --output build/build-resources.json -- cmake --build build --config ${{ matrix.build_type }} --parallel 4
       - name: Ensure WebView2 Evergreen runtime
         if: runner.os == 'Windows'
         shell: pwsh
@@ -323,7 +347,7 @@ jobs:
       # No compiler cache: a new user compiles everything.
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
       - name: Portability tests
         shell: bash
         run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
@@ -375,9 +399,9 @@ jobs:
       - name: Configure hardened sanitizer tests
         run: >-
           cmake -S . -B build-sanitizers -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
-          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DENABLE_SANITIZER_THREAD=ON' || '-DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
+          ${{ matrix.sanitizer == 'thread' && '-DCMAKE_CXX_FLAGS=-stdlib=libc++ -DWEBFRONT_ENABLE_SANITIZER_THREAD=ON' || '-DWEBFRONT_ENABLE_SANITIZER_ADDRESS=ON -DWEBFRONT_ENABLE_SANITIZER_UNDEFINED_BEHAVIOR=ON -DWEBFRONT_ENABLE_FUZZING=ON -DWEBFRONT_GZIP_DIFFERENTIAL=ON' }}
       - name: Build
         run: cmake --build build-sanitizers --parallel 2
       - name: Run full CEF-off suite
@@ -459,7 +483,7 @@ jobs:
 
       # The registry packages and the pinned bootstrap environment are downloaded and verified here; wf then builds the rest.
       - name: Configure CEF integration build
-        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+        run: cmake . -B ${{github.workspace}}/build-cef -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=ON -DWEBFRONT_BUILD_EXAMPLES=OFF -DWEBFRONT_ENABLE_TESTING=ON -DENABLE_CACHE=OFF -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
 
       - name: Build browser test
         run: cmake --build ${{github.workspace}}/build-cef --target webtest developer_integration webfront-wf --parallel 2

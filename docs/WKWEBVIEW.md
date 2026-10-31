@@ -149,7 +149,7 @@ for LAN hosts; the default address remains loopback.
 ```bash
 cmake -S . -B build-wkwebview -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON \
-  -DENABLE_TESTING=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
+  -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_WEBTEST_FRONTEND=WKWebView
 cmake --build build-wkwebview --parallel
 ctest --test-dir build-wkwebview --output-on-failure
 ```

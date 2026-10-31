@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-31
+
+- Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 13 heavy unit-test files four
+  to a file (`WEBFRONT_TEST_UNITY_BATCH`; the default build keeps one object per file, and `JsFunctionSenderTests.cpp`,
+  `CommandsTests.cpp`, `FrontendContractTests.cpp` and `BroadcastTests.cpp` name their helpers so that they can share one).
+  A pull request into `develop` no longer builds the examples or runs the MSVC code analysis (`WEBFRONT_MSVC_ANALYZE`,
+  default ON), nor the builds that prove the self-built environment reproducible unless it changes their inputs
+  (`WEBFRONT_TEST_REPRODUCIBILITY`, default ON); the weekly run, pull requests into and pushes to `master` do all three.
+  `JourneyEmbeddedBuild` and `LifeEmbeddedBuild` no longer hold the `webfront_port_9002` lock while they compile.
+  `DeveloperBrowserIntegration` is cut into five parts (`DeveloperBrowserIntegration`, `-scripts`, `-typescript`,
+  `-jasmine`, `-terminal`) that run in parallel from their own projects on ephemeral ports. `RunWithDeadline.sh` returns
+  when its command does instead of at the deadline, which took 30 s from each of the six `ConsumerJasmine-*` cases under
+  dash, and gives the command its own process group (`setsid`, or a walk of its descendants) where the shell has no job
+  control. `docs/BUILD_TIME_STUDY.md` holds the measurements and the decisions.
+  The developer test parts are serialized for CEF because they share its default profile with other native browser tests.
+
+- Include `developer_integration` in the documented Linux CEF build commands (#434), preparing the developer journey
+  and its dependent Life tests. Check the browser targets in both guides and CI with `NewcomerDocsMatchExamples`.
+
+- **Breaking:** WebFront's test, fuzzing, coverage and sanitizer CMake options now require the `WEBFRONT_` prefix
+  (#412). For example, use `WEBFRONT_ENABLE_TESTING` instead of `ENABLE_TESTING`. Generic `ENABLE_*` variables and
+  old cache entries no longer configure WebFront, either at the top level or as a subproject; set the prefixed options
+  explicitly. This also prevents a parent project's own options from enabling WebFront tests or instrumentation.
+
+- Remove the Windows agent's native profile after a forced exit (#439): when WebView2 processes still held the profile
+  at the end of the 2 s in-process retry, the agent exited and left it behind, so `AutomationCliWatchdog` failed
+  intermittently on loaded runners. A detached agent process now retries removal for about 20 s, including for Unicode
+  paths and paths containing shell metacharacters. The watchdog test waits for the cleanup window, and its second CLI
+  invocation has a 45 s limit instead of 15 s.
+
 ## 0.6.0 - 2026-10-31
 
 - Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of

@@ -123,14 +123,14 @@ def profile_directory():
     rather than an inherited TMPDIR, which may be long: Chromium's singleton socket path must stay below sockaddr_un's
     limit."""
     root = "/tmp" if sys.platform.startswith("linux") and os.access("/tmp", os.W_OK | os.X_OK) else None
-    path = tempfile.mkdtemp(prefix="wf-profile-", dir=root)
+    path = tempfile.mkdtemp(prefix="wf-profile- &%!^ 雪 " if sys.platform == "win32" else "wf-profile-", dir=root)
     try:
         yield path
     finally:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def remaining_profiles(profiles, timeout=10, settle=2.5):
+def remaining_profiles(profiles, timeout=25, settle=2.5):
     """The agent profiles left in `profiles`, once absent for `settle` seconds or after `timeout` more, with what
     they contain.
 
@@ -153,6 +153,34 @@ def remaining_profiles(profiles, timeout=10, settle=2.5):
                         for profile in left for directory, folders, files in os.walk(profile) for name in folders + files)
             return left, list(itertools.islice(contents, 40))
         time.sleep(0.05)
+
+
+def check_windows_profile_cleaner(agent, root):
+    """A locked file must be retried, including when its Unicode path contains shell metacharacters."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+    profile = root / "profile &%!^ 雪"
+    profile.mkdir()
+    file = profile / "locked"
+    file.write_text("locked")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                   wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateFileW(str(file), 0x80000000, 0, None, 3, 0, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        cleaner = subprocess.Popen([agent, "--cleanup-profile", str(profile)])
+        time.sleep(3)
+        assert cleaner.poll() is None, "Cleaner stopped while the profile was locked"
+    finally:
+        kernel.CloseHandle(handle)
+    assert cleaner.wait(timeout=10) == 0
+    assert not profile.exists(), "Cleaner left the profile behind"
 
 
 def check_startup_backoff(agent, root, ready_delay=0):
@@ -263,6 +291,8 @@ def watchdog(args):
     pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.work, prefix="watchdog-") as temporary:
         root = pathlib.Path(temporary)
+        if args.scenario == "cli-watchdog":
+            check_windows_profile_cleaner(args.agent, root)
         project = root / "project"
         shutil.copytree(args.fixture, project)
         environment = root / "watchdog-environment.tgz"
@@ -344,7 +374,7 @@ def watchdog(args):
             failed_command[failed_command.index("--environment") + 1] = str(failed_environment)
             failed_command[failed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
             failed = subprocess.run([args.agent, *failed_command, "--listen", str(endpoint), "--operation", "build"],
-                                    capture_output=True, text=True, encoding="utf-8", timeout=15)
+                                    capture_output=True, text=True, encoding="utf-8", timeout=45)
             assert failed.returncode == 70, (failed.returncode, failed.stdout, failed.stderr)
             assert "Automation startup: B" + "é" * 511 + "\n" in failed.stderr, failed.stderr
             assert not endpoint.exists()

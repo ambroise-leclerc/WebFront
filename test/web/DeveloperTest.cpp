@@ -203,14 +203,39 @@ void registerCommands(webfront::Commands<App>& commands, const std::shared_ptr<C
     });
 }
 
+// What a run does: the public smoke test, one part of the test (each part starts from its own project and runs alongside
+// the others), or everything in one session when nothing is given.
+struct Mode {
+    bool        publicDistribution = false;
+    std::string part               = "all";
+    bool        runs(std::string_view name) const {
+        return part == "all" || part == name;
+    }
+};
+
+Mode parseMode(std::string_view argument) {
+    Mode mode;
+    if (argument.empty())
+        return mode;
+    if (argument == "--public") {
+        mode.publicDistribution = true;
+        mode.part               = "app";
+    } else if (argument.starts_with("--part=")) {
+        mode.part = std::string(argument.substr(7));
+        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal")
+            throw std::invalid_argument("Unknown part of the developer test: " + mode.part);
+    } else {
+        throw std::invalid_argument("Unknown smoke-test mode");
+    }
+    return mode;
+}
+
 template <typename App>
-void bootstrapApp(App& app, std::string_view mode, const std::string& integrity) {
-    if (mode.empty())
-        app.bootstrap("developer", {.environment = "/fixtures/environment.tgz", .integrity = integrity, .registry = "/fixtures/registry/"});
-    else if (mode == "--public")
+void bootstrapApp(App& app, const Mode& mode, const std::string& integrity) {
+    if (mode.publicDistribution)
         app.bootstrap("developer");
     else
-        throw std::invalid_argument("Unknown smoke-test mode");
+        app.bootstrap("developer", {.environment = "/fixtures/environment.tgz", .integrity = integrity, .registry = "/fixtures/registry/"});
 }
 
 void copyHeaders(const std::filesystem::path& project, const std::filesystem::path& output) {
@@ -227,12 +252,17 @@ int main(int argc, char** argv) {
         // CEF child processes must dispatch before interpreting application arguments or creating files.
         webfront::detail::ensureFrontendInitialized<WEBFRONT_TEST_FRONTEND>();
         if (argc != 3 && argc != 4)
-            throw std::invalid_argument("Expected fixture directory, header output directory and optional --public");
+            throw std::invalid_argument("Expected fixture directory, header output directory and optional --public or --part=<name>");
+        const Mode mode = parseMode(argc == 4 ? std::string_view(argv[3]) : std::string_view{});
         webfront::test::TemporaryDirectory project;
         std::filesystem::copy(argv[1], project.path() / "fixtures", std::filesystem::copy_options::recursive);
         const auto integrity = readIntegrity(project.path() / "fixtures/provision.json");
         using App            = webfront::BasicDeveloperApp<WEBFRONT_TEST_FRONTEND, FixturesFS>;
-        App               app{project.path()};
+        // A part has no port of its own to keep: the parts run at the same time, each on the port the system gives it.
+        webfront::WebFrontConfig config;
+        if (mode.part != "all")
+            config.port = "0";
+        App               app{project.path(), config};
         std::atomic<bool> passed{false};
         registerCallbacks(app, project.path(), passed);
         auto               states = std::make_shared<CommandStates>();
@@ -244,10 +274,13 @@ int main(int argc, char** argv) {
         app.cppFunction("test.release", [states](std::string tag) {
             states->release(tag);
         });
+        app.cppFunction("test.part", [part = mode.part] {
+            return part;
+        });
         app.cppFunction("test.browsers", [&app] {
             return static_cast<double>(app.connectedBrowsers());
         });
-        bootstrapApp(app, argc == 4 ? std::string_view(argv[3]) : std::string_view{}, integrity);
+        bootstrapApp(app, mode, integrity);
         auto subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
             if (!std::exchange(injected, true))
                 ui.addScript(runScript);
@@ -263,12 +296,13 @@ int main(int argc, char** argv) {
         app.shutdown();
         if (!passed.load())
             return 1;
-        const bool publicMode = argc == 4;  // ends before the terminal checks, which need the local registry
-        if (!publicMode && states->get("final") != "cancelled") {
+        // The command running at shutdown belongs to the terminal part; the generated header, to the application part.
+        if (mode.runs("terminal") && !mode.publicDistribution && states->get("final") != "cancelled") {
             std::cerr << "The command running at shutdown was not drained: " << states->get("final") << '\n';
             return 1;
         }
-        copyHeaders(project.path(), argv[2]);
+        if (mode.runs("app"))
+            copyHeaders(project.path(), argv[2]);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

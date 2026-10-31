@@ -2,6 +2,8 @@
 /// @author Ambroise Leclerc
 /// @brief Mocks
 
+#pragma once
+
 #include <webfront/system/FileSystem.hpp>
 
 #include <array>
