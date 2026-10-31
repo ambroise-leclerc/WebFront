@@ -17,6 +17,10 @@ WebKitGTK; both with `-DENABLE_TESTING=ON`), with a local-disk sccache, then tim
 | `heavy-test` | complete, but `WebFrontTests.cpp` changed | a pull request that edits one heavy test |
 | `light-test` | complete, but `MimeTypeTests.cpp` changed | a pull request that edits one light test |
 
+The workflow is started by hand (`gh workflow run BuildStudy.yml -f variants=base-j4,unity-heavy-b4 -f windows_reps=3`); its
+inputs are the variants (empty: all), the repetitions on each system, and whether to time the builds and to profile three
+heavy units. A workflow absent from the default branch cannot be dispatched, so it is available once this change is merged.
+
 A cell is wall seconds. Linux cells are stable (two runs of the same variant: 170 and 172 s cold). **Hosted Windows runners are
 not**: the same `base-j4` configuration took 725 s and 466 s cold in two runs. Windows variants are therefore repeated three
 times and reported as a median with its range; a Windows difference smaller than that range is not a result.

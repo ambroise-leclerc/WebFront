@@ -3,15 +3,25 @@ name: Build time study
 # Measurements for #435, run by hand: each job times one configuration of the tests under the compiler-cache scenarios of a
 # pull request (test/tools/BuildStudy.py) and the report job tabulates them. Nothing here gates a merge.
 on:
-  # Temporary: a workflow absent from the default branch cannot be dispatched, so the study branch runs it on push.
-  push:
-    branches: [435-ci-build-time]
-    paths: ['.github/workflows/BuildStudy.yml', 'test/tools/BuildStudy*.py']
   workflow_dispatch:
     inputs:
       variants:
         description: 'Comma-separated variants to run (empty: all)'
         default: ''
+      windows_reps:
+        description: 'Repetitions of each variant on Windows, whose hosted runners vary a lot between jobs (1 to 5)'
+        default: '3'
+      linux_reps:
+        description: 'Repetitions of each variant on Linux (1 to 5)'
+        default: '1'
+      measure:
+        description: 'Time the builds of the variants'
+        type: boolean
+        default: true
+      profile:
+        description: 'Profile where the compile time of three heavy units goes'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -34,7 +44,8 @@ jobs:
       - id: matrix
         env:
           REQUESTED: ${{ inputs.variants }}
-          MESSAGE: ${{ github.event.head_commit.message }}
+          WINDOWS_REPS: ${{ inputs.windows_reps }}
+          LINUX_REPS: ${{ inputs.linux_reps }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
@@ -42,18 +53,19 @@ jobs:
                           'unity-heavy-b3', 'unity-heavy-b4', 'unity-heavy-b6', 'unity-heavy-b12', 'pch', 'pch-unity-heavy-b4',
                           'pch-unity-heavy-b12', 'noanalyze', 'noanalyze-pch', 'noanalyze-unity-heavy-b4',
                           'noanalyze-pch-unity-heavy-b4']
-          import re
-          tagged = re.search(r'\[variants:([^\]]*)\]', os.environ.get('MESSAGE', ''))  # a push selects variants this way
-          requested = [v for v in (tagged.group(1) if tagged else os.environ.get('REQUESTED', '')).replace(' ', '').split(',') if v] or all_variants
+          requested = [v for v in os.environ.get('REQUESTED', '').replace(' ', '').split(',') if v] or all_variants
           # The names reach a matrix, artifact names and file names: nothing outside the list may.
           invalid = sorted(set(requested) - set(all_variants))
           if invalid:
               raise SystemExit('Unknown study variant(s): ' + ', '.join(invalid))
-          # /analyze exists on MSVC only: its variants have no Linux counterpart.
-          reps = re.search(r'\[windows-reps:(\d+)\]', os.environ.get('MESSAGE', ''))
           # Hosted Windows runners vary a lot from one job to the next: repeat there, Linux is stable.
-          linux = re.search(r'\[linux-reps:(\d+)\]', os.environ.get('MESSAGE', ''))
-          count = {'windows': int(reps.group(1)) if reps else 1, 'linux': int(linux.group(1)) if linux else 1}
+          count = {}
+          for system in ('windows', 'linux'):
+              text = os.environ[system.upper() + '_REPS']
+              if not text.isdigit() or not 1 <= int(text) <= 5:
+                  raise SystemExit(f'{system}_reps must be a whole number from 1 to 5, got {text!r}')
+              count[system] = int(text)
+          # /analyze exists on MSVC only: its variants have no Linux counterpart.
           include = [{'os': o, 'variant': v, 'rep': r} for v in requested for o in ('windows', 'linux') for r in range(1, count[o] + 1)
                      if not (o == 'linux' and v.startswith('noanalyze'))]
           print('matrix=' + json.dumps({'include': include}))
@@ -61,8 +73,7 @@ jobs:
 
   study:
     needs: image
-    # A commit message with [profile-only] skips the measurements and runs only the profile job.
-    if: ${{ !contains(github.event.head_commit.message, '[profile-only]') }}
+    if: ${{ inputs.measure }}
     permissions:
       contents: read
       packages: read
@@ -146,7 +157,7 @@ jobs:
   # Where does the compile time of one heavy unit go? MSVC /d1reportTime, GCC -ftime-report, Clang -ftime-trace.
   profile:
     needs: image
-    if: ${{ !contains(github.event.head_commit.message, '[variants:') }}
+    if: ${{ inputs.profile }}
     permissions:
       contents: read
       packages: read
@@ -209,7 +220,7 @@ jobs:
 
   report:
     needs: study
-    if: ${{ !cancelled() && !contains(github.event.head_commit.message, '[profile-only]') }}
+    if: ${{ !cancelled() && inputs.measure }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
