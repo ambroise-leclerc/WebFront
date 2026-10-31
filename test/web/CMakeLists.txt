@@ -206,11 +206,21 @@ if(_browser_tests_available)
         endif()
         set(_developer_command "${_developer_xvfb}" -a ${_developer_command})
     endif()
-    add_test(NAME DeveloperBrowserIntegration COMMAND ${_developer_command}
-        "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated")
-    webfront_set_browser_test_properties(DeveloperBrowserIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 180)
-    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated FIXTURES_REQUIRED DeveloperFixtures)
-    webfront_use_own_profile(DeveloperBrowserIntegration developer)
+    # One long script (developer-specs.mjs) would run for two minutes on its own: it is cut into parts that start from their
+    # own project and run in parallel (#435). `app` also generates the header that LifeEmbeddedBuild compiles. Each part
+    # listens on a port the system picks, so none of them holds webfront_port_9002.
+    foreach(_part app scripts typescript jasmine terminal)
+        set(_name DeveloperBrowserIntegration)
+        if(NOT _part STREQUAL "app")
+            set(_name DeveloperBrowserIntegration-${_part})
+        endif()
+        add_test(NAME ${_name} COMMAND ${_developer_command}
+            "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --part=${_part})
+        set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
+        webfront_use_own_profile(${_name} developer-${_part})
+    endforeach()
+    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
     # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
     if(TARGET webfront-wf)
         set(_wf_project "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-project")
@@ -411,7 +421,7 @@ if(_browser_tests_available)
             --config $<CONFIG> --target life_journey --parallel 2)
         # Serialize nested builds and browser executables sharing this output directory, while independent unit tests may run.
         set_tests_properties(JourneyEmbeddedBuild PROPERTIES FIXTURES_REQUIRED JourneyEmbedded
-            FIXTURES_SETUP JourneyApplication LABELS "web-integration" TIMEOUT 180 RESOURCE_LOCK "webfront_port_9002;webfront_build_tree" PROCESSORS 2)
+            FIXTURES_SETUP JourneyApplication LABELS "web-integration" TIMEOUT 180 RESOURCE_LOCK "webfront_build_tree" PROCESSORS 2)
         set(_journey_command "$<TARGET_FILE:life_journey>")
         if(_developer_xvfb)
             set(_journey_command "${_developer_xvfb}" -a ${_journey_command})
@@ -521,27 +531,36 @@ if(_browser_tests_available)
         # Developer specs migrated by #344 remain in the browser under the repository's locked Jasmine.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)
-        webfront_add_self_build_test(SelfBuildRepeat 0 "run|build|build-distribution-repeat" OUTPUT "Script build completed"
-            REQUIRES SelfBuilt PROVIDES SelfBuiltTwice)
+        # The reproducibility proofs build the environment again, the second time from a refreshed bootstrap: about 45 s on a
+        # hosted runner. A pull request that changes none of their inputs may leave them to the master tier (#435).
+        option(WEBFRONT_TEST_REPRODUCIBILITY "Build the self-built environment again, to prove it reproducible and equal to the checked-in bundles" ON)
+        if(WEBFRONT_TEST_REPRODUCIBILITY)
+            webfront_add_self_build_test(SelfBuildRepeat 0 "run|build|build-distribution-repeat" OUTPUT "Script build completed"
+                REQUIRES SelfBuilt PROVIDES SelfBuiltTwice)
+        endif()
         # The packaged environment must enforce the actual project's publication permissions.
         webfront_add_self_build_test(SelfBuildOutsidePermissions 1 "run|build|elsewhere" OUTPUT "Permission denied: writing elsewhere"
             REQUIRES SelfBuilt)
-        # Reproducible: two builds give the very same bytes.
-        set(_self_outputs environment.tgz environment.json provision.json DeveloperReleaseData.hpp runtime.mjs compiler.mjs
-            script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json life-starter.tgz)
-        webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfBuiltTwice
-            -DLEFT=${_self_project}/build-distribution -DRIGHT=${_self_project}/build-distribution-repeat "-DFILES=${_self_outputs}")
-        set_tests_properties(SelfBuildReproducible PROPERTIES FIXTURES_SETUP SelfReproducible)
+        if(WEBFRONT_TEST_REPRODUCIBILITY)
+            # Reproducible: two builds give the very same bytes.
+            set(_self_outputs environment.tgz environment.json provision.json DeveloperReleaseData.hpp runtime.mjs compiler.mjs
+                script-worker.mjs typecheck-worker.mjs esbuild.wasm xterm.css LICENSES.txt package.json life-starter.tgz)
+            webfront_add_self_build_check(SelfBuildReproducible CompareFiles.cmake SelfBuiltTwice
+                -DLEFT=${_self_project}/build-distribution -DRIGHT=${_self_project}/build-distribution-repeat "-DFILES=${_self_outputs}")
+            set_tests_properties(SelfBuildReproducible PROPERTIES FIXTURES_SETUP SelfReproducible)
+        endif()
         # Assemble fixtures from the self-built environment, retaining #344's dependency chain.
         add_test(NAME DeveloperFixtures COMMAND ${CMAKE_COMMAND} -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
             -DOUTPUT=${_fixtures} -P ${PROJECT_SOURCE_DIR}/test/cmake/AssembleDeveloperFixtures.cmake)
         set_tests_properties(DeveloperFixtures PROPERTIES FIXTURES_REQUIRED SelfBuilt FIXTURES_SETUP DeveloperFixtures
             RESOURCE_LOCK self-build-project LABELS "web-integration" TIMEOUT 60)
-        # Refresh is validated separately from the two identical reproducibility builds.
-        webfront_add_self_build_test(SelfBuildRefresh 0 "run|build|build-distribution|--refresh-bootstrap" OUTPUT "Script build completed"
-            REQUIRES SelfReproducible PROVIDES SelfRefreshed)
-        webfront_add_self_build_check(SelfBuildRefreshMatchesSources CheckSelfBuildRefresh.cmake SelfRefreshed
-            -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project} -DOUTPUT=build-distribution)
+        if(WEBFRONT_TEST_REPRODUCIBILITY)
+            # Refresh is validated separately from the two identical reproducibility builds.
+            webfront_add_self_build_test(SelfBuildRefresh 0 "run|build|build-distribution|--refresh-bootstrap" OUTPUT "Script build completed"
+                REQUIRES SelfReproducible PROVIDES SelfRefreshed)
+            webfront_add_self_build_check(SelfBuildRefreshMatchesSources CheckSelfBuildRefresh.cmake SelfRefreshed
+                -DSOURCE=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project} -DOUTPUT=build-distribution)
+        endif()
         # The Pages site keeps every version and refuses to change a published one.
         webfront_add_self_build_test(SelfBuildSite 0 "run|site|build-distribution|build-site" OUTPUT "Script site completed"
             REQUIRES SelfBuilt PROVIDES SelfStaged)
@@ -576,7 +595,7 @@ if(_browser_tests_available)
     # Protect the shared build tree and browser DLLs/executables, especially on Windows.
     set_tests_properties(LifeEmbeddedBuild PROPERTIES FIXTURES_REQUIRED DeveloperGenerated
         FIXTURES_SETUP LifeEmbedded LABELS "web-integration" TIMEOUT 180
-        RESOURCE_LOCK "webfront_port_9002;webfront_build_tree" PROCESSORS 2)
+        RESOURCE_LOCK "webfront_build_tree" PROCESSORS 2)
     set(_life_command "$<TARGET_FILE:life_embedded>")
     if(_developer_xvfb)
         set(_life_command "${_developer_xvfb}" -a ${_life_command})

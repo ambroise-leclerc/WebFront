@@ -4,6 +4,8 @@
 
 function(set_project_warnings project_name)
   option(WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+  # MSVC /analyze roughly doubles the front-end work of every unit (#435): OFF is for measuring that cost, not for CI.
+  option(WEBFRONT_MSVC_ANALYZE "Run the MSVC code analysis while compiling" ON)
 
   set(MSVC_WARNINGS
       /W4 # Baseline reasonable warnings
@@ -34,6 +36,10 @@ function(set_project_warnings project_name)
       /analyze:stacksize65536 # Raise C6262 stack warning threshold to 64KB (policy buffers can reach 32KB); one argument, as sccache reads a separate "65536" as a second source file and refuses to cache the compilation
       /permissive- # standards conformance mode for MSVC compiler.
   )
+
+  if(NOT WEBFRONT_MSVC_ANALYZE)
+    list(FILTER MSVC_WARNINGS EXCLUDE REGEX "^/analyze")
+  endif()
 
   set(CLANG_WARNINGS
       -Wall

@@ -64,7 +64,7 @@ struct FakeApp {
     function<string()>                         list;
     function<void(FakeUI, uint32_t, string, string)> start;
     function<void(FakeUI, uint32_t)>           cancel;
-    shared_ptr<detail::UISubscribers<FakeUI>>  closed = make_shared<detail::UISubscribers<FakeUI>>();
+    shared_ptr<webfront::detail::UISubscribers<FakeUI>>  closed = make_shared<webfront::detail::UISubscribers<FakeUI>>();
     vector<BrowserCall>                        calls;
 
     [[nodiscard]] bool hasCppFunction(string_view name) const {

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 13 heavy unit-test files four
+  to a file (`WEBFRONT_TEST_UNITY_BATCH`; the default build keeps one object per file, and `JsFunctionSenderTests.cpp`,
+  `CommandsTests.cpp`, `FrontendContractTests.cpp` and `BroadcastTests.cpp` name their helpers so that they can share one).
+  A pull request into `develop` no longer builds the examples or runs the MSVC code analysis (`WEBFRONT_MSVC_ANALYZE`,
+  default ON), nor the builds that prove the self-built environment reproducible unless it changes their inputs
+  (`WEBFRONT_TEST_REPRODUCIBILITY`, default ON); the weekly run, pull requests into and pushes to `master` do all three.
+  `JourneyEmbeddedBuild` and `LifeEmbeddedBuild` no longer hold the `webfront_port_9002` lock while they compile.
+  `DeveloperBrowserIntegration` is cut into five parts (`DeveloperBrowserIntegration`, `-scripts`, `-typescript`,
+  `-jasmine`, `-terminal`) that run in parallel from their own projects on ephemeral ports. `RunWithDeadline.sh` returns
+  when its command does instead of at the deadline, which took 30 s from each of the six `ConsumerJasmine-*` cases under
+  dash, and gives the command its own process group (`setsid`, or a walk of its descendants) where the shell has no job
+  control. `docs/BUILD_TIME_STUDY.md` holds the measurements and the decisions.
+
 - Prefix WebFront's test options (#412): `WEBFRONT_ENABLE_TESTING`, `WEBFRONT_ENABLE_FUZZING`,
   `WEBFRONT_ENABLE_COVERAGE` and `WEBFRONT_ENABLE_SANITIZER_{ADDRESS,LEAK,UNDEFINED_BEHAVIOR,THREAD,MEMORY}` replace
   the unprefixed `ENABLE_*` names (still `OFF` by default). A parent project's own generic variables no longer build

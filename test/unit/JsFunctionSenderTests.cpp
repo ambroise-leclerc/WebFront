@@ -22,7 +22,7 @@ struct SenderApp {
         return std::shared_ptr<WebLink<Net>>(std::shared_ptr<WebLink<Net>>{}, &link);  // not owned
     }
 };
-struct Observed {
+struct SenderObserved {
     int                   completions{};
     bool                  stopped{};
     std::string           value;
@@ -36,7 +36,7 @@ struct Observed {
 };
 struct Receiver {
     using receiver_concept = ex::receiver_tag;
-    Observed&              observed;
+    SenderObserved&              observed;
     ex::inplace_stop_token token;
     auto                   get_env() const noexcept {
         return ex::prop{ex::get_stop_token, token};
@@ -84,7 +84,7 @@ SCENARIO("Typed browser senders are lazy and own their arguments") {
     SenderApp                     app{link};
     BasicUI<SenderApp>            ui{app, 1, 1};
     ex::inplace_stop_source       stop;
-    Observed                      observed;
+    SenderObserved                      observed;
     GIVEN("a sender encoded from a temporary string view") {
         auto sender = ui.jsFunctionSender<std::string>("echo")(std::string_view(std::string("owned-argument")));
         REQUIRE_FALSE(InjectableSocket::hasWrittenData());
@@ -122,7 +122,7 @@ SCENARIO("Typed browser senders report errors without escaping the receive loop"
     auto                    link = std::make_unique<WebLink<InjectableNetworking>>(InjectableSocket{}, WebLinkId{1}, [](WebLinkEvent) { }, scope);
     SenderApp               app{*link};
     BasicUI<SenderApp>      ui{app, 1, 1};
-    Observed                observed;
+    SenderObserved                observed;
     ex::inplace_stop_source stop;
     auto                    sender = ui.jsFunctionSender<std::string>("result")();
     GIVEN("a call started before the browser responds") {
@@ -178,7 +178,7 @@ SCENARIO("Typed browser calls propagate receiver cancellation") {
     SenderApp                     app{link};
     BasicUI<SenderApp>            ui{app, 1, 1};
     ex::inplace_stop_source       stop;
-    Observed                      observed;
+    SenderObserved                      observed;
     GIVEN("a receiver already stopped at start") {
         stop.request_stop();
         auto operation = ex::connect(ui.jsFunctionSender<std::string>("slow")(), Receiver{observed, stop.get_token()});
@@ -237,7 +237,7 @@ SCENARIO("Browser result and cancellation can race") {
                     SenderApp                     app{link};
                     BasicUI<SenderApp>            ui{app, 1, 1};
                     ex::inplace_stop_source       stop;
-                    Observed                      observed;
+                    SenderObserved                      observed;
                     auto                          operation = ex::connect(ui.jsFunctionSender<std::string>("race")(), Receiver{observed, stop.get_token()});
                     ex::start(operation);
                     std::thread stopping([&] {
@@ -254,7 +254,7 @@ SCENARIO("Browser result and cancellation can race") {
 }
 
 namespace {
-networking::Task awaitBrowser(BasicUI<SenderApp> ui, Observed& observed, std::shared_ptr<int> lifetime) {
+networking::Task awaitBrowser(BasicUI<SenderApp> ui, SenderObserved& observed, std::shared_ptr<int> lifetime) {
     static_cast<void>(lifetime);
     observed.value = co_await ui.jsFunctionSender<std::string>("awaited")();
     observed.done();
@@ -265,7 +265,7 @@ SCENARIO("Typed browser senders can be awaited in a tracked task") {
     InlineTaskScope               transport;
     WebLink<InjectableNetworking> link{InjectableSocket{}, 1, [](WebLinkEvent) { }, transport};
     SenderApp                     app{link};
-    Observed                      observed;
+    SenderObserved                      observed;
     InlineTaskScope               calls;
     GIVEN("a coroutine awaiting a browser sender in its own scope") {
         auto               lifetime = std::make_shared<int>(42);
@@ -294,7 +294,7 @@ SCENARIO("Typed browser senders can be awaited in a tracked task") {
 
 SCENARIO("Cancelled correlation IDs cannot be reused before a late reply") {
     GIVEN("a registry with one cancelled call") {
-        detail::PendingCalls<CorrelationPolicy> calls;
+        webfront::detail::PendingCalls<CorrelationPolicy> calls;
         auto                                    retained  = std::make_shared<int>(42);
         std::weak_ptr<int>                      released  = retained;
         const auto                              cancelled = calls.add({[retained](const auto&) { }, [retained](auto) { }});
@@ -348,7 +348,7 @@ SCENARIO("Browser senders reject inconsistent return envelopes") {
     SenderApp                     app{link};
     BasicUI<SenderApp>            ui{app, 1, 1};
     ex::inplace_stop_source       stop;
-    Observed                      observed;
+    SenderObserved                      observed;
     GIVEN("a pending string call") {
         auto operation = ex::connect(ui.jsFunctionSender<std::string>("result")(), Receiver{observed, stop.get_token()});
         ex::start(operation);
@@ -407,7 +407,7 @@ SCENARIO("Browser senders reject inconsistent return envelopes") {
 
 SCENARIO("Correlation exhaustion fails until an outstanding reply releases an ID") {
     GIVEN("a registry with every ID reserved by an unanswered cancelled call") {
-        detail::PendingCalls<CorrelationPolicy> calls;
+        webfront::detail::PendingCalls<CorrelationPolicy> calls;
         for (std::size_t i = 0; i < std::numeric_limits<msg::CallId>::max(); ++i) {
             const auto id = calls.add({});
             calls.cancel(id);
@@ -430,10 +430,10 @@ SCENARIO("Correlation exhaustion fails until an outstanding reply releases an ID
 
 SCENARIO("A sender reports a socket expiring independently of its correlation registry") {
     GIVEN("an expired socket and a still-owned registry") {
-        auto                   calls = std::make_shared<detail::PendingCalls<http::DefaultBuffersPolicy>>();
+        auto                   calls = std::make_shared<webfront::detail::PendingCalls<http::DefaultBuffersPolicy>>();
         std::vector<std::byte> payload(sizeof(msg::FunctionCallHeader<msg::Command::callFunction>));
-        detail::BrowserCallSender<InjectableNetworking, http::DefaultBuffersPolicy, std::string> sender{calls, {}, std::move(payload)};
-        Observed                                                                                 observed;
+        webfront::detail::BrowserCallSender<InjectableNetworking, http::DefaultBuffersPolicy, std::string> sender{calls, {}, std::move(payload)};
+        SenderObserved                                                                                 observed;
         ex::inplace_stop_source                                                                  stop;
         auto operation = ex::connect(std::move(sender), Receiver{observed, stop.get_token()});
         WHEN("the operation starts") {
@@ -448,7 +448,7 @@ SCENARIO("A sender reports a socket expiring independently of its correlation re
 
 SCENARIO("An obsolete registration cannot cancel a replacement with the same wire ID") {
     GIVEN("a completed call whose operation is still delivering an error") {
-        detail::PendingCalls<CorrelationPolicy> calls;
+        webfront::detail::PendingCalls<CorrelationPolicy> calls;
         int                                     originalOwner{};
         int                                     replacementOwner{};
         const auto                              old = calls.add({.complete = [](const auto&) { }, .reject = {}, .owner = &originalOwner});

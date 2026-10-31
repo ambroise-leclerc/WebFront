@@ -47,6 +47,23 @@ if(MSVC)
   target_compile_options(tests PRIVATE /bigobj)
 endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+# The heavy units instantiate a full application, and compile four to a file in about half the time of four apart
+# (docs/BUILD_TIME_STUDY.md). The desktop CI jobs set the batch size; the default keeps one object per test file, which
+# keeps a rebuild after one edit small. The light units stay apart: grouping every unit does not compile, as their
+# helpers share names.
+set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
+if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
+  set(_heavy WebFrontTests BroadcastTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
+      AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
+  set_target_properties(tests PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE ${WEBFRONT_TEST_UNITY_BATCH})
+  foreach(_source IN LISTS TESTS_LIST)
+    cmake_path(GET _source STEM _stem)
+    if(NOT _stem IN_LIST _heavy)
+      set_source_files_properties(${_source} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
+    endif()
+  endforeach()
+endif()
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
@@ -150,6 +167,9 @@ add_test(NAME BootstrapProvisioning
 
 # Windows bash.exe may be the WSL launcher rather than a native Bash runtime.
 if(UNIX)
+    add_test(NAME RunWithDeadline COMMAND ${CMAKE_COMMAND} -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/RunWithDeadline.sh
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRunWithDeadline.cmake)
+    set_tests_properties(RunWithDeadline PROPERTIES TIMEOUT 60 LABELS fast)
     find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
     find_package(Git QUIET)
     if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)
