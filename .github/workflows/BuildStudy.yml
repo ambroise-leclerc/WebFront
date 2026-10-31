@@ -48,7 +48,8 @@ jobs:
           # /analyze exists on MSVC only: its variants have no Linux counterpart.
           reps = re.search(r'\[windows-reps:(\d+)\]', os.environ.get('MESSAGE', ''))
           # Hosted Windows runners vary a lot from one job to the next: repeat there, Linux is stable.
-          count = {'windows': int(reps.group(1)) if reps else 1, 'linux': 1}
+          linux = re.search(r'\[linux-reps:(\d+)\]', os.environ.get('MESSAGE', ''))
+          count = {'windows': int(reps.group(1)) if reps else 1, 'linux': int(linux.group(1)) if linux else 1}
           include = [{'os': o, 'variant': v, 'rep': r} for v in requested for o in ('windows', 'linux') for r in range(1, count[o] + 1)
                      if not (o == 'linux' and v.startswith('noanalyze'))]
           print('matrix=' + json.dumps({'include': include}))

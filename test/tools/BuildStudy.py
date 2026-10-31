@@ -94,7 +94,13 @@ def main():
         if changed:
             path = ROOT / changed
             original = path.read_bytes()
-            path.write_bytes(original + b'\n// build study ' + name.encode() + b'\n')
+            # A comment vanishes in preprocessing, and a preprocessor-keyed cache (GCC) would still hit: add a declaration.
+            identifier = 'build_study_' + name.replace('-', '_')
+            if path.suffix == '.hpp':
+                addition = f'\nnamespace webfront {{ inline constexpr int {identifier} = 0; }}\n'
+            else:
+                addition = f'\nnamespace {{ [[maybe_unused]] constexpr int {identifier} = 0; }}\n'
+            path.write_bytes(original + addition.encode())
         try:
             subprocess.run(['sccache', '--zero-stats'], capture_output=True, check=True)
             command = ['cmake', '--build', str(build), '--config', args.config, '--target', args.target,
