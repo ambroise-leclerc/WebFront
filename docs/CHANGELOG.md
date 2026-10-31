@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-31
+
 - Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 13 heavy unit-test files four
   to a file (`WEBFRONT_TEST_UNITY_BATCH`; the default build keeps one object per file, and `JsFunctionSenderTests.cpp`,
   `CommandsTests.cpp`, `FrontendContractTests.cpp` and `BroadcastTests.cpp` name their helpers so that they can share one).
@@ -18,22 +20,10 @@
 - Include `developer_integration` in the documented Linux CEF build commands (#434), preparing the developer journey
   and its dependent Life tests. Check the browser targets in both guides and CI with `NewcomerDocsMatchExamples`.
 
-- Prefix WebFront's test options (#412): `WEBFRONT_ENABLE_TESTING`, `WEBFRONT_ENABLE_FUZZING`,
-  `WEBFRONT_ENABLE_COVERAGE` and `WEBFRONT_ENABLE_SANITIZER_{ADDRESS,LEAK,UNDEFINED_BEHAVIOR,THREAD,MEMORY}` replace
-  the unprefixed `ENABLE_*` names (still `OFF` by default). A parent project's own generic variables no longer build
-  WebFront's tests or fuzzers, instrument it for coverage or sanitizers, or disable its native detection; a consumer
-  that wants WebFront's tests sets the prefixed option, and its build then keeps the explicit engine selection, as a
-  top-level test build does. A parent configured with an earlier WebFront keeps the unused `ENABLE_COVERAGE` and
-  `ENABLE_SANITIZER_*=OFF` entries in its cache; WebFront no longer reads them and leaves the parent's cache alone.
-  At the top level the former names, from the command line, a toolchain file or the cache, still work until WebFront
-  0.7.0, which refuses to configure while the migration remains, and are removed from the cache. A prefixed name given
-  by the same configure decides, and a former name of another value is then ignored with a warning that
-  `-Wno-deprecated` does not hide; otherwise a former name given by this configure is moved to the prefixed option,
-  even over a value an earlier configure left. A true former value left by an older build tree is moved unless the
-  prefixed option is already cached; the `OFF` defaults left there are dropped silently. Moving or repeating a former
-  name prints a deprecation warning. A toolchain's normal variable also counts as given when it equals the cached
-  value, so a conflicting former name cannot change that prefixed cache entry. CI, the documentation and
-  `TestOptionsConfiguration` use the new names.
+- **Breaking:** WebFront's test, fuzzing, coverage and sanitizer CMake options now require the `WEBFRONT_` prefix
+  (#412). For example, use `WEBFRONT_ENABLE_TESTING` instead of `ENABLE_TESTING`. Generic `ENABLE_*` variables and
+  old cache entries no longer configure WebFront, either at the top level or as a subproject; set the prefixed options
+  explicitly. This also prevents a parent project's own options from enabling WebFront tests or instrumentation.
 
 - Remove the Windows agent's native profile after a forced exit (#439): when WebView2 processes still held the profile
   at the end of the 2 s in-process retry, the agent exited and left it behind, so `AutomationCliWatchdog` failed
