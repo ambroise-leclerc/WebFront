@@ -44,3 +44,13 @@ execute_process(COMMAND "${CMAKE_COMMAND}" --fresh
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Support module option change: ${output}${error}")
 endif()
+
+# A consumer opts in to one of WebFront's test options only by its prefixed name (#412).
+execute_process(COMMAND "${CMAKE_COMMAND}" --fresh
+    -S "${ROOT}/test/cmake/frontend-consumer" -B "${WORK_DIR}/consumer-coverage"
+    "-DROOT=${ROOT}" -DPROBE=ON -DFULL_PROJECT=ON "-DCPM_MODULE=${CPM_MODULE}"
+    -DWEBFRONT_ENABLE_COVERAGE=ON ${DEPENDENCY_ARGS}
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Consumer WEBFRONT_ENABLE_COVERAGE: ${output}${error}")
+endif()

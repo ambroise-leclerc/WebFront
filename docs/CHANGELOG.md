@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Prefix WebFront's test options (#412): `WEBFRONT_ENABLE_TESTING`, `WEBFRONT_ENABLE_FUZZING`,
+  `WEBFRONT_ENABLE_COVERAGE` and `WEBFRONT_ENABLE_SANITIZER_{ADDRESS,LEAK,UNDEFINED_BEHAVIOR,THREAD,MEMORY}` replace
+  the unprefixed `ENABLE_*` names (still `OFF` by default). A parent project's own generic variables no longer build
+  WebFront's tests or fuzzers, instrument it for coverage or sanitizers, or disable its native detection; a consumer
+  that wants WebFront's tests sets the prefixed option, and its build then keeps the explicit engine selection, as a
+  top-level test build does. A parent configured with an earlier WebFront keeps the unused `ENABLE_COVERAGE` and
+  `ENABLE_SANITIZER_*=OFF` entries in its cache; WebFront no longer reads them and leaves the parent's cache alone.
+  At the top level the former names, from the command line, a toolchain file or the cache, still work until WebFront
+  0.7.0, which refuses to configure while the migration remains, and are removed from the cache. A prefixed name given
+  by the same configure decides, and a former name of another value is then ignored with a warning that
+  `-Wno-deprecated` does not hide; otherwise a former name given by this configure is moved to the prefixed option,
+  even over a value an earlier configure left. A true former value left by an older build tree is moved unless the
+  prefixed option is already cached; the `OFF` defaults left there are dropped silently. Moving or repeating a former
+  name prints a deprecation warning. A toolchain's normal variable also counts as given when it equals the cached
+  value, so a conflicting former name cannot change that prefixed cache entry. CI, the documentation and
+  `TestOptionsConfiguration` use the new names.
+
 ## 0.6.0 - 2026-10-31
 
 - Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
