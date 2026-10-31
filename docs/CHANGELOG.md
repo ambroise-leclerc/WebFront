@@ -19,6 +19,11 @@
   value, so a conflicting former name cannot change that prefixed cache entry. CI, the documentation and
   `TestOptionsConfiguration` use the new names.
 
+- Remove the Windows agent's native profile after a forced exit (#439): when WebView2 processes still held the profile
+  at the end of the 2 s in-process retry, the agent exited and left it behind, so `AutomationCliWatchdog` failed
+  intermittently on loaded runners. A detached `cmd.exe` now repeats the removal for about 20 s, and the case's
+  second CLI invocation has a 45 s limit instead of 15 s.
+
 ## 0.6.0 - 2026-10-31
 
 - Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
