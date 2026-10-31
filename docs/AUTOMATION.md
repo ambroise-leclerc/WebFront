@@ -20,7 +20,7 @@ Enable an embedded frontend and the launcher. For example, on macOS:
 
 ```sh
 cmake -S . -B build-agent -DCMAKE_BUILD_TYPE=Release \
-  -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_BUILD_AUTOMATION=ON -DENABLE_TESTING=ON
+  -DWEBFRONT_EMBED_WKWEBVIEW=ON -DWEBFRONT_BUILD_AUTOMATION=ON -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build-agent --target webfront-agent webfront-wf --parallel 2
 ```
 

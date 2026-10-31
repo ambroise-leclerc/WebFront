@@ -1,7 +1,7 @@
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR MSVC)
-    message(FATAL_ERROR "ENABLE_FUZZING requires Clang with libFuzzer (Linux or macOS)")
+    message(FATAL_ERROR "WEBFRONT_ENABLE_FUZZING requires Clang with libFuzzer (Linux or macOS)")
 endif()
-if(ENABLE_SANITIZER_THREAD OR ENABLE_SANITIZER_MEMORY)
+if(WEBFRONT_ENABLE_SANITIZER_THREAD OR WEBFRONT_ENABLE_SANITIZER_MEMORY)
     message(FATAL_ERROR "Fuzzing uses ASan+UBSan and cannot be combined with TSan or MSan")
 endif()
 
@@ -15,7 +15,7 @@ extern \"C\" int LLVMFuzzerTestOneInput(const std::uint8_t*, std::size_t) { retu
     WEBFRONT_HAS_LIBFUZZER)
 cmake_pop_check_state()
 if(NOT WEBFRONT_HAS_LIBFUZZER)
-    message(FATAL_ERROR "ENABLE_FUZZING requires the compiler-rt libFuzzer, ASan and UBSan runtimes")
+    message(FATAL_ERROR "WEBFRONT_ENABLE_FUZZING requires the compiler-rt libFuzzer, ASan and UBSan runtimes")
 endif()
 
 foreach(_decoder IN ITEMS Messages HTTP WebSocket Gzip)

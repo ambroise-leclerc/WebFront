@@ -11,11 +11,8 @@ else()
 endif()
 
 option(BUILD_SHARED_LIBS "Enable compilation of shared libraries" OFF)
-option(ENABLE_TESTING "Enable Test Builds" OFF)
 option(WEBFRONT_BUILD_AUTOMATION "Build the optional local developer CLI/MCP launcher" OFF)
 option(WEBFRONT_BUILD_EXAMPLES "Build the example applications" ${WEBFRONT_IS_TOP_LEVEL})
-option(ENABLE_COVERAGE "Enable test coverage instrumentation" OFF)
-option(ENABLE_FUZZING "Enable Fuzzing Builds" OFF)
 option(WEBFRONT_GZIP_DIFFERENTIAL "Build test-only gzip/zlib differential checks" OFF)
 option(WEBFRONT_USE_MDDLOG "Use the compiled mddlog diagnostic adapter" OFF)
 # The experimental gate must be selected before project() probes the compiler.
@@ -28,12 +25,14 @@ set(VERSION_STRING_REGEX "inline constexpr std::string_view version = \"([0-9]+\
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/webfront/WebFront.hpp" VERSION_STRING REGEX ${VERSION_STRING_REGEX})
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" VERSION_STRING "${VERSION_STRING}")
 project(WebFront LANGUAGES CXX VERSION ${VERSION_STRING})
+# After project(): a toolchain file's variables are then visible, as they were to the former option() calls.
+include(cmake/WebFrontTestOptions.cmake)
+webfront_declare_test_options(${WEBFRONT_IS_TOP_LEVEL})
 
 include(cmake/Frontends.cmake)
 # Applications need no -DWEBFRONT_EMBED_* option: unless the user decided, this platform's native window
 # engine is enabled when its dependencies are present. Test and fuzzing builds keep explicit selection.
-# An embedding parent's variables of those names do not decide for its consumers.
-if(NOT WEBFRONT_IS_TOP_LEVEL OR (NOT ENABLE_TESTING AND NOT ENABLE_FUZZING))
+if(NOT WEBFRONT_ENABLE_TESTING AND NOT WEBFRONT_ENABLE_FUZZING)
     set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT ON)
 else()
     set(WEBFRONT_AUTODETECT_NATIVE_DEFAULT OFF)
@@ -127,7 +126,7 @@ webfront_add_embedded_assets()
 # Opt-in consumer test registration; inclusion alone downloads nothing and registers no tests.
 include(WebFrontJasmine)
 
-if(WEBFRONT_BUILD_AUTOMATION OR (ENABLE_TESTING AND
+if(WEBFRONT_BUILD_AUTOMATION OR (WEBFRONT_ENABLE_TESTING AND
     (WEBFRONT_EMBED_CEF OR WEBFRONT_EMBED_WKWEBVIEW OR WEBFRONT_EMBED_WEBVIEW2 OR WEBFRONT_EMBED_WEBKITGTK)))
     webfront_default_embedded_frontend(_automation_default FALLBACK CEF)
     webfront_select_frontend(WEBFRONT_AUTOMATION_FRONTEND "${_automation_default}"
@@ -144,15 +143,15 @@ if(WEBFRONT_BUILD_AUTOMATION OR (ENABLE_TESTING AND
     webfront_setup_frontends_for_target(webfront-agent)
 endif()
 
-if(ENABLE_TESTING OR ENABLE_FUZZING)
+if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_ENABLE_FUZZING)
   include(TestHardening)
 endif()
 
-if(ENABLE_FUZZING)
+if(WEBFRONT_ENABLE_FUZZING)
   add_subdirectory(test/fuzz)
 endif()
 
-if(ENABLE_TESTING)
+if(WEBFRONT_ENABLE_TESTING)
   enable_testing()
   add_subdirectory(test/unit)
   add_subdirectory(test/web)

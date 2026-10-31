@@ -42,7 +42,7 @@ la spécialisation. WebFront demeure expérimental ; aucune API générale de co
 ou de DOM C++ n’est acquise.
 
 Le projet parent conserve ses réglages globaux. Les exemples ne sont activés par défaut
-qu’au niveau principal, les tests demandent `ENABLE_TESTING=ON`. L’adaptateur mddlog compilé
+qu’au niveau principal, les tests demandent `WEBFRONT_ENABLE_TESTING=ON`. L’adaptateur mddlog compilé
 est une exception optionnelle documentée par l’ADR-011.
 
 ## Options écartées et motifs

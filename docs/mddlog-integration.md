@@ -28,7 +28,7 @@ For example, with an upstream Clang/libc++ toolchain providing its std module ma
 ```bash
 cmake -S . -B build-mddlog -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE=/path/to/mddlog/cmake/toolchains/linux-clang21-libcxx.cmake \
-  -DENABLE_TESTING=ON -DWEBFRONT_USE_MDDLOG=ON -DWEBFRONT_MDDLOG_SOURCE_DIR=/path/to/mddlog
+  -DWEBFRONT_ENABLE_TESTING=ON -DWEBFRONT_USE_MDDLOG=ON -DWEBFRONT_MDDLOG_SOURCE_DIR=/path/to/mddlog
 cmake --build build-mddlog --parallel
 ctest --test-dir build-mddlog --output-on-failure --no-tests=error
 ```

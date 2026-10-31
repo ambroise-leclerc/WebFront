@@ -542,7 +542,7 @@ webfront-wf --project <dir> [--environment <environment.tgz> --integrity <sha512
 
 - Without `--environment`, it uses the **bootstrap environment** provisioned at configure time. `cmake/WebFrontBootstrap.cmake`
   pins its URL and SHA-512 (distinct from `DeveloperReleaseData.hpp`, the environment applications start from, and changed
-  by an explicit pull request). With `ENABLE_TESTING=ON`, configure downloads it to `<build>/bootstrap/` and verifies the
+  by an explicit pull request). With `WEBFRONT_ENABLE_TESTING=ON`, configure downloads it to `<build>/bootstrap/` and verifies the
   digest; a wrong digest or an unreachable URL stops the configure. On a machine without network access, pass
   `-DWEBFRONT_BOOTSTRAP_DIR=<directory holding environment.tgz>`: the archive is verified the same way.
 - `--environment` and `--integrity` run an archive built elsewhere, such as the one built from the current sources (the
@@ -667,7 +667,7 @@ committed: the archives live in the build directory.
 ```sh
 cmake -S . -B build-native -DCMAKE_BUILD_TYPE=Release \
   -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WKWEBVIEW=ON \
-  -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DENABLE_TESTING=ON
+  -DWEBFRONT_WEBTEST_FRONTEND=WKWebView -DWEBFRONT_ENABLE_TESTING=ON
 cmake --build build-native --parallel
 ctest --test-dir build-native -R 'Developer|LifeEmbedded' --output-on-failure
 ```

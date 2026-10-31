@@ -48,34 +48,21 @@ if(MSVC)
 endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-# Build-time options (#435, docs/BUILD_TIME_STUDY.md). They default to one object per test file, which keeps rebuilds
-# fine-grained; the desktop CI jobs group the heavy units.
-#  WEBFRONT_TEST_UNITY_BATCH=N  groups the translation units of `tests` by N (0: no unity build);
-#  WEBFRONT_TEST_UNITY_HEAVY=ON limits the grouping to the heavy units (those instantiating a full application);
-#  WEBFRONT_TEST_PCH=ON         precompiles the headers of the heavy units (measured, not adopted: sccache cannot cache it on MSVC).
-set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "UNITY_BUILD_BATCH_SIZE of the tests target, 0 disables it")
-option(WEBFRONT_TEST_UNITY_HEAVY "Group only the heavy translation units of the tests target" OFF)
-option(WEBFRONT_TEST_PCH "Precompiled headers for the heavy units of the tests target" OFF)
-# The heavy units instantiate a full application; the others are light and keep the regular build.
-set(_heavy WebFrontTests BroadcastTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
-    AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
+# The heavy units instantiate a full application, and compile four to a file in about half the time of four apart
+# (docs/BUILD_TIME_STUDY.md). The desktop CI jobs set the batch size; the default keeps one object per test file, which
+# keeps a rebuild after one edit small. The light units stay apart: grouping every unit does not compile, as their
+# helpers share names.
+set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
 if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
+  set(_heavy WebFrontTests BroadcastTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
+      AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
   set_target_properties(tests PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE ${WEBFRONT_TEST_UNITY_BATCH})
-endif()
-foreach(_source IN LISTS TESTS_LIST)
-  cmake_path(GET _source STEM _stem)
-  if(NOT _stem IN_LIST _heavy)
-    # SKIP_PRECOMPILE_HEADERS spares a source file, not the unity file it would be included in: with a precompiled header the
-    # light units stay out of the unity files as well.
-    if(WEBFRONT_TEST_UNITY_HEAVY OR WEBFRONT_TEST_PCH)
+  foreach(_source IN LISTS TESTS_LIST)
+    cmake_path(GET _source STEM _stem)
+    if(NOT _stem IN_LIST _heavy)
       set_source_files_properties(${_source} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     endif()
-    # WebFront.hpp declares names the light units define themselves (MSVC C4459): they must not receive it.
-    set_source_files_properties(${_source} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-  endif()
-endforeach()
-if(WEBFRONT_TEST_PCH)
-  target_precompile_headers(tests PRIVATE <catch2/catch_test_macros.hpp> <catch2/generators/catch_generators.hpp> <catch2/matchers/catch_matchers.hpp> <webfront/WebFront.hpp>)
+  endforeach()
 endif()
 configure_file(Version.hpp.in generated/Version.hpp @ONLY)
 target_include_directories(tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -195,7 +182,7 @@ if(UNIX)
     endif()
 endif()
 
-if(ENABLE_COVERAGE)
+if(WEBFRONT_ENABLE_COVERAGE)
   target_compile_options(tests PUBLIC -O0 -g -fprofile-arcs -ftest-coverage)
   target_link_options(tests PUBLIC -fprofile-arcs -ftest-coverage)
 endif()
@@ -203,7 +190,7 @@ endif()
 # Replaces the global operator new to count allocations: kept out of Catch2 and TSan builds.
 # Clang's TSan C++ runtime defines the same operators, so this executable cannot link with it.
 # Ordinary and ASan/UBSan builds retain this regression; the rest of the suite still runs under TSan.
-if(NOT ENABLE_SANITIZER_THREAD)
+if(NOT WEBFRONT_ENABLE_SANITIZER_THREAD)
   add_executable(frame_allocation FrameAllocationTest.cpp)
   target_link_libraries(frame_allocation PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
   add_test(NAME FrameBufferNotFormattedWhenDebugDisabled COMMAND frame_allocation)
@@ -247,6 +234,12 @@ add_test(NAME NativeAutodetectReconfiguration
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckNativeAutodetect.cmake)
 # The test takes about 5 s; the wide bound only absorbs a loaded runner (one unexplained stall at 60 s, #416).
 set_tests_properties(NativeAutodetectReconfiguration PROPERTIES TIMEOUT 180)
+# WebFront's prefixed test options, the migration of the former names and their isolation from a parent (#412).
+add_test(NAME TestOptionsConfiguration
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-options
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckTestOptions.cmake)
+set_tests_properties(TestOptionsConfiguration PROPERTIES TIMEOUT 120 LABELS fast)
 # Exercise configuration-dependent CTest discovery and generator switches on single-config CI hosts.
 # The fixture configures no compiler and builds nothing; Ninja is optional for contributor builds.
 find_program(WEBFRONT_TEST_NINJA_EXECUTABLE ninja)
@@ -344,7 +337,7 @@ target_link_libraries(gzip_cache_benchmark PRIVATE WebFront_test_hardening WebFr
 add_test(NAME TransportBenchmarksAreManual COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
     -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckManualTransportBenchmarks.cmake)
 
-if(NOT ENABLE_SANITIZER_THREAD)
+if(NOT WEBFRONT_ENABLE_SANITIZER_THREAD)
   add_executable(gzip_decoder_benchmark EXCLUDE_FROM_ALL GzipDecoderBenchmark.cpp)
   target_link_libraries(gzip_decoder_benchmark PRIVATE WebFront_test_hardening WebFront_warnings WebFront_options WebFront)
 endif()

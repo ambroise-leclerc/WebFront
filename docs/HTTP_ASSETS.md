@@ -176,7 +176,7 @@ Filesystem reads remain synchronous on that context.
 ## Manual benchmarks and differential validation
 
 With a CEF-off Release test build configured, build the optional tools explicitly.
-`gzip_decoder_benchmark` is unavailable when `ENABLE_SANITIZER_THREAD=ON`; use a build
+`gzip_decoder_benchmark` is unavailable when `WEBFRONT_ENABLE_SANITIZER_THREAD=ON`; use a build
 with ThreadSanitizer disabled for the commands below:
 
 ```sh
