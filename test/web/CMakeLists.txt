@@ -206,11 +206,21 @@ if(_browser_tests_available)
         endif()
         set(_developer_command "${_developer_xvfb}" -a ${_developer_command})
     endif()
-    add_test(NAME DeveloperBrowserIntegration COMMAND ${_developer_command}
-        "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated")
-    webfront_set_browser_test_properties(DeveloperBrowserIntegration "${CMAKE_CURRENT_SOURCE_DIR}" 180)
-    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated FIXTURES_REQUIRED DeveloperFixtures)
-    webfront_use_own_profile(DeveloperBrowserIntegration developer)
+    # One long script (developer-specs.mjs) would run for two minutes on its own: it is cut into parts that start from their
+    # own project and run in parallel (#435). `app` also generates the header that LifeEmbeddedBuild compiles. Each part
+    # listens on a port the system picks, so none of them holds webfront_port_9002.
+    foreach(_part app scripts typescript jasmine terminal)
+        set(_name DeveloperBrowserIntegration)
+        if(NOT _part STREQUAL "app")
+            set(_name DeveloperBrowserIntegration-${_part})
+        endif()
+        add_test(NAME ${_name} COMMAND ${_developer_command}
+            "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --part=${_part})
+        set_tests_properties(${_name} PROPERTIES LABELS "web-integration" TIMEOUT 180
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures)
+        webfront_use_own_profile(${_name} developer-${_part})
+    endforeach()
+    set_tests_properties(DeveloperBrowserIntegration PROPERTIES FIXTURES_SETUP DeveloperGenerated)
     # The driver on the environment built from the current sources: statuses, output and reports reach CTest.
     if(TARGET webfront-wf)
         set(_wf_project "${CMAKE_CURRENT_BINARY_DIR}/wf-driver-project")

@@ -678,7 +678,7 @@ WKWebView and all 14 Linux CEF/Xvfb cases with both GCC and Clang in
 The packed 0.3.0 version passes WKWebView and all 14 GCC CEF/Xvfb cases in
 [run 39490581423](https://github.com/ambroise-leclerc/WebFront/actions/runs/39490581423).
 For Linux, select CEF and Xvfb instead; the same developer tests use the selected test frontend.
-`DeveloperBrowserIntegration` exercises the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
+`DeveloperBrowserIntegration` (the application part: starter, build, `wf dev`, Life preview, embedding) and `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine` and `-terminal` exercise, in parallel and each from its own project, the real WASM compiler, local registry, `wf test` under the locked jasmine-core (pass, fail, pending, asynchronous failures, pattern, time limit, Ctrl+C, non-interactive report to C++), build without navigation, incremental dev reload/error/recovery/Ctrl+C, the Life preview, C++ generation/animation and repeatable header generation. Its CTest fixtures then build that
 **browser-generated** header and run `LifeEmbeddedIntegration` from an empty working directory
 with no developer callbacks.
 Deadline and grace-period regressions advance a scoped clock instead of sleeping for seconds; Worker startup,

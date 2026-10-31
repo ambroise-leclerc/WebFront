@@ -120,7 +120,7 @@ sampled bounds, not precise unique-memory or process-creation counts. Pre-existi
 sccache server and its compiler children can fall outside this process family; sccache's own statistics complement the
 sampled build report. It preserves the measured command's failure status.
 
-`DeveloperBrowserIntegration` emits begin/end timestamps for each major phase and every actual command, including
+`DeveloperBrowserIntegration` and its four sibling parts emit begin/end timestamps for each major phase and every actual command, including
 expected failures. `DeveloperSpecs` reports both ends of each spec. The driver reports browser opening/return and shutdown,
 and every suite case, so process-exit costs remain distinguishable. `LastTest-<pass>.log` keeps the full transcript of each pass; the suite
 runner raises the CTest output cap to 2 MiB per case so JUnit retains these details too. The analyzer ranks the emitted

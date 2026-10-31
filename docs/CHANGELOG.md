@@ -8,7 +8,10 @@
   `RunWithDeadline.sh` returns when its command does instead of at the deadline, which took 30 s from each of the six
   `ConsumerJasmine-*` cases under dash. It also gives the command its own process group when the shell has no job
   control. `WEBFRONT_MSVC_ANALYZE` (default ON) and `WEBFRONT_TEST_PCH` exist to measure `/analyze` and precompiled headers.
-  The `Build time study` workflow and `docs/BUILD_TIME_STUDY.md` hold the measurements and the decisions.
+  The `Build time study` workflow and `docs/BUILD_TIME_STUDY.md` hold the measurements and the decisions. The
+  MSVC code analysis and the examples are built by the master and weekly tier only, and `DeveloperBrowserIntegration`
+  is cut into five parts (`DeveloperBrowserIntegration`, `-scripts`, `-typescript`, `-jasmine`, `-terminal`) that
+  run in parallel from their own projects on ephemeral ports.
 
 - Reject a stale `UI` after its connection identifier is reused (#428): each connection gets a 64-bit
   generation, never reused, kept in the application next to its link. `UI`, `JsFunction` and

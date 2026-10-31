@@ -21,13 +21,20 @@ cmake -DBUILD_DIR=build -DLABEL_EXCLUDE=portability -P test/cmake/RunTestSuite.c
 
 ## Following a browser test live
 
-`DeveloperBrowserIntegration`, the `Automation*` cases and the `WfDriver*` cases run `wf` commands (`create`, `install`,
+`DeveloperBrowserIntegration` and its siblings `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine` and `-terminal`
+(the parts of `test/web/developer-specs.mjs`, which run in parallel on a port the system picks), the `Automation*` cases and the `WfDriver*` cases run `wf` commands (`create`, `install`,
 `build`, `dev`, `preview`, `embed`, ...) that can take several seconds each. CTest hides the output of a passing test, so
 to watch one:
 
 ```bash
 ctest --test-dir build -R DeveloperBrowserIntegration -V        # CTest prints the output as it arrives
 ctest --test-dir build -R DeveloperBrowserIntegration -N -V     # prints the command to run `developer_integration` directly
+```
+
+Run `developer_integration` with a fixtures directory and an output directory but no `--part=` to play every part in one
+session, as the test did before it was cut; `--part=app|scripts|typescript|jasmine|terminal` plays one.
+
+```bash
 ```
 
 The process prints a `Developer integration: <time>ms begin|end <step> durationMs=...` line for each phase and each

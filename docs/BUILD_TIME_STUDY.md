@@ -180,9 +180,9 @@ The suite takes 256 s on Linux and 271 s on Windows (run 41134609687). Measured 
   each instantiates its own frontend type, so a merged executable would still instantiate every type once. The CTest cases
   would also lose their separate process, which is what several of them prove (exit status, hang, early close).
 
-## What is left, and why it is not done
+## What was left after the first pass, and what was done about it
 
-After these changes a desktop job spends its time as follows (run 41177164644, a pull request that touches a core header):
+After the changes above a desktop job spends its time as follows (run 41177164644, a pull request that touches a core header):
 
 | Step | Linux | Windows |
 |---|---|---|
@@ -196,15 +196,15 @@ After these changes a desktop job spends its time as follows (run 41177164644, a
 The compiler-cache probe after the suite (a clean rebuild of `life_embedded`, `life_journey` and the consumer, run for #388) costs
 1 to 2 s, so it is not worth removing.
 
-- **`DeveloperBrowserIntegration`** (59 to 113 s) is the longest case and ends the dependency chain (`SelfBuildSession` ->
-  `DeveloperBrowserIntegration` -> `LifeEmbeddedBuild`). It is one 1,061-line script (`test/web/developer-specs.mjs`) run in one
-  browser over one project: later sections rely on the packages, lock and files the earlier ones installed (`terminal and sessions`
-  32 s, `Life preview and bridge` 21 s, `Jasmine runs` 17 s, the TypeScript installs 12 + 8 s). Splitting it into parallel CTest
-  cases means giving each section its own project and setup, and it also produces the generated `LifeUI.hpp` that
-  `LifeEmbeddedBuild` compiles. That is a rewrite of the test, to be validated on all three frontends; it is not a build-time
-  tweak and was left alone.
-- **`/analyze`** and **the examples** (61 to 67 s each on MSVC) cost Windows compile time, but moving either to another job does
-  not shorten a pull request: a parallel job that compiles the same code takes as long, and the pull request waits for both.
-  Only dropping them from the pull-request path (`/analyze` into the `master` tier, the examples into one job) shortens it, and
-  that removes a check from every pull request into `develop`. The numbers are above (about 22 % of a Windows build for
-  `/analyze`, about 190 s of compiler time for the examples) so the maintainers can decide.
+- **`/analyze` and the examples** (about 22 % of a Windows build, and 61 to 67 s each on MSVC) moved to the master tier. Putting
+  them in a parallel job would not have shortened a pull request, which waits for both, so a pull request into `develop` no longer
+  builds either; the weekly run, a pull request into `master`, a push to `master` and a manual dispatch with
+  `repeat_desktop_tests` do (`FULL_TIER` in `BuildAndTest.yml`, `docs/TEST_TIERS.md`).
+- **`DeveloperBrowserIntegration`** (59 to 113 s, the longest case, at the end of the chain `SelfBuildSession` ->
+  `DeveloperBrowserIntegration` -> `LifeEmbeddedBuild`) was one 1,061-line script in one browser over one project. It is now
+  five parts, selected by `developer_integration --part=<name>`: `app` (starter, build, `wf dev`, Life preview, embedding, and
+  the `LifeUI.hpp` that `LifeEmbeddedBuild` compiles), `scripts` (package commands, `wf run`, `wf exec`), `typescript`
+  (`wf check`), `jasmine` (`wf test`) and `terminal` (the terminal, sessions and history). Each part creates and initialises its
+  own project, installs what it needs and listens on a port the system picks, so none holds `webfront_port_9002`; with no
+  `--part` the executable plays them all in one session as before. Locally on macOS (WKWebView) the four cases other than `app`
+  take 3 to 6 s each once the environment is built.
