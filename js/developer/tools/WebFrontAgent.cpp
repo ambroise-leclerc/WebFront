@@ -137,6 +137,34 @@ void releaseWebView(std::chrono::milliseconds grace) noexcept {
         // Without the process list, the removal below still retries the transient errors.
     }
 }
+// The WebView2 processes can keep the profile open past the in-process retry, and the agent cannot wait longer when its
+// exit is forced. A detached shell, outside the agent's job and console, repeats the removal for about 20 s; false when
+// it cannot be started.
+bool removeAfterExit(const std::filesystem::path& path) noexcept {
+    try {
+        const auto profile = path.wstring();
+        // Inside quotes, cmd still expands these.
+        if (profile.find_first_of(L"%\"^!&") != std::wstring::npos)
+            return false;
+        std::wstring command = L"cmd.exe /d /c \"for /l %i in (1,1,20) do @if exist \"" + profile + L"\" (rmdir /s /q \""
+                             + profile + L"\" 2>nul & ping -n 2 127.0.0.1 >nul)\"";
+        STARTUPINFOW        startup{};
+        startup.cb = sizeof startup;
+        PROCESS_INFORMATION information{};
+        for (const DWORD breakaway : {DWORD{CREATE_BREAKAWAY_FROM_JOB}, DWORD{0}}) {
+            if (CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+                               CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | breakaway, nullptr, nullptr,
+                               &startup, &information)) {
+                CloseHandle(information.hThread);
+                CloseHandle(information.hProcess);
+                return true;
+            }
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
 #elif defined(__linux__)
 // The parent and state ('Z' for a zombie) of a process, from /proc/<pid>/stat; nothing when it is gone.
 std::optional<std::pair<pid_t, char>> processStat(pid_t pid) {
@@ -406,6 +434,8 @@ struct Profile {
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
                 continue;
             }
+            if (removeAfterExit(path))
+                return;
 #endif
             std::cerr << "Automation: cannot remove temporary profile: " << error.message() << '\n';
             return;

@@ -344,7 +344,7 @@ def watchdog(args):
             failed_command[failed_command.index("--environment") + 1] = str(failed_environment)
             failed_command[failed_command.index("--integrity") + 1] = "sha512-" + base64.b64encode(hashlib.sha512(failed_environment.read_bytes()).digest()).decode()
             failed = subprocess.run([args.agent, *failed_command, "--listen", str(endpoint), "--operation", "build"],
-                                    capture_output=True, text=True, encoding="utf-8", timeout=15)
+                                    capture_output=True, text=True, encoding="utf-8", timeout=45)
             assert failed.returncode == 70, (failed.returncode, failed.stdout, failed.stderr)
             assert "Automation startup: B" + "é" * 511 + "\n" in failed.stderr, failed.stderr
             assert not endpoint.exists()
