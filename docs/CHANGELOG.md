@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
+  `react::Store::flush()`, where the check throws first, as a call on a null pointer (`-Werror=nonnull`), and the unit
+  tests did not compile. The store now reaches its state through a checked reference. As GCC only runs this analysis
+  when it optimizes, GCC builds also compile `ReactStoreTests.cpp` at -O3 (`react_store_optimized`), so the Debug CI
+  job sees it too.
+
 - Reject a stale `UI` after its connection identifier is reused (#428): each connection gets a 64-bit
   generation, never reused, kept in the application next to its link. `UI`, `JsFunction` and
   `JsFunctionSender` carry it with the 16-bit identifier, so a value kept after its connection closed finds no
