@@ -59,7 +59,8 @@ hosted runner. Adopted (`BuildAndTest.yml`, desktop jobs).
 ### Grouping the heavy units of `tests`
 
 `WEBFRONT_TEST_UNITY_BATCH=N` with `WEBFRONT_TEST_UNITY_HEAVY=ON` compiles the 13 heavy units of `tests` N to a file and
-leaves the 140 light units alone. The `header`, `heavy-test` and `light-test` columns are the cost of a pull request that
+leaves the 33 other test files alone (the optional ones
+enabled by a configuration come on top). The `header`, `heavy-test` and `light-test` columns are the cost of a pull request that
 changes `WebFront.hpp`, `WebFrontTests.cpp` or `MimeTypeTests.cpp` with a complete cache.
 
 Windows (median [range] of three runs, `-j4`):

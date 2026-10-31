@@ -25,7 +25,9 @@ def main(directory):
             for name in ORDER:
                 scenarios = [rep['scenarios'][name] for rep in report['reps'] if name in rep['scenarios']]
                 if not scenarios:
-                    cells.append('-')
+                    # A configuration that failed has no scenario at all: say so instead of printing dashes.
+                    errors = sorted({rep['error'] for rep in report['reps'] if rep.get('error')})
+                    cells.append('FAIL: ' + ', '.join(errors) if errors else '-')
                     continue
                 walls = sorted(scenario['wall_seconds'] for scenario in scenarios)
                 text = f"{statistics.median(walls):.0f}" + (' FAIL' if any(scenario['exit_code'] for scenario in scenarios) else '')

@@ -45,6 +45,10 @@ jobs:
           import re
           tagged = re.search(r'\[variants:([^\]]*)\]', os.environ.get('MESSAGE', ''))  # a push selects variants this way
           requested = [v for v in (tagged.group(1) if tagged else os.environ.get('REQUESTED', '')).replace(' ', '').split(',') if v] or all_variants
+          # The names reach a matrix, artifact names and file names: nothing outside the list may.
+          invalid = sorted(set(requested) - set(all_variants))
+          if invalid:
+              raise SystemExit('Unknown study variant(s): ' + ', '.join(invalid))
           # /analyze exists on MSVC only: its variants have no Linux counterpart.
           reps = re.search(r'\[windows-reps:(\d+)\]', os.environ.get('MESSAGE', ''))
           # Hosted Windows runners vary a lot from one job to the next: repeat there, Linux is stable.
@@ -101,8 +105,12 @@ jobs:
           (cl 2>&1 | head -1) || g++ --version | head -1
       - name: Measure
         shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+          STUDY_OS: ${{ matrix.os }}
+          REP: ${{ matrix.rep }}
         run: |
-          v="${{ matrix.variant }}"
+          v="$VARIANT"
           case "$v" in
             base-all-j2)        jobs=2; target=all;   extra="" ;;
             base-all-j4)        jobs=4; target=all;   extra="" ;;
@@ -118,7 +126,7 @@ jobs:
             unity-all-b*)       jobs=4; target=tests; extra="-DWEBFRONT_TEST_UNITY_BATCH=${v#unity-all-b}" ;;
             *) echo "unknown variant"; exit 1 ;;
           esac
-          if [ "${{ matrix.os }}" = windows ]; then
+          if [ "$STUDY_OS" = windows ]; then
             config=Release
             platform="-DWEBFRONT_EMBED_WEBVIEW2=ON -DWEBFRONT_WEBTEST_FRONTEND=WebView2"
           else
@@ -126,8 +134,8 @@ jobs:
             platform="-DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DENABLE_COVERAGE=ON -DWEBFRONT_REQUIRE_REFLECTION_TESTS=ON"
           fi
           # shellcheck disable=SC2086
-          python3 test/tools/BuildStudy.py --name "${{ matrix.os }}-${{ matrix.variant }}" --build-dir study/build \
-            --jobs "$jobs" --target "$target" --config "$config" --rep ${{ matrix.rep }} --output "study/${{ matrix.os }}-${{ matrix.variant }}-r${{ matrix.rep }}.json" \
+          python3 test/tools/BuildStudy.py --name "$STUDY_OS-$VARIANT" --build-dir study/build \
+            --jobs "$jobs" --target "$target" --config "$config" --rep "$REP" --output "study/$STUDY_OS-$VARIANT-r$REP.json" \
             -- $platform $extra
       - uses: actions/upload-artifact@v4
         if: always()
@@ -180,13 +188,19 @@ jobs:
             -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF "-DCMAKE_CXX_FLAGS=$flags"
           mkdir -p profile
           # One minimal application (HelloWorld) and the two heaviest units of the tests, one at a time (-j1: clean timings).
+          failed=0
           for object in examples/CMakeFiles/HelloWorld.dir/hello-world/HelloWorld.cpp test/unit/CMakeFiles/tests.dir/WebFrontTests.cpp test/unit/CMakeFiles/tests.dir/DeveloperTests.cpp; do
             suffix=o; [ "${{ matrix.os }}" = windows ] && suffix=obj
             name=$(basename "$object")
-            ( cd build && ninja -j1 -v "$object.$suffix" ) > "profile/$name.log" 2>&1 || tail -n 30 "profile/$name.log"
+            if ! ( cd build && ninja -j1 -v "$object.$suffix" ) > "profile/$name.log" 2>&1; then
+              tail -n 30 "profile/$name.log"
+              failed=1
+            fi
           done
           find build -name '*.json' -path '*CMakeFiles*' -newer build/CMakeCache.txt -exec cp {} profile/ \; 2>/dev/null || true
           ls -la profile
+          # A profile of a unit that did not compile is no profile: the artifact is still uploaded, the step fails.
+          exit $failed
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -19,13 +19,20 @@ case $- in
         ;;
 esac
 command_pid=$!
+# Where the command has no group of its own (a shell without job control, and no setsid), the deadline walks its descendants.
+kill_tree() {
+    for child in $(pgrep -P "$1" 2>/dev/null); do
+        kill_tree "$child"
+    done
+    kill -s KILL "$1" 2>/dev/null
+}
 (
     sleep "$limit" &
     sleeper=$!
     trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
     wait "$sleeper" || exit 0
     : > "$expired"
-    kill -s KILL -- "-$command_pid" 2>/dev/null || kill -KILL "$command_pid" 2>/dev/null
+    kill -s KILL -- "-$command_pid" 2>/dev/null || kill_tree "$command_pid"
 # The watchdog must not hold the caller's output pipes: the caller waits for them to close, so a sleeping watchdog would
 # delay a command that already finished until the deadline (30 s per Jasmine case under dash, which has no job control here).
 ) >/dev/null 2>&1 &

@@ -65,7 +65,9 @@ endif()
 foreach(_source IN LISTS TESTS_LIST)
   cmake_path(GET _source STEM _stem)
   if(NOT _stem IN_LIST _heavy)
-    if(WEBFRONT_TEST_UNITY_HEAVY)
+    # SKIP_PRECOMPILE_HEADERS spares a source file, not the unity file it would be included in: with a precompiled header the
+    # light units stay out of the unity files as well.
+    if(WEBFRONT_TEST_UNITY_HEAVY OR WEBFRONT_TEST_PCH)
       set_source_files_properties(${_source} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
     endif()
     # WebFront.hpp declares names the light units define themselves (MSVC C4459): they must not receive it.
