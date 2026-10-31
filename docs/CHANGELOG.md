@@ -13,6 +13,7 @@
   is cut into five parts (`DeveloperBrowserIntegration`, `-scripts`, `-typescript`, `-jasmine`, `-terminal`) that
   run in parallel from their own projects on ephemeral ports. The reproducibility builds of the self-built environment
   (`WEBFRONT_TEST_REPRODUCIBILITY`, default ON) are left out of a pull request into `develop` that changes none of their inputs.
+## 0.6.0 - 2026-10-31
 
 - Build the React store tests in Release with GCC 16 (#429): at -O2 and above, GCC reported the moved-from path of
   `react::Store::flush()`, where the check throws first, as a call on a null pointer (`-Werror=nonnull`), and the unit

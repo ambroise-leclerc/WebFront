@@ -579,7 +579,7 @@ if(_browser_tests_available)
         set_tests_properties(JourneySessionProject PROPERTIES FIXTURES_SETUP JourneySessionProject LABELS "web-integration" TIMEOUT 30)
         webfront_add_driver_suite(WfDriverSession PROJECT "${_wf_project}" REQUIRES WfDriverProject DeveloperFixtures)
         webfront_add_driver_suite(JourneyStartSession PROJECT "${_journey}" REQUIRES JourneySessionProject DeveloperFixtures)
-        webfront_add_driver_suite(JourneyBuildSession PROJECT "${_journey}" REQUIRES JourneyConfigured DeveloperFixtures)
+        webfront_add_driver_suite(JourneyBuildSession PROJECT "${_journey}" REQUIRES JourneyDeclared DeveloperFixtures)
         webfront_add_driver_suite(JourneyRestoreSession PROJECT "${_journey}" REQUIRES JourneyCacheEmptied DeveloperFixtures)
         webfront_add_driver_suite(SelfBuildSession PROJECT "${_self_project}" MANIFEST_DIR js/developer PINNED
             REQUIRES SelfBuildProject TestRegistry)
