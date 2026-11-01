@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -188,7 +188,9 @@ pour cette connexion** est retenu :
 1. **Natif** — utilisable seulement si la connexion est **associée explicitement à la vue d'un frontend intégré** de
    l'application (secret propre au lancement, présenté par la vue lors de la poignée de main) et si l'hôte a un
    affichage. Une adresse de boucle locale ne suffit jamais : un navigateur distant derrière un proxy local ou un
-   tunnel, ou un autre utilisateur de la machine, y arrivent aussi. Avec le navigateur système, aucune association
+   tunnel, ou un autre utilisateur de la machine, y arrivent aussi. L'association de lancement du navigateur système
+   (règle 4) suffit au transport des fichiers, pas aux dialogues natifs : son secret transite par une ligne de commande
+   et un historique. Avec le navigateur système, aucune association de vue
    n'est possible : le natif y est indisponible **par défaut**. Seule exception, une option de confiance que
    l'application active explicitement dans sa configuration (par exemple `trustLoopbackClients = true`, désactivée par
    défaut) rend le natif utilisable pour les connexions de boucle locale ; elle réintroduit la déduction par adresse
@@ -243,8 +245,14 @@ lève).
   secret à usage unique reçu par le pont contre un cookie `HttpOnly`, `SameSite=Strict`, limité au chemin des
   services. Un cookie est partagé par tous les onglets d'un même profil pour une origine : il identifie donc un
   **client** (profil de navigateur), pas une connexion. Le serveur associe à ce client l'ensemble de ses connexions ;
-  une connexion qui présente déjà un cookie valide lors de l'échange rejoint ce client au lieu d'en créer un. Un jeton
-  est accepté si le cookie présenté désigne le client de la connexion propriétaire, tant que celle-ci est ouverte. La
+  une connexion qui présente déjà un cookie valide lors de l'échange rejoint ce client au lieu d'en créer un.
+  **Échanges simultanés** : deux onglets d'un profil vierge peuvent échanger en même temps sans cookie et créer deux
+  clients. Pour qu'aucun `Set-Cookie` n'écrase l'autre, chaque cookie porte un **nom propre à son client**
+  (`wf-client-<id>`, valeur secrète) : les deux coexistent dans le profil et le navigateur les joint tous deux aux
+  requêtes. Un jeton est accepté si **l'un** des cookies présentés désigne le client de la connexion propriétaire, tant
+  que celle-ci est ouverte. Les cookies dont le serveur a oublié le client (dernière connexion fermée) sont effacés
+  (`Max-Age=0`) lors d'un échange ultérieur ; un échange qui présente déjà un cookie valide n'en crée pas, ce qui borne
+  leur nombre au nombre d'échanges réellement concurrents. La
   garantie est la possession du cookie : la même URL rejouée depuis un **autre client** (autre navigateur, autre
   profil, autre machine, client HTTP) est refusée (`403`, sans indiquer si le jeton existe), mais une autre page de la
   même origine dans le même profil peut la lire. Ce n'est pas une perte : ces pages partagent déjà stockage, cookies et
@@ -253,14 +261,34 @@ lève).
   et aux plages média encore inégalement interceptées : elle est écartée. Si le navigateur refuse le cookie, la lecture échoue explicitement, sans repli. Un **mode transférable**,
   explicite et à durée courte obligatoire, fait du jeton seul une capacité au porteur, documentée comme telle, pour
   remettre une URL à une application externe.
-- **Exposition du jeton et du contenu.** Chaque réponse de lecture porte `Cache-Control: no-store` et
-  `Referrer-Policy: no-referrer` ; le jeton n'apparaît dans aucun journal HTTP ni diagnostic (chemin masqué). WebFront
-  ne fournit pas TLS (ADR-008) : sur la boucle locale, le contenu ne quitte pas l'hôte ; pour un client distant, une
-  lecture en HTTP clair expose jeton, cookie et contenu à tout observateur du réseau. Les lectures et écritures de
-  fichiers pour un client distant exigent donc un transport chiffré fourni par le déploiement (mandataire inverse
-  TLS, tunnel chiffré, réseau isolé de confiance) ; sans lui, l'application doit l'accepter explicitement
-  (`allowPlaintextRemote`, désactivé par défaut), et le service refuse sinon la lecture distante. Le cookie de liaison
-  porte `Secure` lorsque la page est servie en HTTPS.
+- **Contenu actif neutralisé.** Le contenu lu est servi sur l'origine applicative : un fichier HTML, SVG ou XML hostile
+  ouvert par son URL exécuterait ses scripts avec l'autorité du pont et l'accès aux racines exposées, et le cookie de
+  liaison n'y changerait rien. Chaque réponse de lecture porte donc, quel que soit le fichier :
+  `Content-Security-Policy: sandbox; default-src 'none'` (un document ouvert par navigation reçoit une origine opaque,
+  sans script, sans formulaire ni accès au pont), `X-Content-Type-Options: nosniff`,
+  `Cross-Origin-Resource-Policy: same-origin`, et `Content-Disposition: attachment` (avec le nom du fichier) sauf pour
+  une liste fermée de types passifs affichables (images matricielles, audio, vidéo, `text/plain`). Les types actifs
+  (`text/html`, `application/xhtml+xml`, `image/svg+xml`, XML, JavaScript, `application/wasm`) ne sont jamais servis
+  en ligne ; HTML, XML, JavaScript et WebAssembly sont servis en `application/octet-stream`. Un SVG garde son type pour
+  rester affichable par `<img>`, qui n'exécute pas de script, mais une navigation vers son URL le télécharge. Une
+  application qui doit afficher un document actif utilise une origine distincte sans accès au pont (autre port ou
+  autre hôte) : option de déploiement à décider le moment venu, pas un défaut.
+- **Exposition du jeton.** Chaque réponse de lecture porte `Cache-Control: no-store` et `Referrer-Policy: no-referrer` ;
+  le jeton n'apparaît dans aucun journal HTTP ni diagnostic (chemin masqué). Le cookie de liaison porte `Secure`
+  lorsque la page est servie en HTTPS.
+- **Transport : déclaré, jamais déduit.** WebFront ne fournit pas TLS (ADR-008) et ne peut pas savoir comment un client
+  l'atteint : un mandataire ou un tunnel présente une connexion de boucle locale pour un client distant, et des en-têtes
+  `Forwarded`/`X-Forwarded-*` peuvent être forgés. WebFront ne lit donc **ni l'adresse ni ces en-têtes** pour décider.
+  Une connexion est de transport local seulement si elle est **associée** : à la vue d'un frontend intégré (secret de
+  lancement présenté par la vue), ou au navigateur système que WebFront a lui-même lancé (secret à usage unique et de
+  courte durée transmis dans le fragment de l'URL ouverte, présenté par `WebFront.js` lors de la poignée de main ;
+  limite documentée : la ligne de commande du navigateur est lisible par les autres utilisateurs de certaines machines
+  et l'URL reste dans son historique, d'où l'usage unique ; un secret volé fait échouer visiblement l'association du
+  navigateur légitime). Pour toute autre connexion, le transport est inconnu, quelle que soit son adresse : lectures
+  et écritures de fichiers y sont refusées, sauf déclaration explicite de l'application sur son déploiement
+  (`remoteFileTransport` : `refused` par défaut, `encryptedByDeployment` lorsque le déploiement chiffre, par exemple
+  un mandataire inverse TLS, `plaintextAccepted` sur un réseau isolé de confiance). Cette déclaration est une
+  attestation de l'intégrateur, que WebFront ne vérifie pas ; la documentation le dit.
 - Listage : paginé, par un type filaire « liste » de chaînes et de tuples à ajouter à l'ADR-003 ; le codage d'une
   liste en JSON dans une chaîne est écarté.
 
@@ -370,7 +398,12 @@ autorisations explicites, backend par connexion).
    test de construction ; dialogue sur le thread de l'interface, parent connu avec un frontend intégré ; fermeture de
    l'application pendant un dialogue ouvert sans blocage ni accès après destruction.
 5. **Lecture par jeton** : `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, jeton absent des journaux ;
-   lecture distante en HTTP clair refusée sans `allowPlaintextRemote` ; `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
+   connexion non associée refusée sans `remoteFileTransport`, y compris lorsqu'elle arrive par un mandataire HTTP sur la
+   boucle locale ou porte des en-têtes `Forwarded`/`X-Forwarded-Proto: https` forgés ; navigateur système lancé par
+   WebFront associé, secret de lancement rejoué refusé ; deux onglets d'un profil vierge qui échangent simultanément
+   (réponses retardées par le test) lisent tous deux leurs URL ; HTML et SVG hostiles ouverts par navigation de premier
+   niveau et dans un `<iframe>` : aucun script exécuté, aucune connexion au pont, téléchargement pour le HTML ; SVG
+   toujours affichable par `<img>` ; `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
    mémoire du serveur indépendante de la taille du fichier servi ; plusieurs requêtes `Range` successives avec le même
    jeton, positionnement et reprise d'une `<video>`, renouvellement avant expiration ; même URL rejouée depuis un
    autre client (autre profil ou navigateur, client HTTP) sans le cookie refusée, acceptée seulement en mode
@@ -420,8 +453,13 @@ autorisations explicites, backend par connexion).
   peuvent lire les URL les unes des autres.
 - **Coût accepté :** un cookie de liaison par client, à qualifier dans chaque moteur ; les téléchargements gérés par
   l'adaptateur doivent le présenter.
-- **Risque :** WebFront ne chiffre pas ; un client distant sans transport chiffré fourni par le déploiement expose
-  jeton et contenu. La lecture distante en clair est refusée sauf acceptation explicite.
+- **Risque :** WebFront ne chiffre pas et ne peut pas attester le transport ; `remoteFileTransport` repose sur la
+  déclaration de l'intégrateur. Une déclaration fausse expose jeton et contenu. Par défaut, toute connexion non
+  associée est refusée.
+- **Coût accepté :** les fichiers actifs ne s'affichent pas en ligne ; un aperçu HTML ou un SVG interactif exige une
+  origine distincte.
+- **Coût accepté :** plusieurs cookies de liaison peuvent coexister brièvement dans un profil après des échanges
+  simultanés.
 - **Risque :** en mode transférable, toute personne qui obtient l'URL lit le fichier pendant sa validité ; ce mode est
   explicite, de courte durée et absent par défaut.
 - **Risque :** la configuration de confiance du navigateur système réintroduit la déduction par adresse ; elle reste
@@ -446,8 +484,10 @@ autorisations explicites, backend par connexion).
   contrôle syntaxique.
 - Ne jamais fonder une autorisation sur l'adresse de la connexion ; seule l'association à la vue d'un frontend, ou la
   configuration de confiance explicite, rend le backend natif utilisable.
-- Servir le contenu des fichiers en flux borné, jamais par copie complète en mémoire, avec `Cache-Control: no-store`
-  et `Referrer-Policy: no-referrer` ; ne jamais journaliser un jeton.
+- Servir le contenu des fichiers en flux borné, jamais par copie complète en mémoire, avec `Cache-Control: no-store`,
+  `Referrer-Policy: no-referrer`, la politique `sandbox` et `nosniff` ; ne jamais servir en ligne un type actif ; ne
+  jamais journaliser un jeton.
+- Ne jamais déduire le transport ni la localité de l'adresse ou des en-têtes `Forwarded`/`X-Forwarded-*`.
 - Ouvrir les dialogues natifs sur le thread de l'interface, avec le parent de l'adaptateur quand il existe ; la tâche
   qui attend le résultat est possédée et annulable (ADR-006).
 - Préférer le portail XDG sous Linux ; ne pas lancer de programme externe pour afficher un dialogue.
