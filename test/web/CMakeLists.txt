@@ -166,6 +166,11 @@ if(_browser_tests_available)
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/${mode}.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer"
             ${programs})
+        if(mode STREQUAL "host-denied")
+            # A grant in the inherited environment must not reach a test that has none.
+            set_tests_properties(ConsumerJasmine-host-denied PROPERTIES ENVIRONMENT
+                "WEBFRONT_JASMINE_HOST=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/ConsumerJasmine-host/host-$<CONFIG>.json")
+        endif()
         if(DEFINED _reason_${mode})
             set_tests_properties(ConsumerJasmine-${mode} PROPERTIES PASS_REGULAR_EXPRESSION "${_reason_${mode}}")
         endif()

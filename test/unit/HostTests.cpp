@@ -428,3 +428,17 @@ SCENARIO("A program does not outlive an application killed without a destructor"
     }
 }
 #endif
+
+SCENARIO("A program that keeps its pipes full cannot hold off the deadline") {
+    auto spec           = probeSpec({"flood"});
+    spec.timeout        = 300ms;
+    spec.maxOutputBytes = 1000;
+    const auto begin    = std::chrono::steady_clock::now();
+    const auto result   = run(spec);
+    THEN("the timeout is honoured and the output stays bounded") {
+        REQUIRE(result.status == ProcessStatus::timeout);
+        REQUIRE(std::chrono::steady_clock::now() - begin < 5s);
+        REQUIRE(result.standardOutput.size() == 1000);
+        REQUIRE(result.standardError.size() == 1000);
+    }
+}

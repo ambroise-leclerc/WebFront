@@ -497,11 +497,11 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
     outWrite.reset();
     errWrite.reset();
 
-    bool       statusLost = false;
-    const auto killGroup  = [pid, &statusLost] {
+    bool statusLost = false;
+    // Only while the program is not reaped: its number, and its group's, are reserved until then.
+    const auto killGroup = [pid] {
         ::kill(-pid, SIGKILL);
-        if (!statusLost)
-            ::kill(pid, SIGKILL);  // Not once reaped: the number may belong to another process by now.
+        ::kill(pid, SIGKILL);
     };
     const auto deadline = begin + spec.timeout;
     bool       exited = false, timedOut = false, cancelled = false;
@@ -527,7 +527,9 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         for (nfds_t index = 0; index < count; ++index) {
             auto& descriptor = owners[index] == 0 ? outRead : errRead;
             char  buffer[8192];
-            for (;;) {
+            // A bounded amount per turn: a program that keeps its pipe full must not starve the other stream, the
+            // deadline or the cancellation, which are checked after every turn.
+            for (int reads = 0; reads < 16; ++reads) {
                 const auto got = ::read(descriptor.fd, buffer, sizeof buffer);
                 if (got > 0) {
                     owners[index] == 0
@@ -542,12 +544,20 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         }
         const auto now = std::chrono::steady_clock::now();
         if (!exited) {
-            const pid_t reaped = ::waitpid(pid, &waitStatus, WNOHANG);
-            // ECHILD: the application ignores SIGCHLD, so the system reaped the program and kept no status.
-            if (reaped == pid || (reaped < 0 && errno == ECHILD)) {
-                statusLost = reaped < 0;
+            // Look without reaping: the program's number, and its group's, stay reserved while it is a zombie, so the
+            // group can be killed before any other process may receive them.
+            siginfo_t info{};
+            const int waited = ::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT);
+            if (waited == 0 && info.si_pid == pid) {
+                ::kill(-pid, SIGKILL);  // Whatever the program left running in its group ends with it.
+                ::waitpid(pid, &waitStatus, 0);
+                exited   = true;
+                drainEnd = now + processDrainGrace;
+            } else if (waited < 0 && errno == ECHILD) {
+                // The application ignores SIGCHLD, so the system reaped the program and kept no status.
+                statusLost = true;
                 exited     = true;
-                killGroup();  // Whatever the program left running in its group ends with it.
+                ::kill(-pid, SIGKILL);
                 drainEnd = now + processDrainGrace;
             } else if (cancel.load() && !cancelled && !timedOut) {
                 cancelled = true;

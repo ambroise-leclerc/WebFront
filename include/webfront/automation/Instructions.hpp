@@ -7,6 +7,7 @@ inline constexpr std::string_view agentInstructions = R"(WebFront developer auto
 2. Ask the owner to launch a developer window with --serve --listen DIRECTORY and explicit --allow grants.
    Attach only to the exact directory supplied by the owner; never discover or read unrelated endpoints.
 3. Run `webfront-agent --attach DIRECTORY --operation check` or build/test/preview as authorized.
+   Setup operations init, create, install, restore and embed need their own grants and plain arguments.
    Add --entry or --pattern only for the operation that accepts it. No shell string is interpreted.
    Attached responses have a 30-second budget; --request-timeout SECONDS changes it (1..3600).
 4. Read JSON state and result.exitCode. A failed operation is not a successful verification.

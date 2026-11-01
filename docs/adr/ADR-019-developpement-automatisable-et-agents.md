@@ -78,7 +78,10 @@ longue rend un runId consultable ; le chemin `connectAutomation` borne les sorti
 les coupures par `truncated`, alors que `runNonInteractive` conserve par défaut sa sortie complète. L'annulation est coopérative,
 ne revient pas sur une publication commise et ne garantit pas d'arrêter le JavaScript déjà lancé.
 Un résultat perdu après une mutation est signalé comme incertain, jamais rejoué automatiquement.
-Installation/restauration réseau, wf run/exec et callbacks C++ arbitraires ne sont pas des outils MCP.
+wf run/exec et callbacks C++ arbitraires ne sont pas des outils MCP. Amendement (#466) : `init`, `create`, `install`,
+`restore` et `embed` sont des opérations du contrat, chacune sous sa propre permission explicite du propriétaire ;
+`install`/`restore` n'utilisent que le registre déjà configuré (jamais choisi par l'agent) et les arguments restent
+des noms simples ou des chemins relatifs au projet.
 
 ### CLI et MCP local stdio
 

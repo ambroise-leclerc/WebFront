@@ -64,7 +64,10 @@ void (async () => {
         const environment = await response.json();
         const runtime = await import('/webfront/developer/environment/'+environment.entry);
         if (typeof runtime.connectAutomation !== 'function') throw new Error('This environment has no automation API v1; provision an updated environment');
-        runtime.connectAutomation({bridge:webFront,call,config,preview:document.getElementById('preview')});
+        const supported = Array.isArray(runtime.automationOperations) ? runtime.automationOperations : [];
+        for (const [operation, since] of __VERSIONED__)
+            if (!supported.includes(operation)) throw new Error('This environment cannot run granted operation '+operation+'; provision environment '+since+' or later');
+        runtime.connectAutomation({bridge:webFront,call,config,environment,preview:document.getElementById('preview')});
     } catch (error) {
         await call('failed',failureText(error?.message ?? error)).catch(() => {});
         window.close();
@@ -72,8 +75,13 @@ void (async () => {
 })();
 )JS";
 
-inline std::string connectionScript(std::string_view capability) {
+inline std::string connectionScript(std::string_view capability, const std::vector<std::pair<std::string, std::string>>& versioned = {}) {
     std::string script{connectionScriptTemplate};
+    std::string list = "[";
+    for (const auto& [operation, since] : versioned)
+        list += (list.size() > 1 ? "," : "") + std::string("[") + json::quote(operation) + "," + json::quote(since) + "]";
+    list += "]";
+    script.replace(script.find("__VERSIONED__"), std::string_view("__VERSIONED__").size(), list);
     script.replace(script.find("__CAPABILITY__"), std::string_view("__CAPABILITY__").size(), capability);
     return script;
 }
@@ -114,7 +122,7 @@ public:
                 throw std::runtime_error("Automation window claim rejected");
             owned->browser = ui;
             owned->launchToken.clear();  // one successful claim; later connections cannot replace the selected browser
-            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret()));
+            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret(), owned->session->versionedOperations()));
             return std::string{"null"};
         });
         app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string sequence, std::string mac, std::string output) {

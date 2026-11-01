@@ -34,7 +34,8 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
-lease; version 0.6.2 predates that API. Publication and pin changes follow
+lease; version 0.6.2 predates that API. The sources advance to 0.6.4 (project setup operations in the automation
+runner), which is not published yet; the release pin stays on the published 0.6.3. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md), with deployment verified before merging a new pin.
 
 ## Minimal C++ application

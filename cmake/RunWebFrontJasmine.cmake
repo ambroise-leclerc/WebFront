@@ -3,7 +3,8 @@ file(REMOVE "${DIRECTORY}/report.json")
 file(REMOVE_RECURSE "${DIRECTORY}/captures")
 # The temporary spaces of the specs never survive into the next run, even if the previous one was killed.
 file(REMOVE_RECURSE "${DIRECTORY}/temp")
-set(host_environment "")
+# An inherited grant must never reach a test that has none: an empty value is read as no grant.
+set(host_environment "[==[WEBFRONT_JASMINE_HOST=]==]")
 if(HOST)
     # The owner's native grant (webfront_add_jasmine_test PROGRAMS); without it the application reads no such file.
     set(host_environment "[==[WEBFRONT_JASMINE_HOST=${DIRECTORY}/host-${CONFIG}.json]==]")

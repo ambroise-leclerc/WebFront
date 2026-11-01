@@ -73,7 +73,7 @@ function validStarter(starter) {
     return String(starter.integrity).startsWith('sha512-');
 }
 
-function pinnedStarters(manifest, environmentUrl) {
+export function pinnedStarters(manifest, environmentUrl) {
     return Object.fromEntries(Object.entries(manifest.starters ?? {}).map(([name, starter]) => {
         if (!validStarter(starter)) throw new Error('Invalid pinned starter metadata');
         return [name, {url: new URL(starter.archive, environmentUrl).href, integrity: starter.integrity}];

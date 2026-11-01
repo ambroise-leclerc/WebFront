@@ -62,6 +62,13 @@ int main(int argc, char** argv) {
             std::cout.write(block.data(), static_cast<std::streamsize>(std::min<unsigned long long>(block.size(), total - written)));
         return 0;
     }
+    if (mode == "flood") {  // Never stops writing to either stream.
+        const std::string block(65536, 'f');
+        for (;;) {
+            std::cout.write(block.data(), static_cast<std::streamsize>(block.size()));
+            std::cerr.write(block.data(), static_cast<std::streamsize>(block.size()));
+        }
+    }
     if (mode == "hang") {
         for (;;)
             sleepFor(100);
