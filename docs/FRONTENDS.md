@@ -104,20 +104,28 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 
 Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine or CEF is
 compiled in) and `webfront::EmbeddedWebFront` (always defined; the native web view when compiled in, otherwise CEF) tell an application what the build holds.
-Without an engine, constructing `EmbeddedWebFront` throws `std::runtime_error`, so the fallback is an ordinary `try`/`catch`:
+Without an engine, constructing `EmbeddedWebFront` throws `std::runtime_error`, so the fallback is an ordinary `try`/`catch`.
+Limit the `try` to the construction: `initialize()` runs there, which is where a missing engine or display fails. Serving
+stays outside, so an error of the server or of the application propagates instead of being taken for a frontend failure and
+serving a second time in the browser.
 
 ```cpp
+std::optional<webfront::EmbeddedWebFront> window;
 if constexpr (webfront::embeddedFrontendAvailable) {
     try {
-        webfront::EmbeddedWebFront window{config};
-        return serve(window);
-    } catch (const std::exception&) { /* fall back to the browser */ }
+        window.emplace(config);
+    } catch (const std::exception&) { /* no usable engine: fall back to the browser */ }
 }
+if (window)
+    return serve(*window);
 webfront::WebFront web{config};
 return serve(web);
 ```
 
-`if constexpr` keeps the absent branch from being instantiated when `serve` needs engine-specific members.
+`if constexpr` here is only a shortcut: the condition does not depend on a template parameter, so the discarded branch must
+still compile. That holds because `EmbeddedWebFront` is a complete application type in every build (without an engine its
+construction throws), so a `serve` generic over the application type compiles for both calls. To drop an instantiation that is
+invalid without an engine, make the selection dependent, for example by passing the type to a function template.
 
 `frontend::nativeWebViewAvailable` is `true` when this platform's native engine is compiled in. It says
 nothing about the session. `frontend::NativeOrBrowserFrontend` decides at run time: its `initialize()`
