@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -179,8 +179,10 @@ pour cette connexion** est retenu :
    l'application (secret propre au lancement, présenté par la vue lors de la poignée de main) et si l'hôte a un
    affichage. Une adresse de boucle locale ne suffit jamais : un navigateur distant derrière un proxy local ou un
    tunnel, ou un autre utilisateur de la machine, y arrivent aussi. Avec le navigateur système, aucune association
-   n'est possible ; le natif n'y est utilisable que par une configuration de confiance explicite de l'application,
-   documentée comme non sûre sur une machine partagée. Windows : `IFileOpenDialog`/`IFileSaveDialog` ;
+   n'est possible : le natif y est indisponible **par défaut**. Seule exception, une option de confiance que
+   l'application active explicitement dans sa configuration (par exemple `trustLoopbackClients = true`, désactivée par
+   défaut) rend le natif utilisable pour les connexions de boucle locale ; elle réintroduit la déduction par adresse
+   et n'est sûre que sur une machine mono-utilisateur sans tunnel ni proxy local. Windows : `IFileOpenDialog`/`IFileSaveDialog` ;
    macOS : `NSOpenPanel`/`NSSavePanel` par le runtime Objective-C déjà employé par WKWebView ; Linux : **portail XDG**
    `org.freedesktop.portal.FileChooser` par D-Bus, puis GTK quand WebKitGTK est déjà lié ; Android et iOS : sélecteurs du
    système, lors de leurs frontends. Le dialogue s'ouvre sur le thread de l'interface, avec la fenêtre de l'adaptateur
@@ -228,6 +230,14 @@ lève).
   existe). Si le navigateur refuse le cookie, la lecture échoue explicitement, sans repli. Un **mode transférable**,
   explicite et à durée courte obligatoire, fait du jeton seul une capacité au porteur, documentée comme telle, pour
   remettre une URL à une application externe.
+- **Exposition du jeton et du contenu.** Chaque réponse de lecture porte `Cache-Control: no-store` et
+  `Referrer-Policy: no-referrer` ; le jeton n'apparaît dans aucun journal HTTP ni diagnostic (chemin masqué). WebFront
+  ne fournit pas TLS (ADR-008) : sur la boucle locale, le contenu ne quitte pas l'hôte ; pour un client distant, une
+  lecture en HTTP clair expose jeton, cookie et contenu à tout observateur du réseau. Les lectures et écritures de
+  fichiers pour un client distant exigent donc un transport chiffré fourni par le déploiement (mandataire inverse
+  TLS, tunnel chiffré, réseau isolé de confiance) ; sans lui, l'application doit l'accepter explicitement
+  (`allowPlaintextRemote`, désactivé par défaut), et le service refuse sinon la lecture distante. Le cookie de liaison
+  porte `Secure` lorsque la page est servie en HTTPS.
 - Listage : paginé, par un type filaire « liste » de chaînes et de tuples à ajouter à l'ADR-003 ; le codage d'une
   liste en JSON dans une chaîne est écarté.
 
@@ -326,13 +336,15 @@ autorisations explicites, backend par connexion).
    absolus, noms Windows réservés), poignée inutilisable par une autre connexion, jeton expiré refusé, écriture
    atomique ; **remplacement concurrent** d'un composant par un lien vers l'extérieur de la racine pendant la lecture,
    l'écriture, la création, le renommage et la suppression, sans qu'aucune opération n'atteigne l'extérieur ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
-3. **Choix du backend** : connexion non associée à la vue d'un frontend → jamais natif, y compris depuis la boucle
-   locale (tunnel, autre utilisateur) ; sans racine → pas de HTML ; annulation → liste vide ; aucun
+3. **Choix du backend** : par défaut, connexion non associée à la vue d'un frontend → jamais natif, y compris depuis
+   la boucle locale (tunnel, autre utilisateur) ; avec l'option de confiance explicite, connexion de boucle locale →
+   natif possible, connexion distante → toujours HTML ; sans racine → pas de HTML ; annulation → liste vide ; aucun
    backend → erreur documentée côté C++ et JavaScript ; backends simulés pour les tests.
 4. **Natif** : un backend au moins par plateforme de bureau (portail XDG sous Linux), vérifié manuellement et par un
    test de construction ; dialogue sur le thread de l'interface, parent connu avec un frontend intégré ; fermeture de
    l'application pendant un dialogue ouvert sans blocage ni accès après destruction.
-5. **Lecture par jeton** : `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
+5. **Lecture par jeton** : `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, jeton absent des journaux ;
+   lecture distante en HTTP clair refusée sans `allowPlaintextRemote` ; `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
    mémoire du serveur indépendante de la taille du fichier servi ; plusieurs requêtes `Range` successives avec le même
    jeton, positionnement et reprise d'une `<video>`, renouvellement avant expiration ; même URL rejouée depuis un
    autre client sans le cookie de liaison refusée, acceptée seulement en mode transférable.
@@ -374,6 +386,8 @@ autorisations explicites, backend par connexion).
   dialogues et lire les fichiers accordés. Les autorisations limitent la portée, pas la confiance.
 - **Coût accepté :** un cookie de liaison par connexion, à qualifier dans chaque moteur ; les téléchargements gérés par
   l'adaptateur doivent le présenter.
+- **Risque :** WebFront ne chiffre pas ; un client distant sans transport chiffré fourni par le déploiement expose
+  jeton et contenu. La lecture distante en clair est refusée sauf acceptation explicite.
 - **Risque :** en mode transférable, toute personne qui obtient l'URL lit le fichier pendant sa validité ; ce mode est
   explicite, de courte durée et absent par défaut.
 - **Risque :** la configuration de confiance du navigateur système réintroduit la déduction par adresse ; elle reste
@@ -396,7 +410,8 @@ autorisations explicites, backend par connexion).
   contrôle syntaxique.
 - Ne jamais fonder une autorisation sur l'adresse de la connexion ; seule l'association à la vue d'un frontend, ou la
   configuration de confiance explicite, rend le backend natif utilisable.
-- Servir le contenu des fichiers en flux borné, jamais par copie complète en mémoire.
+- Servir le contenu des fichiers en flux borné, jamais par copie complète en mémoire, avec `Cache-Control: no-store`
+  et `Referrer-Policy: no-referrer` ; ne jamais journaliser un jeton.
 - Ouvrir les dialogues natifs sur le thread de l'interface, avec le parent de l'adaptateur quand il existe ; la tâche
   qui attend le résultat est possédée et annulable (ADR-006).
 - Préférer le portail XDG sous Linux ; ne pas lancer de programme externe pour afficher un dialogue.
