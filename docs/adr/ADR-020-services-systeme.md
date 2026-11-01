@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -202,8 +202,8 @@ lève).
 
 ### 4. Le contenu des fichiers ne passe pas par des chaînes du pont
 
-- Lecture : une poignée produit une URL `GET` à **jeton à usage unique ou à durée courte**, liée à la connexion ; le
-  contenu peut alimenter `<img>`, `<video>`, `fetch` ou un téléchargement. Un fournisseur de l'ADR-002 ne suffit pas :
+- Lecture : une poignée produit une URL `GET` à jeton ; le contenu peut alimenter `<img>`, `<video>`, `fetch` ou un
+  téléchargement (règles du jeton ci-dessous). Un fournisseur de l'ADR-002 ne suffit pas :
   il ne voit ni la requête ni les jetons. Cette lecture exige une **extension du traitement HTTP** : des routes
   dynamiques dont le gestionnaire reçoit la requête complète et produit statut, en-têtes et corps ; un envoi **en flux**
   par morceaux bornés, à la place de la copie du fichier entier dans la réponse, pour que la mémoire ne dépende pas de
@@ -212,6 +212,22 @@ lève).
 - Écriture : tant que le serveur ne traite que `GET`/`HEAD`, par morceaux de tableaux typés sur le pont, écrits dans un
   fichier temporaire puis validés par renommage, comme l'installation `wf` (ADR-010). L'ajout de `PUT`/`POST` au serveur
   relèvera de sa propre décision.
+- **Jeton de lecture.** Le jeton désigne une autorisation, pas une requête : il est **réutilisable** pendant la vie de
+  l'autorisation et de la connexion, pour que les requêtes `Range` successives d'une vidéo (positionnement, reprise
+  après pause ou coupure) aboutissent toutes. Il est aléatoire (au moins 128 bits), comparé en temps constant, absent
+  des journaux, et révoqué à la fermeture de la connexion, à la révocation de l'autorisation ou à son expiration
+  facultative. Avant l'expiration, la page obtient un nouveau jeton par la poignée (`handle.url()` rappelé) ; un élément
+  média dont le jeton expire en cours de lecture reprend à la position courante avec la nouvelle URL. Un jeton à usage
+  unique n'est qu'une option explicite pour un téléchargement ponctuel, jamais pour un média.
+- **Liaison à la connexion.** Une requête HTTP ne porte pas l'identité de la WebSocket, et `<img>` ou `<video>` ne
+  peuvent pas ajouter d'en-tête : un jeton seul est une capacité au porteur. Par défaut, une lecture exige donc le jeton
+  **et** un cookie de liaison propre à la connexion propriétaire : `WebFront.js` échange, par une requête `fetch` de
+  même origine, un secret à usage unique reçu par le pont contre un cookie `HttpOnly`, `SameSite=Strict`, limité au
+  chemin des services et nommé d'après la connexion. Le navigateur le joint de lui-même aux requêtes de `<img>`,
+  `<video>` et `fetch` ; la même URL rejouée depuis un autre client est refusée (`403`, sans indiquer si le jeton
+  existe). Si le navigateur refuse le cookie, la lecture échoue explicitement, sans repli. Un **mode transférable**,
+  explicite et à durée courte obligatoire, fait du jeton seul une capacité au porteur, documentée comme telle, pour
+  remettre une URL à une application externe.
 - Listage : paginé, par un type filaire « liste » de chaînes et de tuples à ajouter à l'ADR-003 ; le codage d'une
   liste en JSON dans une chaîne est écarté.
 
@@ -263,9 +279,9 @@ Le code vérifié le 2026-10-31 ne permet pas encore d'implémenter ces règles.
 | Étape | Épique | Tâches | Débloque |
 | --- | --- | --- | --- |
 | 1 | [#446](https://github.com/ambroise-leclerc/WebFront/issues/446) Comportements web standard dans les frontends intégrés | [#451](https://github.com/ambroise-leclerc/WebFront/issues/451) `<input type="file">` et téléchargements ; [#452](https://github.com/ambroise-leclerc/WebFront/issues/452) `alert`/`confirm`/`prompt` | fichiers du client (règle 6) ; corrige un défaut existant |
-| 2 | [#447](https://github.com/ambroise-leclerc/WebFront/issues/447) Connexions et routes du serveur HTTP | [#453](https://github.com/ambroise-leclerc/WebFront/issues/453) association explicite d'une `UI` à la vue d'un frontend ; [#454](https://github.com/ambroise-leclerc/WebFront/issues/454) routes dynamiques et envoi en flux ; [#455](https://github.com/ambroise-leclerc/WebFront/issues/455) `Range` (206) | choix du backend (règle 3), lecture par jeton (règle 4) |
+| 2 | [#447](https://github.com/ambroise-leclerc/WebFront/issues/447) Connexions et routes du serveur HTTP | [#453](https://github.com/ambroise-leclerc/WebFront/issues/453) association explicite d'une `UI` à la vue d'un frontend ; [#454](https://github.com/ambroise-leclerc/WebFront/issues/454) routes dynamiques et envoi en flux ; [#455](https://github.com/ambroise-leclerc/WebFront/issues/455) `Range` (206) ; [#469](https://github.com/ambroise-leclerc/WebFront/issues/469) liaison des requêtes HTTP à la connexion (jeton et cookie) | choix du backend (règle 3), lecture par jeton (règle 4) |
 | 3 | [#448](https://github.com/ambroise-leclerc/WebFront/issues/448) Types et contrats du pont | [#456](https://github.com/ambroise-leclerc/WebFront/issues/456) chaînes longues (32 bits) ; [#457](https://github.com/ambroise-leclerc/WebFront/issues/457) listes de chaînes et de tuples ; [#458](https://github.com/ambroise-leclerc/WebFront/issues/458) erreurs typées ; [#459](https://github.com/ambroise-leclerc/WebFront/issues/459) réponse différée des callbacks C++ | listages (règle 4), appels (règle 5) |
-| 4 | [#449](https://github.com/ambroise-leclerc/WebFront/issues/449) Stockage modifiable et livraison des services | [#460](https://github.com/ambroise-leclerc/WebFront/issues/460) stockage sous racines déclarées (révision de l'ADR-002) ; [#461](https://github.com/ambroise-leclerc/WebFront/issues/461) paquet `@webfront/services` | sélecteur HTML et écritures (règles 2 à 4) |
+| 4 | [#449](https://github.com/ambroise-leclerc/WebFront/issues/449) Stockage modifiable et livraison des services | [#460](https://github.com/ambroise-leclerc/WebFront/issues/460) stockage sous racines déclarées, confiné pendant la résolution (révision de l'ADR-002) ; [#461](https://github.com/ambroise-leclerc/WebFront/issues/461) paquet `@webfront/services` | sélecteur HTML et écritures (règles 2 à 4) |
 | 5 | [#450](https://github.com/ambroise-leclerc/WebFront/issues/450) Intégration native des frontends | [#462](https://github.com/ambroise-leclerc/WebFront/issues/462) exécuteur du thread d'interface, y compris le navigateur système ; [#463](https://github.com/ambroise-leclerc/WebFront/issues/463) fenêtre native et correspondance avec les connexions | backend natif seulement |
 
 Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
@@ -307,8 +323,9 @@ autorisations explicites, backend par connexion).
 1. **Comportements web standard** : `<input type="file">`, `alert`/`confirm` et un téléchargement fonctionnent dans CEF, WebView2,
    WKWebView et WebKitGTK ; scénario de la suite partagée, sélection simulée par le moteur quand il le permet.
 2. **Sélecteur HTML** : listage paginé borné, refus de toute sortie des racines (`..`, liens symboliques, chemins
-   absolus, noms Windows réservés : `SafePath`), poignée inutilisable par une autre connexion, jeton expiré refusé,
-   écriture atomique ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
+   absolus, noms Windows réservés), poignée inutilisable par une autre connexion, jeton expiré refusé, écriture
+   atomique ; **remplacement concurrent** d'un composant par un lien vers l'extérieur de la racine pendant la lecture,
+   l'écriture, la création, le renommage et la suppression, sans qu'aucune opération n'atteigne l'extérieur ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
 3. **Choix du backend** : connexion non associée à la vue d'un frontend → jamais natif, y compris depuis la boucle
    locale (tunnel, autre utilisateur) ; sans racine → pas de HTML ; annulation → liste vide ; aucun
    backend → erreur documentée côté C++ et JavaScript ; backends simulés pour les tests.
@@ -316,7 +333,9 @@ autorisations explicites, backend par connexion).
    test de construction ; dialogue sur le thread de l'interface, parent connu avec un frontend intégré ; fermeture de
    l'application pendant un dialogue ouvert sans blocage ni accès après destruction.
 5. **Lecture par jeton** : `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
-   mémoire du serveur indépendante de la taille du fichier servi.
+   mémoire du serveur indépendante de la taille du fichier servi ; plusieurs requêtes `Range` successives avec le même
+   jeton, positionnement et reprise d'une `<video>`, renouvellement avant expiration ; même URL rejouée depuis un
+   autre client sans le cookie de liaison refusée, acceptée seulement en mode transférable.
 6. **Ressources** : aucune ressource ajoutée au cœur (cas `MinimalCoreAssets`) ; sélecteur HTML chargé seulement si le
    service est instancié.
 7. Documentation `docs/SERVICES.md` : backends par configuration, limites, absence d'isolation (ADR-008 inchangée).
@@ -353,6 +372,10 @@ autorisations explicites, backend par connexion).
   sur l'arborescence de l'hôte.
 - **Risque :** le contrôle d'origine (ADR-008) reste la seule frontière du pont ; un script admis peut ouvrir des
   dialogues et lire les fichiers accordés. Les autorisations limitent la portée, pas la confiance.
+- **Coût accepté :** un cookie de liaison par connexion, à qualifier dans chaque moteur ; les téléchargements gérés par
+  l'adaptateur doivent le présenter.
+- **Risque :** en mode transférable, toute personne qui obtient l'URL lit le fichier pendant sa validité ; ce mode est
+  explicite, de courte durée et absent par défaut.
 - **Risque :** la configuration de confiance du navigateur système réintroduit la déduction par adresse ; elle reste
   explicite, désactivée par défaut et documentée comme non sûre. Sans association, le défaut est HTML.
 
@@ -360,7 +383,17 @@ autorisations explicites, backend par connexion).
 
 - Ne jamais transmettre à JavaScript un chemin de l'hôte sans demande explicite de l'application ; ne jamais accepter
   de JavaScript un chemin à ouvrir : seulement une poignée émise pour cette connexion.
-- Résoudre tout chemin sous une racine avec les règles de `SafePath`, après résolution des liens symboliques.
+- `SafePath` ne valide que la syntaxe d'un chemin relatif. Le confinement à une racine se vérifie **pendant** la
+  résolution, par des opérations relatives à un répertoire racine déjà ouvert, jamais par une vérification du chemin
+  suivie d'une ouverture par nom (fenêtre de course : un processus local peut remplacer un composant par un lien entre
+  les deux). Linux : `openat2` avec `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS` (noyau 5.6+), sinon descente composant
+  par composant avec `openat(O_NOFOLLOW | O_DIRECTORY)` ; écritures par `openat(O_CREAT | O_EXCL)` dans le répertoire
+  ouvert, puis `renameat`, `unlinkat`, `mkdirat` relatifs à ce même descripteur. macOS : même descente avec
+  `O_NOFOLLOW` (ou `O_NOFOLLOW_ANY`), `renameatx_np`. Windows : ouvertures relatives au handle du répertoire
+  (`NtCreateFile` avec `RootDirectory`), points de réanalyse refusés par composant (`FILE_FLAG_OPEN_REPARSE_POINT`),
+  renommage par `SetFileInformationByHandle` sur le handle ouvert. Un lien interne à la racine est suivi seulement si la
+  résolution le confine ; par défaut, les liens sont refusés. Les stockages sans liens (FatFs, LittleFS) se contentent du
+  contrôle syntaxique.
 - Ne jamais fonder une autorisation sur l'adresse de la connexion ; seule l'association à la vue d'un frontend, ou la
   configuration de confiance explicite, rend le backend natif utilisable.
 - Servir le contenu des fichiers en flux borné, jamais par copie complète en mémoire.
