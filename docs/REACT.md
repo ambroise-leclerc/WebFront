@@ -132,14 +132,14 @@ simulation, released on disconnect. The original Life starter remains available.
 
 Build the `WebFrontLifeReact` CMake target. The application only creates an
 empty project directory when it is missing (without argument `./life-project`);
-it does not copy the example's sources. Copy `main.tsx` and
+it does not copy the example's sources. Use a new directory, so that no existing project is touched: `mkdir` fails if it exists and `cp -n` never overwrites a file. Copy `main.tsx` and
 `webfront.project.json` from `examples/life/react/` into that directory first,
 then start the application:
 
 ```sh
-mkdir -p life-project
-cp examples/life/react/main.tsx examples/life/react/webfront.project.json life-project/
-./build/examples/WebFrontLifeReact life-project
+mkdir life-react-project
+cp -n examples/life/react/main.tsx examples/life/react/webfront.project.json life-react-project/
+./build/examples/WebFrontLifeReact life-react-project
 ```
 
 In its terminal, run `wf install`, then `wf preview`. The configured registry must
