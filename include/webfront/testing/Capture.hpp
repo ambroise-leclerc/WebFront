@@ -5,14 +5,15 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -31,6 +32,8 @@ public:
 
     static constexpr int         maxFramesPerSecond = 30;
     static constexpr std::size_t maxFrames          = 1800;
+    /// How long the destructor waits for a capture still blocked on the window before it leaves that worker to end alone.
+    static constexpr std::chrono::milliseconds shutdownGrace{500};
 
     explicit CaptureStore(
         std::filesystem::path root,
@@ -39,83 +42,91 @@ public:
                 return frontend::capturePng(timeout);
             },
         std::size_t maxImages = maxFrames)
-        : directory(std::move(root)), capture(std::move(source)), limit(maxImages) { }
+        : shared(std::make_shared<Shared>(std::move(root), std::move(source), maxImages)) { }
     CaptureStore(const CaptureStore&)            = delete;
     CaptureStore& operator=(const CaptureStore&) = delete;
+
+    /// Asks the workers to stop and waits for them for at most `shutdownGrace`. A worker still blocked in its source
+    /// (a window that no longer answers) is detached: it owns its state and ends by itself when the source returns,
+    /// so a source must stay callable until then.
     ~CaptureStore() {
-        stopping = true;
+        shared->closing = true;
         std::scoped_lock lock{control};
-        if (worker.joinable())
-            worker.join();
-        if (shotWorker.joinable())
-            shotWorker.join();
+        if (recording.job)
+            recording.job->stop = true;
+        settle(recording);
+        settle(shot);
     }
 
     [[nodiscard]] static bool validName(std::string_view name) {
-        return !name.empty() && name.size() <= 64 && std::ranges::all_of(name, [](unsigned char c) {
-            return std::isalnum(c) || c == '_' || c == '-';
+        // Explicit ASCII: std::isalnum follows the C locale, which GTK changes, and could accept bytes above 127.
+        return !name.empty() && name.size() <= 64 && std::ranges::all_of(name, [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
         });
     }
 
     /// Writes `<directory>/<name>.png` on the calling thread; returns its size in bytes.
     std::size_t screenshot(std::string_view name) {
-        requireName(name);
-        std::filesystem::create_directories(directory);
-        return write(directory / (std::string(name) + ".png"));
+        return writeScreenshot(*shared, name);
     }
 
     /// Starts `screenshot(name)` on its own thread and returns at once, so a caller that must not wait (the bridge
-    /// server thread) polls pollScreenshot(). One asynchronous screenshot at a time.
+    /// server thread) polls pollScreenshot(). One asynchronous screenshot at a time; a finished one that was never
+    /// polled (its page went away) is discarded to free the slot.
     void beginScreenshot(std::string_view name) {
         requireName(name);
         std::scoped_lock lock{control};
-        if (shotWorker.joinable())
+        reap(shot);
+        if (shot.thread.joinable())
             throw std::logic_error("A screenshot is already running");
-        shotDone = false;
-        shotSize = 0;
-        shotFailure.clear();
-        shotWorker = std::thread([this, owned = std::string(name)] {
+        auto job    = std::make_shared<Job>();
+        shot.job    = job;
+        shot.thread = std::thread([state = shared, job, owned = std::string(name)] {
             try {
-                shotSize = screenshot(owned);
+                job->count = writeScreenshot(*state, owned);
             } catch (const std::exception& error) {
-                shotFailure = error.what();
+                job->failure = error.what();
             }
-            shotDone = true;
+            job->done = true;
         });
     }
 
     /// The size of the finished screenshot, or nothing while it is still running. Throws its error, if any.
     std::optional<std::size_t> pollScreenshot() {
         std::scoped_lock lock{control};
-        if (!shotWorker.joinable())
+        if (!shot.thread.joinable())
             throw std::logic_error("No screenshot is running");
-        if (!shotDone)
+        if (!shot.job->done)
             return std::nullopt;
-        shotWorker.join();
-        if (!shotFailure.empty())
-            throw std::runtime_error(shotFailure);
-        return shotSize;
+        shot.thread.join();
+        if (!shot.job->failure.empty())
+            throw std::runtime_error(shot.job->failure);
+        return shot.job->count.load();
     }
 
-    /// Starts `<directory>/<name>/0001.png`, `0002.png`, ... at the given rate until it is stopped.
+    /// Starts `<directory>/<name>/0001.png`, `0002.png`, ... at the given rate until it is stopped. A name is used once
+    /// per store, so a later recording can never erase the images of an earlier one; a finished recording that was
+    /// never collected (its page went away) is discarded to free the slot.
     void startRecording(std::string_view name, double framesPerSecond) {
         requireName(name);
         if (!(framesPerSecond >= 1 && framesPerSecond <= maxFramesPerSecond))
             throw std::invalid_argument("The frame rate must be between 1 and 30 images per second");
         std::scoped_lock lock{control};
-        if (worker.joinable())
+        reap(recording);
+        if (recording.thread.joinable())
             throw std::logic_error("A recording is already running");
-        const auto target = directory / std::string(name);
-        std::filesystem::remove_all(target);
+        if (recordedNames.contains(std::string(name)))
+            throw std::logic_error("A recording named '" + std::string(name) + "' already exists in this run");
+        const auto target = shared->directory / std::string(name);
+        std::filesystem::remove_all(target);  // Leftovers of an earlier run, never of this store.
         std::filesystem::create_directories(target);
-        frames = 0;
-        failure.clear();
-        stopping          = false;
-        recording         = true;
+        recordedNames.insert(std::string(name));
         const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / framesPerSecond));
-        worker            = std::thread([this, target, period] {
-            record(target, period);
-            recording = false;
+        auto       job    = std::make_shared<Job>();
+        recording.job     = job;
+        recording.thread  = std::thread([state = shared, job, target, period] {
+            record(*state, *job, target, period);
+            job->done = true;
         });
     }
 
@@ -123,18 +134,26 @@ public:
     /// recording ended by itself (error or image limit).
     void requestStop() {
         std::scoped_lock lock{control};
-        if (!worker.joinable())
+        if (!recording.thread.joinable())
             throw std::logic_error("No recording is running");
-        stopping = true;
+        recording.job->stop = true;
+    }
+
+    /// Asks a running recording to stop, if there is one, without waiting and without an error. Used when the page under
+    /// test is replaced, so that its abandoned recording ends and the new page finds the slot free.
+    void abandon() {
+        std::scoped_lock lock{control};
+        if (recording.thread.joinable())
+            recording.job->stop = true;
     }
 
     /// The number of images written once the recording has ended, or nothing while it still runs. Throws the capture
     /// error that ended it, if any.
     std::optional<std::size_t> pollRecording() {
         std::scoped_lock lock{control};
-        if (!worker.joinable())
+        if (!recording.thread.joinable())
             throw std::logic_error("No recording is running");
-        if (recording)
+        if (!recording.job->done)
             return std::nullopt;
         return finish();
     }
@@ -143,27 +162,73 @@ public:
     /// ended it, if any.
     std::size_t stopRecording() {
         std::scoped_lock lock{control};
-        if (!worker.joinable())
+        if (!recording.thread.joinable())
             throw std::logic_error("No recording is running");
-        stopping = true;
+        recording.job->stop = true;
         return finish();
     }
 
 private:
+    struct Shared {
+        Shared(std::filesystem::path root, Source source, std::size_t maxImages)
+            : directory(std::move(root)), capture(std::move(source)), limit(maxImages) { }
+        std::filesystem::path directory;
+        Source                capture;
+        std::size_t           limit;
+        std::atomic<bool>     closing = false;
+    };
+
+    /// One worker's own state, shared with its thread: a new recording never sees the stop request of an old one.
+    struct Job {
+        std::atomic<bool>        stop  = false;
+        std::atomic<bool>        done  = false;
+        std::atomic<std::size_t> count = 0;  // Images written, or the screenshot's size.
+        std::string              failure;    // Written before `done`.
+    };
+
+    struct Slot {
+        std::thread          thread;
+        std::shared_ptr<Job> job;
+    };
+
     static void requireName(std::string_view name) {
         if (!validName(name))
             throw std::invalid_argument("A capture name has 1 to 64 letters, digits, '_' or '-'");
     }
 
-    std::size_t finish() {  // `control` is held.
-        worker.join();
-        if (!failure.empty())
-            throw std::runtime_error("Recording stopped: " + failure);
-        return frames;
+    /// Joins a worker that has already ended, freeing its slot. `control` is held.
+    static void reap(Slot& slot) {
+        if (slot.thread.joinable() && slot.job->done)
+            slot.thread.join();
     }
 
-    std::size_t write(const std::filesystem::path& path) {
-        auto image = capture(std::chrono::seconds{10});
+    static void settle(Slot& slot) {
+        if (!slot.thread.joinable())
+            return;
+        const auto deadline = std::chrono::steady_clock::now() + shutdownGrace;
+        while (!slot.job->done && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        if (slot.job->done)
+            slot.thread.join();
+        else
+            slot.thread.detach();
+    }
+
+    std::size_t finish() {  // `control` is held.
+        recording.thread.join();
+        if (!recording.job->failure.empty())
+            throw std::runtime_error("Recording stopped: " + recording.job->failure);
+        return recording.job->count;
+    }
+
+    static std::size_t writeScreenshot(Shared& state, std::string_view name) {
+        requireName(name);
+        std::filesystem::create_directories(state.directory);
+        return write(state, state.directory / (std::string(name) + ".png"));
+    }
+
+    static std::size_t write(Shared& state, const std::filesystem::path& path) {
+        auto image = state.capture(std::chrono::seconds{10});
         if (!image)
             throw std::runtime_error("Capture failed: " + image.error());
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -174,38 +239,33 @@ private:
         return image->size();
     }
 
-    void record(const std::filesystem::path& target, std::chrono::steady_clock::duration period) {
+    static void record(Shared& state, Job& job, const std::filesystem::path& target, std::chrono::steady_clock::duration period) {
+        const auto ended = [&] {
+            return job.stop || state.closing;
+        };
         auto next = std::chrono::steady_clock::now();
         try {
-            while (!stopping && frames < limit) {
-                auto name = std::to_string(frames + 1);
-                write(target / (std::string(4 - std::min<std::size_t>(name.size(), 4), '0') + name + ".png"));
-                ++frames;
+            while (!ended() && job.count < state.limit) {
+                auto name = std::to_string(job.count + 1);
+                write(state, target / (std::string(4 - std::min<std::size_t>(name.size(), 4), '0') + name + ".png"));
+                ++job.count;
                 next += period;
                 // A slow capture drops the missed instants instead of bursting to catch up.
                 next = std::max(next, std::chrono::steady_clock::now());
-                while (!stopping && std::chrono::steady_clock::now() < next)
+                while (!ended() && std::chrono::steady_clock::now() < next)
                     std::this_thread::sleep_for(
                         std::min<std::chrono::steady_clock::duration>(std::chrono::milliseconds{5}, next - std::chrono::steady_clock::now()));
             }
         } catch (const std::exception& error) {
-            failure = error.what();
+            job.failure = error.what();
         }
     }
 
-    std::filesystem::path    directory;
-    Source                   capture;
-    std::size_t              limit;
-    std::mutex               control;
-    std::thread              worker;
-    std::atomic<bool>        stopping  = false;
-    std::atomic<bool>        recording = false;
-    std::atomic<std::size_t> frames    = 0;
-    std::string              failure;
-    std::thread              shotWorker;
-    std::atomic<bool>        shotDone = false;
-    std::size_t              shotSize = 0;
-    std::string              shotFailure;
+    std::shared_ptr<Shared> shared;
+    std::mutex              control;
+    Slot                    recording;
+    Slot                    shot;
+    std::set<std::string>   recordedNames;
 };
 
 }  // namespace webfront::testing

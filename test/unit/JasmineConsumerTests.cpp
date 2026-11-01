@@ -51,10 +51,7 @@ SCENARIO("A Jasmine session serves its files in bounded chunks to the instrument
     constexpr auto chunk = JasmineSession<>::chunkSize;
     ReportFile     report{"chunks"};
     GIVEN("a file that is an exact multiple of the chunk size, an empty file and a short one") {
-        JasmineSession session{
-            {std::string(chunk * 2, 'a'), "", "short"},
-            report.path
-        };
+        JasmineSession session{{std::string(chunk * 2, 'a'), "", "short"}, report.path};
         REQUIRE(session.attach(7));
         REQUIRE(session.count(7) == 3);
         THEN("every chunk is full until an empty read ends the file") {
@@ -65,17 +62,9 @@ SCENARIO("A Jasmine session serves its files in bounded chunks to the instrument
             REQUIRE(session.read(7, 2, 2).size() == 3);
         }
         THEN("indexes and offsets outside the file are rejected") {
-            for (const auto& [index, offset] : {
-                     std::pair{        -1.0,                                0.0},
-                     {         3.0,                                0.0},
-                     {         0.5,                                0.0},
-                     {         0.0,                               -1.0},
-                     {         0.0,                                0.5},
-                     {         0.0, static_cast<double>(chunk * 2 + 1)},
-                     {std::nan(""),                                0.0},
-                     {         0.0,                       std::nan("")},
-                     {         0.0,                           HUGE_VAL}
-            })
+            for (const auto& [index, offset] : {std::pair{-1.0, 0.0}, {3.0, 0.0}, {0.5, 0.0}, {0.0, -1.0}, {0.0, 0.5},
+                                               {0.0, static_cast<double>(chunk * 2 + 1)}, {std::nan(""), 0.0}, {0.0, std::nan("")},
+                                               {0.0, HUGE_VAL}})
                 REQUIRE_THROWS(session.read(7, index, offset));
         }
         THEN("another page cannot read, count or report") {
@@ -159,6 +148,22 @@ struct CaptureDirectory {
 CaptureResult fakeImage(std::chrono::milliseconds) {
     return std::vector<std::uint8_t>{0x89, 'P', 'N', 'G'};
 }
+
+/// Waits for an observable condition instead of a fixed delay: a loaded CI machine only makes it take longer.
+template <typename Predicate>
+bool waitUntil(Predicate done, std::chrono::seconds limit = std::chrono::seconds{10}) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!done()) {
+        if (std::chrono::steady_clock::now() > deadline)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    return true;
+}
+
+bool fileExists(const std::filesystem::path& path) {
+    return std::filesystem::exists(path);
+}
 }  // namespace
 
 SCENARIO("A capture store writes images only below its directory") {
@@ -170,7 +175,7 @@ SCENARIO("A capture store writes images only below its directory") {
             REQUIRE(std::filesystem::file_size(directory.path / "board-1_a.png") == 4);
         }
         THEN("a name that could leave the directory or add an extension is refused") {
-            for (const auto* name : {"", "../x", "a/b", "a\\b", "a.png", ".", "..", "a b"})
+            for (const auto* name : {"", "../x", "a/b", "a\\b", "a.png", ".", "..", "a b", "caf\xC3\xA9", "\xE9"})
                 REQUIRE_THROWS_AS(store.screenshot(name), std::invalid_argument);
             REQUIRE_THROWS_AS(store.screenshot(std::string(65, 'a')), std::invalid_argument);
             REQUIRE_FALSE(std::filesystem::exists(directory.path));
@@ -199,7 +204,9 @@ SCENARIO("A capture store records numbered images at a bounded rate") {
         THEN("a second recording is refused while it runs") {
             REQUIRE_THROWS_AS(store.startRecording("other", 10), std::logic_error);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds{400});
+        REQUIRE(waitUntil([&] {
+            return calls >= 4;
+        }));
         const auto frames = store.stopRecording();
         THEN("the images are numbered from 0001 and roughly match the rate") {
             REQUIRE(frames >= 4);
@@ -228,7 +235,9 @@ SCENARIO("A recording that loses its window reports the failure when it is stopp
                            return std::vector<std::uint8_t>{1};
                            }};
     store.startRecording("lost", 30);
-    std::this_thread::sleep_for(std::chrono::milliseconds{300});
+    REQUIRE(waitUntil([&] {
+        return calls > 2;
+    }));
     REQUIRE_THROWS_WITH(store.stopRecording(), Catch::Matchers::Equals("Recording stopped: Capture failed: the window is closed"));
 }
 
@@ -291,7 +300,9 @@ SCENARIO("A recording stops on request and reports its count by polling") {
     CaptureDirectory directory{"stop"};
     CaptureStore     store{directory.path, fakeImage};
     store.startRecording("run", 30);
-    std::this_thread::sleep_for(std::chrono::milliseconds{150});
+    REQUIRE(waitUntil([&] {
+        return fileExists(directory.path / "run" / "0002.png");
+    }));
     store.requestStop();
     std::optional<std::size_t> frames;
     for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
@@ -306,8 +317,10 @@ SCENARIO("A recording ends by itself at the image limit and can still be collect
     CaptureDirectory directory{"limit"};
     CaptureStore     store{directory.path, fakeImage, 3};
     store.startRecording("run", 30);
-    std::this_thread::sleep_for(std::chrono::milliseconds{300});
-    store.requestStop();  // already finished: not an error
+    REQUIRE(waitUntil([&] {
+        return fileExists(directory.path / "run" / "0003.png");
+    }));
+    store.requestStop();  // finished or about to: not an error
     std::optional<std::size_t> frames;
     for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
@@ -315,6 +328,102 @@ SCENARIO("A recording ends by itself at the image limit and can still be collect
     REQUIRE_FALSE(std::filesystem::exists(directory.path / "run" / "0004.png"));
     store.startRecording("again", 30);  // the slot is free once collected
     REQUIRE(store.stopRecording() <= 3);
+}
+
+SCENARIO("A capture that nobody collects does not block the next one") {
+    CaptureDirectory directory{"uncollected"};
+    CaptureStore     store{directory.path, fakeImage, 2};
+    GIVEN("a screenshot that finished but was never polled (its page reloaded)") {
+        store.beginScreenshot("a");
+        THEN("the next screenshot starts and can be polled") {
+            REQUIRE(waitUntil([&] {  // the slot is free as soon as the first worker has ended
+                try {
+                    store.beginScreenshot("b");
+                    return true;
+                } catch (const std::logic_error&) {
+                    return false;
+                }
+            }));
+            REQUIRE(pollUntilDone([&] {
+                        const auto size = store.pollScreenshot();
+                        return size ? static_cast<double>(*size) : -1.0;
+                    }) == 4);
+            REQUIRE(std::filesystem::exists(directory.path / "b.png"));
+        }
+    }
+    GIVEN("a recording that ended by itself and was never collected") {
+        store.startRecording("first", 30);
+        THEN("another recording starts, and the first one keeps its images") {
+            REQUIRE(waitUntil([&] {  // the slot is free as soon as the first worker has ended
+                try {
+                    store.startRecording("second", 30);
+                    return true;
+                } catch (const std::logic_error&) {
+                    return false;
+                }
+            }));
+            REQUIRE(store.stopRecording() <= 2);
+            REQUIRE(std::filesystem::exists(directory.path / "first" / "0002.png"));
+        }
+    }
+}
+
+SCENARIO("A recording never erases the images of an earlier recording of the same run") {
+    CaptureDirectory directory{"duplicate"};
+    CaptureStore     store{directory.path, fakeImage};
+    store.startRecording("run", 30);
+    REQUIRE(waitUntil([&] {
+        return fileExists(directory.path / "run" / "0001.png");
+    }));
+    const auto frames = store.stopRecording();
+    REQUIRE(frames >= 1);
+    REQUIRE_THROWS_AS(store.startRecording("run", 30), std::logic_error);
+    REQUIRE(std::filesystem::exists(directory.path / "run" / "0001.png"));
+    GIVEN("images left by an earlier run in a fresh store") {
+        CaptureStore fresh{directory.path, fakeImage};
+        THEN("the first recording of that name replaces them") {
+            std::ofstream{directory.path / "run" / "stale.png"} << "x";
+            fresh.startRecording("run", 30);
+            fresh.stopRecording();
+            REQUIRE_FALSE(std::filesystem::exists(directory.path / "run" / "stale.png"));
+        }
+    }
+}
+
+SCENARIO("A stop request belongs to its own recording") {
+    CaptureDirectory directory{"restart"};
+    CaptureStore     store{directory.path, fakeImage, 3};
+    store.startRecording("one", 30);
+    store.requestStop();
+    std::optional<std::size_t> frames;
+    for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    store.startRecording("two", 30);  // must not inherit, nor lose, the earlier stop request
+    REQUIRE(waitUntil([&] {
+        return fileExists(directory.path / "two" / "0003.png");
+    }));
+    REQUIRE(store.stopRecording() == 3);  // reached its own image limit: it was not stopped early by the first request
+}
+
+SCENARIO("Destroying a store does not wait for a window that never answers") {
+    CaptureDirectory  directory{"closing"};
+    std::atomic<bool> release = false;
+    std::atomic<bool> entered = false;
+    const auto        started = std::chrono::steady_clock::now();
+    {
+        CaptureStore store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
+                               entered = true;
+                               while (!release)
+                                   std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                               return std::vector<std::uint8_t>{1};
+                           }};
+        store.beginScreenshot("stuck");
+        while (!entered)
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds{5});
+    release = true;  // the detached worker ends alone, only touching state it owns
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
 }
 
 SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") {
@@ -337,12 +446,24 @@ SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") 
     }
     THEN("a recording is stopped and collected through the session") {
         session.recordStart(1, "clip", 30);
-        std::this_thread::sleep_for(std::chrono::milliseconds{150});
+        REQUIRE(waitUntil([&] {
+            return fileExists(directory.path / "clip" / "0002.png");
+        }));
         session.recordStop(1);
         REQUIRE(pollUntilDone([&] {
                     return session.recordPoll(1);
                 })
                 >= 2);
+    }
+    THEN("a page that replaces the instrumented one finds the recording slot free") {
+        session.recordStart(1, "abandoned", 30);
+        REQUIRE(session.attach(2));  // a reload: page 1 can no longer collect its recording
+        REQUIRE(pollUntilDone([&] {
+                    return session.recordPoll(2);
+                })
+                >= 0);
+        REQUIRE_NOTHROW(session.recordStart(2, "again", 30));
+        session.recordStop(2);
     }
     THEN("a session without a directory refuses to capture") {
         JasmineSession bare{{"x"}, report.path};

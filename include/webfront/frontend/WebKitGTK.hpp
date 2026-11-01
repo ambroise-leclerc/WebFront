@@ -6,8 +6,8 @@
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
-#include "WebKitGTKPolicy.hpp"
 #include "Window.hpp"
+#include "WebKitGTKPolicy.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -103,7 +103,7 @@ public:
     unsigned (*status)(Object)                              = symbol<decltype(status)>("webkit_uri_response_get_status_code");
     void (*evaluate)(Object, const char*, long, const char*, const char*, Object, Callback, Object) =
         symbol<decltype(evaluate)>("webkit_web_view_evaluate_javascript");
-    unsigned (*idleAdd)(int (*)(void*), void*) = symbol<decltype(idleAdd)>("g_idle_add");
+    unsigned (*idleAddFull)(int, int (*)(void*), void*, void (*)(void*)) = symbol<decltype(idleAddFull)>("g_idle_add_full");
     // Capture needs GTK 4.6 (gdk_texture_save_to_png_bytes): an older runtime still opens windows, but cannot capture.
     void (*snapshot)(Object, int, int, Object, Callback, void*) = optionalSymbol<decltype(snapshot)>("webkit_web_view_get_snapshot");
     Object (*snapshotFinish)(Object, Object, Error**)           = optionalSymbol<decltype(snapshotFinish)>("webkit_web_view_get_snapshot_finish");
@@ -200,17 +200,22 @@ inline void finishCapture(Api::Object view, Api::Object result, void* owner) noe
     }
 }
 
+// The idle source owns `data` (see releaseCapture): it is freed whether the source ran or was removed unserved.
 inline int startCapture(void* data) noexcept {
-    auto  job = std::unique_ptr<std::shared_ptr<CaptureJob>>{static_cast<std::shared_ptr<CaptureJob>*>(data)};
-    auto& a   = api();
-    if (!(*job)->target->view) {
-        (*job)->done.set_value(std::unexpected("the window is closed"));
+    const auto& job = *static_cast<std::shared_ptr<CaptureJob>*>(data);
+    auto&       a   = api();
+    if (!job->target->view) {
+        job->done.set_value(std::unexpected("the window is closed"));
         return 0;
     }
-    const auto view = (*job)->target->view;
-    // WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE.
-    a.snapshot(view, 0, 0, nullptr, reinterpret_cast<Api::Callback>(finishCapture), job.release());
+    const auto view = job->target->view;
+    // WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE. finishCapture owns its own reference to the job.
+    a.snapshot(view, 0, 0, nullptr, reinterpret_cast<Api::Callback>(finishCapture), new std::shared_ptr<CaptureJob>(job));
     return 0;
+}
+
+inline void releaseCapture(void* data) noexcept {
+    delete static_cast<std::shared_ptr<CaptureJob>*>(data);
 }
 
 inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
@@ -220,9 +225,14 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
             return std::unexpected("this WebKitGTK/GTK runtime cannot capture (GTK 4.6 is required)");
         auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
         auto future = job->done.get_future();
-        a.idleAdd(startCapture, new std::shared_ptr<CaptureJob>(job));
-        if (future.wait_for(timeout) != std::future_status::ready)
+        constexpr int idlePriority = 200;  // G_PRIORITY_DEFAULT_IDLE
+        const auto    source       = a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
+        if (future.wait_for(timeout) != std::future_status::ready) {
+            // A main loop that does not run would keep the request, and its job, forever. If the source was served in
+            // the meantime GLib only logs that it is gone.
+            a.sourceRemove(source);
             return std::unexpected("the window did not answer within the capture timeout");
+        }
         return future.get();
     };
 }
@@ -245,7 +255,7 @@ struct Session : FailureState {
     CaptureRegistration                  captureRegistration;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
-        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) { }
+        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;
     ~Session() {

@@ -22,7 +22,7 @@ struct WKWebViewOptions {
     ContentPolicy             contentPolicy{};
     WindowOptions             window{};
     /** @brief Keep the native window hidden and avoid activating the application. A WindowServer is still required. */
-    bool visible{true};
+    bool                      visible{true};
 };
 
 }  // namespace webfront::frontend
@@ -37,6 +37,7 @@ struct WKWebViewOptions {
     #include <utility>
     #include <vector>
 
+    #include <Block.h>
     #include <CoreGraphics/CGGeometry.h>
     #include <dispatch/dispatch.h>
     #include <objc/message.h>
@@ -100,7 +101,7 @@ inline void initialize() {
 }
 
 inline long applicationActivationPolicy() {
-    Object     agentKey(text("LSUIElement"));
+    Object agentKey(text("LSUIElement"));
     const auto agent = send(send(type("NSBundle"), "mainBundle"), "objectForInfoDictionaryKey:", agentKey.get());
     return send<BOOL>(agent, "boolValue") ? 1L : 0L;  // Accessory for agent bundles, Regular otherwise.
 }
@@ -214,7 +215,15 @@ inline void startCapture(void* data) noexcept {
             }
         };
         // A nil configuration snapshots the visible bounds of the view.
-        send<void>(job->target->view, "takeSnapshotWithConfiguration:completionHandler:", static_cast<id>(nullptr), handler);
+        // The engine keeps its own copy until the handler ran; the call never depends on the stack block surviving it.
+        auto* const heapHandler = Block_copy(handler);
+        try {
+            send<void>(job->target->view, "takeSnapshotWithConfiguration:completionHandler:", static_cast<id>(nullptr), heapHandler);
+        } catch (...) {
+            Block_release(heapHandler);
+            throw;
+        }
+        Block_release(heapHandler);
     } catch (...) {
         try {
             job->done.set_exception(std::current_exception());
@@ -387,16 +396,16 @@ struct Session {
         // so asynchronous bridge/Worker work and close requests keep progressing without a visible native window.
         if (!options.visible) {
             const auto preferences = send(configuration.get(), "preferences");
-            const auto selector    = sel_registerName("setInactiveSchedulingPolicy:");
+            const auto selector = sel_registerName("setInactiveSchedulingPolicy:");
             if (!send<BOOL>(preferences, "respondsToSelector:", selector))
                 throw std::runtime_error("WKWebView: hidden sessions require macOS 14 or later (inactiveSchedulingPolicy)");
-            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L);  // WKInactiveSchedulingPolicyNone
+            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L); // WKInactiveSchedulingPolicyNone
         }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
         const auto   windowOptions = frontend::detail::resolveWindow(options.window);
         const CGRect bounds{
-            {                                        0,                                          0},
+            {                                 0,                                   0},
             {static_cast<CGFloat>(windowOptions.width), static_cast<CGFloat>(windowOptions.height)}
         };
         view = send(send(reinterpret_cast<id>(viewClass()), "alloc"), "initWithFrame:configuration:", bounds, configuration.get());

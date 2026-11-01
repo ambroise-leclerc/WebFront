@@ -107,7 +107,10 @@ server thread either: the bridge callbacks only start the work on a worker threa
 20 ms) before the Promise settles. Capturing is paced by the engine: a slow capture drops
 instants rather than bursting, so the number of images can be below `seconds * framesPerSecond`. Stopping a recording
 whose window disappeared throws the capture error. A recording that ends by itself (an error, or the 1800 images limit)
-keeps its slot until `stopRecording()` collects it, so the next `startRecording` needs that call first.
+keeps its slot, and its result, until `stopRecording()` collects it; if the page never does (it reloaded), the next
+`startRecording` discards it, and a new page replacing the instrumented one stops a recording still running. The same
+holds for a screenshot nobody polled. A recording name is used once per run: a second `startRecording` with the same name
+is refused rather than erasing the first one's images. The `webFrontCapture` methods do not depend on `this`.
 
 From C++, `webfront::frontend::capturePng(timeout)` returns the PNG bytes (or a diagnostic) of the open window from any
 thread other than the one running its event loop, and `webfront::testing::CaptureStore` writes them to a directory

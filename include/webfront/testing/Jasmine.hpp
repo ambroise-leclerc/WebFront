@@ -103,17 +103,17 @@ void (async () => {
             await new Promise(resolve => setTimeout(resolve, 20));
         }
     };
-    globalThis.webFrontCapture = {
-        async screenshot(name) { await call('screenshotStart', name); return settle('screenshotPoll'); },
-        startRecording: (name, framesPerSecond = 10) => call('recordStart', name, framesPerSecond),
-        async stopRecording() { await call('recordStop'); return settle('recordPoll'); },
-        async record(name, {seconds = 3, framesPerSecond = 10} = {}) {
-            await this.startRecording(name, framesPerSecond);
-            try { await new Promise(resolve => setTimeout(resolve, seconds * 1000)); }
-            catch (error) { await this.stopRecording().catch(() => {}); throw error; }
-            return this.stopRecording();
-        }
+    // The methods do not use `this`, so `const {record} = webFrontCapture` works. A recording whose page is replaced is
+    // stopped by the C++ side.
+    const screenshot = async name => { await call('screenshotStart', name); return settle('screenshotPoll'); };
+    const startRecording = (name, framesPerSecond = 10) => call('recordStart', name, framesPerSecond);
+    const stopRecording = async () => { await call('recordStop'); return settle('recordPoll'); };
+    const record = async (name, {seconds = 3, framesPerSecond = 10} = {}) => {
+        await startRecording(name, framesPerSecond);
+        await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+        return stopRecording();
     };
+    globalThis.webFrontCapture = {screenshot, startRecording, stopRecording, record};
     const load = async index => {
         const parts = [];
         for (let offset = 0; ; offset += CHUNK) {
@@ -196,15 +196,18 @@ public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
     JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
-        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) { }
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
         std::scoped_lock lock{mutex};
         if (completed)
             return false;
-        if (browser && *browser != caller)
+        if (browser && *browser != caller) {
             std::cerr << "Jasmine: a new page replaced the instrumented one\n";
+            if (store)
+                store->abandon();  // The replaced page can no longer collect its recording.
+        }
         browser = caller;
         return true;
     }
@@ -333,7 +336,7 @@ public:
         const auto path = detail::jasmineConfigurationPath();
         if (!path)
             return;
-        const auto               config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
+        const auto config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
@@ -342,15 +345,9 @@ public:
             store = std::make_shared<CaptureStore>(config.captures);
         session          = std::make_shared<Session>(std::move(contents), config.report, std::move(store));
         const auto owned = session;
-        app.cppFunction("webfront.testing.count", [owned](AppUI ui) {
-            return owned->count(ui);
-        });
-        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) {
-            return owned->read(ui, index, offset);
-        });
-        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) {
-            owned->result(ui, result);
-        });
+        app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
+        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
+        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
         app.cppFunction("webfront.testing.screenshotStart", [owned](AppUI ui, std::string name) {
             owned->screenshotStart(ui, name);
         });
@@ -387,7 +384,7 @@ inline namespace jasmine_inert {
 template <typename App>
 class JasmineTest {
 public:
-    explicit JasmineTest(App&) { }
+    explicit JasmineTest(App&) {}
     [[nodiscard]] int exitCode() const {
         return 0;
     }
