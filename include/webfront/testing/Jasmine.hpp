@@ -160,10 +160,13 @@ void (async () => {
             for (const [key, value] of Object.entries({cwd, env, inheritEnv, timeoutMs, maxOutputBytes}))
                 if (value !== undefined) request[key] = value;
             signal?.throwIfAborted();
-            const id = await call('hostRunStart', JSON.stringify(request));
-            const abort = () => call('hostRunCancel', id).catch(() => {});
+            // The listener exists before the start call: an abort that lands while the program starts is not lost.
+            let id;
+            const abort = () => { if (id !== undefined) call('hostRunCancel', id).catch(() => {}); };
             signal?.addEventListener('abort', abort, {once: true});
             try {
+                id = await call('hostRunStart', JSON.stringify(request));
+                if (signal?.aborted) abort();
                 let summary = '';
                 while (!(summary = await call('hostRunPoll', id))) await new Promise(resolve => setTimeout(resolve, 10));
                 const result = JSON.parse(summary);
@@ -172,7 +175,7 @@ void (async () => {
                 return {...rest, stdout: await text(1), stderr: await text(2)};
             } finally {
                 signal?.removeEventListener('abort', abort);
-                await call('hostRunRelease', id);
+                if (id !== undefined) await call('hostRunRelease', id);
             }
         },
     };

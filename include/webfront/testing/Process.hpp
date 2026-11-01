@@ -30,6 +30,10 @@
     #include <poll.h>
     #include <spawn.h>
     #include <sys/wait.h>
+    #ifdef __linux__
+        #include <sys/prctl.h>
+        #include <sys/syscall.h>
+    #endif
     #include <unistd.h>
 extern char** environ;
 #endif
@@ -214,7 +218,9 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
         errWrite.handle = pipeEnds[1];
         ::SetHandleInformation(outRead.handle, HANDLE_FLAG_INHERIT, 0);
         ::SetHandleInformation(errRead.handle, HANDLE_FLAG_INHERIT, 0);
-        input = WindowsHandle{::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, nullptr)};
+        input.handle = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, nullptr);
+        if (input.handle == INVALID_HANDLE_VALUE)
+            input.handle = nullptr;
         if (!input)
             throw std::runtime_error("Cannot open NUL");
 
@@ -396,6 +402,62 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         return result;
     }
 
+    #ifdef __linux__
+    // fork and exec rather than posix_spawn: the child asks the kernel to kill it when this process dies. A CTest deadline
+    // ends the application with SIGKILL, which runs no destructor, and the program must not outlive the test. Only
+    // async-signal-safe calls run between fork and exec.
+    int report[2];
+    if (::pipe2(report, O_CLOEXEC) != 0) {
+        result.error = "Cannot create a pipe";
+        return result;
+    }
+    Descriptor  reportRead{report[0]}, reportWrite{report[1]};
+    const pid_t parent = ::getpid();
+    sigset_t    none;
+    ::sigemptyset(&none);
+    const pid_t forked = ::fork();
+    if (forked == 0) {
+        ::setpgid(0, 0);  // Its own process group: a timeout or cancellation kills it and the descendants that stayed in it.
+        ::prctl(PR_SET_PDEATHSIG, SIGKILL);
+        int failure = 0;
+        if (::getppid() != parent)
+            failure = ESRCH;
+        else {
+            ::sigprocmask(SIG_SETMASK, &none, nullptr);
+            const int input = ::open("/dev/null", O_RDONLY);
+            if (input < 0 || ::dup2(input, 0) < 0 || ::dup2(outWrite.fd, 1) < 0 || ::dup2(errWrite.fd, 2) < 0)
+                failure = errno;
+            // The application's own descriptors (sockets, files) stay out of the program; the report pipe closes on exec.
+            else if (::syscall(SYS_close_range, 3U, ~0U, 4U /* CLOSE_RANGE_CLOEXEC */) != 0 && errno != ENOSYS && errno != EINVAL)
+                failure = errno;
+            else if (!directory.empty() && ::chdir(directory.c_str()) != 0)
+                failure = errno;
+            else {
+                ::execve(program.c_str(), argv.data(), environmentBlock.data());
+                failure = errno;
+            }
+        }
+        [[maybe_unused]] const auto written = ::write(reportWrite.fd, &failure, sizeof failure);
+        ::_exit(127);
+    }
+    if (forked < 0) {
+        result.error = std::string("Cannot start the program: ") + std::strerror(errno);
+        return result;
+    }
+    const pid_t pid = forked;
+    ::setpgid(pid, pid);  // Also from here, so that no kill of the group can come before the child's own call.
+    reportWrite.reset();
+    int     failure = 0;
+    ssize_t reported;
+    do
+        reported = ::read(reportRead.fd, &failure, sizeof failure);
+    while (reported < 0 && errno == EINTR);
+    if (reported == static_cast<ssize_t>(sizeof failure)) {
+        ::waitpid(pid, nullptr, 0);
+        result.error = std::string("Cannot start the program: ") + std::strerror(failure);
+        return result;
+    }
+    #else
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t          attributes;
     ::posix_spawn_file_actions_init(&actions);
@@ -416,10 +478,10 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
     ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK);
     bool prepared = ::posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0
                     && ::posix_spawn_file_actions_adddup2(&actions, outWrite.fd, 1) == 0 && ::posix_spawn_file_actions_adddup2(&actions, errWrite.fd, 2) == 0;
-    #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+        #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
     // The calling application's own descriptors (sockets, files) stay out of the program.
     prepared = prepared && ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
-    #endif
+        #endif
     if (!directory.empty())
         prepared = prepared && ::posix_spawn_file_actions_addchdir_np(&actions, directory.c_str()) == 0;
     if (!prepared) {
@@ -431,12 +493,15 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         result.error = std::string("Cannot start the program: ") + std::strerror(code);
         return result;
     }
+    #endif
     outWrite.reset();
     errWrite.reset();
 
-    const auto killGroup = [pid] {
+    bool       statusLost = false;
+    const auto killGroup  = [pid, &statusLost] {
         ::kill(-pid, SIGKILL);
-        ::kill(pid, SIGKILL);
+        if (!statusLost)
+            ::kill(pid, SIGKILL);  // Not once reaped: the number may belong to another process by now.
     };
     const auto deadline = begin + spec.timeout;
     bool       exited = false, timedOut = false, cancelled = false;
@@ -477,8 +542,11 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         }
         const auto now = std::chrono::steady_clock::now();
         if (!exited) {
-            if (::waitpid(pid, &waitStatus, WNOHANG) == pid) {
-                exited = true;
+            const pid_t reaped = ::waitpid(pid, &waitStatus, WNOHANG);
+            // ECHILD: the application ignores SIGCHLD, so the system reaped the program and kept no status.
+            if (reaped == pid || (reaped < 0 && errno == ECHILD)) {
+                statusLost = reaped < 0;
+                exited     = true;
                 killGroup();  // Whatever the program left running in its group ends with it.
                 drainEnd = now + processDrainGrace;
             } else if (cancel.load() && !cancelled && !timedOut) {
@@ -496,7 +564,10 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         result.status = ProcessStatus::timeout;
     else if (cancelled)
         result.status = ProcessStatus::cancelled;
-    else if (WIFSIGNALED(waitStatus)) {
+    else if (statusLost) {
+        result.status = ProcessStatus::exited;
+        result.error  = "The exit status is unavailable because the application ignores SIGCHLD";
+    } else if (WIFSIGNALED(waitStatus)) {
         result.status = ProcessStatus::signaled;
         result.signal = WTERMSIG(waitStatus);
     } else {

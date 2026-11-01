@@ -117,6 +117,8 @@ public:
         if (error)
             throw std::runtime_error("Cannot create the temporary directory: " + error.message());
         config.temporary = std::filesystem::weakly_canonical(config.temporary);
+        // Private to this user (POSIX): every space below inherits the closed doorway, whatever the umask.
+        std::filesystem::permissions(config.temporary, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, error);
     }
     HostSession(const HostSession&)            = delete;
     HostSession& operator=(const HostSession&) = delete;
@@ -162,6 +164,7 @@ public:
             const auto      path = config.temporary / name;
             std::error_code error;
             if (std::filesystem::create_directory(path, error)) {
+                std::filesystem::permissions(path, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, error);
                 std::scoped_lock lock{mutex};
                 if (spaces.size() >= 256) {
                     std::filesystem::remove(path, error);

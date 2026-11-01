@@ -148,6 +148,14 @@ What is guaranteed, and what is not:
   leaves nothing behind for the next. Spaces have unique random names, so concurrent runs and sessions never share one. A
   `SIGKILL` of the test process, a power loss or a Windows file still locked by a program leave files in the build tree until
   the next run of the same named test (the runner's deletion) or `ctest` cleanup of the build directory.
+- **If the test process is killed.** On Linux the program asks the kernel to kill it when the test process dies, so a CTest
+  deadline (SIGKILL, no destructor) ends the program too; its descendants that were still in its group are not tracked
+  after that. Other POSIX systems and Windows (the job object closes with the process) are not covered by a test, and macOS has
+  no equivalent of this request: a program may outlive a killed test there.
+- **Privacy.** The temporary root and its spaces are closed to other users (mode 0700) on POSIX; on Windows they inherit
+  the build directory's ACL.
+- **Status lost.** If the application ignores `SIGCHLD`, the system discards exit statuses: the call still ends at the
+  timeout, reporting `exited` with an `error` and exit code -1, never a success.
 - **Failure.** A spec assertion that is false, a refused or unauthorized call that is not caught, and a program that timed out
   or could not start when the spec expects success all fail the test, and so CTest and CI (exit status of the runner).
 

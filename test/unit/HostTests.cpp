@@ -8,6 +8,12 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#ifndef _WIN32
+    #include <csignal>
+
+    #include <sys/wait.h>
+    #include <unistd.h>
+#endif
 
 namespace {
 using namespace webfront::testing;
@@ -366,3 +372,59 @@ SCENARIO("Runs are bounded, cancellable and released") {
         REQUIRE(std::chrono::steady_clock::now() - begin < 10s);
     }
 }
+
+#ifndef _WIN32
+SCENARIO("A program is still bounded when the application ignores SIGCHLD") {
+    const auto previous = std::signal(SIGCHLD, SIG_IGN);
+    auto       spec     = probeSpec({"exit", "0"});
+    spec.timeout        = 100ms;
+    const auto begin    = std::chrono::steady_clock::now();
+    const auto result   = run(spec);
+    std::signal(SIGCHLD, previous);
+    THEN("the call ends promptly and never reports an exit status it could not read") {
+        REQUIRE(std::chrono::steady_clock::now() - begin < 5s);
+        REQUIRE(result.status != ProcessStatus::launchFailed);
+        REQUIRE((result.status == ProcessStatus::exited ? result.exitCode == 0 || !result.error.empty() : true));
+    }
+}
+
+SCENARIO("Temporary spaces are closed to other users") {
+    TempRoot    root{"private"};
+    HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
+    const auto  space = webfront::testing::detail::pathFromUtf8(host.makeTemp());
+    namespace fs      = std::filesystem;
+    for (const auto& path : {root.path, space})
+        REQUIRE((fs::status(path).permissions() & (fs::perms::group_all | fs::perms::others_all)) == fs::perms::none);
+}
+
+SCENARIO("A program that cannot start through exec is reported, with a reason") {
+    ProcessSpec spec;
+    spec.program      = probe.parent_path();  // A directory: exec fails with EACCES.
+    const auto result = run(spec);
+    REQUIRE(result.status == ProcessStatus::launchFailed);
+    REQUIRE_FALSE(result.error.empty());
+}
+#endif
+
+#ifdef __linux__
+SCENARIO("A program does not outlive an application killed without a destructor") {
+    TempRoot root{"orphan"};
+    std::filesystem::create_directories(root.path);
+    const auto marker = root.path / "alive.txt";
+    const auto child  = ::fork();
+    if (child == 0) {  // The application: starts a long program, then is killed like a CTest deadline kills it.
+        auto spec    = probeSpec({"write-later", marker.generic_string()});
+        spec.timeout = 60s;
+        (void)run(spec);
+        ::_exit(0);
+    }
+    REQUIRE(child > 0);
+    std::this_thread::sleep_for(500ms);
+    ::kill(child, SIGKILL);
+    ::waitpid(child, nullptr, 0);
+    std::this_thread::sleep_for(3s);
+    THEN("the program was ended with it") {
+        REQUIRE_FALSE(std::filesystem::exists(marker));
+    }
+}
+#endif
