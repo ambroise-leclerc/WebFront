@@ -313,7 +313,7 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
                     if (::GetLastError() != ERROR_IO_PENDING)
                         break;  // The other end is closed: the end of the stream.
                     while (::WaitForSingleObject(event.handle, 20) == WAIT_TIMEOUT && !stopReading) {}
-                    if (!::HasOverlappedIoCompleted(&overlapped))
+                    if (!HasOverlappedIoCompleted(&overlapped))
                         ::CancelIoEx(pipe, &overlapped);
                     if (!::GetOverlappedResult(pipe, &overlapped, &count, TRUE))
                         break;
@@ -456,6 +456,13 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         if (::getppid() != parent)
             failure = ESRCH;
         else {
+            // The program starts with default dispositions, not the application's (ignored SIGPIPE or SIGCHLD, handlers
+            // that would run in the child before exec), and only then with every signal unblocked.
+            struct sigaction byDefault{};
+            byDefault.sa_handler = SIG_DFL;
+            for (int signalNumber = 1; signalNumber < NSIG; ++signalNumber)
+                if (signalNumber != SIGKILL && signalNumber != SIGSTOP)
+                    ::sigaction(signalNumber, &byDefault, nullptr);
             ::sigprocmask(SIG_SETMASK, &none, nullptr);
             const int input = ::open("/dev/null", O_RDONLY);
             if (input < 0 || ::dup2(input, 0) < 0 || ::dup2(outWrite.fd, 1) < 0 || ::dup2(errWrite.fd, 2) < 0)
@@ -507,8 +514,11 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
     sigset_t none;
     sigemptyset(&none);  // Unqualified: a macro on macOS.
     ::posix_spawnattr_setpgroup(&attributes, 0);
+    sigset_t every;
+    sigfillset(&every);
     ::posix_spawnattr_setsigmask(&attributes, &none);
-    ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK);
+    ::posix_spawnattr_setsigdefault(&attributes, &every);  // Default dispositions, not the application's.
+    ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
     bool prepared = ::posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0
                     && ::posix_spawn_file_actions_adddup2(&actions, outWrite.fd, 1) == 0 && ::posix_spawn_file_actions_adddup2(&actions, errWrite.fd, 2) == 0;
         #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))

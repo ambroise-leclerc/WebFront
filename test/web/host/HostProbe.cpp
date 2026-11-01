@@ -132,6 +132,14 @@ int main(int argc, char** argv) {
         return 0;
     }
 #ifndef _WIN32
+    if (mode == "dispositions") {  // Whether SIGPIPE and SIGCHLD are ignored in this program.
+        for (const int number : {SIGPIPE, SIGCHLD}) {
+            struct sigaction current{};
+            sigaction(number, nullptr, &current);
+            std::cout << (current.sa_handler == SIG_IGN ? "ignored" : "default") << ' ';
+        }
+        return 0;
+    }
     if (mode == "kill-self")
         raise(SIGKILL);
 #endif

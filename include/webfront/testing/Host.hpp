@@ -378,6 +378,7 @@ private:
             throw std::runtime_error("Program not authorized: " + program);
         if (!directory.empty())
             parsed.spec.workingDirectory = contained(directory, true);
+        detail::validateProcessSpec(parsed.spec);  // Refused here, before any run exists.
         return parsed;
     }
 

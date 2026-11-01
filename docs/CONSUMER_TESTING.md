@@ -126,9 +126,11 @@ await webFrontHost.withTemp(async dir => {                    // a new private d
 
 What is guaranteed, and what is not:
 
-- **No shell, literal arguments.** The program is started directly with `args` as its `argv`: spaces, quotes, Unicode, `;|&$\`` and
+- **No shell, literal arguments.** The program is started directly with `args` as its `argv`: spaces, quotes, Unicode, `` ;|&$\` `` and
   empty strings arrive unchanged (Windows applies the standard `CommandLineToArgvW` quoting). Its standard input is closed.
   Paths may contain spaces and Unicode; the program path is the owner's, not the spec's spelling.
+- **Signals.** The program starts with default signal dispositions and an empty signal mask (POSIX), whatever the application
+  ignores or handles.
 - **Environment policy.** By default the program sees **only** `env` (plus `SystemRoot` on Windows, which programs there need to
   start); `inheritEnv: true` adds the test process's environment under it. Neither changes `TMPDIR`: pass the variables you
   want, for example the directory from `makeTemp()`.

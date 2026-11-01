@@ -479,3 +479,28 @@ SCENARIO("A temporary space that cannot be removed is reported and stays registe
     }
 }
 #endif
+
+SCENARIO("A request the process runner would refuse is refused before any run exists") {
+    TempRoot    root{"early-validation"};
+    HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
+    const auto  base = "{\"program\":" + webfront::json::quote(probe.generic_string());
+    REQUIRE_THROWS(host.runStart(base + ",\"env\":{\"A=B\":\"x\"}}"));
+    REQUIRE_THROWS(host.runStart(base + ",\"env\":{\"\":\"x\"}}"));
+    REQUIRE_THROWS(host.runStart(base + ",\"args\":[\"a\\u0000b\"]}"));
+}
+
+#ifndef _WIN32
+SCENARIO("A program starts with default signal dispositions, whatever the application ignores") {
+    const auto pipe   = std::signal(SIGPIPE, SIG_IGN);
+    const auto child  = std::signal(SIGCHLD, SIG_IGN);
+    auto       spec   = probeSpec({"dispositions"});
+    spec.timeout      = 5s;
+    const auto result = run(spec);
+    std::signal(SIGPIPE, pipe);
+    std::signal(SIGCHLD, child);
+    THEN("neither is ignored in the program") {
+        REQUIRE(result.status == ProcessStatus::exited);
+        REQUIRE(result.standardOutput == "default default ");
+    }
+}
+#endif
