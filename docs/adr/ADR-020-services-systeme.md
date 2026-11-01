@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -390,11 +390,14 @@ autorisations explicites, backend par connexion).
    même par un appel direct sans le sélecteur, poignée inutilisable par une autre connexion, jeton expiré refusé, écriture
    atomique ; **remplacement concurrent** d'un composant par un lien vers l'extérieur de la racine pendant la lecture,
    l'écriture, la création, le renommage et la suppression, sans qu'aucune opération n'atteigne l'extérieur ;
-   **déplacement concurrent** hors de la racine d'un répertoire déjà ouvert, injecté entre l'ouverture et l'opération :
-   sous Windows, le déplacement échoue ; sous POSIX, un répertoire modifiable par un autre utilisateur ou par le groupe
-   fait refuser l'opération avant tout effet, et un déplacement par le même utilisateur pendant une écriture fait
-   abandonner la validation avec `confinementViolated`, sans fichier écrit à l'extérieur ; racine `shared` documentée
-   comme confinement affaibli ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
+   **déplacement concurrent** hors de la racine d'un répertoire déjà ouvert, et **de la racine elle-même**, injecté
+   entre l'ouverture et l'opération, pendant l'écriture du temporaire et juste avant le renommage final : sous Windows,
+   chaque déplacement échoue et l'écriture aboutit sous la racine ; sous POSIX, un répertoire de la racine ou un ancêtre
+   modifiable par un autre utilisateur ou le groupe fait refuser la déclaration ou l'opération avant tout effet ; une
+   racine déplacée par le même utilisateur avant l'opération donne `rootMoved` sans effet ; un déplacement par le même
+   utilisateur détecté avant la validation donne `confinementViolated` sans renommage final ; un déplacement survenant
+   après la vérification n'est pas couvert (garantie documentée, pas d'assertion) ; racine `shared` documentée comme
+   confinement affaibli ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
 3. **Choix du backend** : par défaut, connexion non associée à la vue d'un frontend → jamais natif, y compris depuis
    la boucle locale (tunnel, autre utilisateur) ; avec l'option de confiance explicite, connexion de boucle locale →
    natif possible, connexion distante → toujours HTML ; sans racine → pas de HTML ; annulation → liste vide ; aucun
@@ -451,10 +454,10 @@ autorisations explicites, backend par connexion).
   sur l'arborescence de l'hôte.
 - **Risque :** le contrôle d'origine (ADR-008) reste la seule frontière du pont ; un script admis peut ouvrir des
   dialogues et lire les fichiers accordés. Les autorisations limitent la portée, pas la confiance.
-- **Risque :** sous POSIX, un acteur local qui peut écrire dans les répertoires d'une racine peut en sortir un
-  répertoire déjà ouvert ; le contrôle de propriété et de droits le réserve au propriétaire, et la vérification
-  finale détecte la violation, sans l'empêcher pour une lecture ou une suppression. Une racine `shared` n'offre qu'un
-  confinement affaibli.
+- **Risque :** sous POSIX, le même utilisateur (ou le superutilisateur) peut déplacer la racine ou l'un de ses
+  répertoires pendant une opération et faire lire, supprimer ou écrire à l'extérieur ; les contrôles de propriété et de
+  droits réservent ce pouvoir à ces acteurs, la vérification finale ne fait que le détecter. Une racine `shared` n'offre
+  qu'un confinement affaibli.
 - **Risque :** une racine accessible à la page l'est pour tout script admis, sans sélection par l'utilisateur ; le
   sélecteur HTML ne l'empêche pas. Seules les racines `none` et le dialogue natif réservent l'accès à une sélection
   réelle.
@@ -500,18 +503,35 @@ autorisations explicites, backend par connexion).
   propriétaire sur leur contenu. Mesures exigées pour que cette hypothèse soit vérifiée, et non supposée :
   - chaque opération repart du descripteur de la racine ; aucun descripteur intermédiaire n'est conservé au-delà d'une
     opération, et les déplacements effectués par le service lui-même sont sérialisés par racine ;
-  - POSIX : chaque répertoire traversé est contrôlé sur son descripteur (`fstat`) : propriétaire égal à l'utilisateur
-    effectif du processus, aucun droit d'écriture pour le groupe ou les autres ; sinon l'opération est refusée, puisque
-    seul un acteur pouvant écrire dans le parent d'un répertoire peut l'en sortir. Une racine déclarée `shared`
-    (dossier partagé, support amovible monté sans permissions) lève ce contrôle et n'offre qu'un confinement affaibli,
-    documenté comme tel ;
-  - Windows : les répertoires traversés restent ouverts **sans `FILE_SHARE_DELETE`** pendant l'opération, ce qui fait
-    échouer tout renommage ou suppression concurrent de ces répertoires : le cas est couvert, pas seulement supposé ;
-  - toutes plateformes : avant la validation d'une écriture (renommage final) et après toute opération, le service
-    vérifie que le répertoire parent est toujours sous la racine, en remontant par `..` depuis son descripteur jusqu'à
-    l'identité (`st_dev`, `st_ino` ou identifiant de fichier Windows) du descripteur racine ; en cas d'écart, la
-    validation est abandonnée, le fichier temporaire supprimé et l'erreur `confinementViolated` signalée. Cette
-    vérification réduit la fenêtre et détecte la violation ; seules les deux mesures précédentes l'empêchent ;
+  - **l'autorisation est attachée à l'emplacement déclaré, pas à l'objet racine.** Un acteur qui déplace la racine
+    entière (par exemple vers un répertoire de démarrage automatique) ne doit pas faire écrire le service à ce nouvel
+    emplacement, alors que ses descendants restent sous le même descripteur. Chaque opération vérifie donc d'abord que
+    l'emplacement déclaré, résolu composant par composant sans suivre de lien, désigne encore l'identité du descripteur
+    racine (`st_dev`/`st_ino`, identifiant de fichier Windows) ; sinon le service refuse avec `rootMoved` jusqu'à une
+    nouvelle déclaration. Un support démonté puis remonté produit le même refus ;
+  - POSIX : seul peut sortir un répertoire de son parent un acteur qui peut écrire dans ce parent (ou le
+    superutilisateur). Chaque répertoire traversé est contrôlé sur son descripteur (`fstat`) : propriétaire égal à
+    l'utilisateur effectif, aucun droit d'écriture pour le groupe ou les autres. **Les ancêtres de la racine** sont
+    contrôlés de même, jusqu'à `/`, à la déclaration puis à chaque opération : chacun doit être non modifiable par le
+    groupe et les autres, ou porter le bit collant avec l'élément suivant du chemin appartenant à l'utilisateur effectif
+    ou au superutilisateur (cas de `/tmp`) ; sinon la déclaration ou l'opération est refusée. Une racine déclarée
+    `shared` (dossier partagé, support amovible monté sans permissions) lève ces contrôles et n'offre qu'un confinement
+    affaibli, documenté comme tel ;
+  - Windows : le handle de la racine reste ouvert **sans `FILE_SHARE_DELETE`** pendant toute la vie de la déclaration,
+    et les répertoires traversés pendant toute l'opération, écriture du fichier temporaire et renommage final compris :
+    tout renommage ou suppression concurrent de ces répertoires échoue. NTFS refuse en principe aussi le renommage d'un
+    ancêtre dont un descendant est ouvert ; le test le qualifie. Coût accepté : l'utilisateur ne peut pas renommer la
+    racine tant qu'elle est déclarée ;
+  - toutes plateformes : avant la validation d'une écriture et après toute opération, le service vérifie que le
+    répertoire parent est toujours sous la racine, en remontant par `..` jusqu'à l'identité du descripteur racine, et que
+    la racine est toujours à son emplacement déclaré ; en cas d'écart, la validation est abandonnée si elle n'a pas eu
+    lieu, le fichier temporaire supprimé et l'erreur `confinementViolated` signalée. Cette vérification **détecte** sans
+    empêcher : un déplacement entre elle et le renommage, ou pendant l'écriture du fichier temporaire, peut laisser un
+    fichier à l'extérieur ;
+  - **garantie résultante.** Windows : empêchement pendant toute l'opération. POSIX : empêchement face à tout acteur
+    sans droit d'écriture sur les répertoires de la racine et ses ancêtres ; face au même utilisateur (ou au
+    superutilisateur), aucune garantie, seulement une détection au mieux, faute de primitive qui interdise le
+    déplacement d'un répertoire ;
   - stockages embarqués (FatFs, LittleFS) : le micrologiciel est le seul acteur ; ses tâches passent par le service, qui
     sérialise les opérations d'une racine.
 - Ne jamais fonder une autorisation sur l'adresse de la connexion ; seule l'association à la vue d'un frontend, ou la
