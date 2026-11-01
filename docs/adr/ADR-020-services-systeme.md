@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -158,12 +158,22 @@ dépendance du parcours par défaut (ADR-007).
 
 ### 2. La sélection vaut autorisation : des poignées, pas des chemins
 
-Un service de fichiers ne donne jamais à la page un pouvoir sur un chemin arbitraire de l'hôte. Le dialogue, quel que
-soit son backend, produit des **autorisations** (`FileGrant`) :
+Un service de fichiers ne donne jamais à la page un pouvoir sur un chemin arbitraire de l'hôte. Une autorisation
+(`FileGrant`) naît de deux sources seulement, de portée de confiance différente :
+
+- un **dialogue contrôlé par l'hôte** (dialogue natif, ou appel C++ de l'application) : la sélection y est réellement
+  faite par l'utilisateur, car aucun script de la page ne peut piloter un dialogue du système ;
+- une **racine déclarée accessible à la page** (sélecteur HTML) : la racine elle-même est l'autorisation. Le sélecteur
+  HTML s'exécute dans la page, avec l'autorité du pont ; tout script admis (ADR-008) peut appeler les mêmes opérations
+  de listage et de création de poignées sans interaction avec le dialogue. Le sélecteur est une interface, **pas une
+  frontière d'autorisation**.
+
+Dans les deux cas, l'autorisation se présente ainsi :
 
 - côté C++, une autorisation porte le chemin réel ou l'objet de plateforme (URI SAF, URL « security-scoped », chemin
   du portail) et des droits (lecture, écriture, création dans un dossier) ;
-- côté JavaScript, elle n'est qu'une **poignée opaque** liée à la connexion (`UI`) : identifiant aléatoire, nom
+- côté JavaScript, elle n'est qu'une **poignée opaque** liée à la connexion (`UI`) pour les opérations du pont (une
+  autre connexion ne peut pas l'employer) ; ses lectures HTTP sont liées au profil du navigateur (règle 4) : identifiant aléatoire, nom
   affichable, taille, type MIME, droits ; jamais le chemin complet, sauf si l'application le demande explicitement ;
 - une poignée meurt avec la connexion ou sur révocation ; une persistance entre sessions (fichiers récents) est un choix
   explicite de l'application, réalisé par les signets et URI persistantes de la plateforme.
@@ -190,7 +200,13 @@ pour cette connexion** est retenu :
 2. **HTML** — un sélecteur dessiné dans la page : élément personnalisé dans un `<dialog>` modal, sans dépendance à
    React ni à une autre bibliothèque, alimenté par un listage paginé que le C++ calcule **uniquement dans des racines
    déclarées** par l'application (`roots` : données de l'application, supports amovibles, dossier d'export…). Sans
-   racine déclarée, ce backend est indisponible. Il est le seul utilisable en kiosque et pour un client distant, et
+   racine déclarée, ce backend est indisponible. Chaque racine déclare son accès par la page : `none` (aucune opération
+   depuis la page ; seuls le C++ et le dialogue natif créent des autorisations), `read` (lister et lire) ou `readWrite`.
+   Une racine accessible est **entièrement** à la portée de tout script admis, dans ses droits : l'application ne doit
+   y placer que ce qu'elle accepterait de confier à n'importe quel script de son origine. Une confirmation réellement
+   contrôlée par l'hôte pour un client distant n'existe pas dans la page ; si l'application en a besoin, elle passe par
+   un canal hors de la page (bouton physique de l'équipement, confirmation sur l'écran local), hors du périmètre de
+   cette décision. Il est le seul utilisable en kiosque et pour un client distant, et
    le seul que les tests et l'automatisation pilotent (ADR-012, ADR-019). L'adaptateur React (`@webfront/react`) peut
    l'envelopper sans le posséder.
 3. **Client** — pour les fichiers du client : `<input type="file">`, glisser-déposer et téléchargement par lien. Ce
@@ -221,13 +237,20 @@ lève).
   facultative. Avant l'expiration, la page obtient un nouveau jeton par la poignée (`handle.url()` rappelé) ; un élément
   média dont le jeton expire en cours de lecture reprend à la position courante avec la nouvelle URL. Un jeton à usage
   unique n'est qu'une option explicite pour un téléchargement ponctuel, jamais pour un média.
-- **Liaison à la connexion.** Une requête HTTP ne porte pas l'identité de la WebSocket, et `<img>` ou `<video>` ne
-  peuvent pas ajouter d'en-tête : un jeton seul est une capacité au porteur. Par défaut, une lecture exige donc le jeton
-  **et** un cookie de liaison propre à la connexion propriétaire : `WebFront.js` échange, par une requête `fetch` de
-  même origine, un secret à usage unique reçu par le pont contre un cookie `HttpOnly`, `SameSite=Strict`, limité au
-  chemin des services et nommé d'après la connexion. Le navigateur le joint de lui-même aux requêtes de `<img>`,
-  `<video>` et `fetch` ; la même URL rejouée depuis un autre client est refusée (`403`, sans indiquer si le jeton
-  existe). Si le navigateur refuse le cookie, la lecture échoue explicitement, sans repli. Un **mode transférable**,
+- **Liaison au navigateur, pas à la connexion.** Une requête HTTP ne porte pas l'identité de la WebSocket, et `<img>`
+  ou `<video>` ne peuvent pas ajouter d'en-tête : un jeton seul est une capacité au porteur. Par défaut, une lecture
+  exige donc le jeton **et** un cookie de liaison : `WebFront.js` échange, par une requête `fetch` de même origine, un
+  secret à usage unique reçu par le pont contre un cookie `HttpOnly`, `SameSite=Strict`, limité au chemin des
+  services. Un cookie est partagé par tous les onglets d'un même profil pour une origine : il identifie donc un
+  **client** (profil de navigateur), pas une connexion. Le serveur associe à ce client l'ensemble de ses connexions ;
+  une connexion qui présente déjà un cookie valide lors de l'échange rejoint ce client au lieu d'en créer un. Un jeton
+  est accepté si le cookie présenté désigne le client de la connexion propriétaire, tant que celle-ci est ouverte. La
+  garantie est la possession du cookie : la même URL rejouée depuis un **autre client** (autre navigateur, autre
+  profil, autre machine, client HTTP) est refusée (`403`, sans indiquer si le jeton existe), mais une autre page de la
+  même origine dans le même profil peut la lire. Ce n'est pas une perte : ces pages partagent déjà stockage, cookies et
+  autorité du pont (ADR-008). Une isolation par connexion compatible avec les éléments média exigerait un service
+  worker qui ajoute un en-tête selon la page émettrice, indisponible hors contexte sécurisé (client distant en HTTP)
+  et aux plages média encore inégalement interceptées : elle est écartée. Si le navigateur refuse le cookie, la lecture échoue explicitement, sans repli. Un **mode transférable**,
   explicite et à durée courte obligatoire, fait du jeton seul une capacité au porteur, documentée comme telle, pour
   remettre une URL à une application externe.
 - **Exposition du jeton et du contenu.** Chaque réponse de lecture porte `Cache-Control: no-store` et
@@ -272,7 +295,9 @@ if (image) img.src = image.url();
 Chaque appel de dialogue est une tâche possédée (ADR-006), annulable localement ; la fermeture de la connexion ferme
 le sélecteur HTML et abandonne le résultat d'un dialogue natif encore ouvert. La façade JavaScript n'est enregistrée
 que pour les opérations que l'application autorise depuis la page (`allowFromPage`) ; par défaut, ouvrir et enregistrer
-un dialogue sont permis car l'utilisateur confirme, tandis que lister une racine ne l'est que par le sélecteur HTML.
+un dialogue natif sont permis car l'utilisateur confirme dans une interface que la page ne pilote pas ; lister une racine
+et y créer des poignées dépendent seulement de l'accès déclaré pour cette racine, que l'appel vienne du sélecteur HTML ou
+de tout autre script admis.
 
 ### 6. Préalable : rendre `<input type="file">` opérant dans chaque frontend intégré
 
@@ -333,7 +358,8 @@ autorisations explicites, backend par connexion).
 1. **Comportements web standard** : `<input type="file">`, `alert`/`confirm` et un téléchargement fonctionnent dans CEF, WebView2,
    WKWebView et WebKitGTK ; scénario de la suite partagée, sélection simulée par le moteur quand il le permet.
 2. **Sélecteur HTML** : listage paginé borné, refus de toute sortie des racines (`..`, liens symboliques, chemins
-   absolus, noms Windows réservés), poignée inutilisable par une autre connexion, jeton expiré refusé, écriture
+   absolus, noms Windows réservés), racine `none` inaccessible depuis la page, racine `read` refusant toute écriture
+   même par un appel direct sans le sélecteur, poignée inutilisable par une autre connexion, jeton expiré refusé, écriture
    atomique ; **remplacement concurrent** d'un composant par un lien vers l'extérieur de la racine pendant la lecture,
    l'écriture, la création, le renommage et la suppression, sans qu'aucune opération n'atteigne l'extérieur ; tests Catch2 avec système de fichiers simulé, puis test navigateur piloté par l'automatisation.
 3. **Choix du backend** : par défaut, connexion non associée à la vue d'un frontend → jamais natif, y compris depuis
@@ -347,7 +373,10 @@ autorisations explicites, backend par connexion).
    lecture distante en HTTP clair refusée sans `allowPlaintextRemote` ; `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
    mémoire du serveur indépendante de la taille du fichier servi ; plusieurs requêtes `Range` successives avec le même
    jeton, positionnement et reprise d'une `<video>`, renouvellement avant expiration ; même URL rejouée depuis un
-   autre client sans le cookie de liaison refusée, acceptée seulement en mode transférable.
+   autre client (autre profil ou navigateur, client HTTP) sans le cookie refusée, acceptée seulement en mode
+   transférable ; rejouée depuis une autre page du même profil, acceptée (garantie limitée à la possession du cookie,
+   documentée) ; refusée après fermeture de la connexion propriétaire ; poignée refusée par le pont sur une autre
+   connexion.
 6. **Ressources** : aucune ressource ajoutée au cœur (cas `MinimalCoreAssets`) ; sélecteur HTML chargé seulement si le
    service est instancié.
 7. Documentation `docs/SERVICES.md` : backends par configuration, limites, absence d'isolation (ADR-008 inchangée).
@@ -384,7 +413,12 @@ autorisations explicites, backend par connexion).
   sur l'arborescence de l'hôte.
 - **Risque :** le contrôle d'origine (ADR-008) reste la seule frontière du pont ; un script admis peut ouvrir des
   dialogues et lire les fichiers accordés. Les autorisations limitent la portée, pas la confiance.
-- **Coût accepté :** un cookie de liaison par connexion, à qualifier dans chaque moteur ; les téléchargements gérés par
+- **Risque :** une racine accessible à la page l'est pour tout script admis, sans sélection par l'utilisateur ; le
+  sélecteur HTML ne l'empêche pas. Seules les racines `none` et le dialogue natif réservent l'accès à une sélection
+  réelle.
+- **Coût accepté :** la liaison HTTP vaut pour un profil de navigateur : les pages de même origine d'un même profil
+  peuvent lire les URL les unes des autres.
+- **Coût accepté :** un cookie de liaison par client, à qualifier dans chaque moteur ; les téléchargements gérés par
   l'adaptateur doivent le présenter.
 - **Risque :** WebFront ne chiffre pas ; un client distant sans transport chiffré fourni par le déploiement expose
   jeton et contenu. La lecture distante en clair est refusée sauf acceptation explicite.
@@ -395,6 +429,8 @@ autorisations explicites, backend par connexion).
 
 ## Prescriptions d'implémentation et de génération de code
 
+- Ne jamais présenter le sélecteur HTML comme un contrôle d'autorisation : vérifier l'accès déclaré de la racine dans
+  chaque opération C++, quel que soit l'appelant.
 - Ne jamais transmettre à JavaScript un chemin de l'hôte sans demande explicite de l'application ; ne jamais accepter
   de JavaScript un chemin à ouvrir : seulement une poignée émise pour cette connexion.
 - `SafePath` ne valide que la syntaxe d'un chemin relatif. Le confinement à une racine se vérifie **pendant** la
