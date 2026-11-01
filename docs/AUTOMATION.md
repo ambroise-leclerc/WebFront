@@ -41,8 +41,7 @@ build-agent/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer --
 ```
 
 `build-distribution/provision.json` gives the resulting integrity. Project packages must also be
-installed/restored beforehand through wf. Package installation and network restoration are not
-agent tools. Tests use configure-provisioned packages and a local registry, with no public network
+installed/restored beforehand through wf, or by an agent granted `install`/`restore`. Tests use configure-provisioned packages and a local registry, with no public network
 after provisioning. This source build does not publish a release or change the pinned bootstrap.
 
 ## Invocation and authority
@@ -62,11 +61,14 @@ webfront-agent --project /absolute/project \
 ```
 
 All executable operations are denied unless granted by the process owner using `--allow`.
-Valid grants are `check`, `build`, `test`, `preview`, `inspect` and `interact` (click/fill).
+Valid grants are `check`, `build`, `test`, `preview`, `inspect`, `interact` (click/fill) and the project setup
+grants `init`, `create`, `install`, `restore` and `embed`. The setup grants write the manifest, the lock, the cache, a new
+starter directory or the generated provider header; grant them only for a project whose registry you trust.
 The project, environment, manifest directory and grants cannot be changed by MCP or the manifest.
 Omit grants to expose session discovery only. In particular, there is no agent tool for shell,
-JavaScript evaluation, arbitrary callback calls, `wf run`, `exec`, install, restore or arbitrary
-native file reads/writes. An agent edits project files through its separately authorized workspace
+JavaScript evaluation, arbitrary callback calls, `wf run`, `exec` or arbitrary
+native file reads/writes. `install` and `restore` use the registry already configured by the owner, the manifest or the
+default; the operation cannot choose another one. An agent edits project files through its separately authorized workspace
 tools, then asks WebFront to verify them.
 
 `--manifest-dir` selects a project-relative manifest directory. `--registry-dir` serves an
@@ -183,9 +185,16 @@ Operations and their arguments:
 | `build`, `preview` | `{entry?}` | Operation's own grant |
 | `test` | `{pattern?}` | `test` |
 | `inspect` | `{}` | `inspect` |
+| `init` | `{name?}` | `init` |
+| `create` | `{starter, directory?}` | `create` |
+| `install` | `{package?}` (one `name[@range]`; none installs the locked graph) | `install` |
+| `restore` | `{}` | `restore` |
+| `embed` | `{provider}` or `{entry, output}` | `embed` |
 | `click` | `{pageId, elementId}` | `interact` |
 | `fill` | `{pageId, elementId, value}` | `interact` |
 
+`name`, `starter`, `package` and `provider` refuse a leading `-`, a backslash and spaces; `directory` and `output` must be
+new project-relative paths. `embed` needs a provider, or an entry together with an output, never both.
 Unknown arguments, wrong sessions, unsupported commands and option-like entry/pattern strings
 are refused natively. Entries accept manifest labels (including `app:debug` and `app..debug`);
 entry paths must be project-relative. A queued/running operation blocks

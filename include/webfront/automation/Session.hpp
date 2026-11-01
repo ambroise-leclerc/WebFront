@@ -262,6 +262,18 @@ private:
                 fs::safeRelativePath(value);
             if (key == "pattern" && value.starts_with('-'))
                 throw std::invalid_argument("Pattern must not be an option");
+            if ((key == "name" || key == "starter" || key == "package" || key == "provider")
+                && (value.starts_with('-') || value.contains('\\') || value.contains(' ')))
+                throw std::invalid_argument("Argument must be a plain name, not an option or a path");
+            if ((key == "directory" || key == "output") && (value.empty() || value.starts_with('-') || value.contains('\\') || value.starts_with('/')))
+                throw std::invalid_argument("Argument must be a project-relative path");
+            if (key == "directory" || key == "output")
+                fs::safeRelativePath(value);
+        }
+        if (operation == "embed") {
+            const bool provider = args.has("provider"), entry = args.has("entry"), output = args.has("output");
+            if (provider == entry || entry != output)
+                throw std::invalid_argument("embed needs either provider, or entry together with output");
         }
     }
     Run& find(std::string_view id) {

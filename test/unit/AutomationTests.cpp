@@ -231,6 +231,50 @@ SCENARIO("Automation entries accept manifest labels while refusing unsafe paths"
     }
 }
 
+SCENARIO("Project setup operations need their own grants and plain arguments") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            denied{
+        {directory.path(), {"build"}}
+    };
+    Session session{
+        {directory.path(), {"init", "create", "install", "restore", "embed"}}
+    };
+    denied.poll();
+    session.poll();
+    const auto accepted = [&](const char* operation, const char* arguments) {
+        const auto id = Object(session.start(command(session, operation, arguments))).string("runId");
+        session.poll();
+        session.complete(id, R"({"exitCode":0,"output":"","report":null})");
+    };
+    GIVEN("a session without those grants") {
+        for (const auto operation : {"init", "create", "install", "restore", "embed"})
+            REQUIRE_THROWS(denied.start(command(denied, operation, operation == std::string_view("create") ? R"({"starter":"life"})" : "{}")));
+    }
+    GIVEN("granted operations with valid arguments") {
+        accepted("init", R"({"name":"demo"})");
+        accepted("create", R"({"starter":"life","directory":"ui"})");
+        accepted("install", "{}");
+        accepted("install", R"({"package":"react@19.3.1"})");
+        accepted("restore", "{}");
+        accepted("embed", R"({"provider":"LifeUI"})");
+        accepted("embed", R"({"entry":"ui/main.tsx","output":"generated/LifeUI.hpp"})");
+    }
+    GIVEN("options, escapes and incomplete requests") {
+        REQUIRE_THROWS(session.start(command(session, "create", "{}")));
+        REQUIRE_THROWS(session.start(command(session, "create", R"({"starter":"--help"})")));
+        REQUIRE_THROWS(session.start(command(session, "create", R"({"starter":"life","directory":"../escape"})")));
+        REQUIRE_THROWS(session.start(command(session, "create", R"({"starter":"life","directory":"/absolute"})")));
+        REQUIRE_THROWS(session.start(command(session, "install", R"({"package":"--update"})")));
+        REQUIRE_THROWS(session.start(command(session, "install", R"({"package":"a b"})")));
+        REQUIRE_THROWS(session.start(command(session, "init", R"({"name":"-x"})")));
+        REQUIRE_THROWS(session.start(command(session, "restore", R"({"offline":"true"})")));
+        REQUIRE_THROWS(session.start(command(session, "embed", "{}")));
+        REQUIRE_THROWS(session.start(command(session, "embed", R"({"entry":"ui/main.tsx"})")));
+        REQUIRE_THROWS(session.start(command(session, "embed", R"({"provider":"LifeUI","output":"a.hpp"})")));
+        REQUIRE_THROWS(session.start(command(session, "embed", R"({"entry":"ui/main.tsx","output":"../a.hpp"})")));
+    }
+}
+
 SCENARIO("Authorization precedes operation and argument validation") {
     webfront::test::TemporaryDirectory directory;
     Session                            session{

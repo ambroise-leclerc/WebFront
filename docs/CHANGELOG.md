@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Automation can set a project up end to end (#466): `init`, `create`, `install`, `restore` and `embed` join the contract of
+  `webfront-agent`, each behind its own `--allow` grant and with plain-name or project-relative arguments (no options, no
+  traversal). `install` takes one package from the configured registry or installs the locked graph; `embed` takes a manifest
+  provider, or an entry with an output header. See `docs/AUTOMATION.md`.
 - Declare the embedded engine without consumer-side macros (#467): `webfront::embeddedFrontendAvailable` (`constexpr bool`, true
   when a native web view or CEF is compiled in) and `webfront::EmbeddedWebFront` (the application type with the native web view,
   or with CEF when only CEF is built) exist in every configuration; constructing `EmbeddedWebFront` throws
