@@ -3,6 +3,7 @@
 #include "../ContentPolicy.hpp"
 #include "../tooling/Logger.hpp"
 #include "Action.hpp"
+#include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -33,12 +34,16 @@ struct WebView2Options {
     #include "../system/WindowsCompat.hpp"
 
     #include <cstdint>
+    #include <deque>
     #include <exception>
     #include <filesystem>
     #include <format>
+    #include <future>
     #include <limits>
     #include <memory>
+    #include <mutex>
     #include <string>
+    #include <vector>
 
     #include <shlobj.h>
     #include <WebView2.h>
@@ -137,6 +142,111 @@ inline std::filesystem::path userDataFolder() {
     return folder;
 }
 
+/// Posted to the window to make its STA start the queued capture requests.
+inline constexpr UINT captureMessage = WM_APP + 0x4C1;
+
+struct CaptureJob {
+    std::promise<CaptureResult> done;
+};
+
+/**
+ * Capture requests cross from any thread to the window's STA, where CapturePreview must run. The requests wait in this
+ * queue, not in message payloads, so none can leak when the window disappears: closing answers every pending one.
+ */
+class CaptureQueue {
+public:
+    /// The window now accepts requests.
+    void open(HWND handle) {
+        std::scoped_lock lock{mutex};
+        window = handle;
+        opened = true;
+    }
+
+    /// Refuses further requests and returns those still waiting or started but unanswered, to be answered by the caller.
+    std::deque<std::shared_ptr<CaptureJob>> close() {
+        std::scoped_lock lock{mutex};
+        opened = false;
+        window = nullptr;
+        auto jobs = std::exchange(pending, {});
+        jobs.insert(jobs.end(), inflight.begin(), inflight.end());
+        inflight.clear();
+        return jobs;
+    }
+
+    /// The engine owns the request now: closing must still answer it.
+    void started(const std::shared_ptr<CaptureJob>& job) {
+        std::scoped_lock lock{mutex};
+        inflight.push_back(job);
+    }
+
+    void finished(const std::shared_ptr<CaptureJob>& job) {
+        std::scoped_lock lock{mutex};
+        std::erase(inflight, job);
+    }
+
+    bool submit(const std::shared_ptr<CaptureJob>& job) {
+        std::scoped_lock lock{mutex};
+        if (!opened || !PostMessageW(window, captureMessage, 0, 0))
+            return false;
+        pending.push_back(job);
+        return true;
+    }
+
+    void cancel(const std::shared_ptr<CaptureJob>& job) {
+        std::scoped_lock lock{mutex};
+        std::erase(pending, job);
+    }
+
+    std::deque<std::shared_ptr<CaptureJob>> take() {
+        std::scoped_lock lock{mutex};
+        return std::exchange(pending, {});
+    }
+
+private:
+    std::mutex                              mutex;
+    HWND                                    window = nullptr;
+    bool                                    opened = false;
+    std::deque<std::shared_ptr<CaptureJob>> pending;
+    std::vector<std::shared_ptr<CaptureJob>> inflight;
+};
+
+inline void answer(CaptureJob& job, CaptureResult result) noexcept {
+    try {
+        job.done.set_value(std::move(result));
+    } catch (...) { }
+}
+
+// The PNG that CapturePreview wrote to its memory stream.
+inline CaptureResult pngBytes(HRESULT result, IStream* stream) {
+    if (FAILED(result))
+        return std::unexpected(std::format("capture failed (HRESULT 0x{:08X})", static_cast<std::uint32_t>(result)));
+    STATSTG statistics{};
+    check(stream->Stat(&statistics, STATFLAG_NONAME), "measuring the capture");
+    constexpr ULONGLONG limit = 256ull * 1024 * 1024;
+    if (!statistics.cbSize.QuadPart || statistics.cbSize.QuadPart > limit)
+        return std::unexpected("the engine returned no usable image");
+    check(stream->Seek(LARGE_INTEGER{}, STREAM_SEEK_SET, nullptr), "rewinding the capture");
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(statistics.cbSize.QuadPart));
+    ULONG                     read = 0;
+    check(stream->Read(bytes.data(), static_cast<ULONG>(bytes.size()), &read), "reading the capture");
+    bytes.resize(read);
+    return bytes;
+}
+
+inline CaptureProvider captureProvider(std::shared_ptr<CaptureQueue> queue) {
+    return [queue = std::move(queue)](std::chrono::milliseconds timeout) -> CaptureResult {
+        auto job    = std::make_shared<CaptureJob>();
+        auto future = job->done.get_future();
+        if (!queue->submit(job))
+            return std::unexpected("the window is closed or not ready");
+        if (future.wait_for(timeout) != std::future_status::ready) {
+            queue->cancel(job);
+            return std::unexpected("the window did not answer within the capture timeout");
+        }
+        return future.get();
+    };
+}
+
 // All members and callbacks are used on the caller's STA. Pending creation callbacks hold only weak
 // references, so closing during initialization cannot access a destroyed window or stack frame.
 class Session : public std::enable_shared_from_this<Session> {
@@ -160,6 +270,8 @@ public:
     std::function<void()>                            viewReady;
     bool                                             closed       = false;
     UINT_PTR                                         startupTimer = 0;
+    std::shared_ptr<CaptureQueue>                    captureQueue = std::make_shared<CaptureQueue>();
+    CaptureRegistration                              captureRegistration;
 
     ~Session() {
         close();
@@ -212,7 +324,10 @@ public:
         stopStartupTimer();
         if (closed)
             return;
-        closed = true;
+        closed              = true;
+        captureRegistration = {};
+        for (const auto& job : captureQueue->close())
+            answer(*job, std::unexpected("the window is closed"));
         try {
             if (controller)
                 check(controller->Close(), "closing controller");
@@ -455,6 +570,40 @@ private:
             check(controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC), "restoring browser focus");
     }
 
+    void startCaptures() noexcept {
+        for (const auto& job : captureQueue->take()) {
+            try {
+                if (!hasLiveController()) {
+                    answer(*job, std::unexpected("the window is closed"));
+                    continue;
+                }
+                Microsoft::WRL::ComPtr<IStream> stream;
+                check(CreateStreamOnHGlobal(nullptr, TRUE, &stream), "creating the capture stream");
+                captureQueue->started(job);
+                // The handler keeps the job and the stream until the engine answers.
+                check(view->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                                           stream.Get(),
+                                           Microsoft::WRL::Callback<ICoreWebView2CapturePreviewCompletedHandler>([job, stream, queue = captureQueue](HRESULT result) -> HRESULT {
+                                               queue->finished(job);
+                                               try {
+                                                   answer(*job, pngBytes(result, stream.Get()));
+                                               } catch (...) {
+                                                   try {
+                                                       job->done.set_exception(std::current_exception());
+                                                   } catch (...) { }
+                                               }
+                                               return S_OK;
+                                           }).Get()),
+                      "starting the capture");
+            } catch (...) {
+                captureQueue->finished(job);
+                try {
+                    job->done.set_exception(std::current_exception());
+                } catch (...) { }
+            }
+        }
+    }
+
     void notifyPositionChanged() {
         if (hasLiveController())
             check(controller->NotifyParentWindowPositionChanged(), "notifying parent window position");
@@ -479,6 +628,9 @@ private:
                 return true;
             case WM_MOVE:
                 notifyPositionChanged();
+                return true;
+            case captureMessage:
+                startCaptures();
                 return true;
             case WM_CLOSE:
                 close();
@@ -595,6 +747,8 @@ private:
             restoreFocus();
         // Runtime creation is complete. Slow page resources must not consume its watchdog budget.
         stopStartupTimer();
+        captureQueue->open(window);
+        captureRegistration = CaptureRegistration{captureProvider(captureQueue)};
         if (viewReady)
             viewReady();
         check(view->Navigate(url.c_str()), "navigating to application");

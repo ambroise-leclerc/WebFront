@@ -1,5 +1,6 @@
 # CTest owns this process. Its timeout remains outside the browser, even if JS stops responding.
 file(REMOVE "${DIRECTORY}/report.json")
+file(REMOVE_RECURSE "${DIRECTORY}/captures")
 file(READ "${DIRECTORY}/arguments-${CONFIG}.json" json)
 string(JSON count LENGTH "${json}")
 # Bracket arguments are literal: they keep empty strings and semicolons that a list expansion would lose.

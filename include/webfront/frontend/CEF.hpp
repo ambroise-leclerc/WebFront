@@ -4,6 +4,7 @@
 #include "../system/WindowsCompat.hpp"
 #include "../tooling/Logger.hpp"
 #include "CEFPaths.hpp"
+#include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -11,7 +12,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -68,9 +72,12 @@ public:
     #include "cef_command_handler.h"
     #include "cef_command_line.h"
     #include "cef_context_menu_handler.h"
+    #include "cef_devtools_message_observer.h"
     #include "cef_frame.h"
     #include "cef_id_mappers.h"
     #include "cef_load_handler.h"
+    #include "cef_parser.h"
+    #include "cef_task.h"
     #include "cef_request_handler.h"
     #include "views/cef_browser_view.h"
     #include "views/cef_window.h"
@@ -338,6 +345,148 @@ private:
 };
 }  // namespace detail
 
+using frontend::CaptureProvider;
+using frontend::CaptureRegistration;
+using frontend::PendingCaptures;
+using frontend::CaptureResult;
+
+namespace detail {
+/// The browser as seen by capture requests: read and cleared only on the UI thread, so a request that outlives the
+/// window finds it null.
+struct CaptureJob;
+struct CaptureTarget {
+    CefRefPtr<CefBrowser>                    browser;
+    PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
+};
+
+struct CaptureJob {
+    std::shared_ptr<CaptureTarget> target;
+    std::promise<CaptureResult>    done;
+};
+
+inline void answer(CaptureJob& job, CaptureResult result) noexcept {
+    try {
+        job.done.set_value(std::move(result));
+    } catch (...) { }
+}
+
+/// The window is going away: no pending request waits for an answer that will never come.
+inline void abandonCaptures(CaptureTarget& target) noexcept {
+    target.browser = nullptr;
+    for (const auto& job : target.pending.close())
+        answer(*job, std::unexpected("the window is closed"));
+}
+
+
+// The PNG of a Page.captureScreenshot result: {"data": "<base64>"}.
+inline CaptureResult pngOf(const void* json, std::size_t size) {
+    const auto value = CefParseJSON(json, size, JSON_PARSER_RFC);
+    if (!value || value->GetType() != VTYPE_DICTIONARY)
+        return std::unexpected("the engine returned an unreadable capture");
+    const auto data = CefBase64Decode(value->GetDictionary()->GetString("data"));
+    if (!data || !data->GetSize())
+        return std::unexpected("the engine returned no image");
+    std::vector<std::uint8_t> png(data->GetSize());
+    data->GetData(png.data(), png.size(), 0);
+    return png;
+}
+
+// Answers one Page.captureScreenshot. It stays registered with the browser until that answer arrives, and drops its own
+// registration then; the job outlives a waiter that timed out.
+class CaptureObserver : public CefDevToolsMessageObserver {
+public:
+    explicit CaptureObserver(std::shared_ptr<CaptureJob> request) : job(std::move(request)) { }
+
+    void start(CefRefPtr<CefBrowserHost> host) {
+        registration = host->AddDevToolsMessageObserver(this);
+        auto params  = CefDictionaryValue::Create();
+        params->SetString("format", "png");
+        expected = host->ExecuteDevToolsMethod(0, "Page.captureScreenshot", params);
+        if (!expected) {
+            job->target->pending.untrack(job);
+            answer(*job, std::unexpected("the engine refused the capture request"));
+            registration = nullptr;
+            return;
+        }
+    }
+
+    void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int messageId, bool success, const void* result, size_t size) override {
+        if (messageId != expected || !job)
+            return;
+        job->target->pending.untrack(job);
+        if (success)
+            answer(*job, pngOf(result, size));
+        else
+            answer(*job, std::unexpected("the engine failed the capture: " + std::string(static_cast<const char*>(result), size)));
+        job          = nullptr;
+        registration = nullptr;  // Last: it may destroy this observer.
+    }
+
+private:
+    std::shared_ptr<CaptureJob> job;
+    CefRefPtr<CefRegistration>  registration;
+    int                         expected = 0;
+
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(CaptureObserver);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+
+class CaptureTask : public CefTask {
+public:
+    explicit CaptureTask(std::shared_ptr<CaptureJob> request) : job(std::move(request)) { }
+    void Execute() override {
+        try {
+            if (!job->target->browser) {
+                answer(*job, std::unexpected("the window is closed"));
+                return;
+            }
+            CefRefPtr<CaptureObserver> observer = new CaptureObserver(job);
+            observer->start(job->target->browser->GetHost());
+        } catch (...) {
+            try {
+                job->done.set_exception(std::current_exception());
+            } catch (...) { }
+        }
+    }
+
+private:
+    std::shared_ptr<CaptureJob> job;
+
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(CaptureTask);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+
+inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
+    return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
+        auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
+        auto future = job->done.get_future();
+        if (!target->pending.track(job))
+            return std::unexpected("the window is closed");
+        if (!CefPostTask(TID_UI, new CaptureTask(job))) {
+            target->pending.untrack(job);
+            return std::unexpected("the window is closed");
+        }
+        const auto answered = future.wait_for(timeout) == std::future_status::ready;
+        target->pending.untrack(job);  // Whatever the outcome, a finished request is not kept until the window closes.
+        if (!answered)
+            return std::unexpected("the window did not answer within the capture timeout");
+        return future.get();
+    };
+}
+}  // namespace detail
+
 class SimpleCEFClient : public CefClient,
                         public CefDisplayHandler,
                         public CefLifeSpanHandler,
@@ -452,12 +601,23 @@ public:
     }
 
     virtual void OnTitleChange(CefRefPtr<CefBrowser> /*browser*/, const CefString& /*title*/) override { }
-    virtual void OnAfterCreated(CefRefPtr<CefBrowser> /*browser*/) override { }
+    virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        // The application's window is the first browser; popups are cancelled and DevTools has its own client.
+        if (!captureTarget->browser) {
+            captureTarget->browser = browser;
+        captureTarget->pending.open();
+            captureRegistration    = CaptureRegistration{detail::captureProvider(captureTarget)};
+        }
+    }
     virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
         return false;
     }
 
-    virtual void OnBeforeClose(CefRefPtr<CefBrowser> /*browser*/) override {
+    virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+        if (captureTarget->browser && captureTarget->browser->IsSame(browser)) {
+            captureRegistration = {};
+            detail::abandonCaptures(*captureTarget);
+        }
         // Ensure message loop exits when browser closes
         CefQuitMessageLoop();
     }
@@ -466,6 +626,8 @@ private:
     webfront::detail::BoundContentPolicy contentPolicy;
     browser::Launcher                    popupLauncher;
     bool loadingInitialPage = true;
+    std::shared_ptr<detail::CaptureTarget> captureTarget = std::make_shared<detail::CaptureTarget>();
+    CaptureRegistration                    captureRegistration;
 
     void dispatchPopup(const std::string& url, bool userGesture) noexcept {
         try {

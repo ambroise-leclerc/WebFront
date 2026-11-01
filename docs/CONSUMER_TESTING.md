@@ -83,3 +83,55 @@ with application/bridge authority, not a sandbox. Native reads expose only the c
 by numeric index, in bounded chunks, to the newest instrumented connection: a page that reloads
 or redirects is instrumented again and the earlier connection loses access. One window is supported. No runtime path supplied
 by a page is opened. Use an isolated CI environment for untrusted projects and remove secrets.
+
+## Screenshots and image sequences
+
+A test build can capture the **web content** of the window (without native decorations) as PNG images, for example to
+build a README animation in CI. Each named test owns `webfront-jasmine/<name>/captures/`, emptied before every run. The
+specs reach it through the global `webFrontCapture`:
+
+```js
+it('shows the board running', async () => {
+    await webFrontCapture.screenshot('start');                       // captures/start.png
+    const frames = await webFrontCapture.record('run', {seconds: 4, framesPerSecond: 12});
+    // captures/run/0001.png ... 0048.png; frames is the number written
+});
+// Or bracket a scenario yourself: startRecording(name, framesPerSecond) ... stopRecording() -> frames
+```
+
+Encode the sequence outside WebFront: `ffmpeg -framerate 12 -i captures/run/%04d.png run.webm` (or gifski for a GIF).
+Names have 1 to 64 letters, digits, `_` or `-`, so a page can neither leave the directory nor pick a path; rates go from
+1 to 30 images per second and a recording stops at 1800 images. Only one recording runs at a time, on its own thread,
+so the bridge and the page keep running while it records. A screenshot or the end of a recording does not block the
+server thread either: the bridge callbacks only start the work on a worker thread and the page polls for its end (every
+20 ms) before the Promise settles. Capturing is paced by the engine: a slow capture drops
+instants rather than bursting, so the number of images can be below `seconds * framesPerSecond`. Stopping a recording
+whose window disappeared throws the capture error. A recording that ends by itself (an error, or the 1800 images limit)
+keeps its slot, and its result, until `stopRecording()` collects it; if the page never does (it reloaded), the next
+`startRecording` discards it, and a new page replacing the instrumented one stops a recording still running. A
+screenshot keeps its result for the caller that started it: a second `screenshot` while one is running or uncollected is
+refused, so concurrent calls never receive each other's image (run them one after the other); a new page discards an
+uncollected one. A recording name is used once per run: a second `startRecording` with the same name
+is refused rather than erasing the first one's images. The `webFrontCapture` methods do not depend on `this`.
+
+From C++, `webfront::frontend::capturePng(timeout)` returns the PNG bytes (or a diagnostic) of the open window from any
+thread other than the one running its event loop, and `webfront::testing::CaptureStore` writes them to a directory
+(`screenshot`/`stopRecording` wait; `beginScreenshot`/`pollScreenshot` and `requestStop`/`pollRecording` do not).
+One window per process is supported.
+
+| Frontend | Capture |
+| --- | --- |
+| WebKitGTK | Supported (`webkit_web_view_get_snapshot`, GTK 4.6 or newer, otherwise the call fails with a diagnostic), validated under `xvfb-run`; the sandbox opt-out variable is not needed by the capture itself. |
+| WKWebView | Supported (`takeSnapshotWithConfiguration:`, encoded as PNG by AppKit); the request runs on the main thread, which must be running the window's event loop. A hidden window (`visible = false`) is not qualified: its snapshot may be empty. |
+| WebView2 | Supported (`CapturePreview`, PNG); the request runs on the window's STA thread, which must be pumping its message loop. |
+| CEF | Supported through the DevTools protocol (`Page.captureScreenshot`), posted to the browser's UI thread, which must be running its message loop. It opens no DevTools window; it was validated with the default policy, where DevTools are enabled. |
+
+This is an opt-in test facility with the same trust model as the rest of this guide: it is compiled only with
+`WEBFRONT_JASMINE_TESTING`, and the captured page can contain secrets it displays. Automation/MCP does not expose
+captures yet.
+
+A capture that is waiting for the window when it closes, whether the engine already started it or the window's thread
+had not yet got to it (its event loop may have stopped), is answered with "the window is closed" instead of waiting for
+its timeout; a capture requested after the closing is refused at once. A page that replaces the instrumented one stops its recording and finds the slot free when the new page
+attaches (the old worker is waited for at most half a second; one blocked inside a window that no longer answers keeps
+the slot until it returns).

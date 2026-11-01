@@ -3,6 +3,7 @@
 
 #include "../utils/Json.hpp"
 #include "../WebFront.hpp"
+#include "Capture.hpp"
 
 #include <cmath>
 #include <concepts>
@@ -44,12 +45,13 @@ inline std::string readJasmineFile(const std::filesystem::path& path) {
 struct JasmineConfiguration {
     std::vector<std::string> files;
     std::filesystem::path    report;
+    std::filesystem::path    captures;  // Optional: where screenshots and recordings go.
 };
 
 inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
     JasmineConfiguration config;
     json::Reader         reader{text};
-    bool                 files = false, report = false;
+    bool                 files = false, report = false, captures = false;
     reader.object([&](const std::string& key) {
         if (key == "files" && !std::exchange(files, true))
             reader.array([&] {
@@ -59,6 +61,8 @@ inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
             });
         else if (key == "report" && !std::exchange(report, true))
             config.report = reader.string();
+        else if (key == "captures" && !std::exchange(captures, true))
+            config.captures = reader.string();
         else
             throw std::invalid_argument("Unknown or duplicate Jasmine configuration field");
     });
@@ -90,6 +94,26 @@ inline constexpr std::size_t jasmineChunkSize = 49152;
 inline constexpr std::string_view jasmineScriptBody = R"JS(
 void (async () => {
     const call = (name, ...args) => webFront.cppFunction('webfront.testing.' + name)(...args);
+    // Screenshots and image sequences of the web content, written to the run's capture directory. The C++ side starts the
+    // work on its own thread and answers at once (the server thread must keep serving the page), so the page polls.
+    const settle = async name => {
+        for (;;) {
+            const result = await call(name);
+            if (result >= 0) return result;
+            await new Promise(resolve => setTimeout(resolve, 20));
+        }
+    };
+    // The methods do not use `this`, so `const {record} = webFrontCapture` works. A recording whose page is replaced is
+    // stopped by the C++ side.
+    const screenshot = async name => { await call('screenshotStart', name); return settle('screenshotPoll'); };
+    const startRecording = (name, framesPerSecond = 10) => call('recordStart', name, framesPerSecond);
+    const stopRecording = async () => { await call('recordStop'); return settle('recordPoll'); };
+    const record = async (name, {seconds = 3, framesPerSecond = 10} = {}) => {
+        await startRecording(name, framesPerSecond);
+        await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+        return stopRecording();
+    };
+    globalThis.webFrontCapture = {screenshot, startRecording, stopRecording, record};
     const load = async index => {
         const parts = [];
         for (let offset = 0; ; offset += CHUNK) {
@@ -171,16 +195,19 @@ class JasmineSession {
 public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
-    JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath)
-        : files(std::move(contents)), report(std::move(reportPath)) {}
+    JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
         std::scoped_lock lock{mutex};
         if (completed)
             return false;
-        if (browser && *browser != caller)
+        if (browser && *browser != caller) {
             std::cerr << "Jasmine: a new page replaced the instrumented one\n";
+            if (store)
+                store->abandon();  // The replaced page can no longer collect its recording.
+        }
         browser = caller;
         return true;
     }
@@ -201,6 +228,32 @@ public:
             throw std::invalid_argument("Invalid Jasmine file offset");
         const auto part = std::string_view(file).substr(static_cast<std::size_t>(offset), chunkSize);
         return std::vector<std::uint8_t>(part.begin(), part.end());
+    }
+
+    /// Starts writing `<captures>/<name>.png` on a worker thread and returns at once.
+    void screenshotStart(const Caller& caller, const std::string& name) {
+        captures(caller).beginScreenshot(name);
+    }
+
+    /// The size in bytes of the finished screenshot, or -1 while it is still being taken.
+    [[nodiscard]] double screenshotPoll(const Caller& caller) {
+        const auto size = captures(caller).pollScreenshot();
+        return size ? static_cast<double>(*size) : -1.0;
+    }
+
+    void recordStart(const Caller& caller, const std::string& name, double framesPerSecond) {
+        captures(caller).startRecording(name, framesPerSecond);
+    }
+
+    /// Asks the recording to stop and returns at once.
+    void recordStop(const Caller& caller) {
+        captures(caller).requestStop();
+    }
+
+    /// The number of images the recording wrote once it has ended, or -1 while it is still ending.
+    [[nodiscard]] double recordPoll(const Caller& caller) {
+        const auto frames = captures(caller).pollRecording();
+        return frames ? static_cast<double>(*frames) : -1.0;
     }
 
     void result(const Caller& caller, const std::string& text) {
@@ -242,12 +295,23 @@ private:
             throw std::runtime_error("Jasmine callback belongs to another page");
     }
 
-    std::vector<std::string> files;
-    std::filesystem::path    report;
-    std::optional<Caller>    browser;
-    std::mutex               mutex;
-    bool                     completed = false;
-    int                      status    = 1;
+    CaptureStore& captures(const Caller& caller) {
+        {
+            std::scoped_lock lock{mutex};
+            authorize(caller);
+        }
+        if (!store)
+            throw std::runtime_error("This test has no capture directory");
+        return *store;  // Not under the mutex: a capture waits for the window and a recording runs for seconds.
+    }
+
+    std::vector<std::string>      files;
+    std::filesystem::path         report;
+    std::shared_ptr<CaptureStore> store;
+    std::optional<Caller>         browser;
+    std::mutex                    mutex;
+    bool                          completed = false;
+    int                           status    = 1;
 };
 }  // namespace detail
 
@@ -276,11 +340,29 @@ public:
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
-        session          = std::make_shared<Session>(std::move(contents), config.report);
+        std::shared_ptr<CaptureStore> store;
+        if (!config.captures.empty())
+            store = std::make_shared<CaptureStore>(config.captures);
+        session          = std::make_shared<Session>(std::move(contents), config.report, std::move(store));
         const auto owned = session;
         app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
         app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
         app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
+        app.cppFunction("webfront.testing.screenshotStart", [owned](AppUI ui, std::string name) {
+            owned->screenshotStart(ui, name);
+        });
+        app.cppFunction("webfront.testing.screenshotPoll", [owned](AppUI ui) {
+            return owned->screenshotPoll(ui);
+        });
+        app.cppFunction("webfront.testing.recordStart", [owned](AppUI ui, std::string name, double rate) {
+            owned->recordStart(ui, name, rate);
+        });
+        app.cppFunction("webfront.testing.recordStop", [owned](AppUI ui) {
+            owned->recordStop(ui);
+        });
+        app.cppFunction("webfront.testing.recordPoll", [owned](AppUI ui) {
+            return owned->recordPoll(ui);
+        });
         subscription = app.subscribeUIStarted([owned](AppUI ui) {
             if (owned->attach(ui))
                 ui.addScript(detail::jasmineScript());
