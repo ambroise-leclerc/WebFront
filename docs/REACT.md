@@ -130,9 +130,18 @@ The C++ event computes a generation, updates the island and sets a tuple snapsho
 containing the packed grid, generation and population. Each browser owns a separate
 simulation, released on disconnect. The original Life starter remains available.
 
-Build the `WebFrontLifeReact` CMake target and run it with a writable copy of
-`main.tsx` and `webfront.project.json` from that directory as its project argument
-(without argument it uses `./life-project`, created when missing).
+Build the `WebFrontLifeReact` CMake target. The application only creates an
+empty project directory when it is missing (without argument `./life-project`);
+it does not copy the example's sources. Copy `main.tsx` and
+`webfront.project.json` from `examples/life/react/` into that directory first,
+then start the application:
+
+```sh
+mkdir -p life-project
+cp examples/life/react/main.tsx examples/life/react/webfront.project.json life-project/
+./build/examples/WebFrontLifeReact life-project
+```
+
 In its terminal, run `wf install`, then `wf preview`. The configured registry must
 carry `@webfront/react@0.1.0`; this change prepares the archive but does not publish
 to npm. The repository's test registry already carries the package. For a local
