@@ -535,3 +535,22 @@ SCENARIO("A program's output is captured when the application closed its standar
     REQUIRE(WEXITSTATUS(status) == 0);
 }
 #endif
+
+#ifdef __linux__
+SCENARIO("A failed launch is reported as one when the application closed its standard descriptors") {
+    const auto child = ::fork();
+    if (child == 0) {
+        ::close(0);
+        ::close(1);
+        ProcessSpec spec;
+        spec.program      = probe.parent_path() / "no-such-program";
+        const auto result = run(spec);
+        ::_exit(result.status == ProcessStatus::launchFailed && !result.error.empty() ? 0 : 1);
+    }
+    REQUIRE(child > 0);
+    int status = 0;
+    ::waitpid(child, &status, 0);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
+}
+#endif

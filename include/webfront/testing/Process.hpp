@@ -451,7 +451,18 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
         result.error = "Cannot create a pipe";
         return result;
     }
-    Descriptor  reportRead{report[0]}, reportWrite{report[1]};
+    Descriptor reportRead{report[0]}, reportWrite{report[1]};
+    // Above the standard descriptors, like the output pipes: the child's open and dup2 must not close or replace the end
+    // that carries an exec failure, or the parent would take the failed launch for a program that exited with 127.
+    for (auto* end : {&reportRead, &reportWrite}) {
+        const int moved = ::fcntl(end->fd, F_DUPFD_CLOEXEC, 3);
+        if (moved < 0) {
+            result.error = "Cannot create a pipe";
+            return result;
+        }
+        ::close(end->fd);
+        end->fd = moved;
+    }
     const pid_t parent = ::getpid();
     sigset_t    none;
     sigemptyset(&none);  // Unqualified: a macro on macOS.
