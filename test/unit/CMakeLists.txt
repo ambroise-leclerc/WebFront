@@ -29,7 +29,7 @@ list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp D
 list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
 list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
@@ -47,6 +47,11 @@ if(MSVC)
   target_compile_options(tests PRIVATE /bigobj)
 endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+# The native program of the webFrontHost and runProcess tests (also run by the browser specs).
+add_executable(host_probe ../web/host/HostProbe.cpp)
+target_link_libraries(host_probe PRIVATE WebFront_test_hardening WebFront_warnings)
+add_dependencies(tests host_probe)
+target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host_probe>")
 
 # The heavy units instantiate a full application, and compile four to a file in about half the time of four apart
 # (docs/BUILD_TIME_STUDY.md). The desktop CI jobs set the batch size; the default keeps one object per test file, which

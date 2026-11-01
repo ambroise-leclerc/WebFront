@@ -147,6 +147,29 @@ if(_browser_tests_available)
         endif()
         set_tests_properties(ConsumerJasmine-${mode} PROPERTIES FIXTURES_SETUP ConsumerJasmineRuns)
     endforeach()
+    # Native programs and temporary spaces of the specs (issue #445): the probe is the only program the owner authorizes,
+    # next to a file that is not executable.
+    add_dependencies(jasmine_consumer host_probe)
+    set(_not_executable "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/index.html")
+    set(_reason_host-unauthorized "${_reason_fail}")
+    set(_reason_host-timeout "${_reason_fail}")
+    set(_reason_host-launch "${_reason_fail}")
+    foreach(mode host host-denied host-unauthorized host-timeout host-launch)
+        set(programs PROGRAMS "$<TARGET_FILE:host_probe>" "${_not_executable}")
+        if(mode STREQUAL "host-denied")
+            set(programs)
+        elseif(mode STREQUAL "host-launch")
+            set(programs PROGRAMS "${_not_executable}")
+        endif()
+        webfront_add_jasmine_test(NAME ConsumerJasmine-${mode} TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 60
+            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/${mode}.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer"
+            ${programs})
+        if(DEFINED _reason_${mode})
+            set_tests_properties(ConsumerJasmine-${mode} PROPERTIES PASS_REGULAR_EXPRESSION "${_reason_${mode}}")
+        endif()
+    endforeach()
     # Window capture (issue #468) is implemented by every embedded frontend.
     set(WEBFRONT_CAPTURE_FRONTENDS WebKitGTK WKWebView WebView2 CEF)
     if(WEBFRONT_WEBTEST_FRONTEND IN_LIST WEBFRONT_CAPTURE_FRONTENDS)

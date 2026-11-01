@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A minimal excerpt of the ATDF layout (Microchip's device description), enough for the conversion recipe. -->
+<avr-tools-device-file xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <devices>
+    <device name="ATmega328P" architecture="AVR8" family="megaAVR">
+      <address-spaces>
+        <address-space id="prog" name="prog" start="0x0000" size="0x8000"/>
+        <address-space id="data" name="data" start="0x0000" size="0x0900"/>
+      </address-spaces>
+      <interrupts>
+        <interrupt index="0" name="RESET" caption="External Pin, Power-on Reset, Brown-out Reset and Watchdog System Reset"/>
+        <interrupt index="1" name="INT0" caption="External Interrupt Request 0"/>
+        <interrupt index="2" name="INT1" caption="External Interrupt Request 1"/>
+      </interrupts>
+    </device>
+  </devices>
+</avr-tools-device-file>

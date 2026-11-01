@@ -46,7 +46,9 @@ Consumers can explicitly instrument their real application page with
 `webfront::testing::JasmineTest` and register it through `webfront_add_jasmine_test`.
 This optional [Jasmine/CTest path](CONSUMER_TESTING.md) supports precompiled classic JavaScript
 specs and external process deadlines; it does not compile TS or isolate untrusted application code. It can also
-write PNG screenshots and image sequences of the web content on WebKitGTK, WKWebView, WebView2 and CEF (#468).
+write PNG screenshots and image sequences of the web content on WebKitGTK, WKWebView, WebView2 and CEF (#468), and let the
+specs run programs the test's owner authorizes (`PROGRAMS`), with private temporary spaces (#445); that last facility is
+validated on Linux only.
 
 The CEF-off build and complete CTest commands are in [AGENTS.md](../AGENTS.md).
 The suite includes deterministic Catch2 regressions, CMake consumer/configuration checks,

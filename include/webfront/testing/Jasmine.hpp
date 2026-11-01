@@ -4,6 +4,7 @@
 #include "../utils/Json.hpp"
 #include "../WebFront.hpp"
 #include "Capture.hpp"
+#include "Host.hpp"
 
 #include <cmath>
 #include <concepts>
@@ -72,20 +73,25 @@ inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
     return config;
 }
 
-inline std::optional<std::string> jasmineConfigurationPath() {
+/// The value of an environment variable the test runner sets, if it is set and not empty.
+inline std::optional<std::string> jasmineEnvironment(const char* name) {
 #ifdef _MSC_VER
     char*       raw  = nullptr;
     std::size_t size = 0;
-    if (_dupenv_s(&raw, &size, "WEBFRONT_JASMINE_CONFIG") != 0)
-        throw std::runtime_error("Cannot read WEBFRONT_JASMINE_CONFIG");
+    if (_dupenv_s(&raw, &size, name) != 0)
+        throw std::runtime_error(std::string("Cannot read ") + name);
     std::unique_ptr<char, decltype(&std::free)> owned(raw, std::free);
     if (raw && *raw)
         return std::string(raw);
 #else
-    if (const auto* raw = std::getenv("WEBFRONT_JASMINE_CONFIG"); raw && *raw)
+    if (const auto* raw = std::getenv(name); raw && *raw)
         return std::string(raw);
 #endif
     return std::nullopt;
+}
+
+inline std::optional<std::string> jasmineConfigurationPath() {
+    return jasmineEnvironment("WEBFRONT_JASMINE_CONFIG");
 }
 
 /// Bytes per bridge read, shared by the page script (injected as CHUNK) and JasmineSession::read.
@@ -114,6 +120,63 @@ void (async () => {
         return stopRecording();
     };
     globalThis.webFrontCapture = {screenshot, startRecording, stopRecording, record};
+    // Native capabilities the test's owner granted (PROGRAMS in webfront_add_jasmine_test): authorized programs run without a
+    // shell, and private temporary spaces. Without a grant every call rejects. Bytes cross the bridge in bounded chunks.
+    const hostChunk = CHUNK;
+    const bytesOf = data => typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const readAll = async fetchChunk => {
+        const parts = [];
+        for (let offset = 0; ; ) {
+            const part = await fetchChunk(offset);
+            parts.push(part);
+            offset += part.length;
+            if (part.length < hostChunk) break;
+        }
+        return new Blob(parts).arrayBuffer().then(buffer => new Uint8Array(buffer));
+    };
+    const host = {
+        programs: async () => JSON.parse(await call('hostPrograms')),
+        makeTemp: () => call('hostMakeTemp'),
+        removeTemp: path => call('hostRemoveTemp', path),
+        withTemp: async body => {
+            const path = await call('hostMakeTemp');
+            try { return await body(path); }
+            finally { await call('hostRemoveTemp', path); }
+        },
+        writeFile: async (path, data) => {
+            const bytes = bytesOf(data);
+            await call('hostWrite', path, 0, bytes.subarray(0, 0));
+            for (let offset = 0; offset < bytes.length; offset += hostChunk)
+                await call('hostWrite', path, offset, bytes.subarray(offset, offset + hostChunk));
+        },
+        readFile: path => readAll(offset => call('hostRead', path, offset)),
+        readText: async path => new TextDecoder().decode(await host.readFile(path)),
+        run: async (options = {}) => {
+            const known = ['program', 'args', 'cwd', 'env', 'inheritEnv', 'timeoutMs', 'maxOutputBytes', 'signal'];
+            // There is no shell option to ask for: an unknown one is a mistake, not something to ignore.
+            for (const key of Object.keys(options)) if (!known.includes(key)) throw new TypeError('Unknown run option: ' + key);
+            const {program, args = [], cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal} = options;
+            const request = {program, args: args.map(String)};
+            for (const [key, value] of Object.entries({cwd, env, inheritEnv, timeoutMs, maxOutputBytes}))
+                if (value !== undefined) request[key] = value;
+            signal?.throwIfAborted();
+            const id = await call('hostRunStart', JSON.stringify(request));
+            const abort = () => call('hostRunCancel', id).catch(() => {});
+            signal?.addEventListener('abort', abort, {once: true});
+            try {
+                let summary = '';
+                while (!(summary = await call('hostRunPoll', id))) await new Promise(resolve => setTimeout(resolve, 10));
+                const result = JSON.parse(summary);
+                const text = async stream => new TextDecoder().decode(await readAll(offset => call('hostRunRead', id, stream, offset)));
+                const {stdoutBytes, stderrBytes, ...rest} = result;
+                return {...rest, stdout: await text(1), stderr: await text(2)};
+            } finally {
+                signal?.removeEventListener('abort', abort);
+                await call('hostRunRelease', id);
+            }
+        },
+    };
+    globalThis.webFrontHost = host;
     const load = async index => {
         const parts = [];
         for (let offset = 0; ; offset += CHUNK) {
@@ -289,6 +352,12 @@ public:
         return status;
     }
 
+    /// Throws unless `caller` is the page under test (the native capabilities answer to it only).
+    void requireCaller(const Caller& caller) {
+        std::scoped_lock lock{mutex};
+        authorize(caller);
+    }
+
 private:
     void authorize(const Caller& caller) const {
         if (!browser || *browser != caller)
@@ -336,7 +405,7 @@ public:
         const auto path = detail::jasmineConfigurationPath();
         if (!path)
             return;
-        const auto config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
+        const auto               config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
@@ -345,9 +414,19 @@ public:
             store = std::make_shared<CaptureStore>(config.captures);
         session          = std::make_shared<Session>(std::move(contents), config.report, std::move(store));
         const auto owned = session;
-        app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
-        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
-        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
+        // Native capabilities exist only when the owner's CMake file granted some (PROGRAMS): the runner then sets this file.
+        if (const auto hostPath = detail::jasmineEnvironment("WEBFRONT_JASMINE_HOST"))
+            host = std::make_shared<HostSession>(detail::hostConfiguration(detail::readJasmineFile(*hostPath)));
+        registerHost(app);
+        app.cppFunction("webfront.testing.count", [owned](AppUI ui) {
+            return owned->count(ui);
+        });
+        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) {
+            return owned->read(ui, index, offset);
+        });
+        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) {
+            owned->result(ui, result);
+        });
         app.cppFunction("webfront.testing.screenshotStart", [owned](AppUI ui, std::string name) {
             owned->screenshotStart(ui, name);
         });
@@ -374,8 +453,51 @@ public:
     }
 
 private:
-    std::shared_ptr<Session> session;
-    UISubscription           subscription;
+    /// The page's bridge to HostSession; each call is checked against the page under test, and refused with no grant.
+    void registerHost(App& app) {
+        const auto owned = session;
+        const auto grant = host;
+        const auto guard = [owned, grant](const AppUI& ui) -> HostSession& {
+            owned->requireCaller(ui);
+            if (!grant)
+                throw std::runtime_error("No native capability was granted to this test: add PROGRAMS to webfront_add_jasmine_test");
+            return *grant;
+        };
+        app.cppFunction("webfront.testing.hostPrograms", [guard](AppUI ui) {
+            return guard(ui).programs();
+        });
+        app.cppFunction("webfront.testing.hostMakeTemp", [guard](AppUI ui) {
+            return guard(ui).makeTemp();
+        });
+        app.cppFunction("webfront.testing.hostRemoveTemp", [guard](AppUI ui, std::string path) {
+            guard(ui).removeTemp(path);
+        });
+        app.cppFunction("webfront.testing.hostWrite", [guard](AppUI ui, std::string path, double offset, std::vector<std::uint8_t> bytes) {
+            guard(ui).writeFile(path, offset, bytes);
+        });
+        app.cppFunction("webfront.testing.hostRead", [guard](AppUI ui, std::string path, double offset) {
+            return guard(ui).readFile(path, offset);
+        });
+        app.cppFunction("webfront.testing.hostRunStart", [guard](AppUI ui, std::string request) {
+            return guard(ui).runStart(request);
+        });
+        app.cppFunction("webfront.testing.hostRunPoll", [guard](AppUI ui, double id) {
+            return guard(ui).runPoll(id).value_or(std::string{});
+        });
+        app.cppFunction("webfront.testing.hostRunRead", [guard](AppUI ui, double id, double stream, double offset) {
+            return guard(ui).runRead(id, stream, offset);
+        });
+        app.cppFunction("webfront.testing.hostRunCancel", [guard](AppUI ui, double id) {
+            guard(ui).runCancel(id);
+        });
+        app.cppFunction("webfront.testing.hostRunRelease", [guard](AppUI ui, double id) {
+            guard(ui).runRelease(id);
+        });
+    }
+
+    std::shared_ptr<Session>     session;
+    std::shared_ptr<HostSession> host;
+    UISubscription               subscription;
 };
 }  // namespace jasmine_enabled
 #else

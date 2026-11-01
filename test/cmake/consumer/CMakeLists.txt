@@ -31,6 +31,10 @@ enable_testing()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/dummy.js" "// configuration fixture\n")
 webfront_add_jasmine_test(NAME PublicJasmineRegistration TARGET consumer
     JASMINE "${CMAKE_CURRENT_BINARY_DIR}/dummy.js" SPECS "${CMAKE_CURRENT_BINARY_DIR}/dummy.js")
+# The native grant (PROGRAMS) is accepted from a parent project too, with a generator expression for the program.
+webfront_add_jasmine_test(NAME PublicJasmineHostRegistration TARGET consumer
+    JASMINE "${CMAKE_CURRENT_BINARY_DIR}/dummy.js" SPECS "${CMAKE_CURRENT_BINARY_DIR}/dummy.js"
+    PROGRAMS "$<TARGET_FILE:consumer>")
 get_property(engines GLOBAL PROPERTY WEBFRONT_JASMINE_FRONTENDS)
 if(NOT "WKWebView" IN_LIST engines)
     message(FATAL_ERROR "Public Jasmine frontend metadata was lost across add_subdirectory")
