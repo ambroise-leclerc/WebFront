@@ -16,6 +16,8 @@
 #include <vector>
 
 #ifdef _WIN32
+    #include <fcntl.h>
+    #include <io.h>
     #include <process.h>
     #include <windows.h>
 // clang-format off
@@ -90,6 +92,9 @@ void startAgain(const char* self, const char* mode, const char* argument) {
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
+    // Text mode would turn each '\n' into "\r\n": the tests compare bytes.
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
     std::vector<std::string> utf8Arguments;
     std::vector<char*>       utf8Pointers;
     {
