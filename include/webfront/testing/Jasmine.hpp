@@ -122,7 +122,7 @@ void (async () => {
     globalThis.webFrontCapture = {screenshot, startRecording, stopRecording, record};
     // Native capabilities the test's owner granted (PROGRAMS in webfront_add_jasmine_test): authorized programs run without a
     // shell, and private temporary spaces. Without a grant every call rejects. Bytes cross the bridge in bounded chunks.
-    const hostChunk = CHUNK;
+    const hostChunk = CHUNK, HOST_FILE_LIMIT = 64 * 1024 * 1024;
     const bytesOf = data => typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     const readAll = async fetchChunk => {
         const parts = [];
@@ -130,6 +130,7 @@ void (async () => {
             const part = await fetchChunk(offset);
             parts.push(part);
             offset += part.length;
+            if (offset > HOST_FILE_LIMIT) throw new RangeError('A file or output exceeds the 64 MiB limit');
             if (part.length < hostChunk) break;
         }
         return new Blob(parts).arrayBuffer().then(buffer => new Uint8Array(buffer));

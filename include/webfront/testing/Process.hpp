@@ -393,8 +393,15 @@ inline bool makePipe(Descriptor& readEnd, Descriptor& writeEnd) {
         return false;
     readEnd.fd  = fds[0];
     writeEnd.fd = fds[1];
-    for (const int fd : fds)
-        ::fcntl(fd, F_SETFD, ::fcntl(fd, F_GETFD) | FD_CLOEXEC);
+    // Above the standard descriptors, whatever the application closed: a pipe end that already was descriptor 1 or 2 would
+    // keep its close-on-exec flag through dup2 onto itself and vanish at exec, taking the program's output with it.
+    for (auto* end : {&readEnd, &writeEnd}) {
+        const int moved = ::fcntl(end->fd, F_DUPFD_CLOEXEC, 3);
+        if (moved < 0)
+            return false;
+        ::close(end->fd);
+        end->fd = moved;
+    }
     ::fcntl(readEnd.fd, F_SETFL, ::fcntl(readEnd.fd, F_GETFL) | O_NONBLOCK);
     return true;
 }

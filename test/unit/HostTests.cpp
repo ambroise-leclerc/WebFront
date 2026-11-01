@@ -505,3 +505,33 @@ SCENARIO("A program starts with default signal dispositions, whatever the applic
     }
 }
 #endif
+
+SCENARIO("A file larger than the limit is not read") {
+    TempRoot    root{"large"};
+    HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
+    const auto  space = host.makeTemp();
+    const auto  file  = webfront::testing::detail::pathFromUtf8(space) / "big.bin";
+    std::ofstream{file, std::ios::binary} << "x";
+    std::filesystem::resize_file(file, HostSession::maxFileBytes + 1);  // Sparse where the system allows it.
+    REQUIRE_THROWS_WITH(host.readFile(space + "/big.bin", 0), Catch::Matchers::ContainsSubstring("64 MiB"));
+    std::filesystem::resize_file(file, 10);
+    REQUIRE(host.readFile(space + "/big.bin", 0).size() == 10);
+}
+
+#ifndef _WIN32
+SCENARIO("A program's output is captured when the application closed its standard descriptors") {
+    const auto child = ::fork();
+    if (child == 0) {
+        ::close(0);
+        ::close(1);
+        ::close(2);
+        const auto result = run(probeSpec({"args", "hello"}));
+        ::_exit(result.status == ProcessStatus::exited && result.standardOutput == "[0]hello\n" ? 0 : 1);
+    }
+    REQUIRE(child > 0);
+    int status = 0;
+    ::waitpid(child, &status, 0);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
+}
+#endif

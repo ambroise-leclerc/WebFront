@@ -9,7 +9,7 @@
   process group (POSIX) or job object (Windows) are killed at the timeout, on cancellation and when the program ends.
   `makeTemp`/`withTemp`, `writeFile` and `readFile` give private temporary spaces that are removed after success, failure and
   cancellation. Without `PROGRAMS` every call rejects; `webfront::testing::runProcess` and `HostSession` are the C++ API. The wf
-  scripts keep no process capability. Validated on Linux; Windows and macOS are not yet. See `docs/CONSUMER_TESTING.md` for
+  scripts keep no process capability. The browser specs are validated on Linux; Windows and macOS run the unit tests of the runner in CI. See `docs/CONSUMER_TESTING.md` for
   the XML-to-JSON recipe.
 
 - Automation can set a project up end to end (#466): `init`, `create`, `install`, `restore` and `embed` join the contract of

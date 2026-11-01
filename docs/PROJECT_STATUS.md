@@ -47,8 +47,8 @@ Consumers can explicitly instrument their real application page with
 This optional [Jasmine/CTest path](CONSUMER_TESTING.md) supports precompiled classic JavaScript
 specs and external process deadlines; it does not compile TS or isolate untrusted application code. It can also
 write PNG screenshots and image sequences of the web content on WebKitGTK, WKWebView, WebView2 and CEF (#468), and let the
-specs run programs the test's owner authorizes (`PROGRAMS`), with private temporary spaces (#445); that last facility is
-validated on Linux only.
+specs run programs the test's owner authorizes (`PROGRAMS`), with private temporary spaces (#445); its browser specs run on
+Linux only (the runner's unit tests also run on Windows and macOS).
 
 The CEF-off build and complete CTest commands are in [AGENTS.md](../AGENTS.md).
 The suite includes deterministic Catch2 regressions, CMake consumer/configuration checks,

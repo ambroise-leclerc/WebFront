@@ -216,7 +216,10 @@ public:
 
     /// Reads at most one chunk at `offset`; a short (or empty) result is the end of the file.
     [[nodiscard]] std::vector<std::uint8_t> readFile(const std::string& path, double offset) {
-        const auto    file = contained(path);
+        const auto      file = contained(path);
+        std::error_code sizeError;
+        if (const auto size = std::filesystem::file_size(file, sizeError); !sizeError && size > maxFileBytes)
+            throw std::invalid_argument("The file exceeds the 64 MiB limit");
         std::ifstream in(file, std::ios::binary);
         if (!in)
             throw std::runtime_error("Cannot read the file");

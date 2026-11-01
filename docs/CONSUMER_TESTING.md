@@ -122,7 +122,7 @@ await webFrontHost.withTemp(async dir => {                    // a new private d
 | `run({program, args, cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal})` | Runs the program to its end and resolves with `{status, exitCode, signal, error, stdout, stderr, stdoutTruncated, stderrTruncated, durationMs}`. Unknown options are an error. `signal` is an `AbortSignal`. |
 | `programs()` | The authorized program paths. |
 | `makeTemp()`, `removeTemp(dir)`, `withTemp(async dir => ...)` | Private directories under the test's `webfront-jasmine/<name>/temp/`. |
-| `writeFile(path, textOrBytes)`, `readFile(path)`, `readText(path)` | Files inside those directories only (bytes cross the bridge in 48 KiB chunks; 64 MiB at most). |
+| `writeFile(path, textOrBytes)`, `readFile(path)`, `readText(path)` | Files inside those directories only (bytes cross the bridge in 48 KiB chunks; 64 MiB at most, for writing and for reading). |
 
 What is guaranteed, and what is not:
 
@@ -189,10 +189,11 @@ from the application's document root. Provisioning is the one configure-time dow
 repository): the twelve specs of `ConsumerJasmine-host` took 5.6 s in total, of which 3.0 s is the deliberate wait proving a
 killed descendant stays dead and about 1.3 s the start of the window, which a passing one-spec test also pays.
 
-Platforms: the contract is tested on **Linux** (CEF, `xvfb-run`). `Process.hpp` also has a POSIX path for macOS
-(`posix_spawn`, process group; the descriptor-closing action is glibc-only, so other descriptors rely on `FD_CLOEXEC`) and a
-Windows one (`CreateProcessW`, job object, restricted handle inheritance). The same CTest cases cover them, but they have not
-been run on those systems yet: **treat macOS and Windows as unsupported until CI has validated them.**
+Platforms: the browser specs (`ConsumerJasmine-host*`) run on **Linux** (CEF, `xvfb-run`). The process runner and the temporary
+spaces (`Process.hpp`, `Host.hpp`) are also compiled and tested by the unit tests (`HostTests.cpp`) in CI on **macOS**
+(`posix_spawn`, process group; the descriptor-closing action is glibc-only, so other descriptors rely on `FD_CLOEXEC`) and
+**Windows** (`CreateProcessW`, job object, restricted handle inheritance, overlapped pipes). The browser specs have not been
+run on those systems: treat the whole path there as unqualified until they are.
 
 ## Screenshots and image sequences
 
