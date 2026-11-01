@@ -405,25 +405,40 @@ SCENARIO("A stop request belongs to its own recording") {
     REQUIRE(store.stopRecording() == 3);  // reached its own image limit: it was not stopped early by the first request
 }
 
-SCENARIO("Destroying a store does not wait for a window that never answers") {
-    CaptureDirectory  directory{"closing"};
-    std::atomic<bool> release = false;
-    std::atomic<bool> entered = false;
-    const auto        started = std::chrono::steady_clock::now();
-    {
-        CaptureStore store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
-                               entered = true;
-                               while (!release)
-                                   std::this_thread::sleep_for(std::chrono::milliseconds{1});
-                               return std::vector<std::uint8_t>{1};
-                           }};
-        store.beginScreenshot("stuck");
-        while (!entered)
+namespace {
+/// State shared with a source that a detached worker may still run after the test ended: never a reference to a local.
+struct Gate {
+    std::atomic<bool> release = false, entered = false, left = false;
+};
+
+CaptureStore::Source blockedUntilReleased(std::shared_ptr<Gate> gate) {
+    return [gate](std::chrono::milliseconds) -> CaptureResult {
+        gate->entered = true;
+        while (!gate->release)
             std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        gate->left = true;
+        return std::vector<std::uint8_t>{1};
+    };
+}
+}  // namespace
+
+SCENARIO("Destroying a store does not wait for a window that never answers") {
+    CaptureDirectory directory{"closing"};
+    const auto       gate    = std::make_shared<Gate>();
+    const auto       started = std::chrono::steady_clock::now();
+    {
+        CaptureStore store{directory.path, blockedUntilReleased(gate)};
+        store.beginScreenshot("stuck");
+        REQUIRE(waitUntil([&] {
+            return gate->entered.load();
+        }));
     }
-    REQUIRE(std::chrono::steady_clock::now() - started < std::chrono::seconds{5});
-    release = true;  // the detached worker ends alone, only touching state it owns
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    gate->release      = true;  // the detached worker ends alone, only touching state it owns
+    REQUIRE(waitUntil([&] {
+        return gate->left.load();
+    }));
+    REQUIRE(elapsed < std::chrono::seconds{5});
 }
 
 SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") {
@@ -516,17 +531,12 @@ SCENARIO("Abandoning a recording frees its slot before it returns, unless the wi
         }
     }
     GIVEN("a window that does not answer") {
-        std::atomic<bool> release = false, entered = false;
+        const auto gate = std::make_shared<Gate>();
         {
-            CaptureStore store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
-                                   entered = true;
-                                   while (!release)
-                                       std::this_thread::sleep_for(std::chrono::milliseconds{1});
-                                   return std::vector<std::uint8_t>{1};
-                               }};
+            CaptureStore store{directory.path, blockedUntilReleased(gate)};
             store.startRecording("blocked", 30);
             REQUIRE(waitUntil([&] {
-                return entered.load();
+                return gate->entered.load();
             }));  // The worker is inside the window's capture, not yet started.
             const auto begin = std::chrono::steady_clock::now();
             store.abandon();
@@ -534,7 +544,31 @@ SCENARIO("Abandoning a recording frees its slot before it returns, unless the wi
                 REQUIRE(std::chrono::steady_clock::now() - begin < std::chrono::seconds{3});
                 REQUIRE_THROWS_AS(store.startRecording("next", 30), std::logic_error);
             }
-            release = true;
+            gate->release = true;
         }
+        REQUIRE(waitUntil([&] {
+            return gate->left.load();
+        }));
+    }
+}
+
+SCENARIO("Two recording names that differ only by case are one recording, as on a case-insensitive file system") {
+    CaptureDirectory directory{"case"};
+    CaptureStore     store{directory.path, fakeImage};
+    store.startRecording("run", 30);
+    REQUIRE(waitUntil([&] {
+        return fileExists(directory.path / "run" / "0002.png");
+    }));
+    const auto frames = store.stopRecording();
+    THEN("the second name is refused before anything is erased") {
+        REQUIRE_THROWS_AS(store.startRecording("Run", 30), std::logic_error);
+        REQUIRE_THROWS_AS(store.startRecording("RUN", 30), std::logic_error);
+        REQUIRE(fileExists(directory.path / "run" / "0001.png"));
+        REQUIRE(fileExists(directory.path / "run" / "0002.png"));
+        REQUIRE(frames >= 2);
+    }
+    THEN("a different name is still accepted") {
+        REQUIRE_NOTHROW(store.startRecording("run2", 30));
+        store.stopRecording();
     }
 }

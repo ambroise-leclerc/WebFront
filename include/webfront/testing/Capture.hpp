@@ -115,12 +115,15 @@ public:
         reap(recording);
         if (recording.thread.joinable())
             throw std::logic_error("A recording is already running");
-        if (recordedNames.contains(std::string(name)))
-            throw std::logic_error("A recording named '" + std::string(name) + "' already exists in this run");
+        // Windows and the usual macOS volumes ignore case, so "run" and "Run" are one directory there: compare folded
+        // names everywhere, before anything is erased, so that the rule does not depend on the platform.
+        const auto folded = foldCase(name);
+        if (recordedNames.contains(folded))
+            throw std::logic_error("A recording named '" + std::string(name) + "' (or differing only by case) already exists in this run");
         const auto target = shared->directory / std::string(name);
         std::filesystem::remove_all(target);  // Leftovers of an earlier run, never of this store.
         std::filesystem::create_directories(target);
-        recordedNames.insert(std::string(name));
+        recordedNames.insert(folded);
         const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(1.0 / framesPerSecond));
         auto       job    = std::make_shared<Job>();
         recording.job     = job;
@@ -197,6 +200,15 @@ private:
         std::thread          thread;
         std::shared_ptr<Job> job;
     };
+
+    /// Names are ASCII (validName), so folding is exact.
+    static std::string foldCase(std::string_view name) {
+        std::string folded(name);
+        for (auto& c : folded)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        return folded;
+    }
 
     static void requireName(std::string_view name) {
         if (!validName(name))

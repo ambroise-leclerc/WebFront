@@ -9,6 +9,7 @@
 #include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -99,8 +100,6 @@ public:
     const char* (*responseUri)(Object)                      = symbol<decltype(responseUri)>("webkit_uri_response_get_uri");
     unsigned (*timeoutAdd)(unsigned, int (*)(void*), void*) = symbol<decltype(timeoutAdd)>("g_timeout_add");
     int (*sourceRemove)(unsigned)                           = symbol<decltype(sourceRemove)>("g_source_remove");
-    Object (*findSource)(Object, unsigned)                  = symbol<decltype(findSource)>("g_main_context_find_source_by_id");
-    void (*sourceDestroy)(Object)                           = symbol<decltype(sourceDestroy)>("g_source_destroy");
     Object (*response)(Object)                              = symbol<decltype(response)>("webkit_response_policy_decision_get_response");
     unsigned (*status)(Object)                              = symbol<decltype(status)>("webkit_uri_response_get_status_code");
     void (*evaluate)(Object, const char*, long, const char*, const char*, Object, Callback, Object) =
@@ -170,6 +169,7 @@ struct CaptureTarget {
 struct CaptureJob {
     std::shared_ptr<CaptureTarget> target;
     std::promise<CaptureResult>    done;
+    std::atomic<bool>              abandoned = false;  // The requester gave up: the main thread must not start it.
 };
 
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
@@ -226,6 +226,8 @@ inline void finishCapture(Api::Object view, Api::Object result, void* owner) noe
 inline int startCapture(void* data) noexcept {
     const auto& job = *static_cast<std::shared_ptr<CaptureJob>*>(data);
     auto&       a   = api();
+    if (job->abandoned)
+        return 0;
     if (!job->target->view) {
         answer(*job, std::unexpected("the window is closed"));
         return 0;
@@ -246,15 +248,16 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
         const auto& a = api();
         if (!a.snapshot || !a.snapshotFinish || !a.texturePng)
             return std::unexpected("this WebKitGTK/GTK runtime cannot capture (GTK 4.6 is required)");
-        auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
+        auto job    = std::make_shared<CaptureJob>();
+        job->target = target;
         auto future = job->done.get_future();
         constexpr int idlePriority = 200;  // G_PRIORITY_DEFAULT_IDLE
-        const auto    source       = a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
+        a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
         if (future.wait_for(timeout) != std::future_status::ready) {
-            // A main loop that does not run would keep the request, and its job, forever. A source that was served in
-            // the meantime is gone: look it up first, since removing an unknown id makes GLib log a critical warning.
-            if (const auto pending = a.findSource(nullptr, source))
-                a.sourceDestroy(pending);
+            // The source is never touched from this thread: GLib hands out no counted reference to it, so one that the
+            // main thread is serving could be freed under us. The flag makes it a no-op when it runs; a main loop that
+            // never runs keeps only this small job until the process ends.
+            job->abandoned = true;
             return std::unexpected("the window did not answer within the capture timeout");
         }
         return future.get();
