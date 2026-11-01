@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Declare the embedded engine without consumer-side macros (#467): `webfront::embeddedFrontendAvailable` (`constexpr bool`) and
+  `webfront::EmbeddedWebFront` (the native-window application type, whose construction throws `std::runtime_error` when the
+  build has no engine) exist in every configuration. See `docs/FRONTENDS.md`.
 - Capture the web view as PNG images (#468): `webFrontCapture.screenshot(name)` and `webFrontCapture.record(name, {seconds,
   framesPerSecond})` (also `startRecording`/`stopRecording`) in the specs of `webfront_add_jasmine_test` write
   `webfront-jasmine/<name>/captures/<name>.png` and numbered `<name>/0001.png`... for an external encoder such as ffmpeg.

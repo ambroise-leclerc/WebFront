@@ -102,6 +102,23 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 
 ## Native window with browser fallback
 
+Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine is
+compiled in; CEF is not counted) and `webfront::EmbeddedWebFront` (always defined) tell an application what the build holds.
+Without an engine, constructing `EmbeddedWebFront` throws `std::runtime_error`, so the fallback is an ordinary `try`/`catch`:
+
+```cpp
+if constexpr (webfront::embeddedFrontendAvailable) {
+    try {
+        webfront::EmbeddedWebFront window{config};
+        return serve(window);
+    } catch (const std::exception&) { /* fall back to the browser */ }
+}
+webfront::WebFront web{config};
+return serve(web);
+```
+
+`if constexpr` keeps the absent branch from being instantiated when `serve` needs engine-specific members.
+
 `frontend::nativeWebViewAvailable` is `true` when this platform's native engine is compiled in. It says
 nothing about the session. `frontend::NativeOrBrowserFrontend` decides at run time: its `initialize()`
 tries the native engine and, if that throws (engine not compiled in, no `DISPLAY`/`WAYLAND_DISPLAY`,

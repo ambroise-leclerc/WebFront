@@ -952,6 +952,41 @@ template <frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http
 using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Frontend>;
 using UI       = WebFront::UI;
 
+/**
+ * @brief True when this platform's embedded web view engine is compiled in (WEBFRONT_EMBED_WEBKITGTK, WEBFRONT_EMBED_WEBVIEW2
+ * or WEBFRONT_EMBED_WKWEBVIEW). Always defined, so applications need no preprocessor test. CEF is not counted: it is selected
+ * explicitly with WebFrontWithFrontend<frontend::CEFFrontend>. Like frontend::nativeWebViewAvailable, it says nothing about the
+ * session (a missing display still fails at run time).
+ */
+inline constexpr bool embeddedFrontendAvailable = frontend::nativeWebViewAvailable;
+
+namespace detail {
+/// Stands in for the native engine where none is compiled in: constructing the application throws std::runtime_error.
+struct NoEmbeddedFrontend {
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+
+    static void initialize() {
+        throw std::runtime_error("no embedded web view engine in this build: configure with -DWEBFRONT_EMBED_WEBKITGTK=ON (Linux), "
+                                 "-DWEBFRONT_EMBED_WEBVIEW2=ON (Windows) or -DWEBFRONT_EMBED_WKWEBVIEW=ON (macOS)");
+    }
+    static void open(std::string_view, std::string_view) {
+        initialize();
+    }
+};
+
+#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
+using EmbeddedFrontendType = std::conditional_t<frontend::nativeWebViewAvailable, frontend::NativeWebViewFrontend, NoEmbeddedFrontend>;
+#else
+using EmbeddedFrontendType = NoEmbeddedFrontend;
+#endif
+}  // namespace detail
+
+/**
+ * @brief The application type with the embedded web view window. Always defined: without an engine in the build, constructing it
+ * throws std::runtime_error, so falling back to the system browser is an ordinary try/catch.
+ */
+using EmbeddedWebFront = WebFrontWithFrontend<detail::EmbeddedFrontendType>;
+
 }  // namespace webfront
 
 // Optional templates instantiate only when the developer/native facade is selected.
