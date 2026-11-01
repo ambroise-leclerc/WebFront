@@ -458,10 +458,7 @@ SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") 
     THEN("a page that replaces the instrumented one finds the recording slot free") {
         session.recordStart(1, "abandoned", 30);
         REQUIRE(session.attach(2));  // a reload: page 1 can no longer collect its recording
-        REQUIRE(pollUntilDone([&] {
-                    return session.recordPoll(2);
-                })
-                >= 0);
+        // The slot is free as soon as attach returns, with no polling for the old recording to end.
         REQUIRE_NOTHROW(session.recordStart(2, "again", 30));
         session.recordStop(2);
     }
@@ -501,4 +498,43 @@ SCENARIO("The Jasmine configuration accepts an optional capture directory") {
     REQUIRE(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"c"})").captures == "c");
     REQUIRE(jasmineConfiguration(R"({"files":["j","s"],"report":"r"})").captures.empty());
     REQUIRE_THROWS(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"a","captures":"b"})"));
+}
+
+SCENARIO("Abandoning a recording frees its slot before it returns, unless the window blocks the worker") {
+    CaptureDirectory directory{"abandon"};
+    GIVEN("a window that answers") {
+        CaptureStore store{directory.path, fakeImage};
+        store.startRecording("first", 30);
+        store.abandon();
+        THEN("a new recording starts at once") {
+            REQUIRE_NOTHROW(store.startRecording("second", 30));
+            REQUIRE_NOTHROW(store.stopRecording());
+        }
+        THEN("abandoning with nothing running is not an error") {
+            store.abandon();
+            REQUIRE_NOTHROW(store.abandon());
+        }
+    }
+    GIVEN("a window that does not answer") {
+        std::atomic<bool> release = false, entered = false;
+        {
+            CaptureStore store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
+                                   entered = true;
+                                   while (!release)
+                                       std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                                   return std::vector<std::uint8_t>{1};
+                               }};
+            store.startRecording("blocked", 30);
+            REQUIRE(waitUntil([&] {
+                return entered.load();
+            }));  // The worker is inside the window's capture, not yet started.
+            const auto begin = std::chrono::steady_clock::now();
+            store.abandon();
+            THEN("it waits only the grace period, and the slot stays taken") {
+                REQUIRE(std::chrono::steady_clock::now() - begin < std::chrono::seconds{3});
+                REQUIRE_THROWS_AS(store.startRecording("next", 30), std::logic_error);
+            }
+            release = true;
+        }
+    }
 }

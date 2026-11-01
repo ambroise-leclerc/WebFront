@@ -120,10 +120,15 @@ One window per process is supported.
 | Frontend | Capture |
 | --- | --- |
 | WebKitGTK | Supported (`webkit_web_view_get_snapshot`, GTK 4.6 or newer, otherwise the call fails with a diagnostic), validated under `xvfb-run`; the sandbox opt-out variable is not needed by the capture itself. |
-| WKWebView | Supported (`takeSnapshotWithConfiguration:`, encoded as PNG by AppKit); the request runs on the main thread, which must be running the window's event loop. |
+| WKWebView | Supported (`takeSnapshotWithConfiguration:`, encoded as PNG by AppKit); the request runs on the main thread, which must be running the window's event loop. A hidden window (`visible = false`) is not qualified: its snapshot may be empty. |
 | WebView2 | Supported (`CapturePreview`, PNG); the request runs on the window's STA thread, which must be pumping its message loop. |
-| CEF | Not implemented yet: the call fails with "no window that can be captured is open". |
+| CEF | Supported through the DevTools protocol (`Page.captureScreenshot`), posted to the browser's UI thread, which must be running its message loop. It opens no DevTools window; it was validated with the default policy, where DevTools are enabled. |
 
 This is an opt-in test facility with the same trust model as the rest of this guide: it is compiled only with
 `WEBFRONT_JASMINE_TESTING`, and the captured page can contain secrets it displays. Automation/MCP does not expose
 captures yet.
+
+A capture that is in flight when the window closes is answered with "the window is closed" instead of waiting for its
+timeout. A page that replaces the instrumented one stops its recording and finds the slot free when the new page
+attaches (the old worker is waited for at most half a second; one blocked inside a window that no longer answers keeps
+the slot until it returns).

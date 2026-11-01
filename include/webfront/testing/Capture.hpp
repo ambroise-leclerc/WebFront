@@ -139,12 +139,19 @@ public:
         recording.job->stop = true;
     }
 
-    /// Asks a running recording to stop, if there is one, without waiting and without an error. Used when the page under
-    /// test is replaced, so that its abandoned recording ends and the new page finds the slot free.
+    /// Stops a running recording, if there is one, without an error, and waits for its worker for at most `shutdownGrace`
+    /// so that the slot is free when this returns. Used when the page under test is replaced: its abandoned recording
+    /// ends and the new page can start its own at once. A worker still blocked in its source keeps the slot until it
+    /// returns (see reap()).
     void abandon() {
         std::scoped_lock lock{control};
-        if (recording.thread.joinable())
-            recording.job->stop = true;
+        if (!recording.thread.joinable())
+            return;
+        recording.job->stop = true;
+        const auto deadline = std::chrono::steady_clock::now() + shutdownGrace;
+        while (!recording.job->done && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        reap(recording);
     }
 
     /// The number of images written once the recording has ended, or nothing while it still runs. Throws the capture

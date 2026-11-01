@@ -162,12 +162,26 @@ public:
         opened = true;
     }
 
-    /// Refuses further requests and returns those still waiting, to be answered by the caller.
+    /// Refuses further requests and returns those still waiting or started but unanswered, to be answered by the caller.
     std::deque<std::shared_ptr<CaptureJob>> close() {
         std::scoped_lock lock{mutex};
         opened = false;
         window = nullptr;
-        return std::exchange(pending, {});
+        auto jobs = std::exchange(pending, {});
+        jobs.insert(jobs.end(), inflight.begin(), inflight.end());
+        inflight.clear();
+        return jobs;
+    }
+
+    /// The engine owns the request now: closing must still answer it.
+    void started(const std::shared_ptr<CaptureJob>& job) {
+        std::scoped_lock lock{mutex};
+        inflight.push_back(job);
+    }
+
+    void finished(const std::shared_ptr<CaptureJob>& job) {
+        std::scoped_lock lock{mutex};
+        std::erase(inflight, job);
     }
 
     bool submit(const std::shared_ptr<CaptureJob>& job) {
@@ -193,6 +207,7 @@ private:
     HWND                                    window = nullptr;
     bool                                    opened = false;
     std::deque<std::shared_ptr<CaptureJob>> pending;
+    std::vector<std::shared_ptr<CaptureJob>> inflight;
 };
 
 inline void answer(CaptureJob& job, CaptureResult result) noexcept {
@@ -564,10 +579,12 @@ private:
                 }
                 Microsoft::WRL::ComPtr<IStream> stream;
                 check(CreateStreamOnHGlobal(nullptr, TRUE, &stream), "creating the capture stream");
+                captureQueue->started(job);
                 // The handler keeps the job and the stream until the engine answers.
                 check(view->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
                                            stream.Get(),
-                                           Microsoft::WRL::Callback<ICoreWebView2CapturePreviewCompletedHandler>([job, stream](HRESULT result) -> HRESULT {
+                                           Microsoft::WRL::Callback<ICoreWebView2CapturePreviewCompletedHandler>([job, stream, queue = captureQueue](HRESULT result) -> HRESULT {
+                                               queue->finished(job);
                                                try {
                                                    answer(*job, pngBytes(result, stream.Get()));
                                                } catch (...) {
@@ -579,6 +596,7 @@ private:
                                            }).Get()),
                       "starting the capture");
             } catch (...) {
+                captureQueue->finished(job);
                 try {
                     job->done.set_exception(std::current_exception());
                 } catch (...) { }

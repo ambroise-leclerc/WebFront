@@ -10,4 +10,12 @@ describe('The consumer application captured in its real page', () => {
             await expectAsync(webFrontCapture.screenshot(name)).toBeRejected();
         await expectAsync(webFrontCapture.startRecording('rate', 31)).toBeRejected();
     });
+    it('rejects stopping a recording that was never started', async () => {
+        await expectAsync(webFrontCapture.stopRecording()).toBeRejected();
+    });
+    it('keeps a recording name for the run and works through detached methods', async () => {
+        const {record, startRecording} = webFrontCapture;
+        expect(await record('detached', {seconds: 0.5, framesPerSecond: 10})).toBeGreaterThanOrEqual(1);
+        await expectAsync(startRecording('detached')).toBeRejected();
+    });
 });

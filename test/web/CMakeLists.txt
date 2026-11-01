@@ -147,8 +147,9 @@ if(_browser_tests_available)
         endif()
         set_tests_properties(ConsumerJasmine-${mode} PROPERTIES FIXTURES_SETUP ConsumerJasmineRuns)
     endforeach()
-    # Window capture (issue #468) is implemented by WebKitGTK, WKWebView and WebView2; the other frontends report that they cannot capture.
-    if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WebKitGTK" OR WEBFRONT_WEBTEST_FRONTEND STREQUAL "WKWebView" OR WEBFRONT_WEBTEST_FRONTEND STREQUAL "WebView2")
+    # Window capture (issue #468) is implemented by every embedded frontend.
+    set(WEBFRONT_CAPTURE_FRONTENDS WebKitGTK WKWebView WebView2 CEF)
+    if(WEBFRONT_WEBTEST_FRONTEND IN_LIST WEBFRONT_CAPTURE_FRONTENDS)
         webfront_add_jasmine_test(NAME ConsumerJasmine-capture TARGET jasmine_consumer
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"

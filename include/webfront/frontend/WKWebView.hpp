@@ -166,14 +166,29 @@ inline bool successfulHttpStatus(long status) {
 
 /// The view as seen by capture requests: read and cleared only on the main thread, so a request that outlives the
 /// window finds it null.
+struct CaptureJob;
 struct CaptureTarget {
-    id view = nullptr;
+    id                                       view = nullptr;
+    std::vector<std::shared_ptr<CaptureJob>> inflight;  // Snapshots the engine has not answered yet.
 };
 
 struct CaptureJob {
     std::shared_ptr<CaptureTarget> target;
     std::promise<CaptureResult>    done;
 };
+
+inline void answer(CaptureJob& job, CaptureResult result) noexcept {
+    try {
+        job.done.set_value(std::move(result));
+    } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
+}
+
+/// The window is going away: no pending request waits for an answer that will never come.
+inline void abandonCaptures(CaptureTarget& target) noexcept {
+    target.view = nullptr;
+    for (const auto& job : std::exchange(target.inflight, {}))
+        answer(*job, std::unexpected("the window is closed"));
+}
 
 // The PNG of an NSImage through NSBitmapImageRep (NSBitmapImageFileTypePNG = 4).
 inline CaptureResult pngBytes(id image) {
@@ -197,16 +212,17 @@ inline void startCapture(void* data) noexcept {
     const auto                                   job = *owner;
     try {
         if (!job->target->view) {
-            job->done.set_value(std::unexpected("the window is closed"));
+            answer(*job, std::unexpected("the window is closed"));
             return;
         }
         auto handler = ^(id image, id error) {
             try {
+                std::erase(job->target->inflight, job);
                 if (!image) {
                     const auto reason = error ? utf8(send(error, "localizedDescription")) : std::string("the engine returned no image");
-                    job->done.set_value(std::unexpected("snapshot failed: " + reason));
+                    answer(*job, std::unexpected("snapshot failed: " + reason));
                 } else {
-                    job->done.set_value(pngBytes(image));
+                    answer(*job, pngBytes(image));
                 }
             } catch (...) {
                 try {
@@ -217,9 +233,11 @@ inline void startCapture(void* data) noexcept {
         // A nil configuration snapshots the visible bounds of the view.
         // The engine keeps its own copy until the handler ran; the call never depends on the stack block surviving it.
         const auto heapHandler = Block_copy(handler);
+        job->target->inflight.push_back(job);
         try {
             send<void>(job->target->view, "takeSnapshotWithConfiguration:completionHandler:", static_cast<id>(nullptr), heapHandler);
         } catch (...) {
+            std::erase(job->target->inflight, job);
             Block_release(heapHandler);
             throw;
         }
@@ -264,7 +282,7 @@ struct Session {
 
     ~Session() {
         captureRegistration = {};
-        captureTarget->view = nullptr;
+        abandonCaptures(*captureTarget);
         if (timer) {
             send<void>(timer, "invalidate");
             send<void>(timer, "release");

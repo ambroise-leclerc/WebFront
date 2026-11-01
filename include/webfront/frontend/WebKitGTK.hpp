@@ -99,6 +99,8 @@ public:
     const char* (*responseUri)(Object)                      = symbol<decltype(responseUri)>("webkit_uri_response_get_uri");
     unsigned (*timeoutAdd)(unsigned, int (*)(void*), void*) = symbol<decltype(timeoutAdd)>("g_timeout_add");
     int (*sourceRemove)(unsigned)                           = symbol<decltype(sourceRemove)>("g_source_remove");
+    Object (*findSource)(Object, unsigned)                  = symbol<decltype(findSource)>("g_main_context_find_source_by_id");
+    void (*sourceDestroy)(Object)                           = symbol<decltype(sourceDestroy)>("g_source_destroy");
     Object (*response)(Object)                              = symbol<decltype(response)>("webkit_response_policy_decision_get_response");
     unsigned (*status)(Object)                              = symbol<decltype(status)>("webkit_uri_response_get_status_code");
     void (*evaluate)(Object, const char*, long, const char*, const char*, Object, Callback, Object) =
@@ -159,8 +161,10 @@ inline std::filesystem::path profileDirectory(const char* variable, const char* 
 
 /// The view as seen by capture requests: read and cleared only on the GTK main thread, so a request that
 /// outlives the window finds it null.
+struct CaptureJob;
 struct CaptureTarget {
-    Api::Object view = nullptr;
+    Api::Object                             view = nullptr;
+    std::vector<std::shared_ptr<CaptureJob>> inflight;  // Snapshots the engine has not answered yet.
 };
 
 struct CaptureJob {
@@ -168,10 +172,28 @@ struct CaptureJob {
     std::promise<CaptureResult>    done;
 };
 
+inline void answer(CaptureJob& job, CaptureResult result) noexcept {
+    try {
+        job.done.set_value(std::move(result));
+    } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
+}
+
+inline void forget(CaptureTarget& target, const std::shared_ptr<CaptureJob>& job) {
+    std::erase(target.inflight, job);
+}
+
+/// The window is going away: no pending request waits for an answer that will never come.
+inline void abandonCaptures(CaptureTarget& target) noexcept {
+    target.view = nullptr;
+    for (const auto& job : std::exchange(target.inflight, {}))
+        answer(*job, std::unexpected("the window is closed"));
+}
+
 // Runs on the GTK main thread; owns the job until the snapshot completes.
 inline void finishCapture(Api::Object view, Api::Object result, void* owner) noexcept {
     std::unique_ptr<std::shared_ptr<CaptureJob>> job{static_cast<std::shared_ptr<CaptureJob>*>(owner)};
     auto&                                        a = api();
+    forget(*(*job)->target, *job);
     try {
         Api::Error* error   = nullptr;
         const auto  texture = a.snapshotFinish(view, result, &error);
@@ -179,20 +201,20 @@ inline void finishCapture(Api::Object view, Api::Object result, void* owner) noe
             std::string message = error && error->message ? error->message : "the engine returned no image";
             if (error)
                 a.errorFree(error);
-            (*job)->done.set_value(std::unexpected("snapshot failed: " + message));
+            answer(**job, std::unexpected("snapshot failed: " + message));
             return;
         }
         const auto bytes = a.texturePng(texture);
         a.unref(texture);
         if (!bytes) {
-            (*job)->done.set_value(std::unexpected("cannot encode the snapshot as PNG"));
+            answer(**job, std::unexpected("cannot encode the snapshot as PNG"));
             return;
         }
         std::size_t               size  = 0;
         const auto*               begin = static_cast<const std::uint8_t*>(a.bytesData(bytes, &size));
         std::vector<std::uint8_t> png(begin, begin + size);
         a.bytesUnref(bytes);
-        (*job)->done.set_value(std::move(png));
+        answer(**job, std::move(png));
     } catch (...) {
         try {
             (*job)->done.set_exception(std::current_exception());
@@ -205,10 +227,11 @@ inline int startCapture(void* data) noexcept {
     const auto& job = *static_cast<std::shared_ptr<CaptureJob>*>(data);
     auto&       a   = api();
     if (!job->target->view) {
-        job->done.set_value(std::unexpected("the window is closed"));
+        answer(*job, std::unexpected("the window is closed"));
         return 0;
     }
     const auto view = job->target->view;
+    job->target->inflight.push_back(job);
     // WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE. finishCapture owns its own reference to the job.
     a.snapshot(view, 0, 0, nullptr, reinterpret_cast<Api::Callback>(finishCapture), new std::shared_ptr<CaptureJob>(job));
     return 0;
@@ -228,9 +251,10 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
         constexpr int idlePriority = 200;  // G_PRIORITY_DEFAULT_IDLE
         const auto    source       = a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
         if (future.wait_for(timeout) != std::future_status::ready) {
-            // A main loop that does not run would keep the request, and its job, forever. If the source was served in
-            // the meantime GLib only logs that it is gone.
-            a.sourceRemove(source);
+            // A main loop that does not run would keep the request, and its job, forever. A source that was served in
+            // the meantime is gone: look it up first, since removing an unknown id makes GLib log a critical warning.
+            if (const auto pending = a.findSource(nullptr, source))
+                a.sourceDestroy(pending);
             return std::unexpected("the window did not answer within the capture timeout");
         }
         return future.get();
@@ -276,7 +300,7 @@ struct Session : FailureState {
     }
     void releaseView() {
         captureRegistration = {};
-        captureTarget->view = nullptr;
+        abandonCaptures(*captureTarget);
         if (!view)
             return;
         for (auto handler : viewHandlers)
