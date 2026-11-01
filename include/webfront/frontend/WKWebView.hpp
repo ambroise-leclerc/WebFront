@@ -216,7 +216,7 @@ inline void startCapture(void* data) noexcept {
         };
         // A nil configuration snapshots the visible bounds of the view.
         // The engine keeps its own copy until the handler ran; the call never depends on the stack block surviving it.
-        auto* const heapHandler = Block_copy(handler);
+        const auto heapHandler = Block_copy(handler);
         try {
             send<void>(job->target->view, "takeSnapshotWithConfiguration:completionHandler:", static_cast<id>(nullptr), heapHandler);
         } catch (...) {
