@@ -2,6 +2,7 @@
 
 #include "../ContentPolicy.hpp"
 #include "Action.hpp"
+#include "Capture.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -21,7 +22,7 @@ struct WKWebViewOptions {
     ContentPolicy             contentPolicy{};
     WindowOptions             window{};
     /** @brief Keep the native window hidden and avoid activating the application. A WindowServer is still required. */
-    bool                      visible{true};
+    bool visible{true};
 };
 
 }  // namespace webfront::frontend
@@ -30,10 +31,14 @@ struct WKWebViewOptions {
     #include <bit>
     #include <exception>
     #include <functional>
+    #include <future>
+    #include <memory>
     #include <string>
     #include <utility>
+    #include <vector>
 
     #include <CoreGraphics/CGGeometry.h>
+    #include <dispatch/dispatch.h>
     #include <objc/message.h>
     #include <objc/runtime.h>
     #include <pthread.h>
@@ -95,7 +100,7 @@ inline void initialize() {
 }
 
 inline long applicationActivationPolicy() {
-    Object agentKey(text("LSUIElement"));
+    Object     agentKey(text("LSUIElement"));
     const auto agent = send(send(type("NSBundle"), "mainBundle"), "objectForInfoDictionaryKey:", agentKey.get());
     return send<BOOL>(agent, "boolValue") ? 1L : 0L;  // Accessory for agent bundles, Regular otherwise.
 }
@@ -158,6 +163,76 @@ inline bool successfulHttpStatus(long status) {
     return status >= 200 && status < 400;
 }
 
+/// The view as seen by capture requests: read and cleared only on the main thread, so a request that outlives the
+/// window finds it null.
+struct CaptureTarget {
+    id view = nullptr;
+};
+
+struct CaptureJob {
+    std::shared_ptr<CaptureTarget> target;
+    std::promise<CaptureResult>    done;
+};
+
+// The PNG of an NSImage through NSBitmapImageRep (NSBitmapImageFileTypePNG = 4).
+inline CaptureResult pngBytes(id image) {
+    const auto tiff = send(image, "TIFFRepresentation");
+    if (!tiff)
+        return std::unexpected("cannot read the snapshot pixels");
+    const auto representation = send(type("NSBitmapImageRep"), "imageRepWithData:", tiff);
+    if (!representation)
+        return std::unexpected("cannot decode the snapshot");
+    const auto png = send(representation, "representationUsingType:properties:", 4UL, send(type("NSDictionary"), "dictionary"));
+    if (!png)
+        return std::unexpected("cannot encode the snapshot as PNG");
+    const auto bytes = send<const std::uint8_t*>(png, "bytes");
+    const auto size  = send<unsigned long>(png, "length");
+    return std::vector<std::uint8_t>(bytes, bytes + size);
+}
+
+// Runs on the main thread, where AppKit sessions live.
+inline void startCapture(void* data) noexcept {
+    std::unique_ptr<std::shared_ptr<CaptureJob>> owner{static_cast<std::shared_ptr<CaptureJob>*>(data)};
+    const auto                                   job = *owner;
+    try {
+        if (!job->target->view) {
+            job->done.set_value(std::unexpected("the window is closed"));
+            return;
+        }
+        auto handler = ^(id image, id error) {
+            try {
+                if (!image) {
+                    const auto reason = error ? utf8(send(error, "localizedDescription")) : std::string("the engine returned no image");
+                    job->done.set_value(std::unexpected("snapshot failed: " + reason));
+                } else {
+                    job->done.set_value(pngBytes(image));
+                }
+            } catch (...) {
+                try {
+                    job->done.set_exception(std::current_exception());
+                } catch (...) { }
+            }
+        };
+        // A nil configuration snapshots the visible bounds of the view.
+        send<void>(job->target->view, "takeSnapshotWithConfiguration:completionHandler:", static_cast<id>(nullptr), handler);
+    } catch (...) {
+        try {
+            job->done.set_exception(std::current_exception());
+        } catch (...) { }
+    }
+}
+
+inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
+    return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
+        auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
+        auto future = job->done.get_future();
+        dispatch_async_f(dispatch_get_main_queue(), new std::shared_ptr<CaptureJob>(job), startCapture);
+        if (future.wait_for(timeout) != std::future_status::ready)
+            return std::unexpected("the window did not answer within the capture timeout");
+        return future.get();
+    };
+}
+
 struct Session {
     explicit Session(std::string url, WKWebViewOptions options = {})
         : url(std::move(url)), options(std::move(options)), contentPolicy(this->url, this->options.contentPolicy) {
@@ -175,8 +250,12 @@ struct Session {
     bool                                 installed = false, running = false, closed = false, loaded = false;
     bool                                 receivedResponse = false, committed = false;
     std::exception_ptr                   error;
+    std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
+    CaptureRegistration                  captureRegistration;
 
     ~Session() {
+        captureRegistration = {};
+        captureTarget->view = nullptr;
         if (timer) {
             send<void>(timer, "invalidate");
             send<void>(timer, "release");
@@ -308,22 +387,24 @@ struct Session {
         // so asynchronous bridge/Worker work and close requests keep progressing without a visible native window.
         if (!options.visible) {
             const auto preferences = send(configuration.get(), "preferences");
-            const auto selector = sel_registerName("setInactiveSchedulingPolicy:");
+            const auto selector    = sel_registerName("setInactiveSchedulingPolicy:");
             if (!send<BOOL>(preferences, "respondsToSelector:", selector))
                 throw std::runtime_error("WKWebView: hidden sessions require macOS 14 or later (inactiveSchedulingPolicy)");
-            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L); // WKInactiveSchedulingPolicyNone
+            send<void>(preferences, "setInactiveSchedulingPolicy:", 2L);  // WKInactiveSchedulingPolicyNone
         }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
         const auto   windowOptions = frontend::detail::resolveWindow(options.window);
         const CGRect bounds{
-            {                                 0,                                   0},
+            {                                        0,                                          0},
             {static_cast<CGFloat>(windowOptions.width), static_cast<CGFloat>(windowOptions.height)}
         };
         view = send(send(reinterpret_cast<id>(viewClass()), "alloc"), "initWithFrame:configuration:", bounds, configuration.get());
         if (!view)
             throw std::runtime_error("WKWebView: cannot create web view");
         attach(view, this);
+        captureTarget->view = view;
+        captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
         send<void>(view, "setAutoresizingMask:", 18UL);  // NSViewWidthSizable | NSViewHeightSizable
         send<void>(view, "setInspectable:", static_cast<BOOL>(options.contentPolicy.devToolsEnabled));
         send<void>(view, "setNavigationDelegate:", delegate);

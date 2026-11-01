@@ -94,11 +94,19 @@ inline constexpr std::size_t jasmineChunkSize = 49152;
 inline constexpr std::string_view jasmineScriptBody = R"JS(
 void (async () => {
     const call = (name, ...args) => webFront.cppFunction('webfront.testing.' + name)(...args);
-    // Screenshots and image sequences of the web content, written to the run's capture directory.
+    // Screenshots and image sequences of the web content, written to the run's capture directory. The C++ side starts the
+    // work on its own thread and answers at once (the server thread must keep serving the page), so the page polls.
+    const settle = async name => {
+        for (;;) {
+            const result = await call(name);
+            if (result >= 0) return result;
+            await new Promise(resolve => setTimeout(resolve, 20));
+        }
+    };
     globalThis.webFrontCapture = {
-        screenshot: name => call('screenshot', name),
+        async screenshot(name) { await call('screenshotStart', name); return settle('screenshotPoll'); },
         startRecording: (name, framesPerSecond = 10) => call('recordStart', name, framesPerSecond),
-        stopRecording: () => call('recordStop'),
+        async stopRecording() { await call('recordStop'); return settle('recordPoll'); },
         async record(name, {seconds = 3, framesPerSecond = 10} = {}) {
             await this.startRecording(name, framesPerSecond);
             try { await new Promise(resolve => setTimeout(resolve, seconds * 1000)); }
@@ -188,7 +196,7 @@ public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
     JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
-        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) { }
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
@@ -219,18 +227,30 @@ public:
         return std::vector<std::uint8_t>(part.begin(), part.end());
     }
 
-    /// Writes `<captures>/<name>.png` and returns its size in bytes.
-    [[nodiscard]] double screenshot(const Caller& caller, const std::string& name) {
-        return static_cast<double>(captures(caller).screenshot(name));
+    /// Starts writing `<captures>/<name>.png` on a worker thread and returns at once.
+    void screenshotStart(const Caller& caller, const std::string& name) {
+        captures(caller).beginScreenshot(name);
+    }
+
+    /// The size in bytes of the finished screenshot, or -1 while it is still being taken.
+    [[nodiscard]] double screenshotPoll(const Caller& caller) {
+        const auto size = captures(caller).pollScreenshot();
+        return size ? static_cast<double>(*size) : -1.0;
     }
 
     void recordStart(const Caller& caller, const std::string& name, double framesPerSecond) {
         captures(caller).startRecording(name, framesPerSecond);
     }
 
-    /// Returns the number of images the recording wrote.
-    [[nodiscard]] double recordStop(const Caller& caller) {
-        return static_cast<double>(captures(caller).stopRecording());
+    /// Asks the recording to stop and returns at once.
+    void recordStop(const Caller& caller) {
+        captures(caller).requestStop();
+    }
+
+    /// The number of images the recording wrote once it has ended, or -1 while it is still ending.
+    [[nodiscard]] double recordPoll(const Caller& caller) {
+        const auto frames = captures(caller).pollRecording();
+        return frames ? static_cast<double>(*frames) : -1.0;
     }
 
     void result(const Caller& caller, const std::string& text) {
@@ -282,13 +302,13 @@ private:
         return *store;  // Not under the mutex: a capture waits for the window and a recording runs for seconds.
     }
 
-    std::vector<std::string> files;
-    std::filesystem::path    report;
+    std::vector<std::string>      files;
+    std::filesystem::path         report;
     std::shared_ptr<CaptureStore> store;
-    std::optional<Caller>    browser;
-    std::mutex               mutex;
-    bool                     completed = false;
-    int                      status    = 1;
+    std::optional<Caller>         browser;
+    std::mutex                    mutex;
+    bool                          completed = false;
+    int                           status    = 1;
 };
 }  // namespace detail
 
@@ -313,7 +333,7 @@ public:
         const auto path = detail::jasmineConfigurationPath();
         if (!path)
             return;
-        const auto config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
+        const auto               config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
@@ -322,12 +342,30 @@ public:
             store = std::make_shared<CaptureStore>(config.captures);
         session          = std::make_shared<Session>(std::move(contents), config.report, std::move(store));
         const auto owned = session;
-        app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
-        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
-        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
-        app.cppFunction("webfront.testing.screenshot", [owned](AppUI ui, std::string name) { return owned->screenshot(ui, name); });
-        app.cppFunction("webfront.testing.recordStart", [owned](AppUI ui, std::string name, double rate) { owned->recordStart(ui, name, rate); });
-        app.cppFunction("webfront.testing.recordStop", [owned](AppUI ui) { return owned->recordStop(ui); });
+        app.cppFunction("webfront.testing.count", [owned](AppUI ui) {
+            return owned->count(ui);
+        });
+        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) {
+            return owned->read(ui, index, offset);
+        });
+        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) {
+            owned->result(ui, result);
+        });
+        app.cppFunction("webfront.testing.screenshotStart", [owned](AppUI ui, std::string name) {
+            owned->screenshotStart(ui, name);
+        });
+        app.cppFunction("webfront.testing.screenshotPoll", [owned](AppUI ui) {
+            return owned->screenshotPoll(ui);
+        });
+        app.cppFunction("webfront.testing.recordStart", [owned](AppUI ui, std::string name, double rate) {
+            owned->recordStart(ui, name, rate);
+        });
+        app.cppFunction("webfront.testing.recordStop", [owned](AppUI ui) {
+            owned->recordStop(ui);
+        });
+        app.cppFunction("webfront.testing.recordPoll", [owned](AppUI ui) {
+            return owned->recordPoll(ui);
+        });
         subscription = app.subscribeUIStarted([owned](AppUI ui) {
             if (owned->attach(ui))
                 ui.addScript(detail::jasmineScript());
@@ -349,7 +387,7 @@ inline namespace jasmine_inert {
 template <typename App>
 class JasmineTest {
 public:
-    explicit JasmineTest(App&) {}
+    explicit JasmineTest(App&) { }
     [[nodiscard]] int exitCode() const {
         return 0;
     }

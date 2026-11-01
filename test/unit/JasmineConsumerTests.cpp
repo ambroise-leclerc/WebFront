@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <webfront/testing/Capture.hpp>
 #include <webfront/testing/Jasmine.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <thread>
 
 SCENARIO("Consumer Jasmine configuration is bounded and rejects ambiguous or incomplete input") {
     using webfront::testing::detail::jasmineConfiguration;
@@ -48,7 +51,10 @@ SCENARIO("A Jasmine session serves its files in bounded chunks to the instrument
     constexpr auto chunk = JasmineSession<>::chunkSize;
     ReportFile     report{"chunks"};
     GIVEN("a file that is an exact multiple of the chunk size, an empty file and a short one") {
-        JasmineSession session{{std::string(chunk * 2, 'a'), "", "short"}, report.path};
+        JasmineSession session{
+            {std::string(chunk * 2, 'a'), "", "short"},
+            report.path
+        };
         REQUIRE(session.attach(7));
         REQUIRE(session.count(7) == 3);
         THEN("every chunk is full until an empty read ends the file") {
@@ -59,9 +65,17 @@ SCENARIO("A Jasmine session serves its files in bounded chunks to the instrument
             REQUIRE(session.read(7, 2, 2).size() == 3);
         }
         THEN("indexes and offsets outside the file are rejected") {
-            for (const auto& [index, offset] : {std::pair{-1.0, 0.0}, {3.0, 0.0}, {0.5, 0.0}, {0.0, -1.0}, {0.0, 0.5},
-                                               {0.0, static_cast<double>(chunk * 2 + 1)}, {std::nan(""), 0.0}, {0.0, std::nan("")},
-                                               {0.0, HUGE_VAL}})
+            for (const auto& [index, offset] : {
+                     std::pair{        -1.0,                                0.0},
+                     {         3.0,                                0.0},
+                     {         0.5,                                0.0},
+                     {         0.0,                               -1.0},
+                     {         0.0,                                0.5},
+                     {         0.0, static_cast<double>(chunk * 2 + 1)},
+                     {std::nan(""),                                0.0},
+                     {         0.0,                       std::nan("")},
+                     {         0.0,                           HUGE_VAL}
+            })
                 REQUIRE_THROWS(session.read(7, index, offset));
         }
         THEN("another page cannot read, count or report") {
@@ -126,10 +140,6 @@ SCENARIO("The injected script reads in the same chunk size the session serves an
     REQUIRE(script.find("failed to load") != std::string_view::npos);
 }
 
-#include <webfront/testing/Capture.hpp>
-
-#include <atomic>
-#include <thread>
 
 namespace {
 using webfront::frontend::CaptureResult;
@@ -167,7 +177,9 @@ SCENARIO("A capture store writes images only below its directory") {
         }
     }
     GIVEN("a window that cannot be captured") {
-        CaptureStore store{directory.path, [](std::chrono::milliseconds) -> CaptureResult { return std::unexpected("no window"); }};
+        CaptureStore store{directory.path, [](std::chrono::milliseconds) -> CaptureResult {
+                               return std::unexpected("no window");
+                           }};
         THEN("the diagnostic reaches the caller and nothing is written") {
             REQUIRE_THROWS_WITH(store.screenshot("x"), Catch::Matchers::Equals("Capture failed: no window"));
             REQUIRE_FALSE(std::filesystem::exists(directory.path / "x.png"));
@@ -179,9 +191,9 @@ SCENARIO("A capture store records numbered images at a bounded rate") {
     CaptureDirectory directory{"record"};
     std::atomic<int> calls = 0;
     CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
-                       ++calls;
-                       return std::vector<std::uint8_t>{1, 2, 3};
-                   }};
+                           ++calls;
+                           return std::vector<std::uint8_t>{1, 2, 3};
+                           }};
     GIVEN("a recording at 20 images per second") {
         store.startRecording("run", 20);
         THEN("a second recording is refused while it runs") {
@@ -211,13 +223,98 @@ SCENARIO("A recording that loses its window reports the failure when it is stopp
     CaptureDirectory directory{"failure"};
     std::atomic<int> calls = 0;
     CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
-                       if (++calls > 2)
-                           return std::unexpected("the window is closed");
-                       return std::vector<std::uint8_t>{1};
-                   }};
+                           if (++calls > 2)
+                               return std::unexpected("the window is closed");
+                           return std::vector<std::uint8_t>{1};
+                           }};
     store.startRecording("lost", 30);
     std::this_thread::sleep_for(std::chrono::milliseconds{300});
     REQUIRE_THROWS_WITH(store.stopRecording(), Catch::Matchers::Equals("Recording stopped: Capture failed: the window is closed"));
+}
+
+namespace {
+template <typename Poll>
+double pollUntilDone(Poll poll) {
+    for (int attempt = 0; attempt < 500; ++attempt) {
+        if (const auto value = poll(); value >= 0)
+            return value;
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    return -1;
+}
+}  // namespace
+
+SCENARIO("A capture store takes a screenshot without making the caller wait for the window") {
+    CaptureDirectory  directory{"async"};
+    std::atomic<bool> release = false;
+    CaptureStore      store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
+                           while (!release)
+                               std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                           return std::vector<std::uint8_t>{1, 2, 3};
+                            }};
+    GIVEN("a window that has not answered yet") {
+        store.beginScreenshot("slow");  // returns at once
+        THEN("it is pending, a second one is refused, and the result arrives later") {
+            REQUIRE_FALSE(store.pollScreenshot().has_value());
+            REQUIRE_THROWS_AS(store.beginScreenshot("other"), std::logic_error);
+            release = true;
+            std::optional<std::size_t> size;
+            for (int attempt = 0; attempt < 500 && !(size = store.pollScreenshot()); ++attempt)
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            REQUIRE(size == 3);
+            REQUIRE(std::filesystem::exists(directory.path / "slow.png"));
+            REQUIRE_THROWS_AS(store.pollScreenshot(), std::logic_error);
+        }
+    }
+    GIVEN("an invalid name") {
+        REQUIRE_THROWS_AS(store.beginScreenshot("../x"), std::invalid_argument);
+    }
+    release = true;
+}
+
+SCENARIO("An asynchronous screenshot reports a capture failure when polled") {
+    CaptureDirectory directory{"asyncfail"};
+    CaptureStore     store{directory.path, [](std::chrono::milliseconds) -> CaptureResult {
+                           return std::unexpected("no window");
+                           }};
+    store.beginScreenshot("x");
+    std::optional<std::size_t> size;
+    REQUIRE_THROWS_WITH(
+        [&] {
+            for (int attempt = 0; attempt < 500 && !(size = store.pollScreenshot()); ++attempt)
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }(),
+        Catch::Matchers::Equals("Capture failed: no window"));
+}
+
+SCENARIO("A recording stops on request and reports its count by polling") {
+    CaptureDirectory directory{"stop"};
+    CaptureStore     store{directory.path, fakeImage};
+    store.startRecording("run", 30);
+    std::this_thread::sleep_for(std::chrono::milliseconds{150});
+    store.requestStop();
+    std::optional<std::size_t> frames;
+    for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    REQUIRE(frames.has_value());
+    REQUIRE(*frames >= 2);
+    REQUIRE_THROWS_AS(store.requestStop(), std::logic_error);
+    REQUIRE_THROWS_AS(store.pollRecording(), std::logic_error);
+}
+
+SCENARIO("A recording ends by itself at the image limit and can still be collected") {
+    CaptureDirectory directory{"limit"};
+    CaptureStore     store{directory.path, fakeImage, 3};
+    store.startRecording("run", 30);
+    std::this_thread::sleep_for(std::chrono::milliseconds{300});
+    store.requestStop();  // already finished: not an error
+    std::optional<std::size_t> frames;
+    for (int attempt = 0; attempt < 500 && !(frames = store.pollRecording()); ++attempt)
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    REQUIRE(frames == 3);
+    REQUIRE_FALSE(std::filesystem::exists(directory.path / "run" / "0004.png"));
+    store.startRecording("again", 30);  // the slot is free once collected
+    REQUIRE(store.stopRecording() <= 3);
 }
 
 SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") {
@@ -227,15 +324,54 @@ SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") 
     JasmineSession   session{{"x"}, report.path, store};
     REQUIRE(session.attach(1));
     THEN("the instrumented page captures and another page cannot") {
-        REQUIRE(session.screenshot(1, "ok") == 4);
-        REQUIRE_THROWS(session.screenshot(2, "no"));
+        session.screenshotStart(1, "ok");
+        REQUIRE(pollUntilDone([&] {
+                    return session.screenshotPoll(1);
+                })
+                == 4);
+        REQUIRE_THROWS(session.screenshotStart(2, "no"));
+        REQUIRE_THROWS(session.screenshotPoll(2));
         REQUIRE_THROWS(session.recordStart(2, "no", 10));
         REQUIRE_THROWS(session.recordStop(2));
+        REQUIRE_THROWS(session.recordPoll(2));
+    }
+    THEN("a recording is stopped and collected through the session") {
+        session.recordStart(1, "clip", 30);
+        std::this_thread::sleep_for(std::chrono::milliseconds{150});
+        session.recordStop(1);
+        REQUIRE(pollUntilDone([&] {
+                    return session.recordPoll(1);
+                })
+                >= 2);
     }
     THEN("a session without a directory refuses to capture") {
         JasmineSession bare{{"x"}, report.path};
         REQUIRE(bare.attach(1));
-        REQUIRE_THROWS(bare.screenshot(1, "ok"));
+        REQUIRE_THROWS(bare.screenshotStart(1, "ok"));
+    }
+}
+
+SCENARIO("A window registration is replaced by a later one and never removes its successor") {
+    using webfront::frontend::capturePng;
+    using webfront::frontend::CaptureRegistration;
+    const auto answer = [](std::uint8_t byte) {
+        return [byte](std::chrono::milliseconds) -> CaptureResult {
+            return std::vector<std::uint8_t>{byte};
+        };
+    };
+    REQUIRE_FALSE(capturePng().has_value());  // nothing registered
+    {
+        CaptureRegistration first{answer(1)};
+        REQUIRE(capturePng().value() == std::vector<std::uint8_t>{1});
+        {
+            CaptureRegistration second{answer(2)};
+            REQUIRE(capturePng().value() == std::vector<std::uint8_t>{2});
+            first = CaptureRegistration{};  // the stale one goes away
+            REQUIRE(capturePng().value() == std::vector<std::uint8_t>{2});
+            CaptureRegistration moved{std::move(second)};
+            REQUIRE(capturePng().value() == std::vector<std::uint8_t>{2});
+        }
+        REQUIRE_FALSE(capturePng().has_value());  // the last owner closed the window
     }
 }
 

@@ -6,8 +6,8 @@
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
-#include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
+#include "Window.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -45,6 +45,12 @@ class Api {
         if (!result)
             throw std::runtime_error(std::string("WebKitGTK: missing runtime symbol ") + name);
         return result;
+    }
+
+    // A symbol that only some runtimes provide: null instead of an exception, so the rest of the adapter keeps working.
+    template <typename Function>
+    Function optionalSymbol(const char* name) {
+        return module ? reinterpret_cast<Function>(dlsym(module, name)) : nullptr;
     }
 
 public:
@@ -97,13 +103,14 @@ public:
     unsigned (*status)(Object)                              = symbol<decltype(status)>("webkit_uri_response_get_status_code");
     void (*evaluate)(Object, const char*, long, const char*, const char*, Object, Callback, Object) =
         symbol<decltype(evaluate)>("webkit_web_view_evaluate_javascript");
-    unsigned (*idleAdd)(int (*)(void*), void*)                                   = symbol<decltype(idleAdd)>("g_idle_add");
-    void (*snapshot)(Object, int, int, Object, Callback, void*)                  = symbol<decltype(snapshot)>("webkit_web_view_get_snapshot");
-    Object (*snapshotFinish)(Object, Object, Error**)                            = symbol<decltype(snapshotFinish)>("webkit_web_view_get_snapshot_finish");
-    Object (*texturePng)(Object)                                                 = symbol<decltype(texturePng)>("gdk_texture_save_to_png_bytes");
-    const void* (*bytesData)(Object, std::size_t*)                               = symbol<decltype(bytesData)>("g_bytes_get_data");
-    void (*bytesUnref)(Object)                                                   = symbol<decltype(bytesUnref)>("g_bytes_unref");
-    void (*errorFree)(Error*)                                                    = symbol<decltype(errorFree)>("g_error_free");
+    unsigned (*idleAdd)(int (*)(void*), void*) = symbol<decltype(idleAdd)>("g_idle_add");
+    // Capture needs GTK 4.6 (gdk_texture_save_to_png_bytes): an older runtime still opens windows, but cannot capture.
+    void (*snapshot)(Object, int, int, Object, Callback, void*) = optionalSymbol<decltype(snapshot)>("webkit_web_view_get_snapshot");
+    Object (*snapshotFinish)(Object, Object, Error**)           = optionalSymbol<decltype(snapshotFinish)>("webkit_web_view_get_snapshot_finish");
+    Object (*texturePng)(Object)                                = optionalSymbol<decltype(texturePng)>("gdk_texture_save_to_png_bytes");
+    const void* (*bytesData)(Object, std::size_t*)              = symbol<decltype(bytesData)>("g_bytes_get_data");
+    void (*bytesUnref)(Object)                                  = symbol<decltype(bytesUnref)>("g_bytes_unref");
+    void (*errorFree)(Error*)                                   = symbol<decltype(errorFree)>("g_error_free");
 };
 
 inline Api& api() {
@@ -181,16 +188,15 @@ inline void finishCapture(Api::Object view, Api::Object result, void* owner) noe
             (*job)->done.set_value(std::unexpected("cannot encode the snapshot as PNG"));
             return;
         }
-        std::size_t size = 0;
-        const auto* begin = static_cast<const std::uint8_t*>(a.bytesData(bytes, &size));
+        std::size_t               size  = 0;
+        const auto*               begin = static_cast<const std::uint8_t*>(a.bytesData(bytes, &size));
         std::vector<std::uint8_t> png(begin, begin + size);
         a.bytesUnref(bytes);
         (*job)->done.set_value(std::move(png));
     } catch (...) {
         try {
             (*job)->done.set_exception(std::current_exception());
-        } catch (...) {
-        }
+        } catch (...) { }
     }
 }
 
@@ -209,9 +215,12 @@ inline int startCapture(void* data) noexcept {
 
 inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
     return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
+        const auto& a = api();
+        if (!a.snapshot || !a.snapshotFinish || !a.texturePng)
+            return std::unexpected("this WebKitGTK/GTK runtime cannot capture (GTK 4.6 is required)");
         auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
         auto future = job->done.get_future();
-        api().idleAdd(startCapture, new std::shared_ptr<CaptureJob>(job));
+        a.idleAdd(startCapture, new std::shared_ptr<CaptureJob>(job));
         if (future.wait_for(timeout) != std::future_status::ready)
             return std::unexpected("the window did not answer within the capture timeout");
         return future.get();
@@ -236,7 +245,7 @@ struct Session : FailureState {
     CaptureRegistration                  captureRegistration;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
-        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
+        : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) { }
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;
     ~Session() {

@@ -39,13 +39,13 @@ class CaptureRegistration {
 public:
     CaptureRegistration() = default;
     explicit CaptureRegistration(CaptureProvider provider) : owned(std::make_shared<CaptureProvider>(std::move(provider))) {
-        auto& registry = detail::captureRegistry();
+        auto&            registry = detail::captureRegistry();
         std::scoped_lock lock{registry.mutex};
         registry.provider = owned;
     }
     CaptureRegistration(const CaptureRegistration&)            = delete;
     CaptureRegistration& operator=(const CaptureRegistration&) = delete;
-    CaptureRegistration(CaptureRegistration&& other) noexcept : owned(std::exchange(other.owned, nullptr)) {}
+    CaptureRegistration(CaptureRegistration&& other) noexcept : owned(std::exchange(other.owned, nullptr)) { }
     CaptureRegistration& operator=(CaptureRegistration&& other) noexcept {
         if (this != &other) {
             reset();
@@ -81,7 +81,7 @@ private:
 inline CaptureResult capturePng(std::chrono::milliseconds timeout = std::chrono::seconds{10}) {
     std::shared_ptr<CaptureProvider> provider;
     {
-        auto& registry = detail::captureRegistry();
+        auto&            registry = detail::captureRegistry();
         std::scoped_lock lock{registry.mutex};
         provider = registry.provider;
     }

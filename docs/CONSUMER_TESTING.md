@@ -102,18 +102,23 @@ it('shows the board running', async () => {
 Encode the sequence outside WebFront: `ffmpeg -framerate 12 -i captures/run/%04d.png run.webm` (or gifski for a GIF).
 Names have 1 to 64 letters, digits, `_` or `-`, so a page can neither leave the directory nor pick a path; rates go from
 1 to 30 images per second and a recording stops at 1800 images. Only one recording runs at a time, on its own thread,
-so the bridge and the page keep running while it records. Capturing is paced by the engine: a slow capture drops
+so the bridge and the page keep running while it records. A screenshot or the end of a recording does not block the
+server thread either: the bridge callbacks only start the work on a worker thread and the page polls for its end (every
+20 ms) before the Promise settles. Capturing is paced by the engine: a slow capture drops
 instants rather than bursting, so the number of images can be below `seconds * framesPerSecond`. Stopping a recording
-whose window disappeared throws the capture error.
+whose window disappeared throws the capture error. A recording that ends by itself (an error, or the 1800 images limit)
+keeps its slot until `stopRecording()` collects it, so the next `startRecording` needs that call first.
 
 From C++, `webfront::frontend::capturePng(timeout)` returns the PNG bytes (or a diagnostic) of the open window from any
-thread other than the one running its event loop, and `webfront::testing::CaptureStore` writes them to a directory.
+thread other than the one running its event loop, and `webfront::testing::CaptureStore` writes them to a directory
+(`screenshot`/`stopRecording` wait; `beginScreenshot`/`pollScreenshot` and `requestStop`/`pollRecording` do not).
 One window per process is supported.
 
 | Frontend | Capture |
 | --- | --- |
-| WebKitGTK | Supported (`webkit_web_view_get_snapshot`), validated under `xvfb-run`; the sandbox opt-out variable is not needed by the capture itself. |
-| WKWebView, WebView2, CEF | Not implemented yet: the call fails with "no window that can be captured is open". |
+| WebKitGTK | Supported (`webkit_web_view_get_snapshot`, GTK 4.6 or newer, otherwise the call fails with a diagnostic), validated under `xvfb-run`; the sandbox opt-out variable is not needed by the capture itself. |
+| WKWebView | Supported (`takeSnapshotWithConfiguration:`, encoded as PNG by AppKit); the request runs on the main thread, which must be running the window's event loop. |
+| WebView2, CEF | Not implemented yet: the call fails with "no window that can be captured is open". |
 
 This is an opt-in test facility with the same trust model as the rest of this guide: it is compiled only with
 `WEBFRONT_JASMINE_TESTING`, and the captured page can contain secrets it displays. Automation/MCP does not expose
