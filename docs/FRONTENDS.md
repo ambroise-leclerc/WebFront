@@ -102,8 +102,8 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 
 ## Native window with browser fallback
 
-Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine is
-compiled in; CEF is not counted) and `webfront::EmbeddedWebFront` (always defined) tell an application what the build holds.
+Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine or CEF is
+compiled in) and `webfront::EmbeddedWebFront` (always defined; the native web view when compiled in, otherwise CEF) tell an application what the build holds.
 Without an engine, constructing `EmbeddedWebFront` throws `std::runtime_error`, so the fallback is an ordinary `try`/`catch`:
 
 ```cpp

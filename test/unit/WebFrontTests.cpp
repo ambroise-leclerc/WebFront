@@ -490,12 +490,19 @@ SCENARIO("The native engine availability is a constant") {
 
 SCENARIO("The embedded frontend is declared in every configuration") {
     STATIC_REQUIRE(std::is_same_v<decltype(embeddedFrontendAvailable), const bool>);
+#ifdef WEBFRONT_EMBED_CEF
+    STATIC_REQUIRE(embeddedFrontendAvailable);
+    STATIC_REQUIRE(std::is_same_v<detail::EmbeddedFrontendType, std::conditional_t<frontend::nativeWebViewAvailable, frontend::NativeWebViewFrontend, frontend::CEFFrontend>>);
+#else
     STATIC_REQUIRE(embeddedFrontendAvailable == frontend::nativeWebViewAvailable);
+#endif
     STATIC_REQUIRE(std::is_class_v<EmbeddedWebFront>);
     STATIC_REQUIRE(std::is_same_v<EmbeddedWebFront, WebFrontWithFrontend<detail::EmbeddedFrontendType>>);
     STATIC_REQUIRE(frontend::FrontendType<detail::EmbeddedFrontendType>);
 #if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
+#ifndef WEBFRONT_EMBED_CEF
     STATIC_REQUIRE(std::is_same_v<detail::EmbeddedFrontendType, frontend::NativeWebViewFrontend> == embeddedFrontendAvailable);
+#endif
 #endif
     if constexpr (!embeddedFrontendAvailable) {
         THEN("constructing it throws std::runtime_error naming the missing engine") {
