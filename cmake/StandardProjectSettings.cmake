@@ -12,6 +12,18 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
              "Release"
              "MinSizeRel"
              "RelWithDebInfo")
+elseif(CMAKE_GENERATOR STREQUAL "Ninja Multi-Config" AND NOT CMAKE_DEFAULT_BUILD_TYPE AND NOT CMAKE_DEFAULT_CONFIGS)
+  # Only Ninja Multi-Config accepts this variable. Visual Studio and Xcode build Debug unless --config is given.
+  # The default must belong to CMAKE_CONFIGURATION_TYPES, or generation fails.
+  foreach(_webfront_candidate RelWithDebInfo Release Debug)
+    if(_webfront_candidate IN_LIST CMAKE_CONFIGURATION_TYPES)
+      set(CMAKE_DEFAULT_BUILD_TYPE ${_webfront_candidate})
+      break()
+    endif()
+  endforeach()
+  if(NOT CMAKE_DEFAULT_BUILD_TYPE AND CMAKE_CONFIGURATION_TYPES)
+    list(GET CMAKE_CONFIGURATION_TYPES 0 CMAKE_DEFAULT_BUILD_TYPE)
+  endif()
 endif()
 
 # Generate compile_commands.json to make it easier to work with clang based tools

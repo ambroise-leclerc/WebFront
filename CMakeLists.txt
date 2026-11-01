@@ -66,6 +66,9 @@ if(WEBFRONT_IS_TOP_LEVEL)
 endif()
 add_library(WebFront_options INTERFACE)
 target_compile_features(WebFront_options INTERFACE cxx_std_23)
+# The header-only library instantiates enough templates for the examples to exceed MSVC's default
+# object-file section limit (error C1128).
+target_compile_options(WebFront_options INTERFACE "$<$<CXX_COMPILER_ID:MSVC>:/bigobj>")
 # Do not force-define __cpp_lib_format on the command line: unlike a header setting it after
 # actually providing <format>, a command-line -D applies from the start of every translation
 # unit, so other standard headers (e.g. <vector>) that gate their own <format> integration on
