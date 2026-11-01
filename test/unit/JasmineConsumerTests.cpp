@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/testing/Jasmine.hpp>
 
 #include <cmath>
@@ -123,4 +124,124 @@ SCENARIO("The injected script reads in the same chunk size the session serves an
     REQUIRE(script.starts_with("const CHUNK = " + std::to_string(JasmineSession<>::chunkSize) + ";"));
     REQUIRE(script.find("49152", script.find("49152") + 1) == std::string::npos);  // the number appears only in the CHUNK definition
     REQUIRE(script.find("failed to load") != std::string_view::npos);
+}
+
+#include <webfront/testing/Capture.hpp>
+
+#include <atomic>
+#include <thread>
+
+namespace {
+using webfront::frontend::CaptureResult;
+using webfront::testing::CaptureStore;
+
+struct CaptureDirectory {
+    std::filesystem::path path;
+    explicit CaptureDirectory(const std::string& name) : path(std::filesystem::temp_directory_path() / ("webfront-capture-" + name)) {
+        std::filesystem::remove_all(path);
+    }
+    ~CaptureDirectory() {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
+    }
+};
+
+CaptureResult fakeImage(std::chrono::milliseconds) {
+    return std::vector<std::uint8_t>{0x89, 'P', 'N', 'G'};
+}
+}  // namespace
+
+SCENARIO("A capture store writes images only below its directory") {
+    CaptureDirectory directory{"names"};
+    GIVEN("a store with a window that answers") {
+        CaptureStore store{directory.path, fakeImage};
+        THEN("a valid name becomes a PNG file") {
+            REQUIRE(store.screenshot("board-1_a") == 4);
+            REQUIRE(std::filesystem::file_size(directory.path / "board-1_a.png") == 4);
+        }
+        THEN("a name that could leave the directory or add an extension is refused") {
+            for (const auto* name : {"", "../x", "a/b", "a\\b", "a.png", ".", "..", "a b"})
+                REQUIRE_THROWS_AS(store.screenshot(name), std::invalid_argument);
+            REQUIRE_THROWS_AS(store.screenshot(std::string(65, 'a')), std::invalid_argument);
+            REQUIRE_FALSE(std::filesystem::exists(directory.path));
+        }
+    }
+    GIVEN("a window that cannot be captured") {
+        CaptureStore store{directory.path, [](std::chrono::milliseconds) -> CaptureResult { return std::unexpected("no window"); }};
+        THEN("the diagnostic reaches the caller and nothing is written") {
+            REQUIRE_THROWS_WITH(store.screenshot("x"), Catch::Matchers::Equals("Capture failed: no window"));
+            REQUIRE_FALSE(std::filesystem::exists(directory.path / "x.png"));
+        }
+    }
+}
+
+SCENARIO("A capture store records numbered images at a bounded rate") {
+    CaptureDirectory directory{"record"};
+    std::atomic<int> calls = 0;
+    CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
+                       ++calls;
+                       return std::vector<std::uint8_t>{1, 2, 3};
+                   }};
+    GIVEN("a recording at 20 images per second") {
+        store.startRecording("run", 20);
+        THEN("a second recording is refused while it runs") {
+            REQUIRE_THROWS_AS(store.startRecording("other", 10), std::logic_error);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{400});
+        const auto frames = store.stopRecording();
+        THEN("the images are numbered from 0001 and roughly match the rate") {
+            REQUIRE(frames >= 4);
+            REQUIRE(frames <= 12);
+            REQUIRE(std::filesystem::exists(directory.path / "run" / "0001.png"));
+            REQUIRE(std::filesystem::exists(directory.path / "run" / "0004.png"));
+            REQUIRE(frames == static_cast<std::size_t>(calls.load()));
+        }
+        THEN("stopping again is an error") {
+            REQUIRE_THROWS_AS(store.stopRecording(), std::logic_error);
+        }
+    }
+    GIVEN("a rate outside 1 to 30 or an invalid name") {
+        REQUIRE_THROWS_AS(store.startRecording("run", 0), std::invalid_argument);
+        REQUIRE_THROWS_AS(store.startRecording("run", 31), std::invalid_argument);
+        REQUIRE_THROWS_AS(store.startRecording("../run", 10), std::invalid_argument);
+    }
+}
+
+SCENARIO("A recording that loses its window reports the failure when it is stopped") {
+    CaptureDirectory directory{"failure"};
+    std::atomic<int> calls = 0;
+    CaptureStore     store{directory.path, [&](std::chrono::milliseconds) -> CaptureResult {
+                       if (++calls > 2)
+                           return std::unexpected("the window is closed");
+                       return std::vector<std::uint8_t>{1};
+                   }};
+    store.startRecording("lost", 30);
+    std::this_thread::sleep_for(std::chrono::milliseconds{300});
+    REQUIRE_THROWS_WITH(store.stopRecording(), Catch::Matchers::Equals("Recording stopped: Capture failed: the window is closed"));
+}
+
+SCENARIO("Capture callbacks of a Jasmine session obey the same page authority") {
+    CaptureDirectory directory{"session"};
+    ReportFile       report{"capture"};
+    auto             store = std::make_shared<CaptureStore>(directory.path, fakeImage);
+    JasmineSession   session{{"x"}, report.path, store};
+    REQUIRE(session.attach(1));
+    THEN("the instrumented page captures and another page cannot") {
+        REQUIRE(session.screenshot(1, "ok") == 4);
+        REQUIRE_THROWS(session.screenshot(2, "no"));
+        REQUIRE_THROWS(session.recordStart(2, "no", 10));
+        REQUIRE_THROWS(session.recordStop(2));
+    }
+    THEN("a session without a directory refuses to capture") {
+        JasmineSession bare{{"x"}, report.path};
+        REQUIRE(bare.attach(1));
+        REQUIRE_THROWS(bare.screenshot(1, "ok"));
+    }
+}
+
+SCENARIO("The Jasmine configuration accepts an optional capture directory") {
+    using webfront::testing::detail::jasmineConfiguration;
+    REQUIRE(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"c"})").captures == "c");
+    REQUIRE(jasmineConfiguration(R"({"files":["j","s"],"report":"r"})").captures.empty());
+    REQUIRE_THROWS(jasmineConfiguration(R"({"files":["j","s"],"report":"r","captures":"a","captures":"b"})"));
 }

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Capture the web view as PNG images (#468): `webFrontCapture.screenshot(name)` and `webFrontCapture.record(name, {seconds,
+  framesPerSecond})` (also `startRecording`/`stopRecording`) in the specs of `webfront_add_jasmine_test` write
+  `webfront-jasmine/<name>/captures/<name>.png` and numbered `<name>/0001.png`... for an external encoder such as ffmpeg.
+  `webfront::frontend::capturePng()` and `webfront::testing::CaptureStore` are the C++ API. Only WebKitGTK implements it
+  so far; the other frontends report that they cannot capture. See `docs/CONSUMER_TESTING.md`.
+
 ## 0.7.0 - 2026-10-31
 
 - Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 13 heavy unit-test files four

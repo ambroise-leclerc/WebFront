@@ -83,3 +83,38 @@ with application/bridge authority, not a sandbox. Native reads expose only the c
 by numeric index, in bounded chunks, to the newest instrumented connection: a page that reloads
 or redirects is instrumented again and the earlier connection loses access. One window is supported. No runtime path supplied
 by a page is opened. Use an isolated CI environment for untrusted projects and remove secrets.
+
+## Screenshots and image sequences
+
+A test build can capture the **web content** of the window (without native decorations) as PNG images, for example to
+build a README animation in CI. Each named test owns `webfront-jasmine/<name>/captures/`, emptied before every run. The
+specs reach it through the global `webFrontCapture`:
+
+```js
+it('shows the board running', async () => {
+    await webFrontCapture.screenshot('start');                       // captures/start.png
+    const frames = await webFrontCapture.record('run', {seconds: 4, framesPerSecond: 12});
+    // captures/run/0001.png ... 0048.png; frames is the number written
+});
+// Or bracket a scenario yourself: startRecording(name, framesPerSecond) ... stopRecording() -> frames
+```
+
+Encode the sequence outside WebFront: `ffmpeg -framerate 12 -i captures/run/%04d.png run.webm` (or gifski for a GIF).
+Names have 1 to 64 letters, digits, `_` or `-`, so a page can neither leave the directory nor pick a path; rates go from
+1 to 30 images per second and a recording stops at 1800 images. Only one recording runs at a time, on its own thread,
+so the bridge and the page keep running while it records. Capturing is paced by the engine: a slow capture drops
+instants rather than bursting, so the number of images can be below `seconds * framesPerSecond`. Stopping a recording
+whose window disappeared throws the capture error.
+
+From C++, `webfront::frontend::capturePng(timeout)` returns the PNG bytes (or a diagnostic) of the open window from any
+thread other than the one running its event loop, and `webfront::testing::CaptureStore` writes them to a directory.
+One window per process is supported.
+
+| Frontend | Capture |
+| --- | --- |
+| WebKitGTK | Supported (`webkit_web_view_get_snapshot`), validated under `xvfb-run`; the sandbox opt-out variable is not needed by the capture itself. |
+| WKWebView, WebView2, CEF | Not implemented yet: the call fails with "no window that can be captured is open". |
+
+This is an opt-in test facility with the same trust model as the rest of this guide: it is compiled only with
+`WEBFRONT_JASMINE_TESTING`, and the captured page can contain secrets it displays. Automation/MCP does not expose
+captures yet.

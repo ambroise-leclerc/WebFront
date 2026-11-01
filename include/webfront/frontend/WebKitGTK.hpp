@@ -3,13 +3,17 @@
 #include "../ContentPolicy.hpp"
 #include "../tooling/Logger.hpp"
 #include "Action.hpp"
+#include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
+#include <future>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -93,6 +97,13 @@ public:
     unsigned (*status)(Object)                              = symbol<decltype(status)>("webkit_uri_response_get_status_code");
     void (*evaluate)(Object, const char*, long, const char*, const char*, Object, Callback, Object) =
         symbol<decltype(evaluate)>("webkit_web_view_evaluate_javascript");
+    unsigned (*idleAdd)(int (*)(void*), void*)                                   = symbol<decltype(idleAdd)>("g_idle_add");
+    void (*snapshot)(Object, int, int, Object, Callback, void*)                  = symbol<decltype(snapshot)>("webkit_web_view_get_snapshot");
+    Object (*snapshotFinish)(Object, Object, Error**)                            = symbol<decltype(snapshotFinish)>("webkit_web_view_get_snapshot_finish");
+    Object (*texturePng)(Object)                                                 = symbol<decltype(texturePng)>("gdk_texture_save_to_png_bytes");
+    const void* (*bytesData)(Object, std::size_t*)                               = symbol<decltype(bytesData)>("g_bytes_get_data");
+    void (*bytesUnref)(Object)                                                   = symbol<decltype(bytesUnref)>("g_bytes_unref");
+    void (*errorFree)(Error*)                                                    = symbol<decltype(errorFree)>("g_error_free");
 };
 
 inline Api& api() {
@@ -139,6 +150,74 @@ inline std::filesystem::path profileDirectory(const char* variable, const char* 
     return directory;
 }
 
+/// The view as seen by capture requests: read and cleared only on the GTK main thread, so a request that
+/// outlives the window finds it null.
+struct CaptureTarget {
+    Api::Object view = nullptr;
+};
+
+struct CaptureJob {
+    std::shared_ptr<CaptureTarget> target;
+    std::promise<CaptureResult>    done;
+};
+
+// Runs on the GTK main thread; owns the job until the snapshot completes.
+inline void finishCapture(Api::Object view, Api::Object result, void* owner) noexcept {
+    std::unique_ptr<std::shared_ptr<CaptureJob>> job{static_cast<std::shared_ptr<CaptureJob>*>(owner)};
+    auto&                                        a = api();
+    try {
+        Api::Error* error   = nullptr;
+        const auto  texture = a.snapshotFinish(view, result, &error);
+        if (!texture) {
+            std::string message = error && error->message ? error->message : "the engine returned no image";
+            if (error)
+                a.errorFree(error);
+            (*job)->done.set_value(std::unexpected("snapshot failed: " + message));
+            return;
+        }
+        const auto bytes = a.texturePng(texture);
+        a.unref(texture);
+        if (!bytes) {
+            (*job)->done.set_value(std::unexpected("cannot encode the snapshot as PNG"));
+            return;
+        }
+        std::size_t size = 0;
+        const auto* begin = static_cast<const std::uint8_t*>(a.bytesData(bytes, &size));
+        std::vector<std::uint8_t> png(begin, begin + size);
+        a.bytesUnref(bytes);
+        (*job)->done.set_value(std::move(png));
+    } catch (...) {
+        try {
+            (*job)->done.set_exception(std::current_exception());
+        } catch (...) {
+        }
+    }
+}
+
+inline int startCapture(void* data) noexcept {
+    auto  job = std::unique_ptr<std::shared_ptr<CaptureJob>>{static_cast<std::shared_ptr<CaptureJob>*>(data)};
+    auto& a   = api();
+    if (!(*job)->target->view) {
+        (*job)->done.set_value(std::unexpected("the window is closed"));
+        return 0;
+    }
+    const auto view = (*job)->target->view;
+    // WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE.
+    a.snapshot(view, 0, 0, nullptr, reinterpret_cast<Api::Callback>(finishCapture), job.release());
+    return 0;
+}
+
+inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
+    return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
+        auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
+        auto future = job->done.get_future();
+        api().idleAdd(startCapture, new std::shared_ptr<CaptureJob>(job));
+        if (future.wait_for(timeout) != std::future_status::ready)
+            return std::unexpected("the window did not answer within the capture timeout");
+        return future.get();
+    };
+}
+
 struct Session : FailureState {
     Api&                                 a       = api();
     Api::Object                          loop    = a.loopNew(nullptr, 0);
@@ -153,6 +232,8 @@ struct Session : FailureState {
     unsigned                             navigationTimer   = 0;
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
+    std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
+    CaptureRegistration                  captureRegistration;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
         : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
@@ -175,6 +256,8 @@ struct Session : FailureState {
             a.sourceRemove(std::exchange(navigationTimer, 0));
     }
     void releaseView() {
+        captureRegistration = {};
+        captureTarget->view = nullptr;
         if (!view)
             return;
         for (auto handler : viewHandlers)
@@ -226,6 +309,8 @@ struct Session : FailureState {
         a.windowChild(window, view);
         configureSettings();
         registerHandlers();
+        captureTarget->view = view;
+        captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
     }
 
     void configureSettings() {

@@ -3,6 +3,7 @@
 
 #include "../utils/Json.hpp"
 #include "../WebFront.hpp"
+#include "Capture.hpp"
 
 #include <cmath>
 #include <concepts>
@@ -44,12 +45,13 @@ inline std::string readJasmineFile(const std::filesystem::path& path) {
 struct JasmineConfiguration {
     std::vector<std::string> files;
     std::filesystem::path    report;
+    std::filesystem::path    captures;  // Optional: where screenshots and recordings go.
 };
 
 inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
     JasmineConfiguration config;
     json::Reader         reader{text};
-    bool                 files = false, report = false;
+    bool                 files = false, report = false, captures = false;
     reader.object([&](const std::string& key) {
         if (key == "files" && !std::exchange(files, true))
             reader.array([&] {
@@ -59,6 +61,8 @@ inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
             });
         else if (key == "report" && !std::exchange(report, true))
             config.report = reader.string();
+        else if (key == "captures" && !std::exchange(captures, true))
+            config.captures = reader.string();
         else
             throw std::invalid_argument("Unknown or duplicate Jasmine configuration field");
     });
@@ -90,6 +94,18 @@ inline constexpr std::size_t jasmineChunkSize = 49152;
 inline constexpr std::string_view jasmineScriptBody = R"JS(
 void (async () => {
     const call = (name, ...args) => webFront.cppFunction('webfront.testing.' + name)(...args);
+    // Screenshots and image sequences of the web content, written to the run's capture directory.
+    globalThis.webFrontCapture = {
+        screenshot: name => call('screenshot', name),
+        startRecording: (name, framesPerSecond = 10) => call('recordStart', name, framesPerSecond),
+        stopRecording: () => call('recordStop'),
+        async record(name, {seconds = 3, framesPerSecond = 10} = {}) {
+            await this.startRecording(name, framesPerSecond);
+            try { await new Promise(resolve => setTimeout(resolve, seconds * 1000)); }
+            catch (error) { await this.stopRecording().catch(() => {}); throw error; }
+            return this.stopRecording();
+        }
+    };
     const load = async index => {
         const parts = [];
         for (let offset = 0; ; offset += CHUNK) {
@@ -171,8 +187,8 @@ class JasmineSession {
 public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
-    JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath)
-        : files(std::move(contents)), report(std::move(reportPath)) {}
+    JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
@@ -201,6 +217,20 @@ public:
             throw std::invalid_argument("Invalid Jasmine file offset");
         const auto part = std::string_view(file).substr(static_cast<std::size_t>(offset), chunkSize);
         return std::vector<std::uint8_t>(part.begin(), part.end());
+    }
+
+    /// Writes `<captures>/<name>.png` and returns its size in bytes.
+    [[nodiscard]] double screenshot(const Caller& caller, const std::string& name) {
+        return static_cast<double>(captures(caller).screenshot(name));
+    }
+
+    void recordStart(const Caller& caller, const std::string& name, double framesPerSecond) {
+        captures(caller).startRecording(name, framesPerSecond);
+    }
+
+    /// Returns the number of images the recording wrote.
+    [[nodiscard]] double recordStop(const Caller& caller) {
+        return static_cast<double>(captures(caller).stopRecording());
     }
 
     void result(const Caller& caller, const std::string& text) {
@@ -242,8 +272,19 @@ private:
             throw std::runtime_error("Jasmine callback belongs to another page");
     }
 
+    CaptureStore& captures(const Caller& caller) {
+        {
+            std::scoped_lock lock{mutex};
+            authorize(caller);
+        }
+        if (!store)
+            throw std::runtime_error("This test has no capture directory");
+        return *store;  // Not under the mutex: a capture waits for the window and a recording runs for seconds.
+    }
+
     std::vector<std::string> files;
     std::filesystem::path    report;
+    std::shared_ptr<CaptureStore> store;
     std::optional<Caller>    browser;
     std::mutex               mutex;
     bool                     completed = false;
@@ -276,11 +317,17 @@ public:
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
-        session          = std::make_shared<Session>(std::move(contents), config.report);
+        std::shared_ptr<CaptureStore> store;
+        if (!config.captures.empty())
+            store = std::make_shared<CaptureStore>(config.captures);
+        session          = std::make_shared<Session>(std::move(contents), config.report, std::move(store));
         const auto owned = session;
         app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
         app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
         app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
+        app.cppFunction("webfront.testing.screenshot", [owned](AppUI ui, std::string name) { return owned->screenshot(ui, name); });
+        app.cppFunction("webfront.testing.recordStart", [owned](AppUI ui, std::string name, double rate) { owned->recordStart(ui, name, rate); });
+        app.cppFunction("webfront.testing.recordStop", [owned](AppUI ui) { return owned->recordStop(ui); });
         subscription = app.subscribeUIStarted([owned](AppUI ui) {
             if (owned->attach(ui))
                 ui.addScript(detail::jasmineScript());

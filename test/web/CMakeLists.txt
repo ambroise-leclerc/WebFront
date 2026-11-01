@@ -147,6 +147,19 @@ if(_browser_tests_available)
         endif()
         set_tests_properties(ConsumerJasmine-${mode} PROPERTIES FIXTURES_SETUP ConsumerJasmineRuns)
     endforeach()
+    # Window capture (issue #468) is implemented by WebKitGTK; the other frontends report that they cannot capture.
+    if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "WebKitGTK")
+        webfront_add_jasmine_test(NAME ConsumerJasmine-capture TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
+            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        add_test(NAME ConsumerJasmineCaptures COMMAND "${CMAKE_COMMAND}"
+            "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/ConsumerJasmine-capture/captures"
+            -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckConsumerCaptures.cmake")
+        set_tests_properties(ConsumerJasmine-capture PROPERTIES FIXTURES_SETUP ConsumerCaptureRun)
+        set_tests_properties(ConsumerJasmineCaptures PROPERTIES FIXTURES_REQUIRED ConsumerCaptureRun
+            LABELS web-integration TIMEOUT 15)
+    endif()
     add_test(NAME ConsumerJasmineReports COMMAND "${CMAKE_COMMAND}"
         "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine"
         -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckConsumerJasmineReports.cmake")
