@@ -30,7 +30,9 @@ test configurations also build the launcher for their regression tests. Without 
 embedded engine, requesting the launcher fails configure instead of opening a system browser.
 The implementation is native C++23; no Node.js, npm or Python is required to run the launcher.
 
-Provision an environment containing automation API v1 (0.6.3 or later). Environment 0.6.2
+Provision an environment containing automation API v1 (0.6.3 or later). The setup operations (`init`, `create`, `install`,
+`restore`, `embed`) need environment **0.6.4 or later**: the launcher checks this at startup, and granting one of them to an
+older environment fails with a bootstrap error (status 70) naming the operation, instead of failing each run. Environment 0.6.2
 predates that API; passing an older environment produces a bootstrap error with status 70.
 The launcher takes an explicit archive and its independently trusted SHA-512 SRI. Use a verified
 published distribution or build one in this repository:
@@ -194,7 +196,8 @@ Operations and their arguments:
 | `fill` | `{pageId, elementId, value}` | `interact` |
 
 `name`, `starter`, `package` and `provider` refuse a leading `-`, a backslash and spaces; `directory` and `output` must be
-new project-relative paths. `embed` needs a provider, or an entry together with an output, never both.
+project-relative paths: `create` never replaces an existing directory (`wf` refuses it), while `embed` **replaces** its output header, as
+regeneration requires. `embed` needs a provider, or an entry together with an output, never both.
 Unknown arguments, wrong sessions, unsupported commands and option-like entry/pattern strings
 are refused natively. Entries accept manifest labels (including `app:debug` and `app..debug`);
 entry paths must be project-relative. A queued/running operation blocks

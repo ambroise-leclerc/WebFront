@@ -36,6 +36,15 @@ public:
         identity = channel::nonce();
     }
 
+    /// Granted operations that only newer environments implement, with the first version that does.
+    std::vector<std::pair<std::string, std::string>> versionedOperations() const {
+        std::vector<std::pair<std::string, std::string>> result;
+        for (const auto& [name, definition] : operationDefinitions())
+            if (!definition.since.empty() && std::ranges::find(options.allow, definition.permission) != options.allow.end())
+                result.emplace_back(name, definition.since);
+        return result;
+    }
+
     std::string describe() const {
         std::scoped_lock lock{mutex};
         return "{\"version\":1,\"session\":" + json::quote(identity) + ",\"project\":" + json::quote(options.project.generic_string()) + ",\"state\":"

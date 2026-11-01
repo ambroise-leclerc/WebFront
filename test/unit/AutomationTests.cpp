@@ -246,6 +246,14 @@ SCENARIO("Project setup operations need their own grants and plain arguments") {
         session.poll();
         session.complete(id, R"({"exitCode":0,"output":"","report":null})");
     };
+    GIVEN("grants that older environments cannot run") {
+        REQUIRE(denied.versionedOperations().empty());
+        const auto versioned = session.versionedOperations();
+        REQUIRE(versioned.size() == 5);
+        for (const auto& [operation, since] : versioned)
+            REQUIRE(since == "0.6.4");
+        REQUIRE(webfront::automation::connectionScript("secret", versioned).find("[\"embed\",\"0.6.4\"]") != std::string::npos);
+    }
     GIVEN("a session without those grants") {
         for (const auto operation : {"init", "create", "install", "restore", "embed"})
             REQUIRE_THROWS(denied.start(command(denied, operation, operation == std::string_view("create") ? R"({"starter":"life"})" : "{}")));

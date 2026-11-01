@@ -313,6 +313,8 @@ export async function execute(args, context) {
     return exclusive(context, async owned => commands[command](rest, owned),{settlesOnAbort:command==='test'});
 }
 
+/** Automation operations this environment runs beyond the 0.6.3 set; the native owner refuses a grant it does not list. */
+export const automationOperations = ['init', 'create', 'install', 'restore', 'embed'];
 export const connectAutomation = context => connectAgent({...context,run:runNonInteractive,exclusive});
 
 /**
