@@ -447,7 +447,7 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
     Descriptor  reportRead{report[0]}, reportWrite{report[1]};
     const pid_t parent = ::getpid();
     sigset_t    none;
-    ::sigemptyset(&none);
+    sigemptyset(&none);  // Unqualified: a macro on macOS.
     const pid_t forked = ::fork();
     if (forked == 0) {
         ::setpgid(0, 0);  // Its own process group: a timeout or cancellation kills it and the descendants that stayed in it.
@@ -505,7 +505,7 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
     } guard{&actions, &attributes};
     // Its own process group: a timeout or cancellation kills the program and every descendant that stayed in it.
     sigset_t none;
-    ::sigemptyset(&none);
+    sigemptyset(&none);  // Unqualified: a macro on macOS.
     ::posix_spawnattr_setpgroup(&attributes, 0);
     ::posix_spawnattr_setsigmask(&attributes, &none);
     ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK);
@@ -515,8 +515,16 @@ inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<
     // The calling application's own descriptors (sockets, files) stay out of the program.
     prepared = prepared && ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
         #endif
-    if (!directory.empty())
+    if (!directory.empty()) {
+        #if defined(__clang__)
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"  // macOS 26 prefers the name without _np.
+        #endif
         prepared = prepared && ::posix_spawn_file_actions_addchdir_np(&actions, directory.c_str()) == 0;
+        #if defined(__clang__)
+            #pragma clang diagnostic pop
+        #endif
+    }
     if (!prepared) {
         result.error = "Cannot prepare the child process";
         return result;

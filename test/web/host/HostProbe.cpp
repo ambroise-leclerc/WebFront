@@ -1,4 +1,7 @@
 // A tiny native program for the tests of webFrontHost and runProcess: one behaviour per first argument.
+#ifdef _WIN32
+    #define _CRT_SECURE_NO_WARNINGS
+#endif
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
