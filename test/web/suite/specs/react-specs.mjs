@@ -115,11 +115,10 @@ describe('Optional wf React adapter', () => {
         }
     });
 
-    it('receives one snapshot and one React commit for 1000 C++ updates, independently per browser', async () => {
-        const first = await page(), second = await page();
-        const store = createStore('counter', [0, 'initial'], {target: first.contentWindow});
-        const other = createStore('counter', [0, 'other'], {target: second.contentWindow});
-        const root = createRoot(first.contentDocument.getElementById('root'));
+    it('receives one snapshot and one React commit for 1000 C++ updates', async () => {
+        const frame = await page();
+        const store = createStore('counter', [0, 'initial'], {target: frame.contentWindow});
+        const root = createRoot(frame.contentDocument.getElementById('root'));
         let commits = 0, messages = 0;
         const off = store.subscribe(() => ++messages);
         function View() {
@@ -130,10 +129,24 @@ describe('Optional wf React adapter', () => {
         try {
             flushSync(() => root.render(createElement(View)));
             const baseline = commits;
-            const firstId = await call(first, 'reactBurst');
-            await until(() => first.contentDocument.querySelector('output')?.textContent === '999 été 🌍');
+            await call(frame, 'reactBurst');
+            await until(() => frame.contentDocument.querySelector('output')?.textContent === '999 été 🌍');
             expect(messages).toBe(1);
             expect(commits - baseline).toBe(1);
+        } finally {
+            root.unmount(); off(); store.dispose(); frame.remove();
+        }
+    });
+
+    // No React render here (the previous spec counts commits), so each spec stays well within the
+    // default timeout even where opening a browser page is slow.
+    it('keeps the store of each browser independent and revokes the store of a closed one', async () => {
+        const first = await page(), second = await page();
+        const store = createStore('counter', [0, 'initial'], {target: first.contentWindow});
+        const other = createStore('counter', [0, 'other'], {target: second.contentWindow});
+        try {
+            const firstId = await call(first, 'reactBurst');
+            await until(() => store.getSnapshot()[0] === 999);
             expect(other.getSnapshot()).toEqual([0, 'other']);
             await call(second, 'reactBurst');
             await until(() => other.getSnapshot()[0] === 999);
@@ -141,7 +154,7 @@ describe('Optional wf React adapter', () => {
             first.remove();
             await until(async () => !await call(second, 'reactStoreValid', firstId));
         } finally {
-            root.unmount(); off(); store.dispose(); other.dispose(); first.remove(); second.remove();
+            store.dispose(); other.dispose(); first.remove(); second.remove();
         }
     });
 

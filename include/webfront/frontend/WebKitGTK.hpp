@@ -252,12 +252,13 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
             return std::unexpected("the window is closed");
         constexpr int idlePriority = 200;  // G_PRIORITY_DEFAULT_IDLE
         a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
-        if (future.wait_for(timeout) != std::future_status::ready) {
+        const auto answered = future.wait_for(timeout) == std::future_status::ready;
+        target->pending.untrack(job);  // Whatever the outcome, a finished request is not kept until the window closes.
+        if (!answered) {
             // The source is never touched from this thread: GLib hands out no counted reference to it, so one that the
             // main thread is serving could be freed under us. The flag makes it a no-op when it runs; a main loop that
             // never runs keeps only this small job until the process ends.
             job->abandoned = true;
-            target->pending.untrack(job);
             return std::unexpected("the window did not answer within the capture timeout");
         }
         return future.get();

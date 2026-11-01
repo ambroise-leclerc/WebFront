@@ -257,8 +257,9 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
         if (!target->pending.track(job))
             return std::unexpected("the window is closed");
         dispatch_async_f(dispatch_get_main_queue(), new std::shared_ptr<CaptureJob>(job), startCapture);
-        if (future.wait_for(timeout) != std::future_status::ready) {
-            target->pending.untrack(job);
+        const auto answered = future.wait_for(timeout) == std::future_status::ready;
+        target->pending.untrack(job);  // Whatever the outcome, a finished request is not kept until the window closes.
+        if (!answered) {
             return std::unexpected("the window did not answer within the capture timeout");
         }
         return future.get();

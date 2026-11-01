@@ -333,10 +333,24 @@ SCENARIO("A recording ends by itself at the image limit and can still be collect
 SCENARIO("A capture that nobody collects does not block the next one") {
     CaptureDirectory directory{"uncollected"};
     CaptureStore     store{directory.path, fakeImage, 2};
-    GIVEN("a screenshot that finished but was never polled (its page reloaded)") {
+    GIVEN("a screenshot that finished but was never polled") {
         store.beginScreenshot("a");
-        THEN("the next screenshot starts and can be polled") {
-            REQUIRE(waitUntil([&] {  // the slot is free as soon as the first worker has ended
+        THEN("a concurrent request cannot take over its result") {
+            std::this_thread::sleep_for(std::chrono::milliseconds{200});  // Long enough for the fake source to finish.
+            REQUIRE_THROWS_AS(store.beginScreenshot("b"), std::logic_error);
+            REQUIRE(pollUntilDone([&] {
+                        const auto size = store.pollScreenshot();
+                        return size ? static_cast<double>(*size) : -1.0;
+                    }) == 4);
+            REQUIRE(std::filesystem::exists(directory.path / "a.png"));
+            REQUIRE_FALSE(std::filesystem::exists(directory.path / "b.png"));
+        }
+    }
+    GIVEN("a screenshot that finished but whose page was replaced") {
+        store.beginScreenshot("a");
+        THEN("abandon frees the slot and the next screenshot starts and can be polled") {
+            REQUIRE(waitUntil([&] {  // abandon frees the slot as soon as the first worker has ended
+                store.abandon();
                 try {
                     store.beginScreenshot("b");
                     return true;

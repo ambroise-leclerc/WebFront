@@ -403,6 +403,7 @@ public:
         params->SetString("format", "png");
         expected = host->ExecuteDevToolsMethod(0, "Page.captureScreenshot", params);
         if (!expected) {
+            job->target->pending.untrack(job);
             answer(*job, std::unexpected("the engine refused the capture request"));
             registration = nullptr;
             return;
@@ -477,10 +478,10 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
             target->pending.untrack(job);
             return std::unexpected("the window is closed");
         }
-        if (future.wait_for(timeout) != std::future_status::ready) {
-            target->pending.untrack(job);
+        const auto answered = future.wait_for(timeout) == std::future_status::ready;
+        target->pending.untrack(job);  // Whatever the outcome, a finished request is not kept until the window closes.
+        if (!answered)
             return std::unexpected("the window did not answer within the capture timeout");
-        }
         return future.get();
     };
 }

@@ -71,14 +71,14 @@ public:
     }
 
     /// Starts `screenshot(name)` on its own thread and returns at once, so a caller that must not wait (the bridge
-    /// server thread) polls pollScreenshot(). One asynchronous screenshot at a time; a finished one that was never
-    /// polled (its page went away) is discarded to free the slot.
+    /// server thread) polls pollScreenshot(). One asynchronous screenshot at a time, and its result stays reserved for
+    /// the caller that started it until it is polled: a second request never takes over a finished one, so two
+    /// concurrent callers cannot receive each other's result. A page that goes away frees the slot with abandon().
     void beginScreenshot(std::string_view name) {
         requireName(name);
         std::scoped_lock lock{control};
-        reap(shot);
         if (shot.thread.joinable())
-            throw std::logic_error("A screenshot is already running");
+            throw std::logic_error("A screenshot is already running or its result has not been collected");
         auto job    = std::make_shared<Job>();
         shot.job    = job;
         shot.thread = std::thread([state = shared, job, owned = std::string(name)] {
@@ -148,6 +148,7 @@ public:
     /// returns (see reap()).
     void abandon() {
         std::scoped_lock lock{control};
+        reap(shot);  // The replaced page can no longer collect a finished screenshot.
         if (!recording.thread.joinable())
             return;
         recording.job->stop = true;
