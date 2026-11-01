@@ -121,16 +121,23 @@ and propagates: nothing is hidden, but the attempt is repeated. Keep the `try` t
 an error of the application is never taken for a frontend failure:
 
 ```cpp
-std::optional<webfront::EmbeddedWebFront> window;
-if constexpr (webfront::embeddedFrontendAvailable) {
-    try {
-        window.emplace(config);
-    } catch (const std::exception&) { /* no usable engine: fall back to the browser */ }
+template <bool Embedded>
+int run(const webfront::WebFrontConfig& config) {
+    if constexpr (Embedded) {
+        std::optional<webfront::EmbeddedWebFront> window;
+        try {
+            window.emplace(config);
+        } catch (const std::exception&) { /* no usable engine: fall back to the browser */ }
+        if (window)
+            return serve(*window);
+    }
+    webfront::WebFront web{config};
+    return serve(web);
 }
-if (window)
-    return serve(*window);
-webfront::WebFront web{config};
-return serve(web);
+
+int main() {
+    return run<webfront::embeddedFrontendAvailable>(webfront::WebFrontConfig{});
+}
 ```
 
 This does not cover WebView2 and CEF failures, which surface from `show()` inside `serve`. An application that wants a fallback for them
@@ -138,10 +145,9 @@ catches around its own `show()` call and then serves with `WebFront`; it decides
 For WebKitGTK and WKWebView, `frontend::NativeOrBrowserFrontend` below is the more precise tool: it intercepts only the failure
 of the frontend's `initialize()`, which runs before the server is built, so no second server is constructed.
 
-`if constexpr` here is only a shortcut: the condition does not depend on a template parameter, so the discarded branch must
-still compile. That holds because `EmbeddedWebFront` is a complete application type in every build (without an engine its
-construction throws), so a `serve` generic over the application type compiles for both calls. To drop an instantiation that is
-invalid without an engine, make the selection dependent, for example by passing the type to a function template.
+The selection is a function template on a `bool` because the condition of an `if constexpr` outside a template does not
+depend on a template parameter, so its discarded branch would still be checked. Here the branch that names `EmbeddedWebFront`
+is not instantiated when the argument is `false`, so a `serve` that does not accept that type compiles without an engine.
 
 `frontend::nativeWebViewAvailable` is `true` when this platform's native engine is compiled in. It says
 nothing about the session. `frontend::NativeOrBrowserFrontend` decides at run time: its `initialize()`
