@@ -1,6 +1,7 @@
 // A tiny native program for the tests of webFrontHost and runProcess: one behaviour per first argument.
 #ifdef _WIN32
     #define _CRT_SECURE_NO_WARNINGS
+    #define NOMINMAX
 #endif
 #include <chrono>
 #include <cstdlib>
@@ -12,10 +13,15 @@
 #include <iterator>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
     #include <process.h>
     #include <windows.h>
+// clang-format off
+    #include <shellapi.h>
+    // clang-format on
+    #pragma comment(lib, "shell32.lib")
 #else
     #include <csignal>
 
@@ -24,6 +30,43 @@ extern char** environ;
 #endif
 
 namespace {
+#ifdef _WIN32
+// The C runtime hands argv and the environment over in the ANSI code page: read the UTF-16 ones and convert them.
+std::string toUtf8(const wchar_t* wide) {
+    const int   size = ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+    std::string text(static_cast<std::size_t>(size > 0 ? size - 1 : 0), '\0');
+    if (size > 1)
+        ::WideCharToMultiByte(CP_UTF8, 0, wide, -1, text.data(), size, nullptr, nullptr);
+    return text;
+}
+
+std::wstring toWide(const char* utf8) {
+    const int    size = ::MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+    std::wstring text(static_cast<std::size_t>(size > 0 ? size - 1 : 0), L'\0');
+    if (size > 1)
+        ::MultiByteToWideChar(CP_UTF8, 0, utf8, -1, text.data(), size);
+    return text;
+}
+
+bool environmentValue(const char* name, std::string& value) {
+    const auto  key  = toWide(name);
+    const DWORD size = ::GetEnvironmentVariableW(key.c_str(), nullptr, 0);
+    if (size == 0)
+        return false;
+    std::wstring wide(size, L'\0');
+    wide.resize(::GetEnvironmentVariableW(key.c_str(), wide.data(), size));
+    value = toUtf8(wide.c_str());
+    return true;
+}
+#else
+bool environmentValue(const char* name, std::string& value) {
+    const char* found = std::getenv(name);
+    if (found)
+        value = found;
+    return found != nullptr;
+}
+#endif
+
 std::filesystem::path pathOf(const char* utf8) {
     return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(utf8)));
 }
@@ -46,6 +89,21 @@ void startAgain(const char* self, const char* mode, const char* argument) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    std::vector<std::string> utf8Arguments;
+    std::vector<char*>       utf8Pointers;
+    {
+        int       count = 0;
+        wchar_t** wide  = ::CommandLineToArgvW(::GetCommandLineW(), &count);
+        for (int index = 0; wide && index < count; ++index)
+            utf8Arguments.push_back(toUtf8(wide[index]));
+        for (auto& argument : utf8Arguments)
+            utf8Pointers.push_back(argument.data());
+        utf8Pointers.push_back(nullptr);
+        argc = static_cast<int>(utf8Arguments.size());
+        argv = utf8Pointers.data();
+    }
+#endif
     const std::string mode = argc > 1 ? argv[1] : "";
     if (mode == "args") {
         for (int index = 2; index < argc; ++index)
@@ -78,8 +136,8 @@ int main(int argc, char** argv) {
             sleepFor(100);
     }
     if (mode == "env") {
-        const char* value = std::getenv(argv[2]);
-        std::cout << (value ? value : "<unset>");
+        std::string value;
+        std::cout << (environmentValue(argv[2], value) ? value : std::string("<unset>"));
         return 0;
     }
     if (mode == "envcount") {

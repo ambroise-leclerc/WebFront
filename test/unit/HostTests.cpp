@@ -227,7 +227,8 @@ SCENARIO("Invalid requests are refused before anything starts") {
 
 SCENARIO("The host configuration is strict") {
     using webfront::testing::detail::hostConfiguration;
-    REQUIRE_NOTHROW(hostConfiguration(R"({"programs":[],"temporary":"/tmp/x"})"));
+    const auto absolute = webfront::json::quote((std::filesystem::temp_directory_path() / "x").generic_string());
+    REQUIRE_NOTHROW(hostConfiguration(R"({"programs":[],"temporary":)" + absolute + "}"));
     for (const auto* bad : {R"({"programs":["relative"],"temporary":"/tmp/x"})",
                             R"({"programs":[]})",
                             R"({"programs":[],"temporary":"relative"})",
