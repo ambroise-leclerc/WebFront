@@ -128,7 +128,8 @@ This is an opt-in test facility with the same trust model as the rest of this gu
 `WEBFRONT_JASMINE_TESTING`, and the captured page can contain secrets it displays. Automation/MCP does not expose
 captures yet.
 
-A capture that is in flight when the window closes is answered with "the window is closed" instead of waiting for its
-timeout. A page that replaces the instrumented one stops its recording and finds the slot free when the new page
+A capture that is waiting for the window when it closes, whether the engine already started it or the window's thread
+had not yet got to it (its event loop may have stopped), is answered with "the window is closed" instead of waiting for
+its timeout; a capture requested after the closing is refused at once. A page that replaces the instrumented one stops its recording and finds the slot free when the new page
 attaches (the old worker is waited for at most half a second; one blocked inside a window that no longer answers keeps
 the slot until it returns).

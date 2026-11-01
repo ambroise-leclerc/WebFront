@@ -33,6 +33,7 @@ struct WKWebViewOptions {
     #include <functional>
     #include <future>
     #include <memory>
+#include <mutex>
     #include <string>
     #include <utility>
     #include <vector>
@@ -169,7 +170,7 @@ inline bool successfulHttpStatus(long status) {
 struct CaptureJob;
 struct CaptureTarget {
     id                                       view = nullptr;
-    std::vector<std::shared_ptr<CaptureJob>> inflight;  // Snapshots the engine has not answered yet.
+    PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
 };
 
 struct CaptureJob {
@@ -186,9 +187,10 @@ inline void answer(CaptureJob& job, CaptureResult result) noexcept {
 /// The window is going away: no pending request waits for an answer that will never come.
 inline void abandonCaptures(CaptureTarget& target) noexcept {
     target.view = nullptr;
-    for (const auto& job : std::exchange(target.inflight, {}))
+    for (const auto& job : target.pending.close())
         answer(*job, std::unexpected("the window is closed"));
 }
+
 
 // The PNG of an NSImage through NSBitmapImageRep (NSBitmapImageFileTypePNG = 4).
 inline CaptureResult pngBytes(id image) {
@@ -217,7 +219,7 @@ inline void startCapture(void* data) noexcept {
         }
         auto handler = ^(id image, id error) {
             try {
-                std::erase(job->target->inflight, job);
+                job->target->pending.untrack(job);
                 if (!image) {
                     const auto reason = error ? utf8(send(error, "localizedDescription")) : std::string("the engine returned no image");
                     answer(*job, std::unexpected("snapshot failed: " + reason));
@@ -233,11 +235,10 @@ inline void startCapture(void* data) noexcept {
         // A nil configuration snapshots the visible bounds of the view.
         // The engine keeps its own copy until the handler ran; the call never depends on the stack block surviving it.
         const auto heapHandler = Block_copy(handler);
-        job->target->inflight.push_back(job);
         try {
             send<void>(job->target->view, "takeSnapshotWithConfiguration:completionHandler:", static_cast<id>(nullptr), heapHandler);
         } catch (...) {
-            std::erase(job->target->inflight, job);
+            job->target->pending.untrack(job);
             Block_release(heapHandler);
             throw;
         }
@@ -253,9 +254,13 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
     return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
         auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
         auto future = job->done.get_future();
+        if (!target->pending.track(job))
+            return std::unexpected("the window is closed");
         dispatch_async_f(dispatch_get_main_queue(), new std::shared_ptr<CaptureJob>(job), startCapture);
-        if (future.wait_for(timeout) != std::future_status::ready)
+        if (future.wait_for(timeout) != std::future_status::ready) {
+            target->pending.untrack(job);
             return std::unexpected("the window did not answer within the capture timeout");
+        }
         return future.get();
     };
 }
@@ -431,6 +436,7 @@ struct Session {
             throw std::runtime_error("WKWebView: cannot create web view");
         attach(view, this);
         captureTarget->view = view;
+        captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
         send<void>(view, "setAutoresizingMask:", 18UL);  // NSViewWidthSizable | NSViewHeightSizable
         send<void>(view, "setInspectable:", static_cast<BOOL>(options.contentPolicy.devToolsEnabled));

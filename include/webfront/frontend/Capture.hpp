@@ -1,6 +1,7 @@
 /// @brief Frontend-neutral capture of the web view's content as a PNG image, for tests and CI.
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -29,6 +30,47 @@ inline CaptureRegistry& captureRegistry() {
     return registry;
 }
 }  // namespace detail
+
+/**
+ * @brief The requests that nobody has answered yet, from the moment a requesting thread queues them for the thread that
+ * serves the window until the engine answers. A window that closes answers every one of them at once, including those
+ * its thread never got to run (its event loop may have stopped), instead of leaving them to the capture timeout.
+ */
+template <class Job>
+class PendingCaptures {
+public:
+    /// The window can be captured from now on.
+    void open() {
+        std::scoped_lock lock{mutex};
+        accepting = true;
+    }
+
+    /// Registers a request before it is queued. False when the window is not open, so the caller answers at once.
+    [[nodiscard]] bool track(const std::shared_ptr<Job>& job) {
+        std::scoped_lock lock{mutex};
+        if (!accepting)
+            return false;
+        jobs.push_back(job);
+        return true;
+    }
+
+    void untrack(const std::shared_ptr<Job>& job) {
+        std::scoped_lock lock{mutex};
+        std::erase(jobs, job);
+    }
+
+    /// The window is going away: nothing is accepted any more. Returns the requests to answer.
+    [[nodiscard]] std::vector<std::shared_ptr<Job>> close() {
+        std::scoped_lock lock{mutex};
+        accepting = false;
+        return std::exchange(jobs, {});
+    }
+
+private:
+    std::mutex                        mutex;
+    bool                              accepting = false;
+    std::vector<std::shared_ptr<Job>> jobs;
+};
 
 /**
  * @brief Makes a window capturable while it lives. A frontend holds one for its open window.

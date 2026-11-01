@@ -15,6 +15,7 @@
 #include <future>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -346,6 +347,7 @@ private:
 
 using frontend::CaptureProvider;
 using frontend::CaptureRegistration;
+using frontend::PendingCaptures;
 using frontend::CaptureResult;
 
 namespace detail {
@@ -354,7 +356,7 @@ namespace detail {
 struct CaptureJob;
 struct CaptureTarget {
     CefRefPtr<CefBrowser>                    browser;
-    std::vector<std::shared_ptr<CaptureJob>> inflight;  // Requests the engine has not answered yet.
+    PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
 };
 
 struct CaptureJob {
@@ -371,9 +373,10 @@ inline void answer(CaptureJob& job, CaptureResult result) noexcept {
 /// The window is going away: no pending request waits for an answer that will never come.
 inline void abandonCaptures(CaptureTarget& target) noexcept {
     target.browser = nullptr;
-    for (const auto& job : std::exchange(target.inflight, {}))
+    for (const auto& job : target.pending.close())
         answer(*job, std::unexpected("the window is closed"));
 }
+
 
 // The PNG of a Page.captureScreenshot result: {"data": "<base64>"}.
 inline CaptureResult pngOf(const void* json, std::size_t size) {
@@ -404,13 +407,12 @@ public:
             registration = nullptr;
             return;
         }
-        job->target->inflight.push_back(job);
     }
 
     void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int messageId, bool success, const void* result, size_t size) override {
         if (messageId != expected || !job)
             return;
-        std::erase(job->target->inflight, job);
+        job->target->pending.untrack(job);
         if (success)
             answer(*job, pngOf(result, size));
         else
@@ -469,10 +471,16 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
     return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
         auto job    = std::make_shared<CaptureJob>(CaptureJob{target, {}});
         auto future = job->done.get_future();
-        if (!CefPostTask(TID_UI, new CaptureTask(job)))
+        if (!target->pending.track(job))
             return std::unexpected("the window is closed");
-        if (future.wait_for(timeout) != std::future_status::ready)
+        if (!CefPostTask(TID_UI, new CaptureTask(job))) {
+            target->pending.untrack(job);
+            return std::unexpected("the window is closed");
+        }
+        if (future.wait_for(timeout) != std::future_status::ready) {
+            target->pending.untrack(job);
             return std::unexpected("the window did not answer within the capture timeout");
+        }
         return future.get();
     };
 }
@@ -596,6 +604,7 @@ public:
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {
             captureTarget->browser = browser;
+        captureTarget->pending.open();
             captureRegistration    = CaptureRegistration{detail::captureProvider(captureTarget)};
         }
     }

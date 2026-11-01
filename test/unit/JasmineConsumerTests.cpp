@@ -572,3 +572,49 @@ SCENARIO("Two recording names that differ only by case are one recording, as on 
         store.stopRecording();
     }
 }
+
+namespace {
+struct FakeCapture { };
+}  // namespace
+
+SCENARIO("A window that closes answers the captures it never got to run") {
+    using Pending = webfront::frontend::PendingCaptures<FakeCapture>;
+    GIVEN("a request queued for a window whose event loop will never serve it") {
+        Pending pending;
+        const auto request = std::make_shared<FakeCapture>();
+        pending.open();
+        REQUIRE(pending.track(request));
+        WHEN("the window closes") {
+            const auto unanswered = pending.close();
+            THEN("the request is handed back to be answered at once, not left to the capture timeout") {
+                REQUIRE(unanswered.size() == 1);
+                REQUIRE(unanswered.front() == request);
+            }
+            THEN("a request made after the closing is refused instead of queued") {
+                REQUIRE_FALSE(pending.track(std::make_shared<FakeCapture>()));
+                REQUIRE(pending.close().empty());
+            }
+        }
+        WHEN("the request is answered or gives up before the window closes") {
+            pending.untrack(request);
+            THEN("closing has nothing left to answer") {
+                REQUIRE(pending.close().empty());
+            }
+        }
+    }
+    GIVEN("a window that has not opened yet") {
+        Pending pending;
+        THEN("no request is accepted") {
+            REQUIRE_FALSE(pending.track(std::make_shared<FakeCapture>()));
+        }
+    }
+    GIVEN("a window that is closed and then opened again") {
+        Pending pending;
+        pending.open();
+        static_cast<void>(pending.close());
+        pending.open();
+        THEN("requests are accepted again") {
+            REQUIRE(pending.track(std::make_shared<FakeCapture>()));
+        }
+    }
+}

@@ -15,6 +15,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -163,7 +164,7 @@ inline std::filesystem::path profileDirectory(const char* variable, const char* 
 struct CaptureJob;
 struct CaptureTarget {
     Api::Object                             view = nullptr;
-    std::vector<std::shared_ptr<CaptureJob>> inflight;  // Snapshots the engine has not answered yet.
+    PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
 };
 
 struct CaptureJob {
@@ -178,22 +179,19 @@ inline void answer(CaptureJob& job, CaptureResult result) noexcept {
     } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
 }
 
-inline void forget(CaptureTarget& target, const std::shared_ptr<CaptureJob>& job) {
-    std::erase(target.inflight, job);
-}
-
 /// The window is going away: no pending request waits for an answer that will never come.
 inline void abandonCaptures(CaptureTarget& target) noexcept {
     target.view = nullptr;
-    for (const auto& job : std::exchange(target.inflight, {}))
+    for (const auto& job : target.pending.close())
         answer(*job, std::unexpected("the window is closed"));
 }
+
 
 // Runs on the GTK main thread; owns the job until the snapshot completes.
 inline void finishCapture(Api::Object view, Api::Object result, void* owner) noexcept {
     std::unique_ptr<std::shared_ptr<CaptureJob>> job{static_cast<std::shared_ptr<CaptureJob>*>(owner)};
     auto&                                        a = api();
-    forget(*(*job)->target, *job);
+    (*job)->target->pending.untrack(*job);
     try {
         Api::Error* error   = nullptr;
         const auto  texture = a.snapshotFinish(view, result, &error);
@@ -233,7 +231,6 @@ inline int startCapture(void* data) noexcept {
         return 0;
     }
     const auto view = job->target->view;
-    job->target->inflight.push_back(job);
     // WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE. finishCapture owns its own reference to the job.
     a.snapshot(view, 0, 0, nullptr, reinterpret_cast<Api::Callback>(finishCapture), new std::shared_ptr<CaptureJob>(job));
     return 0;
@@ -251,6 +248,8 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
         auto job    = std::make_shared<CaptureJob>();
         job->target = target;
         auto future = job->done.get_future();
+        if (!target->pending.track(job))
+            return std::unexpected("the window is closed");
         constexpr int idlePriority = 200;  // G_PRIORITY_DEFAULT_IDLE
         a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
         if (future.wait_for(timeout) != std::future_status::ready) {
@@ -258,6 +257,7 @@ inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
             // main thread is serving could be freed under us. The flag makes it a no-op when it runs; a main loop that
             // never runs keeps only this small job until the process ends.
             job->abandoned = true;
+            target->pending.untrack(job);
             return std::unexpected("the window did not answer within the capture timeout");
         }
         return future.get();
@@ -356,6 +356,7 @@ struct Session : FailureState {
         configureSettings();
         registerHandlers();
         captureTarget->view = view;
+        captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
     }
 
