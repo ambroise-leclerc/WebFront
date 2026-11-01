@@ -442,3 +442,40 @@ SCENARIO("A program that keeps its pipes full cannot hold off the deadline") {
         REQUIRE(result.standardError.size() == 1000);
     }
 }
+
+SCENARIO("An authorized program that is missing cannot start, and is not called unauthorized") {
+    TempRoot    root{"missing-grant"};
+    const auto  absent = probe.parent_path() / "not-built-yet";
+    HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {absent}))};
+    const auto  id      = host.runStart("{\"program\":" + webfront::json::quote(absent.generic_string()) + "}");
+    const auto  summary = waitFor(host, id);
+    THEN("it is a launch failure with a reason") {
+        REQUIRE(field(summary, "status") == "launchFailed");
+        REQUIRE_FALSE(field(summary, "error").empty());
+    }
+    host.runRelease(id);
+    REQUIRE_THROWS_WITH(host.runStart("{\"program\":" + webfront::json::quote((absent.parent_path() / "other").generic_string()) + "}"),
+                        Catch::Matchers::ContainsSubstring("not authorized"));
+}
+
+#ifndef _WIN32
+SCENARIO("A temporary space that cannot be removed is reported and stays registered") {
+    if (::geteuid() == 0)
+        SKIP("permissions do not stop root");
+    TempRoot    root{"locked"};
+    HostSession host{webfront::testing::detail::hostConfiguration(configurationFor(root, {probe}))};
+    const auto  name  = host.makeTemp();
+    const auto  space = webfront::testing::detail::pathFromUtf8(name);
+    namespace fs      = std::filesystem;
+    fs::create_directory(space / "locked");
+    std::ofstream{space / "locked" / "file"} << "x";
+    fs::permissions(space / "locked", fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
+    THEN("removeTemp fails instead of pretending, and a later attempt can succeed") {
+        REQUIRE_THROWS_WITH(host.removeTemp(name), Catch::Matchers::ContainsSubstring("Cannot remove"));
+        REQUIRE(fs::exists(space));
+        fs::permissions(space / "locked", fs::perms::owner_all, fs::perm_options::replace);
+        REQUIRE_NOTHROW(host.removeTemp(name));
+        REQUIRE_FALSE(fs::exists(space));
+    }
+}
+#endif

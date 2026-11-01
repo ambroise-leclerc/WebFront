@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -140,7 +141,8 @@ public:
             leftover.swap(spaces);
         }
         for (const auto& space : leftover)
-            removeTree(space);
+            if (!removeTree(space))
+                std::cerr << "Jasmine: cannot remove the temporary space " << space.string() << '\n';
     }
 
     /// The authorized programs, as a JSON array of strings.
@@ -184,10 +186,15 @@ public:
         const auto space = detail::pathFromUtf8(path);
         {
             std::scoped_lock lock{mutex};
-            if (!spaces.erase(space))
+            if (!spaces.contains(space))
                 throw std::invalid_argument("Not a temporary space of this run");
         }
-        removeTree(space);
+        // The space stays registered when it cannot be removed, so that the caller sees the failure and the session
+        // retries when it ends.
+        if (!removeTree(space))
+            throw std::runtime_error("Cannot remove the temporary space (a file may still be in use): " + path);
+        std::scoped_lock lock{mutex};
+        spaces.erase(space);
     }
 
     /// Writes bytes at `offset` of a file inside a temporary space. Offset 0 truncates; later chunks must continue the file.
@@ -362,8 +369,7 @@ private:
         const auto requested = detail::pathFromUtf8(program);
         parsed.spec.program.clear();
         for (const auto& allowed : config.programs) {
-            std::error_code error;
-            if (requested.is_absolute() && std::filesystem::equivalent(allowed, requested, error) && !error) {
+            if (requested.is_absolute() && sameFile(allowed, requested)) {
                 parsed.spec.program = allowed;
                 break;
             }
@@ -401,15 +407,29 @@ private:
         return found->second;
     }
 
-    /// Windows may hold a file a moment after its process ended.
-    static void removeTree(const std::filesystem::path& path) noexcept {
+    /// The same file, or, when one of them is absent (a program not built or installed), the same location: an authorized
+    /// program that is missing must be reported as one that cannot start, not as unauthorized.
+    static bool sameFile(const std::filesystem::path& allowed, const std::filesystem::path& requested) {
+        std::error_code error;
+        if (std::filesystem::equivalent(allowed, requested, error) && !error)
+            return true;
+        if (!error)
+            return false;  // Both exist and differ.
+        const auto first  = std::filesystem::weakly_canonical(allowed, error);
+        const auto second = error ? first : std::filesystem::weakly_canonical(requested, error);
+        return !error && first == second;
+    }
+
+    /// Windows may hold a file a moment after its process ended. False if the space is still there afterwards.
+    static bool removeTree(const std::filesystem::path& path) noexcept {
         for (int attempt = 0; attempt < 20; ++attempt) {
             std::error_code error;
             std::filesystem::remove_all(path, error);
             if (!error && !std::filesystem::exists(path, error))
-                return;
+                return true;
             std::this_thread::sleep_for(std::chrono::milliseconds{50});
         }
+        return false;
     }
 
     detail::HostConfiguration              config;

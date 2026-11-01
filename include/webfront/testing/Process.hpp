@@ -171,6 +171,31 @@ struct WindowsHandle {
     }
 };
 
+/// A pipe whose read end is opened for overlapped I/O (CreatePipe cannot) and whose write end is inheritable.
+inline bool makeOverlappedPipe(WindowsHandle& readEnd, WindowsHandle& writeEnd, SECURITY_ATTRIBUTES& inheritable) {
+    static std::atomic<std::uint64_t> counter{0};
+    const std::wstring                name = L"\\\\.\\pipe\\webfront-process-" + std::to_wstring(::GetCurrentProcessId()) + L"-" + std::to_wstring(counter++);
+    SECURITY_ATTRIBUTES               own{sizeof own, nullptr, FALSE};
+    readEnd.handle = ::CreateNamedPipeW(name.c_str(),
+                                        PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                                        1,
+                                        65536,
+                                        65536,
+                                        0,
+                                        &own);
+    if (readEnd.handle == INVALID_HANDLE_VALUE) {
+        readEnd.handle = nullptr;
+        return false;
+    }
+    writeEnd.handle = ::CreateFileW(name.c_str(), GENERIC_WRITE, 0, &inheritable, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (writeEnd.handle == INVALID_HANDLE_VALUE) {
+        writeEnd.handle = nullptr;
+        return false;
+    }
+    return true;
+}
+
 inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomic<bool>& cancel) {
     ProcessResult result;
     const auto    begin = std::chrono::steady_clock::now();
@@ -207,17 +232,9 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
 
         SECURITY_ATTRIBUTES inheritable{sizeof inheritable, nullptr, TRUE};
         WindowsHandle       outRead, outWrite, errRead, errWrite, input;
-        HANDLE              pipeEnds[2];
-        if (!::CreatePipe(&pipeEnds[0], &pipeEnds[1], &inheritable, 0))
+        // The read ends are overlapped, so that a reader blocked on a pipe another process still holds can be cancelled.
+        if (!makeOverlappedPipe(outRead, outWrite, inheritable) || !makeOverlappedPipe(errRead, errWrite, inheritable))
             throw std::runtime_error("Cannot create a pipe");
-        outRead.handle  = pipeEnds[0];
-        outWrite.handle = pipeEnds[1];
-        if (!::CreatePipe(&pipeEnds[0], &pipeEnds[1], &inheritable, 0))
-            throw std::runtime_error("Cannot create a pipe");
-        errRead.handle  = pipeEnds[0];
-        errWrite.handle = pipeEnds[1];
-        ::SetHandleInformation(outRead.handle, HANDLE_FLAG_INHERIT, 0);
-        ::SetHandleInformation(errRead.handle, HANDLE_FLAG_INHERIT, 0);
         input.handle = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, nullptr);
         if (input.handle == INVALID_HANDLE_VALUE)
             input.handle = nullptr;
@@ -283,11 +300,28 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
         input.reset();
 
         std::atomic<bool> outDone{false}, errDone{false};
-        const auto        reader = [](HANDLE pipe, std::string& into, bool& truncated, std::size_t limit, std::atomic<bool>& done) {
-            char  buffer[8192];
-            DWORD count = 0;
-            while (::ReadFile(pipe, buffer, sizeof buffer, &count, nullptr) && count > 0)
+        std::atomic<bool> stopReading{false};
+        const auto        reader = [&stopReading](HANDLE pipe, std::string& into, bool& truncated, std::size_t limit, std::atomic<bool>& done) {
+            char          buffer[8192];
+            WindowsHandle event{::CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+            for (;;) {
+                OVERLAPPED overlapped{};
+                overlapped.hEvent = event.handle;
+                ::ResetEvent(event.handle);
+                DWORD count = 0;
+                if (!::ReadFile(pipe, buffer, sizeof buffer, &count, &overlapped)) {
+                    if (::GetLastError() != ERROR_IO_PENDING)
+                        break;  // The other end is closed: the end of the stream.
+                    while (::WaitForSingleObject(event.handle, 20) == WAIT_TIMEOUT && !stopReading) {}
+                    if (!::HasOverlappedIoCompleted(&overlapped))
+                        ::CancelIoEx(pipe, &overlapped);
+                    if (!::GetOverlappedResult(pipe, &overlapped, &count, TRUE))
+                        break;
+                }
+                if (count == 0)
+                    break;
                 appendBounded(into, buffer, count, limit, truncated);
+            }
             done = true;
         };
         std::thread outThread{reader,
@@ -318,8 +352,7 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
         const auto drainEnd = std::chrono::steady_clock::now() + processDrainGrace;
         while (!(outDone && errDone) && std::chrono::steady_clock::now() < drainEnd)
             std::this_thread::sleep_for(std::chrono::milliseconds{5});
-        ::CancelIoEx(outRead.handle, nullptr);
-        ::CancelIoEx(errRead.handle, nullptr);
+        stopReading = true;  // A reader still waiting on a pipe another process holds cancels its read and ends.
         outThread.join();
         errThread.join();
         DWORD code = 0;

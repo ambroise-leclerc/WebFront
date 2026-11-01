@@ -152,6 +152,9 @@ What is guaranteed, and what is not:
   deadline (SIGKILL, no destructor) ends the program too; its descendants that were still in its group are not tracked
   after that. Other POSIX systems and Windows (the job object closes with the process) are not covered by a test, and macOS has
   no equivalent of this request: a program may outlive a killed test there.
+- **Removal failures.** `removeTemp` (and `withTemp`) reject when a space cannot be removed, for example a file still in use;
+  the space stays registered and the session tries again when it ends, then reports the path on stderr. An authorized program
+  that does not exist (not built yet) is a `launchFailed` result, not an authorization error.
 - **Privacy.** The temporary root and its spaces are closed to other users (mode 0700) on POSIX; on Windows they inherit
   the build directory's ACL.
 - **Status lost.** If the application ignores `SIGCHLD`, the system discards exit statuses: the call still ends at the
