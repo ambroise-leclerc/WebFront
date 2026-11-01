@@ -39,6 +39,22 @@ describe('Developer automation', () => {
         expect(completed[1].result.exitCode).toBe(1);
     });
 
+    it('maps project setup operations to wf argument lists and refuses an incomplete embed', async () => {
+        const argvs=[], completed=[];
+        const runner=createAutomationRunner({context:{},exclusive,inspector:{},
+            run:async argv => {argvs.push(argv); return {exitCode:0,output:'',report:null};},
+            complete:async (_id,result) => {completed.push(result);}});
+        await runner.start({runId:'a',operation:'create',arguments:{starter:'life',directory:'ui'}});
+        await runner.start({runId:'b',operation:'install',arguments:{package:'react@19.3.1'}});
+        await runner.start({runId:'c',operation:'restore',arguments:{}});
+        await runner.start({runId:'d',operation:'embed',arguments:{provider:'LifeUI'}});
+        await runner.start({runId:'e',operation:'embed',arguments:{entry:'ui/main.tsx',output:'generated/LifeUI.hpp'}});
+        await runner.start({runId:'f',operation:'embed',arguments:{entry:'ui/main.tsx'}});
+        expect(argvs).toEqual([['create','life','ui'],['install','react@19.3.1'],['restore'],['embed','LifeUI'],
+            ['embed','ui/main.tsx','--output','generated/LifeUI.hpp']]);
+        expect(completed[5].exitCode).toBe(1);
+    });
+
     it('does not turn a script exit 130 into a cancellation', async () => {
         let completed;
         const runner=createAutomationRunner({context:{},exclusive,inspector:{},

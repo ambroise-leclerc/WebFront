@@ -48,6 +48,15 @@ struct Sources {
 };
 Sources sources;
 
+/// `<name>-starter.tgz`: a plain file name, never a path.
+bool isStarterArchive(std::string_view name) {
+    constexpr std::string_view suffix{"-starter.tgz"};
+    return name.size() > suffix.size() && name.ends_with(suffix)
+           && std::ranges::all_of(name.substr(0, name.size() - suffix.size()), [](char c) {
+                  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+              });
+}
+
 struct Files {
     explicit Files(const std::filesystem::path&) { }
     std::optional<fs::File> open(std::filesystem::path path) const {
@@ -55,6 +64,8 @@ struct Files {
         std::filesystem::path file;
         if (name == "automation/environment.tgz")
             file = sources.archive;
+        else if (name.starts_with("automation/") && isStarterArchive(name.substr(11)))
+            file = sources.archive.parent_path() / name.substr(11);  // beside the environment; its manifest pins the integrity
         else if (!sources.registry.empty() && name.starts_with("automation/registry/")) {
             try {
                 file = developer::projectPath(sources.registry, std::string_view(name).substr(20));

@@ -36,6 +36,15 @@ public:
         identity = channel::nonce();
     }
 
+    /// Granted operations that only newer environments implement, with the first version that does.
+    std::vector<std::pair<std::string, std::string>> versionedOperations() const {
+        std::vector<std::pair<std::string, std::string>> result;
+        for (const auto& [name, definition] : operationDefinitions())
+            if (!definition.since.empty() && std::ranges::find(options.allow, definition.permission) != options.allow.end())
+                result.emplace_back(name, definition.since);
+        return result;
+    }
+
     std::string describe() const {
         std::scoped_lock lock{mutex};
         return "{\"version\":1,\"session\":" + json::quote(identity) + ",\"project\":" + json::quote(options.project.generic_string()) + ",\"state\":"
@@ -262,6 +271,18 @@ private:
                 fs::safeRelativePath(value);
             if (key == "pattern" && value.starts_with('-'))
                 throw std::invalid_argument("Pattern must not be an option");
+            if ((key == "name" || key == "starter" || key == "package" || key == "provider")
+                && (value.starts_with('-') || value.contains('\\') || value.contains(' ')))
+                throw std::invalid_argument("Argument must be a plain name, not an option or a path");
+            if ((key == "directory" || key == "output") && (value.empty() || value.starts_with('-') || value.contains('\\') || value.starts_with('/')))
+                throw std::invalid_argument("Argument must be a project-relative path");
+            if (key == "directory" || key == "output")
+                fs::safeRelativePath(value);
+        }
+        if (operation == "embed") {
+            const bool provider = args.has("provider"), entry = args.has("entry"), output = args.has("output");
+            if (provider == entry || entry != output)
+                throw std::invalid_argument("embed needs either provider, or entry together with output");
         }
     }
     Run& find(std::string_view id) {

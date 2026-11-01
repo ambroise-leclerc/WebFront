@@ -466,6 +466,34 @@ def main():
                 client.close()
             assert client.child.returncode == 0, (client.child.returncode, pathlib.Path(log.name).read_text())
 
+        # An agent builds a project from nothing: the starter comes from the environment's manifest and is served by the launcher.
+        setup = pathlib.Path(temporary) / "setup-project"
+        setup.mkdir()
+        setup_command = ["--project", str(setup), "--environment", args.environment, "--integrity", integrity,
+                         "--registry-dir", args.registry]
+        with (pathlib.Path(temporary) / "setup.log").open("w") as log:
+            client = Client([args.agent, *setup_command, "--mcp", "--timeout", "60", "--startup-timeout", "60",
+                             *sum((["--allow", op] for op in ("init", "create", "install", "restore", "embed")), [])], log)
+            try:
+                client.initialize()
+                missing = client.run("create", {"starter": "nonexistent"}, state="failed")
+                assert "Unknown pinned starter" in missing["output"], missing
+                client.run("create", {"starter": "life", "directory": "ui"})
+                assert (setup / "ui/main.tsx").is_file() and (setup / "ui/style.css").is_file()
+                again = client.run("create", {"starter": "life", "directory": "ui"}, state="failed")
+                assert (setup / "ui/main.tsx").is_file(), again
+                client.run("init")
+                assert (setup / "webfront.project.json").is_file()
+                client.run("install", {"package": "react@19.3.1"})
+                client.run("install", {"package": "react-dom@19.3.1"})
+                client.run("restore")
+                client.run("embed", {"entry": "ui/main.tsx", "output": "generated/LifeUI.hpp"})
+                header = setup / "generated/LifeUI.hpp"
+                assert header.is_file() and b"class LifeUI" in header.read_bytes(), "embed did not write the provider"
+            finally:
+                client.close()
+            assert client.child.returncode == 0, (client.child.returncode, pathlib.Path(log.name).read_text())
+
         # A human-owned window is already running before either agent attaches. Native grants remain the owner's.
         endpoint = pathlib.Path(temporary) / "shared-window"
         # Keep Chromium's temporary Unix socket paths below sockaddr_un's limit, independently

@@ -30,7 +30,12 @@ test configurations also build the launcher for their regression tests. Without 
 embedded engine, requesting the launcher fails configure instead of opening a system browser.
 The implementation is native C++23; no Node.js, npm or Python is required to run the launcher.
 
-Provision an environment containing automation API v1 (0.6.3 or later). Environment 0.6.2
+Provision an environment containing automation API v1 (0.6.3 or later). The setup operations (`init`, `create`, `install`,
+`restore`, `embed`) need environment **0.6.4 or later**: the launcher checks this at startup, and granting one of them to an
+older environment fails with a bootstrap error (status 70) naming the operation, instead of failing each run.
+`create` needs the starter archives (`<name>-starter.tgz`, such as `life-starter.tgz` of a distribution build) in the same
+directory as the `--environment` archive: the launcher serves only files of that name from there, and the environment's
+manifest pins their SHA-512, so the directory is not trusted for content. Environment 0.6.2
 predates that API; passing an older environment produces a bootstrap error with status 70.
 The launcher takes an explicit archive and its independently trusted SHA-512 SRI. Use a verified
 published distribution or build one in this repository:
@@ -41,8 +46,7 @@ build-agent/test/web/webfront-wf --project "$PWD" --manifest-dir js/developer --
 ```
 
 `build-distribution/provision.json` gives the resulting integrity. Project packages must also be
-installed/restored beforehand through wf. Package installation and network restoration are not
-agent tools. Tests use configure-provisioned packages and a local registry, with no public network
+installed/restored beforehand through wf, or by an agent granted `install`/`restore`. Tests use configure-provisioned packages and a local registry, with no public network
 after provisioning. This source build does not publish a release or change the pinned bootstrap.
 
 ## Invocation and authority
@@ -62,11 +66,14 @@ webfront-agent --project /absolute/project \
 ```
 
 All executable operations are denied unless granted by the process owner using `--allow`.
-Valid grants are `check`, `build`, `test`, `preview`, `inspect` and `interact` (click/fill).
+Valid grants are `check`, `build`, `test`, `preview`, `inspect`, `interact` (click/fill) and the project setup
+grants `init`, `create`, `install`, `restore` and `embed`. The setup grants write the manifest, the lock, the cache, a new
+starter directory or the generated provider header; grant them only for a project whose registry you trust.
 The project, environment, manifest directory and grants cannot be changed by MCP or the manifest.
 Omit grants to expose session discovery only. In particular, there is no agent tool for shell,
-JavaScript evaluation, arbitrary callback calls, `wf run`, `exec`, install, restore or arbitrary
-native file reads/writes. An agent edits project files through its separately authorized workspace
+JavaScript evaluation, arbitrary callback calls, `wf run`, `exec` or arbitrary
+native file reads/writes. `install` and `restore` use the registry already configured by the owner, the manifest or the
+default; the operation cannot choose another one. An agent edits project files through its separately authorized workspace
 tools, then asks WebFront to verify them.
 
 `--manifest-dir` selects a project-relative manifest directory. `--registry-dir` serves an
@@ -183,9 +190,17 @@ Operations and their arguments:
 | `build`, `preview` | `{entry?}` | Operation's own grant |
 | `test` | `{pattern?}` | `test` |
 | `inspect` | `{}` | `inspect` |
+| `init` | `{name?}` | `init` |
+| `create` | `{starter, directory?}` | `create` |
+| `install` | `{package?}` (one `name[@range]`; none installs the locked graph) | `install` |
+| `restore` | `{}` | `restore` |
+| `embed` | `{provider}` or `{entry, output}` | `embed` |
 | `click` | `{pageId, elementId}` | `interact` |
 | `fill` | `{pageId, elementId, value}` | `interact` |
 
+`name`, `starter`, `package` and `provider` refuse a leading `-`, a backslash and spaces; `directory` and `output` must be
+project-relative paths: `create` never replaces an existing directory (`wf` refuses it), while `embed` **replaces** its output header, as
+regeneration requires. `embed` needs a provider, or an entry together with an output, never both.
 Unknown arguments, wrong sessions, unsupported commands and option-like entry/pattern strings
 are refused natively. Entries accept manifest labels (including `app:debug` and `app..debug`);
 entry paths must be project-relative. A queued/running operation blocks
