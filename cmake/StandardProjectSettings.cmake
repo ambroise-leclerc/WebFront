@@ -12,7 +12,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
              "Release"
              "MinSizeRel"
              "RelWithDebInfo")
-elseif(CMAKE_GENERATOR STREQUAL "Ninja Multi-Config" AND NOT CMAKE_DEFAULT_BUILD_TYPE)
+elseif(CMAKE_GENERATOR STREQUAL "Ninja Multi-Config" AND NOT CMAKE_DEFAULT_BUILD_TYPE AND NOT CMAKE_DEFAULT_CONFIGS)
   # Only Ninja Multi-Config accepts this variable. Visual Studio and Xcode build Debug unless --config is given.
   # The default must belong to CMAKE_CONFIGURATION_TYPES, or generation fails.
   foreach(_webfront_candidate RelWithDebInfo Release Debug)
