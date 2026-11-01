@@ -67,7 +67,7 @@ void (async () => {
         const supported = Array.isArray(runtime.automationOperations) ? runtime.automationOperations : [];
         for (const [operation, since] of __VERSIONED__)
             if (!supported.includes(operation)) throw new Error('This environment cannot run granted operation '+operation+'; provision environment '+since+' or later');
-        runtime.connectAutomation({bridge:webFront,call,config,preview:document.getElementById('preview')});
+        runtime.connectAutomation({bridge:webFront,call,config,environment,preview:document.getElementById('preview')});
     } catch (error) {
         await call('failed',failureText(error?.message ?? error)).catch(() => {});
         window.close();

@@ -16,6 +16,7 @@ import {build, dev, showPreview} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
+import {pinnedStarters} from './bootstrap.mjs';
 import {connectAutomation as connectAgent, clipText} from './automation.mjs';
 
 const encoder = new TextEncoder();
@@ -315,7 +316,9 @@ export async function execute(args, context) {
 
 /** Automation operations this environment runs beyond the 0.6.3 set; the native owner refuses a grant it does not list. */
 export const automationOperations = ['init', 'create', 'install', 'restore', 'embed'];
-export const connectAutomation = context => connectAgent({...context,run:runNonInteractive,exclusive});
+// The launcher's native configuration has no starters: they come from the environment's own manifest, as in the terminal.
+export const connectAutomation = ({environment, ...context}) => connectAgent({...context, run:runNonInteractive, exclusive,
+    config:{...context.config, starters:pinnedStarters(environment, new URL(context.config.environment, location.href))}});
 
 /**
  * Runs one wf command without a terminal, for a page that the application drives: the command's output goes to

@@ -32,7 +32,10 @@ The implementation is native C++23; no Node.js, npm or Python is required to run
 
 Provision an environment containing automation API v1 (0.6.3 or later). The setup operations (`init`, `create`, `install`,
 `restore`, `embed`) need environment **0.6.4 or later**: the launcher checks this at startup, and granting one of them to an
-older environment fails with a bootstrap error (status 70) naming the operation, instead of failing each run. Environment 0.6.2
+older environment fails with a bootstrap error (status 70) naming the operation, instead of failing each run.
+`create` needs the starter archives (`<name>-starter.tgz`, such as `life-starter.tgz` of a distribution build) in the same
+directory as the `--environment` archive: the launcher serves only files of that name from there, and the environment's
+manifest pins their SHA-512, so the directory is not trusted for content. Environment 0.6.2
 predates that API; passing an older environment produces a bootstrap error with status 70.
 The launcher takes an explicit archive and its independently trusted SHA-512 SRI. Use a verified
 published distribution or build one in this repository:
