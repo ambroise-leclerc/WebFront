@@ -49,6 +49,7 @@ endif()
 target_compile_definitions(tests PRIVATE WEBFRONT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 # The native program of the webFrontHost and runProcess tests (also run by the browser specs).
 add_executable(host_probe ../web/host/HostProbe.cpp)
+target_compile_features(host_probe PRIVATE cxx_std_23)
 target_link_libraries(host_probe PRIVATE WebFront_test_hardening WebFront_warnings)
 add_dependencies(tests host_probe)
 target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host_probe>")
