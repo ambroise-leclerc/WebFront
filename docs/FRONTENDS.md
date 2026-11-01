@@ -104,10 +104,21 @@ deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEB
 
 Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine or CEF is
 compiled in) and `webfront::EmbeddedWebFront` (always defined; the native web view when compiled in, otherwise CEF) tell an application what the build holds.
-Without an engine, constructing `EmbeddedWebFront` throws `std::runtime_error`, so the fallback is an ordinary `try`/`catch`.
-Limit the `try` to the construction: `initialize()` runs there, which is where a missing engine or display fails. Serving
-stays outside, so an error of the server or of the application propagates instead of being taken for a frontend failure and
-serving a second time in the browser.
+Without any engine, constructing `EmbeddedWebFront` throws `std::runtime_error`, so that case falls back with an ordinary `try`/`catch`.
+
+What the constructor reports at run time depends on the engine, because each runs its own initialization at a different moment:
+
+| Engine | Unusable engine or display is reported by |
+| --- | --- |
+| no engine compiled in | the constructor (`std::runtime_error`) |
+| WebKitGTK, WKWebView | the constructor (`initialize()`: no display, missing runtime) |
+| WebView2 | `show()`: `initialize()` is empty, a missing Evergreen runtime fails when the window opens |
+| CEF | `show()`: `CefInitialize` runs in `open()` |
+
+The constructor also builds the HTTP server, so a `catch` around it receives a bind or configuration error as well as a frontend
+failure. The fallback then constructs a second server with the same configuration, which fails again with the same error
+and propagates: nothing is hidden, but the attempt is repeated. Keep the `try` to the construction and serving outside it, so
+an error of the application is never taken for a frontend failure:
 
 ```cpp
 std::optional<webfront::EmbeddedWebFront> window;
@@ -121,6 +132,11 @@ if (window)
 webfront::WebFront web{config};
 return serve(web);
 ```
+
+This does not cover WebView2 and CEF failures, which surface from `show()` inside `serve`. An application that wants a fallback for them
+catches around its own `show()` call and then serves with `WebFront`; it decides which errors count as a frontend failure.
+For WebKitGTK and WKWebView, `frontend::NativeOrBrowserFrontend` below is the more precise tool: it intercepts only the failure
+of the frontend's `initialize()`, which runs before the server is built, so no second server is constructed.
 
 `if constexpr` here is only a shortcut: the condition does not depend on a template parameter, so the discarded branch must
 still compile. That holds because `EmbeddedWebFront` is a complete application type in every build (without an engine its
