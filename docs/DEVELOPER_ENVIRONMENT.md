@@ -308,7 +308,9 @@ A `context` operation outside the permissions rejects with an explicit error. Th
 API**: the Worker keeps its own capabilities (global `fetch`, `importScripts`, WebSocket...), and nothing here is a
 security boundary. Node.js modules (`fs`, `child_process`, `node:*`...) are refused while the script is loaded,
 unless a locked package of that name is a dependency of the importer; `process` does not exist and no polyfill is
-provided.
+provided. A script cannot run a native program, and no manifest permission can grant that: a test or tool that must run a
+program (a CLI under test, a converter's output checked by the binary that reads it) is a spec of the consumer Jasmine path,
+where the test's owner authorizes the program ([native programs and temporary files](CONSUMER_TESTING.md#native-programs-and-temporary-files-from-the-specs)).
 
 Ctrl+C first aborts `context.signal`; a script still running two seconds later (the grace period) is terminated with
 `worker.terminate()`, which also stops a loop that never returns to the event loop. The time limit (`--timeout`,

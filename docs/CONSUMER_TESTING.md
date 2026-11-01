@@ -84,6 +84,117 @@ by numeric index, in bounded chunks, to the newest instrumented connection: a pa
 or redirects is instrumented again and the earlier connection loses access. One window is supported. No runtime path supplied
 by a page is opened. Use an isolated CI environment for untrusted projects and remove secrets.
 
+## Native programs and temporary files from the specs
+
+A consumer's own tools and CLI tests (SiliconForge's `atdf2json`, a test that runs its `siliconforge` binary on a generated
+description) need two things the browser lacks: running a program and a private place to write files. They are an explicit
+**grant of the test's owner** (`PROGRAMS` in `webfront_add_jasmine_test`), never something a spec, a page or a manifest can ask
+for:
+
+```cmake
+webfront_add_jasmine_test(NAME McuTools TARGET SiliconForge
+    SPECS tests/ui/mcu-tools.spec.js
+    PROGRAMS "$<TARGET_FILE:siliconforge>")     # absolute paths or generator expressions
+```
+
+Without `PROGRAMS` every `webFrontHost` call rejects with "No native capability was granted", and a program that is not listed
+is refused with "not authorized": the path in the call must designate the same file as a listed one (a relative name, a shell
+or another binary never matches). Existing tests and applications keep their behaviour; a build without
+`WEBFRONT_JASMINE_TESTING` has no such code path.
+
+```js
+const [siliconforge] = await webFrontHost.programs();        // the authorized paths, in the order of PROGRAMS
+await webFrontHost.withTemp(async dir => {                    // a new private directory, removed afterwards
+    await webFrontHost.writeFile(`${dir}/chip.json`, JSON.stringify(description));
+    const help = await webFrontHost.run({program: siliconforge, args: ['--mcu-path', dir, '--help']});
+    expect(help.status).toBe('exited');                       // exited | signaled | timeout | cancelled | launchFailed
+    expect(help.exitCode).toBe(0);
+    expect(help.stdout).toContain('atmega328p');
+    const bad = await webFrontHost.run({program: siliconforge, args: ['--mcu-file', `${dir}/chip.json`, 'blink.hex'],
+                                        cwd: dir, timeoutMs: 20000});
+    expect(bad.exitCode).toBe(1);
+    expect(bad.stderr).toContain('interrupts[2]');
+});
+```
+
+| Call | Meaning |
+| --- | --- |
+| `run({program, args, cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal})` | Runs the program to its end and resolves with `{status, exitCode, signal, error, stdout, stderr, stdoutTruncated, stderrTruncated, durationMs}`. Unknown options are an error. `signal` is an `AbortSignal`. |
+| `programs()` | The authorized program paths. |
+| `makeTemp()`, `removeTemp(dir)`, `withTemp(async dir => ...)` | Private directories under the test's `webfront-jasmine/<name>/temp/`. |
+| `writeFile(path, textOrBytes)`, `readFile(path)`, `readText(path)` | Files inside those directories only (bytes cross the bridge in 48 KiB chunks; 64 MiB at most, for writing and for reading). |
+
+What is guaranteed, and what is not:
+
+- **No shell, literal arguments.** The program is started directly with `args` as its `argv`: spaces, quotes, Unicode, `` ;|&$\` `` and
+  empty strings arrive unchanged (Windows applies the standard `CommandLineToArgvW` quoting). Its standard input is closed.
+  Paths may contain spaces and Unicode; the program path is the owner's, not the spec's spelling.
+- **Signals.** The program starts with default signal dispositions and an empty signal mask (POSIX), whatever the application
+  ignores or handles.
+- **Environment policy.** By default the program sees **only** `env` (plus `SystemRoot` on Windows, which programs there need to
+  start); `inheritEnv: true` adds the test process's environment under it. Neither changes `TMPDIR`: pass the variables you
+  want, for example the directory from `makeTemp()`.
+- **Working directory.** `cwd` must be inside a temporary space; the default is the test process's directory.
+- **Results.** A non-zero exit, a signal (POSIX), a timeout (`timeoutMs`, 30 s by default, 1 ms to 1 h), a cancellation and a program
+  that cannot start (`launchFailed`, with `error`) are results, not exceptions: assert on them. A refused request (unauthorized
+  program, bad option, path outside the spaces, too many runs) rejects the Promise.
+- **Bounded output.** Each stream keeps its first `maxOutputBytes` (1 MiB by default, 16 MiB at most); the rest is read and
+  discarded, so a noisy program is never blocked, and `stdoutTruncated`/`stderrTruncated` say so. At most 8 runs are active.
+  Standard output and error are decoded as UTF-8.
+- **Descendants.** On a timeout or cancellation the program **and everything it started in its process group** (POSIX) or job
+  object (Windows) is killed; the same happens when the program ends by itself with a descendant still running, so nothing a
+  call started outlives it. A descendant that left the group (`setsid`, a daemon) or escaped the job is not tracked on POSIX; its
+  inherited pipes are given one second after the program ended, then abandoned.
+- **Cleanup.** A temporary space is removed by `withTemp`, by `removeTemp`, when the test process ends normally (also after a
+  failed or cancelled spec), and the runner deletes `temp/` before and after each run, so an earlier run killed by the deadline
+  leaves nothing behind for the next. Spaces have unique random names, so concurrent runs and sessions never share one. A
+  `SIGKILL` of the test process, a power loss or a Windows file still locked by a program leave files in the build tree until
+  the next run of the same named test (the runner's deletion) or `ctest` cleanup of the build directory.
+- **If the test process is killed.** On Linux the program asks the kernel to kill it when the test process dies, so a CTest
+  deadline (SIGKILL, no destructor) ends the program too; its descendants that were still in its group are not tracked
+  after that. Other POSIX systems and Windows (the job object closes with the process) are not covered by a test, and macOS has
+  no equivalent of this request: a program may outlive a killed test there.
+- **Removal failures.** `removeTemp` (and `withTemp`) reject when a space cannot be removed, for example a file still in use;
+  the space stays registered and the session tries again when it ends, then reports the path on stderr. An authorized program
+  that does not exist (not built yet) is a `launchFailed` result, not an authorization error.
+- **Privacy.** The temporary root and its spaces are closed to other users (mode 0700) on POSIX; on Windows they inherit
+  the build directory's ACL.
+- **Status lost.** If the application ignores `SIGCHLD`, the system discards exit statuses: the call still ends at the
+  timeout, reporting `exited` with an `error` and exit code -1, never a success.
+- **Failure.** A spec assertion that is false, a refused or unauthorized call that is not caught, and a program that timed out
+  or could not start when the spec expects success all fail the test, and so CTest and CI (exit status of the runner).
+
+This is an authorization, **not a sandbox**: an authorized program runs with the user's authority and sees the filesystem and
+the network; the specs and the page are trusted code, as everywhere in this guide. The temporary-space check resolves symbolic
+links, but a program can still be told any path it can reach. Treat the grant like handing the test your shell for that one
+binary, and use an isolated CI environment without secrets for untrusted projects. The wf scripts of the developer environment
+(`wf run`, `wf exec`) still run in a browser Worker with no process capability, and the manifest's permissions cannot add one
+(see [the developer environment](DEVELOPER_ENVIRONMENT.md#scripts-wf-run-wf-exec)); a tool that must execute a program is a
+spec of this path.
+
+### Recipe: XML (ATDF) to JSON, then the native tool
+
+[`test/web/jasmine-consumer/host.spec.js`](../test/web/jasmine-consumer/host.spec.js) holds a complete example run by CTest
+(`ConsumerJasmine-host`): it fetches the fixture `atdf-mini.xml` from the document root, converts it with `DOMParser`,
+writes the JSON to a private space and runs a native program on it, asserting its output and a failing exit code with its
+stderr. `DOMParser` exists in the page the specs run in, unlike the wf Worker; a converter that must run in the Worker needs a
+pure-JavaScript XML parser installed with `wf install` from the registry and locked, and cannot start the native tool. To
+build the converter as a distributed tool, keep it a TypeScript module compiled by `wf build` and import it from the spec; a
+native window is still required to run it.
+
+To run it in a consumer project: add `PROGRAMS "$<TARGET_FILE:your-tool>"` to the helper call, compile the TS specs to classic
+JavaScript beforehand (this path does not compile TypeScript), keep the fixtures next to the spec and read them with `fetch`
+from the application's document root. Provisioning is the one configure-time download of the pinned `jasmine-core` (or
+`WEBFRONT_JASMINE_ARCHIVE_DIR` offline); the run needs no Node.js, Python or network. Measured on Linux with CEF (Release, this
+repository): the twelve specs of `ConsumerJasmine-host` took 5.6 s in total, of which 3.0 s is the deliberate wait proving a
+killed descendant stays dead and about 1.3 s the start of the window, which a passing one-spec test also pays.
+
+Platforms: the browser specs (`ConsumerJasmine-host*`) run on **Linux** (CEF, `xvfb-run`). The process runner and the temporary
+spaces (`Process.hpp`, `Host.hpp`) are also compiled and tested by the unit tests (`HostTests.cpp`) in CI on **macOS**
+(`posix_spawn`, process group; the descriptor-closing action is glibc-only, so other descriptors rely on `FD_CLOEXEC`) and
+**Windows** (`CreateProcessW`, job object, restricted handle inheritance, overlapped pipes). The browser specs have not been
+run on those systems: treat the whole path there as unqualified until they are.
+
 ## Screenshots and image sequences
 
 A test build can capture the **web content** of the window (without native decorations) as PNG images, for example to

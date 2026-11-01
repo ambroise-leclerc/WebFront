@@ -21,12 +21,14 @@ function(_webfront_jasmine_quote value output)
 endfunction()
 
 # webfront_add_jasmine_test(NAME name TARGET application SPECS files... [ARGS ...]
-#     [FRONTEND engine] [TIMEOUT seconds] [JASMINE path/to/jasmine.js])
+#     [FRONTEND engine] [TIMEOUT seconds] [JASMINE path/to/jasmine.js] [PROGRAMS programs...])
 # TARGET must retain webfront::testing::JasmineTest before show() in its test-enabled build; the helper defines
 # WEBFRONT_JASMINE_TESTING on it, and without that macro JasmineTest is inert. ARGS reach the application literally,
-# as individual arguments (empty ones, semicolons and '$<' included).
+# as individual arguments (empty ones, semicolons and '$<' included). PROGRAMS is the owner's native grant: the absolute
+# paths (generator expressions such as $<TARGET_FILE:tool> are fine) that the specs may run through webFrontHost.run,
+# without a shell. Without it every webFrontHost call rejects. See docs/CONSUMER_TESTING.md.
 function(webfront_add_jasmine_test)
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "NAME;TARGET;FRONTEND;TIMEOUT;JASMINE" "SPECS;ARGS")
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "NAME;TARGET;FRONTEND;TIMEOUT;JASMINE" "SPECS;ARGS;PROGRAMS")
     if(ARG_UNPARSED_ARGUMENTS OR ARG_KEYWORDS_MISSING_VALUES OR NOT ARG_NAME OR NOT ARG_TARGET OR NOT ARG_SPECS)
         message(FATAL_ERROR "webfront_add_jasmine_test requires NAME, TARGET, SPECS and valid named arguments")
     endif()
@@ -116,7 +118,7 @@ function(webfront_add_jasmine_test)
         if(argument STREQUAL "ARGS")
             set(in_args ON)
             continue()
-        elseif(argument MATCHES "^(NAME|TARGET|FRONTEND|TIMEOUT|JASMINE|SPECS)$")
+        elseif(argument MATCHES "^(NAME|TARGET|FRONTEND|TIMEOUT|JASMINE|SPECS|PROGRAMS)$")
             set(in_args OFF)
         endif()
         if(NOT in_args)
@@ -132,6 +134,24 @@ function(webfront_add_jasmine_test)
         math(EXPR index "${index} + 1")
     endforeach()
     file(GENERATE OUTPUT "${directory}/arguments-$<CONFIG>.json" CONTENT "${arguments}\n")
+    set(host OFF)
+    if(ARG_PROGRAMS)
+        set(host ON)
+        set(programs "[]")
+        set(index 0)
+        foreach(program IN LISTS ARG_PROGRAMS)
+            if(NOT program MATCHES "^(\\$<|/|[A-Za-z]:[/\\\\])")
+                message(FATAL_ERROR "A Jasmine PROGRAMS entry must be an absolute path or a generator expression: ${program}")
+            endif()
+            _webfront_jasmine_quote("${program}" quoted)
+            string(JSON programs SET "${programs}" ${index} "${quoted}")
+            math(EXPR index "${index} + 1")
+        endforeach()
+        _webfront_jasmine_quote("${directory}/temp" temporary)
+        # Generated, not written at configure time: the programs are usually $<TARGET_FILE:...> of the build.
+        file(GENERATE OUTPUT "${directory}/host-$<CONFIG>.json"
+            CONTENT "{\"programs\":${programs},\"temporary\":${temporary}}\n")
+    endif()
     set(prefix "")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ARG_FRONTEND)
         find_program(_webfront_jasmine_xvfb xvfb-run REQUIRED)
@@ -140,7 +160,7 @@ function(webfront_add_jasmine_test)
     target_compile_definitions("${ARG_TARGET}" PRIVATE WEBFRONT_JASMINE_TESTING=1)
     add_test(NAME "${ARG_NAME}" COMMAND "${CMAKE_COMMAND}"
         "-DPROGRAM=$<TARGET_FILE:${ARG_TARGET}>" "-DDIRECTORY=${directory}" "-DCONFIG=$<CONFIG>"
-        "-DPREFIX=${prefix}" "-DLIMIT=${ARG_TIMEOUT}"
+        "-DPREFIX=${prefix}" "-DLIMIT=${ARG_TIMEOUT}" "-DHOST=${host}"
         -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/RunWebFrontJasmine.cmake")
     math(EXPR outer_timeout "${ARG_TIMEOUT} + 15")
     set_tests_properties("${ARG_NAME}" PROPERTIES TIMEOUT "${outer_timeout}" LABELS "web-integration")

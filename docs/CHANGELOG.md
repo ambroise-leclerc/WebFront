@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Run authorized native programs from the specs of `webfront_add_jasmine_test` (#445): `PROGRAMS` is the owner's grant and
+  `webFrontHost.run({program, args, cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal})` starts a listed program
+  directly, without a shell, with literal arguments, an explicit environment, bounded time and output, and a structured result
+  (`exited`, `signaled`, `timeout`, `cancelled`, `launchFailed`, stdout/stderr and truncation flags). The program and its
+  process group (POSIX) or job object (Windows) are killed at the timeout, on cancellation and when the program ends.
+  `makeTemp`/`withTemp`, `writeFile` and `readFile` give private temporary spaces that are removed after success, failure and
+  cancellation. Without `PROGRAMS` every call rejects; `webfront::testing::runProcess` and `HostSession` are the C++ API. The wf
+  scripts keep no process capability. The browser specs are validated on Linux; Windows and macOS run the unit tests of the runner in CI. See `docs/CONSUMER_TESTING.md` for
+  the XML-to-JSON recipe.
+
 - Automation can set a project up end to end (#466): `init`, `create`, `install`, `restore` and `embed` join the contract of
   `webfront-agent`, each behind its own `--allow` grant and with plain-name or project-relative arguments (no options, no
   traversal). `install` takes one package from the configured registry or installs the locked graph; `embed` takes a manifest

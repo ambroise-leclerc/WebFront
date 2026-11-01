@@ -1,0 +1,680 @@
+/// @brief Runs one native program for a test, without a shell, with bounded time and output.
+#pragma once
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#ifdef _WIN32
+    #include "../system/WindowsCompat.hpp"
+
+    #include <cwchar>
+
+    #include <windows.h>
+#else
+    #include <cerrno>
+    #include <csignal>
+
+    #include <fcntl.h>
+    #include <poll.h>
+    #include <spawn.h>
+    #include <sys/wait.h>
+    #ifdef __linux__
+        #include <sys/prctl.h>
+        #include <sys/syscall.h>
+    #endif
+    #include <unistd.h>
+extern char** environ;
+#endif
+
+namespace webfront::testing {
+
+/// What to run. `program` is launched directly with `arguments` as its argv[1...]: no shell ever interprets them.
+struct ProcessSpec {
+    std::filesystem::path    program;
+    std::vector<std::string> arguments;
+    std::filesystem::path    workingDirectory;  ///< Empty: the calling process's directory.
+    /// The child's whole environment, unless `inheritEnvironment` is set, in which case these entries are added to a copy
+    /// of the calling process's environment (and win over it).
+    std::map<std::string, std::string> environment;
+    bool                               inheritEnvironment = false;
+    std::chrono::milliseconds          timeout{30000};
+    std::size_t                        maxOutputBytes = 1024 * 1024;  ///< Per stream; the rest is read and discarded.
+};
+
+enum class ProcessStatus {
+    exited,        ///< The program ended by itself; `exitCode` is meaningful (zero or not).
+    signaled,      ///< POSIX: the program was ended by a signal, in `signal`.
+    timeout,       ///< The deadline passed; the program and its process group/job were killed.
+    cancelled,     ///< The caller asked to stop; the program and its process group/job were killed.
+    launchFailed,  ///< The program could not be started; `error` says why.
+};
+
+struct ProcessResult {
+    ProcessStatus             status   = ProcessStatus::launchFailed;
+    int                       exitCode = -1;
+    int                       signal   = 0;
+    std::string               error;
+    std::string               standardOutput, standardError;
+    bool                      outputTruncated = false, errorTruncated = false;
+    std::chrono::milliseconds duration{0};
+};
+
+[[nodiscard]] inline const char* processStatusName(ProcessStatus status) noexcept {
+    switch (status) {
+        case ProcessStatus::exited:
+            return "exited";
+        case ProcessStatus::signaled:
+            return "signaled";
+        case ProcessStatus::timeout:
+            return "timeout";
+        case ProcessStatus::cancelled:
+            return "cancelled";
+        case ProcessStatus::launchFailed:
+            break;
+    }
+    return "launchFailed";
+}
+
+namespace detail {
+
+inline constexpr std::chrono::milliseconds processTick{20};
+/// After the direct child ended, how long its inherited pipes may stay open (a descendant that left the group or job).
+inline constexpr std::chrono::milliseconds processDrainGrace{1000};
+
+inline void validateProcessSpec(const ProcessSpec& spec) {
+    const auto clean = [](const std::string& text) {
+        return text.find('\0') == std::string::npos;
+    };
+    if (spec.program.empty())
+        throw std::invalid_argument("A program is required");
+    if (!std::ranges::all_of(spec.arguments, clean))
+        throw std::invalid_argument("An argument must not contain a NUL character");
+    for (const auto& [key, value] : spec.environment)
+        if (key.empty() || key.find('=') != std::string::npos || !clean(key) || !clean(value))
+            throw std::invalid_argument("Invalid environment entry");
+    if (spec.timeout.count() <= 0)
+        throw std::invalid_argument("The timeout must be positive");
+}
+
+inline void appendBounded(std::string& into, const char* data, std::size_t size, std::size_t limit, bool& truncated) {
+    const std::size_t room = into.size() < limit ? limit - into.size() : 0;
+    into.append(data, std::min(size, room));
+    if (size > room)
+        truncated = true;
+}
+
+#ifdef _WIN32
+
+inline std::wstring toWide(const std::string& text) {
+    if (text.empty())
+        return {};
+    const int size = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0)
+        throw std::invalid_argument("Text is not valid UTF-8");
+    std::wstring wide(static_cast<std::size_t>(size), L'\0');
+    ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), wide.data(), size);
+    return wide;
+}
+
+/// The CommandLineToArgvW / MSVCRT quoting: the program receives exactly the argument.
+inline std::wstring quoteWindowsArgument(const std::wstring& argument) {
+    if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring::npos)
+        return argument;
+    std::wstring quoted = L"\"";
+    for (auto it = argument.begin();; ++it) {
+        std::size_t backslashes = 0;
+        while (it != argument.end() && *it == L'\\') {
+            ++it;
+            ++backslashes;
+        }
+        if (it == argument.end()) {
+            quoted.append(backslashes * 2, L'\\');
+            break;
+        }
+        if (*it == L'"')
+            quoted.append(backslashes * 2 + 1, L'\\');
+        else
+            quoted.append(backslashes, L'\\');
+        quoted.push_back(*it);
+    }
+    return quoted + L'"';
+}
+
+struct WindowsHandle {
+    HANDLE handle   = nullptr;
+    WindowsHandle() = default;
+    explicit WindowsHandle(HANDLE h) : handle(h == INVALID_HANDLE_VALUE ? nullptr : h) {}
+    WindowsHandle(const WindowsHandle&)            = delete;
+    WindowsHandle& operator=(const WindowsHandle&) = delete;
+    ~WindowsHandle() {
+        reset();
+    }
+    void reset() {
+        if (handle)
+            ::CloseHandle(handle);
+        handle = nullptr;
+    }
+    explicit operator bool() const {
+        return handle != nullptr;
+    }
+};
+
+/// A pipe whose read end is opened for overlapped I/O (CreatePipe cannot) and whose write end is inheritable.
+inline bool makeOverlappedPipe(WindowsHandle& readEnd, WindowsHandle& writeEnd, SECURITY_ATTRIBUTES& inheritable) {
+    static std::atomic<std::uint64_t> counter{0};
+    const std::wstring                name = L"\\\\.\\pipe\\webfront-process-" + std::to_wstring(::GetCurrentProcessId()) + L"-" + std::to_wstring(counter++);
+    SECURITY_ATTRIBUTES               own{sizeof own, nullptr, FALSE};
+    readEnd.handle = ::CreateNamedPipeW(name.c_str(),
+                                        PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                                        1,
+                                        65536,
+                                        65536,
+                                        0,
+                                        &own);
+    if (readEnd.handle == INVALID_HANDLE_VALUE) {
+        readEnd.handle = nullptr;
+        return false;
+    }
+    writeEnd.handle = ::CreateFileW(name.c_str(), GENERIC_WRITE, 0, &inheritable, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (writeEnd.handle == INVALID_HANDLE_VALUE) {
+        writeEnd.handle = nullptr;
+        return false;
+    }
+    return true;
+}
+
+inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomic<bool>& cancel) {
+    ProcessResult result;
+    const auto    begin = std::chrono::steady_clock::now();
+    try {
+        std::wstring commandLine = quoteWindowsArgument(spec.program.wstring());
+        for (const auto& argument : spec.arguments)
+            commandLine += L' ' + quoteWindowsArgument(toWide(argument));
+        // The environment block: sorted case-insensitively, as CreateProcess requires.
+        std::map<std::wstring, std::wstring, bool (*)(const std::wstring&, const std::wstring&)> variables{[](const std::wstring& a, const std::wstring& b) {
+            return ::CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+        }};
+        if (spec.inheritEnvironment) {
+            wchar_t* block = ::GetEnvironmentStringsW();
+            for (const wchar_t* entry = block; block && *entry; entry += std::wcslen(entry) + 1) {
+                const std::wstring text{entry};
+                if (const auto equals = text.find(L'=', 1); equals != std::wstring::npos)
+                    variables[text.substr(0, equals)] = text.substr(equals + 1);
+            }
+            if (block)
+                ::FreeEnvironmentStringsW(block);
+        } else {
+            // A Windows program usually cannot start without its system directory.
+            wchar_t     root[MAX_PATH];
+            const DWORD length = ::GetEnvironmentVariableW(L"SystemRoot", root, MAX_PATH);
+            if (length > 0 && length < MAX_PATH)
+                variables[L"SystemRoot"] = std::wstring(root, length);
+        }
+        for (const auto& [key, value] : spec.environment)
+            variables[toWide(key)] = toWide(value);
+        std::wstring environmentBlock;
+        for (const auto& [key, value] : variables)
+            environmentBlock += key + L'=' + value + L'\0';
+        environmentBlock += L'\0';
+
+        SECURITY_ATTRIBUTES inheritable{sizeof inheritable, nullptr, TRUE};
+        WindowsHandle       outRead, outWrite, errRead, errWrite, input;
+        // The read ends are overlapped, so that a reader blocked on a pipe another process still holds can be cancelled.
+        if (!makeOverlappedPipe(outRead, outWrite, inheritable) || !makeOverlappedPipe(errRead, errWrite, inheritable))
+            throw std::runtime_error("Cannot create a pipe");
+        input.handle = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable, OPEN_EXISTING, 0, nullptr);
+        if (input.handle == INVALID_HANDLE_VALUE)
+            input.handle = nullptr;
+        if (!input)
+            throw std::runtime_error("Cannot open NUL");
+
+        // Only these three handles are inherited.
+        HANDLE inherited[3]  = {input.handle, outWrite.handle, errWrite.handle};
+        SIZE_T attributeSize = 0;
+        ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
+        std::vector<char> attributeStorage(attributeSize);
+        auto*             attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
+        if (!::InitializeProcThreadAttributeList(attributes, 1, 0, &attributeSize))
+            throw std::runtime_error("Cannot prepare the process attributes");
+        struct AttributesGuard {
+            LPPROC_THREAD_ATTRIBUTE_LIST list;
+            ~AttributesGuard() {
+                ::DeleteProcThreadAttributeList(list);
+            }
+        } attributesGuard{attributes};
+        if (!::UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof inherited, nullptr, nullptr))
+            throw std::runtime_error("Cannot restrict the inherited handles");
+
+        STARTUPINFOEXW startup{};
+        startup.StartupInfo.cb         = sizeof startup;
+        startup.StartupInfo.dwFlags    = STARTF_USESTDHANDLES;
+        startup.StartupInfo.hStdInput  = input.handle;
+        startup.StartupInfo.hStdOutput = outWrite.handle;
+        startup.StartupInfo.hStdError  = errWrite.handle;
+        startup.lpAttributeList        = attributes;
+
+        WindowsHandle job{::CreateJobObjectW(nullptr, nullptr)};
+        if (!job)
+            throw std::runtime_error("Cannot create a job object");
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        ::SetInformationJobObject(job.handle, JobObjectExtendedLimitInformation, &limits, sizeof limits);
+
+        const std::wstring  directory = spec.workingDirectory.wstring();
+        PROCESS_INFORMATION process{};
+        if (!::CreateProcessW(spec.program.c_str(),
+                              commandLine.data(),
+                              nullptr,
+                              nullptr,
+                              TRUE,
+                              CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+                              environmentBlock.data(),
+                              directory.empty() ? nullptr : directory.c_str(),
+                              &startup.StartupInfo,
+                              &process)) {
+            result.error = "CreateProcess failed with error " + std::to_string(::GetLastError());
+            return result;
+        }
+        WindowsHandle child{process.hProcess}, thread{process.hThread};
+        if (!::AssignProcessToJobObject(job.handle, child.handle)) {
+            ::TerminateProcess(child.handle, 1);
+            result.error = "Cannot assign the program to its job object";
+            return result;
+        }
+        ::ResumeThread(thread.handle);
+        outWrite.reset();
+        errWrite.reset();
+        input.reset();
+
+        std::atomic<bool> outDone{false}, errDone{false};
+        std::atomic<bool> stopReading{false};
+        const auto        reader = [&stopReading](HANDLE pipe, std::string& into, bool& truncated, std::size_t limit, std::atomic<bool>& done) {
+            char          buffer[8192];
+            WindowsHandle event{::CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+            for (;;) {
+                OVERLAPPED overlapped{};
+                overlapped.hEvent = event.handle;
+                ::ResetEvent(event.handle);
+                DWORD count = 0;
+                if (!::ReadFile(pipe, buffer, sizeof buffer, &count, &overlapped)) {
+                    if (::GetLastError() != ERROR_IO_PENDING)
+                        break;  // The other end is closed: the end of the stream.
+                    while (::WaitForSingleObject(event.handle, 20) == WAIT_TIMEOUT && !stopReading) {}
+                    if (!HasOverlappedIoCompleted(&overlapped))
+                        ::CancelIoEx(pipe, &overlapped);
+                    if (!::GetOverlappedResult(pipe, &overlapped, &count, TRUE))
+                        break;
+                }
+                if (count == 0)
+                    break;
+                appendBounded(into, buffer, count, limit, truncated);
+            }
+            done = true;
+        };
+        std::thread outThread{reader,
+                              outRead.handle,
+                              std::ref(result.standardOutput),
+                              std::ref(result.outputTruncated),
+                              spec.maxOutputBytes,
+                              std::ref(outDone)};
+        std::thread errThread{reader, errRead.handle, std::ref(result.standardError), std::ref(result.errorTruncated), spec.maxOutputBytes, std::ref(errDone)};
+
+        const auto deadline = begin + spec.timeout;
+        bool       timedOut = false, cancelled = false;
+        for (;;) {
+            if (::WaitForSingleObject(child.handle, static_cast<DWORD>(processTick.count())) == WAIT_OBJECT_0)
+                break;
+            if (cancel) {
+                cancelled = true;
+                break;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                timedOut = true;
+                break;
+            }
+        }
+        // The program, and everything it started, ends here: its descendants do not outlive the call.
+        ::TerminateJobObject(job.handle, 1);
+        ::WaitForSingleObject(child.handle, 5000);
+        const auto drainEnd = std::chrono::steady_clock::now() + processDrainGrace;
+        while (!(outDone && errDone) && std::chrono::steady_clock::now() < drainEnd)
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        stopReading = true;  // A reader still waiting on a pipe another process holds cancels its read and ends.
+        outThread.join();
+        errThread.join();
+        DWORD code = 0;
+        ::GetExitCodeProcess(child.handle, &code);
+        result.exitCode = static_cast<int>(code);
+        result.status   = timedOut ? ProcessStatus::timeout : cancelled ? ProcessStatus::cancelled : ProcessStatus::exited;
+        if (result.status != ProcessStatus::exited)
+            result.exitCode = -1;
+    } catch (const std::exception& error) {
+        result.status = ProcessStatus::launchFailed;
+        result.error  = error.what();
+    }
+    result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin);
+    return result;
+}
+
+#else
+
+struct Descriptor {
+    int fd       = -1;
+    Descriptor() = default;
+    explicit Descriptor(int value) : fd(value) {}
+    Descriptor(const Descriptor&)            = delete;
+    Descriptor& operator=(const Descriptor&) = delete;
+    ~Descriptor() {
+        reset();
+    }
+    void reset() {
+        if (fd >= 0)
+            ::close(fd);
+        fd = -1;
+    }
+};
+
+inline bool makePipe(Descriptor& readEnd, Descriptor& writeEnd) {
+    int fds[2];
+    if (::pipe(fds) != 0)
+        return false;
+    readEnd.fd  = fds[0];
+    writeEnd.fd = fds[1];
+    // Above the standard descriptors, whatever the application closed: a pipe end that already was descriptor 1 or 2 would
+    // keep its close-on-exec flag through dup2 onto itself and vanish at exec, taking the program's output with it.
+    for (auto* end : {&readEnd, &writeEnd}) {
+        const int moved = ::fcntl(end->fd, F_DUPFD_CLOEXEC, 3);
+        if (moved < 0)
+            return false;
+        ::close(end->fd);
+        end->fd = moved;
+    }
+    ::fcntl(readEnd.fd, F_SETFL, ::fcntl(readEnd.fd, F_GETFL) | O_NONBLOCK);
+    return true;
+}
+
+inline ProcessResult runProcessPosix(const ProcessSpec& spec, const std::atomic<bool>& cancel) {
+    ProcessResult result;
+    const auto    begin = std::chrono::steady_clock::now();
+
+    std::vector<std::string>           environmentStrings;
+    std::map<std::string, std::string> variables;
+    if (spec.inheritEnvironment)
+        for (char** entry = environ; entry && *entry; ++entry) {
+            const std::string text{*entry};
+            if (const auto equals = text.find('='); equals != std::string::npos && equals > 0)
+                variables[text.substr(0, equals)] = text.substr(equals + 1);
+        }
+    for (const auto& [key, value] : spec.environment)
+        variables[key] = value;
+    for (const auto& [key, value] : variables)
+        environmentStrings.push_back(key + '=' + value);
+    std::vector<char*> environmentBlock;
+    for (auto& entry : environmentStrings)
+        environmentBlock.push_back(entry.data());
+    environmentBlock.push_back(nullptr);
+
+    const std::string        program   = spec.program.string();
+    const std::string        directory = spec.workingDirectory.string();
+    std::vector<std::string> argumentStrings{program};
+    argumentStrings.insert(argumentStrings.end(), spec.arguments.begin(), spec.arguments.end());
+    std::vector<char*> argv;
+    for (auto& argument : argumentStrings)
+        argv.push_back(argument.data());
+    argv.push_back(nullptr);
+
+    Descriptor outRead, outWrite, errRead, errWrite;
+    if (!makePipe(outRead, outWrite) || !makePipe(errRead, errWrite)) {
+        result.error = "Cannot create a pipe";
+        return result;
+    }
+
+    #ifdef __linux__
+    // fork and exec rather than posix_spawn: the child asks the kernel to kill it when this process dies. A CTest deadline
+    // ends the application with SIGKILL, which runs no destructor, and the program must not outlive the test. Only
+    // async-signal-safe calls run between fork and exec.
+    int report[2];
+    if (::pipe2(report, O_CLOEXEC) != 0) {
+        result.error = "Cannot create a pipe";
+        return result;
+    }
+    Descriptor reportRead{report[0]}, reportWrite{report[1]};
+    // Above the standard descriptors, like the output pipes: the child's open and dup2 must not close or replace the end
+    // that carries an exec failure, or the parent would take the failed launch for a program that exited with 127.
+    for (auto* end : {&reportRead, &reportWrite}) {
+        const int moved = ::fcntl(end->fd, F_DUPFD_CLOEXEC, 3);
+        if (moved < 0) {
+            result.error = "Cannot create a pipe";
+            return result;
+        }
+        ::close(end->fd);
+        end->fd = moved;
+    }
+    const pid_t parent = ::getpid();
+    sigset_t    none;
+    sigemptyset(&none);  // Unqualified: a macro on macOS.
+    const pid_t forked = ::fork();
+    if (forked == 0) {
+        ::setpgid(0, 0);  // Its own process group: a timeout or cancellation kills it and the descendants that stayed in it.
+        ::prctl(PR_SET_PDEATHSIG, SIGKILL);
+        int failure = 0;
+        if (::getppid() != parent)
+            failure = ESRCH;
+        else {
+            // The program starts with default dispositions, not the application's (ignored SIGPIPE or SIGCHLD, handlers
+            // that would run in the child before exec), and only then with every signal unblocked.
+            struct sigaction byDefault{};
+            byDefault.sa_handler = SIG_DFL;
+            for (int signalNumber = 1; signalNumber < NSIG; ++signalNumber)
+                if (signalNumber != SIGKILL && signalNumber != SIGSTOP)
+                    ::sigaction(signalNumber, &byDefault, nullptr);
+            ::sigprocmask(SIG_SETMASK, &none, nullptr);
+            const int input = ::open("/dev/null", O_RDONLY);
+            if (input < 0 || ::dup2(input, 0) < 0 || ::dup2(outWrite.fd, 1) < 0 || ::dup2(errWrite.fd, 2) < 0)
+                failure = errno;
+            // The application's own descriptors (sockets, files) stay out of the program; the report pipe closes on exec.
+            else if (::syscall(SYS_close_range, 3U, ~0U, 4U /* CLOSE_RANGE_CLOEXEC */) != 0 && errno != ENOSYS && errno != EINVAL)
+                failure = errno;
+            else if (!directory.empty() && ::chdir(directory.c_str()) != 0)
+                failure = errno;
+            else {
+                ::execve(program.c_str(), argv.data(), environmentBlock.data());
+                failure = errno;
+            }
+        }
+        [[maybe_unused]] const auto written = ::write(reportWrite.fd, &failure, sizeof failure);
+        ::_exit(127);
+    }
+    if (forked < 0) {
+        result.error = std::string("Cannot start the program: ") + std::strerror(errno);
+        return result;
+    }
+    const pid_t pid = forked;
+    ::setpgid(pid, pid);  // Also from here, so that no kill of the group can come before the child's own call.
+    reportWrite.reset();
+    int     failure = 0;
+    ssize_t reported;
+    do
+        reported = ::read(reportRead.fd, &failure, sizeof failure);
+    while (reported < 0 && errno == EINTR);
+    if (reported == static_cast<ssize_t>(sizeof failure)) {
+        ::waitpid(pid, nullptr, 0);
+        result.error = std::string("Cannot start the program: ") + std::strerror(failure);
+        return result;
+    }
+    #else
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t          attributes;
+    ::posix_spawn_file_actions_init(&actions);
+    ::posix_spawnattr_init(&attributes);
+    struct Guard {
+        posix_spawn_file_actions_t* actions;
+        posix_spawnattr_t*          attributes;
+        ~Guard() {
+            ::posix_spawn_file_actions_destroy(actions);
+            ::posix_spawnattr_destroy(attributes);
+        }
+    } guard{&actions, &attributes};
+    // Its own process group: a timeout or cancellation kills the program and every descendant that stayed in it.
+    sigset_t none;
+    sigemptyset(&none);  // Unqualified: a macro on macOS.
+    ::posix_spawnattr_setpgroup(&attributes, 0);
+    sigset_t every;
+    sigfillset(&every);
+    ::posix_spawnattr_setsigmask(&attributes, &none);
+    ::posix_spawnattr_setsigdefault(&attributes, &every);  // Default dispositions, not the application's.
+    ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
+    bool prepared = ::posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0
+                    && ::posix_spawn_file_actions_adddup2(&actions, outWrite.fd, 1) == 0 && ::posix_spawn_file_actions_adddup2(&actions, errWrite.fd, 2) == 0;
+        #if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+    // The calling application's own descriptors (sockets, files) stay out of the program.
+    prepared = prepared && ::posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
+        #endif
+    if (!directory.empty()) {
+        #if defined(__clang__)
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Wdeprecated-declarations"  // macOS 26 prefers the name without _np.
+        #endif
+        prepared = prepared && ::posix_spawn_file_actions_addchdir_np(&actions, directory.c_str()) == 0;
+        #if defined(__clang__)
+            #pragma clang diagnostic pop
+        #endif
+    }
+    if (!prepared) {
+        result.error = "Cannot prepare the child process";
+        return result;
+    }
+    pid_t pid = 0;
+    if (const int code = ::posix_spawn(&pid, program.c_str(), &actions, &attributes, argv.data(), environmentBlock.data()); code != 0) {
+        result.error = std::string("Cannot start the program: ") + std::strerror(code);
+        return result;
+    }
+    #endif
+    outWrite.reset();
+    errWrite.reset();
+
+    bool statusLost = false;
+    // Only while the program is not reaped: its number, and its group's, are reserved until then.
+    const auto killGroup = [pid] {
+        ::kill(-pid, SIGKILL);
+        ::kill(pid, SIGKILL);
+    };
+    const auto deadline = begin + spec.timeout;
+    bool       exited = false, timedOut = false, cancelled = false;
+    int        waitStatus = 0;
+    auto       drainEnd   = std::chrono::steady_clock::time_point::max();
+    for (;;) {
+        pollfd fds[2];
+        nfds_t count = 0;
+        int    owners[2];
+        for (auto [descriptor, id] : {
+                 std::pair{&outRead, 0},
+                 std::pair{&errRead, 1}
+        })
+            if (descriptor->fd >= 0) {
+                fds[count]    = {descriptor->fd, POLLIN, 0};
+                owners[count] = id;
+                ++count;
+            }
+        if (count)
+            ::poll(fds, count, static_cast<int>(processTick.count()));
+        else
+            std::this_thread::sleep_for(processTick);
+        for (nfds_t index = 0; index < count; ++index) {
+            auto& descriptor = owners[index] == 0 ? outRead : errRead;
+            char  buffer[8192];
+            // A bounded amount per turn: a program that keeps its pipe full must not starve the other stream, the
+            // deadline or the cancellation, which are checked after every turn.
+            for (int reads = 0; reads < 16; ++reads) {
+                const auto got = ::read(descriptor.fd, buffer, sizeof buffer);
+                if (got > 0) {
+                    owners[index] == 0
+                        ? appendBounded(result.standardOutput, buffer, static_cast<std::size_t>(got), spec.maxOutputBytes, result.outputTruncated)
+                        : appendBounded(result.standardError, buffer, static_cast<std::size_t>(got), spec.maxOutputBytes, result.errorTruncated);
+                    continue;
+                }
+                if (got == 0 || (errno != EAGAIN && errno != EINTR))
+                    descriptor.reset();
+                break;
+            }
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (!exited) {
+            // Look without reaping: the program's number, and its group's, stay reserved while it is a zombie, so the
+            // group can be killed before any other process may receive them.
+            siginfo_t info{};
+            const int waited = ::waitid(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT);
+            if (waited == 0 && info.si_pid == pid) {
+                ::kill(-pid, SIGKILL);  // Whatever the program left running in its group ends with it.
+                ::waitpid(pid, &waitStatus, 0);
+                exited   = true;
+                drainEnd = now + processDrainGrace;
+            } else if (waited < 0 && errno == ECHILD) {
+                // The application ignores SIGCHLD, so the system reaped the program and kept no status.
+                statusLost = true;
+                exited     = true;
+                ::kill(-pid, SIGKILL);
+                drainEnd = now + processDrainGrace;
+            } else if (cancel.load() && !cancelled && !timedOut) {
+                cancelled = true;
+                killGroup();
+            } else if (now >= deadline && !cancelled && !timedOut) {
+                timedOut = true;
+                killGroup();
+            }
+        }
+        if (exited && ((outRead.fd < 0 && errRead.fd < 0) || now >= drainEnd))
+            break;
+    }
+    if (timedOut)
+        result.status = ProcessStatus::timeout;
+    else if (cancelled)
+        result.status = ProcessStatus::cancelled;
+    else if (statusLost) {
+        result.status = ProcessStatus::exited;
+        result.error  = "The exit status is unavailable because the application ignores SIGCHLD";
+    } else if (WIFSIGNALED(waitStatus)) {
+        result.status = ProcessStatus::signaled;
+        result.signal = WTERMSIG(waitStatus);
+    } else {
+        result.status   = ProcessStatus::exited;
+        result.exitCode = WEXITSTATUS(waitStatus);
+    }
+    result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin);
+    return result;
+}
+
+#endif
+}  // namespace detail
+
+/**
+ * @brief Runs `spec.program` to completion, or until `spec.timeout` or `cancel`, and returns how it ended.
+ * The program is started directly (never through a shell) with its own standard input closed. Its output is captured up to
+ * `maxOutputBytes` per stream and the excess is discarded (`outputTruncated`/`errorTruncated`). When it ends, times out or
+ * is cancelled, the program and its descendants are killed: a POSIX process group (descendants that left it with setsid
+ * survive), a Windows job object. The call blocks; run it on its own thread. Invalid input throws std::invalid_argument; a
+ * program that cannot start is a `launchFailed` result.
+ */
+inline ProcessResult runProcess(const ProcessSpec& spec, const std::atomic<bool>& cancel) {
+    detail::validateProcessSpec(spec);
+#ifdef _WIN32
+    return detail::runProcessWindows(spec, cancel);
+#else
+    return detail::runProcessPosix(spec, cancel);
+#endif
+}
+
+}  // namespace webfront::testing
