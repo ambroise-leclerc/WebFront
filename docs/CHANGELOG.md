@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-01
+
 - Run authorized native programs from the specs of `webfront_add_jasmine_test` (#445): `PROGRAMS` is the owner's grant and
   `webFrontHost.run({program, args, cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal})` starts a listed program
   directly, without a shell, with literal arguments, an explicit environment, bounded time and output, and a structured result

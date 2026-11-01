@@ -40,7 +40,7 @@
 
 namespace webfront {
 
-inline constexpr std::string_view version = "0.7.0";
+inline constexpr std::string_view version = "0.8.0";
 
 namespace testing {
 /// Test-only access to the connection identifiers of an application; not part of the API.
