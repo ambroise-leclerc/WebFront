@@ -175,10 +175,16 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                         result = await exclusive(context, async () => ({exitCode:0, output:'', report:null,
                             data:request.operation === 'inspect' ? inspector.inspect() : inspector.action(request.operation,args)}));
                     } else {
-                        if (!['check','build','test','preview'].includes(request.operation)) throw new Error('Unknown automation operation');
+                        if (!['check','build','test','preview','init','create','install','restore','embed'].includes(request.operation)) throw new Error('Unknown automation operation');
                         const argv = [request.operation];
-                        if (args.entry) argv.push(args.entry);
-                        if (args.pattern) argv.push(args.pattern);
+                        if (request.operation === 'embed') {
+                            if (args.provider) argv.push(args.provider);
+                            else if (args.entry && args.output) argv.push(args.entry, '--output', args.output);
+                            else throw new Error('embed needs either provider, or entry together with output');
+                        } else {
+                            for (const key of ['name','starter','directory','package','entry','pattern'])
+                                if (args[key]) argv.push(args[key]);
+                        }
                         result = await run(argv, {...context, signal:controller.signal, onExit:() => {}, outputLimit:16000,
                             write:text => { output = clip(output + text); }, reporter:undefined});
                         // A command that stopped because of the cancellation reports it, whatever code it chose.

@@ -10,13 +10,19 @@ inline constexpr std::string_view contractSource = R"JSON({
  "type":"object","additionalProperties":false,"required":["session","operation"],
  "properties":{
    "session":{"type":"string","minLength":1},
-   "operation":{"type":"string","enum":["check","build","test","preview","inspect","click","fill"]},
+   "operation":{"type":"string","enum":["check","build","test","preview","inspect","click","fill","init","create","install","restore","embed"]},
    "arguments":{"type":"object","additionalProperties":false,"properties":{
      "entry":{"type":"string","maxLength":4096,"description":"Project-relative path or manifest entry; no leading option or path traversal."},
      "pattern":{"type":"string","maxLength":4096,"description":"Spec name substring, never a command option."},
      "pageId":{"type":"string","minLength":1,"maxLength":4096},
      "elementId":{"type":"string","minLength":1,"maxLength":4096},
-     "value":{"type":"string","maxLength":4096}
+     "value":{"type":"string","maxLength":4096},
+     "name":{"type":"string","maxLength":4096,"description":"Project name written by init; never a command option."},
+     "starter":{"type":"string","maxLength":4096,"description":"Starter name for create, never a command option."},
+     "directory":{"type":"string","maxLength":4096,"description":"Project-relative directory for create; wf refuses an existing one."},
+     "package":{"type":"string","maxLength":4096,"description":"One package name with optional range for install, from the configured registry; omit to install the locked graph."},
+     "provider":{"type":"string","maxLength":4096,"description":"Manifest provider label for embed."},
+     "output":{"type":"string","maxLength":4096,"description":"Project-relative provider header for embed with an entry; an existing file is replaced."}
    }}
  },
  "$defs":{
@@ -37,7 +43,12 @@ inline constexpr std::string_view contractSource = R"JSON({
    "preview":{"permission":"preview","arguments":["entry"],"required":[]},
    "inspect":{"permission":"inspect","arguments":[],"required":[]},
    "click":{"permission":"interact","arguments":["pageId","elementId"],"required":["pageId","elementId"]},
-   "fill":{"permission":"interact","arguments":["pageId","elementId","value"],"required":["pageId","elementId","value"]}
+   "fill":{"permission":"interact","arguments":["pageId","elementId","value"],"required":["pageId","elementId","value"]},
+   "init":{"permission":"init","since":"0.6.4","arguments":["name"],"required":[]},
+   "create":{"permission":"create","since":"0.6.4","arguments":["starter","directory"],"required":["starter"]},
+   "install":{"permission":"install","since":"0.6.4","arguments":["package"],"required":[]},
+   "restore":{"permission":"restore","since":"0.6.4","arguments":[],"required":[]},
+   "embed":{"permission":"embed","since":"0.6.4","arguments":["provider","entry","output"],"required":[]}
  }
 })JSON";
 
@@ -72,6 +83,7 @@ struct OperationDefinition {
     Object                   schema;
     std::string              permission;
     std::vector<std::string> arguments, required;
+    std::string              since;  ///< First environment version that runs the operation; empty when every automation environment does.
 };
 inline const auto& operationDefinitions() {
     static const auto definitions = [] {
@@ -81,7 +93,7 @@ inline const auto& operationDefinitions() {
             const Object schema{raw};
             values.emplace(
                 name,
-                OperationDefinition{schema, schema.string("permission"), contractStrings(schema.raw("arguments")), contractStrings(schema.raw("required"))});
+                OperationDefinition{schema, schema.string("permission"), contractStrings(schema.raw("arguments")), contractStrings(schema.raw("required")), schema.string("since")});
         }
         return values;
     }();

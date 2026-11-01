@@ -1,5 +1,14 @@
 # CTest owns this process. Its timeout remains outside the browser, even if JS stops responding.
 file(REMOVE "${DIRECTORY}/report.json")
+file(REMOVE_RECURSE "${DIRECTORY}/captures")
+# The temporary spaces of the specs never survive into the next run, even if the previous one was killed.
+file(REMOVE_RECURSE "${DIRECTORY}/temp")
+# An inherited grant must never reach a test that has none: an empty value is read as no grant.
+set(host_environment "[==[WEBFRONT_JASMINE_HOST=]==]")
+if(HOST)
+    # The owner's native grant (webfront_add_jasmine_test PROGRAMS); without it the application reads no such file.
+    set(host_environment "[==[WEBFRONT_JASMINE_HOST=${DIRECTORY}/host-${CONFIG}.json]==]")
+endif()
 file(READ "${DIRECTORY}/arguments-${CONFIG}.json" json)
 string(JSON count LENGTH "${json}")
 # Bracket arguments are literal: they keep empty strings and semicolons that a list expansion would lose.
@@ -26,12 +35,13 @@ if(NOT CMAKE_HOST_WIN32)
     set(wrapper "[==[sh]==] ${wrapper}")
 endif()
 cmake_language(EVAL CODE "execute_process(COMMAND ${wrapper} [==[${CMAKE_COMMAND}]==] -E env
-    [==[WEBFRONT_JASMINE_CONFIG=${DIRECTORY}/config.json]==]
+    [==[WEBFRONT_JASMINE_CONFIG=${DIRECTORY}/config.json]==] ${host_environment}
     [==[XDG_DATA_HOME=${DIRECTORY}/profile/data]==] [==[XDG_CACHE_HOME=${DIRECTORY}/profile/cache]==]
     [==[WEBFRONT_TEST_CEF_PROFILE=${DIRECTORY}/profile/cef]==]
     [==[WEBFRONT_TEST_WEBVIEW2_PROFILE=${DIRECTORY}/profile/webview2]==]
     ${prefix} [==[${PROGRAM}]==]${arguments}
     RESULT_VARIABLE status TIMEOUT ${backstop})")
+file(REMOVE_RECURSE "${DIRECTORY}/temp")
 if(status MATCHES "timeout" OR status STREQUAL "124")
     message(FATAL_ERROR "Jasmine application timed out after ${LIMIT} seconds")
 endif()

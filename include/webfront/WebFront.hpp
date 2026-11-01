@@ -40,7 +40,7 @@
 
 namespace webfront {
 
-inline constexpr std::string_view version = "0.7.0";
+inline constexpr std::string_view version = "0.8.0";
 
 namespace testing {
 /// Test-only access to the connection identifiers of an application; not part of the API.
@@ -951,6 +951,49 @@ using WebFront = BasicWF<NetProvider, fs::DefaultFS>;
 template <frontend::FrontendType Frontend, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 using WebFrontWithFrontend = BasicWF<NetProvider, fs::DefaultFS, Policy, Frontend>;
 using UI       = WebFront::UI;
+
+#ifdef WEBFRONT_EMBED_CEF
+inline constexpr bool cefAvailable = true;
+#else
+inline constexpr bool cefAvailable = false;
+#endif
+
+/**
+ * @brief True when at least one embedded engine is compiled in: the platform's native web view (WEBFRONT_EMBED_WEBKITGTK,
+ * WEBFRONT_EMBED_WEBVIEW2 or WEBFRONT_EMBED_WKWEBVIEW) or CEF (WEBFRONT_EMBED_CEF). Always defined, so applications need no
+ * preprocessor test. Like frontend::nativeWebViewAvailable, it says nothing about the session (a missing display still fails at
+ * run time).
+ */
+inline constexpr bool embeddedFrontendAvailable = frontend::nativeWebViewAvailable || cefAvailable;
+
+namespace detail {
+/// Stands in where no engine is compiled in: constructing the application throws std::runtime_error.
+struct NoEmbeddedFrontend {
+    static constexpr frontend::Action action{frontend::Action::closeServerAfterOpen};
+
+    static void initialize() {
+        throw std::runtime_error("no embedded web view engine in this build: configure with -DWEBFRONT_EMBED_WEBKITGTK=ON (Linux), "
+                                 "-DWEBFRONT_EMBED_WEBVIEW2=ON (Windows), -DWEBFRONT_EMBED_WKWEBVIEW=ON (macOS) or -DWEBFRONT_EMBED_CEF=ON");
+    }
+    static void open(std::string_view, std::string_view) {
+        initialize();
+    }
+};
+
+#if defined(_WIN32) || defined(__APPLE__) || defined(__linux__)
+using NativeOrAbsentFrontend = std::conditional_t<frontend::nativeWebViewAvailable, frontend::NativeWebViewFrontend, NoEmbeddedFrontend>;
+#else
+using NativeOrAbsentFrontend = NoEmbeddedFrontend;
+#endif
+// The native web view wins when both exist; CEF is the engine of a build that has no native one.
+using EmbeddedFrontendType = std::conditional_t<frontend::nativeWebViewAvailable || !cefAvailable, NativeOrAbsentFrontend, frontend::CEFFrontend>;
+}  // namespace detail
+
+/**
+ * @brief The application type with the embedded web view window. Always defined: without an engine in the build, constructing it
+ * throws std::runtime_error, so falling back to the system browser is an ordinary try/catch.
+ */
+using EmbeddedWebFront = WebFrontWithFrontend<detail::EmbeddedFrontendType>;
 
 }  // namespace webfront
 

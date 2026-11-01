@@ -3,6 +3,8 @@
 
 #include "../utils/Json.hpp"
 #include "../WebFront.hpp"
+#include "Capture.hpp"
+#include "Host.hpp"
 
 #include <cmath>
 #include <concepts>
@@ -44,12 +46,13 @@ inline std::string readJasmineFile(const std::filesystem::path& path) {
 struct JasmineConfiguration {
     std::vector<std::string> files;
     std::filesystem::path    report;
+    std::filesystem::path    captures;  // Optional: where screenshots and recordings go.
 };
 
 inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
     JasmineConfiguration config;
     json::Reader         reader{text};
-    bool                 files = false, report = false;
+    bool                 files = false, report = false, captures = false;
     reader.object([&](const std::string& key) {
         if (key == "files" && !std::exchange(files, true))
             reader.array([&] {
@@ -59,6 +62,8 @@ inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
             });
         else if (key == "report" && !std::exchange(report, true))
             config.report = reader.string();
+        else if (key == "captures" && !std::exchange(captures, true))
+            config.captures = reader.string();
         else
             throw std::invalid_argument("Unknown or duplicate Jasmine configuration field");
     });
@@ -68,20 +73,25 @@ inline JasmineConfiguration jasmineConfiguration(std::string_view text) {
     return config;
 }
 
-inline std::optional<std::string> jasmineConfigurationPath() {
+/// The value of an environment variable the test runner sets, if it is set and not empty.
+inline std::optional<std::string> jasmineEnvironment(const char* name) {
 #ifdef _MSC_VER
     char*       raw  = nullptr;
     std::size_t size = 0;
-    if (_dupenv_s(&raw, &size, "WEBFRONT_JASMINE_CONFIG") != 0)
-        throw std::runtime_error("Cannot read WEBFRONT_JASMINE_CONFIG");
+    if (_dupenv_s(&raw, &size, name) != 0)
+        throw std::runtime_error(std::string("Cannot read ") + name);
     std::unique_ptr<char, decltype(&std::free)> owned(raw, std::free);
     if (raw && *raw)
         return std::string(raw);
 #else
-    if (const auto* raw = std::getenv("WEBFRONT_JASMINE_CONFIG"); raw && *raw)
+    if (const auto* raw = std::getenv(name); raw && *raw)
         return std::string(raw);
 #endif
     return std::nullopt;
+}
+
+inline std::optional<std::string> jasmineConfigurationPath() {
+    return jasmineEnvironment("WEBFRONT_JASMINE_CONFIG");
 }
 
 /// Bytes per bridge read, shared by the page script (injected as CHUNK) and JasmineSession::read.
@@ -90,6 +100,87 @@ inline constexpr std::size_t jasmineChunkSize = 49152;
 inline constexpr std::string_view jasmineScriptBody = R"JS(
 void (async () => {
     const call = (name, ...args) => webFront.cppFunction('webfront.testing.' + name)(...args);
+    // Screenshots and image sequences of the web content, written to the run's capture directory. The C++ side starts the
+    // work on its own thread and answers at once (the server thread must keep serving the page), so the page polls.
+    const settle = async name => {
+        for (;;) {
+            const result = await call(name);
+            if (result >= 0) return result;
+            await new Promise(resolve => setTimeout(resolve, 20));
+        }
+    };
+    // The methods do not use `this`, so `const {record} = webFrontCapture` works. A recording whose page is replaced is
+    // stopped by the C++ side.
+    const screenshot = async name => { await call('screenshotStart', name); return settle('screenshotPoll'); };
+    const startRecording = (name, framesPerSecond = 10) => call('recordStart', name, framesPerSecond);
+    const stopRecording = async () => { await call('recordStop'); return settle('recordPoll'); };
+    const record = async (name, {seconds = 3, framesPerSecond = 10} = {}) => {
+        await startRecording(name, framesPerSecond);
+        await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+        return stopRecording();
+    };
+    globalThis.webFrontCapture = {screenshot, startRecording, stopRecording, record};
+    // Native capabilities the test's owner granted (PROGRAMS in webfront_add_jasmine_test): authorized programs run without a
+    // shell, and private temporary spaces. Without a grant every call rejects. Bytes cross the bridge in bounded chunks.
+    const hostChunk = CHUNK, HOST_FILE_LIMIT = 64 * 1024 * 1024;
+    const bytesOf = data => typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const readAll = async fetchChunk => {
+        const parts = [];
+        for (let offset = 0; ; ) {
+            const part = await fetchChunk(offset);
+            parts.push(part);
+            offset += part.length;
+            if (offset > HOST_FILE_LIMIT) throw new RangeError('A file or output exceeds the 64 MiB limit');
+            if (part.length < hostChunk) break;
+        }
+        return new Blob(parts).arrayBuffer().then(buffer => new Uint8Array(buffer));
+    };
+    const host = {
+        programs: async () => JSON.parse(await call('hostPrograms')),
+        makeTemp: () => call('hostMakeTemp'),
+        removeTemp: path => call('hostRemoveTemp', path),
+        withTemp: async body => {
+            const path = await call('hostMakeTemp');
+            try { return await body(path); }
+            finally { await call('hostRemoveTemp', path); }
+        },
+        writeFile: async (path, data) => {
+            const bytes = bytesOf(data);
+            await call('hostWrite', path, 0, bytes.subarray(0, 0));
+            for (let offset = 0; offset < bytes.length; offset += hostChunk)
+                await call('hostWrite', path, offset, bytes.subarray(offset, offset + hostChunk));
+        },
+        readFile: path => readAll(offset => call('hostRead', path, offset)),
+        readText: async path => new TextDecoder().decode(await host.readFile(path)),
+        run: async (options = {}) => {
+            const known = ['program', 'args', 'cwd', 'env', 'inheritEnv', 'timeoutMs', 'maxOutputBytes', 'signal'];
+            // There is no shell option to ask for: an unknown one is a mistake, not something to ignore.
+            for (const key of Object.keys(options)) if (!known.includes(key)) throw new TypeError('Unknown run option: ' + key);
+            const {program, args = [], cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal} = options;
+            const request = {program, args: args.map(String)};
+            for (const [key, value] of Object.entries({cwd, env, inheritEnv, timeoutMs, maxOutputBytes}))
+                if (value !== undefined) request[key] = value;
+            signal?.throwIfAborted();
+            // The listener exists before the start call: an abort that lands while the program starts is not lost.
+            let id;
+            const abort = () => { if (id !== undefined) call('hostRunCancel', id).catch(() => {}); };
+            signal?.addEventListener('abort', abort, {once: true});
+            try {
+                id = await call('hostRunStart', JSON.stringify(request));
+                if (signal?.aborted) abort();
+                let summary = '';
+                while (!(summary = await call('hostRunPoll', id))) await new Promise(resolve => setTimeout(resolve, 10));
+                const result = JSON.parse(summary);
+                const text = async stream => new TextDecoder().decode(await readAll(offset => call('hostRunRead', id, stream, offset)));
+                const {stdoutBytes, stderrBytes, ...rest} = result;
+                return {...rest, stdout: await text(1), stderr: await text(2)};
+            } finally {
+                signal?.removeEventListener('abort', abort);
+                if (id !== undefined) await call('hostRunRelease', id);
+            }
+        },
+    };
+    globalThis.webFrontHost = host;
     const load = async index => {
         const parts = [];
         for (let offset = 0; ; offset += CHUNK) {
@@ -171,16 +262,19 @@ class JasmineSession {
 public:
     static constexpr std::size_t chunkSize = jasmineChunkSize;
 
-    JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath)
-        : files(std::move(contents)), report(std::move(reportPath)) {}
+    JasmineSession(std::vector<std::string> contents, std::filesystem::path reportPath, std::shared_ptr<CaptureStore> captureStore = nullptr)
+        : files(std::move(contents)), report(std::move(reportPath)), store(std::move(captureStore)) {}
 
     /// The newest page is the one under test (a reload replaces the previous connection). Returns false once finished.
     bool attach(const Caller& caller) {
         std::scoped_lock lock{mutex};
         if (completed)
             return false;
-        if (browser && *browser != caller)
+        if (browser && *browser != caller) {
             std::cerr << "Jasmine: a new page replaced the instrumented one\n";
+            if (store)
+                store->abandon();  // The replaced page can no longer collect its recording.
+        }
         browser = caller;
         return true;
     }
@@ -201,6 +295,32 @@ public:
             throw std::invalid_argument("Invalid Jasmine file offset");
         const auto part = std::string_view(file).substr(static_cast<std::size_t>(offset), chunkSize);
         return std::vector<std::uint8_t>(part.begin(), part.end());
+    }
+
+    /// Starts writing `<captures>/<name>.png` on a worker thread and returns at once.
+    void screenshotStart(const Caller& caller, const std::string& name) {
+        captures(caller).beginScreenshot(name);
+    }
+
+    /// The size in bytes of the finished screenshot, or -1 while it is still being taken.
+    [[nodiscard]] double screenshotPoll(const Caller& caller) {
+        const auto size = captures(caller).pollScreenshot();
+        return size ? static_cast<double>(*size) : -1.0;
+    }
+
+    void recordStart(const Caller& caller, const std::string& name, double framesPerSecond) {
+        captures(caller).startRecording(name, framesPerSecond);
+    }
+
+    /// Asks the recording to stop and returns at once.
+    void recordStop(const Caller& caller) {
+        captures(caller).requestStop();
+    }
+
+    /// The number of images the recording wrote once it has ended, or -1 while it is still ending.
+    [[nodiscard]] double recordPoll(const Caller& caller) {
+        const auto frames = captures(caller).pollRecording();
+        return frames ? static_cast<double>(*frames) : -1.0;
     }
 
     void result(const Caller& caller, const std::string& text) {
@@ -236,18 +356,35 @@ public:
         return status;
     }
 
+    /// Throws unless `caller` is the page under test (the native capabilities answer to it only).
+    void requireCaller(const Caller& caller) {
+        std::scoped_lock lock{mutex};
+        authorize(caller);
+    }
+
 private:
     void authorize(const Caller& caller) const {
         if (!browser || *browser != caller)
             throw std::runtime_error("Jasmine callback belongs to another page");
     }
 
-    std::vector<std::string> files;
-    std::filesystem::path    report;
-    std::optional<Caller>    browser;
-    std::mutex               mutex;
-    bool                     completed = false;
-    int                      status    = 1;
+    CaptureStore& captures(const Caller& caller) {
+        {
+            std::scoped_lock lock{mutex};
+            authorize(caller);
+        }
+        if (!store)
+            throw std::runtime_error("This test has no capture directory");
+        return *store;  // Not under the mutex: a capture waits for the window and a recording runs for seconds.
+    }
+
+    std::vector<std::string>      files;
+    std::filesystem::path         report;
+    std::shared_ptr<CaptureStore> store;
+    std::optional<Caller>         browser;
+    std::mutex                    mutex;
+    bool                          completed = false;
+    int                           status    = 1;
 };
 }  // namespace detail
 
@@ -272,15 +409,43 @@ public:
         const auto path = detail::jasmineConfigurationPath();
         if (!path)
             return;
-        const auto config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
+        const auto               config = detail::jasmineConfiguration(detail::readJasmineFile(*path));
         std::vector<std::string> contents;
         for (const auto& file : config.files)
             contents.push_back(detail::readJasmineFile(file));
-        session          = std::make_shared<Session>(std::move(contents), config.report);
+        std::shared_ptr<CaptureStore> store;
+        if (!config.captures.empty())
+            store = std::make_shared<CaptureStore>(config.captures);
+        session          = std::make_shared<Session>(std::move(contents), config.report, std::move(store));
         const auto owned = session;
-        app.cppFunction("webfront.testing.count", [owned](AppUI ui) { return owned->count(ui); });
-        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) { return owned->read(ui, index, offset); });
-        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) { owned->result(ui, result); });
+        // Native capabilities exist only when the owner's CMake file granted some (PROGRAMS): the runner then sets this file.
+        if (const auto hostPath = detail::jasmineEnvironment("WEBFRONT_JASMINE_HOST"))
+            host = std::make_shared<HostSession>(detail::hostConfiguration(detail::readJasmineFile(*hostPath)));
+        registerHost(app);
+        app.cppFunction("webfront.testing.count", [owned](AppUI ui) {
+            return owned->count(ui);
+        });
+        app.cppFunction("webfront.testing.read", [owned](AppUI ui, double index, double offset) {
+            return owned->read(ui, index, offset);
+        });
+        app.cppFunction("webfront.testing.result", [owned](AppUI ui, std::string result) {
+            owned->result(ui, result);
+        });
+        app.cppFunction("webfront.testing.screenshotStart", [owned](AppUI ui, std::string name) {
+            owned->screenshotStart(ui, name);
+        });
+        app.cppFunction("webfront.testing.screenshotPoll", [owned](AppUI ui) {
+            return owned->screenshotPoll(ui);
+        });
+        app.cppFunction("webfront.testing.recordStart", [owned](AppUI ui, std::string name, double rate) {
+            owned->recordStart(ui, name, rate);
+        });
+        app.cppFunction("webfront.testing.recordStop", [owned](AppUI ui) {
+            owned->recordStop(ui);
+        });
+        app.cppFunction("webfront.testing.recordPoll", [owned](AppUI ui) {
+            return owned->recordPoll(ui);
+        });
         subscription = app.subscribeUIStarted([owned](AppUI ui) {
             if (owned->attach(ui))
                 ui.addScript(detail::jasmineScript());
@@ -292,8 +457,51 @@ public:
     }
 
 private:
-    std::shared_ptr<Session> session;
-    UISubscription           subscription;
+    /// The page's bridge to HostSession; each call is checked against the page under test, and refused with no grant.
+    void registerHost(App& app) {
+        const auto owned = session;
+        const auto grant = host;
+        const auto guard = [owned, grant](const AppUI& ui) -> HostSession& {
+            owned->requireCaller(ui);
+            if (!grant)
+                throw std::runtime_error("No native capability was granted to this test: add PROGRAMS to webfront_add_jasmine_test");
+            return *grant;
+        };
+        app.cppFunction("webfront.testing.hostPrograms", [guard](AppUI ui) {
+            return guard(ui).programs();
+        });
+        app.cppFunction("webfront.testing.hostMakeTemp", [guard](AppUI ui) {
+            return guard(ui).makeTemp();
+        });
+        app.cppFunction("webfront.testing.hostRemoveTemp", [guard](AppUI ui, std::string path) {
+            guard(ui).removeTemp(path);
+        });
+        app.cppFunction("webfront.testing.hostWrite", [guard](AppUI ui, std::string path, double offset, std::vector<std::uint8_t> bytes) {
+            guard(ui).writeFile(path, offset, bytes);
+        });
+        app.cppFunction("webfront.testing.hostRead", [guard](AppUI ui, std::string path, double offset) {
+            return guard(ui).readFile(path, offset);
+        });
+        app.cppFunction("webfront.testing.hostRunStart", [guard](AppUI ui, std::string request) {
+            return guard(ui).runStart(request);
+        });
+        app.cppFunction("webfront.testing.hostRunPoll", [guard](AppUI ui, double id) {
+            return guard(ui).runPoll(id).value_or(std::string{});
+        });
+        app.cppFunction("webfront.testing.hostRunRead", [guard](AppUI ui, double id, double stream, double offset) {
+            return guard(ui).runRead(id, stream, offset);
+        });
+        app.cppFunction("webfront.testing.hostRunCancel", [guard](AppUI ui, double id) {
+            guard(ui).runCancel(id);
+        });
+        app.cppFunction("webfront.testing.hostRunRelease", [guard](AppUI ui, double id) {
+            guard(ui).runRelease(id);
+        });
+    }
+
+    std::shared_ptr<Session>     session;
+    std::shared_ptr<HostSession> host;
+    UISubscription               subscription;
 };
 }  // namespace jasmine_enabled
 #else

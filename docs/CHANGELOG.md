@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-01
+
+- Run authorized native programs from the specs of `webfront_add_jasmine_test` (#445): `PROGRAMS` is the owner's grant and
+  `webFrontHost.run({program, args, cwd, env, inheritEnv, timeoutMs, maxOutputBytes, signal})` starts a listed program
+  directly, without a shell, with literal arguments, an explicit environment, bounded time and output, and a structured result
+  (`exited`, `signaled`, `timeout`, `cancelled`, `launchFailed`, stdout/stderr and truncation flags). The program and its
+  process group (POSIX) or job object (Windows) are killed at the timeout, on cancellation and when the program ends.
+  `makeTemp`/`withTemp`, `writeFile` and `readFile` give private temporary spaces that are removed after success, failure and
+  cancellation. Without `PROGRAMS` every call rejects; `webfront::testing::runProcess` and `HostSession` are the C++ API. The wf
+  scripts keep no process capability. The browser specs are validated on Linux; Windows and macOS run the unit tests of the runner in CI. See `docs/CONSUMER_TESTING.md` for
+  the XML-to-JSON recipe.
+
+- Automation can set a project up end to end (#466): `init`, `create`, `install`, `restore` and `embed` join the contract of
+  `webfront-agent`, each behind its own `--allow` grant and with plain-name or project-relative arguments (no options, no
+  traversal). `install` takes one package from the configured registry or installs the locked graph; `embed` takes a manifest
+  provider, or an entry with an output header. See `docs/AUTOMATION.md`. The environment sources advance to 0.6.4 (unpublished,
+  the pin stays on 0.6.3). Granting one of these operations to an older environment now fails at startup with a bootstrap error naming
+  the operation, and `embed` is documented as replacing its output header. `create` now finds the pinned starters (the connection reads them from the
+  environment manifest) and the launcher serves `<name>-starter.tgz` from beside the environment archive; an end-to-end case
+  creates, initializes, installs and embeds a project.
+- Declare the embedded engine without consumer-side macros (#467): `webfront::embeddedFrontendAvailable` (`constexpr bool`, true
+  when a native web view or CEF is compiled in) and `webfront::EmbeddedWebFront` (the application type with the native web view,
+  or with CEF when only CEF is built) exist in every configuration; constructing `EmbeddedWebFront` throws
+  `std::runtime_error` when the build has no engine. See `docs/FRONTENDS.md`.
+- Capture the web view as PNG images (#468): `webFrontCapture.screenshot(name)` and `webFrontCapture.record(name, {seconds,
+  framesPerSecond})` (also `startRecording`/`stopRecording`) in the specs of `webfront_add_jasmine_test` write
+  `webfront-jasmine/<name>/captures/<name>.png` and numbered `<name>/0001.png`... for an external encoder such as ffmpeg.
+  `webfront::frontend::capturePng()` and `webfront::testing::CaptureStore` are the C++ API. WebKitGTK, WKWebView, WebView2 and CEF
+  implement it. The bridge callbacks start the work on a worker
+  thread and the page polls, so a capture never blocks the server thread. See `docs/CONSUMER_TESTING.md`.
+
 ## 0.7.0 - 2026-10-31
 
 - Cut pull-request CI time (#435): the desktop jobs build with `--parallel 4` and compile the 13 heavy unit-test files four

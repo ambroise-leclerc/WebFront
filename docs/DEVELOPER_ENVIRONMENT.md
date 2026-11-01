@@ -34,7 +34,8 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
-lease; version 0.6.2 predates that API. Publication and pin changes follow
+lease; version 0.6.2 predates that API. The sources advance to 0.6.4 (project setup operations in the automation
+runner), which is not published yet; the release pin stays on the published 0.6.3. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md), with deployment verified before merging a new pin.
 
 ## Minimal C++ application
@@ -307,7 +308,9 @@ A `context` operation outside the permissions rejects with an explicit error. Th
 API**: the Worker keeps its own capabilities (global `fetch`, `importScripts`, WebSocket...), and nothing here is a
 security boundary. Node.js modules (`fs`, `child_process`, `node:*`...) are refused while the script is loaded,
 unless a locked package of that name is a dependency of the importer; `process` does not exist and no polyfill is
-provided.
+provided. A script cannot run a native program, and no manifest permission can grant that: a test or tool that must run a
+program (a CLI under test, a converter's output checked by the binary that reads it) is a spec of the consumer Jasmine path,
+where the test's owner authorizes the program ([native programs and temporary files](CONSUMER_TESTING.md#native-programs-and-temporary-files-from-the-specs)).
 
 Ctrl+C first aborts `context.signal`; a script still running two seconds later (the grace period) is terminated with
 `worker.terminate()`, which also stops a loop that never returns to the event loop. The time limit (`--timeout`,

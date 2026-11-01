@@ -3,13 +3,19 @@
 #include "../ContentPolicy.hpp"
 #include "../tooling/Logger.hpp"
 #include "Action.hpp"
+#include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -41,6 +47,12 @@ class Api {
         if (!result)
             throw std::runtime_error(std::string("WebKitGTK: missing runtime symbol ") + name);
         return result;
+    }
+
+    // A symbol that only some runtimes provide: null instead of an exception, so the rest of the adapter keeps working.
+    template <typename Function>
+    Function optionalSymbol(const char* name) {
+        return module ? reinterpret_cast<Function>(dlsym(module, name)) : nullptr;
     }
 
 public:
@@ -93,6 +105,14 @@ public:
     unsigned (*status)(Object)                              = symbol<decltype(status)>("webkit_uri_response_get_status_code");
     void (*evaluate)(Object, const char*, long, const char*, const char*, Object, Callback, Object) =
         symbol<decltype(evaluate)>("webkit_web_view_evaluate_javascript");
+    unsigned (*idleAddFull)(int, int (*)(void*), void*, void (*)(void*)) = symbol<decltype(idleAddFull)>("g_idle_add_full");
+    // Capture needs GTK 4.6 (gdk_texture_save_to_png_bytes): an older runtime still opens windows, but cannot capture.
+    void (*snapshot)(Object, int, int, Object, Callback, void*) = optionalSymbol<decltype(snapshot)>("webkit_web_view_get_snapshot");
+    Object (*snapshotFinish)(Object, Object, Error**)           = optionalSymbol<decltype(snapshotFinish)>("webkit_web_view_get_snapshot_finish");
+    Object (*texturePng)(Object)                                = optionalSymbol<decltype(texturePng)>("gdk_texture_save_to_png_bytes");
+    const void* (*bytesData)(Object, std::size_t*)              = symbol<decltype(bytesData)>("g_bytes_get_data");
+    void (*bytesUnref)(Object)                                  = symbol<decltype(bytesUnref)>("g_bytes_unref");
+    void (*errorFree)(Error*)                                   = symbol<decltype(errorFree)>("g_error_free");
 };
 
 inline Api& api() {
@@ -139,6 +159,112 @@ inline std::filesystem::path profileDirectory(const char* variable, const char* 
     return directory;
 }
 
+/// The view as seen by capture requests: read and cleared only on the GTK main thread, so a request that
+/// outlives the window finds it null.
+struct CaptureJob;
+struct CaptureTarget {
+    Api::Object                             view = nullptr;
+    PendingCaptures<CaptureJob> pending;  // Requests nobody has answered yet, queued or in flight.
+};
+
+struct CaptureJob {
+    std::shared_ptr<CaptureTarget> target;
+    std::promise<CaptureResult>    done;
+    std::atomic<bool>              abandoned = false;  // The requester gave up: the main thread must not start it.
+};
+
+inline void answer(CaptureJob& job, CaptureResult result) noexcept {
+    try {
+        job.done.set_value(std::move(result));
+    } catch (...) { }  // Already answered: a closing window may have answered before the engine did.
+}
+
+/// The window is going away: no pending request waits for an answer that will never come.
+inline void abandonCaptures(CaptureTarget& target) noexcept {
+    target.view = nullptr;
+    for (const auto& job : target.pending.close())
+        answer(*job, std::unexpected("the window is closed"));
+}
+
+
+// Runs on the GTK main thread; owns the job until the snapshot completes.
+inline void finishCapture(Api::Object view, Api::Object result, void* owner) noexcept {
+    std::unique_ptr<std::shared_ptr<CaptureJob>> job{static_cast<std::shared_ptr<CaptureJob>*>(owner)};
+    auto&                                        a = api();
+    (*job)->target->pending.untrack(*job);
+    try {
+        Api::Error* error   = nullptr;
+        const auto  texture = a.snapshotFinish(view, result, &error);
+        if (!texture) {
+            std::string message = error && error->message ? error->message : "the engine returned no image";
+            if (error)
+                a.errorFree(error);
+            answer(**job, std::unexpected("snapshot failed: " + message));
+            return;
+        }
+        const auto bytes = a.texturePng(texture);
+        a.unref(texture);
+        if (!bytes) {
+            answer(**job, std::unexpected("cannot encode the snapshot as PNG"));
+            return;
+        }
+        std::size_t               size  = 0;
+        const auto*               begin = static_cast<const std::uint8_t*>(a.bytesData(bytes, &size));
+        std::vector<std::uint8_t> png(begin, begin + size);
+        a.bytesUnref(bytes);
+        answer(**job, std::move(png));
+    } catch (...) {
+        try {
+            (*job)->done.set_exception(std::current_exception());
+        } catch (...) { }
+    }
+}
+
+// The idle source owns `data` (see releaseCapture): it is freed whether the source ran or was removed unserved.
+inline int startCapture(void* data) noexcept {
+    const auto& job = *static_cast<std::shared_ptr<CaptureJob>*>(data);
+    auto&       a   = api();
+    if (job->abandoned)
+        return 0;
+    if (!job->target->view) {
+        answer(*job, std::unexpected("the window is closed"));
+        return 0;
+    }
+    const auto view = job->target->view;
+    // WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE. finishCapture owns its own reference to the job.
+    a.snapshot(view, 0, 0, nullptr, reinterpret_cast<Api::Callback>(finishCapture), new std::shared_ptr<CaptureJob>(job));
+    return 0;
+}
+
+inline void releaseCapture(void* data) noexcept {
+    delete static_cast<std::shared_ptr<CaptureJob>*>(data);
+}
+
+inline CaptureProvider captureProvider(std::shared_ptr<CaptureTarget> target) {
+    return [target = std::move(target)](std::chrono::milliseconds timeout) -> CaptureResult {
+        const auto& a = api();
+        if (!a.snapshot || !a.snapshotFinish || !a.texturePng)
+            return std::unexpected("this WebKitGTK/GTK runtime cannot capture (GTK 4.6 is required)");
+        auto job    = std::make_shared<CaptureJob>();
+        job->target = target;
+        auto future = job->done.get_future();
+        if (!target->pending.track(job))
+            return std::unexpected("the window is closed");
+        constexpr int idlePriority = 200;  // G_PRIORITY_DEFAULT_IDLE
+        a.idleAddFull(idlePriority, startCapture, new std::shared_ptr<CaptureJob>(job), releaseCapture);
+        const auto answered = future.wait_for(timeout) == std::future_status::ready;
+        target->pending.untrack(job);  // Whatever the outcome, a finished request is not kept until the window closes.
+        if (!answered) {
+            // The source is never touched from this thread: GLib hands out no counted reference to it, so one that the
+            // main thread is serving could be freed under us. The flag makes it a no-op when it runs; a main loop that
+            // never runs keeps only this small job until the process ends.
+            job->abandoned = true;
+            return std::unexpected("the window did not answer within the capture timeout");
+        }
+        return future.get();
+    };
+}
+
 struct Session : FailureState {
     Api&                                 a       = api();
     Api::Object                          loop    = a.loopNew(nullptr, 0);
@@ -153,6 +279,8 @@ struct Session : FailureState {
     unsigned                             navigationTimer   = 0;
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
+    std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
+    CaptureRegistration                  captureRegistration;
 
     explicit Session(webfront::detail::BoundContentPolicy rules, WindowOptions settings = {})
         : policy(std::move(rules)), windowOptions(resolveWindow(std::move(settings))) {}
@@ -175,6 +303,8 @@ struct Session : FailureState {
             a.sourceRemove(std::exchange(navigationTimer, 0));
     }
     void releaseView() {
+        captureRegistration = {};
+        abandonCaptures(*captureTarget);
         if (!view)
             return;
         for (auto handler : viewHandlers)
@@ -226,6 +356,9 @@ struct Session : FailureState {
         a.windowChild(window, view);
         configureSettings();
         registerHandlers();
+        captureTarget->view = view;
+        captureTarget->pending.open();
+        captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
     }
 
     void configureSettings() {
