@@ -121,7 +121,8 @@ One window per process is supported.
 | --- | --- |
 | WebKitGTK | Supported (`webkit_web_view_get_snapshot`, GTK 4.6 or newer, otherwise the call fails with a diagnostic), validated under `xvfb-run`; the sandbox opt-out variable is not needed by the capture itself. |
 | WKWebView | Supported (`takeSnapshotWithConfiguration:`, encoded as PNG by AppKit); the request runs on the main thread, which must be running the window's event loop. |
-| WebView2, CEF | Not implemented yet: the call fails with "no window that can be captured is open". |
+| WebView2 | Supported (`CapturePreview`, PNG); the request runs on the window's STA thread, which must be pumping its message loop. |
+| CEF | Not implemented yet: the call fails with "no window that can be captured is open". |
 
 This is an opt-in test facility with the same trust model as the rest of this guide: it is compiled only with
 `WEBFRONT_JASMINE_TESTING`, and the captured page can contain secrets it displays. Automation/MCP does not expose
