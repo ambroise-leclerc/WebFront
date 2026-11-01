@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, propriétaires admissibles des répertoires et des ancêtres, transport du navigateur système déclaré (`loopbackAttested`) plutôt que prouvé par un secret de lancement, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -188,9 +188,7 @@ pour cette connexion** est retenu :
 1. **Natif** — utilisable seulement si la connexion est **associée explicitement à la vue d'un frontend intégré** de
    l'application (secret propre au lancement, présenté par la vue lors de la poignée de main) et si l'hôte a un
    affichage. Une adresse de boucle locale ne suffit jamais : un navigateur distant derrière un proxy local ou un
-   tunnel, ou un autre utilisateur de la machine, y arrivent aussi. L'association de lancement du navigateur système
-   (règle 4) suffit au transport des fichiers, pas aux dialogues natifs : son secret transite par une ligne de commande
-   et un historique. Avec le navigateur système, aucune association de vue
+   tunnel, ou un autre utilisateur de la machine, y arrivent aussi. Avec le navigateur système, aucune association de vue
    n'est possible : le natif y est indisponible **par défaut**. Seule exception, une option de confiance que
    l'application active explicitement dans sa configuration (par exemple `trustLoopbackClients = true`, désactivée par
    défaut) rend le natif utilisable pour les connexions de boucle locale ; elle réintroduit la déduction par adresse
@@ -279,16 +277,23 @@ lève).
 - **Transport : déclaré, jamais déduit.** WebFront ne fournit pas TLS (ADR-008) et ne peut pas savoir comment un client
   l'atteint : un mandataire ou un tunnel présente une connexion de boucle locale pour un client distant, et des en-têtes
   `Forwarded`/`X-Forwarded-*` peuvent être forgés. WebFront ne lit donc **ni l'adresse ni ces en-têtes** pour décider.
-  Une connexion est de transport local seulement si elle est **associée** : à la vue d'un frontend intégré (secret de
-  lancement présenté par la vue), ou au navigateur système que WebFront a lui-même lancé (secret à usage unique et de
-  courte durée transmis dans le fragment de l'URL ouverte, présenté par `WebFront.js` lors de la poignée de main ;
-  limite documentée : la ligne de commande du navigateur est lisible par les autres utilisateurs de certaines machines
-  et l'URL reste dans son historique, d'où l'usage unique ; un secret volé fait échouer visiblement l'association du
-  navigateur légitime). Pour toute autre connexion, le transport est inconnu, quelle que soit son adresse : lectures
-  et écritures de fichiers y sont refusées, sauf déclaration explicite de l'application sur son déploiement
-  (`remoteFileTransport` : `refused` par défaut, `encryptedByDeployment` lorsque le déploiement chiffre, par exemple
-  un mandataire inverse TLS, `plaintextAccepted` sur un réseau isolé de confiance). Cette déclaration est une
-  attestation de l'intégrateur, que WebFront ne vérifie pas ; la documentation le dit.
+  Une connexion est de transport local seulement si elle est **associée à la vue d'un frontend intégré** : son secret
+  est remis à la vue par l'adaptateur, dans le processus, sans transiter par une ligne de commande, une URL ou un
+  historique. Aucun secret transmis au navigateur système (fragment de l'URL ouverte) n'atteste le transport : la ligne
+  de commande et l'historique peuvent le divulguer, et un acteur qui le présente le premier depuis un navigateur
+  distant serait accepté ; l'échec ultérieur de l'association légitime ne protège pas cette première connexion. Pour
+  toute connexion non associée, dont celles du navigateur système, le transport est inconnu, quelle que soit son
+  adresse : lectures et écritures de fichiers y sont refusées, sauf déclaration explicite de l'application sur son
+  déploiement (`remoteFileTransport`) :
+  - `refused` (défaut) ;
+  - `loopbackAttested` : WebFront vérifie que le serveur n'écoute que sur la boucle locale ; l'intégrateur atteste
+    qu'aucun mandataire ni tunnel ne l'expose et que la machine n'est pas partagée avec des utilisateurs non fiables.
+    C'est la déclaration attendue d'une application de bureau qui utilise le navigateur système ;
+  - `encryptedByDeployment` : le déploiement chiffre (mandataire inverse TLS, tunnel chiffré) ;
+  - `plaintextAccepted` : réseau isolé de confiance.
+
+  Hors la part vérifiée de `loopbackAttested`, ces déclarations sont des attestations de l'intégrateur, que WebFront ne
+  vérifie pas ; la documentation le dit.
 - Listage : paginé, par un type filaire « liste » de chaînes et de tuples à ajouter à l'ADR-003 ; le codage d'une
   liste en JSON dans une chaîne est écarté.
 
@@ -393,7 +398,10 @@ autorisations explicites, backend par connexion).
    **déplacement concurrent** hors de la racine d'un répertoire déjà ouvert, et **de la racine elle-même**, injecté
    entre l'ouverture et l'opération, pendant l'écriture du temporaire et juste avant le renommage final : sous Windows,
    chaque déplacement échoue et l'écriture aboutit sous la racine ; sous POSIX, un répertoire de la racine ou un ancêtre
-   modifiable par un autre utilisateur ou le groupe fait refuser la déclaration ou l'opération avant tout effet ; une
+   modifiable par un autre utilisateur ou le groupe, **appartenant à un autre utilisateur même en mode 0755**, ou à bit
+   collant mais appartenant à un autre utilisateur, ou dont l'élément suivant appartient à un autre utilisateur, fait
+   refuser la déclaration ou l'opération avant tout effet ; `/tmp` du superutilisateur avec un élément de l'utilisateur
+   effectif accepté ; une
    racine déplacée par le même utilisateur avant l'opération donne `rootMoved` sans effet ; un déplacement par le même
    utilisateur détecté avant la validation donne `confinementViolated` sans renommage final ; un déplacement survenant
    après la vérification n'est pas couvert (garantie documentée, pas d'assertion) ; racine `shared` documentée comme
@@ -407,8 +415,9 @@ autorisations explicites, backend par connexion).
    l'application pendant un dialogue ouvert sans blocage ni accès après destruction.
 5. **Lecture par jeton** : `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, jeton absent des journaux ;
    connexion non associée refusée sans `remoteFileTransport`, y compris lorsqu'elle arrive par un mandataire HTTP sur la
-   boucle locale ou porte des en-têtes `Forwarded`/`X-Forwarded-Proto: https` forgés ; navigateur système lancé par
-   WebFront associé, secret de lancement rejoué refusé ; deux onglets d'un profil vierge qui échangent simultanément
+   boucle locale ou porte des en-têtes `Forwarded`/`X-Forwarded-Proto: https` forgés ; navigateur système refusé sans
+   déclaration, accepté avec `loopbackAttested` ; `loopbackAttested` refusé à la configuration si le serveur écoute
+   hors de la boucle locale ; deux onglets d'un profil vierge qui échangent simultanément
    (réponses retardées par le test) lisent tous deux leurs URL ; HTML et SVG hostiles ouverts par navigation de premier
    niveau et dans un `<iframe>` : aucun script exécuté, aucune connexion au pont, téléchargement pour le HTML ; SVG
    toujours affichable par `<img>` ; `Range`, MIME, refus après fermeture de la connexion, pas de fuite de chemin dans l'URL,
@@ -424,6 +433,9 @@ autorisations explicites, backend par connexion).
 
 ## Options écartées et motifs
 
+- **Un secret de lancement du navigateur système comme preuve de transport local** : transmis par la ligne de
+  commande et conservé dans l'historique, il peut être présenté le premier par un navigateur distant ; il ne prouve ni
+  la machine ni le transport.
 - **Une seconde fenêtre WebView pour le sélecteur** : impossible avec le navigateur système et à distance, lourde en
   embarqué, sans gain d'isolation (même origine, même pont) et sans aspect natif ; elle cumule les défauts des
   solutions A et B.
@@ -467,7 +479,9 @@ autorisations explicites, backend par connexion).
   l'adaptateur doivent le présenter.
 - **Risque :** WebFront ne chiffre pas et ne peut pas attester le transport ; `remoteFileTransport` repose sur la
   déclaration de l'intégrateur. Une déclaration fausse expose jeton et contenu. Par défaut, toute connexion non
-  associée est refusée.
+  associée est refusée, y compris celle du navigateur système.
+- **Coût accepté :** une application qui utilise le navigateur système doit déclarer `loopbackAttested` pour accéder aux
+  fichiers de l'hôte ; sans cette déclaration, seuls les fichiers du client sont disponibles.
 - **Coût accepté :** les fichiers actifs ne s'affichent pas en ligne ; un aperçu HTML ou un SVG interactif exige une
   origine distincte.
 - **Coût accepté :** plusieurs cookies de liaison peuvent coexister brièvement dans un profil après des échanges
@@ -509,12 +523,16 @@ autorisations explicites, backend par connexion).
     l'emplacement déclaré, résolu composant par composant sans suivre de lien, désigne encore l'identité du descripteur
     racine (`st_dev`/`st_ino`, identifiant de fichier Windows) ; sinon le service refuse avec `rootMoved` jusqu'à une
     nouvelle déclaration. Un support démonté puis remonté produit le même refus ;
-  - POSIX : seul peut sortir un répertoire de son parent un acteur qui peut écrire dans ce parent (ou le
-    superutilisateur). Chaque répertoire traversé est contrôlé sur son descripteur (`fstat`) : propriétaire égal à
-    l'utilisateur effectif, aucun droit d'écriture pour le groupe ou les autres. **Les ancêtres de la racine** sont
-    contrôlés de même, jusqu'à `/`, à la déclaration puis à chaque opération : chacun doit être non modifiable par le
-    groupe et les autres, ou porter le bit collant avec l'élément suivant du chemin appartenant à l'utilisateur effectif
-    ou au superutilisateur (cas de `/tmp`) ; sinon la déclaration ou l'opération est refusée. Une racine déclarée
+  - POSIX : peut sortir un répertoire de son parent tout acteur qui peut écrire dans ce parent, ce qui inclut toujours
+    le **propriétaire** du parent (il peut s'en accorder le droit), ainsi que le superutilisateur. Les seuls
+    propriétaires admissibles sont donc l'utilisateur effectif et le superutilisateur (uid 0). Chaque répertoire traversé
+    est contrôlé sur son descripteur (`fstat`) : propriétaire admissible, aucun droit d'écriture pour le groupe ou les
+    autres. **Les ancêtres de la racine** sont contrôlés de même, jusqu'à `/`, à la déclaration puis à chaque opération :
+    chacun doit avoir un propriétaire admissible et, soit n'être modifiable ni par le groupe ni par les autres, soit
+    porter le bit collant avec l'élément suivant du chemin appartenant lui aussi à un propriétaire admissible (cas de
+    `/tmp`, possédé par le superutilisateur : le bit collant n'empêche pas le propriétaire du répertoire de retirer ses
+    entrées, d'où l'exigence sur ce propriétaire). Un ancêtre en mode 0755 appartenant à un autre utilisateur est
+    refusé ; sinon la déclaration ou l'opération est refusée. Une racine déclarée
     `shared` (dossier partagé, support amovible monté sans permissions) lève ces contrôles et n'offre qu'un confinement
     affaibli, documenté comme tel ;
   - Windows : le handle de la racine reste ouvert **sans `FILE_SHARE_DELETE`** pendant toute la vie de la déclaration,
@@ -528,8 +546,9 @@ autorisations explicites, backend par connexion).
     lieu, le fichier temporaire supprimé et l'erreur `confinementViolated` signalée. Cette vérification **détecte** sans
     empêcher : un déplacement entre elle et le renommage, ou pendant l'écriture du fichier temporaire, peut laisser un
     fichier à l'extérieur ;
-  - **garantie résultante.** Windows : empêchement pendant toute l'opération. POSIX : empêchement face à tout acteur
-    sans droit d'écriture sur les répertoires de la racine et ses ancêtres ; face au même utilisateur (ou au
+  - **garantie résultante.** Windows : empêchement pendant toute l'opération, indépendamment des propriétaires.
+    POSIX : empêchement face à tout autre utilisateur que l'utilisateur effectif et le superutilisateur, puisqu'aucun ne
+    possède ni ne peut modifier un répertoire de la racine ou un ancêtre ; face au même utilisateur (ou au
     superutilisateur), aucune garantie, seulement une détection au mieux, faute de primitive qui interdise le
     déplacement d'un répertoire ;
   - stockages embarqués (FatFs, LittleFS) : le micrologiciel est le seul acteur ; ses tâches passent par le service, qui
