@@ -14,6 +14,18 @@ export function baseUrl(value) {
     return url.href;
 }
 
+/**
+ * The custom domain a base URL is served from, or '' for a github.io project address. A custom domain is the root of the
+ * Pages site, so the base URL must be that root: a path would be a directory of the site, not of the domain.
+ */
+export function customDomain(base) {
+    const url = new URL(baseUrl(base));
+    if (url.hostname.endsWith('.github.io')) return '';
+    if (url.port) throw new Error('A distribution custom domain cannot have a port');
+    if (url.pathname !== '/') throw new Error('A distribution custom domain must serve the site root');
+    return url.hostname;
+}
+
 export const versionName = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 export function versionPath(version) {

@@ -63,7 +63,7 @@
       "include/webfront/system/DeveloperReleaseData.hpp"
     ],
     "fetch": [
-      "https://ambroise-leclerc.github.io"
+      "https://dist.webfront.fr"
     ]
   }
 }

@@ -71,6 +71,15 @@ merge it only after the deployed bytes and headers are verified.
 Once the new version is published, `cmake/WebFrontBootstrap.cmake` may pin it as the bootstrap environment of the
 tests, in a pull request of its own.
 
+## Domain
+
+The distribution is served under `https://dist.webfront.fr/` (ADR-021): `baseUrl` of `distribution.json`, hence the URL in
+every pinned header. The zone of `webfront.fr` holds a `CNAME` from `dist` to `ambroise-leclerc.github.io.`, the domain
+`webfront.fr` is verified in the account's Pages settings, and HTTPS is enforced. `wf run site` writes the `CNAME` file of
+the Pages branch from `baseUrl`; the workflow removes it when `baseUrl` returns to a github.io address. A custom domain must
+serve the root of the site. Changing the base URL is a public URL change: increment the version, and expect every
+earlier pin on the former address to stop working in a browser, since Pages redirects without CORS headers.
+
 ## One-time Pages configuration
 
 The repository's Pages source must be the **gh-pages branch, root directory**, with branch-based
