@@ -9,8 +9,14 @@
 ## État et chronologie
 
 **Proposée** le **2026-11-02**, juste après la publication de l'environnement 0.6.4 (`developer-v0.6.4`).
-Aucun code n'est modifié par cette version. Elle passera à « Acceptée » quand les critères de la section dédiée
+Cette version ne modifie pas le code du dépôt. Elle passera à « Acceptée » quand les critères de la section dédiée
 seront démontrés par une publication réelle.
+
+**Domaine propre livré (point 6 de la décision, #478).** Le 2026-11-02, `dist.webfront.fr` est configuré (`CNAME` chez OVHcloud,
+`webfront.fr` vérifié, certificat approuvé, HTTPS forcé) ; `site.mjs` écrit le `CNAME` (#479) ; l'environnement 0.6.5, première
+version publiée sous ce domaine, est déployé, vérifié (octets, CORS, test public) et épinglé (#480) ; le bootstrap des
+tests l'utilise (#481). Le reste de la décision (workflow de release unique, source unique du pin, répétition avant
+publication, table de compatibilité) n'est pas réalisé.
 
 ## Contexte
 
