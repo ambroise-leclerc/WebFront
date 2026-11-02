@@ -47,8 +47,8 @@ initialization, frontend selection and unavailable-engine diagnostics. These tes
 
 ## File chooser and downloads
 
-`<input type="file">` (single, multiple, `accept`, `webkitdirectory`) and downloads (`<a download>`, generated `blob:` URLs)
-work in every embedded frontend with the engine's own dialog, without a WebFront API (ADR-020, rule 6). A `blob:` URL of an
+The embedded frontends use their engine's file chooser and download handling without a WebFront API (ADR-020, rule 6).
+Coverage varies by engine and does not yet qualify all native dialogs, `accept` filters or directory selection. A `blob:` URL of an
 admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`); a `blob:` URL of any other origin does not.
 
 | Frontend | Chooser | Download | Test injection |
@@ -56,7 +56,7 @@ admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`)
 | WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder, the page's name reduced to its last component, never overwriting (`name (1).ext`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | CEF (Chrome runtime) | the runtime's dialog | the runtime's download handling | `SimpleCEFClient::chooseFiles` (`CefDialogHandler::OnFileDialog`), `downloadDirectory`, `downloadFinished`. The runtime itself turns a suggested name `../x` into `_x` |
 | WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
-| WebView2 | the engine's native chooser | the engine's native download UI | none yet |
+| WebView2 | the engine's native chooser | the engine's native download UI | DevTools intercepts the chooser in tests; `DownloadStarting` redirects the download to a private path |
 
 WKWebView is covered by the shared spec below and by its CI job, but its chooser and download have no native scenario yet. The
 engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
@@ -68,6 +68,9 @@ Xvfb for WebKitGTK) or a `Runtime.evaluate` with `userGesture` (CEF).
 `webkitdirectory` properties keep their values (filtering and directory selection themselves are not exercised), and
 that offering a generated Blob leaves the page and the bridge working. `WebKitGTKAdapter-download|choose-file|cancel-choose`
 and `CEFFileServices-download|choose|cancel` drive the dialog and the download through the injection points.
+`WebView2Lifecycle-file-choose|file-cancel|file-download` verifies the engine's chooser request, selection and cancellation
+events, and the bytes written by a completed Blob download. It intercepts the chooser with DevTools and suppresses the download UI,
+so it does not qualify the native dialogs themselves or closing the window while one is open.
 
 ## Adding a frontend
 

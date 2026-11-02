@@ -93,8 +93,8 @@ void startAgain(const char* self, const char* mode, const char* argument) {
 int main(int argc, char** argv) {
 #ifdef _WIN32
     // Text mode would turn each '\n' into "\r\n": the tests compare bytes.
-    _setmode(_fileno(stdout), _O_BINARY);
-    _setmode(_fileno(stderr), _O_BINARY);
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1 || _setmode(_fileno(stderr), _O_BINARY) == -1)
+        return 1;
     std::vector<std::string> utf8Arguments;
     std::vector<char*>       utf8Pointers;
     {

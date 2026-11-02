@@ -1,12 +1,15 @@
 #include "../driver/TestFrontend.hpp"
 #include <webfront/system/NativeFS.hpp>
+#include <webfront/utils/Json.hpp>
 #include <webfront/WebFront.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <fstream>
 #include <iostream>
 #include <map>
+#include <regex>
 #include <semaphore>
 #include <string>
 #include <thread>
@@ -200,6 +203,155 @@ int lateNavigationFailure() {
     return observed ? 0 : 1;
 }
 
+// Exercise the engine's chooser and download paths. DevTools supplies the chooser answer because
+// WebView2 exposes no file-dialog callback; DownloadStarting supplies a private destination.
+int fileServices(std::string_view mode) {
+    using namespace webfront::frontend::detail::webview2;
+    const auto folder = std::filesystem::temp_directory_path()
+                        / ("webfront-webview2-files-" + std::to_string(GetCurrentProcessId()) + "-"
+                           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    require(std::filesystem::create_directory(folder), "Cannot create private test directory");
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{folder};
+    const auto fixture = folder / "fixture.txt";
+    std::ofstream(fixture) << "chosen by the test";
+    const auto destination = folder / "result.txt";
+
+    webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread                                                               worker([&](std::stop_token stop) {
+        std::stop_callback cleanupServer(stop, [&] {
+            server.stop();
+        });
+        server.run();
+    });
+    Apartment                                                                  apartment;
+    auto                                                                       session = std::make_shared<Session>();
+    session->url           = mode == "download" ? L"http://127.0.0.1:9002/file-services.html?download" : L"http://127.0.0.1:9002/file-services.html?choose";
+    session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {}};
+    session->createWindow(webfront::testdriver::diagnosticWindows());
+    Actions actions;
+    actions.onFailure = [&] {
+        session->fail();
+    };
+    bool                                                   ready = false, interceptRequested = false, clicked = false, asked = false, finished = false;
+    Microsoft::WRL::ComPtr<ICoreWebView2DownloadOperation> download;
+    Microsoft::WRL::ComPtr<ICoreWebView2DevToolsProtocolEventReceiver> chooser;
+    session->viewReady = [&] {
+        EventRegistrationToken token{};
+        if (mode == "download") {
+            Microsoft::WRL::ComPtr<ICoreWebView2_4> view4;
+            check(session->view.As(&view4), "querying download support");
+            check(view4->add_DownloadStarting(
+                      Microsoft::WRL::Callback<ICoreWebView2DownloadStartingEventHandler>([&](ICoreWebView2*,
+                                                                                              ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT {
+                          try {
+                              check(args->get_DownloadOperation(&download), "getting download operation");
+                              check(args->put_ResultFilePath(destination.c_str()), "setting download destination");
+                              check(args->put_Handled(TRUE), "suppressing download UI");
+                          } catch (...) {
+                              session->fail();
+                          }
+                          return S_OK;
+                      }).Get(),
+                      &token),
+                  "registering download handler");
+            ready = true;
+            return;
+        }
+        check(session->view->GetDevToolsProtocolEventReceiver(L"Page.fileChooserOpened", &chooser), "getting chooser event");
+        check(chooser->add_DevToolsProtocolEventReceived(
+                  Microsoft::WRL::Callback<ICoreWebView2DevToolsProtocolEventReceivedEventHandler>(
+                      [&](ICoreWebView2*, ICoreWebView2DevToolsProtocolEventReceivedEventArgs* args) -> HRESULT {
+                          try {
+                              LPWSTR raw = nullptr;
+                              check(args->get_ParameterObjectAsJson(&raw), "reading chooser event");
+                              const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> json(raw, CoTaskMemFree);
+                              std::wcmatch                                             match;
+                              require(std::regex_search(json.get(), match, std::wregex(L"\\\"backendNodeId\\\"\\s*:\\s*(\\d+)")),
+                                      "Chooser event has no input node");
+                              asked = true;
+                              if (mode == "cancel")
+                                  return S_OK;  // The interception was configured to cancel and emit the page's cancel event.
+                              const auto files      = webfront::json::quote(utf8(fixture.c_str()));
+                              const auto parameters = utf16("{\"backendNodeId\":" + utf8(match[1].str()) + ",\"files\":[" + files + "]}");
+                              check(session->view->CallDevToolsProtocolMethod(L"DOM.setFileInputFiles", parameters.c_str(), nullptr), "answering chooser");
+                          } catch (...) {
+                              session->fail();
+                          }
+                          return S_OK;
+                      })
+                      .Get(),
+                  &token),
+              "registering chooser handler");
+    };
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    actions.dispatch    = [&](UINT) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw std::runtime_error("File service scenario timed out: ready=" + std::to_string(ready) + " clicked=" + std::to_string(clicked)
+                                     + " asked=" + std::to_string(asked) + " loading=" + std::to_string(session->loadingInitialPage()));
+        if (!session->view || session->loadingInitialPage())
+            return;
+        if (mode != "download" && !interceptRequested) {
+            interceptRequested = true;
+            check(session->view->CallDevToolsProtocolMethod(L"Page.enable", L"{}", nullptr), "enabling page events");
+            const auto parameters = mode == "cancel" ? L"{\"enabled\":true,\"cancel\":true}" : L"{\"enabled\":true}";
+            check(session->view->CallDevToolsProtocolMethod(
+                      L"Page.setInterceptFileChooserDialog",
+                      parameters,
+                      Microsoft::WRL::Callback<ICoreWebView2CallDevToolsProtocolMethodCompletedHandler>([&](HRESULT result, LPCWSTR) -> HRESULT {
+                          try {
+                              check(result, "enabling chooser interception");
+                              ready = true;
+                          } catch (...) {
+                              session->fail();
+                          }
+                          return S_OK;
+                      }).Get()),
+                  "enabling chooser interception");
+        }
+        if (!ready)
+            return;
+        if (mode == "download") {
+            if (!download)
+                return;
+            COREWEBVIEW2_DOWNLOAD_STATE state{};
+            check(download->get_State(&state), "reading download state");
+            require(state != COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED, "Download was interrupted");
+            finished = state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED;
+        } else {
+            if (!clicked) {
+                clicked = true;
+                check(session->view->CallDevToolsProtocolMethod(L"Runtime.evaluate",
+                                                                L"{\"expression\":\"document.getElementById('picker').click()\",\"userGesture\":true}",
+                                                                nullptr),
+                      "opening chooser");
+            }
+            LPWSTR raw = nullptr;
+            check(session->view->get_DocumentTitle(&raw), "reading page result");
+            const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> title(raw, CoTaskMemFree);
+            finished = asked && std::wstring_view(title.get()) == (mode == "choose" ? L"picked:chosen by the test" : L"cancelled");
+        }
+        if (finished)
+            PostMessageW(session->window, WM_CLOSE, 0, 0);
+    };
+    require(SetTimer(actions.window, 1, 20, nullptr) != 0, "Cannot start file service watchdog");
+    session->start(userDataFolder());
+    session->run();
+    if (actions.failure)
+        std::rethrow_exception(actions.failure);
+    require(finished, "File service did not finish");
+    if (mode == "download") {
+        std::ifstream stream(destination, std::ios::binary);
+        require(std::string(std::istreambuf_iterator<char>(stream), {}) == "downloaded by WebFront", "Wrong downloaded content");
+    }
+    return 0;
+}
+
 int rejectMta() {
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)))
         return 1;
@@ -354,7 +506,19 @@ int run(std::string_view mode) {
     if (!webView2ClosesServer())
         return 1;
     const std::map<std::string_view, std::function<int()>> cases{
-        {          "runtime-ready",runtimeReadyBeforePageLoad                                   },
+        {            "file-choose",
+         [] {
+         return fileServices("choose");
+         }                                                    },
+        {            "file-cancel",
+         [] {
+         return fileServices("cancel");
+         }                                                    },
+        {          "file-download",
+         [] {
+         return fileServices("download");
+         }                                                    },
+        {          "runtime-ready", runtimeReadyBeforePageLoad},
         { "closed-startup-timeout",
          [] {
          return startupCompletion(false);

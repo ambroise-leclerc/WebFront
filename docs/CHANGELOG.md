@@ -6,7 +6,8 @@
   download folder (name reduced to its last component, never overwritten); WKWebView gets `runOpenPanelWithParameters` and
   `WKDownload` (not yet run on a Mac); CEF and WebView2 use the engine's own handling. A `blob:` URL of an admitted origin
   now passes the navigation policy, so a generated Blob can be downloaded. Test injection points answer the chooser and the
-  download without a dialog (`docs/FRONTENDS.md`).
+  download without a dialog (`docs/FRONTENDS.md`). On Windows, WebView2 tests exercise chooser selection and cancellation
+  through DevTools and verify completed downloads on disk; the native dialog UI itself remains unqualified.
 
 - Developer environment: the distribution is served from `https://dist.webfront.fr/` (#478, ADR-021). The sources advance to 0.6.5, the
   first version published under that address; `site.mjs` writes the `CNAME` file of the Pages branch and `wf run pin`
