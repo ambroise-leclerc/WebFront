@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "version": "0.6.5",
+  "environment": "./environment.tgz",
+  "integrity": "sha512-qaSYOJvxcXtKIbrjfjZFFvfoQrda5NfBq24ttQ7SdnIN12tXFDYXRVe+JkrUHXZY6KOhF7qxmo4k8NOqLOupPA==",
+  "starters": {
+    "life": {
+      "archive": "life-starter.tgz",
+      "integrity": "sha512-yVIwrsjivrX9Qkjkpy94oVgQfibm0IGFbjXVJw3Jh0cJcehB3FiATyeLJ2FoqTRJfUR5IuKzri54mxyJbk4zug=="
+    }
+  }
+}
