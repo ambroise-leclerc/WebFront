@@ -27,4 +27,9 @@ export default async function (context) {
     if (await sriOf(new Uint8Array(await response.arrayBuffer())) !== integrity)
         throw new Error(`The published ${served} does not have the pinned integrity`);
     context.console.log(`DeveloperReleaseData.hpp pins the published ${version}.`);
+    // The check above proves the bytes, not that a browser can start from the pinned address: when that address is not
+    // the one the distribution is served from, the pinned URL redirects without CORS headers and an application built with
+    // this header cannot start its developer environment until a version pinned on the current address is published.
+    if (new URL(url).origin !== new URL(current).origin)
+        context.console.log(`WARNING: the pinned ${url} is not on ${new URL(current).origin}; its redirect carries no CORS headers, so a browser cannot start the developer environment from this pin.`);
 }
