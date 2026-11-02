@@ -435,7 +435,12 @@ struct Session : FailureState {
         return std::filesystem::temp_directory_path();
     }
     std::filesystem::path uniqueDestination(std::string_view suggested) const {
-        return uniqueDownloadPath(destinationFolder(), suggested);
+        const auto      folder = destinationFolder();
+        std::error_code error;
+        std::filesystem::create_directories(folder, error);  // WebKitGTK writes into an existing folder only.
+        if (error)
+            throw std::filesystem::filesystem_error("WebKitGTK: cannot create the download folder", folder, error);
+        return uniqueDownloadPath(folder, suggested);
     }
     void trackDownload(Api::Object download) {
         Download entry{download, {}};

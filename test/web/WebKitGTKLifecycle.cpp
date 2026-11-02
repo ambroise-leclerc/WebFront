@@ -176,9 +176,9 @@ std::string readFile(const std::filesystem::path& path) {
 }
 
 void download() {
-    const auto folder = std::filesystem::temp_directory_path() / ("webfront-download-" + std::to_string(getpid()));
-    std::filesystem::remove_all(folder);
-    std::filesystem::create_directories(folder);
+    const auto parent = std::filesystem::temp_directory_path() / ("webfront-download-" + std::to_string(getpid()));
+    const auto folder = parent / "not" / "yet";  // The frontend creates the folder: WebKitGTK writes into an existing one only.
+    std::filesystem::remove_all(parent);
     std::string destination;
     bool        done = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
@@ -200,7 +200,7 @@ void download() {
         throw std::runtime_error("Unexpected download destination: " + destination);
     if (readFile(destination) != "downloaded by WebFront")
         throw std::runtime_error("The downloaded file has the wrong content");
-    std::filesystem::remove_all(folder);
+    std::filesystem::remove_all(parent);
 }
 
 /// Without a configured folder, the download lands in GLib's user download directory (user-dirs.dirs), not in an
@@ -256,6 +256,10 @@ struct FakeClick {
         return display && move && press && flush;
     }
     void click(int x, int y) const {
+        // Without a window manager the pointer may already rest at the target: a press with no motion before it can be
+        // delivered before the page knows the pointer is over it. Arrive from a neighbouring point.
+        move(display, 0, x + 6, y + 6, 0);
+        flush(display);
         move(display, 0, x, y, 0);
         press(display, 1, 1, 0);
         press(display, 1, 0, 0);
@@ -289,7 +293,7 @@ void chooseFile(bool cancel) {
     app.show("file-services.html?choose");
     std::filesystem::remove(fixture);
     if (!asked)
-        throw std::runtime_error("The file chooser was not requested");
+        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " + std::to_string(ticks) + " clicks)");
     const std::string expected = cancel ? "cancelled" : "picked:chosen by the test";
     if (title != expected)
         throw std::runtime_error("Unexpected page state after the chooser: " + title);

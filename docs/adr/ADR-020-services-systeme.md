@@ -5,11 +5,12 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, propriétaires admissibles des répertoires et des ancêtres, transport du navigateur système déclaré (`loopbackAttested`) plutôt que prouvé par un secret de lancement, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.1 | 2026-11-02 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de l'étape 1 pour #451 (sélecteur de fichiers et téléchargements sous WebKitGTK, CEF, WKWebView et WebView2) ; #452 reste à faire. Validations exécutées : tests unitaires de la politique de contenu, des chemins de téléchargement et de WebKitGTK ; scénarios de cycle de vie WebKitGTK, CEF, WKWebView et WebView2 de la CI ; `docs/FRONTENDS.md` précise ce que chaque moteur ne couvre pas. | Branche `451-file-chooser-downloads` (PR #484) |
 
 ## État et chronologie
 
-**Proposée** le **2026-10-31**. Aucun code n'est livré avec cette version : elle fixe le cadre des services
-système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). Elle passera à « Acceptée » quand les
+**Proposée** le **2026-10-31**. La version 1.0 ne livrait aucun code : elle fixe le cadre des services
+système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). La version 1.1 livre une partie de l'étape 1 (#451) ; la décision reste proposée. Elle passera à « Acceptée » quand les
 critères de la section dédiée seront démontrés.
 
 ## Contexte
@@ -352,8 +353,8 @@ Le code vérifié le 2026-10-31 ne permet pas encore d'implémenter ces règles.
 | 4 | [#449](https://github.com/ambroise-leclerc/WebFront/issues/449) Stockage modifiable et livraison des services | [#460](https://github.com/ambroise-leclerc/WebFront/issues/460) stockage sous racines déclarées, confiné pendant la résolution (révision de l'ADR-002) ; [#461](https://github.com/ambroise-leclerc/WebFront/issues/461) paquet `@webfront/services` | sélecteur HTML et écritures (règles 2 à 4) |
 | 5 | [#450](https://github.com/ambroise-leclerc/WebFront/issues/450) Intégration native des frontends | [#462](https://github.com/ambroise-leclerc/WebFront/issues/462) exécuteur du thread d'interface, y compris le navigateur système ; [#463](https://github.com/ambroise-leclerc/WebFront/issues/463) fenêtre native et correspondance avec les connexions | backend natif seulement |
 
-État de l'étape 1 (#451) : sélecteur et téléchargements qualifiés sous WebKitGTK et CEF (Linux), implémentés sous
-WKWebView, laissés au comportement natif sous WebView2 ; `docs/FRONTENDS.md` documente chaque moteur. #452 reste à faire.
+État de l'étape 1 (#451) : sélecteur et téléchargements implémentés et exercés par la CI sous WebKitGTK, CEF,
+WKWebView et WebView2 ; `docs/FRONTENDS.md` documente chaque moteur et ses limites. #452 reste à faire.
 
 Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
 épique ; les dialogues natifs suivront l'étape 5. `PUT`/`POST` ne sont pas des préalables : les écritures passent par
