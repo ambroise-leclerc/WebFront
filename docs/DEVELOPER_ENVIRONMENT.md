@@ -34,9 +34,11 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
-lease; version 0.6.2 predates that API. The sources advance to 0.6.4 (project setup operations in the automation
-runner), which is not published yet; the release pin stays on the published 0.6.3. Publication and pin changes follow
-[PUBLISHING](../js/developer/tools/PUBLISHING.md), with deployment verified before merging a new pin.
+lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
+runner (`init`, `create`, `install`, `restore`, `embed`). The release pin selects 0.6.4 but the archive is published
+only by the dedicated `developer-v0.6.4` tag: the pin pull request stays a draft until deployment is verified. The test
+bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the published 0.6.3 and advances in a separate pull request once
+0.6.4 is deployed. Publication and pin changes follow [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
 
@@ -64,9 +66,10 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 0.6.3 release pin selects
-`https://ambroise-leclerc.github.io/WebFront/developer/0.6.3/environment.tgz`; the
-[publication gate](validation/developer-0.6.3-release.md) requires deployed verification before that pin is merged.
+an exact versioned environment URL and the trusted digest. The 0.6.4 release pin selects
+`https://ambroise-leclerc.github.io/WebFront/developer/0.6.4/environment.tgz`; the
+[publication gate](validation/developer-0.6.4-release.md) requires deployed verification before that pin is merged
+(the 0.6.3 gate is kept in [its report](validation/developer-0.6.3-release.md)).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
 0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable, while 0.4.0 and earlier target the former include layout.
 The configuration pins one version and its SHA-512 rather than resolving a mutable `latest` channel. An explicit

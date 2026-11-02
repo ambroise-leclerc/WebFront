@@ -31,7 +31,7 @@ embedded engine, requesting the launcher fails configure instead of opening a sy
 The implementation is native C++23; no Node.js, npm or Python is required to run the launcher.
 
 Provision an environment containing automation API v1 (0.6.3 or later). The setup operations (`init`, `create`, `install`,
-`restore`, `embed`) need environment **0.6.4 or later**: the launcher checks this at startup, and granting one of them to an
+`restore`, `embed`) need environment **0.6.4 or later**, which must be published (see the [0.6.4 publication gate](validation/developer-0.6.4-release.md)) before anything depending on this pin is merged: the launcher checks this at startup, and granting one of them to an
 older environment fails with a bootstrap error (status 70) naming the operation, instead of failing each run.
 `create` needs the starter archives (`<name>-starter.tgz`, such as `life-starter.tgz` of a distribution build) in the same
 directory as the `--environment` archive: the launcher serves only files of that name from there, and the environment's
