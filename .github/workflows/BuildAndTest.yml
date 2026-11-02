@@ -181,10 +181,6 @@ jobs:
             Write-Host "WebView2 runtime $version at $($executable.FullName)"
           }
       # The fast tier (docs/TEST_TIERS.md): unit tests only, so a plain regression is reported before the browser suite starts.
-      # The file-service scenarios write their captures here (#451); see test/tools/Qualification.py.
-      - name: Choose the qualification evidence folder
-        shell: bash
-        run: echo "WEBFRONT_QUALIFICATION_DIR=$GITHUB_WORKSPACE/qualification-evidence" >> "$GITHUB_ENV"
       - name: Fast tests
         shell: bash
         run: ctest --test-dir build -C ${{ matrix.build_type }} -L fast --parallel 4 --output-on-failure --no-tests=error
@@ -200,17 +196,6 @@ jobs:
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
           -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
           -P test/cmake/RunTestSuite.cmake
-      - name: Collect the qualification evidence
-        if: always()
-        shell: bash
-        run: python3 test/tools/Qualification.py collect --build build --evidence qualification-evidence --platform ${{ matrix.platform }} --output qualification/${{ matrix.platform }}
-      - name: Retain the qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qualification-${{ matrix.platform }}
-          path: qualification/${{ matrix.platform }}/
-          if-no-files-found: ignore
       - name: Analyze CTest timings
         if: always()
         shell: bash
@@ -511,8 +496,6 @@ jobs:
           sudo ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo ip6tables -A OUTPUT ! -o lo -j REJECT
       - name: Run Jasmine bridge test
-        env:
-          WEBFRONT_QUALIFICATION_DIR: ${{ github.workspace }}/qualification-evidence
         run: >-
           ctest --test-dir ${{github.workspace}}/build-cef -L web-integration --output-on-failure --no-tests=error --parallel 4
           --output-junit "${{ github.workspace }}/build-cef/test-results.xml"
@@ -521,16 +504,6 @@ jobs:
         run: |
           sudo iptables -F OUTPUT
           sudo ip6tables -F OUTPUT
-      - name: Collect the qualification evidence
-        if: always()
-        run: python3 test/tools/Qualification.py collect --build build-cef --evidence qualification-evidence --platform linux-cef-${{ matrix.compiler }} --output qualification/linux-cef-${{ matrix.compiler }}
-      - name: Retain the qualification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qualification-linux-cef-${{ matrix.compiler }}
-          path: qualification/linux-cef-${{ matrix.compiler }}/
-          if-no-files-found: ignore
       - name: Compiler cache statistics
         if: always()
         shell: bash
@@ -544,31 +517,3 @@ jobs:
             build-cef/test-results.xml
             build-cef/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
-
-  # One document for every platform, built from the captures the jobs above retained (#451). It runs even when a job failed:
-  # a failing or missing platform is then written into the report instead of being left out.
-  qualification-report:
-    needs: [desktop, desktop-native, web-integration]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: qualification-*
-          path: qualification-input
-      - name: Assemble the qualification document
-        shell: bash
-        run: |
-          # Each artifact holds one platform's folder; give it that platform's name.
-          for directory in qualification-input/qualification-*; do
-            [ -d "$directory" ] && mv "$directory" "qualification-input/${directory#qualification-input/qualification-}"
-          done
-          python3 test/tools/Qualification.py report --input qualification-input --output qualification-report/QUALIFICATION.md
-          # The summary cannot serve the artifact's images: show the tables only and point to the artifact.
-          { grep -v '^!\[' qualification-report/QUALIFICATION.md; echo; echo "The captures are in the \`qualification-report\` artifact of this run."; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: qualification-report
-          path: qualification-report/

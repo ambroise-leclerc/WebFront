@@ -567,6 +567,7 @@ struct Session {
         bool deferred = false;
         guard([&] {
             if (!options.downloadDirectory.empty()) {
+                std::filesystem::create_directories(options.downloadDirectory);  // WebKit needs the folder to exist.
                 const auto destination = frontend::detail::uniqueDownloadPath(options.downloadDirectory, suggested);
                 downloadDestinations[download] = {destination.string(), destination.string()};
                 Object path(text(destination.string()));
@@ -613,6 +614,8 @@ struct Session {
                 std::filesystem::rename(pending.temporary, pending.target, code);  // The old file survives any failure before this.
             if (!completed || code)
                 std::filesystem::remove(pending.temporary, code);
+            if (code)
+                completed = false;  // The target still holds the old file: this is not a finished download.
         }
         if (completed && options.downloadFinished)
             guard([&] {

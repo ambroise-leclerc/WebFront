@@ -182,7 +182,7 @@ if(_browser_tests_available)
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
-        # File services of the engine (issue #451), with captures as evidence for the qualification report.
+        # File services of the engine (issue #451), shared by every embedded frontend.
         webfront_add_jasmine_test(NAME ConsumerJasmine-file-services TARGET jasmine_consumer
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/file-services.spec.js"

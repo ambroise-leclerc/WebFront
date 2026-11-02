@@ -58,20 +58,16 @@ admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`)
 | WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | WebView2 | the engine's native chooser | the engine's native download UI | none yet |
 
-WKWebView is written but has not been run on a Mac by its author: the qualification report below is the first check. The
+WKWebView is covered by the shared spec below and by its CI job, but its chooser and download have no native scenario yet. The
 engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
 Xvfb for WebKitGTK) or a `Runtime.evaluate` with `userGesture` (CEF).
 
-### Qualification report
+### Tests
 
 `ConsumerJasmine-file-services` (all engines) checks that files reach the page as `File` objects, that the `accept` and
-`webkitdirectory` properties keep their values (filtering and directory selection themselves are not exercised), and that offering a generated Blob leaves the page and the bridge working.
-`WebKitGTKAdapter-download|choose-file|cancel-choose` and `CEFFileServices-download|choose|cancel` drive the dialog and
-the download through the injection points. Every scenario captures its final state with WebFront's own window capture
-(`QualificationEvidence.hpp`, `ConsumerJasmine` captures). In CI each platform job retains a `qualification-<platform>`
-artifact (`test/tools/Qualification.py collect`) and the `qualification-report` job assembles them into
-`QUALIFICATION.md` with the images, for Linux (WebKitGTK; CEF on pull requests into `master` and on the weekly run),
-Windows (WebView2) and macOS (WKWebView). A platform that did not report is written as missing.
+`webkitdirectory` properties keep their values (filtering and directory selection themselves are not exercised), and
+that offering a generated Blob leaves the page and the bridge working. `WebKitGTKAdapter-download|choose-file|cancel-choose`
+and `CEFFileServices-download|choose|cancel` drive the dialog and the download through the injection points.
 
 ## Adding a frontend
 

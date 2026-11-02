@@ -1,5 +1,3 @@
-#include "QualificationEvidence.hpp"
-
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
@@ -135,8 +133,7 @@ void nativeClose() {
 /// Runs a page of the test folder in a session configured by the scenario, for at most `seconds`.
 struct ScenarioFrontend : Frontend {
     static inline std::function<void(gtk::Session&)> configure;
-    static inline std::function<bool(gtk::Session&)> finished;  // Polled; true captures the evidence, then closes the window.
-    static inline std::string                        name;      // The scenario, for the qualification evidence.
+    static inline std::function<bool(gtk::Session&)> finished;  // Polled; true closes the window.
     static void open(std::string_view port, std::string_view page) {
         open("127.0.0.1", port, page, {});
     }
@@ -148,9 +145,7 @@ struct ScenarioFrontend : Frontend {
             gtk::Session& session;
             int           remaining = 150;  // 15 s
             unsigned      timer     = 0;
-            bool          finishing = false;
-            webfront::testing::QualificationEvidence evidence;
-        } poll{session, 150, 0, false, {}};
+        } poll{session, 150, 0};
         poll.timer = session.a.timeoutAdd(
             100,
             [](void* data) -> int {
@@ -159,16 +154,7 @@ struct ScenarioFrontend : Frontend {
                     probe.timer = 0;  // Returning 0 removes the source: it must not be removed again.
                     return 0;
                 }
-                if (probe.finishing)
-                    return 1;
-                if (finished(probe.session)) {
-                    probe.finishing = true;
-                    probe.evidence.capture("WebKitGTK", name, [&probe] {
-                        probe.session.close();
-                    });
-                    return 1;
-                }
-                if (--probe.remaining == 0) {
+                if (finished(probe.session) || --probe.remaining == 0) {
                     probe.timer = 0;
                     probe.session.close();
                     return 0;
@@ -177,7 +163,6 @@ struct ScenarioFrontend : Frontend {
             },
             &poll);
         session.run(webfront::frontend::detail::applicationUrl(address, port, page));
-        poll.evidence = {};  // Joins the capture thread before the session goes away.
         if (poll.timer)
             session.a.sourceRemove(poll.timer);
     }
@@ -196,7 +181,6 @@ void download() {
     std::filesystem::create_directories(folder);
     std::string destination;
     bool        done = false;
-    ScenarioFrontend::name = "download";
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.downloadDirectory = folder;
         session.downloadFinished  = [&](const std::string& path) {
@@ -248,7 +232,6 @@ void chooseFile(bool cancel) {
     const auto fixture = std::filesystem::temp_directory_path() / ("webfront-chooser-" + std::to_string(getpid()) + ".txt");
     std::ofstream(fixture) << "chosen by the test";
     bool asked = false;
-    ScenarioFrontend::name = cancel ? "cancel-choose" : "choose-file";
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.chooseFiles = [&]() -> std::vector<std::string> {
             asked = true;

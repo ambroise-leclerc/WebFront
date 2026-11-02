@@ -353,8 +353,7 @@ Le code vérifié le 2026-10-31 ne permet pas encore d'implémenter ces règles.
 | 5 | [#450](https://github.com/ambroise-leclerc/WebFront/issues/450) Intégration native des frontends | [#462](https://github.com/ambroise-leclerc/WebFront/issues/462) exécuteur du thread d'interface, y compris le navigateur système ; [#463](https://github.com/ambroise-leclerc/WebFront/issues/463) fenêtre native et correspondance avec les connexions | backend natif seulement |
 
 État de l'étape 1 (#451) : sélecteur et téléchargements qualifiés sous WebKitGTK et CEF (Linux), implémentés sous
-WKWebView, laissés au comportement natif sous WebView2 ; le rapport de qualification de la CI (`docs/FRONTENDS.md`) documente
-chaque moteur. #452 reste à faire.
+WKWebView, laissés au comportement natif sous WebView2 ; `docs/FRONTENDS.md` documente chaque moteur. #452 reste à faire.
 
 Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
 épique ; les dialogues natifs suivront l'étape 5. `PUT`/`POST` ne sont pas des préalables : les écritures passent par

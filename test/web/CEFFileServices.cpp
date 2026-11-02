@@ -1,6 +1,5 @@
 // Qualification of <input type="file"> and downloads in the CEF frontend (issue #451): the chooser is answered by the
 // client's injection point and opened by a real mouse click sent to the engine; the download goes to a private folder.
-#include "QualificationEvidence.hpp"
 #include <webfront/frontend/CEF.hpp>
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
@@ -26,8 +25,7 @@ struct Scenario {
     std::string           downloaded;
     bool                  asked = false;
 };
-Scenario                                 scenario;
-webfront::testing::QualificationEvidence evidence;
+Scenario scenario;
 
 class Client : public webfront::cef::SimpleCEFClient {
 public:
@@ -59,31 +57,16 @@ public:
         if (window)
             window->GetHost()->CloseBrowser(true);
     }
-    /// Captures the final state with WebFront's own capture, then closes the window on the UI thread.
     void finish() {
         if (finishing)
             return;
         finishing = true;
-        evidence.capture("CEF",
-                         scenario.mode == "choose"   ? "choose-file"
-                         : scenario.mode == "cancel" ? "cancel-choose"
-                                                     : "download",
-                         [this] {
-                             CefPostTask(TID_UI, new Close(this));
-                         });
+        close();
     }
 
 private:
     CefRefPtr<CefBrowser> window;
     bool                  finishing = false;
-    struct Close : CefTask {
-        explicit Close(Client* owner) : client(owner) {}
-        void Execute() override {
-            client->close();
-        }
-        CefRefPtr<Client> client;
-        IMPLEMENT_REFCOUNTING(Close);
-    };
 
 public:
     void clickChooser() {
@@ -159,7 +142,6 @@ int main(int argc, char** argv) {
             require(scenario.title == (scenario.mode == "choose" ? "picked:chosen by the test" : "cancelled"),
                     ("Unexpected page state: " + scenario.title).c_str());
         }
-        evidence = {};
         std::filesystem::remove_all(scenario.folder);
         return 0;
     } catch (const std::exception& error) {
