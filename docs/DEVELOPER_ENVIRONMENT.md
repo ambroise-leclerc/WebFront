@@ -70,6 +70,8 @@ an exact versioned environment URL and the trusted digest. The 0.6.4 release pin
 `https://ambroise-leclerc.github.io/WebFront/developer/0.6.4/environment.tgz`; the
 [publication gate](validation/developer-0.6.4-release.md) requires deployed verification before that pin is merged
 (the 0.6.3 gate is kept in [its report](validation/developer-0.6.3-release.md)).
+The sources advance to 0.6.5, which is served from `https://dist.webfront.fr/` (ADR-021); it is not published yet and the pin
+stays on 0.6.4, whose former address redirects to the new domain without CORS headers, so a browser cannot follow it.
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
 0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable, while 0.4.0 and earlier target the former include layout.
 The configuration pins one version and its SHA-512 rather than resolving a mutable `latest` channel. An explicit

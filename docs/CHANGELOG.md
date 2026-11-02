@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Developer environment: the distribution is served from `https://dist.webfront.fr/` (#478, ADR-021). The sources advance to 0.6.5, the
+  first version published under that address; `site.mjs` writes the `CNAME` file of the Pages branch and `wf run pin`
+  checks the pinned archive where it is served now. Libraries and environments up to 0.6.4 pin the former
+  `ambroise-leclerc.github.io/WebFront/` address, which redirects to the new domain without the CORS headers a browser
+  needs: their developer bootstrap no longer starts and they must be rebuilt with a pin on `dist.webfront.fr`. The pin
+  stays on 0.6.4 until 0.6.5 is published.
+
 ## 0.8.0 - 2026-11-01
 
 - Run authorized native programs from the specs of `webfront_add_jasmine_test` (#445): `PROGRAMS` is the owner's grant and
