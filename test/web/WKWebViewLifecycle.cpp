@@ -334,7 +334,7 @@ void download() {
     std::filesystem::remove_all(folder);
 }
 
-void chooseFile(bool cancel) {
+void chooseFile(bool cancel, const char* page = "file-services.html?choose", const char* click = "document.getElementById('picker').click()") {
     const auto fixture = std::filesystem::temp_directory_path() / ("webfront-wk-chooser-" + std::to_string(getpid()) + ".txt");
     std::ofstream(fixture) << "chosen by the test";
     bool asked                  = false;
@@ -346,6 +346,8 @@ void chooseFile(bool cancel) {
             return cancel ? std::vector<std::string>{} : std::vector<std::string>{fixture.string()};
         };
     };
+    static std::string clickScript;
+    clickScript = std::string("document.title === 'ready' && !window.clicked && (window.clicked = true, ") + click + ")";
     ScenarioFrontend::started = [](Session& session) {
         // A chooser needs a user gesture, and evaluateJavaScript counts as one. The page reports through its title.
         Session* live = &session;
@@ -357,13 +359,13 @@ void chooseFile(bool cancel) {
                 quitApplication();
                 return;
             }
-            Object script(text("document.title === 'ready' && !window.clicked && (window.clicked = true, document.getElementById('picker').click())"));
+            Object script(text(clickScript));
             send<void>(live->view, "evaluateJavaScript:completionHandler:", script.get(), static_cast<id>(nullptr));
         };
         send(type("NSTimer"), "scheduledTimerWithTimeInterval:repeats:block:", 0.1, static_cast<BOOL>(true), tick);
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
-    app.show("file-services.html?choose");
+    app.show(page);
     resetScenario();
     std::filesystem::remove(fixture);
     require(asked, "The file chooser was not requested");
@@ -375,6 +377,59 @@ void chooseOne() {
 }
 void chooseCancel() {
     chooseFile(true);
+}
+/// A frame created by the page without an address inherits its origin: its chooser is the application's own.
+void chooseInBlankFrame() {
+    chooseFile(false, "file-services.html?blank", "document.querySelector('iframe').contentDocument.getElementById('picker').click()");
+}
+void chooseInSrcdocFrame() {
+    chooseFile(false, "file-services.html?srcdoc", "document.querySelector('iframe').contentDocument.getElementById('picker').click()");
+}
+
+/// Closing the window while a system panel is open: the panel answers "cancel" and its late answer touches nothing.
+void closeWithPanel(const char* page, const char* click) {
+    Object pool(send(type("NSAutoreleasePool"), "new"));
+    static bool sawPanel;
+    static std::string script;
+    sawPanel = false;
+    script   = click;
+    ScenarioFrontend::configure = [](webfront::frontend::WKWebViewOptions& options) {
+        options.visible = true;  // No injection: the real NSSavePanel / NSOpenPanel opens as a sheet of a visible window.
+    };
+    ScenarioFrontend::started = [](Session& session) {
+        Session* live  = &session;
+        auto     ticks = std::make_shared<int>(0);
+        auto     tick  = ^(id timer) {
+            const auto sheets = send(live->window, "sheets");
+            if (send<unsigned long>(sheets, "count") > 0) {
+                sawPanel = true;
+                if (++*ticks > 3) {  // Let the sheet settle, then close the window under it.
+                    send<void>(timer, "invalidate");
+                    quitApplication();
+                }
+                return;
+            }
+            if (!script.empty()) {
+                Object code(text("document.title === 'ready' && !window.clicked && (window.clicked = true, " + script + ")"));
+                send<void>(live->view, "evaluateJavaScript:completionHandler:", code.get(), static_cast<id>(nullptr));
+            }
+        };
+        send(type("NSTimer"), "scheduledTimerWithTimeInterval:repeats:block:", 0.1, static_cast<BOOL>(true), tick);
+    };
+    {
+        ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+        app.show(page);
+    }
+    resetScenario();
+    // A late answer from AppKit after the session ended must find nothing to touch.
+    send<void>(send(type("NSRunLoop"), "currentRunLoop"), "runUntilDate:", send(type("NSDate"), "dateWithTimeIntervalSinceNow:", 0.5));
+    require(sawPanel, "The system panel did not open");
+}
+void closeWithOpenPanel() {
+    closeWithPanel("file-services.html?choose", "document.getElementById('picker').click()");
+}
+void closeWithSavePanel() {
+    closeWithPanel("file-services.html?download", "");
 }
 
 /// The save panel's "Replace" choice: the page's bytes land beside the old file and replace it only on success.
@@ -444,7 +499,11 @@ int main(int argc, char** argv) {
             {             "download",             download},
             {          "choose-file",            chooseOne},
             {        "cancel-choose",         chooseCancel},
-            {    "replaced-download",     replacedDownload}
+            {    "replaced-download",     replacedDownload},
+            {     "choose-in-blank",     chooseInBlankFrame},
+            {    "choose-in-srcdoc",    chooseInSrcdocFrame},
+            {   "close-with-open-panel",   closeWithOpenPanel},
+            {   "close-with-save-panel",   closeWithSavePanel}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

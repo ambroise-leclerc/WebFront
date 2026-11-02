@@ -18,6 +18,25 @@
         document.body.append(link);
         result.textContent = "download requested";
         link.click();
+    } else if (mode === "?blank" || mode === "?srcdoc") {
+        // The chooser of a frame the page creates without an address of its own: about:blank / about:srcdoc, same origin.
+        const markup = '<input id="picker" type="file">';
+        const frame = document.createElement("iframe");
+        const wire = () => {
+            const picker = frame.contentDocument.getElementById("picker");
+            if (!picker || picker.wired) return;
+            picker.wired = true;
+            picker.addEventListener("change", async () => {
+                const text = await picker.files[0].text();
+                report("picked:" + text, picker.files[0].name + ": " + text);
+            });
+            picker.addEventListener("cancel", () => report("cancelled", "cancelled"));
+            document.title = "ready";
+        };
+        frame.addEventListener("load", wire);
+        if (mode === "?srcdoc") frame.srcdoc = markup;
+        document.body.append(frame);
+        if (mode === "?blank") { frame.contentDocument.body.innerHTML = markup; wire(); }
     } else if (mode === "?choose") {
         const picker = document.getElementById("picker");
         picker.addEventListener("change", async () => {

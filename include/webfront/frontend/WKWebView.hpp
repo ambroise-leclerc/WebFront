@@ -294,6 +294,8 @@ struct Session {
         std::string target;     // Where the user wants it; differs from `temporary` when "Replace" was chosen.
     };
     std::map<id, PendingDownload>        downloadDestinations;  // WKDownload -> its paths, until it ends.
+    /// What the answers of a system panel hold instead of `this`: AppKit may deliver one after the session is gone.
+    std::shared_ptr<Session*>            alive = std::make_shared<Session*>(this);
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
@@ -304,6 +306,8 @@ struct Session {
     CaptureRegistration                  captureRegistration;
 
     ~Session() {
+        *alive = nullptr;
+        endSheets();  // Each open panel answers "cancel" now, while the view still exists to receive it.
         captureRegistration = {};
         abandonCaptures(*captureTarget);
         if (timer) {
@@ -340,6 +344,16 @@ struct Session {
             attach(delegate, nullptr);
             send<void>(delegate, "release");
         }
+    }
+
+    /// Dismisses the panels attached to the window: their completion handlers run, so WebKit gets its answers.
+    void endSheets() noexcept {
+        if (!window)
+            return;
+        const auto sheets = send(window, "sheets");
+        const auto count  = send<unsigned long>(sheets, "count");
+        for (auto index = count; index > 0; --index)
+            send<void>(window, "endSheet:", send(sheets, "objectAtIndex:", index - 1));
     }
 
     void close() noexcept {
@@ -525,13 +539,28 @@ struct Session {
         decision(policy);  // Exactly once, including after a C++ exception.
     }
 
+    /// The address a frame is judged by. A frame the page creates without a document of its own (no `src`, or `srcdoc`)
+    /// is `about:blank` / `about:srcdoc` and inherits its creator's origin, which is what the policy has to see.
+    static std::string effectiveFrameUrl(id frame) {
+        auto address = utf8(send(send(send(frame, "request"), "URL"), "absoluteString"));
+        if (!address.empty() && !address.starts_with("about:"))
+            return address;
+        const auto origin   = send(frame, "securityOrigin");
+        const auto protocol = utf8(send(origin, "protocol"));
+        const auto host     = utf8(send(origin, "host"));
+        if (protocol.empty() || host.empty())
+            return address;  // An opaque origin (sandboxed frame): not the application's.
+        const auto port = send<long>(origin, "port");
+        return protocol + "://" + host + (port > 0 ? ":" + std::to_string(port) : "") + "/";
+    }
+
     /// <input type="file">: the system panel as a sheet of the window, or the test injection. The handler runs exactly once.
     void chooseFilesForPage(id parameters, id frame, void (^completion)(id)) noexcept {
         id   result   = nullptr;  // NSArray<NSURL*>*; nil cancels.
         bool deferred = false;
         guard([&] {
             // Only the frames the policy admits may open a chooser.
-            if (!contentPolicy.allowsNavigation(utf8(send(send(send(frame, "request"), "URL"), "absoluteString"))))
+            if (!contentPolicy.allowsNavigation(effectiveFrameUrl(frame)))
                 return;
             if (options.chooseFiles) {
                 const auto files = options.chooseFiles();
@@ -551,9 +580,11 @@ struct Session {
             const auto directories = send<BOOL>(parameters, "allowsDirectories");
             send<void>(panel, "setCanChooseDirectories:", directories);
             send<void>(panel, "setCanChooseFiles:", static_cast<BOOL>(!directories));
-            auto handler           = Block_copy(completion);
+            auto handler = Block_copy(completion);
+            send<void>(panel, "retain");
             void (^finished)(long) = ^(long response) {
                 handler(response == 1 ? send(panel, "URLs") : nullptr);  // NSModalResponseOK
+                send<void>(panel, "release");
                 Block_release(handler);
             };
             deferred = true;
@@ -579,9 +610,13 @@ struct Session {
             const auto panel = send(type("NSSavePanel"), "savePanel");
             Object     name(text(std::filesystem::path(suggested).filename().string()));
             send<void>(panel, "setNameFieldStringValue:", name.get());
-            auto handler           = Block_copy(completion);
+            auto handler = Block_copy(completion);
+            auto token   = alive;  // Not `this`: the window may close, and the session end, while the panel is open.
+            send<void>(panel, "retain");
             void (^finished)(long) = ^(long response) {
                 id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
+                if (chosen && !*token)
+                    chosen = nullptr;  // The session is gone: nobody could move the file afterwards.
                 if (chosen) {
                     // "Replace" returns an existing file, which WKDownload refuses: download beside it, replace when done.
                     const std::filesystem::path target = utf8(send(chosen, "path"));
@@ -592,9 +627,10 @@ struct Session {
                         Object path(text(temporary.string()));
                         chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
                     }
-                    downloadDestinations[download] = {temporary.string(), target.string()};
+                    (*token)->downloadDestinations[download] = {temporary.string(), target.string()};
                 }
                 handler(chosen);
+                send<void>(panel, "release");
                 Block_release(handler);
             };
             deferred = true;
