@@ -203,6 +203,41 @@ void download() {
     std::filesystem::remove_all(folder);
 }
 
+/// Without a configured folder, the download lands in GLib's user download directory (user-dirs.dirs), not in an
+/// XDG_DOWNLOAD_DIR environment variable, which nothing defines in a normal session.
+void downloadUserDirectory() {
+    const auto base = std::filesystem::temp_directory_path() / ("webfront-userdir-" + std::to_string(getpid()));
+    std::filesystem::remove_all(base);
+    const auto config = base / "config";
+    const auto folder = base / "Telechargements";
+    const auto decoy  = base / "decoy";
+    std::filesystem::create_directories(config);
+    std::filesystem::create_directories(folder);
+    std::filesystem::create_directories(decoy);
+    std::ofstream(config / "user-dirs.dirs") << "XDG_DOWNLOAD_DIR=\"" << folder.string() << "\"\n";
+    // GLib reads the configuration once, at the first query: set it before any session exists.
+    setenv("XDG_CONFIG_HOME", config.c_str(), 1);
+    setenv("XDG_DOWNLOAD_DIR", decoy.c_str(), 1);
+    std::string destination;
+    bool        done        = false;
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        session.downloadFinished = [&](const std::string& path) {
+            destination = path;
+            done        = true;
+        };
+    };
+    ScenarioFrontend::finished = [&](gtk::Session&) {
+        return done;
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    app.show("file-services.html?download");
+    if (!done)
+        throw std::runtime_error("The download did not finish");
+    if (std::filesystem::path(destination) != folder / "webfront-download.txt")
+        throw std::runtime_error("The download ignored GLib's user download directory: " + destination);
+    std::filesystem::remove_all(base);
+}
+
 /// A real pointer click through the X server's XTest extension: web content only opens a file chooser for a user gesture.
 struct FakeClick {
     void* x11   = dlopen("libX11.so.6", RTLD_NOW);
@@ -266,6 +301,33 @@ void chooseCancel() {
     chooseFile(true);
 }
 
+/// Closing the window while the system file dialog is open must end cleanly, without waiting for an answer.
+void closeWithDialog() {
+    bool opened = false;
+    int  open   = 0;  // Poll ticks since the dialog opened.
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        session.chooserOpened = [&] {
+            opened = true;
+        };
+    };
+    std::string     title;
+    const FakeClick pointer;
+    if (!pointer.available())
+        throw std::runtime_error("XTest is unavailable: run the scenario under Xvfb with libXtst");
+    int ticks = 0;
+    ScenarioFrontend::finished = [&](gtk::Session& session) {
+        const char* current = session.a.viewTitle(session.view);
+        title               = current ? current : "";
+        if (title == "ready" && !opened && ++ticks % 5 == 1)
+            pointer.click(40, 20);
+        return opened && ++open > 10;  // Let the dialog map, then close the window under it.
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    app.show("file-services.html?choose");
+    if (!opened)
+        throw std::runtime_error("The file dialog was not opened");
+}
+
 void windowTitle() {
     gtk::initialize();
     const auto titleOf = [](webfront::WindowOptions window) {
@@ -318,6 +380,8 @@ void run(std::string_view mode) {
         {"profile-permissions", profilePermissions},
         {       "window-title",        windowTitle},
         {          "download",           download},
+        {"download-user-dir", downloadUserDirectory},
+        { "close-with-dialog",      closeWithDialog},
         {       "choose-file",          chooseOne},
         {     "cancel-choose",       chooseCancel}
     };

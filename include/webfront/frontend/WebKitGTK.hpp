@@ -287,6 +287,8 @@ struct Session : FailureState {
     std::filesystem::path downloadDirectory;
     /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset shows the system dialog.
     std::function<std::vector<std::string>()> chooseFiles;
+    /// Test hook: called when the system file dialog is about to open.
+    std::function<void()> chooserOpened;
     /// Test injection: called with the destination of each finished download.
     std::function<void(const std::string&)> downloadFinished;
     struct Download {
@@ -578,8 +580,11 @@ struct Session : FailureState {
         });
     }
     static int onRunFileChooser(Api::Object, Api::Object request, Session* self) noexcept {
-        if (!self->chooseFiles)
+        if (!self->chooseFiles) {
+            if (self->chooserOpened)
+                self->chooserOpened();
             return 0;  // The system dialog, attached to the window by WebKitGTK.
+        }
         try {
             const auto              files = self->chooseFiles();
             std::vector<const char*> pointers;

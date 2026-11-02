@@ -71,6 +71,10 @@ WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the fronte
 `webkitdirectory` properties keep their values (filtering and directory selection themselves are not exercised), and
 that offering a generated Blob leaves the page and the bridge working. `WebKitGTKAdapter-download|choose-file|cancel-choose`
 and `CEFFileServices-download|choose|cancel` drive the dialog and the download through the injection points.
+`WebKitGTKAdapter-download-user-dir` checks that, without a configured folder, the download lands in GLib's user download
+directory (read from `user-dirs.dirs`, not from an environment variable). `WebKitGTKAdapter-close-with-dialog` opens the
+real system dialog with a pointer click, closes the window under it and requires a clean exit; the other engines do not
+test that case.
 `WebView2Lifecycle-file-choose|file-cancel|file-download` verifies the engine's chooser request, selection and cancellation
 events, and the bytes written by a completed Blob download. It intercepts the chooser with DevTools and suppresses the download UI,
 so it does not qualify the native dialogs themselves or closing the window while one is open.
