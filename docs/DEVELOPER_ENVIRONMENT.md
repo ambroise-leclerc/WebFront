@@ -60,7 +60,7 @@ int main() {
 }
 ```
 
-The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
+The [versioned distributions](https://dist.webfront.fr/) are published on GitHub Pages, under the domain `dist.webfront.fr`.
 Each published version is immutable: 0.3.0 introduced the packed-bitset Life starter (bridge support from #289), 0.3.1 made
 `wf install` keep the versions of the installed lock, 0.4.1 changed the include of the generated provider, 0.5.0 added the
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
