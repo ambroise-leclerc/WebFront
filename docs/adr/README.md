@@ -107,7 +107,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-021**. Retain historical numbers and files.
+  is **ADR-022**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

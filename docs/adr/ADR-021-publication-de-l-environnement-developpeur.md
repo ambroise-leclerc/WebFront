@@ -37,7 +37,7 @@ services système (ADR-020) se construisent, plus vite que la bibliothèque.
 
 ### La procédure actuelle
 
-`PUBLISHING.md` décrit quatre temps pour une version, répartis sur plusieurs branches et pull requests :
+`PUBLISHING.md` décrit cinq temps pour une version, répartis sur plusieurs branches et pull requests :
 
 1. fusionner les changements en laissant l'en-tête sur la version précédente (les sources avancent, le pin non) ;
 2. sur une branche de release, `wf run build build-distribution --refresh-bootstrap`, commit du nouvel en-tête et des
