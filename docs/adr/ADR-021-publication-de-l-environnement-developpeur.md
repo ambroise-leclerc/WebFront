@@ -4,7 +4,7 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-11-02 | Proposée | Ambroise Leclerc | Décision initiale : évaluation des méthodes de publication de l'environnement développeur après la publication de la 0.6.4 ; recommandation d'automatiser la chorégraphie actuelle et de ne pas installer de serveur dédié. | À renseigner après intégration. |
+| 1.0 | 2026-11-02 | Proposée | Ambroise Leclerc | Décision initiale : évaluation des méthodes de publication de l'environnement développeur après la publication de la 0.6.4 ; recommandation d'automatiser la chorégraphie actuelle, de ne pas installer de serveur dédié et de servir la distribution sous le domaine propre `dist.webfront.fr`. | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -76,7 +76,7 @@ services système (ADR-020) se construisent, plus vite que la bibliothèque.
 | E | **Signer l'archive** (clé publique dans l'en-tête, signature publiée avec l'archive ; minisign ou Sigstore) | L'en-tête ne change qu'à la rotation de clé : plus de pin par version, plus de PR de fusion, plus de fenêtre de divergence. | Déplace la confiance vers une clé à garder hors ligne ; exige une politique de version minimale/maximale pour éviter le retour en arrière ou le gel (réflexions TUF) ; modifie le contrat « le hash vient de l'hôte » (ADR-013/016) ; la signature doit être vérifiée dans le navigateur par le chargeur de 150 Kio. | À instruire (phase 2) si B ne suffit pas. |
 | F | Assets de release GitHub comme source primaire | Un seul mécanisme de publication. | Redirections et CORS non garantis (déjà écarté en 0.x). | Écartée. |
 | G | **Serveur dédié chez OVHcloud** | Contrôle des en-têtes, du domaine, de la bande passante, des journaux. | Système à exploiter (correctifs, TLS, sauvegardes, supervision) ; point de défaillance unique pour **tout** nouveau démarrage d'application ; surface d'attaque sur la chaîne d'approvisionnement ; coût récurrent. Les besoins réels (4 Mo par version, fichiers statiques immuables) sont très en deçà des limites de Pages. | Écartée comme serveur. |
-| H | **Domaine à soi devant l'hébergement statique** (nom propre en `CNAME` sur Pages, ou stockage objet statique OVHcloud) | L'URL compilée dans chaque application ne dépend plus du compte GitHub ; migration d'hébergeur possible sans nouvelle bibliothèque. | Un nom de domaine à renouveler ; le hash de l'archive reste la garantie, donc le domaine n'élargit pas la confiance. | **Retenue (phase 1, indépendante), à décider séparément.** |
+| H | **Domaine à soi devant l'hébergement statique** : `dist.webfront.fr` en `CNAME` sur Pages (ou, plus tard, stockage objet statique OVHcloud derrière le même nom) | L'URL compilée dans chaque application ne dépend plus du compte GitHub ; migration d'hébergeur possible en changeant le DNS, sans nouvelle bibliothèque. | `webfront.fr` doit être renouvelé et sa zone DNS protégée ; le hash de l'archive reste la garantie, donc le domaine n'élargit pas la confiance. | **Retenue (phase 1, indépendante des points B).** |
 
 ### Sur le serveur OVHcloud
 
@@ -116,8 +116,26 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
 5. **Phase 2 conditionnelle (E, signatures)** : à instruire dans une ADR distincte si, après la phase 1, le pin par version
    reste une contrainte (par exemple si des applications tierces doivent recevoir des correctifs de l'environnement sans
    recompilation). Elle ne se décide pas ici car elle change le modèle de confiance.
-6. **Domaine propre (H)** : décision séparée du propriétaire du projet ; indépendante des points 1 à 4. Elle doit avoir
-   lieu **avant** que des applications tierces compilent l'URL actuelle en grand nombre, et non après.
+6. **Domaine propre (H) : `dist.webfront.fr`**, à adopter au plus vite, indépendamment des points 1 à 4 et avant que des
+   applications tierces compilent l'URL actuelle. Un sous-domaine dédié est utilisé parce que `webfront.fr` porte déjà le
+   courrier (enregistrements MX chez OVHcloud) : le courrier n'est pas touché. Il reste le seul nom compilé dans les
+   en-têtes ; GitHub Pages n'est qu'un hébergement derrière lui. Procédure :
+   1. zone DNS : `dist` en `CNAME` vers `ambroise-leclerc.github.io.` ; si des enregistrements `CAA` existent, y autoriser
+      `letsencrypt.org` ;
+   2. vérification du domaine dans les paramètres Pages du compte GitHub (enregistrement `TXT` `_github-pages-challenge-…`),
+      pour qu'aucun tiers ne puisse revendiquer un sous-domaine de `webfront.fr` ;
+   3. activation sur le dépôt (`gh api -X PUT repos/ambroise-leclerc/WebFront/pages -f cname=dist.webfront.fr`), puis
+      HTTPS forcé une fois le certificat émis ;
+   4. `js/developer/scripts/site.mjs` écrit aujourd'hui seulement `.nojekyll` : il doit aussi écrire (ou conserver) le
+      fichier `CNAME` de la branche `gh-pages`, faute de quoi chaque publication effacerait le domaine configuré ;
+   5. contrôle des anciennes URL : les versions 0.6.0 à 0.6.4 sont compilées avec
+      `ambroise-leclerc.github.io/WebFront/…`, que Pages redirige ensuite vers le nouveau domaine ; un `fetch` de navigateur
+      doit suivre cette redirection avec des en-têtes CORS valides (`developer_integration --public` sur une ancienne
+      version). Les hash ne changent pas ; si la redirection échoue, les applications déjà compilées cessent de démarrer
+      et il faut la corriger avant toute bascule ;
+   6. nouvelle version de l'environnement avec `baseUrl` à `https://dist.webfront.fr/` (changer une URL publique impose
+      d'incrémenter la version), puis mise à jour de `WebFrontBootstrap.cmake`, de `docs/DEVELOPER_ENVIRONMENT.md` et
+      de `js/developer/webfront.project.json` ; les anciennes versions restent à leur place.
 7. **Pas de serveur dédié** (G) tant qu'un besoin mesuré ne le justifie pas.
 
 ## Conséquences
