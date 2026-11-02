@@ -4,13 +4,15 @@
 
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
-| 1.0 | 2026-11-02 | Proposée | Ambroise Leclerc | Décision initiale : évaluation des méthodes de publication de l'environnement développeur après la publication de la 0.6.4 ; recommandation d'automatiser la chorégraphie actuelle, de ne pas installer de serveur dédié et de servir la distribution sous le domaine propre `dist.webfront.fr`. | À renseigner après intégration. |
+| 1.0 | 2026-11-02 | Acceptée | Ambroise Leclerc | Décision initiale : évaluation des méthodes de publication de l'environnement développeur après la publication de la 0.6.4 ; recommandation d'automatiser la chorégraphie actuelle, de ne pas installer de serveur dédié et de servir la distribution sous le domaine propre `dist.webfront.fr`. | À renseigner après intégration. |
 
 ## État et chronologie
 
-**Proposée** le **2026-11-02**, juste après la publication de l'environnement 0.6.4 (`developer-v0.6.4`).
-Cette version ne modifie pas le code du dépôt. Elle passera à « Acceptée » quand les critères de la section dédiée
-seront démontrés par une publication réelle.
+**Acceptée** le **2026-11-02**, par le propriétaire du projet, après la publication de l'environnement 0.6.4
+(`developer-v0.6.4`). L'acceptation vaut décision : le point 6 (domaine propre) est livré, la phase 1 (workflow de release
+unique, source unique du pin, répétition avant publication, table de compatibilité, permissions par job) reste à
+implémenter. Les critères de la section dédiée deviennent ses critères de réception ; ils sont à démontrer par une
+publication réelle et à suivre dans l'issue qui la porte. Cette version ne modifie pas elle-même le code du dépôt.
 
 **Domaine propre livré (point 6 de la décision, #478).** Le 2026-11-02, `dist.webfront.fr` est configuré (`CNAME` chez OVHcloud,
 `webfront.fr` vérifié, certificat approuvé, HTTPS forcé) ; `site.mjs` écrit le `CNAME` (#479) ; l'environnement 0.6.5, première
