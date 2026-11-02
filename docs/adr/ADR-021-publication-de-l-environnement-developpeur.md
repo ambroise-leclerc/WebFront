@@ -90,14 +90,27 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
 
 1. **Phase 1, B : un seul workflow de release de l'environnement**, qui remplace les étapes manuelles de `PUBLISHING.md`.
    Il reste soumis aux invariants de la section « Ce qu'il faut conserver » : reconstruction double, immuabilité, hash
-   épinglé dans l'en-tête, aucune écriture d'un fichier hors de `permissions.publish`.
+   épinglé dans l'en-tête. Deux périmètres d'écriture sont distingués : celui des **scripts `wf`**, qui n'écrivent que
+   là où `permissions.publish` de `js/developer/webfront.project.json` l'autorise (inchangé), et celui de l'**étape de
+   commit du workflow**, qui écrit sur la branche de release une liste fermée de chemins : `distribution.json`,
+   `DeveloperReleaseData.hpp`, les sommes de `bundles.json`, les bundles régénérés et la table de compatibilité de
+   `docs/DEVELOPER_ENVIRONMENT.md`. Cette liste est déclarée dans le workflow, et l'étape échoue si le diff en touche un
+   autre. Le jeton a `contents: write` et ne pousse que sur la branche de release, jamais sur `develop` ni `master`.
 2. **Une source unique pour le pin** : `WebFrontBootstrap.cmake` lit la version, l'URL et l'intégrité d'un même fichier
-   que celui qui produit `DeveloperReleaseData.hpp`, ou en est dérivé par un test `CTest` de cohérence qui échoue à
-   la moindre divergence. Le bootstrap des tests peut rester volontairement en retard sur l'en-tête, mais ce retard devient
-   explicite et borné (une version), non un troisième endroit à éditer à la main.
+   que celui qui produit `DeveloperReleaseData.hpp`, ou en est dérivé, et un test de cohérence distingue les états
+   normaux des incohérences. Sont **normaux** : (a) `distribution.json` en avance sur l'en-tête, les sources préparant
+   la version suivante tandis que l'en-tête épingle la dernière version publiée ; il faut alors que l'en-tête soit
+   exactement celui que génère sa propre version et que l'archive déployée à son URL ait l'intégrité épinglée
+   (ce que vérifie aujourd'hui `wf run pin`) ; (b) `distribution.json` égal à l'en-tête, qui doit alors être
+   identique à celui d'une construction fraîche ; (c) le bootstrap des tests égal à l'en-tête ou à une version
+   publiée antérieure, mais jamais postérieure. Est **incohérent** : un en-tête plus récent que `distribution.json`, un en-tête qui n'est pas celui de sa version, une archive
+   déployée dont l'intégrité diffère, ou un bootstrap de tests en avance sur l'en-tête.
 3. **La vérification du déploiement est une étape du workflow**, pas une convention : SHA-512 des octets servis, en-têtes
-   CORS, `developer_integration --public`. La fusion du pin ne s'ouvre que si elle réussit ; un échec ne laisse aucune
-   branche à synchroniser (la PR n'a pas été ouverte).
+   CORS, `developer_integration --public`. La PR de fusion du pin ne s'ouvre que si elle réussit. Comme la vérification
+   suit la publication et que les versions publiées sont immuables, un échec dû à une panne transitoire (réseau,
+   construction de Pages) se reprend avec les mêmes octets, tandis qu'un échec révélant des octets ou une configuration
+   incorrects impose une nouvelle version. Pour réduire ce second cas, une **répétition sans publication** (dispatch
+   `publish=false`) exécute avant le tag la même suite sur les octets candidats servis en local, comme l'a fait la 0.6.3.
 4. **Table de compatibilité écrite** dans `docs/DEVELOPER_ENVIRONMENT.md` : version de la bibliothèque → environnement
    épinglé → `api` minimale. Elle est générée par le workflow, pas tenue à la main.
 5. **Phase 2 conditionnelle (E, signatures)** : à instruire dans une ADR distincte si, après la phase 1, le pin par version
@@ -109,24 +122,28 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
 
 ## Conséquences
 
-Positives : une opération au lieu de quatre branches/PR ; plus de fenêtre de divergence à surveiller ; les erreurs détectées
-avant la fusion ne coûtent plus un numéro de version quand la vérification précède l'ouverture de la PR ; un seul
-endroit à relire lors d'une revue de release.
+Positives : une opération au lieu de quatre branches/PR ; plus de fenêtre de divergence à surveiller ; les erreurs
+détectables sur les octets candidats sont attrapées par la répétition avant publication et ne consomment pas de numéro ;
+un seul endroit à relire lors d'une revue de release.
 
 Négatives : le workflow doit pouvoir écrire dans le dépôt (jeton à portée limitée, contournement éventuel de la protection de
 `develop`) ; sa première version doit être éprouvée sur une publication réelle ; le tag ne désigne plus un commit préparé à la
 main mais un commit produit par le CI, à documenter.
 
-Risques résiduels : la publication reste irréversible (un octet faux publié impose une nouvelle version) ; Pages reste un
+Risques résiduels : la publication reste irréversible (un octet ou une configuration incorrects constatés après
+publication imposent une nouvelle version ; seule une panne transitoire se reprend avec les mêmes octets) ; Pages reste un
 point de défaillance unique, atténué seulement par l'archive de la prerelease et par l'option H.
 
 ## Critères d'acceptation
 
 1. Une version publiée par le seul workflow, sans édition manuelle de fichier entre le déclenchement et la fusion.
-2. Un test échoue si `distribution.json`, `DeveloperReleaseData.hpp` et `WebFrontBootstrap.cmake` divergent hors du retard borné.
-3. Une publication volontairement échouée à l'étape de vérification n'ouvre aucune PR et ne modifie ni `develop` ni `master`.
-4. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
-5. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
+2. Le test de cohérence accepte les états normaux (a) à (c) de la décision 2, en particulier des sources en avance sur un
+   en-tête resté sur la dernière version publiée, et échoue pour chacune des incohérences listées.
+3. Une vérification volontairement échouée après publication n'ouvre aucune PR et ne modifie ni `develop` ni `master` ; une
+   reprise avec les mêmes octets réussit après une panne simulée, et des octets incorrects mènent à une nouvelle version.
+4. L'étape de commit échoue si le diff touche un chemin hors de la liste fermée de la décision 1.
+5. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
+6. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
 
 ## Prescriptions d'implémentation
 
