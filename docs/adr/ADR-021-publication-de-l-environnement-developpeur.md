@@ -107,13 +107,21 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
    | Job | Permissions du jeton | Destination | Réglage du dépôt nécessaire |
    | --- | --- | --- | --- |
    | Construction et répétition (`wf-package`) | `contents: read` | aucune (artefact) | — |
-   | Préparation | `contents: write` | uniquement la branche `release/developer-<version>`, qui n'est ni `develop` ni `master` ; le commit se limite à la liste fermée ci-dessus | la branche n'est pas protégée par le motif de `develop`/`master` ; aucune dérogation de contournement n'est accordée au workflow |
+   | Préparation | jeton de l'application (`contents: write`) | uniquement la branche `release/developer-<version>`, qui n'est ni `develop` ni `master` ; le commit se limite à la liste fermée ci-dessus | la branche n'est pas protégée par le motif de `develop`/`master` ; aucune dérogation de contournement n'est accordée au workflow |
    | Publication | `contents: write`, `pages: write` | la branche `gh-pages` (sans force-push) et la demande de construction de Pages ; une prerelease | source Pages inchangée (`gh-pages`, racine) ; son environnement `developer-pages-publication` reste l'unique écrivain |
    | Création du tag | `contents: write` | le tag `developer-v<version>`, posé par le **même run** après le succès de la construction : un tag poussé avec le jeton du workflow ne déclencherait pas un autre run, d'où le job unique plutôt que le déclenchement par tag | une règle de tags sur `developer-v*` interdit la mise à jour et la suppression |
    | Vérification | `contents: read` | aucune | — |
-   | Ouverture de la PR de fusion | `pull-requests: write` | une PR de la branche de release vers `develop` | « Allow GitHub Actions to create pull requests » activé dans Settings → Actions → General ; la PR n'est **pas** fusionnée par le workflow : la revue exigée par la protection de `develop` reste | 
+   | Ouverture de la PR de fusion | jeton d'une **application GitHub dédiée** (`pull-requests: write`, `contents: write` sur le dépôt, rien d'autre) ; le `GITHUB_TOKEN` du job se limite à `contents: read` | une PR de la branche de release vers `develop` | l'application est installée sur le dépôt, son secret est celui d'un environnement protégé ; la PR n'est **pas** fusionnée par le workflow : la revue exigée par la protection de `develop` reste |
 
-   Si le dépôt refuse cette option, la PR est ouverte par un jeton d'application dédié, limité à ce seul droit.
+   **La PR et le push de la branche de release utilisent le jeton de l'application, pas le `GITHUB_TOKEN`.** Les événements
+   produits avec le `GITHUB_TOKEN` ne déclenchent pas d'autres workflows (hors `workflow_dispatch` et
+   `repository_dispatch`), et ceux qui le seraient resteraient en attente d'une approbation manuelle : une PR créée avec ce
+   jeton n'exécuterait donc pas, ou pas sans intervention, `BuildAndTest.yml` ni `DeveloperDistribution.yml`, c'est-à-dire
+   les contrôles requis pour fusionner. Avec le jeton d'application, la PR et la branche se comportent comme celles d'une
+   personne : les contrôles s'exécutent normalement et la protection de `develop` reste entière. Le réglage « Allow GitHub
+   Actions to create pull requests » n'est pas nécessaire et reste désactivé. La ligne « Préparation » ci-dessus pousse
+   avec ce même jeton pour la même raison. Le tag et la publication, eux, restent dans le run et n'ont pas besoin de
+   déclencher un autre workflow.
 2. **Une source unique pour le pin** : `WebFrontBootstrap.cmake` lit la version, l'URL et l'intégrité d'un même fichier
    que celui qui produit `DeveloperReleaseData.hpp`, ou en est dérivé, et un test de cohérence distingue les états
    normaux des incohérences. Sont **normaux** : (a) `distribution.json` en avance sur l'en-tête, les sources préparant
@@ -137,7 +145,14 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
    incorrects impose une nouvelle version. Pour réduire ce second cas, une **répétition sans publication** (dispatch
    `publish=false`) exécute avant le tag la même suite sur les octets candidats servis en local, comme l'a fait la 0.6.3.
 4. **Table de compatibilité écrite** dans `docs/DEVELOPER_ENVIRONMENT.md` : version de la bibliothèque → environnement
-   épinglé → `api` minimale. Elle est générée par le workflow, pas tenue à la main.
+   épinglé → `api` minimale. Les deux cycles étant indépendants, le workflow de l'environnement ne peut pas la tenir
+   seul : une version de la bibliothèque peut sortir sans qu'il s'exécute. Le contrat est donc partagé : (a) le workflow
+   de l'environnement réécrit la ligne **« non publiée »** (l'environnement épinglé par `develop`) à chaque pin ;
+   (b) la préparation d'une release de la bibliothèque **fige** cette ligne en une ligne portant sa version, d'après
+   l'en-tête `DeveloperReleaseData.hpp` du commit de release (génération par un script, pas à la main) ;
+   (c) `CheckReleaseVersion.cmake`, déjà exécuté par `ReleaseVersion.yml` sur les tags `v*`, échoue si la version de la
+   bibliothèque n'a pas sa ligne ou si la ligne diffère de l'en-tête. Une version sortie sans nouvelle publication de
+   l'environnement reprend ainsi le même environnement que la précédente, sans attendre la suivante.
 5. **Phase 2 conditionnelle (E, signatures)** : à instruire dans une ADR distincte si, après la phase 1, le pin par version
    reste une contrainte (par exemple si des applications tierces doivent recevoir des correctifs de l'environnement sans
    recompilation). Elle ne se décide pas ici car elle change le modèle de confiance.
@@ -175,8 +190,8 @@ Positives : une opération au lieu de quatre branches/PR ; plus de fenêtre de d
 détectables sur les octets candidats sont attrapées par la répétition avant publication et ne consomment pas de numéro ;
 un seul endroit à relire lors d'une revue de release.
 
-Négatives : le workflow doit pouvoir écrire dans le dépôt (jeton à portée limitée, contournement éventuel de la protection de
-`develop`) ; sa première version doit être éprouvée sur une publication réelle ; le tag ne désigne plus un commit préparé à la
+Négatives : le workflow doit pouvoir écrire dans le dépôt (application GitHub dédiée à portée limitée, dont il faut garder le secret ;
+aucun contournement de la protection de `develop`) ; sa première version doit être éprouvée sur une publication réelle ; le tag ne désigne plus un commit préparé à la
 main mais un commit produit par le CI, à documenter.
 
 Rupture assumée : les applications compilées avec l'ancienne URL de Pages ne démarrent plus leur environnement
@@ -196,10 +211,14 @@ point de défaillance unique, atténué seulement par l'archive de la prerelease
    reprise avec les mêmes octets réussit après une panne simulée, et des octets incorrects mènent à une nouvelle version.
 4. L'étape de commit échoue si le diff touche un chemin hors de la liste fermée de la décision 1, et chaque job du workflow
    déclare exactement les permissions du tableau de la décision 1 (un test du workflow le vérifie).
-5. Un en-tête dont l'URL épinglée est hors de l'origine de `baseUrl`, ou redirigée, est refusé dans l'état (b) ; il n'est
+5. La PR de fusion ouverte par le workflow exécute `BuildAndTest.yml` et `DeveloperDistribution.yml` sans intervention
+   manuelle, et le `GITHUB_TOKEN` n'a que `contents: read` dans ce job.
+6. Un tag de bibliothèque `v*` dont la version n'a pas de ligne dans la table de compatibilité, ou dont la ligne diffère de
+   l'en-tête, fait échouer `ReleaseVersion.yml`.
+7. Un en-tête dont l'URL épinglée est hors de l'origine de `baseUrl`, ou redirigée, est refusé dans l'état (b) ; il n'est
    toléré dans l'état (a) qu'avec l'avertissement.
-6. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
-7. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
+8. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
+9. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
 
 ## Prescriptions d'implémentation
 
