@@ -10,6 +10,16 @@
 **WebFront is a header-only C++23 library for building rich, modern user interfaces.**
 Keep application logic in C++ and create reactive interfaces with TypeScript, React and the existing JavaScript package ecosystem. WebFront brings the UI tools into your application: there is no separate JavaScript development environment to install.
 
+**Website and book: [webfront.fr](https://webfront.fr/en/)** ([en français](https://webfront.fr/fr/)) · [The WebFront Book](https://webfront.fr/en/book/) · [Documentation](docs/) · [Changelog](docs/CHANGELOG.md)
+
+- **C++ in front, web technologies for the screen.** Functions registered with `cppFunction` are called from TypeScript over an asynchronous binary bridge; C++ calls browser functions with `ui.jsFunction`.
+- **Native window or browser, same sources.** WebView2 (Windows), WKWebView (macOS), WebKitGTK (Linux), optional CEF, or the system browser as fallback.
+- **A development environment inside your application.** `wf` installs dependencies, compiles TS/TSX, type-checks, runs Jasmine specs and previews on save, with no Node.js or package manager on the machine.
+- **One executable to ship.** `wf embed` packages the interface into a C++ header; the distributed build runs offline without the development tools.
+- **Ready for AI harnesses.** An optional local launcher (MCP or JSON CLI) lets an agent create, check, build and test a screen under explicit grants.
+
+Desktop Windows, macOS and Linux are the qualified platforms; embedded targets and microcontrollers are not. WebFront already drives a real application: [SiliconForge](https://github.com/ambroise-leclerc/SiliconForge), a microcontroller simulator.
+
 ## From C++ to a reactive UI
 
 Register your simulation, bootstrap the tools, then build the interface in the application's terminal. `life-project` is the working directory for the UI sources:
@@ -56,6 +66,37 @@ int main() {
 </details>
 
 The animation shows the C++ application and the Game of Life example, with terminal output and timing condensed and the preview expanded for readability. [Follow the walkthrough below ↓](#game-of-life-from-console-to-native-application)
+
+## Hello World
+
+The smallest program, [HelloWorld.cpp](examples/hello-world/HelloWorld.cpp), serves the embedded page and opens it in your browser (`WebFront` always uses the system browser):
+
+```cpp
+#include <webfront/WebFront.hpp>
+
+int main() {
+    webfront::WebFront app;
+    app.show();
+}
+```
+
+```bash
+mkdir build && cd build && cmake .. && cmake --build . && examples/HelloWorld
+```
+
+Press Enter in the terminal to stop the server. The same application can build its page from C++ with the [DOM API](docs/DOM.md), with no UI files:
+
+```cpp
+app.onUIStarted([](auto ui) {
+    auto doc = ui.document();
+    auto root = doc.island(); // default: "root"
+    auto button = doc.element("button");
+    auto label = doc.text("Click me");
+    button.append(label);
+    button.listen("click", [label](std::string) { label.setText("Clicked"); });
+    root.append(button);
+});
+```
 
 ## Game of Life: from console to native application
 
@@ -246,6 +287,15 @@ Recompilation is explicit. The resulting application runs offline without the pr
 The examples' [LifeFrontend.hpp](examples/life/LifeFrontend.hpp) selects `NativeOrBrowserFrontend` for both stages: a native window when the engine is built and a session exists, the default browser otherwise.
 Your own application can select `webfront::NativeApp` or `webfront::NativeAppWithAssets` explicitly when it requires a native window.
 
+## What's new since 0.5.0
+
+The [changelog](docs/CHANGELOG.md) is exhaustive; the main additions are:
+
+- **0.6.0.** `ui.document()` for [DOM islands from C++](docs/DOM.md); [forms and inspectors](docs/FORMS.md) generated from type descriptions (with an optional C++26 reflection layer); the [`@webfront/react` adapter](docs/REACT.md) with coalesced C++ stores and `Island`; `app.broadcast(...)` and `app.forEachUI(...)` to reach every browser from any thread; connection generations that reject a stale `UI`; local [automation](docs/AUTOMATION.md) (`webfront-agent`, stdio MCP and JSON CLI).
+- **0.7.0.** **Breaking:** test, fuzzing, coverage and sanitizer CMake options require the `WEBFRONT_` prefix (`WEBFRONT_ENABLE_TESTING`, ...); several agent shutdown fixes; faster pull-request CI.
+- **0.8.0.** Authorized native programs and private temporary files from [Jasmine specs](docs/CONSUMER_TESTING.md); PNG screenshots and image sequences of the web view (`webFrontCapture`); `webfront::embeddedFrontendAvailable` and `webfront::EmbeddedWebFront`; `init`, `create`, `install`, `restore` and `embed` available to automation.
+- **Developer distribution.** The developer environment is served from `dist.webfront.fr` ([ADR-021](docs/adr/README.md)). Libraries older than the sources' pin keep the former address, which no longer works for the developer bootstrap: rebuild against the current sources.
+
 ## Use WebFront in your project
 
 WebFront's implementation lives under `include/`. There is no WebFront library binary to build; CMake supplies its C++ dependencies and platform settings:
@@ -330,6 +380,7 @@ CI runs one combined C++ / native-browser job per desktop platform on each code 
 - The binary bridge supports scalars, strings, tuples, numeric typed arrays and packed bitsets. Arbitrary objects do not cross it. Strings have a 16-bit encoded length limit.
 - Development project access is explicit and intended for trusted local code. Downloaded tools run with the application's bridge authority, and script permissions frame only the `context` API: neither is a sandbox. Only packages that run in a browser are supported; installation scripts and native add-ons are not executed. Builds transform TypeScript without type checking; `wf check` type-checks with the compiler the project locks.
 - The optional [`@webfront/react` adapter](docs/REACT.md) supplies coalesced C++ stores and empty React islands. `WebFrontLifeReact` demonstrates a C++ panel within the Game of Life React UI; its package archive is prepared locally for registry publication.
+- Embedded targets and microcontrollers are not qualified (C++23 support, memory, networking and remote transport security are unreviewed).
 - Packaging, accessibility and native-engine deployment still need application-specific work. The optional [`ui.document()` API](docs/DOM.md) provides DOM islands, automatically batched writes, event callbacks and grouped sender reads. See [project status](docs/PROJECT_STATUS.md) for known limitations.
 
 ## License
@@ -344,4 +395,4 @@ Third-party components retain their own licenses and notices. The WebFront
 license choice does not replace the licenses of its dependencies or bundled
 third-party code.
 
-[Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)
+[Website](https://webfront.fr/en/) · [Book](https://webfront.fr/en/book/) · [Developer environment reference](docs/DEVELOPER_ENVIRONMENT.md) · [architecture decisions](docs/adr/README.md) · [contributing](.github/CONTRIBUTING.md)
