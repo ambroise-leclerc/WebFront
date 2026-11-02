@@ -73,8 +73,8 @@ that offering a generated Blob leaves the page and the bridge working. `WebKitGT
 and `CEFFileServices-download|choose|cancel` drive the dialog and the download through the injection points.
 `WebKitGTKAdapter-download-user-dir` checks that, without a configured folder, the download lands in GLib's user download
 directory (read from `user-dirs.dirs`, not from an environment variable). `WebKitGTKAdapter-close-with-dialog` opens the
-real system dialog with a pointer click, closes the window under it and requires a clean exit; the other engines do not
-test that case on a real dialog. `WKWebViewLifecycle-close-with-open-panel|close-with-save-panel` close the window under an
+real system dialog with a pointer click, closes the window under it and requires a clean exit; CEF and WebView2 do not
+test that case. `WKWebViewLifecycle-close-with-open-panel|close-with-save-panel` close the window under an
 `NSOpenPanel` / `NSSavePanel` sheet, and `choose-in-blank|choose-in-srcdoc` open a chooser from `about:blank` and `srcdoc`
 frames, which WKWebView judges by their inherited origin.
 `WebView2Lifecycle-file-choose|file-cancel|file-download` verifies the engine's chooser request, selection and cancellation
