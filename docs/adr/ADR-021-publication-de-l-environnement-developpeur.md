@@ -131,8 +131,12 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
    5. contrôle des anciennes URL : les versions 0.6.0 à 0.6.4 sont compilées avec
       `ambroise-leclerc.github.io/WebFront/…`, que Pages redirige ensuite vers le nouveau domaine ; un `fetch` de navigateur
       doit suivre cette redirection avec des en-têtes CORS valides (`developer_integration --public` sur une ancienne
-      version). Les hash ne changent pas ; si la redirection échoue, les applications déjà compilées cessent de démarrer
-      et il faut la corriger avant toute bascule ;
+      version). Les hash ne changent pas. **Résultat mesuré le 2026-11-02** : la redirection `301` de Pages ne porte pas
+      d'en-tête `Access-Control-Allow-Origin` (seule la réponse finale en porte un) et Firefox, depuis une page en
+      `http://127.0.0.1`, échoue en `NetworkError` sur l'ancienne URL, alors que l'URL du nouveau domaine répond 200.
+      Pages ne permet pas d'ajouter cet en-tête à une redirection. **Décision** : le propriétaire accepte de rompre les
+      binaires déjà compilés avec l'ancienne URL (bibliothèque 0.6.0 à 0.8.0, pré-alpha, sans compatibilité promise) plutôt
+      que de renoncer au domaine ; ils devront être recompilés avec une version qui épingle `dist.webfront.fr` ;
    6. nouvelle version de l'environnement avec `baseUrl` à `https://dist.webfront.fr/` (changer une URL publique impose
       d'incrémenter la version), puis mise à jour de `WebFrontBootstrap.cmake`, de `docs/DEVELOPER_ENVIRONMENT.md` et
       de `js/developer/webfront.project.json` ; les anciennes versions restent à leur place.
@@ -147,6 +151,10 @@ un seul endroit à relire lors d'une revue de release.
 Négatives : le workflow doit pouvoir écrire dans le dépôt (jeton à portée limitée, contournement éventuel de la protection de
 `develop`) ; sa première version doit être éprouvée sur une publication réelle ; le tag ne désigne plus un commit préparé à la
 main mais un commit produit par le CI, à documenter.
+
+Rupture assumée : les applications compilées avec l'ancienne URL de Pages ne démarrent plus leur environnement
+développeur une fois le domaine propre activé (redirection sans en-têtes CORS). Les versions de l'environnement déjà
+publiées restent à leur emplacement, mais seule leur nouvelle URL est utilisable par un navigateur.
 
 Risques résiduels : la publication reste irréversible (un octet ou une configuration incorrects constatés après
 publication imposent une nouvelle version ; seule une panne transitoire se reprend avec les mêmes octets) ; Pages reste un
