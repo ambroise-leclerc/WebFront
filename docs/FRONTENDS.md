@@ -58,9 +58,12 @@ admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`)
 | WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | WebView2 | the engine's native chooser | the engine's native download UI | DevTools intercepts the chooser in tests; `DownloadStarting` redirects the download to a private path |
 
-WKWebView is covered by the shared spec below and by its CI job, but its chooser and download have no native scenario yet. The
-engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
-Xvfb for WebKitGTK) or a `Runtime.evaluate` with `userGesture` (CEF).
+The engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
+Xvfb for WebKitGTK), a `Runtime.evaluate` with `userGesture` (CEF) or `evaluateJavaScript`, which WebKit treats as a user
+gesture (WKWebView). The WKWebView scenarios (`WKWebViewLifecycle-download`, `-choose-file`, `-cancel-choose`,
+`-replaced-download`) use the test injections of `WKWebViewOptions`: they qualify the delegate wiring, the blob download
+policy, the destination handling and the replace-on-success logic, not the system `NSOpenPanel`/`NSSavePanel` themselves.
+WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the frontend sees it.
 
 ### Tests
 

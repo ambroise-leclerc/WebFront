@@ -1,10 +1,15 @@
 #include "../driver/TestFrontend.hpp"
 #include <webfront/WebFront.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <thread>
+#include <vector>
 
 #include <netinet/in.h>
 #include <poll.h>
@@ -268,6 +273,144 @@ void agentApplication() {
     require(send<long>(app, "activationPolicy") == previousPolicy, "Session did not restore the host activation policy");
 }
 
+std::string readFile(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(stream), {}};
+}
+
+/// Opens a page with the file-service test injections of WKWebViewOptions, which a scenario fills in before show().
+struct ScenarioFrontend : Frontend {
+    static inline std::function<void(webfront::frontend::WKWebViewOptions&)> configure;
+    static inline std::function<void(Session&)>                             started;
+
+    static void open(std::string_view port, std::string_view page) {
+        initialize();
+        Object                               pool(send(type("NSAutoreleasePool"), "new"));
+        webfront::frontend::WKWebViewOptions options{.visible = webfront::testdriver::diagnosticWindows()};
+        if (configure)
+            configure(options);
+        Session session(webfront::frontend::detail::applicationUrl("127.0.0.1", port, page), options);
+        session.create();
+        session.start();
+        if (started)
+            started(session);
+        session.run();
+    }
+};
+using ScenarioApp = webfront::WebFrontWithFrontend<ScenarioFrontend>;
+
+/// Ends the AppKit loop from a native callback, as the Quit menu item does.
+void quitApplication() {
+    send<void>(send(type("NSApplication"), "sharedApplication"), "terminate:", static_cast<id>(nullptr));
+}
+
+void resetScenario() {
+    ScenarioFrontend::configure = nullptr;
+    ScenarioFrontend::started   = nullptr;
+}
+
+void download() {
+    const auto folder = std::filesystem::temp_directory_path() / ("webfront-wk-download-" + std::to_string(getpid()));
+    std::filesystem::remove_all(folder);
+    std::string destination;
+    bool        done        = false;
+    ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
+        options.downloadDirectory = folder;  // Created by the frontend when the download starts.
+        options.downloadFinished  = [&](const std::string& path) {
+            destination = path;
+            done        = true;
+            quitApplication();
+        };
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    app.show("file-services.html?download");
+    resetScenario();
+    require(done, "The download did not finish");
+    // The suggested name "../webfront-download.txt" must never leave the download folder. WebKit already neutralizes the
+    // separators before the frontend sees the name (it arrives as "_webfront-download.txt"), so the folder is what is checked.
+    const std::filesystem::path saved(destination);
+    require(saved.parent_path() == folder && saved.filename().string().ends_with("webfront-download.txt"), ("Unexpected download destination: " + destination).c_str());
+    require(readFile(destination) == "downloaded by WebFront", "The downloaded file has the wrong content");
+    std::filesystem::remove_all(folder);
+}
+
+void chooseFile(bool cancel) {
+    const auto fixture = std::filesystem::temp_directory_path() / ("webfront-wk-chooser-" + std::to_string(getpid()) + ".txt");
+    std::ofstream(fixture) << "chosen by the test";
+    bool asked                  = false;
+    static std::string finalTitle;
+    finalTitle.clear();
+    ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
+        options.chooseFiles = [&]() -> std::vector<std::string> {
+            asked = true;
+            return cancel ? std::vector<std::string>{} : std::vector<std::string>{fixture.string()};
+        };
+    };
+    ScenarioFrontend::started = [](Session& session) {
+        // A chooser needs a user gesture, and evaluateJavaScript counts as one. The page reports through its title.
+        Session* live = &session;
+        auto     tick = ^(id timer) {
+            const auto title = utf8(send(live->view, "title"));
+            if (title.starts_with("picked:") || title == "cancelled") {
+                finalTitle = title;
+                send<void>(timer, "invalidate");
+                quitApplication();
+                return;
+            }
+            Object script(text("document.title === 'ready' && !window.clicked && (window.clicked = true, document.getElementById('picker').click())"));
+            send<void>(live->view, "evaluateJavaScript:completionHandler:", script.get(), static_cast<id>(nullptr));
+        };
+        send(type("NSTimer"), "scheduledTimerWithTimeInterval:repeats:block:", 0.1, static_cast<BOOL>(true), tick);
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    app.show("file-services.html?choose");
+    resetScenario();
+    std::filesystem::remove(fixture);
+    require(asked, "The file chooser was not requested");
+    const std::string expected = cancel ? "cancelled" : "picked:chosen by the test";
+    require(finalTitle == expected, ("Unexpected page state after the chooser: " + finalTitle).c_str());
+}
+void chooseOne() {
+    chooseFile(false);
+}
+void chooseCancel() {
+    chooseFile(true);
+}
+
+/// The save panel's "Replace" choice: the page's bytes land beside the old file and replace it only on success.
+void replacedDownload() {
+    Object     pool(send(type("NSAutoreleasePool"), "new"));
+    const auto folder = std::filesystem::temp_directory_path() / ("webfront-wk-replace-" + std::to_string(getpid()));
+    std::filesystem::remove_all(folder);
+    std::filesystem::create_directories(folder);
+    const auto target    = folder / "report.txt";
+    const auto temporary = folder / "report.txt.part";
+    std::vector<std::string> finished;
+    Session session("http://127.0.0.1:0/", {.visible = false, .downloadFinished = [&](const std::string& path) {
+                                                finished.push_back(path);
+                                            }});
+    const auto start = [&](std::uintptr_t key, std::string_view oldContent, std::string_view downloaded) {
+        std::ofstream(target) << oldContent;
+        if (!downloaded.empty())
+            std::ofstream(temporary) << downloaded;
+        session.downloadDestinations[reinterpret_cast<id>(key)] = {temporary.string(), target.string()};
+    };
+    start(1, "old", "new");
+    session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{1}), true);
+    require(readFile(target) == "new" && !std::filesystem::exists(temporary), "A completed download did not replace the old file");
+    require(finished == std::vector<std::string>{target.string()}, "The finished download was not reported at the chosen path");
+
+    start(2, "old", "partial");
+    session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{2}), false);
+    require(readFile(target) == "old" && !std::filesystem::exists(temporary), "A failed download damaged the old file or left its part behind");
+
+    start(3, "old", "");  // The engine reported success but the part is gone: the replacement fails, the old file stays.
+    session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{3}), true);
+    require(readFile(target) == "old" && finished.size() == 1, "A failed replacement was reported as a finished download");
+    require(session.downloadDestinations.empty(), "A download outlived its end");
+    std::filesystem::remove_all(folder);
+}
+
 void nativeEarlyClose() {
     nativeClose(false);
 }
@@ -297,7 +440,11 @@ int main(int argc, char** argv) {
             {"navigation-diagnostic", navigationDiagnostic},
             {     "missing-response",      missingResponse},
             { "committed-navigation",  committedNavigation},
-            {    "agent-application",     agentApplication}
+            {    "agent-application",     agentApplication},
+            {             "download",             download},
+            {          "choose-file",            chooseOne},
+            {        "cancel-choose",         chooseCancel},
+            {    "replaced-download",     replacedDownload}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;
