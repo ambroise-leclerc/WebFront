@@ -6,12 +6,14 @@
 #include "CEFPaths.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "Downloads.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -493,7 +495,9 @@ class SimpleCEFClient : public CefClient,
                         public CefLoadHandler,
                         public CefRequestHandler,
                         public CefContextMenuHandler,
-                        public CefCommandHandler {
+                        public CefCommandHandler,
+                        public CefDownloadHandler,
+                        public CefDialogHandler {
 public:
     explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
         : contentPolicy(std::move(policy)), popupLauncher(launch) { }
@@ -510,6 +514,55 @@ public:
     }
     CefRefPtr<CefCommandHandler> GetCommandHandler() override {
         return this;
+    }
+
+    /// The Chrome runtime already shows its own file dialog and saves downloads; these two hooks only exist for tests.
+    /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset keeps the engine's dialog.
+    std::function<std::vector<std::string>()> chooseFiles;
+    /// Test injection: a non-empty folder receives downloads without a "save as" dialog.
+    std::filesystem::path downloadDirectory;
+    /// Test injection: called with the full path of each completed download.
+    std::function<void(const std::string&)> downloadFinished;
+
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
+        return this;
+    }
+    CefRefPtr<CefDialogHandler> GetDialogHandler() override {
+        return this;
+    }
+    bool OnFileDialog(CefRefPtr<CefBrowser>,
+                      FileDialogMode,
+                      const CefString&,
+                      const CefString&,
+                      const std::vector<CefString>&,
+                      const std::vector<CefString>&,
+                      const std::vector<CefString>&,
+                      CefRefPtr<CefFileDialogCallback> callback) override {
+        if (!chooseFiles)
+            return false;
+        std::vector<CefString> files;
+        try {
+            for (const auto& file : chooseFiles())
+                files.emplace_back(file);
+        } catch (...) {
+            files.clear();
+        }
+        if (files.empty())
+            callback->Cancel();
+        else
+            callback->Continue(files);
+        return true;
+    }
+    bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>, const CefString& suggested, CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        if (downloadDirectory.empty())
+            return false;
+        const auto result = frontend::detail::uniqueDownloadPath(downloadDirectory, suggested.ToString());
+        callback->Continue(result.string(), false);
+        return true;
+    }
+    void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {
+        if (item->IsComplete() && downloadFinished)
+            downloadFinished(item->GetFullPath().ToString());
     }
 
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {

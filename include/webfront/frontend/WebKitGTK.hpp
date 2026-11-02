@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "Downloads.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
@@ -90,6 +91,7 @@ public:
     Object (*settings)(Object)                                                    = symbol<decltype(settings)>("webkit_web_view_get_settings");
     void (*load)(Object, const char*)                                             = symbol<decltype(load)>("webkit_web_view_load_uri");
     const char* (*viewUri)(Object)                                                = symbol<decltype(viewUri)>("webkit_web_view_get_uri");
+    const char* (*viewTitle)(Object)                                              = symbol<decltype(viewTitle)>("webkit_web_view_get_title");
     void (*windowClose)(Object)                                                   = symbol<decltype(windowClose)>("gtk_window_close");
     void (*stop)(Object)                                                          = symbol<decltype(stop)>("webkit_web_view_stop_loading");
     Object (*navigationAction)(Object)                      = symbol<decltype(navigationAction)>("webkit_navigation_policy_decision_get_navigation_action");
@@ -113,6 +115,11 @@ public:
     const void* (*bytesData)(Object, std::size_t*)              = symbol<decltype(bytesData)>("g_bytes_get_data");
     void (*bytesUnref)(Object)                                  = symbol<decltype(bytesUnref)>("g_bytes_unref");
     void (*errorFree)(Error*)                                   = symbol<decltype(errorFree)>("g_error_free");
+    void (*downloadDestination)(Object, const char*)            = symbol<decltype(downloadDestination)>("webkit_download_set_destination");
+    void (*downloadCancel)(Object)                              = symbol<decltype(downloadCancel)>("webkit_download_cancel");
+    const char* (*downloadGetDestination)(Object)               = symbol<decltype(downloadGetDestination)>("webkit_download_get_destination");
+    void (*chooserSelect)(Object, const char* const*)           = symbol<decltype(chooserSelect)>("webkit_file_chooser_request_select_files");
+    void (*chooserCancel)(Object)                               = symbol<decltype(chooserCancel)>("webkit_file_chooser_request_cancel");
 };
 
 inline Api& api() {
@@ -274,6 +281,18 @@ struct Session : FailureState {
     webfront::detail::BoundContentPolicy policy;
     WindowOptions                        windowOptions;
     std::function<void()>                navigationCancelled;
+    /// Download folder; empty selects the user's XDG download folder, else the home folder.
+    std::filesystem::path downloadDirectory;
+    /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset shows the system dialog.
+    std::function<std::vector<std::string>()> chooseFiles;
+    /// Test injection: called with the destination of each finished download.
+    std::function<void(const std::string&)> downloadFinished;
+    struct Download {
+        Api::Object                object;
+        std::vector<unsigned long> handlers;
+    };
+    std::vector<Download> downloads;
+    unsigned long         downloadStartedHandler = 0;
     bool                                 closed            = false;
     bool                                 initialNavigation = true;
     unsigned                             navigationTimer   = 0;
@@ -288,6 +307,7 @@ struct Session : FailureState {
     Session& operator=(const Session&) = delete;
     ~Session() {
         stopNavigationTimer();
+        releaseDownloads();
         releaseView();
         destroyWindow();
         release(network);
@@ -311,6 +331,17 @@ struct Session : FailureState {
             a.disconnect(view, handler);
         a.stop(view);
         release(view);
+    }
+    void releaseDownloads() {
+        if (downloadStartedHandler && network)
+            a.disconnect(network, std::exchange(downloadStartedHandler, 0));
+        for (auto& download : downloads) {
+            for (auto handler : download.handlers)
+                a.disconnect(download.object, handler);
+            a.downloadCancel(download.object);
+            a.unref(download.object);
+        }
+        downloads.clear();
     }
     void destroyWindow() {
         if (!window)
@@ -356,6 +387,7 @@ struct Session : FailureState {
         a.windowChild(window, view);
         configureSettings();
         registerHandlers();
+        downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
         captureTarget->view = view;
         captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
@@ -381,6 +413,42 @@ struct Session : FailureState {
         on("load-failed", onLoadFailed, 2);
         on("web-process-terminated", onProcessTerminated);
         on("decide-policy", onDecidePolicy);
+        on("run-file-chooser", onRunFileChooser);
+    }
+
+    std::filesystem::path destinationFolder() const {
+        if (!downloadDirectory.empty())
+            return downloadDirectory;
+        if (const auto* xdg = std::getenv("XDG_DOWNLOAD_DIR"); xdg && *xdg)
+            return xdg;
+        if (const auto* home = std::getenv("HOME"); home && *home) {
+            std::error_code error;
+            const auto      folder = std::filesystem::path(home) / "Downloads";
+            if (std::filesystem::is_directory(folder, error))
+                return folder;
+            return home;
+        }
+        return std::filesystem::temp_directory_path();
+    }
+    std::filesystem::path uniqueDestination(std::string_view suggested) const {
+        return uniqueDownloadPath(destinationFolder(), suggested);
+    }
+    void trackDownload(Api::Object download) {
+        Download entry{download, {}};
+        a.refSink(download);
+        entry.handlers.push_back(a.connect(download, "decide-destination", reinterpret_cast<Api::Callback>(onDecideDestination), this, nullptr, 0));
+        entry.handlers.push_back(a.connect(download, "finished", reinterpret_cast<Api::Callback>(onDownloadFinished), this, nullptr, 0));
+        entry.handlers.push_back(a.connect(download, "failed", reinterpret_cast<Api::Callback>(onDownloadFailed), this, nullptr, 0));
+        downloads.push_back(std::move(entry));
+    }
+    void forgetDownload(Api::Object download) {
+        const auto found = std::ranges::find(downloads, download, &Download::object);
+        if (found == downloads.end())
+            return;
+        for (auto handler : found->handlers)
+            a.disconnect(download, handler);
+        a.unref(found->object);
+        downloads.erase(found);
     }
 
     bool initialDocumentFailed() const {
@@ -477,6 +545,53 @@ struct Session : FailureState {
             self->close();
             return 1;
         }
+    }
+    static void onDownloadStarted(Api::Object, Api::Object download, Session* self) noexcept {
+        self->guard([self, download] {
+            self->trackDownload(download);
+        });
+    }
+    static int onDecideDestination(Api::Object download, const char* suggested, Session* self) noexcept {
+        try {
+            const auto destination = self->uniqueDestination(suggested ? suggested : "");
+            api().downloadDestination(download, destination.c_str());
+        } catch (...) {
+            api().downloadCancel(download);
+        }
+        return 1;
+    }
+    static void onDownloadFinished(Api::Object download, Session* self) noexcept {
+        std::string destination;
+        if (const auto* path = api().downloadGetDestination(download))
+            destination = path;
+        self->guard([self, download, destination] {
+            self->forgetDownload(download);
+            if (self->downloadFinished)
+                self->downloadFinished(destination);
+        });
+    }
+    static void onDownloadFailed(Api::Object download, Api::Error*, Session* self) noexcept {
+        self->guard([self, download] {
+            self->forgetDownload(download);
+        });
+    }
+    static int onRunFileChooser(Api::Object, Api::Object request, Session* self) noexcept {
+        if (!self->chooseFiles)
+            return 0;  // The system dialog, attached to the window by WebKitGTK.
+        try {
+            const auto              files = self->chooseFiles();
+            std::vector<const char*> pointers;
+            for (const auto& file : files)
+                pointers.push_back(file.c_str());
+            pointers.push_back(nullptr);
+            if (files.empty())
+                api().chooserCancel(request);
+            else
+                api().chooserSelect(request, pointers.data());
+        } catch (...) {
+            api().chooserCancel(request);
+        }
+        return 1;
     }
     static int onNavigationTimeout(void* data) noexcept {
         auto* self            = static_cast<Session*>(data);

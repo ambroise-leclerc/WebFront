@@ -45,6 +45,34 @@ startup failures before any window is created. Coordination waits have a 30-seco
 `test/unit/WebFrontTests.cpp` also checks initialization once per frontend type, retry after failed
 initialization, frontend selection and unavailable-engine diagnostics. These tests need no GUI.
 
+## File chooser and downloads
+
+`<input type="file">` (single, multiple, `accept`, `webkitdirectory`) and downloads (`<a download>`, generated `blob:` URLs)
+work in every embedded frontend with the engine's own dialog, without a WebFront API (ADR-020, rule 6). A `blob:` URL of an
+admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`); a `blob:` URL of any other origin does not.
+
+| Frontend | Chooser | Download | Test injection |
+| --- | --- | --- | --- |
+| WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder, the page's name reduced to its last component, never overwriting (`name (1).ext`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| CEF (Chrome runtime) | the runtime's dialog | the runtime's download handling | `SimpleCEFClient::chooseFiles` (`CefDialogHandler::OnFileDialog`), `downloadDirectory`, `downloadFinished`. The runtime itself turns a suggested name `../x` into `_x` |
+| WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| WebView2 | the engine's native chooser | the engine's native download UI | none yet |
+
+WKWebView is written but has not been run on a Mac by its author: the qualification report below is the first check. The
+engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
+Xvfb for WebKitGTK) or a `Runtime.evaluate` with `userGesture` (CEF).
+
+### Qualification report
+
+`ConsumerJasmine-file-services` (all engines) checks that files reach the page as `File` objects, that `accept` and
+`webkitdirectory` are honoured, and that offering a generated Blob leaves the page and the bridge working.
+`WebKitGTKAdapter-download|choose-file|cancel-choose` and `CEFFileServices-download|choose|cancel` drive the dialog and
+the download through the injection points. Every scenario captures its final state with WebFront's own window capture
+(`QualificationEvidence.hpp`, `ConsumerJasmine` captures). In CI each platform job retains a `qualification-<platform>`
+artifact (`test/tools/Qualification.py collect`) and the `qualification-report` job assembles them into
+`QUALIFICATION.md` with the images, for Linux (WebKitGTK; CEF on pull requests into `master` and on the weekly run),
+Windows (WebView2) and macOS (WKWebView). A platform that did not report is written as missing.
+
 ## Adding a frontend
 
 1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.

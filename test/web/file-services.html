@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>File chooser and downloads</title>
+<style>body{font:16px sans-serif;margin:8px} #result{margin-top:16px;padding:8px;border:1px solid #888;min-height:2em}</style>
+<input id="picker" type="file">  <!-- First, at the top-left corner: the GTK test clicks it with a pointer. -->
+<h3>WebFront file services</h3>
+<p id="result">waiting</p>
+<script>
+    // ?download saves a Blob through <a download>; ?choose waits for a click on the input (given by the test with a user
+    // gesture), then reports the chosen file's text in the title.
+    const mode = location.search;
+    const result = document.getElementById("result");
+    const report = (title, text) => { result.textContent = text; document.title = title; };
+    if (mode === "?download") {
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(new Blob(["downloaded by WebFront"], { type: "text/plain" }));
+        link.download = "../webfront-download.txt";
+        document.body.append(link);
+        result.textContent = "download requested";
+        link.click();
+    } else if (mode === "?choose") {
+        const picker = document.getElementById("picker");
+        picker.addEventListener("change", async () => {
+            const text = await picker.files[0].text();
+            report("picked:" + text, picker.files[0].name + ": " + text);
+        });
+        picker.addEventListener("cancel", () => report("cancelled", "cancelled"));
+        document.title = "ready";
+    }
+</script>
