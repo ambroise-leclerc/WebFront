@@ -547,8 +547,10 @@ struct Session {
             }
             const auto panel = send(type("NSOpenPanel"), "openPanel");
             send<void>(panel, "setAllowsMultipleSelection:", send<BOOL>(parameters, "allowsMultipleSelection"));
-            send<void>(panel, "setCanChooseDirectories:", send<BOOL>(parameters, "allowsDirectories"));
-            send<void>(panel, "setCanChooseFiles:", static_cast<BOOL>(true));
+            // <input webkitdirectory> chooses a folder, and only a folder.
+            const auto directories = send<BOOL>(parameters, "allowsDirectories");
+            send<void>(panel, "setCanChooseDirectories:", directories);
+            send<void>(panel, "setCanChooseFiles:", static_cast<BOOL>(!directories));
             auto handler           = Block_copy(completion);
             void (^finished)(long) = ^(long response) {
                 handler(response == 1 ? send(panel, "URLs") : nullptr);  // NSModalResponseOK
@@ -608,14 +610,16 @@ struct Session {
             return;
         const auto pending = std::move(found->second);
         downloadDestinations.erase(found);
-        std::error_code code;
         if (pending.temporary != pending.target) {
+            std::error_code replaced;
             if (completed)
-                std::filesystem::rename(pending.temporary, pending.target, code);  // The old file survives any failure before this.
-            if (!completed || code)
-                std::filesystem::remove(pending.temporary, code);
-            if (code)
+                std::filesystem::rename(pending.temporary, pending.target, replaced);  // The old file survives any failure before this.
+            if (replaced)
                 completed = false;  // The target still holds the old file: this is not a finished download.
+            if (!completed) {
+                std::error_code cleanup;  // Its own code: cleaning up must not hide the outcome of the replacement.
+                std::filesystem::remove(pending.temporary, cleanup);
+            }
         }
         if (completed && options.downloadFinished)
             guard([&] {

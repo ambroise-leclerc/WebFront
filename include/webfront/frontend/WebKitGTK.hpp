@@ -115,6 +115,8 @@ public:
     const void* (*bytesData)(Object, std::size_t*)              = symbol<decltype(bytesData)>("g_bytes_get_data");
     void (*bytesUnref)(Object)                                  = symbol<decltype(bytesUnref)>("g_bytes_unref");
     void (*errorFree)(Error*)                                   = symbol<decltype(errorFree)>("g_error_free");
+    // GLib resolves the folder from user-dirs.dirs (a user may have moved it), not only from the environment.
+    const char* (*userDirectory)(int) = symbol<decltype(userDirectory)>("g_get_user_special_dir");  // G_USER_DIRECTORY_DOWNLOAD = 2
     void (*downloadDestination)(Object, const char*)            = symbol<decltype(downloadDestination)>("webkit_download_set_destination");
     void (*downloadCancel)(Object)                              = symbol<decltype(downloadCancel)>("webkit_download_cancel");
     const char* (*downloadGetDestination)(Object)               = symbol<decltype(downloadGetDestination)>("webkit_download_get_destination");
@@ -419,8 +421,8 @@ struct Session : FailureState {
     std::filesystem::path destinationFolder() const {
         if (!downloadDirectory.empty())
             return downloadDirectory;
-        if (const auto* xdg = std::getenv("XDG_DOWNLOAD_DIR"); xdg && *xdg)
-            return xdg;
+        if (const auto* folder = a.userDirectory(2); folder && *folder)
+            return folder;
         if (const auto* home = std::getenv("HOME"); home && *home) {
             std::error_code error;
             const auto      folder = std::filesystem::path(home) / "Downloads";
