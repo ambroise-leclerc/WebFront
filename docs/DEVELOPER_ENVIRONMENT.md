@@ -35,10 +35,10 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
 lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
-runner (`init`, `create`, `install`, `restore`, `embed`). The release pin selects 0.6.4 but the archive is published
-only by the dedicated `developer-v0.6.4` tag: the pin pull request stays a draft until deployment is verified. The test
-bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the published 0.6.3 and advances in a separate pull request once
-0.6.4 is deployed. Publication and pin changes follow [PUBLISHING](../js/developer/tools/PUBLISHING.md).
+runner (`init`, `create`, `install`, `restore`, `embed`). The release pin selects 0.6.4, published under the dedicated
+`developer-v0.6.4` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
+published 0.6.3 and advances in a separate pull request. Publication and pin changes follow
+[PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
 

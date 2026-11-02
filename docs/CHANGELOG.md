@@ -17,8 +17,8 @@
 - Automation can set a project up end to end (#466): `init`, `create`, `install`, `restore` and `embed` join the contract of
   `webfront-agent`, each behind its own `--allow` grant and with plain-name or project-relative arguments (no options, no
   traversal). `install` takes one package from the configured registry or installs the locked graph; `embed` takes a manifest
-  provider, or an entry with an output header. See `docs/AUTOMATION.md`. The environment sources advance to 0.6.4 (unpublished,
-  the pin stays on 0.6.3). Granting one of these operations to an older environment now fails at startup with a bootstrap error naming
+  provider, or an entry with an output header. See `docs/AUTOMATION.md`. Developer environment 0.6.4 is published and pinned;
+  the separate test bootstrap remains on 0.6.3. Granting one of these operations to an older environment now fails at startup with a bootstrap error naming
   the operation, and `embed` is documented as replacing its output header. `create` now finds the pinned starters (the connection reads them from the
   environment manifest) and the launcher serves `<name>-starter.tgz` from beside the environment archive; an end-to-end case
   creates, initializes, installs and embeds a project.
