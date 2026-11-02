@@ -143,6 +143,10 @@ jobs:
           elif [ "$result" != 2 ]; then
             exit "$result"
           fi
+          # A CNAME left over from a custom domain must not outlive a base URL that returns to github.io: remove it, which the
+          # commit below records as a deletion. The script refuses a site that still has one.
+          host=$(jq -r '.baseUrl | sub("^https://"; "") | sub("[/:].*$"; "")' js/developer/tools/distribution.json)
+          case "$host" in *.github.io) git -C "$site" rm -q --ignore-unmatch CNAME ;; esac
           wf run site build-distribution "$site"
           git -C "$site" config user.name "$GITHUB_ACTOR"
           git -C "$site" config user.email "$GITHUB_ACTOR@users.noreply.github.com"

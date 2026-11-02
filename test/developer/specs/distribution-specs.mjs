@@ -132,6 +132,24 @@ describe('The developer distribution', () => {
         expect(await project.readText('site/CNAME')).toBe('dist.example.test\n');
     });
 
+    it('Pages staging refuses to keep the CNAME of a former custom domain when the base URL returns to github.io', async () => {
+        const project = memoryProject();
+        await project.write('js/developer/tools/distribution.json', JSON.stringify({version: '0.1.0', baseUrl: 'https://owner.github.io/WebFront/'}));
+        const environment = encode('environment');
+        const starterBytes = encode('starter');
+        const manifest = {version: '0.1.0', integrity: await integrity(environment), starters: {life: {archive: 'life-starter.tgz', integrity: await integrity(starterBytes)}}};
+        await project.write('distribution/environment.tgz', environment);
+        await project.write('distribution/life-starter.tgz', starterBytes);
+        await project.write('distribution/provision.json', JSON.stringify(manifest));
+        await project.write('distribution/DeveloperReleaseData.hpp', bootstrapHeader('0.1.0', 'https://owner.github.io/WebFront/', manifest.integrity));
+        await project.write('site/CNAME', 'dist.example.test\n');
+        const stage = () => stageSite({args: ['distribution', 'site'], project, console: {log() {}}});
+        await rejects(stage(), /still has a CNAME file/);
+        project.storage.delete('site/CNAME');
+        await stage();
+        expect(project.storage.has('site/CNAME')).toBe(false);
+    });
+
     it('a custom domain is the root of the site and a github.io address has none', () => {
         expect(customDomain('https://dist.example.test')).toBe('dist.example.test');
         expect(customDomain('https://owner.github.io/WebFront/')).toBe('');

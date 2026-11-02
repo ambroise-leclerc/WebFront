@@ -53,11 +53,18 @@ async function versionRow(project, site, version) {
 }
 
 // The custom domain of the base URL, written as the CNAME file of the Pages branch so that no publication depends on a
-// setting made once in the repository's Pages page. A project site served at the github.io address has none.
+// setting made once in the repository's Pages page. A project site served at the github.io address has none. A script
+// cannot delete a file, so a CNAME left over from a custom domain is refused: the workflow removes it before staging
+// (a Pages site that keeps it would still redirect to the former domain).
 async function writeDomain(project, site) {
     const distribution = JSON.parse(await project.readText('js/developer/tools/distribution.json'));
     const domain = customDomain(baseUrl(distribution.baseUrl));
-    if (domain) await project.write(`${site}/CNAME`, `${domain}\n`);
+    if (domain) {
+        await project.write(`${site}/CNAME`, `${domain}\n`);
+        return;
+    }
+    if ((await entries(project, site)).includes('CNAME'))
+        throw new Error('The base URL has no custom domain but the site still has a CNAME file: remove it from the Pages branch');
 }
 
 async function writeIndex(project, site) {
