@@ -101,15 +101,34 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
    commit du workflow**, qui écrit sur la branche de release une liste fermée de chemins : `distribution.json`,
    `DeveloperReleaseData.hpp`, les sommes de `bundles.json`, les bundles régénérés et la table de compatibilité de
    `docs/DEVELOPER_ENVIRONMENT.md`. Cette liste est déclarée dans le workflow, et l'étape échoue si le diff en touche un
-   autre. Le jeton a `contents: write` et ne pousse que sur la branche de release, jamais sur `develop` ni `master`.
+   autre. Les permissions se donnent **par job**, jamais pour tout le workflow, et la protection de `develop` et `master`
+   n'est affaiblie par aucune :
+
+   | Job | Permissions du jeton | Destination | Réglage du dépôt nécessaire |
+   | --- | --- | --- | --- |
+   | Construction et répétition (`wf-package`) | `contents: read` | aucune (artefact) | — |
+   | Préparation | `contents: write` | uniquement la branche `release/developer-<version>`, qui n'est ni `develop` ni `master` ; le commit se limite à la liste fermée ci-dessus | la branche n'est pas protégée par le motif de `develop`/`master` ; aucune dérogation de contournement n'est accordée au workflow |
+   | Publication | `contents: write`, `pages: write` | la branche `gh-pages` (sans force-push) et la demande de construction de Pages ; une prerelease | source Pages inchangée (`gh-pages`, racine) ; son environnement `developer-pages-publication` reste l'unique écrivain |
+   | Création du tag | `contents: write` | le tag `developer-v<version>`, posé par le **même run** après le succès de la construction : un tag poussé avec le jeton du workflow ne déclencherait pas un autre run, d'où le job unique plutôt que le déclenchement par tag | une règle de tags sur `developer-v*` interdit la mise à jour et la suppression |
+   | Vérification | `contents: read` | aucune | — |
+   | Ouverture de la PR de fusion | `pull-requests: write` | une PR de la branche de release vers `develop` | « Allow GitHub Actions to create pull requests » activé dans Settings → Actions → General ; la PR n'est **pas** fusionnée par le workflow : la revue exigée par la protection de `develop` reste | 
+
+   Si le dépôt refuse cette option, la PR est ouverte par un jeton d'application dédié, limité à ce seul droit.
 2. **Une source unique pour le pin** : `WebFrontBootstrap.cmake` lit la version, l'URL et l'intégrité d'un même fichier
    que celui qui produit `DeveloperReleaseData.hpp`, ou en est dérivé, et un test de cohérence distingue les états
    normaux des incohérences. Sont **normaux** : (a) `distribution.json` en avance sur l'en-tête, les sources préparant
    la version suivante tandis que l'en-tête épingle la dernière version publiée ; il faut alors que l'en-tête soit
-   exactement celui que génère sa propre version et que l'archive déployée à son URL ait l'intégrité épinglée
-   (ce que vérifie aujourd'hui `wf run pin`) ; (b) `distribution.json` égal à l'en-tête, qui doit alors être
+   exactement celui que génère sa propre version et que l'archive déployée ait l'intégrité épinglée ; (b) `distribution.json` égal à l'en-tête, qui doit alors être
    identique à celui d'une construction fraîche ; (c) le bootstrap des tests égal à l'en-tête ou à une version
-   publiée antérieure, mais jamais postérieure. Est **incohérent** : un en-tête plus récent que `distribution.json`, un en-tête qui n'est pas celui de sa version, une archive
+   publiée antérieure, mais jamais postérieure. Trois vérifications sont **distinctes** et ne se remplacent pas :
+   (i) les **octets** : l'archive servie aujourd'hui par `baseUrl` a l'intégrité épinglée (ce que fait `wf run pin`,
+   qui la récupère au domaine courant et non à l'URL de l'en-tête) ; (ii) l'**URL réellement épinglée** : elle est sur
+   l'origine de `baseUrl` et répond 200 sans redirection ; (iii) l'**accès depuis un navigateur** : un `fetch` d'une page
+   d'une autre origine sur cette URL, avec en-têtes CORS valides (`developer_integration --public`, qui part de l'en-tête).
+   Dans l'état (a), seule (i) est exigée, car l'en-tête peut épingler une version publiée sous une adresse
+   antérieure : `wf run pin` n'émet alors qu'un avertissement lorsque l'origine diffère, et un tel en-tête peut donc être
+   accepté bien qu'**inutilisable dans un navigateur**. Dans l'état (b) et dans tout état de release, (ii) et (iii) sont
+   exigées et font échouer le workflow. Est **incohérent** : un en-tête plus récent que `distribution.json`, un en-tête qui n'est pas celui de sa version, une archive
    déployée dont l'intégrité diffère, ou un bootstrap de tests en avance sur l'en-tête.
 3. **La vérification du déploiement est une étape du workflow**, pas une convention : SHA-512 des octets servis, en-têtes
    CORS, `developer_integration --public`. La PR de fusion du pin ne s'ouvre que si elle réussit. Comme la vérification
@@ -175,9 +194,12 @@ point de défaillance unique, atténué seulement par l'archive de la prerelease
    en-tête resté sur la dernière version publiée, et échoue pour chacune des incohérences listées.
 3. Une vérification volontairement échouée après publication n'ouvre aucune PR et ne modifie ni `develop` ni `master` ; une
    reprise avec les mêmes octets réussit après une panne simulée, et des octets incorrects mènent à une nouvelle version.
-4. L'étape de commit échoue si le diff touche un chemin hors de la liste fermée de la décision 1.
-5. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
-6. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
+4. L'étape de commit échoue si le diff touche un chemin hors de la liste fermée de la décision 1, et chaque job du workflow
+   déclare exactement les permissions du tableau de la décision 1 (un test du workflow le vérifie).
+5. Un en-tête dont l'URL épinglée est hors de l'origine de `baseUrl`, ou redirigée, est refusé dans l'état (b) ; il n'est
+   toléré dans l'état (a) qu'avec l'avertissement.
+6. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
+7. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
 
 ## Prescriptions d'implémentation
 
