@@ -6,8 +6,8 @@
 
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <string>
+#include <string_view>
 
 #include <unistd.h>
 
@@ -136,7 +136,12 @@ int main(int argc, char** argv) {
                     ("The download left its folder: " + scenario.downloaded).c_str());
             require(std::filesystem::path(scenario.downloaded).filename().string().ends_with("webfront-download.txt"), "The download lost its name");
             std::ifstream stream(scenario.downloaded, std::ios::binary);
-            require(std::string(std::istreambuf_iterator<char>(stream), {}) == "downloaded by WebFront", "The downloaded file has the wrong content");
+            require(stream.is_open(), "The downloaded file could not be opened");
+            constexpr std::string_view expected = "downloaded by WebFront";
+            std::string                contents(expected.size() + 1, '\0');
+            stream.read(contents.data(), static_cast<std::streamsize>(contents.size()));
+            contents.resize(static_cast<std::size_t>(stream.gcount()));
+            require(contents == expected, "The downloaded file has the wrong content");
         } else {
             require(scenario.asked, ("The file chooser was not requested; title=" + scenario.title).c_str());
             require(scenario.title == (scenario.mode == "choose" ? "picked:chosen by the test" : "cancelled"),
