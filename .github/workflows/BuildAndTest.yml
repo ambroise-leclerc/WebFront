@@ -566,7 +566,8 @@ jobs:
             [ -d "$directory" ] && mv "$directory" "qualification-input/${directory#qualification-input/qualification-}"
           done
           python3 test/tools/Qualification.py report --input qualification-input --output qualification-report/QUALIFICATION.md
-          cat qualification-report/QUALIFICATION.md >> "$GITHUB_STEP_SUMMARY"
+          # The summary cannot serve the artifact's images: show the tables only and point to the artifact.
+          { grep -v '^!\[' qualification-report/QUALIFICATION.md; echo; echo "The captures are in the \`qualification-report\` artifact of this run."; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: qualification-report

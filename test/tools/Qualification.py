@@ -114,7 +114,12 @@ def report(args: argparse.Namespace) -> int:
         row = [name, engine, mark(data["tests"].get(GENERIC[0]))]
         for scenario in NATIVE:
             test = native_test(engine, scenario)
-            row.append(mark(data["tests"].get(test)) if test else "⚪ not injected")
+            cell = mark(data["tests"].get(test)) if test else "⚪ not injected"
+            # A scenario can pass while its capture failed: say that the visual evidence is missing.
+            lost = [n for n in data.get("native", []) if n.get("scenario") == scenario and n.get("capture") != "ok"]
+            if lost and test and data["tests"].get(test) == "passed":
+                cell += " (no capture)"
+            row.append(cell)
         lines.append("| " + " | ".join(row) + " |")
     missing = [e for e in ENGINES if not any(d["engine"] == e for _, d in manifests.values())]
     if missing:

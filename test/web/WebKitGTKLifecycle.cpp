@@ -155,8 +155,10 @@ struct ScenarioFrontend : Frontend {
             100,
             [](void* data) -> int {
                 auto& probe = *static_cast<Poll*>(data);
-                if (probe.session.closed)
+                if (probe.session.closed) {
+                    probe.timer = 0;  // Returning 0 removes the source: it must not be removed again.
                     return 0;
+                }
                 if (probe.finishing)
                     return 1;
                 if (finished(probe.session)) {

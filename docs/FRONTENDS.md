@@ -64,8 +64,8 @@ Xvfb for WebKitGTK) or a `Runtime.evaluate` with `userGesture` (CEF).
 
 ### Qualification report
 
-`ConsumerJasmine-file-services` (all engines) checks that files reach the page as `File` objects, that `accept` and
-`webkitdirectory` are honoured, and that offering a generated Blob leaves the page and the bridge working.
+`ConsumerJasmine-file-services` (all engines) checks that files reach the page as `File` objects, that the `accept` and
+`webkitdirectory` properties keep their values (filtering and directory selection themselves are not exercised), and that offering a generated Blob leaves the page and the bridge working.
 `WebKitGTKAdapter-download|choose-file|cancel-choose` and `CEFFileServices-download|choose|cancel` drive the dialog and
 the download through the injection points. Every scenario captures its final state with WebFront's own window capture
 (`QualificationEvidence.hpp`, `ConsumerJasmine` captures). In CI each platform job retains a `qualification-<platform>`

@@ -289,7 +289,11 @@ struct Session {
     WKWebViewOptions                     options;
     webfront::detail::BoundContentPolicy contentPolicy;
     std::function<void()>                navigationCancelled;
-    std::map<id, std::string>            downloadDestinations;  // WKDownload -> destination, until it finishes.
+    struct PendingDownload {
+        std::string temporary;  // Where WKDownload writes: it needs a file that does not exist yet.
+        std::string target;     // Where the user wants it; differs from `temporary` when "Replace" was chosen.
+    };
+    std::map<id, PendingDownload>        downloadDestinations;  // WKDownload -> its paths, until it ends.
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
@@ -564,7 +568,7 @@ struct Session {
         guard([&] {
             if (!options.downloadDirectory.empty()) {
                 const auto destination = frontend::detail::uniqueDownloadPath(options.downloadDirectory, suggested);
-                downloadDestinations[download] = destination.string();
+                downloadDestinations[download] = {destination.string(), destination.string()};
                 Object path(text(destination.string()));
                 result = send(type("NSURL"), "fileURLWithPath:", path.get());
                 return;
@@ -574,10 +578,20 @@ struct Session {
             send<void>(panel, "setNameFieldStringValue:", name.get());
             auto handler           = Block_copy(completion);
             void (^finished)(long) = ^(long response) {
-                id url = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
-                if (url)
-                    downloadDestinations[download] = utf8(send(url, "path"));
-                handler(url);
+                id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
+                if (chosen) {
+                    // "Replace" returns an existing file, which WKDownload refuses: download beside it, replace when done.
+                    const std::filesystem::path target = utf8(send(chosen, "path"));
+                    std::error_code             code;
+                    auto                        temporary = target;
+                    if (std::filesystem::exists(target, code)) {
+                        temporary = frontend::detail::uniqueDownloadPath(target.parent_path(), target.filename().string() + ".part");
+                        Object path(text(temporary.string()));
+                        chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                    }
+                    downloadDestinations[download] = {temporary.string(), target.string()};
+                }
+                handler(chosen);
                 Block_release(handler);
             };
             deferred = true;
@@ -591,11 +605,18 @@ struct Session {
         const auto found = downloadDestinations.find(download);
         if (found == downloadDestinations.end())
             return;
-        const auto destination = std::move(found->second);
+        const auto pending = std::move(found->second);
         downloadDestinations.erase(found);
+        std::error_code code;
+        if (pending.temporary != pending.target) {
+            if (completed)
+                std::filesystem::rename(pending.temporary, pending.target, code);  // The old file survives any failure before this.
+            if (!completed || code)
+                std::filesystem::remove(pending.temporary, code);
+        }
         if (completed && options.downloadFinished)
             guard([&] {
-                options.downloadFinished(destination);
+                options.downloadFinished(pending.target);
             });
     }
 
