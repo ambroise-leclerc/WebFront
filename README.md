@@ -81,21 +81,33 @@ int main() {
 ```
 
 ```bash
-mkdir build && cd build && cmake .. && cmake --build . && examples/HelloWorld
+mkdir build
+cd build
+cmake ..
+cmake --build .
+examples/HelloWorld
 ```
 
-Press Enter in the terminal to stop the server. The same application can build its page from C++ with the [DOM API](docs/DOM.md), with no UI files:
+On Windows with Visual Studio run `examples\Debug\HelloWorld.exe` (`--config Release` selects `examples\Release\`). Press Enter in the terminal to stop the server.
+
+The same application can build its page from C++ with the [DOM API](docs/DOM.md), with no UI files. Register the handler before `show()`, which returns only when the server stops:
 
 ```cpp
-app.onUIStarted([](auto ui) {
-    auto doc = ui.document();
-    auto root = doc.island(); // default: "root"
-    auto button = doc.element("button");
-    auto label = doc.text("Click me");
-    button.append(label);
-    button.listen("click", [label](std::string) { label.setText("Clicked"); });
-    root.append(button);
-});
+#include <webfront/WebFront.hpp>
+
+int main() {
+    webfront::WebFront app;
+    app.onUIStarted([](auto ui) {
+        auto doc = ui.document();
+        auto root = doc.island(); // default: "root"
+        auto button = doc.element("button");
+        auto label = doc.text("Click me");
+        button.append(label);
+        button.listen("click", [label](std::string) { label.setText("Clicked"); });
+        root.append(button);
+    });
+    app.show();
+}
 ```
 
 ## Game of Life: from console to native application
