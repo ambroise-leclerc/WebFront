@@ -43,7 +43,7 @@
   "js/developer/tools/archive.mjs": "da63bb9d796ddfd24ed945b15c53f66a0400eb177886fd4f1c8fd10cafb5a91b",
   "js/developer/tools/distribution.mjs": "43dfdccc912693db46fd095fd78ae79325abab672d99f89fd569914ef3499cad",
   "js/developer/scripts/build.mjs": "7aa0358dbd8555ab83bf0380f67892e96b7e9806d4968de18e1a8eaf6e91c080",
-  "js/developer/webfront.project.json": "8984debb97ec09ffa768e910567adb2f642de99088549c6bfaa16287568ed1b8",
+  "js/developer/webfront.project.json": "84d59d7ba14883e6a4ec78f26bb05c0e671b48e983296dd20146d4ecea28c528",
   "js/core/bootstrap/bootstrap.bundle.mjs": "536831257f0fc92e31911841750e1e59247f7c64e756b0fcb878efd9860a741f",
   "js/developer/environment/packages.bundle.mjs": "2d62f3fcdece8e898f15814d7e80fc3a27ea062f45514cf8e5c3ae32fd9d26c5",
   "include/webfront/system/DeveloperReleaseData.hpp": "c85df5bf7b93609e26d3830c83b747726ad54ee4040cb30e2dc59a12e34b94ce"
