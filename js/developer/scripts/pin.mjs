@@ -4,7 +4,7 @@
 //   wf run js/developer/scripts/pin.mjs
 //
 // The header must be exactly the one generated for its version, and the archive at its URL must have its integrity.
-import {bootstrapHeader, sriOf} from '../tools/distribution.mjs';
+import {baseUrl, bootstrapHeader, sriOf} from '../tools/distribution.mjs';
 
 export default async function (context) {
     const {project} = context;
@@ -17,9 +17,14 @@ export default async function (context) {
     const marker = `developer/${version}/environment.tgz`;
     if (!url.endsWith('/' + marker) || header !== bootstrapHeader(version, url.slice(0, -marker.length), integrity))
         throw new Error(`DeveloperReleaseData.hpp is not the header generated for the published ${version}`);
-    const response = await context.fetch(url, {signal: context.signal});
-    if (!response.ok) throw new Error(`The pinned environment ${url} is not published (${response.status})`);
+    // The archive is fetched where the distribution is served now. A version pinned under a previous address (the
+    // github.io one, which redirects to the custom domain without CORS headers, so that a browser cannot follow it) is the
+    // same file there: the pinned integrity is what proves it.
+    const current = baseUrl(JSON.parse(await project.readText('js/developer/tools/distribution.json')).baseUrl);
+    const served = new URL(marker, current).href;
+    const response = await context.fetch(served, {signal: context.signal});
+    if (!response.ok) throw new Error(`The pinned environment ${served} is not published (${response.status})`);
     if (await sriOf(new Uint8Array(await response.arrayBuffer())) !== integrity)
-        throw new Error(`The published ${url} does not have the pinned integrity`);
+        throw new Error(`The published ${served} does not have the pinned integrity`);
     context.console.log(`DeveloperReleaseData.hpp pins the published ${version}.`);
 }

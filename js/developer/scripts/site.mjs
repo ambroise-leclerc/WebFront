@@ -4,7 +4,7 @@
 //
 // A published version is immutable: staging may only repeat identical bytes. Nothing is modified before every byte of
 // an existing version has been compared.
-import {versionName, versionPath, distributionFiles, sriOf} from '../tools/distribution.mjs';
+import {baseUrl, customDomain, versionName, versionPath, distributionFiles, sriOf} from '../tools/distribution.mjs';
 
 const same = (a, b) => a.length === b.length && a.every((byte, index) => byte === b[index]);
 
@@ -52,9 +52,18 @@ async function versionRow(project, site, version) {
     return `<li>${version}: ${links}</li>`;
 }
 
+// The custom domain of the base URL, written as the CNAME file of the Pages branch so that no publication depends on a
+// setting made once in the repository's Pages page. A project site served at the github.io address has none.
+async function writeDomain(project, site) {
+    const distribution = JSON.parse(await project.readText('js/developer/tools/distribution.json'));
+    const domain = customDomain(baseUrl(distribution.baseUrl));
+    if (domain) await project.write(`${site}/CNAME`, `${domain}\n`);
+}
+
 async function writeIndex(project, site) {
     const versions = (await entries(project, `${site}/developer`)).filter(name => versionName.test(name)).sort();
     await project.write(`${site}/.nojekyll`, '');
+    await writeDomain(project, site);
     const rows = [];
     for (const version of versions) rows.push(await versionRow(project, site, version));
     await project.write(`${site}/index.html`, `<!doctype html>\n<html lang="en"><meta charset="utf-8"><title>WebFront developer packages</title><h1>WebFront developer packages</h1><p>Use a version-pinned bootstrap header and SHA-512. React and its dependencies are downloaded separately from npm.</p><ul>${rows.join('')}</ul></html>\n`);

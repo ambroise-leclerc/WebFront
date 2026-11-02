@@ -1,6 +1,6 @@
 // Specs of the developer distribution: the starters, the Pages staging and the pinned bootstrap header.
 import {tar} from '../../../js/developer/tools/archive.mjs';
-import {bootstrapHeader, versionPath, distributionFiles} from '../../../js/developer/tools/distribution.mjs';
+import {bootstrapHeader, versionPath, distributionFiles, customDomain} from '../../../js/developer/tools/distribution.mjs';
 import stageSite from '../../../js/developer/scripts/site.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
 import {createStarter} from '../../../js/developer/environment/starter.mjs';
@@ -75,6 +75,7 @@ describe('The developer distribution', () => {
 
     it('Pages staging retains older versions and refuses different bytes under an existing version', async () => {
         const project = memoryProject();
+        await project.write('js/developer/tools/distribution.json', JSON.stringify({version: '0.1.0', baseUrl: 'https://owner.github.io/WebFront/'}));
         const environment = encode('environment');
         const starterBytes = encode('starter');
         const write = async version => {
@@ -93,6 +94,7 @@ describe('The developer distribution', () => {
         await write('0.2.0');
         await stage();
         expect(await project.readText('site/developer/0.1.0/environment.tgz')).toBe('environment');
+        expect(project.storage.has('site/CNAME')).toBe(false);
         expect(await project.readText('site/index.html')).toMatch(/developer\/0.2.0\/life-starter.tgz/);
         expect(await project.readText('site/developer/0.2.0/life-starter.tgz')).toBe('starter');
         await write('0.3.0');
@@ -109,6 +111,33 @@ describe('The developer distribution', () => {
         expect(await project.readText('site/developer/0.2.0/DeveloperReleaseData.hpp')).toMatch(/namespace webfront/);
         await project.write('distribution/environment.tgz', 'corrupt');
         await rejects(stage(), /checksum mismatch/);
+    });
+
+    it('Pages staging writes the CNAME file of a custom domain on every publication', async () => {
+        const project = memoryProject();
+        await project.write('js/developer/tools/distribution.json', JSON.stringify({version: '0.1.0', baseUrl: 'https://dist.example.test/'}));
+        const environment = encode('environment');
+        const starterBytes = encode('starter');
+        const manifest = {version: '0.1.0', integrity: await integrity(environment), starters: {life: {archive: 'life-starter.tgz', integrity: await integrity(starterBytes)}}};
+        await project.write('distribution/environment.tgz', environment);
+        await project.write('distribution/life-starter.tgz', starterBytes);
+        await project.write('distribution/provision.json', JSON.stringify(manifest));
+        await project.write('distribution/DeveloperReleaseData.hpp', bootstrapHeader('0.1.0', 'https://dist.example.test/', manifest.integrity));
+        const stage = () => stageSite({args: ['distribution', 'site'], project, console: {log() {}}});
+        await stage();
+        expect(await project.readText('site/CNAME')).toBe('dist.example.test\n');
+        // A publication from a checkout that lost the file restores it.
+        project.storage.delete('site/CNAME');
+        await stage();
+        expect(await project.readText('site/CNAME')).toBe('dist.example.test\n');
+    });
+
+    it('a custom domain is the root of the site and a github.io address has none', () => {
+        expect(customDomain('https://dist.example.test')).toBe('dist.example.test');
+        expect(customDomain('https://owner.github.io/WebFront/')).toBe('');
+        throws(() => customDomain('https://dist.example.test/developer/'));
+        throws(() => customDomain('https://dist.example.test:8443/'));
+        throws(() => customDomain('http://dist.example.test/'));
     });
 
     it('bootstrap configuration is pinned and rejects unsafe version/base inputs', async () => {

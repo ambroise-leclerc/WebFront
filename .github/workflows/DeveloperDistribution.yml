@@ -147,6 +147,8 @@ jobs:
           git -C "$site" config user.name "$GITHUB_ACTOR"
           git -C "$site" config user.email "$GITHUB_ACTOR@users.noreply.github.com"
           git -C "$site" add .nojekyll index.html developer
+          # The custom domain of the base URL, when it has one.
+          if [ -e "$site/CNAME" ]; then git -C "$site" add CNAME; fi
           if ! git -C "$site" diff --cached --quiet; then
             version=$(jq -r .version js/developer/tools/distribution.json)
             git -C "$site" commit -m "Publish developer packages $version [#288]"
