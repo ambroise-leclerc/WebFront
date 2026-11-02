@@ -127,7 +127,9 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
    3. activation sur le dépôt (`gh api -X PUT repos/ambroise-leclerc/WebFront/pages -f cname=dist.webfront.fr`), puis
       HTTPS forcé une fois le certificat émis ;
    4. `js/developer/scripts/site.mjs` écrit aujourd'hui seulement `.nojekyll` : il doit aussi écrire (ou conserver) le
-      fichier `CNAME` de la branche `gh-pages`, faute de quoi chaque publication effacerait le domaine configuré ;
+      fichier `CNAME` de la branche `gh-pages` d'après `baseUrl`. Le workflow part d'un extrait de la branche existante, donc
+      ne supprimerait pas un `CNAME` déjà présent ; l'écrire à chaque publication rend toutefois le domaine reproductible
+      (branche recréée, extrait perdu) au lieu de dépendre d'un réglage fait une fois dans l'interface (#478) ;
    5. contrôle des anciennes URL : les versions 0.6.0 à 0.6.4 sont compilées avec
       `ambroise-leclerc.github.io/WebFront/…`, que Pages redirige ensuite vers le nouveau domaine ; un `fetch` de navigateur
       doit suivre cette redirection avec des en-têtes CORS valides (`developer_integration --public` sur une ancienne
