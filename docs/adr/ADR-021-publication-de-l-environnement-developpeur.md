@@ -133,10 +133,17 @@ une **procédure** compliquée, pas un **hébergement** insuffisant ; changer d'
    qui la récupère au domaine courant et non à l'URL de l'en-tête) ; (ii) l'**URL réellement épinglée** : elle est sur
    l'origine de `baseUrl` et répond 200 sans redirection ; (iii) l'**accès depuis un navigateur** : un `fetch` d'une page
    d'une autre origine sur cette URL, avec en-têtes CORS valides (`developer_integration --public`, qui part de l'en-tête).
-   Dans l'état (a), seule (i) est exigée, car l'en-tête peut épingler une version publiée sous une adresse
-   antérieure : `wf run pin` n'émet alors qu'un avertissement lorsque l'origine diffère, et un tel en-tête peut donc être
-   accepté bien qu'**inutilisable dans un navigateur**. Dans l'état (b) et dans tout état de release, (ii) et (iii) sont
-   exigées et font échouer le workflow. Est **incohérent** : un en-tête plus récent que `distribution.json`, un en-tête qui n'est pas celui de sa version, une archive
+   **Dans tous les états, (i), (ii) et (iii) sont exigées** pour l'URL réellement épinglée par l'en-tête ; une
+   archive dont les octets sont bons à une autre adresse ne suffit pas, car ce sont les applications construites depuis
+   `develop` qui démarrent depuis l'URL compilée. `wf run pin` échoue donc (il ne se contente plus d'avertir) quand
+   l'URL épinglée n'est pas sur l'origine de `baseUrl`, redirige ou n'est pas servie avec CORS.
+   **Seule exception, la dérogation de migration**, explicite, bornée et temporaire : lorsque `baseUrl` change,
+   `distribution.json` déclare l'ancienne adresse (`previousBase`) ; tant que l'en-tête épingle une version publiée sous
+   cette adresse, (ii) et (iii) sont remplacées par un avertissement qui nomme la dérogation. Elle prend fin d'elle-même :
+   elle n'est acceptée que pour un en-tête dont la version précède la première version publiée sous la nouvelle adresse,
+   et son champ doit être retiré à ce pin ; le workflow refuse une dérogation périmée, ou un en-tête hors adresse sans
+   déclaration. La migration déjà acceptée (github.io vers `dist.webfront.fr`, #478) est l'unique cas actuel et est
+   close depuis le pin de la 0.6.5. Est **incohérent** : un en-tête plus récent que `distribution.json`, un en-tête qui n'est pas celui de sa version, une archive
    déployée dont l'intégrité diffère, ou un bootstrap de tests en avance sur l'en-tête.
 3. **La vérification du déploiement est une étape du workflow**, pas une convention : SHA-512 des octets servis, en-têtes
    CORS, `developer_integration --public`. La PR de fusion du pin ne s'ouvre que si elle réussit. Comme la vérification
@@ -215,8 +222,9 @@ point de défaillance unique, atténué seulement par l'archive de la prerelease
    manuelle, et le `GITHUB_TOKEN` n'a que `contents: read` dans ce job.
 6. Un tag de bibliothèque `v*` dont la version n'a pas de ligne dans la table de compatibilité, ou dont la ligne diffère de
    l'en-tête, fait échouer `ReleaseVersion.yml`.
-7. Un en-tête dont l'URL épinglée est hors de l'origine de `baseUrl`, ou redirigée, est refusé dans l'état (b) ; il n'est
-   toléré dans l'état (a) qu'avec l'avertissement.
+7. Un en-tête dont l'URL épinglée est hors de l'origine de `baseUrl`, redirigée ou sans CORS est refusé dans tous les états,
+   y compris celui des sources en avance ; seule une dérogation de migration déclarée dans `distribution.json` le tolère,
+   avec avertissement, et elle est refusée dès que l'en-tête épingle une version publiée sous la nouvelle adresse.
 8. `PUBLISHING.md` décrit le workflow et ses points de reprise ; l'ancienne procédure manuelle n'y figure plus que comme secours.
 9. Les invariants (reconstruction identique, immuabilité, budget de 150 Kio) sont toujours vérifiés par CTest.
 
