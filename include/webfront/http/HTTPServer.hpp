@@ -10,6 +10,7 @@
 #include "../Task.hpp"
 #include "../tooling/HexDump.hpp"
 #include "AcceptEncoding.hpp"
+#include "BlockingWorker.hpp"
 #include "BuffersPolicy.hpp"
 #include "Encodings.hpp"
 #include "GzipCache.hpp"
@@ -28,8 +29,11 @@
 #include <list>
 #include <locale>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -220,6 +224,7 @@ struct Response : Headers {
         badRequest            = 400,
         forbidden             = 403,
         notFound              = 404,
+        methodNotAllowed      = 405,
         notAcceptable         = 406,
         internalServerError   = 500,
         notImplemented        = 501,
@@ -269,12 +274,13 @@ private:
     mutable std::string httpStatus;
 
     [[nodiscard]] static std::string toString(StatusCode code) {
-        static constexpr std::array<std::pair<StatusCode, std::string_view>, 10> names{
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 11> names{
             {{switchingProtocols, "Switching Protocols"},
              {ok, "OK"},
              {badRequest, "Bad Request"},
              {forbidden, "Forbidden"},
              {notFound, "Not Found"},
+             {methodNotAllowed, "Method Not Allowed"},
              {notAcceptable, "Not Acceptable"},
              {internalServerError, "Internal Server Error"},
              {notImplemented, "Not Implemented"},
@@ -287,6 +293,148 @@ private:
         return {};
     }
 };
+
+/// The request a dynamic route answers: the parsed request, its decoded path and its raw query.
+struct RouteRequest {
+    const Request&   request;
+    std::string_view path;   ///< Percent-decoded, without the query; always starts with the route's prefix.
+    std::string_view query;  ///< After the '?', undecoded; empty when there is none.
+};
+
+/// What a route handler produces. The server adds `Content-Length` (from `contentLength`) and `Connection`;
+/// a handler sets the others (`Content-Type`, `Content-Range`, `Content-Disposition`, `Cache-Control`...).
+struct RouteReply {
+    Response::StatusCode                             status = Response::ok;
+    std::vector<std::pair<std::string, std::string>> headers;
+    /// Exact size of the body. Unset with a body: the body ends when the connection closes.
+    std::optional<std::uint64_t> contentLength;
+    /// Fills the buffer with the next bytes of the body and returns their count; 0 ends the body. Called on
+    /// the server's worker thread, one chunk at a time, so memory use does not depend on the body's size.
+    /// Never called for `HEAD`. A throw ends the response by closing the connection.
+    std::function<std::size_t(std::span<char>)> body;
+};
+
+/// Answers `GET` and `HEAD` requests under a prefix. Runs on the server's worker thread, not on the I/O
+/// context: it may block (disk, remote storage) without delaying other connections. A throw answers 500.
+using RouteHandler = std::function<RouteReply(const RouteRequest&)>;
+
+/// The dynamic routes of a server. Prefixes never overlap, so at most one route matches a path.
+class RouteTable {
+public:
+    struct Entry {
+        std::string  prefix;
+        RouteHandler handler;
+    };
+
+private:
+    struct State {
+        std::mutex                          mutex;
+        std::vector<std::shared_ptr<Entry>> entries;
+    };
+
+public:
+    /// Removes its route when destroyed or reset, and stays safe after the table is gone. A request already
+    /// running keeps the handler it started with; no later request reaches it.
+    class Registration {
+    public:
+        Registration() = default;
+        Registration(const Registration&)            = delete;
+        Registration& operator=(const Registration&) = delete;
+        Registration(Registration&& other) noexcept : state(std::move(other.state)), entry(std::move(other.entry)) {}
+        Registration& operator=(Registration&& other) noexcept {
+            if (this != &other) {
+                reset();
+                state = std::move(other.state);
+                entry = std::move(other.entry);
+            }
+            return *this;
+        }
+        ~Registration() { reset(); }
+
+        void reset() noexcept {
+            if (auto owner = state.lock()) {
+                std::lock_guard lock(owner->mutex);
+                std::erase(owner->entries, entry);
+            }
+            state.reset();
+            entry.reset();
+        }
+        [[nodiscard]] explicit operator bool() const noexcept { return !state.expired(); }
+
+    private:
+        friend class RouteTable;
+        Registration(std::weak_ptr<State> owner, std::shared_ptr<Entry> route) : state(std::move(owner)), entry(std::move(route)) {}
+        std::weak_ptr<State>  state;
+        std::shared_ptr<Entry> entry;
+    };
+
+    /// @param prefix absolute path ending with '/', such as "/webfront/services/files/"; "/" is refused, as is
+    ///        anything that would cover the protected "/WebFront.js" (ADR-002).
+    /// @throws std::invalid_argument for a malformed prefix, an empty handler, or a prefix that contains
+    ///         or is contained in a registered one.
+    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler) {
+        if (!handler) throw std::invalid_argument("A route needs a handler");
+        if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
+        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler)});
+        std::lock_guard lock(state->mutex);
+        for (const auto& other : state->entries)
+            if (other->prefix.starts_with(entry->prefix) || entry->prefix.starts_with(other->prefix))
+                throw std::invalid_argument("Route prefix '" + entry->prefix + "' collides with '" + other->prefix + "'");
+        state->entries.push_back(entry);
+        return {state, std::move(entry)};
+    }
+
+    /// @return the route whose prefix starts the path, kept alive for as long as the caller holds it.
+    [[nodiscard]] std::shared_ptr<const Entry> find(std::string_view path) const {
+        std::lock_guard lock(state->mutex);
+        for (const auto& entry : state->entries)
+            if (path.starts_with(entry->prefix)) return entry;
+        return {};
+    }
+
+private:
+    std::shared_ptr<State> state = std::make_shared<State>();
+
+    static bool validPrefix(std::string_view prefix) {
+        if (prefix.size() < 2 || !prefix.starts_with('/') || !prefix.ends_with('/')) return false;
+        if (prefix.find("..") != std::string_view::npos || prefix.find("//") != std::string_view::npos) return false;
+        return std::none_of(prefix.begin(), prefix.end(), [](char c) {
+            return static_cast<unsigned char>(c) <= 32 || c == 127 || c == '?' || c == '#' || c == '%' || c == '\\';
+        });
+    }
+};
+
+namespace routing {
+
+/// The decoded path and raw query of an origin-form request target, or nothing when it is not a safe one.
+inline std::optional<std::pair<std::string, std::string>> splitTarget(const std::string& uri) {
+    const auto mark = uri.find('?');
+    auto       path = uri::decode(std::string_view(uri).substr(0, mark));
+    if (!path.starts_with('/') || path.find("..") != std::string::npos) return {};
+    if (std::any_of(path.begin(), path.end(), [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; })) return {};
+    return std::pair{std::move(path), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
+}
+
+/// Refuses what could split a response or contradict the framing the server owns.
+inline void validateReply(const RouteReply& reply) {
+    const auto isToken = [](std::string_view name) {
+        return !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
+        });
+    };
+    for (const auto& [name, value] : reply.headers) {
+        if (!isToken(name)) throw std::runtime_error("Invalid response header name '" + name + "'");
+        if (std::any_of(value.begin(), value.end(), [](char c) { return c == '\r' || c == '\n' || c == '\0'; }))
+            throw std::runtime_error("Invalid value for response header '" + name + "'");
+        for (const auto reserved : {std::string_view("Content-Length"), std::string_view("Connection"), std::string_view("Transfer-Encoding")})
+            if (std::ranges::equal(name, reserved, [](char a, char b) {
+                    return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+                }))
+                throw std::runtime_error("Response header '" + name + "' belongs to the server");
+    }
+}
+
+} // namespace routing
 
 template <networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
 class RequestHandler {
@@ -307,6 +455,8 @@ public:
         bool needsDecode = false;
         bool head = false;
         bool identityFallback = false;
+        /// An unencoded file of known size, left unread to be streamed (asynchronous requests only).
+        std::unique_ptr<fs::File> file{};
         std::size_t limit = maxDecodedAssetSize<Policy>();
     };
 
@@ -410,6 +560,14 @@ private:
         const bool fallback = file->isEncoded() && encoding::isGzip(file->getEncoding()) &&
             !request.acceptsEncoding(file->getEncoding()) && request.acceptsEncoding("identity");
         prepared.identityFallback = fallback;
+        if (asynchronous && !file->isEncoded()) {
+            if (const auto size = file->knownSize()) {
+                response.headers.emplace_back("Content-Length", std::to_string(*size));
+                if (prepared.head) return {};
+                prepared.file = std::make_unique<fs::File>(std::move(*file));
+                return {};
+            }
+        }
         const auto inputLimit = asynchronous && fallback ? maxEncodedAssetSize : std::numeric_limits<std::size_t>::max();
         std::array<char, 512> buffer{};
         while (auto bytesRead = file->read(buffer)) {
@@ -488,6 +646,7 @@ public:
         log::info("Stopping HTTP server...");
         tasks.requestStop();
         decodeExecutor.stop();
+        routeWorker.stop();
         ioContext.stop();
     }
 
@@ -496,6 +655,8 @@ public:
     void drain() {
         decodeExecutor.stop();
         decodeExecutor.join();
+        routeWorker.stop();
+        routeWorker.join();
         tasks.drain(ioContext);
     }
 
@@ -503,6 +664,8 @@ public:
     void drainUntilJoined() noexcept {
         decodeExecutor.stop();
         decodeExecutor.join();
+        routeWorker.stop();
+        routeWorker.join();
         tasks.drainUntilJoined(ioContext);
     }
 
@@ -527,6 +690,13 @@ public:
         return Net::ResumeAfter(acceptor, duration);
     }
 
+    /// Answers the `GET` and `HEAD` requests under `prefix` with `handler` (see RouteTable::add for the
+    /// prefix rules). The route lasts as long as the returned registration; it never masks the embedded
+    /// `WebFront.js`, and takes precedence over the file providers. Thread-safe.
+    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler) {
+        return routes.add(std::move(prefix), std::move(handler));
+    }
+
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
     void onUpgrade(std::function<void(typename Net::Socket&&)>&& handler) {
         upgradeHandler = std::move(handler);
@@ -546,6 +716,8 @@ private:
     networking::TaskScope                       tasks;
     RequestHandler<Net, FS, Policy>             requestHandler;
     gzip::DecodeExecutor<Decode>                decodeExecutor;
+    RouteTable                                  routes;
+    BlockingWorker                              routeWorker;
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
@@ -580,9 +752,83 @@ private:
         }
     }
 
+    struct RouteMatch {
+        std::shared_ptr<const RouteTable::Entry> route;
+        std::string                              path, query;
+    };
+
+    // A request, other than a WebSocket upgrade, under a registered prefix. Every method under a prefix
+    // belongs to the route (405 for those it does not serve): its URLs never fall through to the providers.
+    std::optional<RouteMatch> matchRoute(const Request& request) const {
+        if (request.isUpgradeRequest("websocket")) return {};
+        auto split = routing::splitTarget(request.uri);
+        if (!split) return {};
+        auto route = routes.find(split->first);
+        if (!route) return {};
+        return RouteMatch{std::move(route), std::move(split->first), std::move(split->second)};
+    }
+
+    // Sends a body read on the worker in chunks of at most emissionBufferSize bytes, each read after the
+    // previous one was sent (back-pressure). A failure cannot change the status line already sent: it is
+    // logged, and the caller closes the connection, which the client sees as a truncated body.
+    networking::Task streamBody(typename Net::Socket& socket, std::function<std::size_t(std::span<char>)> body,
+                                std::optional<std::uint64_t> length, std::string label) {
+        try {
+            std::vector<char> chunk(Policy::emissionBufferSize);
+            std::uint64_t     sent = 0;
+            for (;;) {
+                std::size_t count = 0;
+                co_await networking::ex::continues_on(routeWorker.run([&] { count = body(chunk); }), Net::Scheduler(socket));
+                if (count == 0) break;
+                if (count > chunk.size() || (length && count > *length - sent)) throw std::length_error("The body is longer than announced");
+                sent += count;
+                std::vector<typename Net::ConstBuffer> buffers{Net::Buffer(static_cast<const char*>(chunk.data()), count)};
+                co_await Net::Send(socket, buffers);
+            }
+            if (length && sent != *length) throw std::length_error("The body is shorter than announced");
+        }
+        catch (const std::exception& error) {
+            log::warn("{} ended its response early: {}", label, error.what());
+        }
+    }
+
+    // Runs the handler on the worker, then streams its body in chunks of at most emissionBufferSize bytes,
+    // each read on the worker and sent before the next is read (back-pressure). Closing the connection
+    // fails the pending send and ends the response; the stop request of the server cancels the awaits.
+    networking::Task serveRoute(typename Net::Socket& socket, Request request, RouteMatch match) {
+        const bool head = request.method == Request::Method::Head;
+        RouteReply reply;
+        Response   response;
+        try {
+            if (!head && request.method != Request::Method::Get) {
+                response = Response::getStatusResponse(Response::methodNotAllowed);
+                response.headers.emplace_back("Allow", "GET, HEAD");
+            } else {
+                co_await networking::ex::continues_on(routeWorker.run([&] {
+                    reply = match.route->handler(RouteRequest{request, match.path, match.query});
+                    routing::validateReply(reply);
+                }), Net::Scheduler(socket));
+                response.statusCode = reply.status;
+                for (auto& [name, value] : reply.headers) response.headers.emplace_back(name, value);
+                if (reply.contentLength) response.headers.emplace_back("Content-Length", std::to_string(*reply.contentLength));
+                else if (!reply.body) response.headers.emplace_back("Content-Length", "0");
+            }
+        }
+        catch (const std::exception& error) {
+            log::warn("Route {} failed: {}", match.route->prefix, error.what());
+            response = Response::getStatusResponse(Response::internalServerError);
+            reply.body = nullptr;
+        }
+        const bool streaming = !head && reply.body && response.statusCode != Response::methodNotAllowed;
+        co_await Net::Send(socket, response.toBuffers<Net>());
+        if (streaming) co_await streamBody(socket, std::move(reply.body), reply.contentLength, match.route->prefix);
+        socket.shutdown(Net::Socket::shutdown_both);
+    }
+
     networking::Task serve(typename Net::Socket socket) {
         Request request;
         std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
+        std::unique_ptr<fs::File> streamed;
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
@@ -592,6 +838,10 @@ private:
                 request.parseSomeData(buffer.data(), buffer.data() + received);
             }
             log::info("Received request {} on {}", request.getMethodName(), request.uri);
+            if (auto match = matchRoute(request)) {
+                co_await serveRoute(socket, std::move(request), std::move(*match));
+                co_return;
+            }
             auto prepared = requestHandler.prepareRequest(std::move(request));
             if (prepared.needsDecode) {
                 lease.emplace(co_await networking::ex::continues_on(
@@ -605,6 +855,7 @@ private:
                         prepared.response.headers.emplace_back("Vary", "Accept-Encoding");
                     }
                 }
+                if (prepared.response.statusCode == Response::ok) streamed = std::move(prepared.file);
                 response = std::move(prepared.response);
             }
             log::info("  responding http {}", static_cast<int>(response.statusCode));
@@ -621,6 +872,8 @@ private:
             response = Response::getStatusResponse(Response::internalServerError);
         }
         co_await Net::Send(socket, response.toBuffers<Net>());
+        if (streamed)
+            co_await streamBody(socket, [&file = *streamed](std::span<char> out) { return file.read(out); }, streamed->knownSize(), "File response");
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
             socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
