@@ -3,14 +3,20 @@
 #include "../ContentPolicy.hpp"
 #include "Action.hpp"
 #include "Capture.hpp"
+#include "Downloads.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <map>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <vector>
 #include <type_traits>
 
 namespace webfront::frontend {
@@ -23,6 +29,12 @@ struct WKWebViewOptions {
     WindowOptions             window{};
     /** @brief Keep the native window hidden and avoid activating the application. A WindowServer is still required. */
     bool                      visible{true};
+    /** @brief Test injection: answers `<input type="file">` without a dialog (an empty list cancels). Unset shows the system panel. */
+    std::function<std::vector<std::string>()> chooseFiles{};
+    /** @brief Test injection: a non-empty folder receives downloads without a save panel. */
+    std::filesystem::path downloadDirectory{};
+    /** @brief Test injection: called with the destination of each finished download. */
+    std::function<void(const std::string&)> downloadFinished{};
 };
 
 }  // namespace webfront::frontend
@@ -277,6 +289,16 @@ struct Session {
     WKWebViewOptions                     options;
     webfront::detail::BoundContentPolicy contentPolicy;
     std::function<void()>                navigationCancelled;
+    struct PendingDownload {
+        std::unique_ptr<frontend::detail::DownloadStaging> staging;
+        std::filesystem::path target;
+        bool reserved;
+        bool replace;
+    };
+    frontend::detail::DownloadReservations reservations;
+    std::map<id, PendingDownload>        downloadDestinations;  // WKDownload -> its paths, until it ends.
+    /// What the answers of a system panel hold instead of `this`: AppKit may deliver one after the session is gone.
+    std::shared_ptr<Session*>            alive = std::make_shared<Session*>(this);
     id                                   app = nullptr, window = nullptr, view = nullptr, delegate = nullptr, timer = nullptr;
     id                                   previousDelegate = nullptr, previousMenu = nullptr;
     long                                 previousActivationPolicy = 0;
@@ -287,6 +309,9 @@ struct Session {
     CaptureRegistration                  captureRegistration;
 
     ~Session() {
+        *alive = nullptr;
+        endSheets();  // Each open panel answers "cancel" now, while the view still exists to receive it.
+        abandonDownloads();
         captureRegistration = {};
         abandonCaptures(*captureTarget);
         if (timer) {
@@ -322,6 +347,26 @@ struct Session {
         if (delegate) {
             attach(delegate, nullptr);
             send<void>(delegate, "release");
+        }
+    }
+
+    /// Dismisses the panels attached to the window: their completion handlers run, so WebKit gets its answers.
+    void endSheets() noexcept {
+        if (!window)
+            return;
+        const auto sheets = send(window, "sheets");
+        const auto count  = send<unsigned long>(sheets, "count");
+        for (auto index = count; index > 0; --index)
+            send<void>(window, "endSheet:", send(sheets, "objectAtIndex:", index - 1));
+    }
+
+    /// Cancels the downloads still running and removes the incomplete files they were writing.
+    void abandonDownloads() noexcept {
+        auto pending = std::exchange(downloadDestinations, {});  // Their failure callbacks must find nothing to settle.
+        for (const auto& [download, paths] : pending) {
+            send<void>(download, "cancel:", static_cast<id>(nullptr));
+            if (paths.reserved)
+                reservations.release(paths.target);
         }
     }
 
@@ -499,10 +544,148 @@ struct Session {
             const auto destination = utf8(send(send(send(action, "request"), "URL"), "absoluteString"));
             if (contentPolicy.allowsNavigation(destination)) {
                 policy = 1;  // WKNavigationActionPolicyAllow
+                // <a download> and generated Blobs: WKNavigationActionPolicyDownload (macOS 11.3).
+                if (send<BOOL>(action, "respondsToSelector:", sel_registerName("shouldPerformDownload")) && send<BOOL>(action, "shouldPerformDownload"))
+                    policy = 2;
             } else
                 rejectNavigation("initial navigation was denied by contentPolicy");
         });
         decision(policy);  // Exactly once, including after a C++ exception.
+    }
+
+    /// The address a frame is judged by. A frame the page creates without a document of its own (no `src`, or `srcdoc`)
+    /// is `about:blank` / `about:srcdoc` and inherits its creator's origin, which is what the policy has to see.
+    static std::string effectiveFrameUrl(id frame) {
+        auto address = utf8(send(send(send(frame, "request"), "URL"), "absoluteString"));
+        if (!address.empty() && !address.starts_with("about:"))
+            return address;
+        const auto origin   = send(frame, "securityOrigin");
+        const auto protocol = utf8(send(origin, "protocol"));
+        const auto host     = utf8(send(origin, "host"));
+        if (protocol.empty() || host.empty())
+            return address;  // An opaque origin (sandboxed frame): not the application's.
+        const auto port = send<long>(origin, "port");
+        return protocol + "://" + host + (port > 0 ? ":" + std::to_string(port) : "") + "/";
+    }
+
+    /// <input type="file">: the system panel as a sheet of the window, or the test injection. The handler runs exactly once.
+    void chooseFilesForPage(id parameters, id frame, void (^completion)(id)) noexcept {
+        id   result   = nullptr;  // NSArray<NSURL*>*; nil cancels.
+        bool deferred = false;
+        guard([&] {
+            // Only the frames the policy admits may open a chooser.
+            if (!contentPolicy.allowsNavigation(effectiveFrameUrl(frame)))
+                return;
+            if (options.chooseFiles) {
+                const auto files = options.chooseFiles();
+                if (files.empty())
+                    return;
+                const auto urls = send(type("NSMutableArray"), "array");
+                for (const auto& file : files) {
+                    Object path(text(file));
+                    send<void>(urls, "addObject:", send(type("NSURL"), "fileURLWithPath:", path.get()));
+                }
+                result = urls;
+                return;
+            }
+            const auto panel = send(type("NSOpenPanel"), "openPanel");
+            send<void>(panel, "setAllowsMultipleSelection:", send<BOOL>(parameters, "allowsMultipleSelection"));
+            // <input webkitdirectory> chooses a folder, and only a folder.
+            const auto directories = send<BOOL>(parameters, "allowsDirectories");
+            send<void>(panel, "setCanChooseDirectories:", directories);
+            send<void>(panel, "setCanChooseFiles:", static_cast<BOOL>(!directories));
+            auto handler = Block_copy(completion);
+            send<void>(panel, "retain");
+            void (^finished)(long) = ^(long response) {
+                handler(response == 1 ? send(panel, "URLs") : nullptr);  // NSModalResponseOK
+                send<void>(panel, "release");
+                Block_release(handler);
+            };
+            deferred = true;
+            send<void>(panel, "beginSheetModalForWindow:completionHandler:", window, finished);
+        });
+        if (!deferred)
+            completion(result);
+    }
+
+    /// A WKDownload needs a destination that does not exist: the test folder, or the user's choice in a save panel.
+    void chooseDownloadDestination(id download, const std::string& suggested, void (^completion)(id)) noexcept {
+        id   result   = nullptr;  // NSURL*; nil cancels the download.
+        bool deferred = false;
+        guard([&] {
+            if (!options.downloadDirectory.empty()) {
+                std::filesystem::create_directories(options.downloadDirectory);  // WebKit needs the folder to exist.
+                std::filesystem::path destination;
+                try {
+                    destination = reservations.reserve(options.downloadDirectory, suggested);
+                } catch (const std::filesystem::filesystem_error&) {
+                    return;  // No candidate is free: nil cancels this download without stopping the session.
+                }
+                std::unique_ptr<frontend::detail::DownloadStaging> staging;
+                try {
+                    staging = std::make_unique<frontend::detail::DownloadStaging>(destination.parent_path());
+                } catch (...) {
+                    reservations.release(destination);
+                    throw;
+                }
+                const auto temporary = staging->path();
+                downloadDestinations[download] = {std::move(staging), destination, true, false};
+                Object path(text(temporary.string()));
+                result = send(type("NSURL"), "fileURLWithPath:", path.get());
+                return;
+            }
+            const auto panel = send(type("NSSavePanel"), "savePanel");
+            Object     name(text(std::filesystem::path(suggested).filename().string()));
+            send<void>(panel, "setNameFieldStringValue:", name.get());
+            auto     handler = Block_copy(completion);
+            auto     token   = alive;     // Not `this`: the window may close, and the session end, while the panel is open.
+            const id key     = download;  // By value: the panel answers after this lambda and its references are gone.
+            send<void>(panel, "retain");
+            void (^finished)(long) = ^(long response) {
+                id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
+                if (chosen && !*token)
+                    chosen = nullptr;                                      // The session is gone: nobody could move the file afterwards.
+                try {
+                    if (chosen) {
+                        const std::filesystem::path target = utf8(send(chosen, "path"));
+                        std::error_code             code;
+                        const bool replace = std::filesystem::exists(target, code);
+                        if (code)
+                            throw std::filesystem::filesystem_error("Cannot inspect download target", target, code);
+                        auto staging = std::make_unique<frontend::detail::DownloadStaging>(target.parent_path());
+                        const auto temporary = staging->path();
+                        Object path(text(temporary.string()));
+                        chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                        (*token)->downloadDestinations[key] = {std::move(staging), target, false, replace};
+                    }
+                } catch (const std::filesystem::filesystem_error&) {
+                    chosen = nullptr;  // No temporary name is free: answer WebKit once, without crossing the AppKit block.
+                }
+                handler(chosen);
+                send<void>(panel, "release");
+                Block_release(handler);
+            };
+            deferred = true;
+            send<void>(panel, "beginSheetModalForWindow:completionHandler:", window, finished);
+        });
+        if (!deferred)
+            completion(result);
+    }
+
+    void downloadEnded(id download, bool completed) noexcept {
+        const auto found = downloadDestinations.find(download);
+        if (found == downloadDestinations.end())
+            return;
+        const auto pending = std::move(found->second);
+        downloadDestinations.erase(found);
+        if (completed)
+            completed = pending.staging->finish(pending.target, pending.replace);
+        if (pending.reserved)
+            reservations.release(pending.target);
+        if (completed && options.downloadFinished)
+            guard([&] {
+                options.downloadFinished(pending.target.string());
+            });
     }
 
     void navigationResponse(id response, void (^decision)(long)) noexcept {
@@ -517,8 +700,12 @@ struct Session {
                 rejectNavigation("initial navigation response was denied by contentPolicy");
                 return;
             }
-            if (committed)
+            // A response the engine cannot display (an attachment, an archive) is saved, not shown.
+            if (committed) {
+                if (!send<BOOL>(response, "canShowMIMEType"))
+                    policy = 2;  // WKNavigationResponsePolicyDownload
                 return;
+            }
             if (send<BOOL>(http, "respondsToSelector:", sel_registerName("statusCode"))) {
                 const auto status = send<long>(http, "statusCode");
                 if (!successfulHttpStatus(status)) {
@@ -620,6 +807,48 @@ inline void addNavigationMethods(Class cls) {
             return nullptr;
         },
         "@@:@@@@");
+    // File chooser (WKUIDelegate) and downloads (WKNavigationDelegate, WKDownloadDelegate), issue #451.
+    addMethod(
+        cls,
+        "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:",
+        +[](id self, SEL, id, id parameters, id frame, void (^completion)(id)) {
+            if (auto s = session(self))
+                s->chooseFilesForPage(parameters, frame, completion);
+            else
+                completion(nullptr);
+        },
+        "v@:@@@@?");
+    const auto becameDownload = +[](id self, SEL, id, id, id download) {
+        send<void>(download, "setDelegate:", self);
+    };
+    addMethod(cls, "webView:navigationAction:didBecomeDownload:", becameDownload, "v@:@@@");
+    addMethod(cls, "webView:navigationResponse:didBecomeDownload:", becameDownload, "v@:@@@");
+    addMethod(
+        cls,
+        "download:decideDestinationUsingResponse:suggestedFilename:completionHandler:",
+        +[](id self, SEL, id download, id, id suggested, void (^completion)(id)) {
+            if (auto s = session(self))
+                s->chooseDownloadDestination(download, utf8(suggested), completion);
+            else
+                completion(nullptr);
+        },
+        "v@:@@@@?");
+    addMethod(
+        cls,
+        "downloadDidFinish:",
+        +[](id self, SEL, id download) {
+            if (auto s = session(self))
+                s->downloadEnded(download, true);
+        },
+        "v@:@");
+    addMethod(
+        cls,
+        "download:didFailWithError:resumeData:",
+        +[](id self, SEL, id download, id, id) {
+            if (auto s = session(self))
+                s->downloadEnded(download, false);
+        },
+        "v@:@@@");
     addMethod(cls, "webView:didFinishNavigation:", navigationFinished, "v@:@@");
     addMethod(cls, "webView:didCommitNavigation:", navigationCommitted, "v@:@@");
     const auto failed = +[](id self, SEL, id, id, id error) {

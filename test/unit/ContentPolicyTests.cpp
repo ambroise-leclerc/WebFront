@@ -70,6 +70,14 @@ SCENARIO("Content policy compares complete HTTP origins") {
             REQUIRE(policy.allowsBridge(std::nullopt));
             REQUIRE(policy.allowsNavigation("http://127.0.0.1:9002/next?x=1#fragment"));
         }
+        THEN("a Blob of the application's origin (a generated download) is allowed, one of another origin is not") {
+            REQUIRE(policy.allowsNavigation("blob:http://127.0.0.1:9002/0b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"));
+            REQUIRE(policy.allowsNavigation("BLOB:http://127.0.0.1:9002/id"));
+            for (const auto* url : {"blob:https://example.com/id", "blob:null/id", "blob:", "blob:http://127.0.0.1:9002@evil/id", "blob:blob:http://127.0.0.1:9002/id"}) {
+                INFO(url);
+                REQUIRE_FALSE(policy.allowsNavigation(url));
+            }
+        }
         THEN("other origins and ambiguous syntax fail closed") {
             for (const auto* origin : invalidBridgeOrigins) {
                 INFO(origin);

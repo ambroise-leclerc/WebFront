@@ -45,6 +45,54 @@ startup failures before any window is created. Coordination waits have a 30-seco
 `test/unit/WebFrontTests.cpp` also checks initialization once per frontend type, retry after failed
 initialization, frontend selection and unavailable-engine diagnostics. These tests need no GUI.
 
+## File chooser and downloads
+
+The embedded frontends use their engine's file chooser and download handling without a WebFront API (ADR-020, rule 6).
+Coverage varies by engine and does not yet qualify all native dialogs, `accept` filters or directory selection. A `blob:` URL of an
+admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`); a `blob:` URL of any other origin does not.
+
+| Frontend | Chooser | Download | Test injection |
+| --- | --- | --- | --- |
+| WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder, the page's name reduced to its last component, never overwriting (`name (1).ext`), also between downloads that run at the same time (`DownloadReservations`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| CEF (Chrome runtime) | the runtime's dialog | the runtime's download handling | `SimpleCEFClient::chooseFiles` (`CefDialogHandler::OnFileDialog`), `downloadDirectory`, `downloadFinished`. The runtime itself turns a suggested name `../x` into `_x` |
+| WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| WebView2 | the engine's native chooser | the engine's native download UI | DevTools intercepts the chooser in tests; `DownloadStarting` redirects the download to a private path |
+
+The engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
+Xvfb for WebKitGTK), a `Runtime.evaluate` with `userGesture` (CEF) or `evaluateJavaScript`, which WebKit treats as a user
+gesture (WKWebView). The WKWebView scenarios (`WKWebViewLifecycle-download`, `-choose-file`, `-cancel-choose`,
+`-replaced-download`) use the test injections of `WKWebViewOptions`: they qualify the delegate wiring, the blob download
+policy, the destination handling and the replace-on-success logic, not the system `NSOpenPanel`/`NSSavePanel` themselves.
+The real panels were driven by hand on macOS before the private staging change in `52d8c68` (accessibility actions, a
+local slow server, no automated test): saving and the
+"Replace" choice report the finished download and leave no `.part` file; cancelling the save sheet creates nothing; an
+`<input webkitdirectory>` panel offers folders only; two simultaneous downloads of one name get `same.bin` and
+`same (1).bin`; closing the window cancels the downloads in progress and removes their incomplete files; a response the
+engine cannot display (`application/octet-stream`) is saved as a download.
+These earlier manual results do not qualify the private staging implementation; the PR records subsequent validation
+separately. Native dialog qualification remains incomplete.
+WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the frontend sees it.
+If all 10,000 candidate names are occupied, automatic destination selection fails and cancels the download.
+WKWebView writes each download in a private staging directory beside the destination. On success it installs the file;
+if a destination that was free appears during the download, it preserves that file and discards the download. Failed and
+cancelled downloads remove their staging directory. Installing a new destination requires hard-link support on its filesystem.
+
+### Tests
+
+`ConsumerJasmine-file-services` (all engines) checks that files reach the page as `File` objects, that the `accept` and
+`webkitdirectory` properties keep their values (filtering and directory selection themselves are not exercised), and
+that offering a generated Blob leaves the page and the bridge working. `WebKitGTKAdapter-download|choose-file|cancel-choose`
+and `CEFFileServices-download|choose|cancel` drive the dialog and the download through the injection points.
+`WebKitGTKAdapter-download-user-dir` checks that, without a configured folder, the download lands in GLib's user download
+directory (read from `user-dirs.dirs`, not from an environment variable). `WebKitGTKAdapter-close-with-dialog` opens the
+real system dialog with a pointer click, closes the window under it and requires a clean exit; CEF and WebView2 do not
+test that case. `WKWebViewLifecycle-close-with-open-panel|close-with-save-panel` close the window under an
+`NSOpenPanel` / `NSSavePanel` sheet, and `choose-in-blank|choose-in-srcdoc` open a chooser from `about:blank` and `srcdoc`
+frames, which WKWebView judges by their inherited origin.
+`WebView2Lifecycle-file-choose|file-cancel|file-download` verifies the engine's chooser request, selection and cancellation
+events, and the bytes written by a completed Blob download. It intercepts the chooser with DevTools and suppresses the download UI,
+so it does not qualify the native dialogs themselves or closing the window while one is open.
+
 ## Adding a frontend
 
 1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.

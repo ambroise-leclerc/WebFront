@@ -26,7 +26,7 @@ endif()
 set(TESTS_LIST)
 list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
-list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
+list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
 list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
@@ -296,6 +296,10 @@ add_test(NAME FrontendConsumerConfiguration
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-consumer
         -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
         "-DDEPENDENCY_ARGS=${_consumer_dependency_args}"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DTEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendConsumer.cmake)
 set_tests_properties(FrontendConsumerConfiguration PROPERTIES TIMEOUT 120)
 # Read the actual target's launcher at generation time, including an explicitly

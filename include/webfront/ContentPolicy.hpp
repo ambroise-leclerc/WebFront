@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -130,6 +131,21 @@ inline std::optional<std::string> contentOrigin(std::string_view url, bool origi
     return serializedContentOrigin(parts->scheme, authority->host, *port, defaultPort);
 }
 
+/**
+ * @brief The URL a `blob:` URL was minted for (`blob:http://host:port/id` gives `http://host:port/id`), or empty.
+ *
+ * A page downloads a generated `Blob` by navigating to such a URL; its content always belongs to the page's own origin,
+ * so the origin it names is the one the navigation policy must judge.
+ */
+inline std::string_view blobOriginUrl(std::string_view url) {
+    constexpr std::string_view scheme = "blob:";
+    if (url.size() <= scheme.size() || !std::ranges::equal(url.substr(0, scheme.size()), scheme, [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a)) == b;
+        }))
+        return {};
+    return url.substr(scheme.size());
+}
+
 /** @brief Validated snapshot shared by the HTTP and embedded-frontend policy hooks. */
 class BoundContentPolicy {
 public:
@@ -147,6 +163,8 @@ public:
     }
 
     bool allowsNavigation(std::string_view url) const {
+        if (const auto inner = blobOriginUrl(url); !inner.empty())
+            url = inner;  // A Blob of an admitted origin (a generated download) is that origin's own content.
         const auto origin = contentOrigin(url);
         return origin && (policy.allowAnyNavigation || *origin == applicationOrigin || contains(policy.navigationAllowedOrigins, *origin));
     }

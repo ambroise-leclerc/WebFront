@@ -5,11 +5,12 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, propriétaires admissibles des répertoires et des ancêtres, transport du navigateur système déclaré (`loopbackAttested`) plutôt que prouvé par un secret de lancement, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.1 | 2026-11-02 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison partielle de l'étape 1 pour #451 (sélecteur de fichiers et téléchargements sous WebKitGTK, CEF, WKWebView et WebView2) ; #452 reste à faire. La section « État de l'étape 1 » distingue les preuves de validation par moteur et par révision ; `docs/FRONTENDS.md` précise les limites de couverture. | Branche `451-file-chooser-downloads` (PR #484), implémentation initiale `91049ab`, stockage privé WKWebView `52d8c68` |
 
 ## État et chronologie
 
-**Proposée** le **2026-10-31**. Aucun code n'est livré avec cette version : elle fixe le cadre des services
-système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). Elle passera à « Acceptée » quand les
+**Proposée** le **2026-10-31**. La version 1.0 ne livrait aucun code : elle fixe le cadre des services
+système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). La version 1.1 livre une partie de l'étape 1 (#451) ; la décision reste proposée. Elle passera à « Acceptée » quand les
 critères de la section dédiée seront démontrés.
 
 ## Contexte
@@ -351,6 +352,23 @@ Le code vérifié le 2026-10-31 ne permet pas encore d'implémenter ces règles.
 | 3 | [#448](https://github.com/ambroise-leclerc/WebFront/issues/448) Types et contrats du pont | [#456](https://github.com/ambroise-leclerc/WebFront/issues/456) chaînes longues (32 bits) ; [#457](https://github.com/ambroise-leclerc/WebFront/issues/457) listes de chaînes et de tuples ; [#458](https://github.com/ambroise-leclerc/WebFront/issues/458) erreurs typées ; [#459](https://github.com/ambroise-leclerc/WebFront/issues/459) réponse différée des callbacks C++ | listages (règle 4), appels (règle 5) |
 | 4 | [#449](https://github.com/ambroise-leclerc/WebFront/issues/449) Stockage modifiable et livraison des services | [#460](https://github.com/ambroise-leclerc/WebFront/issues/460) stockage sous racines déclarées, confiné pendant la résolution (révision de l'ADR-002) ; [#461](https://github.com/ambroise-leclerc/WebFront/issues/461) paquet `@webfront/services` | sélecteur HTML et écritures (règles 2 à 4) |
 | 5 | [#450](https://github.com/ambroise-leclerc/WebFront/issues/450) Intégration native des frontends | [#462](https://github.com/ambroise-leclerc/WebFront/issues/462) exécuteur du thread d'interface, y compris le navigateur système ; [#463](https://github.com/ambroise-leclerc/WebFront/issues/463) fenêtre native et correspondance avec les connexions | backend natif seulement |
+
+État de l'étape 1 (#451), preuves disponibles au 2026-11-03 : sélecteur et téléchargements implémentés dans les quatre
+moteurs, avec des validations de provenance et de révision distinctes. Les résultats suivants ne valent que pour les
+révisions indiquées ; ils ne qualifient pas automatiquement les changements ultérieurs.
+
+| Moteur | Source de validation | Révision et portée |
+| --- | --- | --- |
+| WebKitGTK | [CI Linux](https://github.com/ambroise-leclerc/WebFront/actions/runs/41628819255/job/125892906278) | `52d8c68` : suite CTest, dont sélection, annulation et téléchargements. |
+| WebView2 | [CI Windows](https://github.com/ambroise-leclerc/WebFront/actions/runs/41628819255/job/125892850205) | `52d8c68` : suite CTest ; sélection interceptée par DevTools et téléchargements redirigés, sans qualification des dialogues natifs. Les 538 tests MSVC Release locaux rapportés dans la [PR #484](https://github.com/ambroise-leclerc/WebFront/pull/484) constituent une preuve locale distincte. |
+| CEF | [CI étendue GCC et Clang](https://github.com/ambroise-leclerc/WebFront/actions/runs/41614144327) | `158ceb5`, antérieure au stockage privé WKWebView : scénarios CEF de fichiers et suite Jasmine. Les essais Linux locaux rapportés dans la PR sont distincts de cette exécution CI. |
+| WKWebView | [CI macOS](https://github.com/ambroise-leclerc/WebFront/actions/runs/41614129707/job/125843186922) | `158ceb5`, antérieure au stockage privé ajouté dans `52d8c68` : scénarios automatisés de sélection, téléchargement, remplacement et fermeture sous un panneau. |
+| WKWebView, panneaux réels | Essais manuels locaux rapportés dans la [PR #484](https://github.com/ambroise-leclerc/WebFront/pull/484) et `docs/FRONTENDS.md` | Réalisés avant `52d8c68` ; la révision exacte de chaque essai n'est pas consignée. Ces résultats ne qualifient pas le nouveau stockage privé. |
+
+À la révision `52d8c68`, le nouveau stockage privé WKWebView n'avait pas été exécuté sur macOS : la compilation CI avait
+échoué avant les tests. Le correctif et les validations ultérieures sont consignés dans la PR #484. La qualification
+des dialogues natifs reste partielle ; les injections de test ne la remplacent pas. `docs/FRONTENDS.md` détaille les
+limites par moteur. #452 reste à faire et l'ADR reste proposée.
 
 Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
 épique ; les dialogues natifs suivront l'étape 5. `PUT`/`POST` ne sont pas des préalables : les écritures passent par

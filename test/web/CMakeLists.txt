@@ -182,6 +182,11 @@ if(_browser_tests_available)
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        # File services of the engine (issue #451), shared by every embedded frontend.
+        webfront_add_jasmine_test(NAME ConsumerJasmine-file-services TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
+            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/file-services.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
         add_test(NAME ConsumerJasmineCaptures COMMAND "${CMAKE_COMMAND}"
             "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/ConsumerJasmine-capture/captures"
             -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckConsumerCaptures.cmake")
@@ -232,6 +237,17 @@ if(WEBFRONT_EMBED_CEF AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(_policy_xvfb)
         add_test(NAME CEFContentPolicy COMMAND "${_policy_xvfb}" -a $<TARGET_FILE:cef_content_policy>)
         webfront_set_browser_test_properties(CEFContentPolicy "${CMAKE_CURRENT_SOURCE_DIR}" 45)
+    endif()
+    # File chooser and downloads (issue #451).
+    add_executable(cef_file_services CEFFileServices.cpp)
+    target_link_libraries(cef_file_services PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    webfront_setup_frontends_for_target(cef_file_services)
+    add_dependencies(webtest cef_file_services)
+    if(_policy_xvfb)
+        foreach(mode download choose cancel)
+            add_test(NAME CEFFileServices-${mode} COMMAND "${_policy_xvfb}" -a $<TARGET_FILE:cef_file_services> ${mode})
+            webfront_set_browser_test_properties(CEFFileServices-${mode} "${CMAKE_CURRENT_SOURCE_DIR}" 60)
+        endforeach()
     endif()
 endif()
 

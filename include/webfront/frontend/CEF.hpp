@@ -6,15 +6,19 @@
 #include "CEFPaths.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "Downloads.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <memory>
+#include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -493,7 +497,9 @@ class SimpleCEFClient : public CefClient,
                         public CefLoadHandler,
                         public CefRequestHandler,
                         public CefContextMenuHandler,
-                        public CefCommandHandler {
+                        public CefCommandHandler,
+                        public CefDownloadHandler,
+                        public CefDialogHandler {
 public:
     explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
         : contentPolicy(std::move(policy)), popupLauncher(launch) { }
@@ -510,6 +516,82 @@ public:
     }
     CefRefPtr<CefCommandHandler> GetCommandHandler() override {
         return this;
+    }
+
+    /// The Chrome runtime already shows its own file dialog and saves downloads; these two hooks only exist for tests.
+    /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset keeps the engine's dialog.
+    std::function<std::vector<std::string>()> chooseFiles;
+    /// Test injection: a non-empty folder receives downloads without a "save as" dialog.
+    std::filesystem::path downloadDirectory;
+    frontend::detail::DownloadReservations                         downloadReservations;
+    std::mutex                                                     reservedMutex;
+    std::map<std::uint32_t, std::filesystem::path>                 reservedByDownload;  // CefDownloadItem id -> destination
+    /// Test injection: called with the full path of each completed download.
+    std::function<void(const std::string&)> downloadFinished;
+
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
+        return this;
+    }
+    CefRefPtr<CefDialogHandler> GetDialogHandler() override {
+        return this;
+    }
+    bool OnFileDialog(CefRefPtr<CefBrowser>,
+                      FileDialogMode,
+                      const CefString&,
+                      const CefString&,
+                      const std::vector<CefString>&,
+                      const std::vector<CefString>&,
+                      const std::vector<CefString>&,
+                      CefRefPtr<CefFileDialogCallback> callback) override {
+        if (!chooseFiles)
+            return false;
+        std::vector<CefString> files;
+        try {
+            for (const auto& file : chooseFiles())
+                files.emplace_back(file);
+        } catch (...) {
+            files.clear();
+        }
+        if (files.empty())
+            callback->Cancel();
+        else
+            callback->Continue(files);
+        return true;
+    }
+    bool OnBeforeDownload(CefRefPtr<CefBrowser>,
+                          CefRefPtr<CefDownloadItem>           item,
+                          const CefString&                     suggested,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        if (downloadDirectory.empty())
+            return false;
+        try {
+            const auto result = downloadReservations.reserve(downloadDirectory, suggested.ToString());
+            {
+                std::scoped_lock lock{reservedMutex};
+                reservedByDownload[item->GetId()] = result;
+            }
+            callback->Continue(result.string(), false);
+        } catch (const std::filesystem::filesystem_error&) {
+            // Returning true without continuing cancels the download, including when all candidate names are occupied.
+        }
+        return true;
+    }
+    void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {
+        if (item->IsComplete() && downloadFinished)
+            downloadFinished(item->GetFullPath().ToString());
+        if (item->IsInProgress())
+            return;
+        // Complete, cancelled or interrupted: the name can be given to another download again.
+        std::filesystem::path reserved;
+        {
+            std::scoped_lock lock{reservedMutex};
+            if (const auto found = reservedByDownload.find(item->GetId()); found != reservedByDownload.end()) {
+                reserved = std::move(found->second);
+                reservedByDownload.erase(found);
+            }
+        }
+        if (!reserved.empty())
+            downloadReservations.release(reserved);
     }
 
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {

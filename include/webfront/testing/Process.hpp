@@ -245,6 +245,8 @@ inline ProcessResult runProcessWindows(const ProcessSpec& spec, const std::atomi
         HANDLE inherited[3]  = {input.handle, outWrite.handle, errWrite.handle};
         SIZE_T attributeSize = 0;
         ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
+        if (attributeSize == 0)
+            throw std::runtime_error("Cannot determine the process attribute size");
         std::vector<char> attributeStorage(attributeSize);
         auto*             attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
         if (!::InitializeProcThreadAttributeList(attributes, 1, 0, &attributeSize))
