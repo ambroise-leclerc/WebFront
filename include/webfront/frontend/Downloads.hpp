@@ -1,7 +1,8 @@
 #pragma once
 
-#include <filesystem>
 #include <cerrno>
+#include <chrono>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <random>
@@ -22,6 +23,7 @@ namespace webfront::frontend::detail {
 class DownloadStaging {
 public:
     explicit DownloadStaging(const std::filesystem::path& parent) {
+        sweepStale(parent);
 #ifdef __APPLE__
         auto pattern = (parent / ".webfront-download-XXXXXX").string();
         std::vector<char> buffer(pattern.begin(), pattern.end());
@@ -56,14 +58,55 @@ public:
         std::filesystem::remove_all(directory, ignored);
     }
     [[nodiscard]] std::filesystem::path path() const { return directory / "download"; }
+    /**
+     * @brief Installs the staged file. A new target never replaces a file that appeared meanwhile.
+     *
+     * A hard link installs atomically; on a filesystem without links (exFAT, FAT, some network shares) the file is copied,
+     * which still refuses an existing target. A copy that failed midway is removed.
+     */
     bool finish(const std::filesystem::path& target, bool replace) const {
         std::error_code error;
-        if (replace)
+        if (replace) {
             std::filesystem::rename(path(), target, error);
-        else
-            std::filesystem::create_hard_link(path(), target, error);
+            return !error;
+        }
+        std::filesystem::create_hard_link(path(), target, error);
+        if (!error)
+            return true;
+        error.clear();
+        std::filesystem::copy_file(path(), target, std::filesystem::copy_options::none, error);
+        if (error && error != std::errc::file_exists) {
+            std::error_code ignored;
+            std::filesystem::remove(target, ignored);
+        }
         return !error;
     }
+
+    /// Removes the staging directories that a crash left in `parent` more than a week ago.
+    static void sweepStale(const std::filesystem::path& parent) noexcept {
+        try {
+            constexpr std::string_view prefix = ".webfront-download-";
+            const auto                 limit  = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24 * 7);
+            std::error_code            error;
+            for (std::filesystem::directory_iterator it(parent, error), end; !error && it != end; it.increment(error)) {
+                const auto name = it->path().filename().string();
+                if (!name.starts_with(prefix))
+                    continue;
+                const bool directory = it->is_directory(error);
+                if (error || !directory) {
+                    error.clear();  // An unreadable entry must not stop the sweep of the next ones.
+                    continue;
+                }
+                if (const auto written = std::filesystem::last_write_time(it->path(), error); !error && written < limit) {
+                    std::error_code ignored;
+                    std::filesystem::remove_all(it->path(), ignored);
+                }
+                error.clear();
+            }
+        } catch (...) {
+        }
+    }
+
 private:
     std::filesystem::path directory;
 };
@@ -79,12 +122,17 @@ private:
 inline std::filesystem::path
 uniqueDownloadPath(const std::filesystem::path& folder, std::string_view suggested, const std::function<bool(const std::filesystem::path&)>& taken = {}) {
     auto name = std::filesystem::path(std::string(suggested)).filename();
+    // Leading dots would let a page create hidden files (".bash_login") when the folder is the home folder.
+    if (const auto text = name.string(); text.starts_with('.'))
+        name = text.substr(text.find_first_not_of('.') == std::string::npos ? text.size() : text.find_first_not_of('.'));
     if (name.empty() || name == "." || name == "..")
         name = "download";
     auto            result = folder / name;
     std::error_code error;
     const auto      unavailable = [&](const std::filesystem::path& path) {
-        return std::filesystem::exists(path, error) || (taken && taken(path));
+        error.clear();
+        const bool exists = std::filesystem::exists(path, error);
+        return exists || error || (taken && taken(path));  // An unreadable path is not known to be free.
     };
     for (int index = 1; unavailable(result); ++index) {
         if (index == 10'000)
@@ -110,6 +158,12 @@ public:
         });
         reserved.insert(result);
         return result;
+    }
+
+    /// Reserves exactly `path` (a destination the user chose); false if another running download already holds it.
+    [[nodiscard]] bool reserveExact(const std::filesystem::path& path) {
+        std::scoped_lock lock{mutex};
+        return reserved.insert(path).second;
     }
 
     void release(const std::filesystem::path& path) {

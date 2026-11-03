@@ -53,9 +53,9 @@ admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`)
 
 | Frontend | Chooser | Download | Test injection |
 | --- | --- | --- | --- |
-| WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder, the page's name reduced to its last component, never overwriting (`name (1).ext`), also between downloads that run at the same time (`DownloadReservations`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder (`~/Downloads` when none is configured, never the home folder itself; leading dots are removed from names), the page's name reduced to its last component, never overwriting (`name (1).ext`), also between downloads that run at the same time (`DownloadReservations`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | CEF (Chrome runtime) | the runtime's dialog | the runtime's download handling | `SimpleCEFClient::chooseFiles` (`CefDialogHandler::OnFileDialog`), `downloadDirectory`, `downloadFinished`. The runtime itself turns a suggested name `../x` into `_x` |
-| WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames of the application's own origin | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | WebView2 | the engine's native chooser | the engine's native download UI | DevTools intercepts the chooser in tests; `DownloadStarting` redirects the download to a private path |
 
 The engines require a user gesture to open a chooser, so the native scenarios click with a real pointer event (XTest under
@@ -75,7 +75,7 @@ WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the fronte
 If all 10,000 candidate names are occupied, automatic destination selection fails and cancels the download.
 WKWebView writes each download in a private staging directory beside the destination. On success it installs the file;
 if a destination that was free appears during the download, it preserves that file and discards the download. Failed and
-cancelled downloads remove their staging directory. Installing a new destination requires hard-link support on its filesystem.
+cancelled downloads remove their staging directory. A new destination is installed with a hard link, or by a copy that still refuses an existing file on filesystems without links (exFAT, network shares); a failed installation is reported on `stderr`. Staging directories left by a crash are removed after a week. Two downloads cannot target the same chosen file at once. The file chooser opens only for the application's own origin.
 
 ### Tests
 

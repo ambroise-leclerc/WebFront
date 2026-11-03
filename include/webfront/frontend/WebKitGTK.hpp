@@ -116,6 +116,7 @@ public:
     void (*bytesUnref)(Object)                                  = symbol<decltype(bytesUnref)>("g_bytes_unref");
     void (*errorFree)(Error*)                                   = symbol<decltype(errorFree)>("g_error_free");
     // GLib resolves the folder from user-dirs.dirs (a user may have moved it), not only from the environment.
+    const char* (*homeDirectory)() = symbol<decltype(homeDirectory)>("g_get_home_dir");
     const char* (*userDirectory)(int) = symbol<decltype(userDirectory)>("g_get_user_special_dir");  // G_USER_DIRECTORY_DOWNLOAD = 2
     void (*downloadDestination)(Object, const char*)            = symbol<decltype(downloadDestination)>("webkit_download_set_destination");
     void (*downloadCancel)(Object)                              = symbol<decltype(downloadCancel)>("webkit_download_cancel");
@@ -425,15 +426,17 @@ struct Session : FailureState {
     std::filesystem::path destinationFolder() const {
         if (!downloadDirectory.empty())
             return downloadDirectory;
-        if (const auto* folder = a.userDirectory(2); folder && *folder)
-            return folder;
-        if (const auto* home = std::getenv("HOME"); home && *home) {
+        const auto* home = std::getenv("HOME");
+        if (!home || !*home)
+            home = a.homeDirectory();  // GLib reads the passwd database when HOME is unset.
+        if (const auto* folder = a.userDirectory(2); folder && *folder) {
             std::error_code error;
-            const auto      folder = std::filesystem::path(home) / "Downloads";
-            if (std::filesystem::is_directory(folder, error))
+            // GLib reports the home folder itself when no download folder is configured: never write there.
+            if (!(home && *home && std::filesystem::equivalent(folder, home, error)))
                 return folder;
-            return home;
         }
+        if (home && *home)
+            return std::filesystem::path(home) / "Downloads";  // Created on demand.
         return std::filesystem::temp_directory_path();
     }
     std::filesystem::path reserveDestination(std::string_view suggested) {
