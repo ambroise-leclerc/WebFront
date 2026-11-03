@@ -665,8 +665,8 @@ struct Session {
                             const bool                  replace = std::filesystem::exists(target, code);
                             if (code)
                                 throw std::filesystem::filesystem_error("Cannot inspect download target", target, code);
-                            auto& reservations = (*token)->reservations;
-                            if (!reservations.reserveExact(target))
+                            auto& sessionReservations = (*token)->reservations;
+                            if (!sessionReservations.reserveExact(target))
                                 throw std::filesystem::filesystem_error("Another download is writing this target", target,
                                                                         std::make_error_code(std::errc::file_exists));
                             try {
@@ -676,7 +676,7 @@ struct Session {
                                 chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
                                 (*token)->downloadDestinations[key] = {std::move(staging), target, true, replace};
                             } catch (...) {
-                                reservations.release(target);
+                                sessionReservations.release(target);
                                 throw;
                             }
                         }
