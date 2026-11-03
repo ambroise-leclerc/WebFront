@@ -91,7 +91,7 @@ void nativeClose(bool quit) {
         if (quit)
             send<void>(app, "terminate:", static_cast<id>(nullptr));
         else
-            send<void>(session.window, "performClose:", static_cast<id>(nullptr));
+            send<void>(session.window, "close");
         require(session.closed, "Native close/Quit did not close the session");
         session.run();
     }
@@ -405,7 +405,7 @@ void closeWithPanel(const char* page, const char* click) {
                 sawPanel = true;
                 if (++*ticks > 3) {  // Let the sheet settle, then close the window under it.
                     send<void>(timer, "invalidate");
-                    quitApplication();
+                    send<void>(live->window, "close");
                 }
                 return;
             }

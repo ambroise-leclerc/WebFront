@@ -629,6 +629,7 @@ struct Session {
             send<void>(panel, "setNameFieldStringValue:", name.get());
             auto handler = Block_copy(completion);
             auto token   = alive;  // Not `this`: the window may close, and the session end, while the panel is open.
+            const id key = download;  // By value: the panel answers after this lambda and its references are gone.
             send<void>(panel, "retain");
             void (^finished)(long) = ^(long response) {
                 id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
@@ -646,7 +647,7 @@ struct Session {
                         Object path(text(temporary.string()));
                         chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
                     }
-                    (*token)->downloadDestinations[download] = {temporary.string(), target.string(), reserved};
+                    (*token)->downloadDestinations[key] = {temporary.string(), target.string(), reserved};
                 }
                 handler(chosen);
                 send<void>(panel, "release");
