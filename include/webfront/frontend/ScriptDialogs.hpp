@@ -10,7 +10,7 @@ struct ScriptDialog {
     enum class Kind { alert, confirm, prompt, beforeUnload };
 
     Kind        kind{Kind::alert};
-    std::string message{};      ///< The text of the page (empty for `beforeunload`, whose text the engine chooses).
+    std::string message{};      ///< The page's text; for `beforeunload`, whatever text the engine supplies (possibly empty, often a fixed phrase).
     std::string defaultText{};  ///< The initial value of a `prompt`.
 };
 
