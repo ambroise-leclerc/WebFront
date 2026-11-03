@@ -90,8 +90,13 @@ public:
             std::error_code            error;
             for (std::filesystem::directory_iterator it(parent, error), end; !error && it != end; it.increment(error)) {
                 const auto name = it->path().filename().string();
-                if (!name.starts_with(prefix) || !it->is_directory(error))
+                if (!name.starts_with(prefix))
                     continue;
+                const bool directory = it->is_directory(error);
+                if (error || !directory) {
+                    error.clear();  // An unreadable entry must not stop the sweep of the next ones.
+                    continue;
+                }
                 if (const auto written = std::filesystem::last_write_time(it->path(), error); !error && written < limit) {
                     std::error_code ignored;
                     std::filesystem::remove_all(it->path(), ignored);
