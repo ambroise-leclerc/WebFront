@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, propriétaires admissibles des répertoires et des ancêtres, transport du navigateur système déclaré (`loopbackAttested`) plutôt que prouvé par un secret de lancement, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
 | 1.1 | 2026-11-02 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison partielle de l'étape 1 pour #451 (sélecteur de fichiers et téléchargements sous WebKitGTK, CEF, WKWebView et WebView2) ; #452 reste à faire. La section « État de l'étape 1 » distingue les preuves de validation par moteur et par révision ; `docs/FRONTENDS.md` précise les limites de couverture. | Branche `451-file-chooser-downloads` (PR #484), implémentation initiale `91049ab`, stockage privé WKWebView `52d8c68` |
+| 1.2 | 2026-11-03 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #452 (`alert`, `confirm`, `prompt`, `beforeunload`) : l'étape 1 est complète. `docs/FRONTENDS.md` précise la couverture par moteur (WKWebView et WebView2 non exécutés localement ; `beforeunload` non exercé de bout en bout). | Branche `452-script-dialogs` |
 
 ## État et chronologie
 
@@ -368,7 +369,7 @@ révisions indiquées ; ils ne qualifient pas automatiquement les changements ul
 À la révision `52d8c68`, le nouveau stockage privé WKWebView n'avait pas été exécuté sur macOS : la compilation CI avait
 échoué avant les tests. Le correctif et les validations ultérieures sont consignés dans la PR #484. La qualification
 des dialogues natifs reste partielle ; les injections de test ne la remplacent pas. `docs/FRONTENDS.md` détaille les
-limites par moteur. #452 reste à faire et l'ADR reste proposée.
+limites par moteur. #452 (`alert`, `confirm`, `prompt`, `beforeunload`) est livré dans la version 1.2 ; l'ADR reste proposée.
 
 Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
 épique ; les dialogues natifs suivront l'étape 5. `PUT`/`POST` ne sont pas des préalables : les écritures passent par

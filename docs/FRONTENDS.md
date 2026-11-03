@@ -93,6 +93,31 @@ frames, which WKWebView judges by their inherited origin.
 events, and the bytes written by a completed Blob download. It intercepts the chooser with DevTools and suppresses the download UI,
 so it does not qualify the native dialogs themselves or closing the window while one is open.
 
+## Script dialogs
+
+`alert`, `confirm`, `prompt` and `beforeunload` work in every embedded frontend without a WebFront API (ADR-020, rule 6, #452).
+All four engines use the system's or the engine's own box attached to the window by default; each frontend also has a test
+injection that answers without a box, with the shared types of `frontend/ScriptDialogs.hpp` (`ScriptDialog`,
+`ScriptDialogAnswer`, `ScriptDialogHandler`). Closing the window with a box open never waits for an answer: the page's call
+returns as dismissed (`false` for `confirm`, `null` for `prompt`).
+
+| Frontend | Dialogs | Test injection |
+| --- | --- | --- |
+| WebKitGTK | `script-dialog` signal; the default handler shows WebKitGTK's dialog on the window | `Session::answerScriptDialog` (`scriptDialogOpened` reports the default dialog) |
+| CEF (Chrome runtime) | `CefJSDialogHandler` (`OnJSDialog`, `OnBeforeUnloadDialog`) answered only by the injection; otherwise the runtime's own dialogs | `SimpleCEFClient::answerScriptDialog` |
+| WKWebView | the three `WKUIDelegate` panel methods show an `NSAlert` sheet of the window (an accessory text field for `prompt`); only frames of the application's own origin, others are dismissed | `WKWebViewOptions::answerScriptDialog` |
+| WebView2 | the engine's own dialogs, until the injection turns them off and answers `ScriptDialogOpening` (kinds alert, confirm, prompt, beforeunload) | `Session::answerScriptDialog` (adapter-internal, set from a `prepare` hook) |
+
+WebKit gives a WKWebView no separate `beforeunload` callback: the page's confirmation reaches the confirm method, so an
+injected handler sees it as `confirm` there. The other three engines report `ScriptDialog::Kind::beforeUnload`.
+
+Tests: `WebKitGTKAdapter-script-dialogs` and `CEFFileServices-dialogs` check that each dialog reaches the injection with its
+message and default text, that a confirmed `confirm` returns `true`, an accepted `prompt` returns its text and a dismissed
+one returns `null`. `WebKitGTKAdapter-close-with-script-dialog` and `CEFFileServices-hold` close the window under an open
+alert; `WKWebViewLifecycle-script-dialogs|close-with-script-dialog` and `WebView2Lifecycle-script-dialogs` cover the same
+on their engines (the WebView2 case has no close-under-dialog scenario). No scenario triggers a real `beforeunload` (the
+engines show it only after a user gesture on the page); its wiring is implemented but not exercised end to end.
+
 ## Adding a frontend
 
 1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.

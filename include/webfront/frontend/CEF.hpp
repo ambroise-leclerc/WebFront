@@ -7,6 +7,7 @@
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
+#include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -499,7 +500,8 @@ class SimpleCEFClient : public CefClient,
                         public CefContextMenuHandler,
                         public CefCommandHandler,
                         public CefDownloadHandler,
-                        public CefDialogHandler {
+                        public CefDialogHandler,
+                        public CefJSDialogHandler {
 public:
     explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
         : contentPolicy(std::move(policy)), popupLauncher(launch) { }
@@ -535,6 +537,33 @@ public:
     CefRefPtr<CefDialogHandler> GetDialogHandler() override {
         return this;
     }
+    /// Test injection: answers alert, confirm, prompt and beforeunload without a dialog. Unset keeps the engine's own dialogs.
+    frontend::ScriptDialogHandler answerScriptDialog;
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override {
+        return this;
+    }
+    bool OnJSDialog(CefRefPtr<CefBrowser>,
+                    const CefString&,
+                    JSDialogType                   type,
+                    const CefString&               message,
+                    const CefString&               defaultText,
+                    CefRefPtr<CefJSDialogCallback> callback,
+                    bool&) override {
+        if (!answerScriptDialog)
+            return false;
+        frontend::ScriptDialog dialog;
+        dialog.kind        = type == JSDIALOGTYPE_CONFIRM  ? frontend::ScriptDialog::Kind::confirm
+                             : type == JSDIALOGTYPE_PROMPT ? frontend::ScriptDialog::Kind::prompt
+                                                           : frontend::ScriptDialog::Kind::alert;
+        dialog.message     = message.ToString();
+        dialog.defaultText = defaultText.ToString();
+        return answer(dialog, callback);
+    }
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser>, const CefString& message, bool, CefRefPtr<CefJSDialogCallback> callback) override {
+        if (!answerScriptDialog)
+            return false;
+        return answer({frontend::ScriptDialog::Kind::beforeUnload, message.ToString(), {}}, callback);
+    }
     bool OnFileDialog(CefRefPtr<CefBrowser>,
                       FileDialogMode,
                       const CefString&,
@@ -558,6 +587,19 @@ public:
             callback->Continue(files);
         return true;
     }
+private:
+    bool answer(const frontend::ScriptDialog& dialog, CefRefPtr<CefJSDialogCallback> callback) {
+        frontend::ScriptDialogAnswer reply;
+        try {
+            reply = answerScriptDialog(dialog);
+        } catch (...) {
+            reply = {};  // A failing injection dismisses the dialog; the page must not wait for it.
+        }
+        callback->Continue(reply.accepted, reply.text);
+        return true;
+    }
+
+public:
     bool OnBeforeDownload(CefRefPtr<CefBrowser>,
                           CefRefPtr<CefDownloadItem>           item,
                           const CefString&                     suggested,

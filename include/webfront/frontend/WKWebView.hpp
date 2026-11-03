@@ -4,6 +4,7 @@
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "Downloads.hpp"
+#include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -36,6 +37,9 @@ struct WKWebViewOptions {
     std::filesystem::path downloadDirectory{};
     /** @brief Test injection: called with the destination of each finished download. */
     std::function<void(const std::string&)> downloadFinished{};
+    /** @brief Test injection: answers `alert`, `confirm` and `prompt` without a box. Unset shows an NSAlert sheet on the window.
+     *  WebKit reports `beforeunload` through the confirm delegate, so a handler sees it as a `confirm`. */
+    ScriptDialogHandler answerScriptDialog{};
 };
 
 }  // namespace webfront::frontend
@@ -618,6 +622,76 @@ struct Session {
             completion(result);
     }
 
+    /// `alert`, `confirm` and `prompt` (WKUIDelegate): an NSAlert sheet of the window, or the test injection. `answer` runs exactly once,
+    /// with a dismissed answer when the page's origin is not the application's, when the window closes, or when the box cannot be shown.
+    void runScriptDialog(ScriptDialog dialog, id frame, std::function<void(ScriptDialogAnswer)> answer) noexcept {
+        ScriptDialogAnswer result;  // Dismissed.
+        bool               deferred = false;
+        guard([&] {
+            if (!contentPolicy.isApplicationOrigin(effectiveFrameUrl(frame)))
+                return;
+            if (options.answerScriptDialog) {
+                result = options.answerScriptDialog(dialog);
+                return;
+            }
+            const id alert    = send(send(type("NSAlert"), "alloc"), "init");  // Owned until the sheet answers.
+            id       field    = nullptr;
+            bool     retained = true;
+            try {
+                {
+                    Object message(text(dialog.message));
+                    send<void>(alert, "setMessageText:", message.get());
+                }
+                const bool confirming = dialog.kind != ScriptDialog::Kind::alert;
+                {
+                    Object accept(text("OK"));
+                    send<void>(alert, "addButtonWithTitle:", accept.get());  // NSAlertFirstButtonReturn (1000).
+                }
+                if (confirming) {
+                    Object cancel(text("Cancel"));
+                    send<void>(alert, "addButtonWithTitle:", cancel.get());
+                }
+                if (dialog.kind == ScriptDialog::Kind::prompt) {
+                    field = send(send(type("NSTextField"), "alloc"), "initWithFrame:", CGRect{{0, 0}, {300, 24}});
+                    Object value(text(dialog.defaultText));
+                    send<void>(field, "setStringValue:", value.get());
+                    send<void>(alert, "setAccessoryView:", field);
+                    send<void>(alert, "layout");
+                    send<void>(send(alert, "window"), "setInitialFirstResponder:", field);
+                }
+                auto shared = std::make_shared<std::function<void(ScriptDialogAnswer)>>(std::move(answer));
+                void (^finished)(long) = ^(long response) {
+                    ScriptDialogAnswer reply;
+                    reply.accepted = response == 1000;  // endSheet: at window close reports NSModalResponseCancel.
+                    if (reply.accepted && field)
+                        reply.text = utf8(send(field, "stringValue"));
+                    (*shared)(std::move(reply));
+                    if (field)
+                        send<void>(field, "release");
+                    send<void>(alert, "release");
+                };
+                retained = false;  // From here the block owns the alert and the field, if the sheet starts.
+                try {
+                    send<void>(alert, "beginSheetModalForWindow:completionHandler:", window, finished);
+                } catch (...) {
+                    retained = true;
+                    answer   = std::move(*shared);  // The block never ran: answer below.
+                    throw;
+                }
+            } catch (...) {
+                if (retained) {
+                    if (field)
+                        send<void>(field, "release");
+                    send<void>(alert, "release");
+                }
+                throw;
+            }
+            deferred = true;
+        });
+        if (!deferred)
+            answer(std::move(result));
+    }
+
     /// A WKDownload needs a destination that does not exist: the test folder, or the user's choice in a save panel.
     void chooseDownloadDestination(id download, const std::string& suggested, void (^completion)(id)) noexcept {
         id   result   = nullptr;  // NSURL*; nil cancels the download.
@@ -848,6 +922,53 @@ inline void addNavigationMethods(Class cls) {
                 completion(nullptr);
         },
         "v@:@@@@?");
+    // JavaScript dialogs (WKUIDelegate), issue #452. Without these WebKit answers nothing and the page's call does not return.
+    addMethod(
+        cls,
+        "webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:",
+        +[](id self, SEL, id, id message, id frame, void (^completion)()) {
+            auto handler = Block_copy(completion);
+            auto done    = [handler](ScriptDialogAnswer) {
+                handler();
+                Block_release(handler);
+            };
+            if (auto s = session(self))
+                s->runScriptDialog({ScriptDialog::Kind::alert, utf8(message), {}}, frame, done);
+            else
+                done({});
+        },
+        "v@:@@@@?");
+    addMethod(
+        cls,
+        "webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:",
+        +[](id self, SEL, id, id message, id frame, void (^completion)(BOOL)) {
+            auto handler = Block_copy(completion);
+            auto done    = [handler](ScriptDialogAnswer reply) {
+                handler(static_cast<BOOL>(reply.accepted));
+                Block_release(handler);
+            };
+            if (auto s = session(self))
+                s->runScriptDialog({ScriptDialog::Kind::confirm, utf8(message), {}}, frame, done);
+            else
+                done({});
+        },
+        "v@:@@@@?");
+    addMethod(
+        cls,
+        "webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:",
+        +[](id self, SEL, id, id message, id defaultText, id frame, void (^completion)(id)) {
+            auto handler = Block_copy(completion);
+            auto done    = [handler](ScriptDialogAnswer reply) {
+                Object value(reply.accepted ? text(reply.text) : nullptr);
+                handler(value.get());  // nil is the prompt's null.
+                Block_release(handler);
+            };
+            if (auto s = session(self))
+                s->runScriptDialog({ScriptDialog::Kind::prompt, utf8(message), defaultText ? utf8(defaultText) : std::string{}}, frame, done);
+            else
+                done({});
+        },
+        "v@:@@@@@?");
     const auto becameDownload = +[](id self, SEL, id, id, id download) {
         send<void>(download, "setDelegate:", self);
     };

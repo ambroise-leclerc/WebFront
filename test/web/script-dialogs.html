@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Script dialogs</title>
+<p id="result">waiting</p>
+<script>
+    // alert, confirm and prompt (issue #452). The test's injection answers: confirm -> true, prompt("name?") -> "typed",
+    // prompt("cancelled?") -> dismissed (null). The title then reports every answer; ?hold only opens an alert and waits.
+    setTimeout(() => {
+        if (location.search === "?hold") {
+            document.title = "holding";
+            alert("held open");
+            document.title = "released";
+            return;
+        }
+        alert("hello");
+        const confirmed = confirm("sure?");
+        const typed = prompt("name?", "default");
+        const cancelled = prompt("cancelled?", "x");
+        document.title = "answers:" + confirmed + "|" + typed + "|" + cancelled;
+        document.getElementById("result").textContent = document.title;
+    }, 100);
+</script>
