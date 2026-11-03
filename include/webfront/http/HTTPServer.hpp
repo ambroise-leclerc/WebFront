@@ -647,6 +647,7 @@ public:
         tasks.requestStop();
         decodeExecutor.stop();
         routeWorker.stop();
+        fileWorker.stop();
         ioContext.stop();
     }
 
@@ -656,7 +657,9 @@ public:
         decodeExecutor.stop();
         decodeExecutor.join();
         routeWorker.stop();
+        fileWorker.stop();
         routeWorker.join();
+        fileWorker.join();
         tasks.drain(ioContext);
     }
 
@@ -665,7 +668,9 @@ public:
         decodeExecutor.stop();
         decodeExecutor.join();
         routeWorker.stop();
+        fileWorker.stop();
         routeWorker.join();
+        fileWorker.join();
         tasks.drainUntilJoined(ioContext);
     }
 
@@ -717,7 +722,10 @@ private:
     RequestHandler<Net, FS, Policy>             requestHandler;
     gzip::DecodeExecutor<Decode>                decodeExecutor;
     RouteTable                                  routes;
-    BlockingWorker                              routeWorker;
+    // Route handlers may block for as long as they like: they get their own threads, so that the files of the
+    // providers (WebFront.js, pages) keep flowing for the other browsers.
+    BlockingWorker                              routeWorker{4};
+    BlockingWorker                              fileWorker{2};
     std::function<void(typename Net::Socket&&)> upgradeHandler;
 
     std::string bind(std::string_view address, std::string_view requestedPort) {
@@ -771,14 +779,14 @@ private:
     // Sends a body read on the worker in chunks of at most emissionBufferSize bytes, each read after the
     // previous one was sent (back-pressure). A failure cannot change the status line already sent: it is
     // logged, and the caller closes the connection, which the client sees as a truncated body.
-    networking::Task streamBody(typename Net::Socket& socket, std::function<std::size_t(std::span<char>)> body,
+    networking::Task streamBody(BlockingWorker& worker, typename Net::Socket& socket, std::function<std::size_t(std::span<char>)> body,
                                 std::optional<std::uint64_t> length, std::string label) {
         try {
             std::vector<char> chunk(Policy::emissionBufferSize);
             std::uint64_t     sent = 0;
             for (;;) {
                 std::size_t count = 0;
-                co_await networking::ex::continues_on(routeWorker.run([&] { count = body(chunk); }), Net::Scheduler(socket));
+                co_await networking::ex::continues_on(worker.run([&] { count = body(chunk); }), Net::Scheduler(socket));
                 if (count == 0) break;
                 if (count > chunk.size() || (length && count > *length - sent)) throw std::length_error("The body is longer than announced");
                 sent += count;
@@ -820,8 +828,9 @@ private:
             reply.body = nullptr;
         }
         const bool streaming = !head && reply.body && response.statusCode != Response::methodNotAllowed;
+        if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
-        if (streaming) co_await streamBody(socket, std::move(reply.body), reply.contentLength, match.route->prefix);
+        if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix);
         socket.shutdown(Net::Socket::shutdown_both);
     }
 
@@ -829,6 +838,7 @@ private:
         Request request;
         std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
         std::unique_ptr<fs::File> streamed;
+        bool head = false;
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
@@ -842,6 +852,7 @@ private:
                 co_await serveRoute(socket, std::move(request), std::move(*match));
                 co_return;
             }
+            head = request.method == Request::Method::Head;
             auto prepared = requestHandler.prepareRequest(std::move(request));
             if (prepared.needsDecode) {
                 lease.emplace(co_await networking::ex::continues_on(
@@ -871,9 +882,10 @@ private:
             log::warn("HTTP asset request failed: {}", error.what());
             response = Response::getStatusResponse(Response::internalServerError);
         }
+        if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streamed)
-            co_await streamBody(socket, [&file = *streamed](std::span<char> out) { return file.read(out); }, streamed->knownSize(), "File response");
+            co_await streamBody(fileWorker, socket, [&file = *streamed](std::span<char> out) { return file.read(out); }, streamed->knownSize(), "File response");
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
             socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)

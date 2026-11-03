@@ -81,12 +81,14 @@ private:
         return count;
     }
 
+    // The bytes left from the stream's current position, which the caller may have moved past a prefix.
     void measureStream() {
         if (!fstream.is_open()) return;
+        const auto start = fstream.tellg();
         fstream.seekg(0, std::ios::end);
         const auto end = fstream.tellg();
-        fstream.seekg(0, std::ios::beg);
-        if (end >= 0 && fstream) streamSize = static_cast<std::uint64_t>(end);
+        fstream.seekg(start);
+        if (start >= 0 && end >= start && fstream) streamSize = static_cast<std::uint64_t>(end - start);
         else fstream.clear();
     }
 

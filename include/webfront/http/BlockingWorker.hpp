@@ -9,10 +9,12 @@
 #include <mutex>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace webfront::http {
 
-/// Runs the work senders it hands out, one at a time and in order, on a lazily started thread.
+/// Runs the work senders it hands out on lazily started threads, up to a fixed number: a job waits for a free
+/// thread, so slow work delays only the jobs queued behind as many slow ones as there are threads.
 ///
 /// A sender completes on that thread: the awaiting task continues on the I/O context with `continues_on`.
 /// Work still queued when the worker stops completes as stopped, so no task outlives the shutdown; the work
@@ -27,7 +29,7 @@ class BlockingWorker {
     };
 
 public:
-    BlockingWorker() = default;
+    explicit BlockingWorker(std::size_t maxThreads = 1) : limit(maxThreads == 0 ? 1 : maxThreads) {}
     BlockingWorker(const BlockingWorker&)            = delete;
     BlockingWorker& operator=(const BlockingWorker&) = delete;
     ~BlockingWorker() {
@@ -46,7 +48,13 @@ public:
 
     /// Waits for the running work; call after `stop()` and outside the worker's own thread.
     void join() noexcept {
-        if (thread.joinable()) thread.join();
+        std::vector<std::thread> ending;
+        {
+            std::lock_guard lock(mutex);
+            ending.swap(threads);
+        }
+        for (auto& thread : ending)
+            if (thread.joinable()) thread.join();
     }
 
     struct Sender {
@@ -107,14 +115,25 @@ private:
     std::condition_variable changed;
     std::deque<Job*>        queue;
     bool                    stopping = false;
-    std::thread             thread;
+    std::vector<std::thread> threads;
+    std::size_t             limit;
+    std::size_t             idle = 0;
 
     bool enqueue(Job* job) {
         {
             std::lock_guard lock(mutex);
             if (stopping) return false;
-            if (!thread.joinable()) thread = std::thread([this] { loop(); });
             queue.push_back(job);
+            if (queue.size() > idle && threads.size() < limit) {
+                try {
+                    threads.emplace_back([this] { loop(); });
+                } catch (...) {
+                    if (threads.empty()) {
+                        queue.pop_back();
+                        throw;
+                    }  // else a running thread will take the job
+                }
+            }
         }
         changed.notify_one();
         return true;
@@ -126,7 +145,9 @@ private:
             std::deque<Job*> cancelled;
             {
                 std::unique_lock lock(mutex);
+                ++idle;
                 changed.wait(lock, [this] { return stopping || !queue.empty(); });
+                --idle;
                 if (stopping) {
                     cancelled.swap(queue);
                 } else {

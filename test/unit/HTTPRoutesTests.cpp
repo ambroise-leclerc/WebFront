@@ -3,6 +3,7 @@
 #include "Mocks.hpp"
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <webfront/http/BlockingWorker.hpp>
 #include <webfront/http/HTTPServer.hpp>
 
 #include <atomic>
@@ -11,6 +12,7 @@
 #include <list>
 #include <string>
 #include <string_view>
+#include <future>
 #include <thread>
 #ifndef _WIN32
     #include <sys/resource.h>
@@ -499,4 +501,91 @@ SCENARIO("A native file known by its size reports it") {
         REQUIRE(file.read(buffer) == 100);
         REQUIRE(file.knownSize() == 1234);
     }
+}
+
+SCENARIO("Failed HEAD requests carry no body") {
+    Fixture fixture;
+    Router  server("127.0.0.1", "0");
+    GIVEN("a handler which throws") {
+        auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) -> RouteReply { throw std::runtime_error("no"); });
+        const auto response = fixture.answer(get("/webfront/services/files/x", "HEAD"));
+        THEN("the 500 has its headers only") {
+            REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+            REQUIRE(response.ends_with("\r\n\r\n"));
+        }
+    }
+    GIVEN("a handler with an invalid header") {
+        auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
+            auto reply = text("x");
+            reply.headers.emplace_back("Bad Name", "v");
+            return reply;
+        });
+        const auto response = fixture.answer(get("/webfront/services/files/x", "HEAD"));
+        THEN("the 500 has its headers only") { REQUIRE(response.ends_with("\r\n\r\n")); }
+    }
+    GIVEN("a file which does not exist") {
+        const auto response = fixture.answer(get("/nothing.txt", "HEAD"));
+        THEN("the 404 has its headers only") {
+            REQUIRE(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+            REQUIRE(response.ends_with("\r\n\r\n"));
+        }
+    }
+}
+
+SCENARIO("A file wrapped after a prefix yields the remaining bytes and their count") {
+    webfront::test::TemporaryDirectory directory;
+    const auto                         path = directory.path() / "prefixed.bin";
+    std::ofstream(path, std::ios::binary) << "prefix:payload";
+    std::ifstream stream(path, std::ios::binary);
+    stream.seekg(7);
+    fs::File file{std::move(stream)};
+    THEN("only the payload is counted and read") {
+        REQUIRE(file.knownSize() == 7);
+        std::array<char, 32> buffer{};
+        const auto           count = file.read(buffer);
+        REQUIRE(std::string(buffer.data(), count) == "payload");
+    }
+}
+
+namespace {
+struct Completes {
+    using receiver_concept = networking::ex::receiver_tag;
+    std::promise<void>* done;
+    void                set_value() noexcept { done->set_value(); }
+    void                set_error(std::exception_ptr) noexcept { done->set_value(); }
+    void                set_stopped() noexcept { done->set_value(); }
+};
+}  // namespace
+
+SCENARIO("A blocked job does not delay the others of a worker with several threads") {
+    BlockingWorker     worker{2};
+    std::promise<void> release, blockedDone, quickDone;
+    auto               shared = release.get_future().share();
+    std::atomic<bool>  blocked{false};
+    auto               blockedEnded = blockedDone.get_future();
+    auto               quickEnded   = quickDone.get_future();
+    auto               slow = networking::ex::connect(worker.run([&] { blocked = true; shared.wait(); }), Completes{&blockedDone});
+    auto               fast = networking::ex::connect(worker.run([] {}), Completes{&quickDone});
+    networking::ex::start(slow);
+    REQUIRE(waitFor([&] { return blocked.load(); }));
+    networking::ex::start(fast);
+    THEN("the quick job completes while the slow one still runs") {
+        REQUIRE(quickEnded.wait_for(5s) == std::future_status::ready);
+        REQUIRE(blockedEnded.wait_for(10ms) == std::future_status::timeout);
+    }
+    release.set_value();
+    blockedEnded.wait();
+}
+
+SCENARIO("A single-thread worker keeps the jobs in order") {
+    BlockingWorker     worker;
+    std::promise<void> firstDone, secondDone;
+    std::string        order;
+    auto               first  = networking::ex::connect(worker.run([&] { order += 'a'; }), Completes{&firstDone});
+    auto               second = networking::ex::connect(worker.run([&] { order += 'b'; }), Completes{&secondDone});
+    networking::ex::start(first);
+    networking::ex::start(second);
+    firstDone.get_future().wait();
+    secondDone.get_future().wait();
+    REQUIRE(order == "ab");
 }

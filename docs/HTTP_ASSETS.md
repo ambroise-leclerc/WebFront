@@ -42,7 +42,7 @@ body.
 `app.addRoute(prefix, handler)` answers `GET` and `HEAD` under an absolute prefix ending with `/` with an
 `http::RouteReply` produced at run time: status, headers, an exact `contentLength` (unset: the body ends when the
 connection closes) and a `body` callback filling the next chunk (0 ends it). The handler and the callback run on the worker
-thread, so a slow disk does not delay other connections. A route precedes the file providers, never masks the embedded
+thread, so a slow disk does not delay other connections. Route work runs on its own pool of 4 threads and the files of the providers on another of 2: a handler that blocks for seconds delays at most the routes queued behind four such handlers, never `WebFront.js` or a page. A route precedes the file providers, never masks the embedded
 `WebFront.js`, and overlapping prefixes are refused when registered. Other methods get 405; a handler that throws, or sets a
 header that could split the response or that the server owns (`Content-Length`, `Connection`, `Transfer-Encoding`), gets
 500. The registration handle removes the route when destroyed; a request already running keeps its handler. `Range`
