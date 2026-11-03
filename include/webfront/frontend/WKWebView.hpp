@@ -359,15 +359,13 @@ struct Session {
             send<void>(window, "endSheet:", send(sheets, "objectAtIndex:", index - 1));
     }
 
-    /// Cancels the downloads still running and removes the `.part` files that a "Replace" choice made them write.
+    /// Cancels the downloads still running and removes the incomplete files they were writing.
     void abandonDownloads() noexcept {
         auto pending = std::exchange(downloadDestinations, {});  // Their failure callbacks must find nothing to settle.
         for (const auto& [download, paths] : pending) {
             send<void>(download, "cancel:", static_cast<id>(nullptr));
-            if (paths.temporary != paths.target) {
-                std::error_code ignored;
-                std::filesystem::remove(paths.temporary, ignored);
-            }
+            std::error_code ignored;  // The engine created this file (it refuses an existing destination): it is only a fragment.
+            std::filesystem::remove(paths.temporary, ignored);
             if (paths.reserved)
                 reservations.release(paths.temporary);
         }
