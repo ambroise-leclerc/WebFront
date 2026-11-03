@@ -1,6 +1,7 @@
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
 #include <filesystem>
@@ -359,6 +360,53 @@ void closeWithDialog() {
         throw std::runtime_error("The file dialog was not opened");
 }
 
+/// alert, confirm and prompt reach the injection point and their answers reach the page (issue #452).
+void scriptDialogs() {
+    std::vector<std::string> seen;
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        session.answerScriptDialog = [&](const webfront::frontend::ScriptDialog& dialog) {
+            using Kind = webfront::frontend::ScriptDialog::Kind;
+            seen.push_back(std::to_string(static_cast<int>(dialog.kind)) + ":" + dialog.message + ":" + dialog.defaultText);
+            if (dialog.kind == Kind::prompt)
+                return dialog.message == "name?" ? webfront::frontend::ScriptDialogAnswer{true, "typed"} : webfront::frontend::ScriptDialogAnswer{};
+            return webfront::frontend::ScriptDialogAnswer{true, {}};
+        };
+    };
+    std::string title;
+    ScenarioFrontend::finished = [&](gtk::Session& session) {
+        const char* current = session.a.viewTitle(session.view);
+        title               = current ? current : "";
+        return title.starts_with("answers:");
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    app.show("script-dialogs.html");
+    if (title != "answers:true|typed|null")
+        throw std::runtime_error("Unexpected answers from the script dialogs: " + title);
+    const std::vector<std::string> expected{"0:hello:", "1:sure?:", "2:name?:default", "2:cancelled?:x"};
+    if (seen != expected)
+        throw std::runtime_error("The injection did not see the expected dialogs");
+}
+
+/// Closing the window while WebKitGTK's own script dialog is open must end cleanly, without waiting for an answer.
+void closeWithScriptDialog() {
+    using Clock = std::chrono::steady_clock;
+    bool              opened = false;
+    Clock::time_point openedAt;
+    ScenarioFrontend::configure = [&](gtk::Session& session) {
+        session.scriptDialogOpened = [&] {
+            opened   = true;
+            openedAt = Clock::now();
+        };
+    };
+    ScenarioFrontend::finished = [&](gtk::Session&) {
+        return opened && Clock::now() - openedAt > std::chrono::milliseconds(500);  // Let the dialog map, then close under it.
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    app.show("script-dialogs.html?hold");
+    if (!opened)
+        throw std::runtime_error("The script dialog was not opened");
+}
+
 void windowTitle() {
     gtk::initialize();
     const auto titleOf = [](webfront::WindowOptions window) {
@@ -414,7 +462,9 @@ void run(std::string_view mode) {
         {"download-user-dir", downloadUserDirectory},
         { "close-with-dialog",      closeWithDialog},
         {       "choose-file",          chooseOne},
-        {     "cancel-choose",       chooseCancel}
+        {     "cancel-choose",       chooseCancel},
+        {    "script-dialogs",       scriptDialogs},
+        {"close-with-script-dialog", closeWithScriptDialog}
     };
     const auto selected = cases.find(mode);
     if (selected == cases.end())

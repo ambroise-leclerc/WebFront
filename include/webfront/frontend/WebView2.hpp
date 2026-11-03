@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -268,6 +269,9 @@ public:
     // Internal adapter observer: the browser exists and nothing is loaded yet (the transport benchmark of ADR-017 registers
     // its message channel here).
     std::function<void()>                            viewReady;
+    // Internal adapter injection (issue #452): answers alert, confirm, prompt and beforeunload without a dialog. Unset keeps
+    // WebView2's own dialogs, which the runtime attaches to the window.
+    ScriptDialogHandler                              answerScriptDialog;
     bool                                             closed       = false;
     UINT_PTR                                         startupTimer = 0;
     std::shared_ptr<CaptureQueue>                    captureQueue = std::make_shared<CaptureQueue>();
@@ -736,6 +740,53 @@ private:
                   }).Get(),
                   &token),
               "registering popup policy");
+        if (answerScriptDialog) {
+            check(settings->put_AreDefaultScriptDialogsEnabled(FALSE), "disabling the default script dialogs");
+            check(view->add_ScriptDialogOpening(
+                      Microsoft::WRL::Callback<ICoreWebView2ScriptDialogOpeningEventHandler>([weak](ICoreWebView2*,
+                                                                                                   ICoreWebView2ScriptDialogOpeningEventArgs* args) -> HRESULT {
+                          if (const auto self = weak.lock())
+                              self->scriptDialogOpening(args);
+                          return S_OK;
+                      }).Get(),
+                      &token),
+                  "registering script dialog handler");
+        }
+    }
+
+    void scriptDialogOpening(ICoreWebView2ScriptDialogOpeningEventArgs* args) noexcept {
+        // Not accepting is the dismissed answer, so any failure below leaves the page's call returning. The injection answers
+        // synchronously (it must return promptly), so no deferral is taken: the event completes when this handler returns.
+        try {
+            COREWEBVIEW2_SCRIPT_DIALOG_KIND kind{};
+            check(args->get_Kind(&kind), "reading the script dialog kind");
+            ScriptDialog dialog;
+            switch (kind) {
+                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM: dialog.kind = ScriptDialog::Kind::confirm; break;
+                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT: dialog.kind = ScriptDialog::Kind::prompt; break;
+                case COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD: dialog.kind = ScriptDialog::Kind::beforeUnload; break;
+                default: dialog.kind = ScriptDialog::Kind::alert; break;
+            }
+            LPWSTR message = nullptr;
+            if (SUCCEEDED(args->get_Message(&message)) && message) {
+                const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned(message, CoTaskMemFree);
+                dialog.message = utf8(owned.get());
+            }
+            if (dialog.kind == ScriptDialog::Kind::prompt) {
+                LPWSTR initial = nullptr;
+                if (SUCCEEDED(args->get_DefaultText(&initial)) && initial) {
+                    const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owned(initial, CoTaskMemFree);
+                    dialog.defaultText = utf8(owned.get());
+                }
+            }
+            const auto reply = answerScriptDialog(dialog);
+            if (!reply.accepted)
+                return;
+            if (dialog.kind == ScriptDialog::Kind::prompt)
+                check(args->put_ResultText(utf16(reply.text).c_str()), "setting the prompt result");
+            check(args->Accept(), "accepting the script dialog");
+        } catch (...) {
+        }
     }
 
     void configure() {

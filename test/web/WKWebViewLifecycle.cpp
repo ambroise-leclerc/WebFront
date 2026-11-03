@@ -432,6 +432,83 @@ void closeWithSavePanel() {
     closeWithPanel("file-services.html?download", "");
 }
 
+/// alert, confirm and prompt reach the injection point and their answers reach the page (issue #452).
+void scriptDialogs() {
+    Object                   pool(send(type("NSAutoreleasePool"), "new"));
+    std::vector<std::string> seen;
+    static std::string       finalTitle;
+    finalTitle.clear();
+    ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
+        options.answerScriptDialog = [&](const webfront::frontend::ScriptDialog& dialog) {
+            using Kind = webfront::frontend::ScriptDialog::Kind;
+            seen.push_back(std::to_string(static_cast<int>(dialog.kind)) + ":" + dialog.message + ":" + dialog.defaultText);
+            if (dialog.kind == Kind::prompt)
+                return dialog.message == "name?" ? webfront::frontend::ScriptDialogAnswer{true, "typed"} : webfront::frontend::ScriptDialogAnswer{};
+            return webfront::frontend::ScriptDialogAnswer{true, {}};
+        };
+    };
+    ScenarioFrontend::started = [](Session& session) {
+        Session* live = &session;
+        auto     tick = ^(id timer) {
+            const auto title = utf8(send(live->view, "title"));
+            if (title.starts_with("answers:")) {
+                finalTitle = title;
+                send<void>(timer, "invalidate");
+                quitApplication();
+            }
+        };
+        send(type("NSTimer"), "scheduledTimerWithTimeInterval:repeats:block:", 0.1, static_cast<BOOL>(true), tick);
+    };
+    {
+        ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+        app.show("script-dialogs.html");
+    }
+    resetScenario();
+    require(finalTitle == "answers:true|typed|null", ("Unexpected answers from the script dialogs: " + finalTitle).c_str());
+    const std::vector<std::string> expected{"0:hello:", "1:sure?:", "2:name?:default", "2:cancelled?:x"};
+    require(seen == expected, "The injection did not see the expected dialogs");
+}
+
+/// A sandboxed iframe without allow-same-origin loads the application's own URL but has an opaque origin: its dialogs are
+/// dismissed, never shown as the application's (issue #452). The parent's own confirm still reaches the injection.
+void sandboxedScriptDialog() {
+    Object                   pool(send(type("NSAutoreleasePool"), "new"));
+    std::vector<std::string> seen;
+    static std::string       finalTitle;
+    finalTitle.clear();
+    ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
+        options.answerScriptDialog = [&](const webfront::frontend::ScriptDialog& dialog) {
+            seen.push_back(std::to_string(static_cast<int>(dialog.kind)) + ":" + dialog.message + ":" + dialog.defaultText);
+            return webfront::frontend::ScriptDialogAnswer{true, {}};
+        };
+    };
+    ScenarioFrontend::started = [](Session& session) {
+        Session* live = &session;
+        auto     tick = ^(id timer) {
+            const auto title = utf8(send(live->view, "title"));
+            if (title.starts_with("sandboxed:")) {
+                finalTitle = title;
+                send<void>(timer, "invalidate");
+                quitApplication();
+            }
+        };
+        send(type("NSTimer"), "scheduledTimerWithTimeInterval:repeats:block:", 0.1, static_cast<BOOL>(true), tick);
+    };
+    {
+        ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+        app.show("script-dialogs.html?sandbox");
+    }
+    resetScenario();
+    require(finalTitle == "sandboxed:false|true", ("The sandboxed frame's confirm was not dismissed: " + finalTitle).c_str());
+    const std::vector<std::string> expected{"1:parent?:"};
+    require(seen == expected, "The injection saw a dialog from the opaque-origin frame");
+}
+
+/// Closing the window while the NSAlert sheet is open: the sheet answers "dismissed" and the page is not left waiting.
+void closeWithScriptDialog() {
+    closeWithPanel("script-dialogs.html?hold", "");
+}
+
 /// The save panel's "Replace" choice: the page's bytes land beside the old file and replace it only on success.
 void replacedDownload() {
     Object     pool(send(type("NSAutoreleasePool"), "new"));
@@ -530,7 +607,10 @@ int main(int argc, char** argv) {
             {     "choose-in-blank",     chooseInBlankFrame},
             {    "choose-in-srcdoc",    chooseInSrcdocFrame},
             {   "close-with-open-panel",   closeWithOpenPanel},
-            {   "close-with-save-panel",   closeWithSavePanel}
+            {   "close-with-save-panel",   closeWithSavePanel},
+            {       "script-dialogs",       scriptDialogs},
+            { "close-with-script-dialog", closeWithScriptDialog},
+            { "sandboxed-script-dialog", sandboxedScriptDialog}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

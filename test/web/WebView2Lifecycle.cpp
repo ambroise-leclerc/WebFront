@@ -352,6 +352,58 @@ int fileServices(std::string_view mode) {
     return 0;
 }
 
+// alert, confirm and prompt reach the injection point and their answers reach the page (issue #452).
+int scriptDialogs() {
+    using namespace webfront::frontend::detail::webview2;
+    webfront::http::Server<webfront::NetProvider, webfront::fs::NativeDebugFS> server("127.0.0.1", "9002", std::filesystem::current_path());
+    std::jthread                                                               worker([&](std::stop_token stop) {
+        std::stop_callback cleanupServer(stop, [&] {
+            server.stop();
+        });
+        server.run();
+    });
+    Apartment                                                                  apartment;
+    auto                                                                       session = std::make_shared<Session>();
+    session->url           = L"http://127.0.0.1:9002/script-dialogs.html";
+    session->contentPolicy = webfront::detail::BoundContentPolicy{"http://127.0.0.1:9002", {}};
+    std::vector<std::string> seen;
+    session->answerScriptDialog = [&](const webfront::frontend::ScriptDialog& dialog) {
+        using Kind = webfront::frontend::ScriptDialog::Kind;
+        seen.push_back(std::to_string(static_cast<int>(dialog.kind)) + ":" + dialog.message + ":" + dialog.defaultText);
+        if (dialog.kind == Kind::prompt)
+            return dialog.message == "name?" ? webfront::frontend::ScriptDialogAnswer{true, "typed"} : webfront::frontend::ScriptDialogAnswer{};
+        return webfront::frontend::ScriptDialogAnswer{true, {}};
+    };
+    session->createWindow(webfront::testdriver::diagnosticWindows());
+    Actions actions;
+    actions.onFailure = [&] {
+        session->fail();
+    };
+    std::wstring title;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    actions.dispatch    = [&](UINT) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw std::runtime_error("Script dialog scenario timed out");
+        if (!session->view)
+            return;
+        LPWSTR raw = nullptr;
+        check(session->view->get_DocumentTitle(&raw), "reading page result");
+        const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> current(raw, CoTaskMemFree);
+        title = current.get();
+        if (title.starts_with(L"answers:"))
+            PostMessageW(session->window, WM_CLOSE, 0, 0);
+    };
+    require(SetTimer(actions.window, 1, 20, nullptr) != 0, "Cannot start script dialog watchdog");
+    session->start(userDataFolder());
+    session->run();
+    if (actions.failure)
+        std::rethrow_exception(actions.failure);
+    require(title == L"answers:true|typed|null", "Unexpected answers from the script dialogs");
+    const std::vector<std::string> expected{"0:hello:", "1:sure?:", "2:name?:default", "2:cancelled?:x"};
+    require(seen == expected, "The injection did not see the expected dialogs");
+    return 0;
+}
+
 int rejectMta() {
     if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)))
         return 1;
@@ -514,6 +566,7 @@ int run(std::string_view mode) {
          [] {
          return fileServices("cancel");
          }                                                    },
+        {         "script-dialogs", scriptDialogs},
         {          "file-download",
          [] {
          return fileServices("download");

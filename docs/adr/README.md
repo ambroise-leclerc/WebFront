@@ -60,7 +60,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.5 — 2026-10-30 |
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted | 2026-10-28 | 1.2 — 2026-10-29 |
-| [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.0 — 2026-10-31 |
+| [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.2 — 2026-11-03 |
 | [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
 
 Numbering follows the reading topics; milestones and individual file histories provide

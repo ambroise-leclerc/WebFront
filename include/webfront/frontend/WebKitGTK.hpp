@@ -6,6 +6,7 @@
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
+#include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 #include "WebKitGTKPolicy.hpp"
@@ -123,6 +124,12 @@ public:
     const char* (*downloadGetDestination)(Object)               = symbol<decltype(downloadGetDestination)>("webkit_download_get_destination");
     void (*chooserSelect)(Object, const char* const*)           = symbol<decltype(chooserSelect)>("webkit_file_chooser_request_select_files");
     void (*chooserCancel)(Object)                               = symbol<decltype(chooserCancel)>("webkit_file_chooser_request_cancel");
+    // WEBKIT_SCRIPT_DIALOG_ALERT = 0, CONFIRM = 1, PROMPT = 2, BEFORE_UNLOAD_CONFIRM = 3.
+    int (*dialogType)(Object)                                   = symbol<decltype(dialogType)>("webkit_script_dialog_get_dialog_type");
+    const char* (*dialogMessage)(Object)                        = symbol<decltype(dialogMessage)>("webkit_script_dialog_get_message");
+    void (*dialogConfirm)(Object, int)                          = symbol<decltype(dialogConfirm)>("webkit_script_dialog_confirm_set_confirmed");
+    const char* (*dialogDefault)(Object)                        = symbol<decltype(dialogDefault)>("webkit_script_dialog_prompt_get_default_text");
+    void (*dialogPromptText)(Object, const char*)               = symbol<decltype(dialogPromptText)>("webkit_script_dialog_prompt_set_text");
 };
 
 inline Api& api() {
@@ -292,6 +299,10 @@ struct Session : FailureState {
     std::function<void()> chooserOpened;
     /// Test injection: called with the destination of each finished download.
     std::function<void(const std::string&)> downloadFinished;
+    /// Test injection: answers alert, confirm, prompt and beforeunload without a dialog. Unset shows WebKitGTK's own dialog.
+    ScriptDialogHandler answerScriptDialog;
+    /// Test hook: called when WebKitGTK's own script dialog is about to open.
+    std::function<void()> scriptDialogOpened;
     struct Download {
         Api::Object                object;
         std::vector<unsigned long> handlers;
@@ -421,6 +432,7 @@ struct Session : FailureState {
         on("web-process-terminated", onProcessTerminated);
         on("decide-policy", onDecidePolicy);
         on("run-file-chooser", onRunFileChooser);
+        on("script-dialog", onScriptDialog);
     }
 
     std::filesystem::path destinationFolder() const {
@@ -613,6 +625,38 @@ struct Session : FailureState {
                 api().chooserSelect(request, pointers.data());
         } catch (...) {
             api().chooserCancel(request);
+        }
+        return 1;
+    }
+    static int onScriptDialog(Api::Object, Api::Object dialog, Session* self) noexcept {
+        if (!self->answerScriptDialog) {
+            if (self->scriptDialogOpened)
+                self->scriptDialogOpened();
+            return 0;  // WebKitGTK's dialog, attached to the window; closing the window dismisses it.
+        }
+        auto&        a = api();
+        ScriptDialog description;
+        switch (a.dialogType(dialog)) {
+            case 1: description.kind = ScriptDialog::Kind::confirm; break;
+            case 2: description.kind = ScriptDialog::Kind::prompt; break;
+            case 3: description.kind = ScriptDialog::Kind::beforeUnload; break;
+            default: description.kind = ScriptDialog::Kind::alert; break;
+        }
+        if (const auto* message = a.dialogMessage(dialog))
+            description.message = message;
+        if (description.kind == ScriptDialog::Kind::prompt)
+            if (const auto* initial = a.dialogDefault(dialog))
+                description.defaultText = initial;
+        ScriptDialogAnswer reply;
+        try {
+            reply = self->answerScriptDialog(description);
+        } catch (...) {
+            reply = {};  // A failing injection dismisses the dialog; the page must not wait for it.
+        }
+        if (description.kind == ScriptDialog::Kind::prompt)
+            a.dialogPromptText(dialog, reply.accepted ? reply.text.c_str() : nullptr);  // A null text is the prompt's null.
+        else if (description.kind != ScriptDialog::Kind::alert) {
+            a.dialogConfirm(dialog, reply.accepted ? 1 : 0);
         }
         return 1;
     }

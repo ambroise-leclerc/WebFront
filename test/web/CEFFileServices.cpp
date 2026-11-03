@@ -18,12 +18,13 @@ void require(bool value, const char* message) {
 }
 
 struct Scenario {
-    std::string           mode;  // download | choose | cancel
+    std::string           mode;  // download | choose | cancel | dialogs | hold (script dialogs, issue #452)
     std::filesystem::path folder;
     std::filesystem::path fixture;
     std::string           title;
     std::string           downloaded;
     bool                  asked = false;
+    std::vector<std::string> dialogs;  // What the injection point saw, in order.
 };
 Scenario scenario;
 
@@ -34,6 +35,14 @@ public:
             scenario.asked = true;
             return scenario.mode == "choose" ? std::vector<std::string>{scenario.fixture.string()} : std::vector<std::string>{};
         };
+        if (scenario.mode == "dialogs")
+            answerScriptDialog = [](const webfront::frontend::ScriptDialog& dialog) {
+                using Kind = webfront::frontend::ScriptDialog::Kind;
+                scenario.dialogs.push_back(std::to_string(static_cast<int>(dialog.kind)) + ":" + dialog.message + ":" + dialog.defaultText);
+                if (dialog.kind == Kind::prompt)
+                    return dialog.message == "name?" ? webfront::frontend::ScriptDialogAnswer{true, "typed"} : webfront::frontend::ScriptDialogAnswer{};
+                return webfront::frontend::ScriptDialogAnswer{true, {}};
+            };
         downloadDirectory = scenario.folder;
         downloadFinished  = [this](const std::string& path) {
             scenario.downloaded = path;
@@ -43,7 +52,11 @@ public:
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
         scenario.title = title.ToString();
         window         = browser;
-        if (scenario.title == "ready" && scenario.mode != "download")
+        if (scenario.title.starts_with("answers:"))
+            finish();
+        else if (scenario.title == "holding")
+            CefPostDelayedTask(TID_UI, new Deadline(this), 1500);  // The engine's own alert is open by then: close under it.
+        else if (scenario.title == "ready" && (scenario.mode == "choose" || scenario.mode == "cancel"))
             CefPostDelayedTask(TID_UI, new Click(this, 40), 500);
         else if (scenario.title.starts_with("picked:") || scenario.title == "cancelled")
             finish();
@@ -119,7 +132,7 @@ struct Frontend {
 int main(int argc, char** argv) {
     try {
         webfront::detail::ensureFrontendInitialized<Frontend>();  // CEF subprocesses run this program too and end here.
-        require(argc == 2, "usage: cef_file_services download|choose|cancel");
+        require(argc == 2, "usage: cef_file_services download|choose|cancel|dialogs|hold");
         scenario.mode   = argv[1];
         scenario.folder = std::filesystem::temp_directory_path() / ("webfront-cef-" + scenario.mode + "-" + std::to_string(getpid()));
         std::filesystem::remove_all(scenario.folder);
@@ -128,7 +141,9 @@ int main(int argc, char** argv) {
         std::ofstream(scenario.fixture) << "chosen by the test";
         using FS = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::NativeDebugFS>;
         webfront::BasicWFWithFrontend<webfront::NetProvider, FS, Frontend> app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
-        app.show("file-services.html?" + (scenario.mode == "download" ? std::string("download") : std::string("choose")));
+        app.show(scenario.mode == "hold"      ? std::string("script-dialogs.html?hold")
+                 : scenario.mode == "dialogs" ? std::string("script-dialogs.html")
+                                            : "file-services.html?" + (scenario.mode == "download" ? std::string("download") : std::string("choose")));
         if (scenario.mode == "download") {
             require(!scenario.downloaded.empty(), "The download did not finish");
             // The engine neutralizes the page's "../webfront-download.txt" itself (Chrome writes "_webfront-download.txt").
@@ -142,6 +157,14 @@ int main(int argc, char** argv) {
             stream.read(contents.data(), static_cast<std::streamsize>(contents.size()));
             contents.resize(static_cast<std::size_t>(stream.gcount()));
             require(contents == expected, "The downloaded file has the wrong content");
+        } else if (scenario.mode == "hold") {
+            // Reaching this point is the check: the window closed under the alert. The engine may release the page's alert
+            // while closing, so "released" is as valid as "holding".
+            require(scenario.title == "holding" || scenario.title == "released", ("The alert page did not start: " + scenario.title).c_str());
+        } else if (scenario.mode == "dialogs") {
+            require(scenario.title == "answers:true|typed|null", ("Unexpected answers from the script dialogs: " + scenario.title).c_str());
+            const std::vector<std::string> expected{"0:hello:", "1:sure?:", "2:name?:default", "2:cancelled?:x"};
+            require(scenario.dialogs == expected, "The injection did not see the expected dialogs");
         } else {
             require(scenario.asked, ("The file chooser was not requested; title=" + scenario.title).c_str());
             require(scenario.title == (scenario.mode == "choose" ? "picked:chosen by the test" : "cancelled"),

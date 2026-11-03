@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Embedded frontends: `alert`, `confirm`, `prompt` and `beforeunload` (`beforeunload` is not handled under WKWebView, see `docs/FRONTENDS.md`; #452, ADR-020 rule 6). WKWebView implements the three
+  `WKUIDelegate` panel methods (an `NSAlert` sheet of the window; without them these calls did nothing); WebKitGTK, CEF and
+  WebView2 keep their engine's dialogs. A shared test injection (`frontend/ScriptDialogs.hpp`) answers the dialogs in each
+  frontend, and closing the window with a box open dismisses it. See `docs/FRONTENDS.md` for the engine-by-engine coverage.
+
 - Embedded frontends: `<input type="file">` and downloads (#451, ADR-020 rule 6). WebKitGTK saves downloads to the user's
   download folder (name reduced to its last component, never overwritten); WKWebView gets `runOpenPanelWithParameters` and
   `WKDownload`; CEF and WebView2 use the engine's own handling. A `blob:` URL of an admitted origin
