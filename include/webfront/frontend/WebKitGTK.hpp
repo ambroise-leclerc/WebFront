@@ -425,15 +425,15 @@ struct Session : FailureState {
     std::filesystem::path destinationFolder() const {
         if (!downloadDirectory.empty())
             return downloadDirectory;
-        if (const auto* folder = a.userDirectory(2); folder && *folder)
-            return folder;
-        if (const auto* home = std::getenv("HOME"); home && *home) {
+        const auto* home = std::getenv("HOME");
+        if (const auto* folder = a.userDirectory(2); folder && *folder) {
             std::error_code error;
-            const auto      folder = std::filesystem::path(home) / "Downloads";
-            if (std::filesystem::is_directory(folder, error))
+            // GLib reports the home folder itself when no download folder is configured: never write there.
+            if (!(home && *home && std::filesystem::equivalent(folder, home, error)))
                 return folder;
-            return home;
         }
+        if (home && *home)
+            return std::filesystem::path(home) / "Downloads";  // Created on demand.
         return std::filesystem::temp_directory_path();
     }
     std::filesystem::path reserveDestination(std::string_view suggested) {

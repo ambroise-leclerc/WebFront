@@ -10,6 +10,7 @@
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -573,8 +574,8 @@ struct Session {
         id   result   = nullptr;  // NSArray<NSURL*>*; nil cancels.
         bool deferred = false;
         guard([&] {
-            // Only the frames the policy admits may open a chooser.
-            if (!contentPolicy.allowsNavigation(effectiveFrameUrl(frame)))
+            // Only the application's own origin may open a chooser, not every origin that navigation admits.
+            if (!contentPolicy.isApplicationOrigin(effectiveFrameUrl(frame)))
                 return;
             if (options.chooseFiles) {
                 const auto files = options.chooseFiles();
@@ -594,15 +595,24 @@ struct Session {
             const auto directories = send<BOOL>(parameters, "allowsDirectories");
             send<void>(panel, "setCanChooseDirectories:", directories);
             send<void>(panel, "setCanChooseFiles:", static_cast<BOOL>(!directories));
-            auto handler = Block_copy(completion);
-            send<void>(panel, "retain");
-            void (^finished)(long) = ^(long response) {
-                handler(response == 1 ? send(panel, "URLs") : nullptr);  // NSModalResponseOK
-                send<void>(panel, "release");
-                Block_release(handler);
-            };
+            auto handler  = Block_copy(completion);
+            bool retained = false;
+            try {
+                send<void>(panel, "retain");
+                retained = true;
+                void (^finished)(long) = ^(long response) {
+                    handler(response == 1 ? send(panel, "URLs") : nullptr);  // NSModalResponseOK
+                    send<void>(panel, "release");
+                    Block_release(handler);
+                };
+                send<void>(panel, "beginSheetModalForWindow:completionHandler:", window, finished);
+            } catch (...) {
+                if (retained)
+                    send<void>(panel, "release");
+                Block_release(handler);  // The panel never took the handler: `completion` answers below.
+                throw;
+            }
             deferred = true;
-            send<void>(panel, "beginSheetModalForWindow:completionHandler:", window, finished);
         });
         if (!deferred)
             completion(result);
@@ -637,36 +647,54 @@ struct Session {
             const auto panel = send(type("NSSavePanel"), "savePanel");
             Object     name(text(std::filesystem::path(suggested).filename().string()));
             send<void>(panel, "setNameFieldStringValue:", name.get());
-            auto     handler = Block_copy(completion);
-            auto     token   = alive;     // Not `this`: the window may close, and the session end, while the panel is open.
-            const id key     = download;  // By value: the panel answers after this lambda and its references are gone.
-            send<void>(panel, "retain");
-            void (^finished)(long) = ^(long response) {
-                id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
-                if (chosen && !*token)
-                    chosen = nullptr;                                      // The session is gone: nobody could move the file afterwards.
-                try {
-                    if (chosen) {
-                        const std::filesystem::path target = utf8(send(chosen, "path"));
-                        std::error_code             code;
-                        const bool replace = std::filesystem::exists(target, code);
-                        if (code)
-                            throw std::filesystem::filesystem_error("Cannot inspect download target", target, code);
-                        auto staging = std::make_unique<frontend::detail::DownloadStaging>(target.parent_path());
-                        const auto temporary = staging->path();
-                        Object path(text(temporary.string()));
-                        chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
-                        (*token)->downloadDestinations[key] = {std::move(staging), target, false, replace};
+            auto     handler  = Block_copy(completion);
+            bool     retained = false;
+            auto     token    = alive;     // Not `this`: the window may close, and the session end, while the panel is open.
+            const id key      = download;  // By value: the panel answers after this lambda and its references are gone.
+            try {
+                send<void>(panel, "retain");
+                retained = true;
+                void (^finished)(long) = ^(long response) {
+                    id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
+                    if (chosen && !*token)
+                        chosen = nullptr;  // The session is gone: nobody could move the file afterwards.
+                    try {
+                        if (chosen) {
+                            const std::filesystem::path target = utf8(send(chosen, "path"));
+                            std::error_code             code;
+                            const bool                  replace = std::filesystem::exists(target, code);
+                            if (code)
+                                throw std::filesystem::filesystem_error("Cannot inspect download target", target, code);
+                            auto& reservations = (*token)->reservations;
+                            if (!reservations.reserveExact(target))
+                                throw std::filesystem::filesystem_error("Another download is writing this target", target,
+                                                                        std::make_error_code(std::errc::file_exists));
+                            try {
+                                auto       staging   = std::make_unique<frontend::detail::DownloadStaging>(target.parent_path());
+                                const auto temporary = staging->path();
+                                Object     path(text(temporary.string()));
+                                chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                                (*token)->downloadDestinations[key] = {std::move(staging), target, true, replace};
+                            } catch (...) {
+                                reservations.release(target);
+                                throw;
+                            }
+                        }
+                    } catch (const std::filesystem::filesystem_error&) {
+                        chosen = nullptr;  // No staging, or the target is taken: answer WebKit once, without crossing the AppKit block.
                     }
-                } catch (const std::filesystem::filesystem_error&) {
-                    chosen = nullptr;  // No temporary name is free: answer WebKit once, without crossing the AppKit block.
-                }
-                handler(chosen);
-                send<void>(panel, "release");
-                Block_release(handler);
-            };
+                    handler(chosen);
+                    send<void>(panel, "release");
+                    Block_release(handler);
+                };
+                send<void>(panel, "beginSheetModalForWindow:completionHandler:", window, finished);
+            } catch (...) {
+                if (retained)
+                    send<void>(panel, "release");
+                Block_release(handler);  // The panel never took the handler: `completion` answers below.
+                throw;
+            }
             deferred = true;
-            send<void>(panel, "beginSheetModalForWindow:completionHandler:", window, finished);
         });
         if (!deferred)
             completion(result);
@@ -678,8 +706,10 @@ struct Session {
             return;
         const auto pending = std::move(found->second);
         downloadDestinations.erase(found);
-        if (completed)
-            completed = pending.staging->finish(pending.target, pending.replace);
+        if (completed && !pending.staging->finish(pending.target, pending.replace)) {
+            completed = false;
+            std::fprintf(stderr, "WebFront: the download could not be installed at %s\n", pending.target.string().c_str());
+        }
         if (pending.reserved)
             reservations.release(pending.target);
         if (completed && options.downloadFinished)

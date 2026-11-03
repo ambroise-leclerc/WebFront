@@ -169,6 +169,12 @@ public:
         return origin && (policy.allowAnyNavigation || *origin == applicationOrigin || contains(policy.navigationAllowedOrigins, *origin));
     }
 
+    /// Whether `url` belongs to the application's own origin, whatever the navigation allow-list admits.
+    bool isApplicationOrigin(std::string_view url) const {
+        const auto origin = contentOrigin(url);
+        return origin && *origin == applicationOrigin;
+    }
+
     // Popups always leave the embedded session. Only HTTP(S) is forwarded, never shell/file schemes.
     template <typename Launcher>
     void handlePopup(const std::string& url, bool userInitiated, Launcher&& launch) const {
