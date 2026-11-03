@@ -671,14 +671,15 @@ struct Session {
                         send<void>(field, "release");
                     send<void>(alert, "release");
                 };
-                retained = false;  // From here the block owns the alert and the field, if the sheet starts.
                 try {
                     send<void>(alert, "beginSheetModalForWindow:completionHandler:", window, finished);
                 } catch (...) {
-                    retained = true;
-                    answer   = std::move(*shared);  // The block never ran: answer below.
+                    // The call failed to dispatch, so the block never runs and never releases: this function still owns
+                    // the alert and the field (released below) and answers dismissed.
+                    answer = std::move(*shared);
                     throw;
                 }
+                retained = false;  // The sheet started: the block owns the alert and the field until it answers.
             } catch (...) {
                 if (retained) {
                     if (field)

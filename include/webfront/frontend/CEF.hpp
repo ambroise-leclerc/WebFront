@@ -548,7 +548,7 @@ public:
                     const CefString&               message,
                     const CefString&               defaultText,
                     CefRefPtr<CefJSDialogCallback> callback,
-                    bool&) override {
+                    bool&) override {  // suppress_message stays false: the injection is the answer.
         if (!answerScriptDialog)
             return false;
         frontend::ScriptDialog dialog;
@@ -587,19 +587,6 @@ public:
             callback->Continue(files);
         return true;
     }
-private:
-    bool answer(const frontend::ScriptDialog& dialog, CefRefPtr<CefJSDialogCallback> callback) {
-        frontend::ScriptDialogAnswer reply;
-        try {
-            reply = answerScriptDialog(dialog);
-        } catch (...) {
-            reply = {};  // A failing injection dismisses the dialog; the page must not wait for it.
-        }
-        callback->Continue(reply.accepted, reply.text);
-        return true;
-    }
-
-public:
     bool OnBeforeDownload(CefRefPtr<CefBrowser>,
                           CefRefPtr<CefDownloadItem>           item,
                           const CefString&                     suggested,
@@ -747,6 +734,17 @@ public:
     }
 
 private:
+    bool answer(const frontend::ScriptDialog& dialog, CefRefPtr<CefJSDialogCallback> callback) {
+        frontend::ScriptDialogAnswer reply;
+        try {
+            reply = answerScriptDialog(dialog);
+        } catch (...) {
+            reply = {};  // A failing injection dismisses the dialog; the page must not wait for it.
+        }
+        callback->Continue(reply.accepted, reply.text);
+        return true;
+    }
+
     webfront::detail::BoundContentPolicy contentPolicy;
     browser::Launcher                    popupLauncher;
     bool loadingInitialPage = true;

@@ -755,7 +755,8 @@ private:
     }
 
     void scriptDialogOpening(ICoreWebView2ScriptDialogOpeningEventArgs* args) noexcept {
-        // Not accepting is the dismissed answer, so any failure below leaves the page's call returning.
+        // Not accepting is the dismissed answer, so any failure below leaves the page's call returning. The injection answers
+        // synchronously (it must return promptly), so no deferral is taken: the event completes when this handler returns.
         try {
             COREWEBVIEW2_SCRIPT_DIALOG_KIND kind{};
             check(args->get_Kind(&kind), "reading the script dialog kind");

@@ -1,6 +1,7 @@
 #include <webfront/system/NativeFS.hpp>
 #include <webfront/WebFront.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
 #include <filesystem>
@@ -388,15 +389,17 @@ void scriptDialogs() {
 
 /// Closing the window while WebKitGTK's own script dialog is open must end cleanly, without waiting for an answer.
 void closeWithScriptDialog() {
-    bool opened = false;
-    int  open   = 0;
+    using Clock = std::chrono::steady_clock;
+    bool              opened = false;
+    Clock::time_point openedAt;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.scriptDialogOpened = [&] {
-            opened = true;
+            opened   = true;
+            openedAt = Clock::now();
         };
     };
     ScenarioFrontend::finished = [&](gtk::Session&) {
-        return opened && ++open > 10;
+        return opened && Clock::now() - openedAt > std::chrono::milliseconds(500);  // Let the dialog map, then close under it.
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     app.show("script-dialogs.html?hold");

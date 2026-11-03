@@ -98,8 +98,8 @@ so it does not qualify the native dialogs themselves or closing the window while
 `alert`, `confirm` and `prompt` work in every embedded frontend, and `beforeunload` in all but WKWebView, without a WebFront API (ADR-020, rule 6, #452).
 All four engines use the system's or the engine's own box attached to the window by default; each frontend also has a test
 injection that answers without a box, with the shared types of `frontend/ScriptDialogs.hpp` (`ScriptDialog`,
-`ScriptDialogAnswer`, `ScriptDialogHandler`). Closing the window with a box open never waits for an answer: the page's call
-returns as dismissed (`false` for `confirm`, `null` for `prompt`).
+`ScriptDialogAnswer`, `ScriptDialogHandler`). Closing the window with a box open never waits for an answer. Under WKWebView the sheet's completion handler answers dismissed (`false` for `confirm`, `null` for `prompt`);
+under the other engines the page is gone with the window, and the value its call would have returned is not observable.
 
 | Frontend | Dialogs | Test injection |
 | --- | --- | --- |
@@ -107,6 +107,10 @@ returns as dismissed (`false` for `confirm`, `null` for `prompt`).
 | CEF (Chrome runtime) | `CefJSDialogHandler` (`OnJSDialog`, `OnBeforeUnloadDialog`) answered only by the injection; otherwise the runtime's own dialogs | `SimpleCEFClient::answerScriptDialog` |
 | WKWebView | the three `WKUIDelegate` panel methods (alert, confirm, prompt; not `beforeunload`, see below) show an `NSAlert` sheet of the window (an accessory text field for `prompt`); only frames of the application's own origin, others are dismissed | `WKWebViewOptions::answerScriptDialog` |
 | WebView2 | the engine's own dialogs, until the injection turns them off and answers `ScriptDialogOpening` (kinds alert, confirm, prompt, beforeunload) | `Session::answerScriptDialog` (adapter-internal, set from a `prepare` hook) |
+
+Origin filtering differs: WKWebView answers dismissed for a frame outside the application's origin, because its code shows the
+box itself. WebKitGTK, CEF and WebView2 leave the decision to the engine's own dialog (or to the injection), without a
+WebFront origin check; the content policy that already restricts navigation to admitted origins is the guard there.
 
 **Limit: WKWebView does not handle `beforeunload`.** The public `WKUIDelegate` has no method for it; WebKit routes it through a
 private selector (`_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:`), not through the confirm
