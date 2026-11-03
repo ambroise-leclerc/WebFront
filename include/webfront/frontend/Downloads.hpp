@@ -13,7 +13,7 @@
 #include <vector>
 
 #ifdef __APPLE__
-    #include <cstdlib>
+    #include <unistd.h>
 #endif
 
 namespace webfront::frontend::detail {

@@ -13,31 +13,46 @@ using webfront::frontend::detail::uniqueDownloadPath;
 
 SCENARIO("Download staging preserves a destination created while a download runs") {
     std::random_device random;
-    const auto folder = std::filesystem::temp_directory_path() / ("webfront-download-staging-unit-" + std::to_string(random()));
+    const auto         folder = std::filesystem::temp_directory_path() / ("webfront-download-staging-unit-" + std::to_string(random()));
     REQUIRE(std::filesystem::create_directory(folder));
     const auto target = folder / "target.txt";
-    std::filesystem::remove(target);
-    std::filesystem::path stagingPath;
-    {
-        webfront::frontend::detail::DownloadStaging staging(folder);
-        stagingPath = staging.path();
-        std::ofstream(stagingPath) << "download";
-        std::ofstream(target) << "other file";
-        REQUIRE_FALSE(staging.finish(target, false));
+    GIVEN("another process creates the destination during the download") {
+        WHEN("the completed download is installed without permission to replace") {
+            std::filesystem::path stagingPath;
+            bool                  installed = false;
+            {
+                webfront::frontend::detail::DownloadStaging staging(folder);
+                stagingPath = staging.path();
+                std::ofstream(stagingPath) << "download";
+                std::ofstream(target) << "other file";
+                installed = staging.finish(target, false);
+            }
+            THEN("the other file survives and the private staging directory is removed") {
+                REQUIRE_FALSE(installed);
+                std::ifstream stream(target);
+                REQUIRE(std::string(std::istreambuf_iterator<char>(stream), {}) == "other file");
+                REQUIRE_FALSE(std::filesystem::exists(stagingPath.parent_path()));
+            }
+        }
     }
-    std::ifstream stream(target);
-    REQUIRE(std::string(std::istreambuf_iterator<char>(stream), {}) == "other file");
-    REQUIRE_FALSE(std::filesystem::exists(stagingPath));
-    stream.close();
-    std::filesystem::remove(target);
-    {
-        webfront::frontend::detail::DownloadStaging staging(folder);
-        std::ofstream(staging.path()) << "completed";
-        REQUIRE(staging.finish(target, false));
+    GIVEN("the destination is free") {
+        WHEN("the completed download is installed") {
+            std::filesystem::path stagingPath;
+            bool                  installed = false;
+            {
+                webfront::frontend::detail::DownloadStaging staging(folder);
+                stagingPath = staging.path();
+                std::ofstream(stagingPath) << "completed";
+                installed = staging.finish(target, false);
+            }
+            THEN("the destination holds the completed bytes and staging is removed") {
+                REQUIRE(installed);
+                std::ifstream completed(target);
+                REQUIRE(std::string(std::istreambuf_iterator<char>(completed), {}) == "completed");
+                REQUIRE_FALSE(std::filesystem::exists(stagingPath.parent_path()));
+            }
+        }
     }
-    std::ifstream completed(target);
-    REQUIRE(std::string(std::istreambuf_iterator<char>(completed), {}) == "completed");
-    completed.close();
     std::filesystem::remove(target);
     std::filesystem::remove(folder);
 }

@@ -63,11 +63,14 @@ Xvfb for WebKitGTK), a `Runtime.evaluate` with `userGesture` (CEF) or `evaluateJ
 gesture (WKWebView). The WKWebView scenarios (`WKWebViewLifecycle-download`, `-choose-file`, `-cancel-choose`,
 `-replaced-download`) use the test injections of `WKWebViewOptions`: they qualify the delegate wiring, the blob download
 policy, the destination handling and the replace-on-success logic, not the system `NSOpenPanel`/`NSSavePanel` themselves.
-The real panels were driven by hand on macOS (accessibility actions, a local slow server, no automated test): saving and the
+The real panels were driven by hand on macOS before the private staging change in `52d8c68` (accessibility actions, a
+local slow server, no automated test): saving and the
 "Replace" choice report the finished download and leave no `.part` file; cancelling the save sheet creates nothing; an
 `<input webkitdirectory>` panel offers folders only; two simultaneous downloads of one name get `same.bin` and
 `same (1).bin`; closing the window cancels the downloads in progress and removes their incomplete files; a response the
 engine cannot display (`application/octet-stream`) is saved as a download.
+These earlier manual results do not qualify the private staging implementation; the PR records subsequent validation
+separately. Native dialog qualification remains incomplete.
 WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the frontend sees it.
 If all 10,000 candidate names are occupied, automatic destination selection fails and cancels the download.
 WKWebView writes each download in a private staging directory beside the destination. On success it installs the file;
