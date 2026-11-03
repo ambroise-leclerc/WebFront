@@ -656,11 +656,13 @@ public:
     void drain() {
         decodeExecutor.stop();
         decodeExecutor.join();
+        // The cancelled tasks are pumped before the workers are joined: a handler may wait for what the cleanup
+        // of a cancelled task does, and the tasks awaiting a running job end when that job returns.
         routeWorker.stop();
         fileWorker.stop();
+        tasks.drain(ioContext);
         routeWorker.join();
         fileWorker.join();
-        tasks.drain(ioContext);
     }
 
     /** @brief Destructor-safe join, retaining ownership until every task has finished. */
@@ -669,9 +671,9 @@ public:
         decodeExecutor.join();
         routeWorker.stop();
         fileWorker.stop();
+        tasks.drainUntilJoined(ioContext);
         routeWorker.join();
         fileWorker.join();
-        tasks.drainUntilJoined(ioContext);
     }
 
     /** @brief Scope shared with upgraded connections; the server must outlive them. */
@@ -798,6 +800,9 @@ private:
         catch (const std::exception& error) {
             log::warn("{} ended its response early: {}", label, error.what());
         }
+        catch (...) {
+            log::warn("{} ended its response early: unknown exception", label);
+        }
     }
 
     // Runs the handler on the worker, then streams its body in chunks of at most emissionBufferSize bytes,
@@ -824,6 +829,11 @@ private:
         }
         catch (const std::exception& error) {
             log::warn("Route {} failed: {}", match.route->prefix, error.what());
+            response = Response::getStatusResponse(Response::internalServerError);
+            reply.body = nullptr;
+        }
+        catch (...) {
+            log::warn("Route {} failed with an exception which is not a std::exception", match.route->prefix);
             response = Response::getStatusResponse(Response::internalServerError);
             reply.body = nullptr;
         }
@@ -880,6 +890,10 @@ private:
         }
         catch (const std::exception& error) {
             log::warn("HTTP asset request failed: {}", error.what());
+            response = Response::getStatusResponse(Response::internalServerError);
+        }
+        catch (...) {
+            log::warn("HTTP asset request failed with an exception which is not a std::exception");
             response = Response::getStatusResponse(Response::internalServerError);
         }
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body

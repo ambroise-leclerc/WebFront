@@ -590,3 +590,23 @@ SCENARIO("A single-thread worker keeps the jobs in order") {
     secondDone.get_future().wait();
     REQUIRE(order == "ab");
 }
+
+SCENARIO("A handler or a body throwing something else than a std::exception is contained") {
+    Fixture fixture;
+    Router  server("127.0.0.1", "0");
+    GIVEN("a handler which throws an int") {
+        auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) -> RouteReply { throw 42; });
+        const auto response = fixture.answer(get("/webfront/services/files/x"));
+        THEN("the browser gets a 500") { REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); }
+    }
+    GIVEN("a body which throws an int after the headers") {
+        auto route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
+            RouteReply reply;
+            reply.contentLength = 10;
+            reply.body          = [](std::span<char>) -> std::size_t { throw 42; };
+            return reply;
+        });
+        const auto response = fixture.answer(get("/webfront/services/files/x"));
+        THEN("the connection ends after the headers") { REQUIRE(response.ends_with("\r\n\r\n")); }
+    }
+}
