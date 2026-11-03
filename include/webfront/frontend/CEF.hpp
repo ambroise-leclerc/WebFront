@@ -558,15 +558,22 @@ public:
             callback->Continue(files);
         return true;
     }
-    bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, const CefString& suggested, CefRefPtr<CefBeforeDownloadCallback> callback) override {
+    bool OnBeforeDownload(CefRefPtr<CefBrowser>,
+                          CefRefPtr<CefDownloadItem>           item,
+                          const CefString&                     suggested,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override {
         if (downloadDirectory.empty())
             return false;
-        const auto result = downloadReservations.reserve(downloadDirectory, suggested.ToString());
-        {
-            std::scoped_lock lock{reservedMutex};
-            reservedByDownload[item->GetId()] = result;
+        try {
+            const auto result = downloadReservations.reserve(downloadDirectory, suggested.ToString());
+            {
+                std::scoped_lock lock{reservedMutex};
+                reservedByDownload[item->GetId()] = result;
+            }
+            callback->Continue(result.string(), false);
+        } catch (const std::filesystem::filesystem_error&) {
+            // Returning true without continuing cancels the download, including when all candidate names are occupied.
         }
-        callback->Continue(result.string(), false);
         return true;
     }
     void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {

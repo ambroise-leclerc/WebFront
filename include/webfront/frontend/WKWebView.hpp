@@ -616,7 +616,12 @@ struct Session {
         guard([&] {
             if (!options.downloadDirectory.empty()) {
                 std::filesystem::create_directories(options.downloadDirectory);  // WebKit needs the folder to exist.
-                const auto destination = reservations.reserve(options.downloadDirectory, suggested);
+                std::filesystem::path destination;
+                try {
+                    destination = reservations.reserve(options.downloadDirectory, suggested);
+                } catch (const std::filesystem::filesystem_error&) {
+                    return;  // No candidate is free: nil cancels this download without stopping the session.
+                }
                 downloadDestinations[download] = {destination.string(), destination.string(), true};
                 Object path(text(destination.string()));
                 result = send(type("NSURL"), "fileURLWithPath:", path.get());
@@ -625,27 +630,31 @@ struct Session {
             const auto panel = send(type("NSSavePanel"), "savePanel");
             Object     name(text(std::filesystem::path(suggested).filename().string()));
             send<void>(panel, "setNameFieldStringValue:", name.get());
-            auto handler = Block_copy(completion);
-            auto token   = alive;  // Not `this`: the window may close, and the session end, while the panel is open.
-            const id key = download;  // By value: the panel answers after this lambda and its references are gone.
+            auto     handler = Block_copy(completion);
+            auto     token   = alive;     // Not `this`: the window may close, and the session end, while the panel is open.
+            const id key     = download;  // By value: the panel answers after this lambda and its references are gone.
             send<void>(panel, "retain");
             void (^finished)(long) = ^(long response) {
                 id chosen = response == 1 ? send(panel, "URL") : nullptr;  // NSModalResponseOK
                 if (chosen && !*token)
-                    chosen = nullptr;  // The session is gone: nobody could move the file afterwards.
-                if (chosen) {
-                    // "Replace" returns an existing file, which WKDownload refuses: download beside it, replace when done.
-                    const std::filesystem::path target = utf8(send(chosen, "path"));
-                    std::error_code             code;
-                    auto                        temporary = target;
-                    bool                        reserved  = false;
-                    if (std::filesystem::exists(target, code)) {
-                        temporary = (*token)->reservations.reserve(target.parent_path(), target.filename().string() + ".part");
-                        reserved  = true;
-                        Object path(text(temporary.string()));
-                        chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                    chosen = nullptr;                                      // The session is gone: nobody could move the file afterwards.
+                try {
+                    if (chosen) {
+                        // "Replace" returns an existing file, which WKDownload refuses: download beside it, replace when done.
+                        const std::filesystem::path target = utf8(send(chosen, "path"));
+                        std::error_code             code;
+                        auto                        temporary = target;
+                        bool                        reserved  = false;
+                        if (std::filesystem::exists(target, code)) {
+                            temporary = (*token)->reservations.reserve(target.parent_path(), target.filename().string() + ".part");
+                            reserved  = true;
+                            Object path(text(temporary.string()));
+                            chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                        }
+                        (*token)->downloadDestinations[key] = {temporary.string(), target.string(), reserved};
                     }
-                    (*token)->downloadDestinations[key] = {temporary.string(), target.string(), reserved};
+                } catch (const std::filesystem::filesystem_error&) {
+                    chosen = nullptr;  // No temporary name is free: answer WebKit once, without crossing the AppKit block.
                 }
                 handler(chosen);
                 send<void>(panel, "release");
@@ -664,16 +673,15 @@ struct Session {
             return;
         const auto pending = std::move(found->second);
         downloadDestinations.erase(found);
-        if (pending.temporary != pending.target) {
+        if (completed && pending.temporary != pending.target) {
             std::error_code replaced;
-            if (completed)
-                std::filesystem::rename(pending.temporary, pending.target, replaced);  // The old file survives any failure before this.
+            std::filesystem::rename(pending.temporary, pending.target, replaced);  // The old file survives any failure before this.
             if (replaced)
-                completed = false;  // The target still holds the old file: this is not a finished download.
-            if (!completed) {
-                std::error_code cleanup;  // Its own code: cleaning up must not hide the outcome of the replacement.
-                std::filesystem::remove(pending.temporary, cleanup);
-            }
+                completed = false;                                                 // The target still holds the old file: this is not a finished download.
+        }
+        if (!completed) {
+            std::error_code cleanup;
+            std::filesystem::remove(pending.temporary, cleanup);
         }
         if (pending.reserved)
             reservations.release(pending.temporary);

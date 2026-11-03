@@ -296,6 +296,10 @@ add_test(NAME FrontendConsumerConfiguration
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-consumer
         -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
         "-DDEPENDENCY_ARGS=${_consumer_dependency_args}"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DTEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendConsumer.cmake)
 set_tests_properties(FrontendConsumerConfiguration PROPERTIES TIMEOUT 120)
 # Read the actual target's launcher at generation time, including an explicitly

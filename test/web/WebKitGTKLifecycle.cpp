@@ -240,29 +240,56 @@ void downloadUserDirectory() {
 
 /// A real pointer click through the X server's XTest extension: web content only opens a file chooser for a user gesture.
 struct FakeClick {
-    void* x11   = dlopen("libX11.so.6", RTLD_NOW);
-    void* xtest = dlopen("libXtst.so.6", RTLD_NOW);
-    using Open  = void* (*)(const char*);
-    using Flush = int (*)(void*);
-    using Move  = int (*)(void*, int, int, int, unsigned long);
-    using Press = int (*)(void*, unsigned, int, unsigned long);
-    Open  open    = x11 ? reinterpret_cast<Open>(dlsym(x11, "XOpenDisplay")) : nullptr;
-    Flush flush   = x11 ? reinterpret_cast<Flush>(dlsym(x11, "XFlush")) : nullptr;
-    Move  move    = xtest ? reinterpret_cast<Move>(dlsym(xtest, "XTestFakeMotionEvent")) : nullptr;
-    Press press   = xtest ? reinterpret_cast<Press>(dlsym(xtest, "XTestFakeButtonEvent")) : nullptr;
-    void* display = open ? open(nullptr) : nullptr;
+    void* x11           = dlopen("libX11.so.6", RTLD_NOW);
+    void* xtest         = dlopen("libXtst.so.6", RTLD_NOW);
+    void* gtkModule     = dlopen("libgtk-4.so.1", RTLD_NOW | RTLD_LOCAL);
+    using Open          = void* (*)(const char*);
+    using Flush         = int (*)(void*);
+    using Move          = int (*)(void*, int, int, int, unsigned long);
+    using Press         = int (*)(void*, unsigned, int, unsigned long);
+    using Translate     = int (*)(void*, unsigned long, unsigned long, int, int, int*, int*, unsigned long*);
+    using Root          = unsigned long (*)(void*);
+    using Surface       = void* (*)(void*);
+    using Xid           = unsigned long (*)(void*);
+    Open      open      = x11 ? reinterpret_cast<Open>(dlsym(x11, "XOpenDisplay")) : nullptr;
+    Flush     flush     = x11 ? reinterpret_cast<Flush>(dlsym(x11, "XFlush")) : nullptr;
+    Move      move      = xtest ? reinterpret_cast<Move>(dlsym(xtest, "XTestFakeMotionEvent")) : nullptr;
+    Press     press     = xtest ? reinterpret_cast<Press>(dlsym(xtest, "XTestFakeButtonEvent")) : nullptr;
+    Translate translate = x11 ? reinterpret_cast<Translate>(dlsym(x11, "XTranslateCoordinates")) : nullptr;
+    Root      root      = x11 ? reinterpret_cast<Root>(dlsym(x11, "XDefaultRootWindow")) : nullptr;
+    // GTK's client surface need not start at the root window's origin, even under Xvfb.
+    Surface surface = gtkModule ? reinterpret_cast<Surface>(dlsym(gtkModule, "gtk_native_get_surface")) : nullptr;
+    Xid     xid     = gtkModule ? reinterpret_cast<Xid>(dlsym(gtkModule, "gdk_x11_surface_get_xid")) : nullptr;
+    void*   display = open ? open(nullptr) : nullptr;
 
     bool available() const {
-        return display && move && press && flush;
+        return display && move && press && flush && translate && root && surface && xid;
     }
-    void click(int x, int y) const {
-        // Without a window manager the pointer may already rest at the target: a press with no motion before it can be
-        // delivered before the page knows the pointer is over it. Arrive from a neighbouring point.
-        move(display, 0, x + 6, y + 6, 0);
-        flush(display);
-        move(display, 0, x, y, 0);
-        press(display, 1, 1, 0);
-        press(display, 1, 0, 0);
+    void click(void* window, int x, int y, int phase) const {
+        const auto native = surface(window);
+        if (!native)
+            return;
+        int           rootX = 0, rootY = 0;
+        unsigned long child = 0;
+        if (!translate(display, xid(native), root(display), x, y, &rootX, &rootY, &child))
+            throw std::runtime_error("Cannot locate the GTK file chooser in the X root window");
+        // One step per poll: GTK and the web process must see the pointer enter before they receive the button events.
+        switch (phase) {
+            case 0:
+                move(display, 0, rootX + 120, rootY + 60, 0);
+                break;
+            case 1:
+                move(display, 0, rootX, rootY, 0);
+                break;
+            case 2:
+                press(display, 1, 1, 0);
+                break;
+            case 3:
+                press(display, 1, 0, 0);
+                break;
+            default:
+                break;
+        }
         flush(display);
     }
 };
@@ -270,7 +297,7 @@ struct FakeClick {
 void chooseFile(bool cancel) {
     const auto fixture = std::filesystem::temp_directory_path() / ("webfront-chooser-" + std::to_string(getpid()) + ".txt");
     std::ofstream(fixture) << "chosen by the test";
-    bool asked = false;
+    bool asked                  = false;
     ScenarioFrontend::configure = [&](gtk::Session& session) {
         session.chooseFiles = [&]() -> std::vector<std::string> {
             asked = true;
@@ -285,15 +312,15 @@ void chooseFile(bool cancel) {
     ScenarioFrontend::finished = [&](gtk::Session& session) {
         const char* current = session.a.viewTitle(session.view);
         title               = current ? current : "";
-        if (title == "ready" && !asked && ++ticks % 5 == 1)
-            pointer.click(40, 20);  // The "Choose File" button, at the page's top-left corner.
+        if (title == "ready" && !asked)
+            pointer.click(session.window, 40, 20, ticks++ % 5);  // The button's position within the GTK client surface.
         return title.starts_with("picked:") || title == "cancelled";
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     app.show("file-services.html?choose");
     std::filesystem::remove(fixture);
     if (!asked)
-        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " + std::to_string(ticks) + " clicks)");
+        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " + std::to_string(ticks) + " pointer steps)");
     const std::string expected = cancel ? "cancelled" : "picked:chosen by the test";
     if (title != expected)
         throw std::runtime_error("Unexpected page state after the chooser: " + title);
@@ -322,8 +349,8 @@ void closeWithDialog() {
     ScenarioFrontend::finished = [&](gtk::Session& session) {
         const char* current = session.a.viewTitle(session.view);
         title               = current ? current : "";
-        if (title == "ready" && !opened && ++ticks % 5 == 1)
-            pointer.click(40, 20);
+        if (title == "ready" && !opened)
+            pointer.click(session.window, 40, 20, ticks++ % 5);
         return opened && ++open > 10;  // Let the dialog map, then close the window under it.
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});

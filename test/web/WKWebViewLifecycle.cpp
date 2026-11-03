@@ -462,6 +462,22 @@ void replacedDownload() {
     start(3, "old", "");  // The engine reported success but the part is gone: the replacement fails, the old file stays.
     session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{3}), true);
     require(readFile(target) == "old" && finished.size() == 1, "A failed replacement was reported as a finished download");
+
+    // Ordinary downloads write directly to the chosen path. A network failure must remove that fragment too.
+    const auto ordinary = session.reservations.reserve(folder, "ordinary.txt");
+    std::ofstream(ordinary) << "partial";
+    const auto key                    = reinterpret_cast<id>(std::uintptr_t{4});
+    session.downloadDestinations[key] = {ordinary.string(), ordinary.string(), true};
+    session.downloadEnded(key, false);
+    require(!std::filesystem::exists(ordinary), "A failed ordinary download left an incomplete file");
+    require(session.reservations.empty() && finished.size() == 1, "A failed download kept its reservation or reported success");
+
+    // Successful ordinary downloads must keep their bytes and report the destination exactly once.
+    std::ofstream(ordinary) << "complete";
+    session.downloadDestinations[key] = {ordinary.string(), ordinary.string(), false};
+    session.downloadEnded(key, true);
+    require(readFile(ordinary) == "complete", "A completed ordinary download was removed");
+    require(finished == std::vector<std::string>{target.string(), ordinary.string()}, "An ordinary download was not reported");
     require(session.downloadDestinations.empty(), "A download outlived its end");
     std::filesystem::remove_all(folder);
 }

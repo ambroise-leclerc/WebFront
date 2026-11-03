@@ -69,6 +69,8 @@ The real panels were driven by hand on macOS (accessibility actions, a local slo
 `same (1).bin`; closing the window cancels the downloads in progress and removes their incomplete files; a response the
 engine cannot display (`application/octet-stream`) is saved as a download.
 WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the frontend sees it.
+If all 10,000 candidate names are occupied, automatic destination selection fails and cancels the download.
+WKWebView also removes incomplete files when a download fails, including ordinary saves without an existing target.
 
 ### Tests
 

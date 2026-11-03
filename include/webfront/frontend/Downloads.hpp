@@ -16,10 +16,10 @@ namespace webfront::frontend::detail {
  * Only the final component of the suggested name is kept (a page can neither choose a folder nor climb out of it), an
  * empty name becomes "download", and an existing file is kept: "name", then "name (1).ext", "name (2).ext", and so on.
  * `taken` additionally rejects the names that another download has reserved but not created yet.
+ * Throws `std::filesystem::filesystem_error` if all 10,000 candidates are occupied.
  */
-inline std::filesystem::path uniqueDownloadPath(const std::filesystem::path&                         folder,
-                                                std::string_view                                     suggested,
-                                                const std::function<bool(const std::filesystem::path&)>& taken = {}) {
+inline std::filesystem::path
+uniqueDownloadPath(const std::filesystem::path& folder, std::string_view suggested, const std::function<bool(const std::filesystem::path&)>& taken = {}) {
     auto name = std::filesystem::path(std::string(suggested)).filename();
     if (name.empty() || name == "." || name == "..")
         name = "download";
@@ -28,8 +28,11 @@ inline std::filesystem::path uniqueDownloadPath(const std::filesystem::path&    
     const auto      unavailable = [&](const std::filesystem::path& path) {
         return std::filesystem::exists(path, error) || (taken && taken(path));
     };
-    for (int index = 1; unavailable(result) && index < 10'000; ++index)
+    for (int index = 1; unavailable(result); ++index) {
+        if (index == 10'000)
+            throw std::filesystem::filesystem_error("No free download destination", folder / name, std::make_error_code(std::errc::file_exists));
         result = folder / (name.stem().string() + " (" + std::to_string(index) + ")" + name.extension().string());
+    }
     return result;
 }
 

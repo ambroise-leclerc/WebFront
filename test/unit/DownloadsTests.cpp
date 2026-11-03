@@ -34,6 +34,29 @@ SCENARIO("A download name suggested by a page stays inside the download folder")
             REQUIRE(uniqueDownloadPath(folder, "report.txt") == folder / "report (2).txt");
         }
     }
+    GIVEN("every candidate is reserved by another download") {
+        THEN("exhaustion is reported instead of returning an occupied path") {
+            std::size_t probes = 0;
+            REQUIRE_THROWS_AS(uniqueDownloadPath(folder,
+                                                 "report.txt",
+                                                 [&](const auto&) {
+                                                     ++probes;
+                                                     return true;
+                                                 }),
+                              std::filesystem::filesystem_error);
+            REQUIRE(probes == 10'000);
+        }
+    }
+    GIVEN("only the last candidate is available") {
+        THEN("that candidate can still be used") {
+            REQUIRE(uniqueDownloadPath(folder,
+                                       "report.txt",
+                                       [&](const auto& path) {
+                                           return path.filename() != "report (9999).txt";
+                                       })
+                    == folder / "report (9999).txt");
+        }
+    }
     std::filesystem::remove_all(folder);
 }
 
