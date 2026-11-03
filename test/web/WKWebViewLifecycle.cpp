@@ -469,6 +469,41 @@ void scriptDialogs() {
     require(seen == expected, "The injection did not see the expected dialogs");
 }
 
+/// A sandboxed iframe without allow-same-origin loads the application's own URL but has an opaque origin: its dialogs are
+/// dismissed, never shown as the application's (issue #452). The parent's own confirm still reaches the injection.
+void sandboxedScriptDialog() {
+    Object                   pool(send(type("NSAutoreleasePool"), "new"));
+    std::vector<std::string> seen;
+    static std::string       finalTitle;
+    finalTitle.clear();
+    ScenarioFrontend::configure = [&](webfront::frontend::WKWebViewOptions& options) {
+        options.answerScriptDialog = [&](const webfront::frontend::ScriptDialog& dialog) {
+            seen.push_back(std::to_string(static_cast<int>(dialog.kind)) + ":" + dialog.message + ":" + dialog.defaultText);
+            return webfront::frontend::ScriptDialogAnswer{true, {}};
+        };
+    };
+    ScenarioFrontend::started = [](Session& session) {
+        Session* live = &session;
+        auto     tick = ^(id timer) {
+            const auto title = utf8(send(live->view, "title"));
+            if (title.starts_with("sandboxed:")) {
+                finalTitle = title;
+                send<void>(timer, "invalidate");
+                quitApplication();
+            }
+        };
+        send(type("NSTimer"), "scheduledTimerWithTimeInterval:repeats:block:", 0.1, static_cast<BOOL>(true), tick);
+    };
+    {
+        ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+        app.show("script-dialogs.html?sandbox");
+    }
+    resetScenario();
+    require(finalTitle == "sandboxed:false|true", ("The sandboxed frame's confirm was not dismissed: " + finalTitle).c_str());
+    const std::vector<std::string> expected{"1:parent?:"};
+    require(seen == expected, "The injection saw a dialog from the opaque-origin frame");
+}
+
 /// Closing the window while the NSAlert sheet is open: the sheet answers "dismissed" and the page is not left waiting.
 void closeWithScriptDialog() {
     closeWithPanel("script-dialogs.html?hold", "");
@@ -574,7 +609,8 @@ int main(int argc, char** argv) {
             {   "close-with-open-panel",   closeWithOpenPanel},
             {   "close-with-save-panel",   closeWithSavePanel},
             {       "script-dialogs",       scriptDialogs},
-            { "close-with-script-dialog", closeWithScriptDialog}
+            { "close-with-script-dialog", closeWithScriptDialog},
+            { "sandboxed-script-dialog", sandboxedScriptDialog}
         };
         cases.at(argc == 2 ? argv[1] : "")();
         return 0;

@@ -5,7 +5,24 @@
 <script>
     // alert, confirm and prompt (issue #452). The test's injection answers: confirm -> true, prompt("name?") -> "typed",
     // prompt("cancelled?") -> dismissed (null). The title then reports every answer; ?hold only opens an alert and waits.
+    // ?sandbox embeds this page in a sandboxed iframe without allow-same-origin: same URL, opaque origin. Its confirm must not
+    // reach the application's dialog (WKWebView); the frame reports its result by postMessage and the parent then asks one
+    // confirm of its own, so the title is "sandboxed:<frame's confirm>|<parent's confirm>".
+    if (location.search === "?inner") {
+        parent.postMessage("frame:" + confirm("from the sandbox"), "*");
+    } else if (location.search === "?sandbox") {
+        addEventListener("message", (event) => {
+            if (typeof event.data === "string" && event.data.startsWith("frame:"))
+                document.title = "sandboxed:" + event.data.slice(6) + "|" + confirm("parent?");
+        });
+        const frame = document.createElement("iframe");
+        frame.setAttribute("sandbox", "allow-scripts allow-modals");
+        frame.src = "script-dialogs.html?inner";
+        document.body.appendChild(frame);
+    }
     setTimeout(() => {
+        if (location.search === "?inner" || location.search === "?sandbox")
+            return;
         if (location.search === "?hold") {
             document.title = "holding";
             alert("held open");

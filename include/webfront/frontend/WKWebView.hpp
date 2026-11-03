@@ -559,17 +559,16 @@ struct Session {
         decision(policy);  // Exactly once, including after a C++ exception.
     }
 
-    /// The address a frame is judged by. A frame the page creates without a document of its own (no `src`, or `srcdoc`)
-    /// is `about:blank` / `about:srcdoc` and inherits its creator's origin, which is what the policy has to see.
+    /// The address a frame is judged by: always its security origin, never the address of its request. A sandboxed frame
+    /// without allow-same-origin loads the application's own URL yet has an opaque origin (empty protocol and host, judged as
+    /// no address, so never the application's). A frame the page creates without a document of its own (`about:blank`,
+    /// `about:srcdoc`) inherits its creator's origin, which is what the policy has to see.
     static std::string effectiveFrameUrl(id frame) {
-        auto address = utf8(send(send(send(frame, "request"), "URL"), "absoluteString"));
-        if (!address.empty() && !address.starts_with("about:"))
-            return address;
         const auto origin   = send(frame, "securityOrigin");
         const auto protocol = utf8(send(origin, "protocol"));
         const auto host     = utf8(send(origin, "host"));
         if (protocol.empty() || host.empty())
-            return address;  // An opaque origin (sandboxed frame): not the application's.
+            return {};
         const auto port = send<long>(origin, "port");
         return protocol + "://" + host + (port > 0 ? ":" + std::to_string(port) : "") + "/";
     }

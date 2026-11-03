@@ -105,12 +105,17 @@ under the other engines the page is gone with the window, and the value its call
 | --- | --- | --- |
 | WebKitGTK | `script-dialog` signal; the default handler shows WebKitGTK's dialog on the window | `Session::answerScriptDialog` (`scriptDialogOpened` reports the default dialog) |
 | CEF (Chrome runtime) | `CefJSDialogHandler` (`OnJSDialog`, `OnBeforeUnloadDialog`) answered only by the injection; otherwise the runtime's own dialogs | `SimpleCEFClient::answerScriptDialog` |
-| WKWebView | the three `WKUIDelegate` panel methods (alert, confirm, prompt; not `beforeunload`, see below) show an `NSAlert` sheet of the window (an accessory text field for `prompt`); only frames of the application's own origin, others are dismissed | `WKWebViewOptions::answerScriptDialog` |
+| WKWebView | the three `WKUIDelegate` panel methods (alert, confirm, prompt; not `beforeunload`, see below) show an `NSAlert` sheet of the window (an accessory text field for `prompt`); only frames whose security origin is the application's, others (including a sandboxed frame without `allow-same-origin`, whose origin is opaque even at the application's URL) are dismissed | `WKWebViewOptions::answerScriptDialog` |
 | WebView2 | the engine's own dialogs, until the injection turns them off and answers `ScriptDialogOpening` (kinds alert, confirm, prompt, beforeunload) | `Session::answerScriptDialog` (adapter-internal, set from a `prepare` hook) |
 
 Origin filtering differs: WKWebView answers dismissed for a frame outside the application's origin, because its code shows the
 box itself. WebKitGTK, CEF and WebView2 leave the decision to the engine's own dialog (or to the injection), without a
 WebFront origin check; the content policy that already restricts navigation to admitted origins is the guard there.
+
+**Limit: closing the window does not ask `beforeunload`.** Closing the window itself is not a page navigation. Under WebView2
+the window's `WM_CLOSE` ends in `ICoreWebView2Controller::Close`, which does not raise `beforeunload`; navigations and reloads
+can reach the handler. Under WebKitGTK and CEF this was not verified. A page can therefore lose unsaved changes when the user
+closes the window; the application must save its state itself (for example on `visibilitychange`).
 
 **Limit: WKWebView does not handle `beforeunload`.** The public `WKUIDelegate` has no method for it; WebKit routes it through a
 private selector (`_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:`), not through the confirm
@@ -122,7 +127,7 @@ three engines report `ScriptDialog::Kind::beforeUnload`.
 Tests: `WebKitGTKAdapter-script-dialogs` and `CEFFileServices-dialogs` check that each dialog reaches the injection with its
 message and default text, that a confirmed `confirm` returns `true`, an accepted `prompt` returns its text and a dismissed
 one returns `null`. `WebKitGTKAdapter-close-with-script-dialog` and `CEFFileServices-hold` close the window under an open
-alert; `WKWebViewLifecycle-script-dialogs|close-with-script-dialog` and `WebView2Lifecycle-script-dialogs` cover the same
+alert; `WKWebViewLifecycle-script-dialogs|close-with-script-dialog|sandboxed-script-dialog` (the last: a sandboxed opaque-origin frame's `confirm` is dismissed, never shown) and `WebView2Lifecycle-script-dialogs` cover the same
 on their engines (the WebView2 case has no close-under-dialog scenario). No scenario triggers a real `beforeunload` (the
 engines show it only after a user gesture on the page); its wiring is implemented but not exercised end to end.
 
