@@ -439,16 +439,18 @@ void replacedDownload() {
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder);
     const auto target    = folder / "report.txt";
-    const auto temporary = folder / "report.txt.part";
+    std::filesystem::path temporary;
     std::vector<std::string> finished;
     Session session("http://127.0.0.1:0/", {.visible = false, .downloadFinished = [&](const std::string& path) {
                                                 finished.push_back(path);
                                             }});
     const auto start = [&](std::uintptr_t key, std::string_view oldContent, std::string_view downloaded) {
         std::ofstream(target) << oldContent;
+        auto staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
+        temporary = staging->path();
         if (!downloaded.empty())
             std::ofstream(temporary) << downloaded;
-        session.downloadDestinations[reinterpret_cast<id>(key)] = {temporary.string(), target.string(), false};
+        session.downloadDestinations[reinterpret_cast<id>(key)] = {std::move(staging), target, false, true};
     };
     start(1, "old", "new");
     session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{1}), true);
@@ -463,18 +465,27 @@ void replacedDownload() {
     session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{3}), true);
     require(readFile(target) == "old" && finished.size() == 1, "A failed replacement was reported as a finished download");
 
-    // Ordinary downloads write directly to the chosen path. A network failure must remove that fragment too.
+    // A failed ordinary download removes its private fragment and releases its destination.
     const auto ordinary = session.reservations.reserve(folder, "ordinary.txt");
-    std::ofstream(ordinary) << "partial";
+    auto staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
+    std::ofstream(staging->path()) << "partial";
     const auto key                    = reinterpret_cast<id>(std::uintptr_t{4});
-    session.downloadDestinations[key] = {ordinary.string(), ordinary.string(), true};
+    session.downloadDestinations[key] = {std::move(staging), ordinary, true, false};
     session.downloadEnded(key, false);
     require(!std::filesystem::exists(ordinary), "A failed ordinary download left an incomplete file");
     require(session.reservations.empty() && finished.size() == 1, "A failed download kept its reservation or reported success");
 
+    staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
+    session.downloadDestinations[key] = {std::move(staging), ordinary, false, false};
+    std::ofstream(ordinary) << "created by another process";
+    session.downloadEnded(key, false);
+    require(readFile(ordinary) == "created by another process", "A failed download removed an unrelated file");
+    std::filesystem::remove(ordinary);
+
     // Successful ordinary downloads must keep their bytes and report the destination exactly once.
-    std::ofstream(ordinary) << "complete";
-    session.downloadDestinations[key] = {ordinary.string(), ordinary.string(), false};
+    staging = std::make_unique<webfront::frontend::detail::DownloadStaging>(folder);
+    std::ofstream(staging->path()) << "complete";
+    session.downloadDestinations[key] = {std::move(staging), ordinary, false, false};
     session.downloadEnded(key, true);
     require(readFile(ordinary) == "complete", "A completed ordinary download was removed");
     require(finished == std::vector<std::string>{target.string(), ordinary.string()}, "An ordinary download was not reported");

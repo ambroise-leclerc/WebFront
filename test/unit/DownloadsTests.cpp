@@ -11,6 +11,37 @@
 using webfront::frontend::detail::DownloadReservations;
 using webfront::frontend::detail::uniqueDownloadPath;
 
+SCENARIO("Download staging preserves a destination created while a download runs") {
+    std::random_device random;
+    const auto folder = std::filesystem::temp_directory_path() / ("webfront-download-staging-unit-" + std::to_string(random()));
+    REQUIRE(std::filesystem::create_directory(folder));
+    const auto target = folder / "target.txt";
+    std::filesystem::remove(target);
+    std::filesystem::path stagingPath;
+    {
+        webfront::frontend::detail::DownloadStaging staging(folder);
+        stagingPath = staging.path();
+        std::ofstream(stagingPath) << "download";
+        std::ofstream(target) << "other file";
+        REQUIRE_FALSE(staging.finish(target, false));
+    }
+    std::ifstream stream(target);
+    REQUIRE(std::string(std::istreambuf_iterator<char>(stream), {}) == "other file");
+    REQUIRE_FALSE(std::filesystem::exists(stagingPath));
+    stream.close();
+    std::filesystem::remove(target);
+    {
+        webfront::frontend::detail::DownloadStaging staging(folder);
+        std::ofstream(staging.path()) << "completed";
+        REQUIRE(staging.finish(target, false));
+    }
+    std::ifstream completed(target);
+    REQUIRE(std::string(std::istreambuf_iterator<char>(completed), {}) == "completed");
+    completed.close();
+    std::filesystem::remove(target);
+    std::filesystem::remove(folder);
+}
+
 SCENARIO("A download name suggested by a page stays inside the download folder") {
     const auto folder = std::filesystem::temp_directory_path() / "webfront-downloads-unit";
     std::filesystem::remove_all(folder);

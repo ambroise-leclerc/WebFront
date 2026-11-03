@@ -8,7 +8,8 @@
   now passes the navigation policy, so a generated Blob can be downloaded. Test injection points answer the chooser and the
   download without a dialog (`docs/FRONTENDS.md`). On Windows, WebView2 tests exercise chooser selection and cancellation
   through DevTools and verify completed downloads on disk; the native dialog UI itself remains unqualified.
-  Failed WKWebView downloads remove their incomplete files; automatic destination selection cancels instead of reusing
+  WKWebView stages downloads privately and preserves a destination created during transfer; failed downloads remove their
+  incomplete files. Automatic destination selection cancels instead of reusing
   an occupied path when all 10,000 candidate names are taken.
 
 - Developer environment: the distribution is served from `https://dist.webfront.fr/` (#478, ADR-021). The sources advance to 0.6.5, the

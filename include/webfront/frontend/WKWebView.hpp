@@ -290,9 +290,10 @@ struct Session {
     webfront::detail::BoundContentPolicy contentPolicy;
     std::function<void()>                navigationCancelled;
     struct PendingDownload {
-        std::string temporary;  // Where WKDownload writes: it needs a file that does not exist yet.
-        std::string target;     // Where the user wants it; differs from `temporary` when "Replace" was chosen.
-        bool        reserved;   // `temporary` was handed out by `reservations`: give it back when the download ends.
+        std::unique_ptr<frontend::detail::DownloadStaging> staging;
+        std::filesystem::path target;
+        bool reserved;
+        bool replace;
     };
     frontend::detail::DownloadReservations reservations;
     std::map<id, PendingDownload>        downloadDestinations;  // WKDownload -> its paths, until it ends.
@@ -364,10 +365,8 @@ struct Session {
         auto pending = std::exchange(downloadDestinations, {});  // Their failure callbacks must find nothing to settle.
         for (const auto& [download, paths] : pending) {
             send<void>(download, "cancel:", static_cast<id>(nullptr));
-            std::error_code ignored;  // The engine created this file (it refuses an existing destination): it is only a fragment.
-            std::filesystem::remove(paths.temporary, ignored);
             if (paths.reserved)
-                reservations.release(paths.temporary);
+                reservations.release(paths.target);
         }
     }
 
@@ -622,8 +621,16 @@ struct Session {
                 } catch (const std::filesystem::filesystem_error&) {
                     return;  // No candidate is free: nil cancels this download without stopping the session.
                 }
-                downloadDestinations[download] = {destination.string(), destination.string(), true};
-                Object path(text(destination.string()));
+                std::unique_ptr<frontend::detail::DownloadStaging> staging;
+                try {
+                    staging = std::make_unique<frontend::detail::DownloadStaging>(destination.parent_path());
+                } catch (...) {
+                    reservations.release(destination);
+                    throw;
+                }
+                const auto temporary = staging->path();
+                downloadDestinations[download] = {std::move(staging), destination, true, false};
+                Object path(text(temporary.string()));
                 result = send(type("NSURL"), "fileURLWithPath:", path.get());
                 return;
             }
@@ -640,18 +647,16 @@ struct Session {
                     chosen = nullptr;                                      // The session is gone: nobody could move the file afterwards.
                 try {
                     if (chosen) {
-                        // "Replace" returns an existing file, which WKDownload refuses: download beside it, replace when done.
                         const std::filesystem::path target = utf8(send(chosen, "path"));
                         std::error_code             code;
-                        auto                        temporary = target;
-                        bool                        reserved  = false;
-                        if (std::filesystem::exists(target, code)) {
-                            temporary = (*token)->reservations.reserve(target.parent_path(), target.filename().string() + ".part");
-                            reserved  = true;
-                            Object path(text(temporary.string()));
-                            chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
-                        }
-                        (*token)->downloadDestinations[key] = {temporary.string(), target.string(), reserved};
+                        const bool replace = std::filesystem::exists(target, code);
+                        if (code)
+                            throw std::filesystem::filesystem_error("Cannot inspect download target", target, code);
+                        auto staging = std::make_unique<frontend::detail::DownloadStaging>(target.parent_path());
+                        const auto temporary = staging->path();
+                        Object path(text(temporary.string()));
+                        chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
+                        (*token)->downloadDestinations[key] = {std::move(staging), target, false, replace};
                     }
                 } catch (const std::filesystem::filesystem_error&) {
                     chosen = nullptr;  // No temporary name is free: answer WebKit once, without crossing the AppKit block.
@@ -673,21 +678,13 @@ struct Session {
             return;
         const auto pending = std::move(found->second);
         downloadDestinations.erase(found);
-        if (completed && pending.temporary != pending.target) {
-            std::error_code replaced;
-            std::filesystem::rename(pending.temporary, pending.target, replaced);  // The old file survives any failure before this.
-            if (replaced)
-                completed = false;                                                 // The target still holds the old file: this is not a finished download.
-        }
-        if (!completed) {
-            std::error_code cleanup;
-            std::filesystem::remove(pending.temporary, cleanup);
-        }
+        if (completed)
+            completed = pending.staging->finish(pending.target, pending.replace);
         if (pending.reserved)
-            reservations.release(pending.temporary);
+            reservations.release(pending.target);
         if (completed && options.downloadFinished)
             guard([&] {
-                options.downloadFinished(pending.target);
+                options.downloadFinished(pending.target.string());
             });
     }
 

@@ -70,7 +70,9 @@ The real panels were driven by hand on macOS (accessibility actions, a local slo
 engine cannot display (`application/octet-stream`) is saved as a download.
 WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the frontend sees it.
 If all 10,000 candidate names are occupied, automatic destination selection fails and cancels the download.
-WKWebView also removes incomplete files when a download fails, including ordinary saves without an existing target.
+WKWebView writes each download in a private staging directory beside the destination. On success it installs the file;
+if a destination that was free appears during the download, it preserves that file and discards the download. Failed and
+cancelled downloads remove their staging directory. Installing a new destination requires hard-link support on its filesystem.
 
 ### Tests
 

@@ -1,14 +1,72 @@
 #pragma once
 
 #include <filesystem>
+#include <cerrno>
 #include <functional>
 #include <mutex>
+#include <random>
 #include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
+#include <vector>
+
+#ifdef __APPLE__
+    #include <cstdlib>
+#endif
 
 namespace webfront::frontend::detail {
+
+/** A private staging directory beside a download target. */
+class DownloadStaging {
+public:
+    explicit DownloadStaging(const std::filesystem::path& parent) {
+#ifdef __APPLE__
+        auto pattern = (parent / ".webfront-download-XXXXXX").string();
+        std::vector<char> buffer(pattern.begin(), pattern.end());
+        buffer.push_back('\0');
+        if (!::mkdtemp(buffer.data()))
+            throw std::filesystem::filesystem_error("Cannot create download staging", parent, std::error_code(errno, std::generic_category()));
+        directory = buffer.data();
+#else
+        std::random_device random;
+        for (int attempt = 0; attempt < 100; ++attempt) {
+            auto candidate = parent / (".webfront-download-" + std::to_string(random()) + "-" + std::to_string(random()));
+            std::error_code error;
+            if (std::filesystem::create_directory(candidate, error)) {
+                directory = std::move(candidate);
+                std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, error);
+                if (error) {
+                    std::filesystem::remove(directory);
+                    throw std::filesystem::filesystem_error("Cannot secure download staging", directory, error);
+                }
+                return;
+            }
+            if (error && error != std::errc::file_exists)
+                throw std::filesystem::filesystem_error("Cannot create download staging", candidate, error);
+        }
+        throw std::filesystem::filesystem_error("Cannot allocate download staging", parent, std::make_error_code(std::errc::file_exists));
+#endif
+    }
+    DownloadStaging(const DownloadStaging&) = delete;
+    DownloadStaging& operator=(const DownloadStaging&) = delete;
+    ~DownloadStaging() {
+        std::error_code ignored;
+        std::filesystem::remove_all(directory, ignored);
+    }
+    [[nodiscard]] std::filesystem::path path() const { return directory / "download"; }
+    bool finish(const std::filesystem::path& target, bool replace) const {
+        std::error_code error;
+        if (replace)
+            std::filesystem::rename(path(), target, error);
+        else
+            std::filesystem::create_hard_link(path(), target, error);
+        return !error;
+    }
+private:
+    std::filesystem::path directory;
+};
 
 /**
  * @brief A path in `folder` that does not exist yet, for a download whose name the page suggested.
