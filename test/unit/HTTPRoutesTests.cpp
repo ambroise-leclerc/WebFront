@@ -43,8 +43,8 @@ using Files  = MockFileSystem<ProviderFiles>;
 using Router = Server<RouteNet, Files>;
 
 template <typename Condition>
-bool waitFor(Condition condition) {
-    for (auto waited = 0ms; waited < 10s; waited += 1ms) {
+bool waitFor(Condition condition, std::chrono::milliseconds limit = 10s) {
+    for (auto waited = 0ms; waited < limit; waited += 1ms) {
         if (condition()) return true;
         std::this_thread::sleep_for(1ms);
     }
@@ -345,7 +345,7 @@ std::uint64_t peakResidentBytes() {
 SCENARIO("A large body is streamed without being held") {
     Fixture fixture;
     Router  server("127.0.0.1", "0");
-    constexpr std::uint64_t size = 300ull * 1024 * 1024;
+    constexpr std::uint64_t size = 128ull * 1024 * 1024;
     std::size_t             largestChunk = 0;
     auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
         RouteReply reply;
@@ -361,10 +361,11 @@ SCENARIO("A large body is streamed without being held") {
     InjectableSocket::discardWrites();
     const auto before = peakResidentBytes();
     send(get("/webfront/services/files/big"));
-    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
+    // 16384 chunks, each crossing to the worker thread: slow under Debug, coverage and sanitizers.
+    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }, 120s));
     THEN("the peak memory of the process did not grow with the size sent") {
-        // Holding the body would add its 300 MiB to the peak; ctest runs each scenario in its own process.
-        if (const auto after = peakResidentBytes()) REQUIRE(after - before < 64ull * 1024 * 1024);
+        // Holding the body would add its 128 MiB to the peak; ctest runs each scenario in its own process.
+        if (const auto after = peakResidentBytes()) REQUIRE(after - before < 48ull * 1024 * 1024);
     }
     THEN("every byte was sent through a buffer of the emission size") {
         REQUIRE(InjectableSocket::discardedBytes() > size);
