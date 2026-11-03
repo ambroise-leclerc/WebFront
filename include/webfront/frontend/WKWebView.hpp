@@ -38,7 +38,8 @@ struct WKWebViewOptions {
     /** @brief Test injection: called with the destination of each finished download. */
     std::function<void(const std::string&)> downloadFinished{};
     /** @brief Test injection: answers `alert`, `confirm` and `prompt` without a box. Unset shows an NSAlert sheet on the window.
-     *  WebKit reports `beforeunload` through the confirm delegate, so a handler sees it as a `confirm`. */
+     *  `beforeunload` is not handled by WKWebView: the public WKUIDelegate has no method for it, and it does not reach the confirm
+     *  method. A page that relies on it can lose unsaved changes on navigation or close; WebFront does not confirm it. */
     ScriptDialogHandler answerScriptDialog{};
 };
 

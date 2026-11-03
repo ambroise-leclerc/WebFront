@@ -95,7 +95,7 @@ so it does not qualify the native dialogs themselves or closing the window while
 
 ## Script dialogs
 
-`alert`, `confirm`, `prompt` and `beforeunload` work in every embedded frontend without a WebFront API (ADR-020, rule 6, #452).
+`alert`, `confirm` and `prompt` work in every embedded frontend, and `beforeunload` in all but WKWebView, without a WebFront API (ADR-020, rule 6, #452).
 All four engines use the system's or the engine's own box attached to the window by default; each frontend also has a test
 injection that answers without a box, with the shared types of `frontend/ScriptDialogs.hpp` (`ScriptDialog`,
 `ScriptDialogAnswer`, `ScriptDialogHandler`). Closing the window with a box open never waits for an answer: the page's call
@@ -105,11 +105,15 @@ returns as dismissed (`false` for `confirm`, `null` for `prompt`).
 | --- | --- | --- |
 | WebKitGTK | `script-dialog` signal; the default handler shows WebKitGTK's dialog on the window | `Session::answerScriptDialog` (`scriptDialogOpened` reports the default dialog) |
 | CEF (Chrome runtime) | `CefJSDialogHandler` (`OnJSDialog`, `OnBeforeUnloadDialog`) answered only by the injection; otherwise the runtime's own dialogs | `SimpleCEFClient::answerScriptDialog` |
-| WKWebView | the three `WKUIDelegate` panel methods show an `NSAlert` sheet of the window (an accessory text field for `prompt`); only frames of the application's own origin, others are dismissed | `WKWebViewOptions::answerScriptDialog` |
+| WKWebView | the three `WKUIDelegate` panel methods (alert, confirm, prompt; not `beforeunload`, see below) show an `NSAlert` sheet of the window (an accessory text field for `prompt`); only frames of the application's own origin, others are dismissed | `WKWebViewOptions::answerScriptDialog` |
 | WebView2 | the engine's own dialogs, until the injection turns them off and answers `ScriptDialogOpening` (kinds alert, confirm, prompt, beforeunload) | `Session::answerScriptDialog` (adapter-internal, set from a `prepare` hook) |
 
-WebKit gives a WKWebView no separate `beforeunload` callback: the page's confirmation reaches the confirm method, so an
-injected handler sees it as `confirm` there. The other three engines report `ScriptDialog::Kind::beforeUnload`.
+**Limit: WKWebView does not handle `beforeunload`.** The public `WKUIDelegate` has no method for it; WebKit routes it through a
+private selector (`_webView:runBeforeUnloadConfirmPanelWithMessage:initiatedByFrame:completionHandler:`), not through the confirm
+method, and WebFront does not implement a private selector. A page that asks for a confirmation before leaving can therefore
+lose unsaved changes under WKWebView; the application must save its state itself (for example on `visibilitychange`). This was
+not verified on macOS: support through the private selector, if wanted, needs a decision and a check on a real system. The other
+three engines report `ScriptDialog::Kind::beforeUnload`.
 
 Tests: `WebKitGTKAdapter-script-dialogs` and `CEFFileServices-dialogs` check that each dialog reaches the injection with its
 message and default text, that a confirmed `confirm` returns `true`, an accepted `prompt` returns its text and a dismissed
