@@ -292,7 +292,9 @@ struct Session {
     struct PendingDownload {
         std::string temporary;  // Where WKDownload writes: it needs a file that does not exist yet.
         std::string target;     // Where the user wants it; differs from `temporary` when "Replace" was chosen.
+        bool        reserved;   // `temporary` was handed out by `reservations`: give it back when the download ends.
     };
+    frontend::detail::DownloadReservations reservations;
     std::map<id, PendingDownload>        downloadDestinations;  // WKDownload -> its paths, until it ends.
     /// What the answers of a system panel hold instead of `this`: AppKit may deliver one after the session is gone.
     std::shared_ptr<Session*>            alive = std::make_shared<Session*>(this);
@@ -366,6 +368,8 @@ struct Session {
                 std::error_code ignored;
                 std::filesystem::remove(paths.temporary, ignored);
             }
+            if (paths.reserved)
+                reservations.release(paths.temporary);
         }
     }
 
@@ -614,8 +618,8 @@ struct Session {
         guard([&] {
             if (!options.downloadDirectory.empty()) {
                 std::filesystem::create_directories(options.downloadDirectory);  // WebKit needs the folder to exist.
-                const auto destination = frontend::detail::uniqueDownloadPath(options.downloadDirectory, suggested);
-                downloadDestinations[download] = {destination.string(), destination.string()};
+                const auto destination = reservations.reserve(options.downloadDirectory, suggested);
+                downloadDestinations[download] = {destination.string(), destination.string(), true};
                 Object path(text(destination.string()));
                 result = send(type("NSURL"), "fileURLWithPath:", path.get());
                 return;
@@ -635,12 +639,14 @@ struct Session {
                     const std::filesystem::path target = utf8(send(chosen, "path"));
                     std::error_code             code;
                     auto                        temporary = target;
+                    bool                        reserved  = false;
                     if (std::filesystem::exists(target, code)) {
-                        temporary = frontend::detail::uniqueDownloadPath(target.parent_path(), target.filename().string() + ".part");
+                        temporary = (*token)->reservations.reserve(target.parent_path(), target.filename().string() + ".part");
+                        reserved  = true;
                         Object path(text(temporary.string()));
                         chosen = send(type("NSURL"), "fileURLWithPath:", path.get());
                     }
-                    (*token)->downloadDestinations[download] = {temporary.string(), target.string()};
+                    (*token)->downloadDestinations[download] = {temporary.string(), target.string(), reserved};
                 }
                 handler(chosen);
                 send<void>(panel, "release");
@@ -670,6 +676,8 @@ struct Session {
                 std::filesystem::remove(pending.temporary, cleanup);
             }
         }
+        if (pending.reserved)
+            reservations.release(pending.temporary);
         if (completed && options.downloadFinished)
             guard([&] {
                 options.downloadFinished(pending.target);

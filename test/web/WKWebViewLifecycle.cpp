@@ -448,7 +448,7 @@ void replacedDownload() {
         std::ofstream(target) << oldContent;
         if (!downloaded.empty())
             std::ofstream(temporary) << downloaded;
-        session.downloadDestinations[reinterpret_cast<id>(key)] = {temporary.string(), target.string()};
+        session.downloadDestinations[reinterpret_cast<id>(key)] = {temporary.string(), target.string(), false};
     };
     start(1, "old", "new");
     session.downloadEnded(reinterpret_cast<id>(std::uintptr_t{1}), true);

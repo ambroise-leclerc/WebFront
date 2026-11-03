@@ -53,7 +53,7 @@ admitted origin passes the navigation policy (`webfront::detail::blobOriginUrl`)
 
 | Frontend | Chooser | Download | Test injection |
 | --- | --- | --- | --- |
-| WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder, the page's name reduced to its last component, never overwriting (`name (1).ext`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
+| WebKitGTK | default `run-file-chooser` dialog (portal under Flatpak) | `download-started` / `decide-destination`: the user's XDG download folder, the page's name reduced to its last component, never overwriting (`name (1).ext`), also between downloads that run at the same time (`DownloadReservations`) | `Session::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | CEF (Chrome runtime) | the runtime's dialog | the runtime's download handling | `SimpleCEFClient::chooseFiles` (`CefDialogHandler::OnFileDialog`), `downloadDirectory`, `downloadFinished`. The runtime itself turns a suggested name `../x` into `_x` |
 | WKWebView | `runOpenPanelWithParameters` shows an `NSOpenPanel` sheet of the window; only frames admitted by the policy | `WKDownload` (macOS 11.3+): a save panel proposes the name | `WKWebViewOptions::chooseFiles`, `downloadDirectory`, `downloadFinished` |
 | WebView2 | the engine's native chooser | the engine's native download UI | DevTools intercepts the chooser in tests; `DownloadStarting` redirects the download to a private path |

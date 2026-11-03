@@ -294,7 +294,9 @@ struct Session : FailureState {
     struct Download {
         Api::Object                object;
         std::vector<unsigned long> handlers;
+        std::filesystem::path      reserved;  // The destination given to this download, until it ends.
     };
+    DownloadReservations reservations;
     std::vector<Download> downloads;
     unsigned long         downloadStartedHandler = 0;
     bool                                 closed            = false;
@@ -434,16 +436,16 @@ struct Session : FailureState {
         }
         return std::filesystem::temp_directory_path();
     }
-    std::filesystem::path uniqueDestination(std::string_view suggested) const {
+    std::filesystem::path reserveDestination(std::string_view suggested) {
         const auto      folder = destinationFolder();
         std::error_code error;
         std::filesystem::create_directories(folder, error);  // WebKitGTK writes into an existing folder only.
         if (error)
             throw std::filesystem::filesystem_error("WebKitGTK: cannot create the download folder", folder, error);
-        return uniqueDownloadPath(folder, suggested);
+        return reservations.reserve(folder, suggested);
     }
     void trackDownload(Api::Object download) {
-        Download entry{download, {}};
+        Download entry{download, {}, {}};
         a.refSink(download);
         entry.handlers.push_back(a.connect(download, "decide-destination", reinterpret_cast<Api::Callback>(onDecideDestination), this, nullptr, 0));
         entry.handlers.push_back(a.connect(download, "finished", reinterpret_cast<Api::Callback>(onDownloadFinished), this, nullptr, 0));
@@ -456,6 +458,8 @@ struct Session : FailureState {
             return;
         for (auto handler : found->handlers)
             a.disconnect(download, handler);
+        if (!found->reserved.empty())
+            reservations.release(found->reserved);
         a.unref(found->object);
         downloads.erase(found);
     }
@@ -562,7 +566,11 @@ struct Session : FailureState {
     }
     static int onDecideDestination(Api::Object download, const char* suggested, Session* self) noexcept {
         try {
-            const auto destination = self->uniqueDestination(suggested ? suggested : "");
+            const auto destination = self->reserveDestination(suggested ? suggested : "");
+            if (const auto entry = std::ranges::find(self->downloads, download, &Download::object); entry != self->downloads.end())
+                entry->reserved = destination;
+            else
+                self->reservations.release(destination);
             api().downloadDestination(download, destination.c_str());
         } catch (...) {
             api().downloadCancel(download);
