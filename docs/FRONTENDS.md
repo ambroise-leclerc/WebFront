@@ -63,6 +63,8 @@ Xvfb for WebKitGTK), a `Runtime.evaluate` with `userGesture` (CEF) or `evaluateJ
 gesture (WKWebView). The WKWebView scenarios (`WKWebViewLifecycle-download`, `-choose-file`, `-cancel-choose`,
 `-replaced-download`) use the test injections of `WKWebViewOptions`: they qualify the delegate wiring, the blob download
 policy, the destination handling and the replace-on-success logic, not the system `NSOpenPanel`/`NSSavePanel` themselves.
+The real `NSSavePanel` was driven by hand (accessibility actions) on macOS: saving, and the "Replace" choice over an existing
+file, report the finished download and leave no `.part` file. No automated test opens it.
 WebKit reduces a suggested name such as `../x.txt` to `_x.txt` before the frontend sees it.
 
 ### Tests
