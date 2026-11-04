@@ -23,7 +23,9 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -93,6 +95,8 @@ public:
 
     ~BrowserIntegrationTest() {
         joinBitsetFutureChecks();
+        error_code ignored;
+        if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
     }
 
     /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
@@ -104,6 +108,7 @@ public:
         registerCallbacks();
         registerBitsetCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
+        registerMediaRoute(app);
         streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
             if (request.query.find("fail=1") != std::string_view::npos) throw std::runtime_error("route failure requested by the spec");
             std::uint64_t size = 0;
@@ -174,7 +179,10 @@ private:
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     UISubscription                   lifeReactSubscription;
-    http::RouteTable::Registration   streamRoute;
+    http::RouteTable::Registration   streamRoute, mediaRoute;
+    filesystem::path                 mediaFile;
+    mutex                            mediaMutex;
+    vector<string>                   mediaRanges;
     std::map<WebLinkId, react::Store<TestWF::UI, std::tuple<std::uint32_t, std::string>>> reactStores;
     UISubscription                       closedDomSubscription;
     std::map<WebLinkId, bool>            closedDocumentRejected;
@@ -379,6 +387,36 @@ private:
             notice.pending = false;
             throw;
         }
+    }
+
+    /// A 20 second PCM sound in a native file, served by ranges (#455): a <video> element plays it and seeks in it.
+    void registerMediaRoute(TestWF& app) {
+        constexpr uint32_t rate = 8000, seconds = 20, dataSize = rate * seconds;
+        string wav = "RIFF";
+        auto   little = [&wav](uint32_t value, int bytes) { for (int index = 0; index < bytes; ++index) wav.push_back(static_cast<char>((value >> (8 * index)) & 0xff)); };
+        little(36 + dataSize, 4);
+        wav += "WAVEfmt ";
+        little(16, 4); little(1, 2); little(1, 2); little(rate, 4); little(rate, 4); little(1, 2); little(8, 2);
+        wav += "data";
+        little(dataSize, 4);
+        for (uint32_t index = 0; index < dataSize; ++index) wav.push_back(static_cast<char>(128 + (index % 80 < 40 ? 20 : -20)));
+        mediaFile = filesystem::temp_directory_path() / ("webfront-range-" + to_string(random_device{}()) + ".wav");
+        ofstream(mediaFile, ios::binary) << wav;
+        mediaRoute = app.addRoute("/webfront/services/test-media/", [this](const http::RouteRequest& request) {
+            {
+                lock_guard lock(mediaMutex);
+                mediaRanges.push_back(request.request.getHeaderValue("Range").value_or("-"));
+            }
+            auto reply = http::fileReply(request.request, fs::File(ifstream(mediaFile, ios::binary), mediaFile), "audio/wav");
+            reply.headers.emplace_back("Cache-Control", "no-store");
+            return reply;
+        });
+        webFront->cppFunction("mediaRanges", [this]() {
+            lock_guard lock(mediaMutex);
+            string joined;
+            for (const auto& range : mediaRanges) joined += range + "\n";
+            return joined;
+        });
     }
 
     void registerCallbacks() {

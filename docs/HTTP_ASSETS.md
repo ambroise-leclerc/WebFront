@@ -45,8 +45,36 @@ connection closes) and a `body` callback filling the next chunk (0 ends it). The
 thread, so a slow disk does not delay other connections. Route work runs on its own pool of 4 threads and the files of the providers on another of 2: a handler that blocks for seconds delays at most the routes queued behind four such handlers, never `WebFront.js` or a page. A route precedes the file providers, never masks the embedded
 `WebFront.js`, and overlapping prefixes are refused when registered. Other methods get 405; a handler that throws, or sets a
 header that could split the response or that the server owns (`Content-Length`, `Connection`, `Transfer-Encoding`), gets
-500. The registration handle removes the route when destroyed; a request already running keeps its handler. `Range`
-requests (#455) and the binding of a request to a connection (#469) are not part of this mechanism yet.
+500. The registration handle removes the route when destroyed; a request already running keeps its handler. The
+binding of a request to a connection (#469) is not part of this mechanism yet.
+
+## Byte ranges (#455)
+
+An unencoded file of known size, from any provider, is served by ranges (RFC 9110 §14) and says so with
+`Accept-Ranges: bytes`. A single `Range: bytes=a-b`, `a-` or `-n` answers `206 Partial Content` with `Content-Range`
+and the length of that part; only those bytes are read, on the worker, in chunks of `emissionBufferSize` (the file
+positions itself with `fs::File::seek`). A range that starts at or past the end, an empty suffix (`-0`), or any range of an
+empty file answers `416` with `Content-Range: bytes */size`; a last byte past the end is clamped, and a suffix longer than
+the file selects all of it. `HEAD` answers like `GET` without a body, so it announces the 206 and its length.
+
+What the server may ignore, it ignores, and the answer is a normal `200` with the whole file: several ranges (in one
+field or several), a unit other than `bytes`, a malformed or inverted range (`5-2`), and a `Range` on a response that
+cannot be ranged. Multipart answers (`multipart/byteranges`) are not produced. The responses of encoded files (served as
+stored with `Content-Encoding`, or decoded by the gzip fallback) carry `Accept-Ranges: none` and are never partial, like
+files whose size is unknown.
+
+`If-Range` conditions a range on a validator. Only a strong entity tag is compared: a native file (`NativeDebugFS`, the
+development document root, or any provider building `fs::File(ifstream, path)`) has the tag `"<size>-<modification time>"`,
+sent as `ETag` on its 200 and 206 responses. If the tag in `If-Range` is not the file's current one, the file changed
+between the two requests, so the current file is sent in full with its new tag. Embedded data and providers that
+do not give a path have no tag, and a conditioned range is answered in full. The server sends no `Last-Modified`, so a date
+in `If-Range` never matches (and a browser applies no heuristic freshness to development files).
+
+A dynamic route that serves a file, such as the services built on #454, calls `http::fileReply(request, file, contentType)`:
+it applies the same rules to the route's `RouteRequest::request` and returns the `RouteReply` (200, 206 or 416) that the
+handler completes with its own headers (`Cache-Control`, `Content-Disposition`...). A handler with its own storage
+can use `http::range::select(request, size, entityTag)` directly. The read-only reply is repeatable: successive range
+requests on one URL each open the file again.
 
 ## Validated representation cache
 

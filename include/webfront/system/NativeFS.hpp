@@ -14,8 +14,9 @@ class NativeRawFS {
 public:
     std::optional<File> open(std::filesystem::path path) {
         std::ifstream file;
-        file.open(rootPath / path, std::ios::binary);
-        if (file.is_open()) return File{std::move(file)};
+        const auto full = rootPath / path;
+        file.open(full, std::ios::binary);
+        if (file.is_open()) return File{std::move(file), full};
         return {};
     }
 protected:

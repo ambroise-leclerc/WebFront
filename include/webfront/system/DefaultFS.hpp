@@ -33,8 +33,9 @@ public:
 
     std::optional<File> open(std::filesystem::path file) const {
         if (root.empty()) return {};
-        std::ifstream stream(root / file, std::ios::binary);
-        if (stream.is_open()) return File{std::move(stream)};
+        const auto    full = root / file;
+        std::ifstream stream(full, std::ios::binary);
+        if (stream.is_open()) return File{std::move(stream), full};
         return {};
     }
 

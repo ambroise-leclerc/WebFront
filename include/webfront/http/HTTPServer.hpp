@@ -16,6 +16,7 @@
 #include "GzipCache.hpp"
 #include "GzipExecutor.hpp"
 #include "MimeType.hpp"
+#include "Ranges.hpp"
 #include "WebSocket.hpp"
 
 #include <algorithm>
@@ -221,11 +222,13 @@ struct Response : Headers {
     enum StatusCode : uint16_t {
         switchingProtocols    = 101,
         ok                    = 200,
+        partialContent        = 206,
         badRequest            = 400,
         forbidden             = 403,
         notFound              = 404,
         methodNotAllowed      = 405,
         notAcceptable         = 406,
+        rangeNotSatisfiable   = 416,
         internalServerError   = 500,
         notImplemented        = 501,
         serviceUnavailable    = 503,
@@ -274,14 +277,16 @@ private:
     mutable std::string httpStatus;
 
     [[nodiscard]] static std::string toString(StatusCode code) {
-        static constexpr std::array<std::pair<StatusCode, std::string_view>, 11> names{
+        static constexpr std::array<std::pair<StatusCode, std::string_view>, 13> names{
             {{switchingProtocols, "Switching Protocols"},
              {ok, "OK"},
+             {partialContent, "Partial Content"},
              {badRequest, "Bad Request"},
              {forbidden, "Forbidden"},
              {notFound, "Not Found"},
              {methodNotAllowed, "Method Not Allowed"},
              {notAcceptable, "Not Acceptable"},
+             {rangeNotSatisfiable, "Range Not Satisfiable"},
              {internalServerError, "Internal Server Error"},
              {notImplemented, "Not Implemented"},
              {serviceUnavailable, "Service Unavailable"},
@@ -460,6 +465,53 @@ inline void validateReply(const RouteReply& reply) {
 
 } // namespace routing
 
+/// The reply of a route that serves `file` as `contentType`, with the byte ranges of RFC 9110 §14: `Range` selects
+/// one part (206 with `Content-Range`, 416 when it starts past the end), `If-Range` conditions it on the file's
+/// entity tag, several ranges are answered in full, and only the selected bytes are read, in chunks, by the server.
+/// A file that is encoded or has no known size is answered in full with `Accept-Ranges: none`.
+/// The handler adds what it alone knows (`Cache-Control`, `Content-Disposition`...).
+[[nodiscard]] inline RouteReply fileReply(const Request& request, fs::File file, std::string contentType) {
+    RouteReply reply;
+    reply.headers.emplace_back("Content-Type", std::move(contentType));
+    const auto size = file.knownSize();
+    if (file.isEncoded() || !size) {
+        reply.headers.emplace_back("Accept-Ranges", "none");
+        reply.body = [file = std::make_shared<fs::File>(std::move(file))](std::span<char> out) { return file->read(out); };
+        reply.contentLength = size;
+        return reply;
+    }
+    reply.headers.emplace_back("Accept-Ranges", "bytes");
+    if (file.entityTag()) reply.headers.emplace_back("ETag", *file.entityTag());
+    const auto selection = range::select(request, *size, file.entityTag());
+    if (selection.outcome == range::Outcome::unsatisfiable) {
+        reply.status = Response::rangeNotSatisfiable;
+        reply.headers.emplace_back("Content-Range", range::unsatisfiedContentRange(*size));
+        reply.contentLength = 0;
+        return reply;
+    }
+    std::uint64_t first  = 0;
+    std::uint64_t length = *size;
+    if (selection.outcome == range::Outcome::partial) {
+        reply.status = Response::partialContent;
+        reply.headers.emplace_back("Content-Range", range::contentRange(selection, *size));
+        first  = selection.first;
+        length = selection.length;
+    }
+    reply.contentLength = length;
+    reply.body = [file = std::make_shared<fs::File>(std::move(file)), first, remaining = length, positioned = first == 0](std::span<char> out) mutable {
+        if (!positioned) {
+            if (!file->seek(first)) throw std::runtime_error("The file cannot seek");
+            positioned = true;
+        }
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), remaining));
+        if (count == 0) return std::size_t{0};
+        const auto read = file->read(out.first(count));
+        remaining -= read;
+        return read;
+    };
+    return reply;
+}
+
 template <networking::Features Net, fs::Provider FS, BuffersPolicyType Policy = DefaultBuffersPolicy>
 class RequestHandler {
 public:
@@ -481,6 +533,10 @@ public:
         bool identityFallback = false;
         /// An unencoded file of known size, left unread to be streamed (asynchronous requests only).
         std::unique_ptr<fs::File> file{};
+        /// The part of `file` a `Range` request selected: its first byte, and how many bytes follow (206).
+        bool partial = false;
+        std::uint64_t offset = 0;
+        std::uint64_t length = 0;
         std::size_t limit = maxDecodedAssetSize<Policy>();
     };
 
@@ -520,13 +576,15 @@ private:
             result.needsDecode = false;
             return result;
         }
-        response.statusCode = Response::ok;
+        response.statusCode = result.partial ? Response::partialContent : Response::ok;
         response.headers.emplace_back("Content-Type", MimeType(requestPath->extension().string()).toString());
         if (!result.needsDecode) {
             if (!response.getHeaderValue("Content-Length"))
                 response.headers.emplace_back("Content-Length", std::to_string(response.content.size()));
             if (result.head) response.content.clear();
         }
+        // Only an unencoded file of known size is served by ranges, and it announced them when it was opened.
+        if (!response.getHeaderValue("Accept-Ranges")) response.headers.emplace_back("Accept-Ranges", "none");
         return result;
     }
 
@@ -586,7 +644,23 @@ private:
         prepared.identityFallback = fallback;
         if (asynchronous && !file->isEncoded()) {
             if (const auto size = file->knownSize()) {
-                response.headers.emplace_back("Content-Length", std::to_string(*size));
+                response.headers.emplace_back("Accept-Ranges", "bytes");
+                if (file->entityTag()) response.headers.emplace_back("ETag", *file->entityTag());
+                const auto selection = range::select(request, *size, file->entityTag());
+                if (selection.outcome == range::Outcome::unsatisfiable) {
+                    auto unsatisfiable = Response::getStatusResponse(Response::rangeNotSatisfiable);
+                    unsatisfiable.headers.emplace_back("Content-Range", range::unsatisfiedContentRange(*size));
+                    unsatisfiable.headers.emplace_back("Accept-Ranges", "bytes");
+                    return unsatisfiable;
+                }
+                prepared.length = *size;
+                if (selection.outcome == range::Outcome::partial) {
+                    prepared.partial = true;
+                    prepared.offset  = selection.first;
+                    prepared.length  = selection.length;
+                    response.headers.emplace_back("Content-Range", range::contentRange(selection, *size));
+                }
+                response.headers.emplace_back("Content-Length", std::to_string(prepared.length));
                 if (prepared.head) return {};
                 prepared.file = std::make_unique<fs::File>(std::move(*file));
                 return {};
@@ -872,6 +946,7 @@ private:
         Request request;
         std::optional<typename gzip::DecodeExecutor<Decode>::Lease> lease;
         std::unique_ptr<fs::File> streamed;
+        std::uint64_t streamOffset = 0, streamLength = 0;
         bool head = false;
         Response response;
         try {
@@ -900,7 +975,11 @@ private:
                         prepared.response.headers.emplace_back("Vary", "Accept-Encoding");
                     }
                 }
-                if (prepared.response.statusCode == Response::ok) streamed = std::move(prepared.file);
+                if (prepared.response.statusCode == Response::ok || prepared.response.statusCode == Response::partialContent) {
+                    streamOffset = prepared.offset;
+                    streamLength = prepared.length;
+                    streamed     = std::move(prepared.file);
+                }
                 response = std::move(prepared.response);
             }
             log::info("  responding http {}", static_cast<int>(response.statusCode));
@@ -923,7 +1002,18 @@ private:
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streamed)
-            co_await streamBody(fileWorker, socket, [&file = *streamed](std::span<char> out) { return file.read(out); }, streamed->knownSize(), "File response");
+            co_await streamBody(fileWorker, socket, [&file = *streamed, offset = streamOffset, remaining = streamLength,
+                                                     positioned = streamOffset == 0](std::span<char> out) mutable {
+                if (!positioned) {
+                    if (!file.seek(offset)) throw std::runtime_error("The file cannot seek");
+                    positioned = true;
+                }
+                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), remaining));
+                if (count == 0) return std::size_t{0};
+                const auto read = file.read(out.first(count));
+                remaining -= read;
+                return read;
+            }, streamLength, "File response");
         if (response.statusCode != Response::switchingProtocols || tasks.stopRequested())
             socket.shutdown(Net::Socket::shutdown_both);  // a stopped server hands nothing over: its drain would never end
         else if (upgradeHandler)
