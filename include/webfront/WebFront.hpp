@@ -174,7 +174,7 @@ public:
     /// repeated requests (byte ranges). Throws ReadRefused when the connection is gone, when it is not the view of an
     /// embedded frontend and WebFrontConfig::remoteFileTransport was not declared, or when the options are unacceptable.
     [[nodiscard]] std::string grantRead(const ReadRoute& route, std::string_view path, ReadOptions options = {}) const {
-        return route.binding()->grant(generation, route.prefix(), path, std::move(options));
+        return route.binding()->grant(generation, route.id(), route.prefix(), path, std::move(options));
     }
 
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
@@ -540,7 +540,9 @@ public:
             throw std::invalid_argument("A read route needs a handler");
         if (!prefix.starts_with(ReadBinding::servicesPath) || prefix.size() == ReadBinding::servicesPath.size() || prefix.starts_with(ReadBinding::bindPath))
             throw std::invalid_argument("A read route lives under " + std::string(ReadBinding::servicesPath) + ", not under " + std::string(ReadBinding::bindPath));
-        return ReadRoute{prefix, readBinding, httpServer.addRoute(prefix, readBinding->readHandler(prefix, std::move(handler)), true)};
+        auto id = automation::channel::nonce();  // this registration's identity: its grants work nowhere else
+        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true);
+        return ReadRoute{std::move(id), prefix, readBinding, std::move(registration)};
     }
 
     /// Revokes the read grant of a URL returned by UI::grantRead (or of its token); an unknown one is ignored.

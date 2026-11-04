@@ -133,6 +133,7 @@
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
                 const error = new Error(`WebFront connection closed: ${detail}`);
                 this.settleReadyRejected(error);
+                this.rejectBound(error);  // a no-op once settled
                 for (const pending of this.pendingCalls.values())
                     pending.reject(error);
                 this.pendingCalls.clear();
@@ -142,6 +143,7 @@
             this.socket.onerror = () => {
                 const error = new Error("WebFront connection failed");
                 this.settleReadyRejected(error);
+                this.rejectBound(error);
                 console.error("[WebFront socket error]", error);
             };
         }

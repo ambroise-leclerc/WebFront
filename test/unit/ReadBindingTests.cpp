@@ -68,7 +68,7 @@ struct Fixture {
 
     explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused)
         : binding(transport, [this] { return time; }) {
-        read = binding.readHandler(std::string(prefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
+        read = binding.readHandler("route-a", std::string(prefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
             lastRest    = std::string(grant.rest);
             lastContext = grant.context;
             http::RouteReply reply;
@@ -85,7 +85,7 @@ struct Fixture {
     }
 
     std::string url(ReadBinding::ConnectionKey key, std::string_view path = "a.txt", ReadOptions options = {}) {
-        return binding.grant(key, prefix, path, std::move(options));
+        return binding.grant(key, "route-a", prefix, path, std::move(options));
     }
 };
 
@@ -253,6 +253,23 @@ SCENARIO("The exchange secret is single use and only the right one works", "[rea
         REQUIRE(call(fixture.exchange, check, cookie).status == http::Response::ok);
         REQUIRE(call(fixture.exchange, check, "wf-client-0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
     }
+}
+
+SCENARIO("A grant works only on the route registration that issued it", "[read-binding]") {
+    Fixture fixture;
+    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
+    const auto url    = fixture.url(1, "a.txt", {.context = std::string("secret-of-route-a")});
+    bool       otherRan = false;
+    // A later route on the same prefix (route A was dropped and B registered), or a sibling prefix.
+    const auto other = fixture.binding.readHandler("route-b", std::string(prefix), [&](const http::RouteRequest&, const ReadGrant&) {
+        otherRan = true;
+        return http::RouteReply{};
+    });
+    THEN("the other route refuses the token without running its handler") {
+        REQUIRE(call(other, url, cookie).status == http::Response::forbidden);
+        REQUIRE_FALSE(otherRan);
+    }
+    THEN("the issuing route still accepts it") { REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok); }
 }
 
 SCENARIO("The transferable mode makes the token alone a short-lived bearer capability", "[read-binding]") {
@@ -492,6 +509,35 @@ SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
         REQUIRE_FALSE(logged.contains(token));
         REQUIRE_FALSE(logged.contains(token.substr(0, 16)));
         REQUIRE_FALSE(logged.contains("secret-name"));
+    }
+    testing::InjectableSocket::reset();
+}
+
+SCENARIO("A rejected or upgraded services target is not logged either", "[read-binding]") {
+    testing::InjectableSocket::reset();
+    ReadNet::accepts = 0;
+    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
+    webfront::log::setLogLevel(webfront::log::Debug);
+    std::string logged;
+    std::mutex  loggedMutex;
+    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += std::string(line) + "\n";
+    });
+    // "report..txt" makes the target unfit for route dispatch: it falls to the file providers.
+    const std::string raw = "GET /webfront/services/files/0123456789abcdef.TOKENSECRET/report..txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    std::vector<std::byte> bytes;
+    for (const char c : raw)
+        bytes.push_back(static_cast<std::byte>(c));
+    testing::InjectableSocket::receive(bytes);
+    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+    webfront::log::removeSinks(sink);
+    webfront::log::setLogLevel(webfront::log::Error);
+    std::scoped_lock lock{loggedMutex};
+    THEN("no log line holds the token or the file name") {
+        REQUIRE_FALSE(logged.contains("TOKENSECRET"));
+        REQUIRE_FALSE(logged.contains("report"));
+        REQUIRE(logged.contains("Received request GET"));
     }
     testing::InjectableSocket::reset();
 }

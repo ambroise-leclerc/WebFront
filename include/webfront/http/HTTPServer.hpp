@@ -414,6 +414,15 @@ private:
 
 namespace routing {
 
+/// True when a request target may carry a read token (it names the services space, in any letter case): its text is
+/// then never logged, whether or not the target qualifies for route dispatch (a rejected target, an upgrade request...).
+inline bool mentionsServices(std::string_view target) {
+    constexpr std::string_view marker = "webfront/services";
+    return std::search(target.begin(), target.end(), marker.begin(), marker.end(), [](char a, char b) {
+               return std::tolower(static_cast<unsigned char>(a)) == b;
+           }) != target.end();
+}
+
 /// The path without empty and "." segments, so that "/a//b/./c" reaches the route of "/a/b/c" instead of falling
 /// through to the file providers, which would resolve it to the same file. A trailing slash is kept.
 inline std::string collapseSegments(std::string path) {
@@ -606,10 +615,11 @@ private:
         // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
         auto       requestUri = uri::decode(rawPath);
-        log::debug("Request uri - raw:'{}' decoded path:'{}'", uri, requestUri);
+        const bool secret = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
+        if (!secret) log::debug("Request uri - raw:'{}' decoded path:'{}'", uri, requestUri);
         if (!isSafePath(requestUri)) return {};
         auto requestPath = std::filesystem::path(requestUri).relative_path();
-        log::debug("  -> requestPath : {}", requestPath.string());
+        if (!secret) log::debug("  -> requestPath : {}", requestPath.string());
         if (!requestPath.has_filename()) requestPath /= "index.html";
         return requestPath;
     }
@@ -976,6 +986,8 @@ private:
             auto match = matchRoute(request);
             if (match && match->route->secretPath)
                 log::info("Received request {} on {}...", request.getMethodName(), match->route->prefix);  // the rest is a secret
+            else if (routing::mentionsServices(request.uri))
+                log::info("Received request {} on a services path (not logged)", request.getMethodName());
             else
                 log::info("Received request {} on {}", request.getMethodName(), request.uri);
             if (match) {

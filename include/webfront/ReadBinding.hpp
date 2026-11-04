@@ -233,7 +233,7 @@ public:
     /// Gives a read URL to the connection `key`: `prefix` is the route's, `rest` the path under the token (it is
     /// percent-encoded here). Throws ReadRefused when the connection is gone, its transport is refused, or the options
     /// are unacceptable.
-    [[nodiscard]] std::string grant(ConnectionKey key, std::string_view prefix, std::string_view rest, ReadOptions options) {
+    [[nodiscard]] std::string grant(ConnectionKey key, std::string_view routeId, std::string_view prefix, std::string_view rest, ReadOptions options) {
         if (options.lifetime.count() < 0)
             throw ReadRefused("A read lifetime cannot be negative");
         if (options.transferable && (options.lifetime.count() <= 0 || options.lifetime > maxTransferableLifetime))
@@ -245,7 +245,7 @@ public:
             throw ReadRefused("The connection is closed");
         if (!connection->second.local && transport == RemoteFileTransport::refused)
             throw ReadRefused("This connection is not the view of an embedded frontend: declare WebFrontConfig::remoteFileTransport to read files");
-        Grant record{.owner = key, .secret = secret, .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
+        Grant record{.owner = key, .route = std::string(routeId), .secret = secret, .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
         if (options.lifetime.count() > 0)
             record.expiry = now() + options.lifetime;
         grants[id] = std::move(record);
@@ -298,13 +298,13 @@ public:
 
     /// Wraps `handler` as a route handler that serves it only for a request which presents an acceptable token (and cookie).
     /// The prefix this is registered under must be `prefix`, which ends with '/'.
-    [[nodiscard]] http::RouteHandler readHandler(std::string prefix, ReadHandler handler) {
-        return [this, prefix = std::move(prefix), handler = std::move(handler)](const http::RouteRequest& request) {
+    [[nodiscard]] http::RouteHandler readHandler(std::string routeId, std::string prefix, ReadHandler handler) {
+        return [this, routeId = std::move(routeId), prefix = std::move(prefix), handler = std::move(handler)](const http::RouteRequest& request) {
             const auto after = request.path.substr(std::min(prefix.size(), request.path.size()));
             const auto slash = after.find('/');
             const auto token = after.substr(0, slash);
             const auto rest  = slash == std::string_view::npos ? std::string_view{} : after.substr(slash + 1);
-            auto       context = authorize(token, detail::requestCookies(request.request));
+            auto       context = authorize(routeId, token, detail::requestCookies(request.request));
             if (!context) {
                 auto denied = plain(http::Response::forbidden);
                 detail::hardenRead(denied, {});
@@ -317,8 +317,8 @@ public:
     }
 
     /// True when `token` is accepted for a request that presents `cookies`: used by the route, exposed for tests.
-    [[nodiscard]] bool accepts(std::string_view token, const std::vector<std::pair<std::string, std::string>>& cookies) {
-        return authorize(token, cookies).has_value();
+    [[nodiscard]] bool accepts(std::string_view routeId, std::string_view token, const std::vector<std::pair<std::string, std::string>>& cookies) {
+        return authorize(routeId, token, cookies).has_value();
     }
 
 private:
@@ -333,6 +333,7 @@ private:
     };
     struct Grant {
         ConnectionKey                                        owner = 0;
+        std::string                                          route;  // the registration that issued it
         std::string                                          secret;
         bool                                                 transferable = false;
         std::optional<std::chrono::steady_clock::time_point> expiry;
@@ -419,7 +420,7 @@ private:
     }
 
     /// The context of the grant, when `token` and the cookies are acceptable. Every refusal looks alike.
-    std::optional<std::shared_ptr<const std::any>> authorize(std::string_view token, const std::vector<std::pair<std::string, std::string>>& cookies) {
+    std::optional<std::shared_ptr<const std::any>> authorize(std::string_view routeId, std::string_view token, const std::vector<std::pair<std::string, std::string>>& cookies) {
         const auto dot = token.find('.');
         if (dot == std::string_view::npos)
             return std::nullopt;
@@ -428,6 +429,8 @@ private:
         if (found == grants.end() || !detail::viewSecretMatches(found->second.secret, token.substr(dot + 1)))
             return std::nullopt;
         const auto& grant = found->second;
+        if (grant.route != routeId)  // a grant is valid for the registration that issued it, not for a later route on the prefix
+            return std::nullopt;
         if (grant.expiry && now() >= *grant.expiry) {
             grants.erase(found);
             return std::nullopt;
@@ -459,10 +462,11 @@ class ReadRoute {
 public:
     ReadRoute() = default;
     [[nodiscard]] const std::string& prefix() const noexcept { return prefixValue; }
+    [[nodiscard]] const std::string& id() const noexcept { return idValue; }
     [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(registration); }
 
-    ReadRoute(std::string prefix, std::shared_ptr<ReadBinding> owner, http::RouteTable::Registration route)
-        : prefixValue(std::move(prefix)), bound(std::move(owner)), registration(std::move(route)) {}
+    ReadRoute(std::string id, std::string prefix, std::shared_ptr<ReadBinding> owner, http::RouteTable::Registration route)
+        : idValue(std::move(id)), prefixValue(std::move(prefix)), bound(std::move(owner)), registration(std::move(route)) {}
     [[nodiscard]] const std::shared_ptr<ReadBinding>& binding() const {
         if (!bound)
             throw ReadRefused("The read route is empty");
@@ -470,6 +474,7 @@ public:
     }
 
 private:
+    std::string                    idValue;
     std::string                    prefixValue;
     std::shared_ptr<ReadBinding>   bound;
     http::RouteTable::Registration registration;
