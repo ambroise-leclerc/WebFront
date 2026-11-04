@@ -16,7 +16,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 namespace webfront::fs {
 
@@ -43,12 +42,6 @@ public:
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
         : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize==0), encoding(contentEncoding) {}
     File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} { measureStream(); }
-    /// A native file, with the validator its path provides (see entityTag()).
-    File(std::ifstream ifstream, const std::filesystem::path& source) : File(std::move(ifstream)) {
-        std::error_code error;
-        const auto      modified = std::filesystem::last_write_time(source, error);
-        if (!error && streamSize) entityTagValue = "\"" + std::to_string(*streamSize) + "-" + std::to_string(static_cast<long long>(modified.time_since_epoch().count())) + "\"";
-    }
 
     [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
     [[nodiscard]] std::string_view getEncoding() const { return encoding; }
@@ -58,10 +51,15 @@ public:
     /// native file whose stream can seek). A server uses it to announce a length and stream the file in chunks.
     [[nodiscard]] std::optional<std::uint64_t> knownSize() const { return fileType == FileType::staticData ? std::optional<std::uint64_t>{size} : streamSize; }
 
-    /// A strong entity tag (RFC 9110 §8.8.3), when the file can tell its version: a native file's size and
-    /// modification time. Embedded data and providers that do not know their version have none, and a range
-    /// request conditioned by `If-Range` is then answered in full.
+    /// A strong entity tag (RFC 9110 §8.8.3) for the bytes this file yields, when its provider can guarantee one.
+    /// WebFront derives none from a pathname, a size or a modification time: those can describe another version than
+    /// the opened stream (replacement between the open and the lookup, rewrite that keeps the time). A provider
+    /// whose storage is versioned (a content hash, a revision number) sets it with setEntityTag(); without one, a
+    /// range request conditioned by `If-Range` is answered in full.
     [[nodiscard]] const std::optional<std::string>& entityTag() const { return entityTagValue; }
+
+    /// @param tag a quoted tag that changes whenever the bytes this file yields change, such as `"rev-42"`.
+    void setEntityTag(std::string tag) { entityTagValue = std::move(tag); }
 
     /// Positions the next read at `offset` bytes from the start of the content (the position the file had when it
     /// was built), when knownSize() is set. An offset past the end positions at the end.

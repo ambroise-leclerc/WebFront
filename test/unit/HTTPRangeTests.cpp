@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <list>
 #include <optional>
 #include <string>
@@ -81,12 +82,17 @@ struct Served {
     static inline std::vector<std::uint64_t> words;
     static inline std::filesystem::path      native;  ///< a native file when set, embedded data otherwise
     static inline std::string_view           encoding;
+    static inline std::string                tag;       ///< the provider's validator; empty when it has none
 };
 
 struct ServedFS {
     explicit ServedFS(std::filesystem::path) {}
     std::optional<fs::File> open(std::filesystem::path) {
-        if (!Served::native.empty()) return fs::File(std::ifstream(Served::native, std::ios::binary), Served::native);
+        if (!Served::native.empty()) {
+            fs::File file{std::ifstream(Served::native, std::ios::binary)};
+            if (!Served::tag.empty()) file.setEntityTag(Served::tag);
+            return file;
+        }
         auto& words = Served::words;
         words.assign((Served::content.size() + 7) / 8, 0);
         for (std::size_t index = 0; index < Served::content.size(); ++index)
@@ -137,6 +143,7 @@ std::string header(const std::string& response, std::string_view name) {
 void serveEmbedded(std::string content, std::string_view encoding = {}) {
     Served::content  = std::move(content);
     Served::encoding = encoding;
+    Served::tag.clear();
     Served::native.clear();
 }
 
@@ -246,8 +253,8 @@ SCENARIO("A file is served by ranges") {
                     REQUIRE(header(response, "Accept-Ranges") == "bytes");
                     REQUIRE(body(response) == content);
                 }
-                THEN("a native file has an entity tag, embedded data none") {
-                    REQUIRE(header(response, "ETag").empty() != native);
+                THEN("no validator is derived from a pathname, a size or a time") {
+                    REQUIRE(header(response, "ETag").empty());
                 }
             }
             WHEN("a range crosses the emission chunks") {
@@ -317,10 +324,15 @@ SCENARIO("A range survives a file changed between two requests only when its val
     webfront::test::TemporaryDirectory directory;
     Served::native   = directory.path() / "media.bin";
     Served::encoding = {};
+    // The provider versions its storage: here the tag is a hash of the content, which no time or size can replace.
+    const auto publish = [](const std::string& content) {
+        std::ofstream(Served::native, std::ios::binary | std::ios::trunc) << content;
+        Served::tag = "\"v" + std::to_string(std::hash<std::string>{}(content)) + "\"";
+    };
     const auto original = pattern(5000);
-    std::ofstream(Served::native, std::ios::binary) << original;
+    publish(original);
     const auto tag = header(fetch(request("GET", "")), "ETag");
-    REQUIRE_FALSE(tag.empty());
+    REQUIRE(tag == Served::tag);
     const std::string conditional = "Range: bytes=100-199\r\nIf-Range: " + tag + "\r\n";
 
     GIVEN("the file did not change") {
@@ -332,7 +344,7 @@ SCENARIO("A range survives a file changed between two requests only when its val
     }
     GIVEN("the file grew") {
         const auto replaced = pattern(5001);
-        std::ofstream(Served::native, std::ios::binary | std::ios::trunc) << replaced;
+        publish(replaced);
         const auto response = fetch(request("GET", conditional));
         THEN("the current file is sent in full, with its new tag") {
             REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
@@ -340,16 +352,29 @@ SCENARIO("A range survives a file changed between two requests only when its val
             REQUIRE(header(response, "ETag") != tag);
         }
     }
-    GIVEN("the file was rewritten with the same size, later") {
+    GIVEN("the file was rewritten with the same size and the same modification time") {
         const auto before = std::filesystem::last_write_time(Served::native);
         std::string replaced = original;
         std::reverse(replaced.begin(), replaced.end());
-        std::ofstream(Served::native, std::ios::binary | std::ios::trunc) << replaced;
-        std::filesystem::last_write_time(Served::native, before + 1h);
+        publish(replaced);
+        std::filesystem::last_write_time(Served::native, before);
         const auto response = fetch(request("GET", conditional));
         THEN("the current file is sent in full") {
             REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
             REQUIRE(body(response) == replaced);
+        }
+    }
+    GIVEN("a native file whose provider gives no validator") {
+        Served::tag.clear();
+        const auto response = fetch(request("GET", "Range: bytes=100-199\r\nIf-Range: " + tag + "\r\n"));
+        THEN("it has no ETag and a conditioned range is answered in full") {
+            REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+            REQUIRE(header(response, "ETag").empty());
+            REQUIRE(body(response) == original);
+        }
+        THEN("a range without condition is still served") {
+            const auto plain = fetch(request("GET", "Range: bytes=100-199\r\n"));
+            REQUIRE(plain.starts_with("HTTP/1.1 206 Partial Content\r\n"));
         }
     }
     GIVEN("the file shrank without the validator being checked") {
@@ -402,7 +427,7 @@ SCENARIO("A dynamic route serves a file by ranges") {
             const auto path = directory.path() / "granted.bin";
             if (native) std::ofstream(path, std::ios::binary) << content;
             const auto open = [&] {
-                if (native) return fs::File(std::ifstream(path, std::ios::binary), path);
+                if (native) return fs::File(std::ifstream(path, std::ios::binary));
                 static std::vector<std::uint64_t> words;
                 words.assign((content.size() + 7) / 8, 0);
                 for (std::size_t index = 0; index < content.size(); ++index)
@@ -512,7 +537,7 @@ SCENARIO("A native file can be read again from any position after its end") {
     webfront::test::TemporaryDirectory directory;
     const auto                         path = directory.path() / "short.bin";
     std::ofstream(path, std::ios::binary) << "abc";
-    fs::File             file(std::ifstream(path, std::ios::binary), path);
+    fs::File             file{std::ifstream(path, std::ios::binary)};
     std::array<char, 16> buffer{};
     REQUIRE(file.read(buffer) == 3);
     THEN("seek positions it again, and the content reads as before") {

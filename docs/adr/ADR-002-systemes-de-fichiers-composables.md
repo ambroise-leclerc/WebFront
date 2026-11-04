@@ -15,7 +15,7 @@
 | 2.3 | 2026-10-14 | Acceptée | Ambroise Leclerc | Composition facultative des ressources des composants avec DefaultFSWith. | [40f5621](https://github.com/ambroise-leclerc/WebFront/commit/40f5621928fdd188f230bf08ff062f9557619046) |
 | 2.4 | 2026-10-14 | Acceptée | Ambroise Leclerc | Fournisseur PackageFS et stockage transactionnel des outils installés. | [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) |
 | 2.5 | 2026-11-03 | Acceptée | Ambroise Leclerc | `fs::File::knownSize()` : taille connue avant lecture (données embarquées, fichier natif sur flux positionnable), pour annoncer `Content-Length` et envoyer le fichier en flux (#454). Les routes dynamiques passent après le `WebFront.js` protégé et ne peuvent pas le masquer. | Branche `454-dynamic-routes` |
-| 2.6 | 2026-11-04 | Acceptée | Ambroise Leclerc | `fs::File::seek` et `entityTag()` : positionnement dans un fichier de taille connue et validateur fort (taille et date) d'un fichier natif construit avec son chemin, pour les requêtes `Range` et `If-Range` (#455). Le serveur traite les plages ; `fs::Provider` ne voit toujours pas la requête. | Branche `455-range-requests` |
+| 2.6 | 2026-11-04 | Acceptée | Ambroise Leclerc | `fs::File::seek`, `entityTag()` et `setEntityTag()` : positionnement dans un fichier de taille connue et validateur fort fourni par le fournisseur (jamais déduit d'un chemin, d'une taille ou d'une date), pour les requêtes `Range` et `If-Range` (#455). Le serveur traite les plages ; `fs::Provider` ne voit toujours pas la requête. | Branche `455-range-requests` |
 
 ## État et chronologie
 

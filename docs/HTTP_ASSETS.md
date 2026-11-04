@@ -63,12 +63,14 @@ cannot be ranged. Multipart answers (`multipart/byteranges`) are not produced. T
 stored with `Content-Encoding`, or decoded by the gzip fallback) carry `Accept-Ranges: none` and are never partial, like
 files whose size is unknown.
 
-`If-Range` conditions a range on a validator. Only a strong entity tag is compared: a native file (`NativeDebugFS`, the
-development document root, or any provider building `fs::File(ifstream, path)`) has the tag `"<size>-<modification time>"`,
-sent as `ETag` on its 200 and 206 responses. If the tag in `If-Range` is not the file's current one, the file changed
-between the two requests, so the current file is sent in full with its new tag. Embedded data and providers that
-do not give a path have no tag, and a conditioned range is answered in full. The server sends no `Last-Modified`, so a date
-in `If-Range` never matches (and a browser applies no heuristic freshness to development files).
+`If-Range` conditions a range on a validator, and only a strong entity tag is compared. WebFront derives none itself: a
+pathname, a size or a modification time can describe another version than the stream that was opened (a replacement
+between the open and the lookup, a rewrite that keeps the time), and a tag that is wrong would let a client join bytes of
+two versions. A provider whose storage is versioned (a content hash, a revision) gives its tag with
+`fs::File::setEntityTag`, which must change whenever the bytes change; it is sent as `ETag` on the 200 and 206 responses.
+Native files of `NativeDebugFS` and the development root, and embedded data, have no tag: a conditioned range is answered
+in full, while an unconditioned `Range` is still served. The server sends no `Last-Modified`, so a date in `If-Range`
+never matches (and a browser applies no heuristic freshness to development files).
 
 A dynamic route that serves a file, such as the services built on #454, calls `http::fileReply(request, file, contentType)`:
 it applies the same rules to the route's `RouteRequest::request` and returns the `RouteReply` (200, 206 or 416) that the

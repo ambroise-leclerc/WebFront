@@ -407,7 +407,9 @@ private:
                 lock_guard lock(mediaMutex);
                 mediaRanges.push_back(request.request.getHeaderValue("Range").value_or("-"));
             }
-            auto reply = http::fileReply(request.request, fs::File(ifstream(mediaFile, ios::binary), mediaFile), "audio/wav");
+            fs::File file{ifstream(mediaFile, ios::binary)};
+            file.setEntityTag("\"test-media-1\"");  // the content is written once, so its version never changes
+            auto reply = http::fileReply(request.request, std::move(file), "audio/wav");
             reply.headers.emplace_back("Cache-Control", "no-store");
             return reply;
         });

@@ -30,9 +30,9 @@
   `a-`, `-n`): `206` with `Content-Range` and only the selected bytes read, `416` with `bytes */size` for a range that
   starts past the end, and `Accept-Ranges: bytes`. Several ranges, a unit other than
   `bytes` and malformed ranges are ignored (`200`, whole file), as is any `Range` on `HEAD`; encoded or decoded responses say `Accept-Ranges: none`.
-  `If-Range` compares the strong `ETag` that `fs::File` now derives from a native file's size and modification time
-  (`File(ifstream, path)`, used by `NativeDebugFS` and the development root); a changed file is sent in full. `fs::File`
-  gains `seek` and `entityTag`. Dynamic routes serve a file by ranges with `http::fileReply`, or `http::range::select`. The binding
+  `If-Range` compares a strong `ETag` that a provider gives with `fs::File::setEntityTag`; nothing is derived from a path,
+  a size or a time, so native and embedded files have none and a conditioned range is answered in full. `fs::File`
+  gains `seek`, `entityTag` and `setEntityTag`. Dynamic routes serve a file by ranges with `http::fileReply`, or `http::range::select`. The binding
   to a connection (#469) follows.
 
 - Embedded frontends: `alert`, `confirm`, `prompt` and `beforeunload` (`beforeunload` is not handled under WKWebView, see `docs/FRONTENDS.md`; #452, ADR-020 rule 6). WKWebView implements the three
