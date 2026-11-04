@@ -174,6 +174,9 @@ public:
     /// repeated requests (byte ranges). Throws ReadRefused when the connection is gone, when it is not the view of an
     /// embedded frontend and WebFrontConfig::remoteFileTransport was not declared, or when the options are unacceptable.
     [[nodiscard]] std::string grantRead(const ReadRoute& route, std::string_view path, ReadOptions options = {}) const {
+        // A generation is only unique within its application: a route of another one would own the wrong connection.
+        if (route.binding().get() != webFront->readBinding.get())
+            throw ReadRefused("The read route belongs to another application");
         return route.binding()->grant(generation, route.id(), route.prefix(), path, std::move(options));
     }
 

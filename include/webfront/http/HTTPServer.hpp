@@ -414,13 +414,30 @@ private:
 
 namespace routing {
 
-/// True when a request target may carry a read token (it names the services space, in any letter case): its text is
-/// then never logged, whether or not the target qualifies for route dispatch (a rejected target, an upgrade request...).
+/// True when a request target may carry a read token (it names the services space): its text is then never logged,
+/// whether or not the target qualifies for route dispatch (a rejected target, an upgrade request...). The target is
+/// judged as the server and the file providers would read it: percent-decoded (twice, for a doubly encoded one),
+/// with backslashes as separators and empty or "." segments dropped, in any letter case.
 inline bool mentionsServices(std::string_view target) {
     constexpr std::string_view marker = "webfront/services";
-    return std::search(target.begin(), target.end(), marker.begin(), marker.end(), [](char a, char b) {
-               return std::tolower(static_cast<unsigned char>(a)) == b;
-           }) != target.end();
+    std::string                text(target.substr(0, target.find('?')));
+    for (int pass = 0; pass < 3; ++pass) {
+        std::string lowered;
+        lowered.reserve(text.size());
+        for (const char c : text) lowered += c == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::string normalized;
+        for (std::size_t from = 0; from <= lowered.size();) {
+            const auto end     = std::min(lowered.find('/', from), lowered.size());
+            const auto segment = std::string_view(lowered).substr(from, end - from);
+            if (!segment.empty() && segment != ".") normalized += (normalized.empty() ? "" : "/") + std::string(segment);
+            from = end + 1;
+        }
+        if (normalized.find(marker) != std::string::npos) return true;
+        auto decoded = uri::decode(lowered, false);
+        if (decoded == lowered) return false;
+        text = std::move(decoded);
+    }
+    return true;  // still encoded after three layers: nothing is worth showing
 }
 
 /// The path without empty and "." segments, so that "/a//b/./c" reaches the route of "/a/b/c" instead of falling

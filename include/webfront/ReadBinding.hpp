@@ -196,8 +196,8 @@ public:
     /// The longest lifetime of a transferable grant, which is a bearer capability.
     static constexpr std::chrono::seconds maxTransferableLifetime{15 * 60};
 
-    explicit ReadBinding(RemoteFileTransport transport = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
-        : transport(transport), now(std::move(clock)) {}
+    explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
+        : transport(declared), now(std::move(clock)) {}
 
     ReadBinding(const ReadBinding&)            = delete;
     ReadBinding& operator=(const ReadBinding&) = delete;

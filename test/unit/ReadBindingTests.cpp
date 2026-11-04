@@ -3,6 +3,7 @@
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/ReadBinding.hpp>
 #include <webfront/WebFront.hpp>
 #include <webfront/http/HTTPServer.hpp>
@@ -23,7 +24,7 @@ using namespace std::chrono_literals;
 
 namespace {
 
-constexpr std::string_view prefix = "/webfront/services/files/";
+constexpr std::string_view readPrefix = "/webfront/services/files/";
 
 std::optional<std::string> header(const http::RouteReply& reply, std::string_view name) {
     for (const auto& [key, value] : reply.headers)
@@ -68,7 +69,7 @@ struct Fixture {
 
     explicit Fixture(RemoteFileTransport transport = RemoteFileTransport::refused)
         : binding(transport, [this] { return time; }) {
-        read = binding.readHandler("route-a", std::string(prefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
+        read = binding.readHandler("route-a", std::string(readPrefix), [this](const http::RouteRequest&, const ReadGrant& grant) {
             lastRest    = std::string(grant.rest);
             lastContext = grant.context;
             http::RouteReply reply;
@@ -85,7 +86,7 @@ struct Fixture {
     }
 
     std::string url(ReadBinding::ConnectionKey key, std::string_view path = "a.txt", ReadOptions options = {}) {
-        return binding.grant(key, "route-a", prefix, path, std::move(options));
+        return binding.grant(key, "route-a", readPrefix, path, std::move(options));
     }
 };
 
@@ -108,8 +109,8 @@ SCENARIO("A read needs the token and the cookie of the client of the connection 
             REQUIRE(cookies.front().contains("; SameSite=Strict"));
             REQUIRE_FALSE(cookies.front().contains("Secure"));
         }
-        THEN("the URL is under the prefix, followed by the token and the encoded path") {
-            REQUIRE(url.starts_with(prefix));
+        THEN("the URL is under the readPrefix, followed by the token and the encoded path") {
+            REQUIRE(url.starts_with(readPrefix));
             REQUIRE(url.ends_with("/dir/a%20b.txt"));
         }
         WHEN("the owner's client presents the URL with its cookie") {
@@ -134,11 +135,11 @@ SCENARIO("A read needs the token and the cookie of the client of the connection 
         }
         WHEN("the token is altered or absent") {
             auto altered = url;
-            altered[prefix.size() + 20] = altered[prefix.size() + 20] == 'a' ? 'b' : 'a';
+            altered[readPrefix.size() + 20] = altered[readPrefix.size() + 20] == 'a' ? 'b' : 'a';
             THEN("every refusal looks alike") {
                 const auto unknown = call(fixture.read, altered, cookie);
-                const auto missing = call(fixture.read, std::string(prefix), cookie);
-                const auto garbage = call(fixture.read, std::string(prefix) + "nodot/x", cookie);
+                const auto missing = call(fixture.read, std::string(readPrefix), cookie);
+                const auto garbage = call(fixture.read, std::string(readPrefix) + "nodot/x", cookie);
                 REQUIRE(unknown.status == http::Response::forbidden);
                 REQUIRE(missing.status == http::Response::forbidden);
                 REQUIRE(garbage.status == http::Response::forbidden);
@@ -260,8 +261,8 @@ SCENARIO("A grant works only on the route registration that issued it", "[read-b
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "a.txt", {.context = std::string("secret-of-route-a")});
     bool       otherRan = false;
-    // A later route on the same prefix (route A was dropped and B registered), or a sibling prefix.
-    const auto other = fixture.binding.readHandler("route-b", std::string(prefix), [&](const http::RouteRequest&, const ReadGrant&) {
+    // A later route on the same readPrefix (route A was dropped and B registered), or a sibling readPrefix.
+    const auto other = fixture.binding.readHandler("route-b", std::string(readPrefix), [&](const http::RouteRequest&, const ReadGrant&) {
         otherRan = true;
         return http::RouteReply{};
     });
@@ -436,7 +437,7 @@ SCENARIO("Read responses neutralize active content", "[read-binding]") {
     }
     GIVEN("a refusal") {
         Fixture fixture;
-        const auto denied = call(fixture.read, std::string(prefix) + "nothing.here/x");
+        const auto denied = call(fixture.read, std::string(readPrefix) + "nothing.here/x");
         THEN("it is neutralized too, and tells nothing") {
             REQUIRE(denied.status == http::Response::forbidden);
             REQUIRE(header(denied, "Cache-Control") == "no-store");
@@ -481,7 +482,7 @@ SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
     Fixture                                                 fixture;
     const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
     const auto url    = fixture.url(1, "secret-name.txt");
-    auto       route  = server.addRoute(std::string(prefix), fixture.read, true);
+    auto       route  = server.addRoute(std::string(readPrefix), fixture.read, true);
 
     webfront::log::setLogLevel(webfront::log::Debug);
     std::string logged;
@@ -503,7 +504,7 @@ SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
         const auto response = testing::InjectableSocket::writtenText();
         REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
         REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
-        const auto token = url.substr(prefix.size(), 16 + 1 + 64);
+        const auto token = url.substr(readPrefix.size(), 16 + 1 + 64);
         std::scoped_lock lock{loggedMutex};
         REQUIRE(logged.contains("Received request GET on /webfront/services/files/..."));
         REQUIRE_FALSE(logged.contains(token));
@@ -533,7 +534,27 @@ SCENARIO("A rejected or upgraded services target is not logged either", "[read-b
     REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
     webfront::log::removeSinks(sink);
     webfront::log::setLogLevel(webfront::log::Error);
+    // The same target spelled with an encoded first letter and doubled separators.
+    testing::InjectableSocket::reset();
+    ReadNet::accepts = 0;
+    http::Server<ReadNet, MockFileSystem<NoFiles>> encodedServer("127.0.0.1", "0");
+    const std::string encodedRaw = "GET /%77ebfront//services/./files/0123456789abcdef.ENCODEDSECRET/report..txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    std::vector<std::byte> encodedBytes;
+    for (const char c : encodedRaw)
+        encodedBytes.push_back(static_cast<std::byte>(c));
+    webfront::log::setLogLevel(webfront::log::Debug);
+    const auto encodedSink = webfront::log::addSinks([&](std::string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += std::string(line) + "\n";
+    });
+    testing::InjectableSocket::receive(encodedBytes);
+    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+    webfront::log::removeSinks(encodedSink);
+    webfront::log::setLogLevel(webfront::log::Error);
     std::scoped_lock lock{loggedMutex};
+    THEN("no log line holds the encoded token either") {
+        REQUIRE_FALSE(logged.contains("ENCODEDSECRET"));
+    }
     THEN("no log line holds the token or the file name") {
         REQUIRE_FALSE(logged.contains("TOKENSECRET"));
         REQUIRE_FALSE(logged.contains("report"));
@@ -553,20 +574,26 @@ SCENARIO("An application registers read routes under the services path only", "[
     ReadNet::accepts = 100;
     ReadApp app{WebFrontConfig{.port = "0"}};
     const auto handler = [](const http::RouteRequest&, const ReadGrant&) { return http::RouteReply{}; };
-    THEN("a prefix outside the cookie's path, the path itself and the exchange route are refused") {
+    THEN("a readPrefix outside the cookie's path, the path itself and the exchange route are refused") {
         REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/files/", handler)), std::invalid_argument);
         REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/", handler)), std::invalid_argument);
         REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/bind/", handler)), std::invalid_argument);
         REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/bind/more/", handler)), std::invalid_argument);
         REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/files/", nullptr)), std::invalid_argument);
     }
-    THEN("a prefix under it is accepted once, then free again when the route is dropped") {
+    THEN("a readPrefix under it is accepted once, then free again when the route is dropped") {
         {
             auto route = app.addReadRoute("/webfront/services/files/", handler);
             REQUIRE(route);
             REQUIRE_THROWS_AS(static_cast<void>(app.addReadRoute("/webfront/services/files/", handler)), std::invalid_argument);
         }
         REQUIRE_NOTHROW(static_cast<void>(app.addReadRoute("/webfront/services/files/", handler)));
+    }
+    THEN("a route of another application grants nothing to this one's browser") {
+        ReadApp other{WebFrontConfig{.port = "0"}};
+        auto    foreign = other.addReadRoute("/webfront/services/files/", handler);
+        ReadApp::UI ui{app, 0, 1};
+        REQUIRE_THROWS_WITH(ui.grantRead(foreign, "a.txt"), Catch::Matchers::ContainsSubstring("another application"));
     }
     THEN("a loopback declaration is refused for an application that listens on all interfaces") {
         REQUIRE_THROWS_AS(ReadApp(WebFrontConfig{.address = "0.0.0.0", .port = "0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}),
