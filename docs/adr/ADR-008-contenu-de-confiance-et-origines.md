@@ -5,6 +5,7 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Décision initiale : politique commune des origines du pont, de la navigation et des fenêtres surgissantes. | [d59db71](https://github.com/ambroise-leclerc/WebFront/commit/d59db712f1d390abe1457a5046b904bd330b85cc) |
+| 1.1 | 2026-11-04 | Proposée | Ambroise Leclerc | Le contrôle d'origine reste seul juge de l'accès au pont ; un secret de lancement, présenté à la poignée de main, distingue la vue d'un frontend intégré sans l'autoriser davantage (#453, ADR-020). | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -35,6 +36,12 @@ Que les dérogations de développement demeurent explicites. DevTools et menus r
 par défaut. Le navigateur système contrôle sa propre navigation ; le serveur y applique néanmoins
 le contrôle du bridge. Les capacités des moteurs diffèrent, notamment les popups WKWebView.
 WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
+
+Que le secret de lancement d'une vue intégrée (#453) ne s'ajoute pas au contrôle d'origine : il ne donne aucun accès
+au pont, que le contrôle d'`Origin` règle seul. Il ne sert qu'à savoir si la connexion vient de la vue de
+l'application (`UI::isEmbeddedView()`), critère de « client local » des services (ADR-020, règle 3). Il ne protège pas
+d'un script admis dans la vue, qui partage l'autorité du pont et pourrait le lire avant `WebFront.js` ; le navigateur
+système n'en reçoit aucun.
 
 ## Options écartées et motifs
 

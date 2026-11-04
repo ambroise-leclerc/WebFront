@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>View association</title>
+<script src="WebFront.js"></script>
+<script>
+    // The page of the embedded view connects with the secret of the launch; the secret is gone once presented.
+    // A second connection of the same page, from the same loopback address, presents none: it is not the view.
+    (async () => {
+        try {
+            await webFront.ready;
+            if ("__webfrontView" in window) throw new Error("the launch secret is still readable by the page");
+            await new Promise((resolve, reject) => {
+                const socket = new WebSocket(`ws://${location.host}`, "WebFront_0.1");
+                socket.binaryType = "arraybuffer";
+                socket.onopen = () => socket.send(new Uint8Array([0, new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? 0 : 1]));
+                socket.onmessage = () => resolve();
+                socket.onerror = () => reject(new Error("the second connection failed"));
+            });
+            for (let attempt = 0; attempt < 100; ++attempt) {
+                if (await webFront.cppFunction("startedConnections")() >= 2) break;
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        } finally {
+            window.close();
+        }
+    })();
+</script>

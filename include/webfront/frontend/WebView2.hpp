@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -27,6 +28,8 @@ struct WebView2Options {
     WindowOptions             window{};
     /** @brief Keep the native window hidden while retaining the real controller and message loop. */
     bool                      visible{true};
+    /** @brief Per-launch proof of this view (ADR-020), given to top-level documents of the application's origin at their creation. */
+    ViewLaunch                launch{};
 };
 
 }  // namespace webfront::frontend
@@ -264,6 +267,7 @@ public:
     std::exception_ptr                               failure;
     std::wstring                                     url;
     webfront::detail::BoundContentPolicy             contentPolicy;
+    ViewLaunch                                       viewLaunch;
     // Internal adapter observer, used by lifecycle probes after a successful native cancellation.
     std::function<void()>                            navigationCancelled;
     // Internal adapter observer: the browser exists and nothing is loaded yet (the transport benchmark of ADR-017 registers
@@ -722,6 +726,10 @@ private:
         Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
         check(view->get_Settings(&settings), "getting browser settings");
         configureContentSettings(settings.Get(), contentPolicy.options());
+        if (!viewLaunch.secret.empty()) {
+            const auto script = utf16(webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin));
+            check(view->AddScriptToExecuteOnDocumentCreated(script.c_str(), nullptr), "installing the view association script");
+        }
         check(view->add_NavigationStarting(
                   Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>([weak](ICoreWebView2*,
                                                                                                ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
@@ -821,6 +829,7 @@ inline void open(std::string_view address,
                                  "https://developer.microsoft.com/microsoft-edge/webview2/");
     auto session       = std::make_shared<Session>(options.startupTimeout);
     session->contentPolicy = std::move(contentPolicy);
+    session->viewLaunch    = options.launch;
     session->url       = applicationUrl(address, port, file);
     if (prepare)
         prepare(*session);
@@ -869,6 +878,14 @@ struct WebView2Frontend {
         options.window        = window;
         open(address, port, file, options);
     }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+        WebView2Options options;
+        options.contentPolicy = policy;
+        options.window        = window;
+        options.launch        = launch;
+        open(address, port, file, options);
+    }
 };
 
 /** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
@@ -890,6 +907,14 @@ struct WebView2FrontendWithOptions : WebView2Frontend {
         auto options          = OptionsProvider::get();
         options.contentPolicy = policy;
         options.window        = window;
+        WebView2Frontend::open(address, port, page, options);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+        auto options          = OptionsProvider::get();
+        options.contentPolicy = policy;
+        options.window        = window;
+        options.launch        = launch;
         WebView2Frontend::open(address, port, page, options);
     }
 };

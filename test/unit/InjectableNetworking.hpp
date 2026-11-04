@@ -114,6 +114,18 @@ public:
     void close() {}
     void shutdown(shutdown_type) { ++shutdowns; }
 
+    /// The peer address of the next accepted connection, as the server reads it for trustLoopbackClients.
+    static inline std::atomic<bool> peerIsLoopback{false};
+    struct PeerAddress {
+        bool loopback;
+        bool is_loopback() const { return loopback; }
+    };
+    struct PeerEndpoint {
+        bool        loopback;
+        PeerAddress address() const { return {loopback}; }
+    };
+    PeerEndpoint remote_endpoint(std::error_code&) const { return {peerIsLoopback.load()}; }
+
     /// The read the WebSocket is waiting for: the test completes it, or the task is stopped.
     static ManualSender read(networking::buffers::MutableBuffer buffer) {
         return ManualSender([buffer](ManualSender::Completion completion) {

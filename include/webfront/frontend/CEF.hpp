@@ -2,6 +2,7 @@
 
 #include "../ContentPolicy.hpp"
 #include "../system/WindowsCompat.hpp"
+#include "../ViewAssociation.hpp"
 #include "../tooling/Logger.hpp"
 #include "CEFPaths.hpp"
 #include "Capture.hpp"
@@ -252,6 +253,58 @@ inline CefMainArgs makeMainArgs(
 }
 
 // Initialize CEF and handle subprocesses
+/// The renderer's half of the view association (ADR-020): the browser process hands the launch secret to its own browser
+/// as extra information, never on a command line, and the renderer defines it on the window of the top-level documents of
+/// the application's origin, before any script of the page runs. WebFront.js reads then removes it.
+class ViewSecretRenderApp : public CefApp, public CefRenderProcessHandler {
+public:
+    static constexpr const char* secretKey = "webfrontViewSecret";
+    static constexpr const char* originKey = "webfrontViewOrigin";
+
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override {
+        return this;
+    }
+    void OnBrowserCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDictionaryValue> extraInfo) override {
+        if (!browser || !extraInfo || !extraInfo->HasKey(secretKey) || !extraInfo->HasKey(originKey))
+            return;
+        std::scoped_lock lock{mutex};
+        launches[browser->GetIdentifier()] = ViewLaunch{extraInfo->GetString(secretKey).ToString(), extraInfo->GetString(originKey).ToString()};
+    }
+    void OnBrowserDestroyed(CefRefPtr<CefBrowser> browser) override {
+        std::scoped_lock lock{mutex};
+        launches.erase(browser->GetIdentifier());
+    }
+    void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        if (!frame->IsMain())
+            return;
+        ViewLaunch launch;
+        {
+            std::scoped_lock lock{mutex};
+            const auto       found = launches.find(browser->GetIdentifier());
+            if (found == launches.end())
+                return;
+            launch = found->second;
+        }
+        const auto url = frame->GetURL().ToString();
+        if (url != launch.origin && !url.starts_with(launch.origin + "/"))
+            return;
+        context->GetGlobal()->SetValue(CefString(std::string(webfront::detail::viewSecretProperty)), CefV8Value::CreateString(launch.secret),
+                                       V8_PROPERTY_ATTRIBUTE_DONTENUM);
+    }
+
+private:
+    std::mutex                  mutex;
+    std::map<int, ViewLaunch>   launches;
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(ViewSecretRenderApp);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+
 // Throws: CEFInitializationError on initialization failure
 // Throws: CEFSubprocessExit if this is a subprocess (caller should exit with the provided code)
 // Returns: void on successful main process initialization
@@ -279,7 +332,7 @@ inline void initialize() {
         argv_ptrs.data()
     #endif
     );
-    CefRefPtr<CefApp> app;
+    CefRefPtr<CefApp> app(new ViewSecretRenderApp);
     int               exit_code = CefExecuteProcess(main_args, app, nullptr);
     if (exit_code >= 0) {
         throw CEFSubprocessExit(exit_code);
@@ -827,7 +880,7 @@ namespace detail {
 
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
                        CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
-                       WindowOptions windowSettings = {}, bool preserveSignalHandlers = false) {
+                       WindowOptions windowSettings = {}, bool preserveSignalHandlers = false, const ViewLaunch& launch = {}) {
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -889,7 +942,13 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     CefBrowserSettings browser_settings;
 
     // Create a browser view using the modern Views API - this creates a chromeless browser
-    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(client, url, browser_settings, nullptr, nullptr, nullptr);
+    CefRefPtr<CefDictionaryValue> extraInfo;
+    if (!launch.secret.empty()) {
+        extraInfo = CefDictionaryValue::Create();
+        extraInfo->SetString(ViewSecretRenderApp::secretKey, launch.secret);
+        extraInfo->SetString(ViewSecretRenderApp::originKey, launch.origin);
+    }
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(client, url, browser_settings, extraInfo, nullptr, nullptr);
 
     // Create a window delegate for controlling the window appearance
     CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate(frontend::detail::resolveWindow(std::move(windowSettings))));
@@ -910,12 +969,14 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
 }  // namespace detail
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {},
-                 const WindowOptions& window = {}) {
+                 const WindowOptions& window = {}, const ViewLaunch& launch = {}) {
     detail::openWindow(frontend::detail::applicationUrl(address, port, file),
                        webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
                        nullptr,
                        {},
-                       window);
+                       window,
+                       false,
+                       launch);
 }
 
 }  // namespace webfront::cef
@@ -933,7 +994,8 @@ inline void initialize() {
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
-inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}, const WindowOptions& = {}) {
+inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}, const WindowOptions& = {},
+                 const ViewLaunch& = {}) {
     throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }

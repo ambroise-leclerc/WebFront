@@ -4,6 +4,7 @@
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "Downloads.hpp"
+#include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -41,6 +42,9 @@ struct WKWebViewOptions {
      *  `beforeunload` is not handled by WKWebView: the public WKUIDelegate has no method for it, and it does not reach the confirm
      *  method. A page that relies on it can lose unsaved changes on navigation or close; WebFront does not confirm it. */
     ScriptDialogHandler answerScriptDialog{};
+    /** @brief Per-launch proof of this view (ADR-020): given to documents of the application's origin only, at the start of
+     *  the document, for WebFront.js to present in its handshake. Set by WebFront; empty gives the view no association. */
+    ViewLaunch launch{};
 };
 
 }  // namespace webfront::frontend
@@ -475,6 +479,12 @@ struct Session {
             if (!send<BOOL>(preferences, "respondsToSelector:", selector))
                 throw std::runtime_error("WKWebView: hidden sessions require macOS 14 or later (inactiveSchedulingPolicy)");
             send<void>(preferences, "setInactiveSchedulingPolicy:", 2L); // WKInactiveSchedulingPolicyNone
+        }
+        if (!options.launch.secret.empty()) {
+            // At the start of every document, in the main frame only: the script itself checks the origin.
+            Object source(text(::webfront::detail::viewSecretScript(options.launch.secret, options.launch.origin)));
+            Object script(send(send(type("WKUserScript"), "alloc"), "initWithSource:injectionTime:forMainFrameOnly:", source.get(), 0L, static_cast<BOOL>(true)));
+            send<void>(send(configuration.get(), "userContentController"), "addUserScript:", script.get());
         }
         // Deliver script-created popup attempts to the delegates, which always cancel unmanaged views.
         send<void>(send(configuration.get(), "preferences"), "setJavaScriptCanOpenWindowsAutomatically:", static_cast<BOOL>(true));
@@ -1094,6 +1104,10 @@ struct WKWebViewFrontend {
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
         open(address, port, file, WKWebViewOptions{.contentPolicy = policy, .window = window});
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+        open(address, port, file, WKWebViewOptions{.contentPolicy = policy, .window = window, .launch = launch});
     }
 };
 

@@ -277,7 +277,9 @@ private:
         const auto     jsEndian       = static_cast<msg::JSEndian>(command->getEndian());
         sameEndian = (nativeIsLittle && jsEndian == msg::JSEndian::little) || (nativeIsBig && jsEndian == msg::JSEndian::big);
 
-        eventsHandler({WebLinkEvent::Code::linked, id});
+        // Anything after the two header bytes is the secret of an embedded view (ADR-020); the application judges it.
+        const auto proof = data.size() > sizeof(msg::Handshake) ? data.subspan(sizeof(msg::Handshake)) : std::span<const std::byte>{};
+        eventsHandler({WebLinkEvent::Code::linked, id, std::string(reinterpret_cast<const char*>(proof.data()), proof.size())});
     }
 
     void handleCallFunction(std::span<const std::byte> data) {

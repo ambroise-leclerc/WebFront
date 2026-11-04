@@ -5,9 +5,12 @@
 #include <atomic>
 #include <filesystem>
 #include <iostream>
+#include <cstdint>
 #include <map>
+#include <mutex>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 #ifndef WEBFRONT_TEST_FRONTEND
     #error WEBFRONT_TEST_FRONTEND must select an embedded frontend
@@ -28,6 +31,33 @@ int show(std::string_view page) {
     app.show(page);
     if (connected)
         throw std::runtime_error("Unexpected bridge connection");
+    return 0;
+}
+
+// The page of the view is associated with the view of the frontend; a second connection from the same page, without the
+// secret, is not (ADR-020, rule 3).
+int checkViewAssociation() {
+    App                 app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    std::mutex          mutex;
+    std::vector<bool>   embedded;
+    std::vector<bool>   local;
+    app.onUIStarted([&](App::UI ui) {
+        std::scoped_lock lock{mutex};
+        embedded.push_back(ui.isEmbeddedView());
+        local.push_back(ui.isLocalClient());
+    });
+    app.cppFunction("startedConnections", [&] {
+        std::scoped_lock lock{mutex};
+        return static_cast<std::uint32_t>(embedded.size());
+    });
+    app.show("view-association.html");
+    std::scoped_lock lock{mutex};
+    if (embedded.size() != 2)
+        throw std::runtime_error("Expected two bridge connections");
+    if (!embedded[0] || !local[0])
+        throw std::runtime_error("The page of the view is not associated with the view");
+    if (embedded[1] || local[1])
+        throw std::runtime_error("A connection without the secret was associated with the view");
     return 0;
 }
 
@@ -196,6 +226,7 @@ int run(std::string_view mode) {
             return show("encoded path %23.html?x=1#example");
         });
     cases.emplace("navigation-failure", expectNavigationFailure);
+    cases.emplace("view-association", checkViewAssociation);
     const auto selected = cases.find(mode);
     if (selected == cases.end())
         throw std::runtime_error("Unknown lifecycle scenario");

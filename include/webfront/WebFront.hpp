@@ -16,6 +16,7 @@
 #include "system/WindowsCompat.hpp"
 #include "Task.hpp"
 #include "UISubscribers.hpp"
+#include "ViewAssociation.hpp"
 #include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
@@ -46,6 +47,9 @@ namespace testing {
 /// Test-only access to the connection identifiers of an application; not part of the API.
 template <typename Application>
 struct ConnectionIds;
+/// Test-only access to the launch secret of an application; not part of the API.
+template <typename Application>
+struct LaunchSecret;
 }  // namespace testing
 
 using NetProvider     = networking::TCPStdnet;
@@ -147,6 +151,20 @@ public:
     template <typename Rep, typename Period>
     [[nodiscard]] auto resumeAfter(std::chrono::duration<Rep, Period> duration) const {
         return webFront->resumeAfter(duration);
+    }
+
+    /// True when this connection proved, with the secret of this launch, that it comes from the view of an embedded
+    /// frontend of this application (CEF, WebView2, WKWebView, WebKitGTK). The system browser never is: no secret is
+    /// given to it, whatever its address. False once the connection is gone.
+    [[nodiscard]] bool isEmbeddedView() const {
+        return webFront->isEmbeddedView(webLinkId, generation);
+    }
+
+    /// The only criterion of a "local client" for system services (ADR-020, rule 3): an embedded view, or a
+    /// loopback peer when the application set WebFrontConfig::trustLoopbackClients. The address is otherwise never
+    /// consulted. False once the connection is gone.
+    [[nodiscard]] bool isLocalClient() const {
+        return webFront->isLocalClient(webLinkId, generation);
     }
 
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
@@ -346,6 +364,10 @@ struct WebFrontConfig {
     ContentPolicy         contentPolicy{};
     /// Initial window of the embedded frontends; the title defaults to the executable's name.
     WindowOptions         window{};
+    /// Treats a connection whose peer address is the loopback as a local client (UI::isLocalClient) although it is
+    /// not the view of an embedded frontend. This reintroduces a decision by address: it is unsafe on a shared machine
+    /// and behind a local proxy or an SSH tunnel, which also arrive from the loopback. Off by default (ADR-020).
+    bool                  trustLoopbackClients = false;
 };
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
@@ -367,6 +389,7 @@ public:
           httpDocRoot(config.documentRoot),
           contentPolicy(std::move(config.contentPolicy)),
           windowOptions(std::move(config.window)),
+          trustLoopbackClients(config.trustLoopbackClients),
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
@@ -379,12 +402,20 @@ public:
                 id         = idsCounter++;
                 generation = ++generationCounter;
             }
+            bool loopbackPeer = false;
+            if constexpr (requires(std::error_code& error) { socket.remote_endpoint(error).address().is_loopback(); }) {
+                if (trustLoopbackClients) {
+                    std::error_code error;
+                    const auto      peer = socket.remote_endpoint(error);
+                    loopbackPeer         = !error && peer.address().is_loopback();
+                }
+            }
             auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
                 onEvent(event);
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{.link = link, .generation = generation, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}});
+                webLinks.emplace(id, Connection{.link = link, .generation = generation, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}, .viewAssociated = false, .loopbackPeer = loopbackPeer});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
@@ -490,6 +521,8 @@ private:
     friend class Broadcast;
     template <typename>
     friend struct testing::ConnectionIds;  // lets a test start the identifiers near their wrap
+    template <typename>
+    friend struct testing::LaunchSecret;  // lets a test present the secret an embedded view would
 
     /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
     /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
@@ -533,6 +566,19 @@ private:
         if (found == webLinks.end())
             return {nullptr, WebLinkGeneration{0}};
         return {found->second.link, found->second.generation};
+    }
+
+    [[nodiscard]] bool isEmbeddedView(WebLinkId id, WebLinkGeneration generation) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        return found != webLinks.end() && found->second.generation == generation && !found->second.closed && found->second.viewAssociated;
+    }
+
+    [[nodiscard]] bool isLocalClient(WebLinkId id, WebLinkGeneration generation) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        return found != webLinks.end() && found->second.generation == generation && !found->second.closed
+               && (found->second.viewAssociated || (trustLoopbackClients && found->second.loopbackPeer));
     }
 
     /// The UI of the connection that now owns `id` (generation 0, reaching nothing, when none does).
@@ -674,7 +720,9 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
-        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
+        if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::applicationOrigin(httpAddress, httpPort)});
+        else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy);
@@ -773,6 +821,8 @@ private:
     std::filesystem::path                                                    httpDocRoot;
     ContentPolicy                                                            contentPolicy;
     WindowOptions                                                            windowOptions;
+    const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
+    const bool                                                               trustLoopbackClients;
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
@@ -782,6 +832,8 @@ private:
         enum class Stage { handshaking, starting, started };
         Stage                                  stage = Stage::handshaking;  // starting while its onUIStarted handlers run
         std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
+        bool                                    viewAssociated = false;              // presented the launch secret of an embedded view
+        bool                                    loopbackPeer   = false;              // peer address was the loopback (read only with trustLoopbackClients)
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -894,8 +946,10 @@ private:
             case WebLinkEvent::Code::linked: {
                 {
                     std::scoped_lock lock{linksMutex};
-                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
-                        found->second.stage = Connection::Stage::starting;
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
+                        found->second.stage          = Connection::Stage::starting;
+                        found->second.viewAssociated = detail::viewSecretMatches(viewSecret, event.text);
+                    }
                 }
                 // Even when a handler throws: the browser must not keep collecting deferred sends.
                 struct Started {
