@@ -399,7 +399,7 @@ run_case("Native on unsupported platform" FALSE "Native supports only Windows, D
 
 # Configure-only fixtures exercise CTest commands on every platform and adding an engine using
 # only a registration and support module. They need neither a compiler nor a browser SDK.
-foreach(case webkitgtk-linux cef-linux cef-macos cef-windows cef-disabled missing-xvfb missing-xvfb-hook browser webview2-windows wkwebview-macos extension)
+foreach(case webkitgtk-display webkitgtk-linux cef-linux cef-macos cef-windows cef-disabled missing-xvfb missing-xvfb-hook browser webview2-windows wkwebview-macos extension)
     # These directories belong only to this configure-only fixture. Drop their caches so a
     # changed generator or previous discovery result cannot influence the next invocation.
     file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/frontend-tests/${case}")
@@ -411,6 +411,9 @@ foreach(case webkitgtk-linux cef-linux cef-macos cef-windows cef-disabled missin
     if(NOT result EQUAL 0)
         list(APPEND failures "${case}: ${output}${error}")
     else()
+        if(case STREQUAL "webkitgtk-display")
+            continue()  # The fixture verifies per-test display isolation without an installed browser SDK.
+        endif()
         if(case MATCHES "^cef-(macos|windows)$" AND NOT "${output}${error}" MATCHES "browser integration is not registered on")
             list(APPEND failures "${case}: missing warning about unvalidated browser tests")
         endif()
@@ -434,9 +437,9 @@ foreach(case webkitgtk-linux cef-linux cef-macos cef-windows cef-disabled missin
             continue()
         endif()
         if(case STREQUAL "extension" OR case STREQUAL "webview2-windows")
-            set(expected_count 9)
+            set(expected_count 10)
         else()
-            set(expected_count 8)
+            set(expected_count 9)
         endif()
         if(NOT count EQUAL expected_count)
             list(APPEND failures "${case}: expected ${expected_count} tests, got ${count}")

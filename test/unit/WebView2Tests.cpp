@@ -4,6 +4,81 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <webfront/frontend/WebView2.hpp>
 
+namespace {
+struct ViewRegistrationBrowser {
+    Microsoft::WRL::ComPtr<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler> completion;
+    unsigned navigations = 0;
+    HRESULT navigationResult = S_OK;
+    HRESULT AddScriptToExecuteOnDocumentCreated(LPCWSTR, ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler* handler) {
+        completion = handler;
+        return S_OK;
+    }
+    HRESULT Navigate(LPCWSTR) {
+        ++navigations;
+        return navigationResult;
+    }
+};
+}
+
+SCENARIO("WebView2 waits for view association registration before navigation") {
+    using namespace webfront::frontend::detail::webview2;
+    Apartment apartment;
+    auto session = std::make_shared<Session>(std::chrono::milliseconds{25});
+    session->createWindow();
+    session->viewLaunch = {std::string(64, 'a'), "http://127.0.0.1:9002"};
+    ViewRegistrationBrowser browser;
+    session->installViewAssociationThenNavigate(&browser);
+    REQUIRE(browser.completion);
+    REQUIRE(browser.navigations == 0);
+    REQUIRE(session->startupTimer != 0);
+    WHEN("registration completes successfully") {
+        REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
+        REQUIRE(browser.navigations == 1);
+        REQUIRE(session->startupTimer == 0);
+        REQUIRE_FALSE(session->failure);
+    }
+    WHEN("registration fails") {
+        REQUIRE(browser.completion->Invoke(E_FAIL, nullptr) == S_OK);
+        REQUIRE(browser.navigations == 0);
+        REQUIRE(session->failure);
+        REQUIRE(session->startupTimer == 0);
+    }
+    WHEN("registration never completes") {
+        REQUIRE_THROWS_WITH(session->run(), Catch::Matchers::ContainsSubstring("25 milliseconds"));
+        REQUIRE(browser.navigations == 0);
+    }
+    WHEN("the window closes before registration completes") {
+        session->close();
+        REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
+        REQUIRE(browser.navigations == 0);
+    }
+    WHEN("navigation fails after successful registration") {
+        browser.navigationResult = E_FAIL;
+        REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
+        REQUIRE(session->failure);
+    }
+}
+
+SCENARIO("WebView2 installs the window close script even without a view association secret") {
+    using namespace webfront::frontend::detail::webview2;
+    Apartment apartment;
+    auto session = std::make_shared<Session>();
+    session->createWindow();
+    ViewRegistrationBrowser browser;
+    session->installViewAssociationThenNavigate(&browser);
+    REQUIRE(browser.completion);
+    REQUIRE(browser.navigations == 0);
+    REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
+    REQUIRE(browser.navigations == 1);
+    REQUIRE(session->startupTimer == 0);
+    THEN("the script asks the host to close instead of relying on Chromium's window.close() filter") {
+        const auto script = Session::windowCloseScript();
+        REQUIRE_THAT(script, Catch::Matchers::ContainsSubstring("webfront:close-window"));
+        REQUIRE_THAT(script, Catch::Matchers::ContainsSubstring("window.top!==window"));
+        REQUIRE(Session::windowCloseMessage() == L"webfront:close-window");
+    }
+}
+
 SCENARIO("WebView2 encodes application paths") {
     using webfront::frontend::detail::webview2::applicationUrl;
     GIVEN("a UTF-8 filename containing percent-escaped URL delimiters") {

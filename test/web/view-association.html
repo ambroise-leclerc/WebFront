@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>View association</title>
+<script src="WebFront.js"></script>
+<script>
+    // The page of the embedded view connects with the secret of the launch; the secret is gone once presented.
+    // A second connection of the same page, from the same loopback address, presents none: it is not the view.
+    (async () => {
+        try {
+            await webFront.ready;
+            if ("__webfrontView" in window) throw new Error("the launch secret is still readable by the page");
+            // Run the C++-generated injection against origins serialized by the real engine. A synthetic window
+            // keeps the fixed test secret separate from the real view's launch secret and needs no IPv6 listener.
+            for (const address of ["0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "2001:0DB8:0:0:1:0:0:1"]) {
+                const script = await webFront.cppFunction("associationScript")(address);
+                const target = {};
+                target.top = target;
+                const origin = new URL(`http://[${address}]:9002/`).origin;
+                new Function("window", "location", script)(target, {origin});
+                if (target.__webfrontView !== "a".repeat(64)) throw new Error(`association failed for ${origin}`);
+                const foreign = {};
+                foreign.top = foreign;
+                new Function("window", "location", script)(foreign, {origin: origin.replace(":9002", ":9003")});
+                if ("__webfrontView" in foreign) throw new Error("a foreign origin received the secret");
+            }
+            await webFront.cppFunction("originsChecked")();
+            await new Promise((resolve, reject) => {
+                const socket = new WebSocket(`ws://${location.host}`, "WebFront_0.1");
+                socket.binaryType = "arraybuffer";
+                socket.onopen = () => socket.send(new Uint8Array([0, new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? 0 : 1]));
+                socket.onmessage = () => resolve();
+                socket.onerror = () => reject(new Error("the second connection failed"));
+                socket.onclose = () => reject(new Error("the second connection closed before answering"));
+            });
+            for (let attempt = 0; attempt < 100; ++attempt) {
+                if (await webFront.cppFunction("startedConnections")() >= 2) break;
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        } finally {
+            window.close();
+        }
+    })();
+</script>

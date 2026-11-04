@@ -29,10 +29,16 @@ struct QuietFrontend : Frontend {
         open(address, port, page, policy, WindowOptions{});
     }
     static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window) {
+        open(address, port, page, policy, window, ViewLaunch{});
+    }
+    // The launch proof reaches the engine as it does in an application: the suite runs the same association.
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
         if constexpr (std::is_same_v<Frontend, frontend::WKWebViewFrontend>) {
             frontend::WKWebViewOptions options;
             options.contentPolicy = policy;
             options.window        = window;
+            options.launch        = launch;
             options.visible       = diagnosticWindows();
             Frontend::open(address, port, page, options);
         } else if constexpr (std::is_same_v<Frontend, frontend::WebView2Frontend>) {
@@ -40,10 +46,11 @@ struct QuietFrontend : Frontend {
             options.contentPolicy = policy;
             options.window        = window;
             options.visible       = diagnosticWindows();
+            options.launch        = launch;
             Frontend::open(address, port, page, options);
         } else {
             // Linux engines use one Xvfb display around a complete suite; their native windows stay real.
-            Frontend::open(address, port, page, policy, window);
+            Frontend::open(address, port, page, policy, window, launch);
         }
     }
 };

@@ -19,6 +19,7 @@
 | 1.12 | 2026-10-27 | Acceptée | Ambroise Leclerc | Identifiant de lot non nul, plafond d’opérations, codec canonique et nettoyage limité aux sous-arbres concernés (#380). | — |
 | 1.13 | 2026-10-27 | Acceptée | Ambroise Leclerc | Rejet de PROPERTY value sur output pour préserver les identifiants de ses enfants (#380). | — |
 | 1.14 | 2026-10-27 | Proposée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [PR #394](https://github.com/ambroise-leclerc/WebFront/pull/394) |
+| 1.15 | 2026-11-04 | Proposée | Ambroise Leclerc | La poignée de main peut porter, après ses deux octets, le secret de lancement d'une vue intégrée (#453, ADR-020). | À renseigner après intégration. |
 
 ## État et chronologie
 
@@ -64,6 +65,17 @@ fragmentés, conserve les fragments incomplets et traite les trames réunies dan
 La politique borne chaque message à 64 MiB par défaut ; que tout dépassement annoncé soit
 refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur propre plafond de
 125 octets.
+
+## Poignée de main (`handshake`, code 0)
+
+Le message compte deux octets : le code 0 et l'indicateur d'endianness de la page. Il peut être suivi du **secret de
+lancement** d'une vue intégrée (ADR-020, règle 3) : 64 octets ASCII, les caractères hexadécimaux minuscules lus tels
+quels. Sans secret, le message est celui des versions antérieures ; le serveur l'accepte (le pont reste réglé par
+l'`Origin`, ADR-008) et la connexion n'est simplement pas associée à une vue. Le serveur compare le secret en temps
+constant à celui de son lancement ; toute autre longueur ou valeur est ignorée sans fermer la connexion. `WebFront.js` ne
+transmet que 64 caractères hexadécimaux ; il retire la propriété qui le porte de la fenêtre dès son chargement et le garde
+pour les poignées de main de la page. Le serveur n'accepte qu'une poignée de main par connexion (la suivante est ignorée
+et ne modifie pas l'association) et ne copie une preuve que si elle compte exactement 64 octets.
 
 ## Commande DOM (`domBatch`, code 5, version 1)
 

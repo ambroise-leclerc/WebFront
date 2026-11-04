@@ -9,6 +9,7 @@
 #include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
+#include "../ViewAssociation.hpp"
 #include "WebKitGTKPolicy.hpp"
 
 #include <atomic>
@@ -130,6 +131,11 @@ public:
     void (*dialogConfirm)(Object, int)                          = symbol<decltype(dialogConfirm)>("webkit_script_dialog_confirm_set_confirmed");
     const char* (*dialogDefault)(Object)                        = symbol<decltype(dialogDefault)>("webkit_script_dialog_prompt_get_default_text");
     void (*dialogPromptText)(Object, const char*)               = symbol<decltype(dialogPromptText)>("webkit_script_dialog_prompt_set_text");
+    // User scripts: WebKitUserContentInjectedFrames TOP_FRAME = 1 and WebKitUserScriptInjectionTime START = 0.
+    Object (*contentManager)(Object)                            = symbol<decltype(contentManager)>("webkit_web_view_get_user_content_manager");
+    Object (*scriptNew)(const char*, int, int, const char* const*, const char* const*) = symbol<decltype(scriptNew)>("webkit_user_script_new");
+    void (*scriptAdd)(Object, Object)                           = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
+    void (*scriptUnref)(Object)                                 = symbol<decltype(scriptUnref)>("webkit_user_script_unref");
 };
 
 inline Api& api() {
@@ -291,6 +297,8 @@ struct Session : FailureState {
     webfront::detail::BoundContentPolicy policy;
     WindowOptions                        windowOptions;
     std::function<void()>                navigationCancelled;
+    /// Per-launch proof of this view (ADR-020), given at the start of the top-level documents of the application's origin.
+    ViewLaunch launch;
     /// Download folder; empty selects the user's XDG download folder, else the home folder.
     std::filesystem::path downloadDirectory;
     /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset shows the system dialog.
@@ -404,11 +412,23 @@ struct Session : FailureState {
         a.windowSize(window, windowOptions.width, windowOptions.height);
         a.windowChild(window, view);
         configureSettings();
+        installViewAssociation();
         registerHandlers();
         downloadStartedHandler = a.connect(network, "download-started", reinterpret_cast<Api::Callback>(onDownloadStarted), this, nullptr, 0);
         captureTarget->view = view;
         captureTarget->pending.open();
         captureRegistration = CaptureRegistration{captureProvider(captureTarget)};
+    }
+
+    void installViewAssociation() {
+        const auto source = webfront::detail::viewSecretScript(launch.secret, launch.origin);
+        if (source.empty())
+            return;
+        // No allow list: WebKit match patterns carry no port, so one built from the origin would match nothing. The script
+        // itself compares location.origin, port included, and only defines the secret for the application's origin.
+        const auto script = a.scriptNew(source.c_str(), 1, 0, nullptr, nullptr);
+        a.scriptAdd(a.contentManager(view), script);
+        a.scriptUnref(script);
     }
 
     void configureSettings() {
@@ -684,11 +704,13 @@ struct OpenOptions {
     ContentPolicy                 contentPolicy{};
     WindowOptions                 window{};
     std::function<void(Session&)> configure{};
+    ViewLaunch                    launch{};
 };
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}) {
     initialize();
     Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), options.contentPolicy}, options.window);
+    session.launch = options.launch;
     session.create();
     if (options.configure)
         options.configure(session);
@@ -726,6 +748,15 @@ struct WebKitGTKFrontend {
         (void)page;
         (void)policy;
         initialize();
+#endif
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+#if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
+        detail::webkitgtk::open(address, port, page, {.contentPolicy = policy, .window = window, .launch = launch});
+#else
+        (void)launch;
+        open(address, port, page, policy, window);
 #endif
     }
 };

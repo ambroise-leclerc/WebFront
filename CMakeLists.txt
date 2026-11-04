@@ -51,7 +51,7 @@ add_library(WebFront INTERFACE)
 add_library(WebFront::WebFront ALIAS WebFront)
 target_link_libraries(WebFront INTERFACE Threads::Threads)
 if(WIN32)
-    target_link_libraries(WebFront INTERFACE shell32)
+    target_link_libraries(WebFront INTERFACE shell32 bcrypt)
 endif()
 
 # Static linkage for CEF compatibility (a global setting: only the top-level project may choose it)

@@ -13,6 +13,7 @@ A frontend is a type with:
 | `static void initialize()` | Called once successfully per frontend type, before the first `BasicWF` listener is created. A thrown exception aborts construction; the next construction retries. |
 | `static void open(std::string_view port, std::string_view file)` | Called by `show()` / `openAndRun()` on the calling thread, while the HTTP server runs on its own thread. |
 | `static void open(address, port, page, const ContentPolicy&)` (optional) | Preferred overload receiving the per-application [content policy](CONTENT_POLICY.md). |
+| `static void open(address, port, page, const ContentPolicy&, const WindowOptions&, const ViewLaunch&)` (optional) | Richest overload: also receives the [view association](#view-association) proof of this launch. |
 | `static constexpr Action action` | What `BasicWF` does once `open()` returns. |
 
 - **Blocking.** With `Action::closeServerAfterOpen` (embedded windows), `open()` blocks until the window is closed, releases its session resources, and returns; `BasicWF` then stops the server and joins its thread, so `show()` returns after a clean shutdown. With `Action::keepServerRunning` (the system browser), the server keeps running after `open()` returns, until `stop()` or application destruction. The action determines server lifetime, not whether opening returns immediately: the built-in system-browser adapter waits for Enter in the console after launching the page and cannot observe when the external browser closes.
@@ -21,6 +22,40 @@ A frontend is a type with:
 - **Unavailable frontends.** Every frontend type is always declared. In a build without its support, initialization or opening throws a message naming the CMake option that enables it (`-DWEBFRONT_EMBED_CEF=ON`, `-DWEBFRONT_EMBED_WEBVIEW2=ON`, `-DWEBFRONT_EMBED_WKWEBVIEW=ON`, `-DWEBFRONT_EMBED_WEBKITGTK=ON`).
 - **URL.** Built-in frontends also provide `open(address, port, file)`, which `BasicWF` prefers when available. Build the URL with `frontend::detail::applicationUrl(address, port, file)` in `frontend/Url.hpp`: it uses the configured address and preserves URI query/fragment syntax and existing percent escapes. Spaces and UTF-8 bytes are encoded. For literal filename delimiters use `%23`, `%3F` and `%25`. The two-argument overload uses `127.0.0.1`; wildcard binds open their matching loopback address.
 - **Selection.** `webfront::WebFront` always uses the system browser. An application opts into another frontend with `webfront::WebFrontWithFrontend<...>`; enabling an embedded engine at configuration time never changes the default.
+
+## View association
+
+`UI::isEmbeddedView()` tells whether a connection comes from the view of an embedded frontend of this application, and
+`UI::isLocalClient()` is the only criterion of a "local client" for system services (ADR-020, rule 3). A loopback address
+proves nothing: a remote browser behind a local proxy or an SSH tunnel, or another user of the machine, arrives from it too.
+
+Each launch creates a random 256-bit secret. A frontend that implements the `open(..., const ViewLaunch&)` overload gives it
+to its own view, in the process, at the start of every top-level document whose origin is the application's
+(`ViewLaunch::origin`). The page receives it as the window property `__webfrontView`; `WebFront.js` takes it when it loads, removes
+it from the window and presents it in the handshake of every connection of that page (a reconnection included). The server
+accepts one handshake per connection and compares the secret in constant time; a proof of another size than 64 characters is
+not even copied. It is never served over HTTP and never put
+on a command line or in a URL.
+
+| Engine | Injection at the start of the document |
+| --- | --- |
+| WKWebView | `WKUserScript`, `WKUserScriptInjectionTimeAtDocumentStart`, main frame only |
+| WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`); the first navigation waits for successful registration in its completion handler, with the startup watchdog active during that wait; registration failure fails the opening |
+| WebKitGTK | `WebKitUserScript` at document start, top frame, no URL allow list (the script compares `location.origin`, port included) |
+| CEF | extra browser information given to `CefBrowserView::CreateBrowserView`, read by the renderer process's `OnBrowserCreated` and defined on the window by `OnContextCreated` through the same script as the other engines, evaluated in the new context so that the page itself answers for its origin (the render process app is the one given to `CefExecuteProcess`; a separate helper executable must give it its own `ViewSecretRenderApp`) |
+
+- The system browser receives no secret (a command line or a history could disclose it, and a remote browser would present
+  it first): its connections are never local, whatever their address. An application that accepts that risk sets
+  `WebFrontConfig::trustLoopbackClients`, which reads the peer address and is unsafe on a shared machine or behind a proxy or tunnel.
+- `NativeOrBrowserFrontend` passes the proof to the native window only.
+- The association does not protect against a script admitted into the view (ADR-008): it shares the authority of the bridge
+  and could read the property before `WebFront.js`. An adapter that cannot inject a script simply does not implement the overload.
+- A custom frontend that wants services restricted to its own view implements the overload and applies
+  `webfront::detail::viewSecretScript(secret, origin)` (or the engine's equivalent) at the start of the document. The helper
+  returns an empty script, hence no association, unless the secret is lowercase hexadecimal and the origin a plain http origin;
+  give it `webfront::detail::browserOrigin(address, port)` (lowercase, without port 80), which `ViewLaunch::origin` already is.
+  The script uses the browser's `URL` parser to serialize that origin before comparing it with `location.origin`, including
+  IPv6 compression and embedded IPv4 notation (`::ffff:127.0.0.1` becomes `[::ffff:7f00:1]` as a URL host).
 
 ## Window title and size
 
@@ -135,7 +170,7 @@ engines show it only after a user gesture on the page); its wiring is implemente
 
 1. Implement the type in `include/webfront/frontend/` following the contract above and include it from `Frontend.hpp`. Keep platform headers behind the option's macro.
 2. Add its support module and one `webfront_register_frontend(...)` entry in `cmake/Frontends.cmake`, using the fields below.
-3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the seven shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
+3. Extend `FrontendSelection` coverage and run the shared Jasmine and lifecycle suites. Enabling the engine on a `TEST_PLATFORMS` platform automatically registers the eight shared lifecycle cases; `WEBFRONT_TEST_FRONTEND` selects its C++ type in both runners.
 
 | Field | Meaning |
 | --- | --- |
@@ -157,7 +192,7 @@ Registry order determines the initial cache default: the first enabled embedded 
 
 ## Lifecycle tests
 
-`test/web/FrontendLifecycle.cpp` runs the same seven cases under the selected embedded engine:
+`test/web/FrontendLifecycle.cpp` runs the same eight cases under the selected embedded engine:
 
 - `no-bridge`: close a page that never connects to the bridge and return from `show()`.
 - `early-close`: close immediately from the page's first script, before any bridge connection.
@@ -166,6 +201,7 @@ Registry order determines the initial cache default: the first enabled embedded 
 - `path-encoding`: load `encoded path #.html` and verify that its query and fragment survived.
 - `content-policy`: block a popup and a foreign-origin top-level navigation while keeping the original page alive.
 - `navigation-allow-list`: permit the same top-level destination through the explicit navigation allow-list.
+- `view-association`: the page of the view connects with the secret of the launch and `UI::isEmbeddedView()` is true; a second connection of that page, from the same loopback address and without the secret, is not associated.
 
 Each runs in a separate process as `<Frontend>Lifecycle-<case>`, with the registry's timeout, the
 `web-integration` label and the same port lock as Jasmine. Linux CEF and WebKitGTK cases use Xvfb. On Linux CEF, run

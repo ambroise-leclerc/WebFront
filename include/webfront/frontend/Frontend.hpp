@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../ContentPolicy.hpp"
+#include "../ViewAssociation.hpp"
 #include "Action.hpp"
 #include "Window.hpp"
 #include "CEF.hpp"
@@ -99,6 +100,10 @@ struct CEFFrontend {
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
         cef::open(address, port, file, policy, window);
     }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+        cef::open(address, port, file, policy, window, launch);
+    }
 };
 
 namespace detail {
@@ -121,8 +126,11 @@ struct PlatformNativeFrontend {
 
 // Calls the richest open() the frontend offers, as BasicWF does.
 template <typename Frontend>
-void openWith(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
-    if constexpr (requires { Frontend::open(address, port, file, policy, window); })
+void openWith(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
+              const ViewLaunch& launch = {}) {
+    if constexpr (requires { Frontend::open(address, port, file, policy, window, launch); })
+        Frontend::open(address, port, file, policy, window, launch);
+    else if constexpr (requires { Frontend::open(address, port, file, policy, window); })
         Frontend::open(address, port, file, policy, window);
     else if constexpr (requires { Frontend::open(address, port, file, policy); })
         Frontend::open(address, port, file, policy);
@@ -195,8 +203,13 @@ struct NativeOrBrowserFrontendFor {
         open(address, port, file, policy, WindowOptions{});
     }
     static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window) {
+        open(address, port, file, policy, window, ViewLaunch{});
+    }
+    /// The launch proof goes to the native window only: the system browser is never given a secret (ADR-020).
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
         if (usesNativeWindow())
-            detail::openWith<Native>(address, port, file, policy, window);
+            detail::openWith<Native>(address, port, file, policy, window, launch);
         else
             detail::openWith<Browser>(address, port, file, policy, window);
     }

@@ -290,3 +290,40 @@ SCENARIO("The application chooses the title and the size of the embedded window"
         }
     }
 }
+
+namespace {
+struct LaunchRecordingFrontend {
+    static constexpr frontend::Action action = frontend::Action::keepServerRunning;
+    static inline ViewLaunch          received{};
+    static inline int                 opens = 0;
+    static void                       initialize() { }
+    static void                       open(std::string_view, std::string_view) { }
+    static void open(std::string_view, std::string_view, std::string_view, const ContentPolicy&, const WindowOptions&, const ViewLaunch& launch) {
+        received = launch;
+        ++opens;
+    }
+};
+}  // namespace
+
+SCENARIO("A frontend that accepts a view launch receives this application's secret and origin") {
+    GIVEN("a frontend with the richest open overload") {
+        using LaunchApp = BasicWFWithFrontend<ContractNet, MockFileSystem<>, LaunchRecordingFrontend>;
+        LaunchApp first;
+        LaunchApp second;
+        WHEN("each application opens its window") {
+            LaunchRecordingFrontend::opens = 0;
+            first.openWindow("index.html");
+            const auto firstLaunch = LaunchRecordingFrontend::received;
+            second.openWindow("index.html");
+            const auto secondLaunch = LaunchRecordingFrontend::received;
+            THEN("the frontend gets a 64-character secret and the origin it must expose it to") {
+                REQUIRE(LaunchRecordingFrontend::opens == 2);
+                CHECK(firstLaunch.secret.size() == 64);
+                CHECK(firstLaunch.origin == "http://127.0.0.1:" + std::string(first.port()));
+            }
+            THEN("every application has its own secret") {
+                CHECK(firstLaunch.secret != secondLaunch.secret);
+            }
+        }
+    }
+}

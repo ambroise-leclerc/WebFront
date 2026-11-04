@@ -25,6 +25,18 @@ SCENARIO("Handshake message") {
     REQUIRE(handshake->getEndian() == msg::JSEndian::little);
 }
 
+SCENARIO("Handshake message with the proof of an embedded view") {
+    // ADR-003: bytes after the two header bytes are the launch secret of ADR-020; the header itself is unchanged.
+    const std::string proof(64, 'a');
+    std::vector<std::byte> raw{std::byte{0x00}, std::byte{0x00}};
+    for (const char c : proof)
+        raw.push_back(static_cast<std::byte>(c));
+    auto handshake = msg::Handshake::castFromRawData(std::span(raw));
+    REQUIRE(handshake->getEndian() == msg::JSEndian::little);
+    REQUIRE(handshake->getPayloadSize() == 0);
+    REQUIRE(raw.size() - sizeof(*handshake) == proof.size());
+}
+
 SCENARIO("Ack message") {
     msg::Ack ack;
 

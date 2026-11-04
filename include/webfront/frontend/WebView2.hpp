@@ -5,6 +5,7 @@
 #include "Action.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -27,6 +28,8 @@ struct WebView2Options {
     WindowOptions             window{};
     /** @brief Keep the native window hidden while retaining the real controller and message loop. */
     bool                      visible{true};
+    /** @brief Per-launch proof of this view (ADR-020), given to top-level documents of the application's origin at their creation. */
+    ViewLaunch                launch{};
 };
 
 }  // namespace webfront::frontend
@@ -264,6 +267,7 @@ public:
     std::exception_ptr                               failure;
     std::wstring                                     url;
     webfront::detail::BoundContentPolicy             contentPolicy;
+    ViewLaunch                                       viewLaunch;
     // Internal adapter observer, used by lifecycle probes after a successful native cancellation.
     std::function<void()>                            navigationCancelled;
     // Internal adapter observer: the browser exists and nothing is loaded yet (the transport benchmark of ADR-017 registers
@@ -705,6 +709,19 @@ private:
                   }).Get(),
                   &token),
               "registering window close handler");
+        check(view->add_WebMessageReceived(
+                  Microsoft::WRL::Callback<ICoreWebView2WebMessageReceivedEventHandler>([weak](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                      LPWSTR raw = nullptr;
+                      if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                          const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
+                          if (std::wstring_view{message.get()} == windowCloseMessage())
+                              if (const auto self = weak.lock())
+                                  self->requestWindowClose();
+                      }
+                      return S_OK;
+                  }).Get(),
+                  &token),
+              "registering window close message handler");
         check(view->add_NavigationCompleted(
                   Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>([weak](ICoreWebView2*,
                                                                                                 ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
@@ -796,13 +813,52 @@ private:
         check(controller->put_IsVisible(TRUE), "showing controller");
         if (GetFocus() == window)
             restoreFocus();
-        // Runtime creation is complete. Slow page resources must not consume its watchdog budget.
-        stopStartupTimer();
         captureQueue->open(window);
         captureRegistration = CaptureRegistration{captureProvider(captureQueue)};
         if (viewReady)
             viewReady();
-        check(view->Navigate(url.c_str()), "navigating to application");
+        installViewAssociationThenNavigate(view.Get());
+    }
+
+public:
+    // Keep the runtime watchdog active until registration completes. The browser is owned by this session;
+    // the callback checks its weak session before using it. The template permits delayed-registration test doubles.
+    static constexpr std::wstring_view windowCloseMessage() noexcept {
+        return L"webfront:close-window";
+    }
+
+    // Chromium silently ignores window.close() from a top-level page whose session history still holds the
+    // initial entry (a script running at document creation can race with its replacement), so a page's very
+    // first script could never close the window. The top-level window.close() asks the host directly instead.
+    static std::string windowCloseScript() {
+        return "(()=>{if(window.top!==window||!window.chrome||!window.chrome.webview)return;"
+               "const post=window.chrome.webview.postMessage.bind(window.chrome.webview);"
+               "Object.defineProperty(window,'close',{value:function close(){post('webfront:close-window');},"
+               "configurable:true,writable:true});})();";
+    }
+
+    template <typename Browser>
+    void installViewAssociationThenNavigate(Browser* browser) {
+        const auto source = windowCloseScript() + webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
+        {
+            auto       weak   = weak_from_this();
+            const auto script = utf16(source);
+            check(browser->AddScriptToExecuteOnDocumentCreated(
+                      script.c_str(),
+                      Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak, browser](HRESULT result, LPCWSTR) -> HRESULT {
+                          if (const auto self = weak.lock(); self && !self->closed) {
+                              try {
+                                  check(result, "installing the view association script");
+                                  self->stopStartupTimer();
+                                  check(browser->Navigate(self->url.c_str()), "navigating to application");
+                              } catch (...) {
+                                  self->fail();
+                              }
+                          }
+                          return S_OK;
+                      }).Get()),
+                  "starting the view association script installation");
+        }
     }
 };
 
@@ -821,6 +877,7 @@ inline void open(std::string_view address,
                                  "https://developer.microsoft.com/microsoft-edge/webview2/");
     auto session       = std::make_shared<Session>(options.startupTimeout);
     session->contentPolicy = std::move(contentPolicy);
+    session->viewLaunch    = options.launch;
     session->url       = applicationUrl(address, port, file);
     if (prepare)
         prepare(*session);
@@ -869,6 +926,14 @@ struct WebView2Frontend {
         options.window        = window;
         open(address, port, file, options);
     }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+        WebView2Options options;
+        options.contentPolicy = policy;
+        options.window        = window;
+        options.launch        = launch;
+        open(address, port, file, options);
+    }
 };
 
 /** @brief Configured WebView2 frontend. OptionsProvider::get() returns per-opening WebView2Options. */
@@ -890,6 +955,14 @@ struct WebView2FrontendWithOptions : WebView2Frontend {
         auto options          = OptionsProvider::get();
         options.contentPolicy = policy;
         options.window        = window;
+        WebView2Frontend::open(address, port, page, options);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view page, const ContentPolicy& policy, const WindowOptions& window,
+                     const ViewLaunch& launch) {
+        auto options          = OptionsProvider::get();
+        options.contentPolicy = policy;
+        options.window        = window;
+        options.launch        = launch;
         WebView2Frontend::open(address, port, page, options);
     }
 };

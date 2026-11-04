@@ -110,6 +110,9 @@ private:
     std::size_t inFlight = 0;
 };
 
+/// The only size of handshake proof that is kept: the 64 hexadecimal characters of a launch secret (ADR-020).
+inline constexpr std::size_t handshakeProofSize = 64;
+
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
     std::shared_ptr<HandlerGuard> handlers{std::make_shared<HandlerGuard>()};
@@ -117,6 +120,7 @@ class WebLink {
     WebLinkId id;
     DecimalId idText{id};
     bool sameEndian;
+    bool handshaken{};  /// The handshake is accepted once
     std::mutex transportMutex;
     std::optional<log::TransportHandle> transport; /// Browser log transport, attached at handshake
     bool transportRetired{};                       /// No transport may attach after disconnection
@@ -252,7 +256,10 @@ public:
 private:
     void onBinaryMessage(std::span<const std::byte> data) {
         const log::ContextScope context(linkContext());
-        log::infoHex("onMessage(binary) :", data);
+        // Log records reach connected browsers: a handshake carries the launch secret of an embedded view, so only its
+        // two header bytes are dumped.
+        const bool isHandshake = !data.empty() && static_cast<msg::Command>(data[0]) == msg::Command::handshake;
+        log::infoHex("onMessage(binary) :", isHandshake ? data.first(std::min(data.size(), sizeof(msg::Handshake))) : data);
         if (data.empty()) {
             log::error("Received an empty WebFront message");
             return;
@@ -267,6 +274,11 @@ private:
     }
 
     void handleHandshake(std::span<const std::byte> data) {
+        // One handshake per connection: a repeated one must not reset the stage or the association the first established.
+        if (std::exchange(handshaken, true)) {
+            log::error("Ignoring a repeated handshake");
+            return;
+        }
         auto command = msg::Handshake::castFromRawData(data);
         sendCommand(msg::Ack{});
         attachTransport();
@@ -277,7 +289,12 @@ private:
         const auto     jsEndian       = static_cast<msg::JSEndian>(command->getEndian());
         sameEndian = (nativeIsLittle && jsEndian == msg::JSEndian::little) || (nativeIsBig && jsEndian == msg::JSEndian::big);
 
-        eventsHandler({WebLinkEvent::Code::linked, id});
+        // Anything after the two header bytes is the secret of an embedded view (ADR-020); the application judges it.
+        // Only a proof of the exact size of a launch secret is copied: anything else cannot match and is not worth an allocation.
+        auto proof = data.size() > sizeof(msg::Handshake) ? data.subspan(sizeof(msg::Handshake)) : std::span<const std::byte>{};
+        if (proof.size() != handshakeProofSize)
+            proof = {};
+        eventsHandler({WebLinkEvent::Code::linked, id, std::string(reinterpret_cast<const char*>(proof.data()), proof.size())});
     }
 
     void handleCallFunction(std::span<const std::byte> data) {
