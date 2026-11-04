@@ -800,29 +800,30 @@ private:
         check(controller->put_IsVisible(TRUE), "showing controller");
         if (GetFocus() == window)
             restoreFocus();
-        // Runtime creation is complete. Slow page resources must not consume its watchdog budget.
-        stopStartupTimer();
         captureQueue->open(window);
         captureRegistration = CaptureRegistration{captureProvider(captureQueue)};
         if (viewReady)
             viewReady();
-        installViewAssociationThenNavigate();
+        installViewAssociationThenNavigate(view.Get());
     }
 
-    // The script is registered, then the first navigation is issued: WebView2 executes its commands in the order they are
-    // issued, so the document created by that navigation runs the script. The completion handler only reports a registration
-    // that failed, which fails the opening instead of leaving the view silently unassociated (ADR-020).
-    void installViewAssociationThenNavigate() {
+public:
+    // Keep the runtime watchdog active until registration completes. The browser is owned by this session;
+    // the callback checks its weak session before using it. The template permits delayed-registration test doubles.
+    template <typename Browser>
+    void installViewAssociationThenNavigate(Browser* browser) {
         const auto source = webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
         if (!source.empty()) {
             auto       weak   = weak_from_this();
             const auto script = utf16(source);
-            check(view->AddScriptToExecuteOnDocumentCreated(
+            check(browser->AddScriptToExecuteOnDocumentCreated(
                       script.c_str(),
-                      Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak](HRESULT result, LPCWSTR) -> HRESULT {
+                      Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak, browser](HRESULT result, LPCWSTR) -> HRESULT {
                           if (const auto self = weak.lock(); self && !self->closed) {
                               try {
                                   check(result, "installing the view association script");
+                                  self->stopStartupTimer();
+                                  check(browser->Navigate(self->url.c_str()), "navigating to application");
                               } catch (...) {
                                   self->fail();
                               }
@@ -830,8 +831,11 @@ private:
                           return S_OK;
                       }).Get()),
                   "starting the view association script installation");
+            return;
         }
-        check(view->Navigate(url.c_str()), "navigating to application");
+        // Slow page resources must not consume the runtime startup budget.
+        stopStartupTimer();
+        check(browser->Navigate(url.c_str()), "navigating to application");
     }
 };
 
