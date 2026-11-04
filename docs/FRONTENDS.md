@@ -31,8 +31,10 @@ proves nothing: a remote browser behind a local proxy or an SSH tunnel, or anoth
 
 Each launch creates a random 256-bit secret. A frontend that implements the `open(..., const ViewLaunch&)` overload gives it
 to its own view, in the process, at the start of every top-level document whose origin is the application's
-(`ViewLaunch::origin`). The page receives it as the window property `__webfrontView`; `WebFront.js` reads it once, removes it and
-presents it in the WebSocket handshake. The server compares it in constant time. It is never served over HTTP and never put
+(`ViewLaunch::origin`). The page receives it as the window property `__webfrontView`; `WebFront.js` takes it when it loads, removes
+it from the window and presents it in the handshake of every connection of that page (a reconnection included). The server
+accepts one handshake per connection and compares the secret in constant time; a proof of another size than 64 characters is
+not even copied. It is never served over HTTP and never put
 on a command line or in a URL.
 
 | Engine | Injection at the start of the document |
@@ -40,7 +42,7 @@ on a command line or in a URL.
 | WKWebView | `WKUserScript`, `WKUserScriptInjectionTimeAtDocumentStart`, main frame only |
 | WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`); the registration is asynchronous, so the first navigation starts from its completion handler and a failed registration fails the opening |
 | WebKitGTK | `WebKitUserScript` at document start, top frame, allow list of the application's origin |
-| CEF | extra browser information given to `CefBrowserView::CreateBrowserView`, read by the renderer process's `OnBrowserCreated` and defined on the window in `OnContextCreated` (the render process app is the one given to `CefExecuteProcess`) |
+| CEF | extra browser information given to `CefBrowserView::CreateBrowserView`, read by the renderer process's `OnBrowserCreated` and defined on the window by `OnContextCreated` through the same script as the other engines, evaluated in the new context so that the page itself answers for its origin (the render process app is the one given to `CefExecuteProcess`; a separate helper executable must give it its own `ViewSecretRenderApp`) |
 
 - The system browser receives no secret (a command line or a history could disclose it, and a remote browser would present
   it first): its connections are never local, whatever their address. An application that accepts that risk sets
@@ -49,7 +51,10 @@ on a command line or in a URL.
 - The association does not protect against a script admitted into the view (ADR-008): it shares the authority of the bridge
   and could read the property before `WebFront.js`. An adapter that cannot inject a script simply does not implement the overload.
 - A custom frontend that wants services restricted to its own view implements the overload and applies
-  `webfront::detail::viewSecretScript(secret, origin)` (or the engine's equivalent) at the start of the document.
+  `webfront::detail::viewSecretScript(secret, origin)` (or the engine's equivalent) at the start of the document. The helper
+  returns an empty script, hence no association, unless the secret is lowercase hexadecimal and the origin a plain http origin;
+  give it `webfront::detail::browserOrigin(address, port)` (the origin as `location.origin` writes it: lowercase, without port 80),
+  which `ViewLaunch::origin` already is.
 
 ## Window title and size
 

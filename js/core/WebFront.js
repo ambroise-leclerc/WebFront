@@ -51,8 +51,9 @@
 
     const arrayCodes = new Map(Array.from(arrayTypes, ([constructor, spec]) => [spec.code, {...spec, constructor}]));
 
-    /// The launch secret of an embedded view, once: defined by the adapter before any script of the page, then removed.
-    /// Anything that is not the expected 64 hexadecimal characters is ignored, so a script cannot inject other bytes.
+    /// The launch secret of an embedded view: defined by the adapter before any script of the page, taken here when
+    /// WebFront.js loads and removed from the window, then kept for every handshake of this page (a reconnection presents
+    /// it again). Anything that is not the expected 64 hexadecimal characters is ignored, so a script cannot inject other bytes.
     function takeViewSecret() {
         const descriptor = Object.getOwnPropertyDescriptor(global, "__webfrontView");
         if (!descriptor) return "";
@@ -60,6 +61,8 @@
         const value = descriptor.value;
         return typeof value === "string" && /^[0-9a-f]{64}$/.test(value) ? value : "";
     }
+
+    const viewSecret = takeViewSecret();
 
     function nativeIsLittleEndian() {
         const word = new Uint32Array([0x110000ff]);
@@ -156,9 +159,9 @@
 
         handshake() {
             this.state = "handshaking";
-            // An embedded frontend gives its view a per-launch secret at the start of the document (ADR-020). It is
-            // presented once, here, and removed so that the page does not keep reading it; the system browser has none.
-            const secret = takeViewSecret();
+            // An embedded frontend gives its view a per-launch secret at the start of the document (ADR-020). It was taken
+            // out of the window when this script loaded, so the page does not keep reading it; the system browser has none.
+            const secret = viewSecret;
             const header = [Command.handshake, nativeIsLittleEndian() ? 0 : 1];
             for (let index = 0; index < secret.length; ++index) header.push(secret.charCodeAt(index) & 0x7f);
             this.socket.send(new Uint8Array(header));

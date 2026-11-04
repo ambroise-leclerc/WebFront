@@ -73,7 +73,9 @@ lancement** d'une vue intégrée (ADR-020, règle 3) : 64 octets ASCII, les cara
 quels. Sans secret, le message est celui des versions antérieures ; le serveur l'accepte (le pont reste réglé par
 l'`Origin`, ADR-008) et la connexion n'est simplement pas associée à une vue. Le serveur compare le secret en temps
 constant à celui de son lancement ; toute autre longueur ou valeur est ignorée sans fermer la connexion. `WebFront.js` ne
-transmet que 64 caractères hexadécimaux et retire la propriété qui le porte après l'avoir lue.
+transmet que 64 caractères hexadécimaux ; il retire la propriété qui le porte de la fenêtre dès son chargement et le garde
+pour les poignées de main de la page. Le serveur n'accepte qu'une poignée de main par connexion (la suivante est ignorée
+et ne modifie pas l'association) et ne copie une preuve que si elle compte exactement 64 octets.
 
 ## Commande DOM (`domBatch`, code 5, version 1)
 

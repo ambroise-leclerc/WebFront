@@ -285,11 +285,15 @@ public:
                 return;
             launch = found->second;
         }
-        const auto url = frame->GetURL().ToString();
-        if (url != launch.origin && !url.starts_with(launch.origin + "/"))
+        // frame->GetURL() can still be the previous or a blank URL when the context is created: the page itself is asked
+        // for its origin, by the script every other adapter runs, which only defines the secret for a top-level document of
+        // the application's origin.
+        const auto script = webfront::detail::viewSecretScript(launch.secret, launch.origin);
+        if (script.empty())
             return;
-        context->GetGlobal()->SetValue(CefString(std::string(webfront::detail::viewSecretProperty)), CefV8Value::CreateString(launch.secret),
-                                       V8_PROPERTY_ATTRIBUTE_DONTENUM);
+        CefRefPtr<CefV8Value>     result;
+        CefRefPtr<CefV8Exception> exception;
+        context->Eval(script, CefString(), 0, result, exception);
     }
 
 private:
@@ -332,6 +336,8 @@ inline void initialize() {
         argv_ptrs.data()
     #endif
     );
+    // The renderer processes are this executable started again: this is the app that installs their render process handler
+    // (a separate helper executable must pass a ViewSecretRenderApp to its own CefExecuteProcess to associate its views).
     CefRefPtr<CefApp> app(new ViewSecretRenderApp);
     int               exit_code = CefExecuteProcess(main_args, app, nullptr);
     if (exit_code >= 0) {

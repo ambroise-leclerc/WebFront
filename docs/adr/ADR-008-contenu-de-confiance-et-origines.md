@@ -40,7 +40,7 @@ WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
 Que le secret de lancement d'une vue intégrée (#453) ne s'ajoute pas au contrôle d'origine : il ne donne aucun accès
 au pont, que le contrôle d'`Origin` règle seul. Il ne sert qu'à savoir si la connexion vient de la vue de
 l'application (`UI::isEmbeddedView()`), critère de « client local » des services (ADR-020, règle 3). Il ne protège pas
-d'un script admis dans la vue, qui partage l'autorité du pont et pourrait le lire avant `WebFront.js` ; le navigateur
+d'un script admis dans la vue, qui partage l'autorité du pont et pourrait le lire avant `WebFront.js`, ou le rejouer depuis une autre connexion tant que la page vit ; le navigateur
 système n'en reçoit aucun.
 
 ## Options écartées et motifs

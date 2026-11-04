@@ -813,12 +813,13 @@ private:
     // script: the initial navigation waits for it, and a registration that fails fails the opening instead of leaving the
     // view silently unassociated (ADR-020).
     void installViewAssociationThenNavigate() {
-        if (viewLaunch.secret.empty()) {
+        const auto source = webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
+        if (source.empty()) {
             check(view->Navigate(url.c_str()), "navigating to application");
             return;
         }
         auto       weak   = weak_from_this();
-        const auto script = utf16(webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin));
+        const auto script = utf16(source);
         check(view->AddScriptToExecuteOnDocumentCreated(
                   script.c_str(),
                   Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak](HRESULT result, LPCWSTR) -> HRESULT {

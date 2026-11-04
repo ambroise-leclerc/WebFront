@@ -5,12 +5,14 @@
 - Embedded frontends: a connection proves it comes from the view (#453, ADR-020 rule 3). Each launch creates a random
   256-bit secret that the adapter gives to its own view at the start of every top-level document of the application's
   origin (WKWebView `WKUserScript`, WebView2 `AddScriptToExecuteOnDocumentCreated`, WebKitGTK `WebKitUserScript`, CEF
-  extra browser information read by the renderer); `WebFront.js` reads it once, removes it and presents it in the handshake
+  extra browser information read by the renderer); `WebFront.js` takes it when it loads, removes it from the window and presents it in the handshake
   (ADR-003, ADR-008). `UI::isEmbeddedView()` is true only for that connection and `UI::isLocalClient()` is the only
   criterion of a local client: it is never deduced from the address. The system browser receives no secret and is never
   local, unless the application sets `WebFrontConfig::trustLoopbackClients` (off by default, unsafe on a shared machine
   or behind a proxy or tunnel). A frontend receives the proof through an optional
-  `open(address, port, file, policy, window, ViewLaunch)` overload. The association does not protect against a script
+  `open(address, port, file, policy, window, ViewLaunch)` overload. The handshake is accepted once per connection and a proof is copied only at the size of a secret; the
+  script handed to a view is refused (no association) for an origin or a secret that would need escaping; an IPv4 loopback
+  seen through a dual-stack socket counts as loopback. The association does not protect against a script
   admitted into the view. WebView2, WebKitGTK and CEF code is covered by their own CI jobs; WKWebView is also tested here.
 
 - HTTP server: dynamic routes (#454, ADR-020 prerequisite). `addRoute(prefix, handler)` on the application answers `GET` and

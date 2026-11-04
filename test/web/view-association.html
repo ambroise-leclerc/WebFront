@@ -15,6 +15,7 @@
                 socket.onopen = () => socket.send(new Uint8Array([0, new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? 0 : 1]));
                 socket.onmessage = () => resolve();
                 socket.onerror = () => reject(new Error("the second connection failed"));
+                socket.onclose = () => reject(new Error("the second connection closed before answering"));
             });
             for (let attempt = 0; attempt < 100; ++attempt) {
                 if (await webFront.cppFunction("startedConnections")() >= 2) break;

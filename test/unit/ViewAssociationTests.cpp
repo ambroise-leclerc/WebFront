@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -23,10 +24,10 @@ struct LaunchSecret {
 }  // namespace webfront::testing
 
 namespace {
-const std::string upgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+const std::string viewUpgradeRequest = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                                    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
 
-struct OneBrowserNet : testing::InjectableNetworking {
+struct ViewOneBrowserNet : testing::InjectableNetworking {
     static inline bool accepted{};
     static auto        Accept(Acceptor&) {
         return networking::ex::then(networking::ex::just(), []() -> Socket {
@@ -37,44 +38,44 @@ struct OneBrowserNet : testing::InjectableNetworking {
     }
 };
 
-using Socket = testing::InjectableSocket;
-using App    = BasicWF<OneBrowserNet, fs::DefaultFS>;
+using ViewSocket = testing::InjectableSocket;
+using ViewApp = BasicWF<ViewOneBrowserNet, fs::DefaultFS>;
 
-struct Verdict {
+struct ViewVerdict {
     bool embedded = false;
     bool local    = false;
 };
 
 // Connects one browser whose handshake carries `proof` after its two header bytes, and reports what the UI says.
-Verdict connect(App& app, const std::string& proof) {
-    Verdict verdict;
+ViewVerdict connect(ViewApp& app, const std::string& proof) {
+    ViewVerdict verdict;
     bool    started = false;
-    app.onUIStarted([&](App::UI ui) {
+    app.onUIStarted([&](ViewApp::UI ui) {
         verdict.embedded = ui.isEmbeddedView();
         verdict.local    = ui.isLocalClient();
         started          = true;
     });
-    Socket::receive(std::as_bytes(std::span(upgradeRequest)));
+    ViewSocket::receive(std::as_bytes(std::span(viewUpgradeRequest)));
     msg::Handshake         handshake;
     std::vector<std::byte> payload(handshake.header().begin(), handshake.header().end());
     for (const char c : proof)
         payload.push_back(static_cast<std::byte>(c));
-    Socket::receive(testing::clientFrame(payload));
+    ViewSocket::receive(testing::clientFrame(payload));
     REQUIRE(started);
     return verdict;
 }
 
 void freshNetwork() {
-    Socket::reset();
-    Socket::peerIsLoopback  = false;
-    OneBrowserNet::accepted = false;
+    ViewSocket::reset();
+    ViewSocket::peerIsLoopback  = false;
+    ViewOneBrowserNet::accepted = false;
 }
 }  // namespace
 
 SCENARIO("A connection is associated with the view of an embedded frontend only by the secret of the launch", "[view-association]") {
     freshNetwork();
-    App app{WebFrontConfig{.port = "0"}};
-    const std::string secret = testing::LaunchSecret<App>::of(app);
+    ViewApp app{WebFrontConfig{.port = "0"}};
+    const std::string secret = testing::LaunchSecret<ViewApp>::of(app);
 
     GIVEN("the secret of the launch") {
         THEN("it is 256 random bits in lowercase hexadecimal") {
@@ -82,8 +83,8 @@ SCENARIO("A connection is associated with the view of an embedded frontend only 
             REQUIRE(std::ranges::all_of(secret, [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) && !std::isupper(static_cast<unsigned char>(c)); }));
         }
         THEN("another application has another one") {
-            App other{WebFrontConfig{.port = "0"}};
-            REQUIRE(testing::LaunchSecret<App>::of(other) != secret);
+            ViewApp other{WebFrontConfig{.port = "0"}};
+            REQUIRE(testing::LaunchSecret<ViewApp>::of(other) != secret);
         }
     }
     WHEN("the handshake presents the secret") {
@@ -102,8 +103,8 @@ SCENARIO("A connection is associated with the view of an embedded frontend only 
             REQUIRE_FALSE(verdict.local);
         }
     }
-    WHEN("the handshake presents a prefix of the secret or the secret with more bytes") {
-        THEN("neither is accepted") {
+    WHEN("the handshake presents a prefix of the secret") {
+        THEN("it is not accepted") {
             REQUIRE_FALSE(connect(app, secret.substr(0, 63)).embedded);
         }
     }
@@ -117,8 +118,8 @@ SCENARIO("A connection is associated with the view of an embedded frontend only 
     WHEN("the handshake carries the secret of an earlier launch") {
         std::string earlier;
         {
-            App previous{WebFrontConfig{.port = "0"}};
-            earlier = testing::LaunchSecret<App>::of(previous);
+            ViewApp previous{WebFrontConfig{.port = "0"}};
+            earlier = testing::LaunchSecret<ViewApp>::of(previous);
         }
         const auto verdict = connect(app, earlier);
         THEN("it is rejected: the secret does not survive a restart") {
@@ -128,14 +129,78 @@ SCENARIO("A connection is associated with the view of an embedded frontend only 
     WHEN("the handshake carries the secret padded with extra bytes") {
         REQUIRE_FALSE(connect(app, secret + "00").embedded);
     }
+    WHEN("the handshake carries a proof longer than a secret") {
+        REQUIRE_FALSE(connect(app, std::string(100, 'a')).embedded);
+    }
+    WHEN("a second handshake without the secret follows the one that presented it") {
+        std::optional<ViewApp::UI> browser;
+        app.onUIStarted([&](ViewApp::UI ui) { browser = ui; });
+        ViewSocket::receive(std::as_bytes(std::span(viewUpgradeRequest)));
+        msg::Handshake         handshake;
+        std::vector<std::byte> payload(handshake.header().begin(), handshake.header().end());
+        for (const char c : secret)
+            payload.push_back(static_cast<std::byte>(c));
+        ViewSocket::receive(testing::clientFrame(payload));
+        REQUIRE(browser);
+        REQUIRE(browser->isEmbeddedView());
+        ViewSocket::receive(testing::clientFrame(std::vector<std::byte>(handshake.header().begin(), handshake.header().end())));
+        THEN("the connection stays the embedded view") {
+            REQUIRE(browser->isEmbeddedView());
+            REQUIRE(browser->isLocalClient());
+        }
+    }
+}
+
+SCENARIO("The script that hands the secret to a view refuses what it cannot write safely", "[view-association]") {
+    const std::string secret(64, 'a');
+    GIVEN("a hexadecimal secret and a plain origin") {
+        const auto script = detail::viewSecretScript(secret, "http://127.0.0.1:9002");
+        THEN("the script names the origin and the secret") {
+            REQUIRE(script.contains("location.origin === 'http://127.0.0.1:9002'"));
+            REQUIRE(script.contains(secret));
+        }
+    }
+    GIVEN("an origin or a secret that would need escaping") {
+        THEN("there is no script, hence no association") {
+            REQUIRE(detail::viewSecretScript(secret, "http://x'; alert(1); '").empty());
+            REQUIRE(detail::viewSecretScript(secret, "http://x\\").empty());
+            REQUIRE(detail::viewSecretScript(secret, "http://x\n").empty());
+            REQUIRE(detail::viewSecretScript("a'b", "http://127.0.0.1:9002").empty());
+            REQUIRE(detail::viewSecretScript({}, "http://127.0.0.1:9002").empty());
+        }
+    }
+}
+
+SCENARIO("The origin given to a view is written as the browser writes location.origin", "[view-association]") {
+    THEN("the default port 80 is dropped and the host is lowercase") {
+        REQUIRE(detail::browserOrigin("127.0.0.1", "80") == "http://127.0.0.1");
+        REQUIRE(detail::browserOrigin("LocalHost", "9002") == "http://localhost:9002");
+        REQUIRE(detail::browserOrigin("127.0.0.1", "8080") == "http://127.0.0.1:8080");
+    }
+}
+
+SCENARIO("An IPv4 loopback seen through a dual-stack socket is a loopback peer", "[view-association]") {
+    THEN("the v4-mapped loopback is, another mapped address and a public one are not") {
+        REQUIRE(detail::isLoopbackAddress(stdnet::ip::address(stdnet::ip::address_v4::loopback())));
+        REQUIRE(detail::isLoopbackAddress(stdnet::ip::address(stdnet::ip::address_v6::loopback())));
+        const auto mapped = [](unsigned char first) {
+            stdnet::ip::address_v6::bytes_type bytes{};
+            bytes[10] = bytes[11] = 0xFF;
+            bytes[12]             = first;
+            bytes[15]             = 1;
+            return stdnet::ip::address(stdnet::ip::address_v6(bytes));
+        };
+        REQUIRE(detail::isLoopbackAddress(mapped(127)));
+        REQUIRE_FALSE(detail::isLoopbackAddress(mapped(10)));
+    }
 }
 
 SCENARIO("A loopback peer is a local client only when the application trusts loopback clients", "[view-association]") {
     freshNetwork();
-    Socket::peerIsLoopback = true;
+    ViewSocket::peerIsLoopback = true;
 
     GIVEN("the default configuration") {
-        App app{WebFrontConfig{.port = "0"}};
+        ViewApp app{WebFrontConfig{.port = "0"}};
         const auto verdict = connect(app, {});
         THEN("a loopback peer without the secret is not local") {
             REQUIRE_FALSE(verdict.embedded);
@@ -143,7 +208,7 @@ SCENARIO("A loopback peer is a local client only when the application trusts loo
         }
     }
     GIVEN("trustLoopbackClients") {
-        App app{WebFrontConfig{.port = "0", .trustLoopbackClients = true}};
+        ViewApp app{WebFrontConfig{.port = "0", .trustLoopbackClients = true}};
         const auto verdict = connect(app, {});
         THEN("a loopback peer is local though it is not the embedded view") {
             REQUIRE_FALSE(verdict.embedded);
@@ -151,8 +216,8 @@ SCENARIO("A loopback peer is a local client only when the application trusts loo
         }
     }
     GIVEN("trustLoopbackClients and a peer that is not the loopback") {
-        Socket::peerIsLoopback = false;
-        App app{WebFrontConfig{.port = "0", .trustLoopbackClients = true}};
+        ViewSocket::peerIsLoopback = false;
+        ViewApp app{WebFrontConfig{.port = "0", .trustLoopbackClients = true}};
         const auto verdict = connect(app, {});
         THEN("the connection is not local") {
             REQUIRE_FALSE(verdict.local);
@@ -162,7 +227,7 @@ SCENARIO("A loopback peer is a local client only when the application trusts loo
 
 SCENARIO("The handshake's secret never reaches the diagnostics", "[view-association]") {
     freshNetwork();
-    App                    app{WebFrontConfig{.port = "0"}};
+    ViewApp                    app{WebFrontConfig{.port = "0"}};
     std::vector<std::string> records;
     log::setLogLevel(log::Debug);
     const auto sink = log::addSinks([&records](std::string_view text) { records.emplace_back(text); });

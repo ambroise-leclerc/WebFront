@@ -176,6 +176,21 @@ public:
 };
 
 namespace detail {
+
+/// True for the loopback address of either family, including an IPv4 loopback seen through a dual-stack socket (::ffff:127.0.0.1).
+template <typename Address>
+[[nodiscard]] bool isLoopbackAddress(const Address& address) {
+    if (address.is_loopback())
+        return true;
+    if constexpr (requires { address.is_v6(); address.to_v6().is_v4_mapped(); address.to_v6().to_bytes(); }) {
+        if (address.is_v6()) {
+            const auto v6 = address.to_v6();
+            return v6.is_v4_mapped() && v6.to_bytes()[12] == 127;
+        }
+    }
+    return false;
+}
+
 template <frontend::FrontendType Frontend>
 inline int ensureFrontendInitialized() {
     static std::once_flag initialized;
@@ -407,7 +422,7 @@ public:
                 if (trustLoopbackClients) {
                     std::error_code error;
                     const auto      peer = socket.remote_endpoint(error);
-                    loopbackPeer         = !error && peer.address().is_loopback();
+                    loopbackPeer         = !error && detail::isLoopbackAddress(peer.address());
                 }
             }
             auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
@@ -721,7 +736,7 @@ public:
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
         if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
-            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::applicationOrigin(httpAddress, httpPort)});
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
@@ -948,7 +963,8 @@ private:
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.stage          = Connection::Stage::starting;
-                        found->second.viewAssociated = detail::viewSecretMatches(viewSecret, event.text);
+                        // Raised once, never lowered: the secret is judged at the single handshake WebLink dispatches.
+                        found->second.viewAssociated = found->second.viewAssociated || detail::viewSecretMatches(viewSecret, event.text);
                     }
                 }
                 // Even when a handler throws: the browser must not keep collecting deferred sends.

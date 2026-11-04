@@ -421,9 +421,9 @@ struct Session : FailureState {
     }
 
     void installViewAssociation() {
-        if (launch.secret.empty())
+        const auto source = webfront::detail::viewSecretScript(launch.secret, launch.origin);
+        if (source.empty())
             return;
-        const auto source  = webfront::detail::viewSecretScript(launch.secret, launch.origin);
         const auto pattern = launch.origin + "/*";
         const char* const allowList[] = {pattern.c_str(), nullptr};
         const auto script = a.scriptNew(source.c_str(), 1, 0, allowList, nullptr);
