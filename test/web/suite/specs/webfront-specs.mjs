@@ -357,6 +357,92 @@ describe('Dynamic HTTP routes', () => {
     });
 });
 
+// Byte ranges of a native file served by a route (#455): fetch with Range, and a <video> that seeks.
+describe('HTTP byte ranges', () => {
+    const url = '/webfront/services/test-media/sound.wav';
+    const total = 44 + 8000 * 20;
+
+    const bytesOf = async response => new Uint8Array(await response.arrayBuffer());
+
+    it('announces ranges and serves a part, a suffix and an open range', async () => {
+        const whole = await fetch(url);
+        expect(whole.status).toBe(200);
+        expect(whole.headers.get('accept-ranges')).toBe('bytes');
+        const all = await bytesOf(whole);
+        expect(all.length).toBe(total);
+
+        const part = await fetch(url, {headers: {Range: 'bytes=100-199'}});
+        expect(part.status).toBe(206);
+        expect(part.headers.get('content-range')).toBe(`bytes 100-199/${total}`);
+        expect(await bytesOf(part)).toEqual(all.slice(100, 200));
+
+        const suffix = await fetch(url, {headers: {Range: 'bytes=-50'}});
+        expect(suffix.status).toBe(206);
+        expect(await bytesOf(suffix)).toEqual(all.slice(total - 50));
+
+        const open = await fetch(url, {headers: {Range: `bytes=${total - 10}-`}});
+        expect(open.status).toBe(206);
+        expect(await bytesOf(open)).toEqual(all.slice(total - 10));
+    });
+
+    it('answers 416 past the end, in full for several ranges, and honours If-Range', async () => {
+        const past = await fetch(url, {headers: {Range: `bytes=${total}-`}});
+        expect(past.status).toBe(416);
+        expect(past.headers.get('content-range')).toBe(`bytes */${total}`);
+
+        const several = await fetch(url, {headers: {Range: 'bytes=0-1,5-6'}});
+        expect(several.status).toBe(200);
+        expect((await bytesOf(several)).length).toBe(total);
+
+        const tag = (await fetch(url, {method: 'HEAD'})).headers.get('etag');
+        expect(tag).toBeTruthy();
+        const matching = await fetch(url, {headers: {Range: 'bytes=0-9', 'If-Range': tag}});
+        expect(matching.status).toBe(206);
+        const stale = await fetch(url, {headers: {Range: 'bytes=0-9', 'If-Range': '"stale"'}});
+        expect(stale.status).toBe(200);
+        expect((await bytesOf(stale)).length).toBe(total);
+    });
+
+    it('lets a <video> seek into the middle of the resource and resume', async () => {
+        // Only the requests the video makes count: the explicit fetches above also asked for ranges.
+        const before = (await webFront.cppFunction('mediaRanges')()).split('\n').length;
+        const video = document.createElement('video');
+        video.preload = 'auto';
+        video.muted = true;
+        const once = name => new Promise((resolve, reject) => {
+            video.addEventListener(name, resolve, {once: true});
+            video.addEventListener('error', () => reject(new Error(`video error ${video.error?.code}: ${video.error?.message}`)), {once: true});
+        });
+        try {
+            const ready = once('loadedmetadata');
+            video.src = url;
+            await ready;
+            expect(video.duration).toBeGreaterThan(19);
+            const seeked = once('seeked');
+            video.currentTime = video.duration / 2;
+            await seeked;
+            expect(video.currentTime).toBeGreaterThan(9);
+            const playing = once('timeupdate');
+            await video.play();
+            await playing;
+            video.pause();
+            const seekedAgain = once('seeked');
+            video.currentTime = 2;
+            await seekedAgain;
+            expect(video.currentTime).toBeLessThan(5);
+        } finally {
+            video.removeAttribute('src');
+            video.load();
+        }
+        // Only the requests of the video count (the explicit fetches above are before the baseline). What a media
+        // engine asks is its own business: WebKit probes with a range then buffers the whole resource, GStreamer
+        // (WebKitGTK) may download it without any Range. The ranges themselves are checked by the specs above; here
+        // the video must have loaded this resource from the route and positioned itself in it.
+        const requests = (await webFront.cppFunction('mediaRanges')()).split('\n').slice(before - 1).filter(range => range !== '');
+        expect(requests.length).toBeGreaterThan(0);
+    });
+});
+
 // C++ also checks what it observed: it is told over this connection, after every call the specs sent.
 afterAll(async () => { await webFront.cppFunction('specsFinished')(); });
 

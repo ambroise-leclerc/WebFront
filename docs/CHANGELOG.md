@@ -24,7 +24,16 @@
   prefixes are refused at registration; other methods get 405. Headers that could split the response, or that the server
   owns (`Content-Length`, `Connection`, `Transfer-Encoding`), turn into a 500. Unencoded files of known size
   (`fs::File::knownSize()`) are streamed the same way, so serving a large file no longer loads it into memory; encoded
-  files are still read whole. `Range` (#455) and the binding to a connection (#469) follow.
+  files are still read whole. The binding to a connection (#469) follows; `Range` is described below (#455).
+
+- HTTP server: byte ranges (#455, ADR-020 prerequisite). Unencoded files of known size are served by `Range` (`bytes=a-b`,
+  `a-`, `-n`): `206` with `Content-Range` and only the selected bytes read, `416` with `bytes */size` for a range that
+  starts past the end, and `Accept-Ranges: bytes`. Several ranges, a unit other than
+  `bytes` and malformed ranges are ignored (`200`, whole file), as is any `Range` on `HEAD`; encoded or decoded responses say `Accept-Ranges: none`.
+  `If-Range` compares a strong `ETag` that a provider gives with `fs::File::setEntityTag`; nothing is derived from a path,
+  a size or a time, so native and embedded files have none and a conditioned range is answered in full. `fs::File`
+  gains `seek`, `entityTag` and `setEntityTag`. Dynamic routes serve a file by ranges with `http::fileReply`, or `http::range::select`. The binding
+  to a connection (#469) follows.
 
 - Embedded frontends: `alert`, `confirm`, `prompt` and `beforeunload` (`beforeunload` is not handled under WKWebView, see `docs/FRONTENDS.md`; #452, ADR-020 rule 6). WKWebView implements the three
   `WKUIDelegate` panel methods (an `NSAlert` sheet of the window; without them these calls did nothing); WebKitGTK, CEF and
