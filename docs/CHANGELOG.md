@@ -28,8 +28,8 @@
 
 - HTTP server: byte ranges (#455, ADR-020 prerequisite). Unencoded files of known size are served by `Range` (`bytes=a-b`,
   `a-`, `-n`): `206` with `Content-Range` and only the selected bytes read, `416` with `bytes */size` for a range that
-  starts past the end, and `Accept-Ranges: bytes`; `HEAD` announces the same headers. Several ranges, a unit other than
-  `bytes` and malformed ranges are ignored (`200`, whole file); encoded or decoded responses say `Accept-Ranges: none`.
+  starts past the end, and `Accept-Ranges: bytes`. Several ranges, a unit other than
+  `bytes` and malformed ranges are ignored (`200`, whole file), as is any `Range` on `HEAD`; encoded or decoded responses say `Accept-Ranges: none`.
   `If-Range` compares the strong `ETag` that `fs::File` now derives from a native file's size and modification time
   (`File(ifstream, path)`, used by `NativeDebugFS` and the development root); a changed file is sent in full. `fs::File`
   gains `seek` and `entityTag`. Dynamic routes serve a file by ranges with `http::fileReply`, or `http::range::select`. The binding

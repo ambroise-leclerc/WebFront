@@ -8,6 +8,7 @@
 #include <webfront/http/Ranges.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -296,11 +297,16 @@ SCENARIO("A file is served by ranges") {
             }
             WHEN("HEAD carries a range") {
                 const auto response = fetch(request("HEAD", "Range: bytes=10-29\r\n"));
-                THEN("it announces the 206 and sends no body") {
-                    REQUIRE(response.starts_with("HTTP/1.1 206 Partial Content\r\n"));
-                    REQUIRE(header(response, "Content-Length") == "20");
-                    REQUIRE(header(response, "Content-Range") == "bytes 10-29/" + std::to_string(content.size()));
+                THEN("the range is ignored: it describes the whole file and sends no body") {
+                    REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                    REQUIRE(header(response, "Content-Length") == std::to_string(content.size()));
+                    REQUIRE(header(response, "Content-Range").empty());
+                    REQUIRE(header(response, "Accept-Ranges") == "bytes");
                     REQUIRE(body(response).empty());
+                }
+                THEN("an unsatisfiable range is ignored too") {
+                    const auto past = fetch(request("HEAD", "Range: bytes=" + std::to_string(content.size()) + "-\r\n"));
+                    REQUIRE(past.starts_with("HTTP/1.1 200 OK\r\n"));
                 }
             }
         }
@@ -450,12 +456,71 @@ SCENARIO("A dynamic route serves a file by ranges") {
             }
             WHEN("HEAD carries a range") {
                 const auto response = answer(get("HEAD", "Range: bytes=5-14\r\n"));
-                THEN("it announces the part and sends no body") {
-                    REQUIRE(response.starts_with("HTTP/1.1 206 Partial Content\r\n"));
-                    REQUIRE(header(response, "Content-Length") == "10");
+                THEN("the range is ignored: it describes the whole file and sends no body") {
+                    REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+                    REQUIRE(header(response, "Content-Length") == std::to_string(content.size()));
                     REQUIRE(body(response).empty());
                 }
             }
         }
+    }
+}
+
+SCENARIO("A route serving a stored encoding keeps it and negotiates it") {
+    const auto content = pattern(64);
+    const auto serve   = [&](std::string_view acceptEncoding) {
+        InjectableSocket::reset();
+        RangeNet::accepts = 0;
+        http::Server<RangeNet, ServedFS> server("127.0.0.1", "0");
+        std::vector<std::uint64_t> words((content.size() + 7) / 8, 0);
+        for (std::size_t index = 0; index < content.size(); ++index)
+            words[index / 8] |= static_cast<std::uint64_t>(static_cast<unsigned char>(content[index])) << ((7 - index % 8) * 8);
+        auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest& routed) {
+            return fileReply(routed.request, fs::File(words, content.size(), "gzip"), "text/html");
+        });
+        const std::string text = "GET /webfront/services/files/page.html HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: " + std::string(acceptEncoding) +
+                                 "\r\nRange: bytes=0-3\r\n\r\n";
+        std::vector<std::byte> bytes;
+        for (const char c : text) bytes.push_back(static_cast<std::byte>(c));
+        InjectableSocket::receive(bytes);
+        REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }));
+        auto written = InjectableSocket::writtenText();
+        InjectableSocket::reset();
+        return written;
+    };
+    GIVEN("a client that accepts gzip") {
+        const auto response = serve("gzip");
+        THEN("the stored bytes are labelled with their coding, in full, whatever the Range") {
+            REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+            REQUIRE(header(response, "Content-Encoding") == "gzip");
+            REQUIRE(header(response, "Vary") == "Accept-Encoding");
+            REQUIRE(header(response, "Accept-Ranges") == "none");
+            REQUIRE(body(response) == content);
+        }
+    }
+    GIVEN("a client that does not accept gzip") {
+        const auto response = serve("identity");
+        THEN("it gets a 406 instead of bytes it cannot read") {
+            REQUIRE(response.starts_with("HTTP/1.1 406 Not Acceptable\r\n"));
+            REQUIRE(header(response, "Vary") == "Accept-Encoding");
+            REQUIRE(header(response, "Content-Encoding").empty());
+        }
+    }
+}
+
+SCENARIO("A native file can be read again from any position after its end") {
+    webfront::test::TemporaryDirectory directory;
+    const auto                         path = directory.path() / "short.bin";
+    std::ofstream(path, std::ios::binary) << "abc";
+    fs::File             file(std::ifstream(path, std::ios::binary), path);
+    std::array<char, 16> buffer{};
+    REQUIRE(file.read(buffer) == 3);
+    THEN("seek positions it again, and the content reads as before") {
+        REQUIRE(file.seek(0));
+        REQUIRE(file.read(buffer) == 3);
+        REQUIRE(std::string(buffer.data(), 3) == "abc");
+        REQUIRE(file.seek(2));
+        REQUIRE(file.read(buffer) == 1);
+        REQUIRE(buffer[0] == 'c');
     }
 }

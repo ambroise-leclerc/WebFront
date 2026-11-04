@@ -129,10 +129,8 @@ private:
 
     size_t readFStream(std::span<char> buffer) {
         fstream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-        if (fstream.eof()) {
-            eofBit = true;
-            fstream.close();
-        }
+        // The stream stays open at the end of the file, so that seek() can position it again.
+        if (fstream.eof()) eofBit = true;
         return static_cast<size_t>(fstream.gcount());
     }
 };

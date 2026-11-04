@@ -55,7 +55,7 @@ An unencoded file of known size, from any provider, is served by ranges (RFC 911
 and the length of that part; only those bytes are read, on the worker, in chunks of `emissionBufferSize` (the file
 positions itself with `fs::File::seek`). A range that starts at or past the end, an empty suffix (`-0`), or any range of an
 empty file answers `416` with `Content-Range: bytes */size`; a last byte past the end is clamped, and a suffix longer than
-the file selects all of it. `HEAD` answers like `GET` without a body, so it announces the 206 and its length.
+the file selects all of it. Range is defined for `GET` only (RFC 9110 §14.2): a `HEAD` ignores it and describes the whole file, without a body.
 
 What the server may ignore, it ignores, and the answer is a normal `200` with the whole file: several ranges (in one
 field or several), a unit other than `bytes`, a malformed or inverted range (`5-2`), and a `Range` on a response that
@@ -73,7 +73,7 @@ in `If-Range` never matches (and a browser applies no heuristic freshness to dev
 A dynamic route that serves a file, such as the services built on #454, calls `http::fileReply(request, file, contentType)`:
 it applies the same rules to the route's `RouteRequest::request` and returns the `RouteReply` (200, 206 or 416) that the
 handler completes with its own headers (`Cache-Control`, `Content-Disposition`...). A handler with its own storage
-can use `http::range::select(request, size, entityTag)` directly. The read-only reply is repeatable: successive range
+can use `http::range::select(request, size, entityTag)` directly. A file with a stored coding is sent as stored, with `Content-Encoding` and `Vary: Accept-Encoding`, in full and with `Accept-Ranges: none`; a client that does not accept the coding gets a 406, because `fileReply` does not decode. The read-only reply is repeatable: successive range
 requests on one URL each open the file again.
 
 ## Validated representation cache

@@ -1,0 +1,4 @@
+.sites-checkout/
+.sites-runtime/
+*.tar.gz
+.deployment-backups/

@@ -474,6 +474,16 @@ inline void validateReply(const RouteReply& reply) {
     RouteReply reply;
     reply.headers.emplace_back("Content-Type", std::move(contentType));
     const auto size = file.knownSize();
+    if (file.isEncoded()) {
+        // The stored bytes are sent as they are: the client must accept their coding (no decoding here).
+        reply.headers.emplace_back("Vary", "Accept-Encoding");
+        if (!request.acceptsEncoding(file.getEncoding())) {
+            reply.status        = Response::notAcceptable;
+            reply.contentLength = 0;
+            return reply;
+        }
+        reply.headers.emplace_back("Content-Encoding", std::string(file.getEncoding()));
+    }
     if (file.isEncoded() || !size) {
         reply.headers.emplace_back("Accept-Ranges", "none");
         reply.body = [file = std::make_shared<fs::File>(std::move(file))](std::span<char> out) { return file->read(out); };
@@ -482,7 +492,8 @@ inline void validateReply(const RouteReply& reply) {
     }
     reply.headers.emplace_back("Accept-Ranges", "bytes");
     if (file.entityTag()) reply.headers.emplace_back("ETag", *file.entityTag());
-    const auto selection = range::select(request, *size, file.entityTag());
+    // Range is defined for GET only (RFC 9110 §14.2): HEAD describes the full response.
+    const auto selection = request.method == Request::Method::Get ? range::select(request, *size, file.entityTag()) : range::Selection{};
     if (selection.outcome == range::Outcome::unsatisfiable) {
         reply.status = Response::rangeNotSatisfiable;
         reply.headers.emplace_back("Content-Range", range::unsatisfiedContentRange(*size));
@@ -646,7 +657,8 @@ private:
             if (const auto size = file->knownSize()) {
                 response.headers.emplace_back("Accept-Ranges", "bytes");
                 if (file->entityTag()) response.headers.emplace_back("ETag", *file->entityTag());
-                const auto selection = range::select(request, *size, file->entityTag());
+                // Range is defined for GET only (RFC 9110 §14.2): HEAD describes the full response.
+                const auto selection = request.method == Request::Method::Get ? range::select(request, *size, file->entityTag()) : range::Selection{};
                 if (selection.outcome == range::Outcome::unsatisfiable) {
                     auto unsatisfiable = Response::getStatusResponse(Response::rangeNotSatisfiable);
                     unsatisfiable.headers.emplace_back("Content-Range", range::unsatisfiedContentRange(*size));
