@@ -659,3 +659,11 @@ SCENARIO("A namespace named after the port survives a restart", "[read-binding]"
         erased = erased || (line.starts_with(cookie.substr(0, cookie.find('=')) + "=;") && line.contains("Max-Age=0"));
     REQUIRE(erased);
 }
+
+SCENARIO("A grant is refused for a path the server would never route", "[read-binding]") {
+    Fixture fixture;
+    fixture.bind(1, true);
+    for (const std::string_view path : {"report..txt", "../up.txt", "a/../b", "tab\there.txt", "line\nbreak"})
+        REQUIRE_THROWS_AS(fixture.url(1, path), ReadRefused);
+    REQUIRE_NOTHROW(fixture.url(1, "dir/report.v2.txt"));
+}

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <future>
 #include <span>
 #include <string>
@@ -429,4 +430,31 @@ SCENARIO("A writer resumes after a failed write reported the closure") {
         }
     }
     InjectableSocket::reset();
+}
+
+SCENARIO("WebLink never logs the payload of an incoming message") {
+    InjectableSocket::reset();
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
+    auto [callId, result] = link.expectResult<string>();
+
+    log::setLogLevel(log::Info);
+    string     logged;
+    std::mutex loggedMutex;
+    const auto sink = log::addSinks([&](string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += string(line) + "\n";
+    });
+    auto response = returnMessage(callId, [](auto& message, auto& frame) {
+        const string value{"/webfront/services/files/0123456789abcdef.QQQQQQQQQQQQQQQQ/a.txt"};
+        message.encodeParameter(value, frame);
+        frame.freeze();
+    });
+    InjectableSocket::receive(response);
+    REQUIRE(result.get().starts_with("/webfront/services/files/"));
+    log::removeSinks(sink);
+    log::setLogLevel(log::Error);
+    std::scoped_lock lock{loggedMutex};
+    REQUIRE(logged.find("QQQQ") == string::npos);
+    REQUIRE(logged.find("51 51") == string::npos);
 }

@@ -249,6 +249,9 @@ public:
             throw ReadRefused("A read lifetime cannot be negative");
         if (options.transferable && (options.lifetime.count() <= 0 || options.lifetime > maxTransferableLifetime))
             throw ReadRefused("A transferable read needs a lifetime of at most 15 minutes");
+        // The server refuses a target holding ".." or a control character before any route sees it: such a URL would never work.
+        if (rest.contains("..") || std::ranges::any_of(rest, [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; }))
+            throw ReadRefused("The path of a read cannot contain \"..\" or control characters");
         std::string      id = automation::channel::nonce().substr(0, 16), secret = automation::channel::nonce();
         std::scoped_lock lock{mutex};
         reapExpired();
