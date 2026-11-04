@@ -224,13 +224,29 @@ public:
     [[nodiscard]] std::string open(ConnectionKey key, bool local) {
         auto             secret = automation::channel::nonce();
         std::scoped_lock lock{mutex};
+        if (stopped)
+            return secret;  // nothing is registered: the exchange of this secret finds no connection
         connections[key] = Connection{.local = local, .client = {}, .exchange = secret};
         exchanges[secret] = key;
         return secret;
     }
 
+    /// The application stops: every connection, client and grant is dropped, and nothing is granted afterwards.
+    void shutdown() {
+        Released         released;  // destroyed after the lock: a context's destructor may call back into the binding
+        std::scoped_lock lock{mutex};
+        stopped = true;
+        for (auto& [id, grant] : grants)
+            released.push_back(std::move(grant.context));
+        grants.clear();
+        connections.clear();
+        exchanges.clear();
+        clients.clear();
+    }
+
     /// A connection ended: its grants die, its client is forgotten with its last connection.
     void close(ConnectionKey key) {
+        Released         released;
         std::scoped_lock lock{mutex};
         const auto       found = connections.find(key);
         if (found == connections.end())
@@ -242,7 +258,7 @@ public:
                 clients.erase(client);
         }
         connections.erase(found);
-        std::erase_if(grants, [key](const auto& grant) { return grant.second.owner == key; });
+        detach([key](const auto& grant) { return grant.second.owner == key; }, released);
     }
 
     /// Gives a read URL to the connection `key`: `prefix` is the route's, `rest` the path under the token (it is
@@ -259,10 +275,11 @@ public:
         if (http::routing::collapseSegments("/" + std::string(rest)) != "/" + std::string(rest))
             throw ReadRefused("The path of a read cannot hold empty or dot segments");
         std::string      id = automation::channel::nonce().substr(0, 16), secret = automation::channel::nonce();
+        Released         released;
         std::scoped_lock lock{mutex};
-        reapExpired();
+        reapExpired(released);
         const auto       connection = connections.find(key);
-        if (connection == connections.end())
+        if (stopped || connection == connections.end())
             throw ReadRefused("The connection is closed");
         if (!connection->second.local && transport == RemoteFileTransport::refused)
             throw ReadRefused("This connection is not the view of an embedded frontend: declare WebFrontConfig::remoteFileTransport to read files");
@@ -290,10 +307,13 @@ public:
         }
         if (token.empty())
             return;
+        Released         released;
         std::scoped_lock lock{mutex};
         if (const auto found = grants.find(std::string(token.substr(0, tokenIdSize)));
-            found != grants.end() && detail::viewSecretMatches(found->second.secret, token.substr(tokenIdSize + 1)))
+            found != grants.end() && detail::viewSecretMatches(found->second.secret, token.substr(tokenIdSize + 1))) {
+            released.push_back(std::move(found->second.context));
             grants.erase(found);
+        }
     }
 
     /// The handler of the exchange route (`bindPath`): `<secret>` swaps the one-time secret for a cookie, `check`
@@ -343,6 +363,8 @@ public:
     }
 
 private:
+    using Released = std::vector<std::shared_ptr<const std::any>>;
+
     struct Connection {
         bool        local = false;
         std::string client;    // empty until the exchange
@@ -386,9 +408,23 @@ private:
     }
 
     /// Drops the expired grants and their contexts, whether or not their tokens are ever presented again. Caller holds the lock.
-    void reapExpired() {
+    void reapExpired(Released& released) {
         const auto instant = now();
-        std::erase_if(grants, [instant](const auto& grant) { return grant.second.expiry && instant >= *grant.second.expiry; });
+        detach([instant](const auto& grant) { return grant.second.expiry && instant >= *grant.second.expiry; }, released);
+    }
+
+    /// Removes the grants matching `selected`, handing their contexts to `released` so that the caller destroys them once
+    /// the lock is dropped. Caller holds the lock.
+    template <typename Predicate>
+    void detach(Predicate selected, Released& released) {
+        for (auto grant = grants.begin(); grant != grants.end();) {
+            if (selected(*grant)) {
+                released.push_back(std::move(grant->second.context));
+                grant = grants.erase(grant);
+            } else {
+                ++grant;
+            }
+        }
     }
 
     /// The id of the first client whose cookie is presented with its right secret; empty if none. Caller holds the lock.
@@ -452,8 +488,9 @@ private:
         const auto dot = token.find('.');
         if (dot == std::string_view::npos)
             return std::nullopt;
+        Released         released;
         std::scoped_lock lock{mutex};
-        reapExpired();
+        reapExpired(released);
         const auto       found = grants.find(std::string(token.substr(0, dot)));
         if (found == grants.end() || !detail::viewSecretMatches(found->second.secret, token.substr(dot + 1)))
             return std::nullopt;
@@ -463,6 +500,7 @@ private:
         if (grant.route != routeId)  // a grant is valid for the registration that issued it, not for a later route on the prefix
             return std::nullopt;
         if (grant.expiry && now() >= *grant.expiry) {
+            released.push_back(std::move(found->second.context));
             grants.erase(found);
             return std::nullopt;
         }
@@ -487,6 +525,7 @@ private:
     std::map<std::string, ConnectionKey> exchanges;
     std::map<std::string, Client>      clients;
     std::map<std::string, Grant>       grants;
+    bool                               stopped = false;
 };
 
 /// A registered read route (BasicWF::addReadRoute): the route lasts as long as this object. Move-only.

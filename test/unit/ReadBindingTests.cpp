@@ -683,3 +683,46 @@ SCENARIO("A token opens only the path it was issued for", "[read-binding]") {
     REQUIRE(call(fixture.read, transferable.substr(0, transferable.rfind('/')) + "/private.txt").status == http::Response::forbidden);
     REQUIRE_THROWS_AS(fixture.url(1, "a//b"), ReadRefused);
 }
+
+SCENARIO("Dropping a grant never runs its context's destructor under the lock", "[read-binding]") {
+    Fixture fixture;
+    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
+    (void)cookie;
+    // A context whose deleter calls back into the binding would deadlock if it ran while the binding is locked.
+    const auto reentrant = [&fixture] {
+        return std::shared_ptr<int>(new int(1), [&fixture](int* value) {
+            delete value;
+            (void)fixture.binding.accepts("route-a", "none", "x", {});
+        });
+    };
+    WHEN("the grant expires") {
+        (void)fixture.url(1, "a", {.lifetime = 1s, .context = reentrant()});
+        fixture.time += 2s;
+        THEN("the next grant sweeps it") { REQUIRE_NOTHROW(fixture.url(1, "b")); }
+    }
+    WHEN("the grant is revoked") {
+        fixture.binding.revoke(fixture.url(1, "a", {.context = reentrant()}));
+    }
+    WHEN("its connection closes") {
+        (void)fixture.url(1, "a", {.context = reentrant()});
+        fixture.binding.close(1);
+    }
+    WHEN("the application shuts down") {
+        (void)fixture.url(1, "a", {.context = reentrant()});
+        fixture.binding.shutdown();
+    }
+}
+
+SCENARIO("A binding that was shut down grants nothing and holds nothing", "[read-binding]") {
+    Fixture fixture;
+    fixture.bind(1, true);
+    auto               held = std::make_shared<int>(3);
+    std::weak_ptr<int> watch = held;
+    const auto         url = fixture.url(1, "a", {.context = held});
+    held.reset();
+    REQUIRE_FALSE(watch.expired());
+    fixture.binding.shutdown();
+    REQUIRE(watch.expired());
+    REQUIRE_THROWS_AS(fixture.url(1, "b"), ReadRefused);
+    REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
+}

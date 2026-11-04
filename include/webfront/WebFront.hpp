@@ -880,6 +880,7 @@ private:
     }
 
     void releaseLinks() {
+        readBinding->shutdown();  // read URLs die with the application, and no grant is issued afterwards
         for (auto& [id, document] : domDocuments)
             document->close();
         domDocuments.clear();
