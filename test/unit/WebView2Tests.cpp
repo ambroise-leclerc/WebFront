@@ -59,16 +59,24 @@ SCENARIO("WebView2 waits for view association registration before navigation") {
     }
 }
 
-SCENARIO("WebView2 navigates immediately without a view association script") {
+SCENARIO("WebView2 installs the window close script even without a view association secret") {
     using namespace webfront::frontend::detail::webview2;
     Apartment apartment;
     auto session = std::make_shared<Session>();
     session->createWindow();
     ViewRegistrationBrowser browser;
     session->installViewAssociationThenNavigate(&browser);
-    REQUIRE_FALSE(browser.completion);
+    REQUIRE(browser.completion);
+    REQUIRE(browser.navigations == 0);
+    REQUIRE(browser.completion->Invoke(S_OK, L"script") == S_OK);
     REQUIRE(browser.navigations == 1);
     REQUIRE(session->startupTimer == 0);
+    THEN("the script asks the host to close instead of relying on Chromium's window.close() filter") {
+        const auto script = Session::windowCloseScript();
+        REQUIRE_THAT(script, Catch::Matchers::ContainsSubstring("webfront:close-window"));
+        REQUIRE_THAT(script, Catch::Matchers::ContainsSubstring("window.top!==window"));
+        REQUIRE(Session::windowCloseMessage() == L"webfront:close-window");
+    }
 }
 
 SCENARIO("WebView2 encodes application paths") {

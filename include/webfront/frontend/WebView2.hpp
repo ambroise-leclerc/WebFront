@@ -709,6 +709,19 @@ private:
                   }).Get(),
                   &token),
               "registering window close handler");
+        check(view->add_WebMessageReceived(
+                  Microsoft::WRL::Callback<ICoreWebView2WebMessageReceivedEventHandler>([weak](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                      LPWSTR raw = nullptr;
+                      if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                          const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
+                          if (std::wstring_view{message.get()} == windowCloseMessage())
+                              if (const auto self = weak.lock())
+                                  self->requestWindowClose();
+                      }
+                      return S_OK;
+                  }).Get(),
+                  &token),
+              "registering window close message handler");
         check(view->add_NavigationCompleted(
                   Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>([weak](ICoreWebView2*,
                                                                                                 ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
@@ -810,10 +823,24 @@ private:
 public:
     // Keep the runtime watchdog active until registration completes. The browser is owned by this session;
     // the callback checks its weak session before using it. The template permits delayed-registration test doubles.
+    static constexpr std::wstring_view windowCloseMessage() noexcept {
+        return L"webfront:close-window";
+    }
+
+    // Chromium silently ignores window.close() from a top-level page whose session history still holds the
+    // initial entry (a script running at document creation can race with its replacement), so a page's very
+    // first script could never close the window. The top-level window.close() asks the host directly instead.
+    static std::string windowCloseScript() {
+        return "(()=>{if(window.top!==window||!window.chrome||!window.chrome.webview)return;"
+               "const post=window.chrome.webview.postMessage.bind(window.chrome.webview);"
+               "Object.defineProperty(window,'close',{value:function close(){post('webfront:close-window');},"
+               "configurable:true,writable:true});})();";
+    }
+
     template <typename Browser>
     void installViewAssociationThenNavigate(Browser* browser) {
-        const auto source = webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
-        if (!source.empty()) {
+        const auto source = windowCloseScript() + webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
+        {
             auto       weak   = weak_from_this();
             const auto script = utf16(source);
             check(browser->AddScriptToExecuteOnDocumentCreated(
@@ -831,11 +858,7 @@ public:
                           return S_OK;
                       }).Get()),
                   "starting the view association script installation");
-            return;
         }
-        // Slow page resources must not consume the runtime startup budget.
-        stopStartupTimer();
-        check(browser->Navigate(url.c_str()), "navigating to application");
     }
 };
 

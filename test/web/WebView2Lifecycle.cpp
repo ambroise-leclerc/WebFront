@@ -463,9 +463,15 @@ int runtimeReadyBeforePageLoad() {
         require(session->loadingInitialPage(), "The fixture must still be loading its first page");
         require(!session->startupTimer, "Runtime watchdog still covers page loading");
         EventRegistrationToken token{};
-        check(session->view->add_WindowCloseRequested(
-                  Microsoft::WRL::Callback<ICoreWebView2WindowCloseRequestedEventHandler>([&](ICoreWebView2*, IUnknown*) -> HRESULT {
-                      closeObserved = true;
+        // The session turns the page's window.close() into a host message (Chromium may ignore the native request).
+        check(session->view->add_WebMessageReceived(
+                  Microsoft::WRL::Callback<ICoreWebView2WebMessageReceivedEventHandler>([&](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                      LPWSTR raw = nullptr;
+                      if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
+                          const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> message(raw, CoTaskMemFree);
+                          if (std::wstring_view{message.get()} == Session::windowCloseMessage())
+                              closeObserved = true;
+                      }
                       return S_OK;
                   }).Get(),
                   &token),
