@@ -40,11 +40,15 @@ public:
     File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
         : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize==0), encoding(contentEncoding) {}
-    File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} {}
+    File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} { measureStream(); }
 
     [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
     [[nodiscard]] std::string_view getEncoding() const { return encoding; }
     [[nodiscard]] bool eof() const { return eofBit; }
+
+    /// The number of bytes this file yields, when known before reading it (always for embedded data, and for a
+    /// native file whose stream can seek). A server uses it to announce a length and stream the file in chunks.
+    [[nodiscard]] std::optional<std::uint64_t> knownSize() const { return fileType == FileType::staticData ? std::optional<std::uint64_t>{size} : streamSize; }
 
     // Extracts characters from file into given buffer until buffer size or end of file is reached.
     // @param buffer buffer which will receive extracted data
@@ -58,6 +62,7 @@ private:
     FileType fileType;
     std::span<const uint64_t> data;
     size_t readIndex{}, size{};
+    std::optional<std::uint64_t> streamSize;
     bool eofBit{false};
     const std::string encoding{};
     std::ifstream fstream;
@@ -74,6 +79,17 @@ private:
         }
         eofBit = readIndex == size;
         return count;
+    }
+
+    // The bytes left from the stream's current position, which the caller may have moved past a prefix.
+    void measureStream() {
+        if (!fstream.is_open()) return;
+        const auto start = fstream.tellg();
+        fstream.seekg(0, std::ios::end);
+        const auto end = fstream.tellg();
+        fstream.seekg(start);
+        if (start >= 0 && end >= start && fstream) streamSize = static_cast<std::uint64_t>(end - start);
+        else fstream.clear();
     }
 
     size_t readFStream(std::span<char> buffer) {

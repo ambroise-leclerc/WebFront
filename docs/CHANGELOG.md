@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- HTTP server: dynamic routes (#454, ADR-020 prerequisite). `addRoute(prefix, handler)` on the application answers `GET` and
+  `HEAD` under an absolute prefix with a reply produced at run time (`http::RouteReply`: status, headers, exact or unknown
+  length, and a body read chunk by chunk). The handler and the reads run on a worker thread of the server, one chunk of
+  `emissionBufferSize` bytes at a time with back-pressure, so memory does not depend on the body's size; a closing connection
+  or a server stop ends the response. The route precedes the file providers and cannot cover `WebFront.js`; overlapping
+  prefixes are refused at registration; other methods get 405. Headers that could split the response, or that the server
+  owns (`Content-Length`, `Connection`, `Transfer-Encoding`), turn into a 500. Unencoded files of known size
+  (`fs::File::knownSize()`) are streamed the same way, so serving a large file no longer loads it into memory; encoded
+  files are still read whole. `Range` (#455) and the binding to a connection (#469) follow.
+
 - Embedded frontends: `alert`, `confirm`, `prompt` and `beforeunload` (`beforeunload` is not handled under WKWebView, see `docs/FRONTENDS.md`; #452, ADR-020 rule 6). WKWebView implements the three
   `WKUIDelegate` panel methods (an `NSAlert` sheet of the window; without them these calls did nothing); WebKitGTK, CEF and
   WebView2 keep their engine's dialogs. A shared test injection (`frontend/ScriptDialogs.hpp`) answers the dialogs in each

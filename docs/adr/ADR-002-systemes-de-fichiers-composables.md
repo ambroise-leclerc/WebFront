@@ -14,11 +14,12 @@
 | 2.2 | 2026-07-22 | Acceptée | Ambroise Leclerc | Page de repli embarquée prête pour le bridge. | [6e73219](https://github.com/ambroise-leclerc/WebFront/commit/6e73219a093c9bbe5c3f14bf0ac74e8e79e2803b) |
 | 2.3 | 2026-10-14 | Acceptée | Ambroise Leclerc | Composition facultative des ressources des composants avec DefaultFSWith. | [40f5621](https://github.com/ambroise-leclerc/WebFront/commit/40f5621928fdd188f230bf08ff062f9557619046) |
 | 2.4 | 2026-10-14 | Acceptée | Ambroise Leclerc | Fournisseur PackageFS et stockage transactionnel des outils installés. | [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) |
+| 2.5 | 2026-11-03 | Acceptée | Ambroise Leclerc | `fs::File::knownSize()` : taille connue avant lecture (données embarquées, fichier natif sur flux positionnable), pour annoncer `Content-Length` et envoyer le fichier en flux (#454). Les routes dynamiques passent après le `WebFront.js` protégé et ne peuvent pas le masquer. | Branche `454-dynamic-routes` |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-14** (version 2.4).
+Dernière révision : **2026-11-03** (version 2.5).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte

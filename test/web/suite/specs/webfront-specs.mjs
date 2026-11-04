@@ -319,6 +319,44 @@ describe('WebFront browser integration', () => {
     });
 });
 
+// A dynamic route of the HTTP server (#454): the reply is produced by C++ at run time and streamed in chunks.
+describe('Dynamic HTTP routes', () => {
+    const url = '/webfront/services/test-stream/pattern.bin';
+    const size = 100000; // several chunks of the server's emission buffer
+    const byteAt = index => (index * 7 + 3) % 251;
+
+    it('streams a reply produced by C++', async () => {
+        const response = await fetch(`${url}?size=${size}`);
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('application/octet-stream');
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expect(response.headers.get('content-length')).toBe(String(size));
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        expect(bytes.length).toBe(size);
+        let wrong = -1;
+        for (let index = 0; index < size && wrong < 0; ++index) if (bytes[index] !== byteAt(index)) wrong = index;
+        expect(wrong).toBe(-1);
+    });
+
+    it('answers HEAD with the headers only', async () => {
+        const response = await fetch(`${url}?size=${size}`, {method: 'HEAD'});
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-length')).toBe(String(size));
+        expect((await response.arrayBuffer()).byteLength).toBe(0);
+    });
+
+    it('refuses the other methods and answers 500 when the handler fails', async () => {
+        expect((await fetch(url, {method: 'POST'})).status).toBe(405);
+        expect((await fetch(`${url}?fail=1`)).status).toBe(500);
+    });
+
+    it('leaves the embedded WebFront.js to the core', async () => {
+        const response = await fetch('/WebFront.js');
+        expect(response.ok).toBeTrue();
+        expect(response.headers.get('content-type')).toContain('javascript');
+    });
+});
+
 // C++ also checks what it observed: it is told over this connection, after every call the specs sent.
 afterAll(async () => { await webFront.cppFunction('specsFinished')(); });
 

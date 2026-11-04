@@ -428,6 +428,15 @@ public:
         return httpServer.startTask(std::move(task));
     }
 
+    /** @brief Answers the `GET` and `HEAD` requests under `prefix` (absolute, ending with '/') with a reply produced at
+     * run time and streamed in chunks of bounded size (see http::RouteReply). The handler runs on a worker thread, not on
+     * the server context. The route precedes the file providers, never masks the embedded `WebFront.js`, and lasts as long
+     * as the returned registration; an overlapping prefix throws std::invalid_argument. Thread-safe.
+     */
+    [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler) {
+        return httpServer.addRoute(std::move(prefix), std::move(handler));
+    }
+
     /** @brief A sender completing on the server context once the duration has elapsed. co_await propagates the
      * task's stop token: a stop request (TaskHandle::requestStop, shutdown) completes it stopped at once.
      */

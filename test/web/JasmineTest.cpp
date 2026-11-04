@@ -104,6 +104,23 @@ public:
         registerCallbacks();
         registerBitsetCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
+        streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
+            if (request.query.find("fail=1") != std::string_view::npos) throw std::runtime_error("route failure requested by the spec");
+            std::uint64_t size = 0;
+            if (const auto at = request.query.find("size="); at != std::string_view::npos)
+                size = std::stoull(std::string(request.query.substr(at + 5)));
+            http::RouteReply reply;
+            reply.headers.emplace_back("Content-Type", "application/octet-stream");
+            reply.headers.emplace_back("Cache-Control", "no-store");
+            reply.contentLength = size;
+            reply.body          = [size, produced = std::uint64_t{0}](std::span<char> out) mutable {
+                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), size - produced));
+                for (std::size_t index = 0; index < count; ++index) out[index] = static_cast<char>((((produced + index) * 7) + 3) % 251);
+                produced += count;
+                return count;
+            };
+            return reply;
+        });
     }
 
     /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
@@ -157,6 +174,7 @@ private:
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     UISubscription                   lifeReactSubscription;
+    http::RouteTable::Registration   streamRoute;
     std::map<WebLinkId, react::Store<TestWF::UI, std::tuple<std::uint32_t, std::string>>> reactStores;
     UISubscription                       closedDomSubscription;
     std::map<WebLinkId, bool>            closedDocumentRejected;
