@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- HTTP reads bound to the browser client (#469, ADR-020 rule 4). `app.addReadRoute(prefix, handler)` registers a route under
+  `/webfront/services/` whose URLs are grants: `ui.grantRead(route, path, ReadOptions)` returns `prefix + token + "/" + path`
+  (a 256-bit secret and an identifier, compared in constant time, reusable for byte ranges, revoked with the connection,
+  `app.revokeRead(url)` or an optional lifetime). After its handshake each connection receives a one-time secret through the
+  bridge (`wfBind.exchange`) and exchanges it by a same-origin `fetch` for a `wf-client-<id>` cookie (`HttpOnly`,
+  `SameSite=Strict`, `Path=/webfront/services/`) naming its browser client; `webFront.bound` resolves once the cookie is
+  held, or rejects with an explicit error when the browser refuses it, and bound reads then answer `403` without a fallback.
+  The tabs of a profile that present the cookie share one client; concurrent exchanges of a blank profile create two
+  coexisting cookies; cookies of forgotten clients are erased at a later exchange; a client is forgotten with its last
+  connection. A token without the cookie of the owning connection's client, or after that connection closed, or after a
+  restart, is refused without saying whether it exists. A transferable grant (token alone) needs a lifetime of at most
+  15 minutes. Every read answer carries `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+  `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff` and
+  `Cross-Origin-Resource-Policy: same-origin`; types outside the closed passive list (raster images, audio, video,
+  `text/plain`) are attachments; HTML, XML, JavaScript and WebAssembly are announced as `application/octet-stream`; SVG keeps
+  its type but downloads on navigation. The server logs a route flagged secret without the rest of its path. The transport is
+  declared, never deduced: only the view of an embedded frontend is local; any other connection (the system browser
+  included) is refused a grant unless `WebFrontConfig::remoteFileTransport` is `loopbackAttested` (refused at construction
+  unless the server listens on the loopback), `encryptedByDeployment` (the cookie is then `Secure`) or `plaintextAccepted`.
+  Engine qualification of the cookie (CEF, WebView2, WKWebView, WebKitGTK, system browsers) and the browser specs remain to
+  be run in the corresponding CI jobs.
+
 - Embedded frontends: a connection proves it comes from the view (#453, ADR-020 rule 3). Each launch creates a random
   256-bit secret that the adapter gives to its own view at the start of every top-level document of the application's
   origin (WKWebView `WKUserScript`, WebView2 `AddScriptToExecuteOnDocumentCreated`, WebKitGTK `WebKitUserScript`, CEF

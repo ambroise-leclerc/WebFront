@@ -329,6 +329,8 @@ public:
     struct Entry {
         std::string  prefix;
         RouteHandler handler;
+        /// The path after the prefix carries a secret (a read token): the server never writes it to its logs.
+        bool         secretPath = false;
     };
 
 private:
@@ -377,10 +379,10 @@ public:
     ///        anything that would cover the protected "/WebFront.js" (ADR-002).
     /// @throws std::invalid_argument for a malformed prefix, an empty handler, or a prefix that contains
     ///         or is contained in a registered one.
-    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler) {
+    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, bool secretPath = false) {
         if (!handler) throw std::invalid_argument("A route needs a handler");
         if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
-        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler)});
+        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), secretPath});
         std::lock_guard lock(state->mutex);
         for (const auto& other : state->entries)
             if (other->prefix.starts_with(entry->prefix) || entry->prefix.starts_with(other->prefix))
@@ -813,8 +815,8 @@ public:
     /// Answers the `GET` and `HEAD` requests under `prefix` with `handler` (see RouteTable::add for the
     /// prefix rules). The route lasts as long as the returned registration; it never masks the embedded
     /// `WebFront.js`, and takes precedence over the file providers. Thread-safe.
-    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler) {
-        return routes.add(std::move(prefix), std::move(handler));
+    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler, bool secretPath = false) {
+        return routes.add(std::move(prefix), std::move(handler), secretPath);
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
@@ -971,8 +973,12 @@ private:
                 if (received == 0) co_return;  // the client closed the connection
                 request.parseSomeData(buffer.data(), buffer.data() + received);
             }
-            log::info("Received request {} on {}", request.getMethodName(), request.uri);
-            if (auto match = matchRoute(request)) {
+            auto match = matchRoute(request);
+            if (match && match->route->secretPath)
+                log::info("Received request {} on {}...", request.getMethodName(), match->route->prefix);  // the rest is a secret
+            else
+                log::info("Received request {} on {}", request.getMethodName(), request.uri);
+            if (match) {
                 co_await serveRoute(socket, std::move(request), std::move(*match));
                 co_return;
             }

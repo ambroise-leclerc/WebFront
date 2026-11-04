@@ -120,6 +120,11 @@
             // gets its own independent settlement via .then()/.catch()/await on the same promise;
             // attaching a handler here doesn't consume or affect those.
             this.readyPromise.catch(() => {});
+            this.boundPromise = new Promise((resolve, reject) => {
+                this.resolveBound = resolve;
+                this.rejectBound = reject;
+            });
+            this.boundPromise.catch(() => {});
             this.socket = new WebSocket(url, "WebFront_0.1");
             this.socket.binaryType = "arraybuffer";
             this.socket.onopen = () => this.handshake();
@@ -145,6 +150,30 @@
         /// closes or fails before that. Does not reflect later disconnects; see pendingCalls/state.
         get ready() {
             return this.readyPromise;
+        }
+
+        /// Resolves once this browser client holds the cookie that binds the read URLs given to this page (ADR-020), and
+        /// rejects, with an explicit error, when the exchange fails or the browser refuses the cookie: bound reads
+        /// then fail, without falling back to the token alone. C++ starts it right after the handshake.
+        get bound() {
+            return this.boundPromise;
+        }
+
+        /// Exchanges the one-time secret received through the bridge for the cookie of this client, then checks that the
+        /// browser kept it. The secret is single use; the cookie is HttpOnly, so the page never reads it.
+        async bindClient(secret) {
+            const base = "/webfront/services/bind/";
+            try {
+                const exchange = await fetch(base + encodeURIComponent(secret), {credentials: "same-origin", cache: "no-store"});
+                if (!exchange.ok) throw new Error(`the server refused the exchange (HTTP ${exchange.status})`);
+                const check = await fetch(base + "check", {credentials: "same-origin", cache: "no-store"});
+                if (!check.ok) throw new Error("the browser refused the binding cookie");
+                this.resolveBound();
+            } catch (error) {
+                const failure = new Error(`WebFront could not bind this browser for reads: ${error.message || error}`);
+                this.rejectBound(failure);
+                console.error("[WebFront binding]", failure);
+            }
         }
 
         /// Rejects the initial-readiness promise at most once, and only while still waiting on the
@@ -585,4 +614,6 @@
     // pointed at a different URL, e.g. to exercise the initial-connection-failure path.
     global.WebFrontBridge = WebFrontBridge;
     global.webFront = new WebFrontBridge();
+    // Called by C++ after the handshake: the one-time secret of the read binding (see WebFrontBridge.bindClient).
+    global.wfBind = {exchange: secret => global.webFront.bindClient(secret)};
 })(globalThis);
