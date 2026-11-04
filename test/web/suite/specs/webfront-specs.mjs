@@ -443,6 +443,88 @@ describe('HTTP byte ranges', () => {
     });
 });
 
+// HTTP reads bound to the browser client of the connection (#469): token and cookie, neutralized active content.
+describe('Bound HTTP reads', () => {
+    const readUrl = name => webFront.cppFunction('readUrl')(name);
+    const settle = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    it('binds this browser: the cookie exchange completes', async () => {
+        await webFront.bound;
+    });
+
+    it('reads a granted URL with the cookie and neutralizing headers', async () => {
+        await webFront.bound;
+        const response = await fetch(await readUrl('hello.txt'));
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe('hello');
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+        expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+        expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
+        expect(response.headers.get('cross-origin-resource-policy')).toBe('same-origin');
+    });
+
+    it('refuses the same URL without the cookie, as another client would', async () => {
+        await webFront.bound;
+        const url = await readUrl('hello.txt');
+        expect((await fetch(url, {credentials: 'omit'})).status).toBe(403);
+        expect((await fetch(url)).status).toBe(200);
+        const altered = url.replace(/[0-9a-f](\/[^/]*)$/, match => (match[0] === 'a' ? 'b' : 'a') + match.slice(1));
+        expect((await fetch(altered)).status).toBe(403);
+    });
+
+    it('announces HTML as an octet-stream download and keeps an SVG type', async () => {
+        await webFront.bound;
+        const html = await fetch(await readUrl('evil.html'));
+        expect(html.headers.get('content-type')).toBe('application/octet-stream');
+        expect(html.headers.get('content-disposition')).toContain('attachment');
+        const svg = await fetch(await readUrl('evil.svg'));
+        expect(svg.headers.get('content-type')).toBe('image/svg+xml');
+        expect(svg.headers.get('content-disposition')).toContain('attachment');
+    });
+
+    it('displays a granted SVG by <img> without running its script', async () => {
+        await webFront.bound;
+        const image = new Image();
+        const loaded = new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('the SVG did not load')); });
+        image.src = await readUrl('evil.svg');
+        await loaded;
+        await settle(300);
+        expect(window.__readExecuted).toBeUndefined();
+    });
+
+    it('does not execute hostile HTML opened in a frame', async () => {
+        await webFront.bound;
+        const frame = document.createElement('iframe');
+        frame.src = await readUrl('evil.html');
+        document.body.appendChild(frame);
+        try {
+            await settle(700);
+            expect(window.__readExecuted).toBeUndefined();
+        } finally {
+            frame.remove();
+        }
+    });
+
+    it('does not execute a hostile SVG opened in a frame', async () => {
+        await webFront.bound;
+        const frame = document.createElement('iframe');
+        frame.src = await readUrl('evil.svg');
+        document.body.appendChild(frame);
+        try {
+            await settle(700);
+            expect(window.__readExecuted).toBeUndefined();
+        } finally {
+            frame.remove();
+        }
+    });
+
+    it('rejects bound when the initial connection fails', async () => {
+        const bridge = new WebFrontBridge('ws://127.0.0.1:1');
+        await expectAsync(bridge.bound).toBeRejected();
+    });
+});
+
 // C++ also checks what it observed: it is told over this connection, after every call the specs sent.
 afterAll(async () => { await webFront.cppFunction('specsFinished')(); });
 

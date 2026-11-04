@@ -109,6 +109,7 @@ public:
         registerBitsetCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
         registerMediaRoute(app);
+        registerReadRoute(app);
         streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
             if (request.query.find("fail=1") != std::string_view::npos) throw std::runtime_error("route failure requested by the spec");
             std::uint64_t size = 0;
@@ -180,6 +181,7 @@ private:
     UISubscription                   uiSubscription;
     UISubscription                   lifeReactSubscription;
     http::RouteTable::Registration   streamRoute, mediaRoute;
+    ReadRoute                        readRoute;
     filesystem::path                 mediaFile;
     mutex                            mediaMutex;
     vector<string>                   mediaRanges;
@@ -419,6 +421,29 @@ private:
             for (const auto& range : mediaRanges) joined += range + "\n";
             return joined;
         });
+    }
+
+    /// Read grants bound to the browser client (#469): hostile active content is served by a bound route.
+    void registerReadRoute(TestWF& app) {
+        readRoute = app.addReadRoute("/webfront/services/test-read/", [](const http::RouteRequest&, const ReadGrant& grant) {
+            const string_view marker = "try { window.top.__readExecuted = true; parent.__readExecuted = true; } catch (e) {} fetch('/webfront/services/test-read/executed').catch(() => {});";
+            string type, body;
+            if (grant.rest == "hello.txt") { type = "text/plain"; body = "hello"; }
+            else if (grant.rest == "evil.html") { type = "text/html"; body = "<script>" + string(marker) + "</script>"; }
+            else if (grant.rest == "evil.svg") { type = "image/svg+xml"; body = "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><script>" + string(marker) + "</script><rect width='4' height='4' fill='red'/></svg>"; }
+            else { http::RouteReply reply; reply.status = http::Response::notFound; reply.contentLength = 0; return reply; }
+            http::RouteReply reply;
+            reply.headers.emplace_back("Content-Type", type);
+            reply.contentLength = body.size();
+            reply.body = [body = std::move(body), position = size_t{0}](span<char> out) mutable {
+                const auto count = min(out.size(), body.size() - position);
+                copy_n(body.data() + position, count, out.data());
+                position += count;
+                return count;
+            };
+            return reply;
+        });
+        webFront->cppFunction("readUrl", [this](TestWF::UI ui, string name) { return ui.grantRead(readRoute, name); });
     }
 
     void registerCallbacks() {

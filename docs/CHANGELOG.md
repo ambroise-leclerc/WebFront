@@ -21,8 +21,9 @@
   declared, never deduced: only the view of an embedded frontend is local; any other connection (the system browser
   included) is refused a grant unless `WebFrontConfig::remoteFileTransport` is `loopbackAttested` (refused at construction
   unless the server listens on the loopback), `encryptedByDeployment` (the cookie is then `Secure`) or `plaintextAccepted`.
-  Engine qualification of the cookie (CEF, WebView2, WKWebView, WebKitGTK, system browsers) and the browser specs remain to
-  be run in the corresponding CI jobs.
+  The shared Jasmine suite covers the binding (cookie required, neutralizing headers, hostile HTML and SVG in frames, SVG by
+  `<img>`, `bound` rejecting on a failed connection); it passes under WKWebView. Qualification under CEF, WebView2, WebKitGTK
+  and the system browsers remains to be run in the corresponding CI jobs.
 
 - Embedded frontends: a connection proves it comes from the view (#453, ADR-020 rule 3). Each launch creates a random
   256-bit secret that the adapter gives to its own view at the start of every top-level document of the application's
