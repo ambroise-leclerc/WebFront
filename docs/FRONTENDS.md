@@ -41,7 +41,7 @@ on a command line or in a URL.
 | --- | --- |
 | WKWebView | `WKUserScript`, `WKUserScriptInjectionTimeAtDocumentStart`, main frame only |
 | WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`); the registration is asynchronous, so the first navigation starts from its completion handler and a failed registration fails the opening |
-| WebKitGTK | `WebKitUserScript` at document start, top frame, allow list of the application's origin |
+| WebKitGTK | `WebKitUserScript` at document start, top frame, no URL allow list (the script compares `location.origin`, port included) |
 | CEF | extra browser information given to `CefBrowserView::CreateBrowserView`, read by the renderer process's `OnBrowserCreated` and defined on the window by `OnContextCreated` through the same script as the other engines, evaluated in the new context so that the page itself answers for its origin (the render process app is the one given to `CefExecuteProcess`; a separate helper executable must give it its own `ViewSecretRenderApp`) |
 
 - The system browser receives no secret (a command line or a history could disclose it, and a remote browser would present

@@ -424,9 +424,9 @@ struct Session : FailureState {
         const auto source = webfront::detail::viewSecretScript(launch.secret, launch.origin);
         if (source.empty())
             return;
-        const auto pattern = launch.origin + "/*";
-        const char* const allowList[] = {pattern.c_str(), nullptr};
-        const auto script = a.scriptNew(source.c_str(), 1, 0, allowList, nullptr);
+        // No allow list: WebKit match patterns carry no port, so one built from the origin would match nothing. The script
+        // itself compares location.origin, port included, and only defines the secret for the application's origin.
+        const auto script = a.scriptNew(source.c_str(), 1, 0, nullptr, nullptr);
         a.scriptAdd(a.contentManager(view), script);
         a.scriptUnref(script);
     }
