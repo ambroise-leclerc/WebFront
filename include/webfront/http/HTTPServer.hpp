@@ -397,7 +397,8 @@ private:
 
     static bool validPrefix(std::string_view prefix) {
         if (prefix.size() < 2 || !prefix.starts_with('/') || !prefix.ends_with('/')) return false;
-        if (prefix.find("..") != std::string_view::npos || prefix.find("//") != std::string_view::npos) return false;
+        if (prefix.find("..") != std::string_view::npos || prefix.find("//") != std::string_view::npos || prefix.find("/./") != std::string_view::npos)
+            return false;
         return std::none_of(prefix.begin(), prefix.end(), [](char c) {
             return static_cast<unsigned char>(c) <= 32 || c == 127 || c == '?' || c == '#' || c == '%' || c == '\\';
         });
@@ -406,20 +407,43 @@ private:
 
 namespace routing {
 
-/// The decoded path and raw query of an origin-form request target, or nothing when it is not a safe one.
+/// The path without empty and "." segments, so that "/a//b/./c" reaches the route of "/a/b/c" instead of falling
+/// through to the file providers, which would resolve it to the same file. A trailing slash is kept.
+inline std::string collapseSegments(std::string path) {
+#ifdef _WIN32
+    std::replace(path.begin(), path.end(), '\\', '/');  // the providers resolve a backslash as a separator there
+#endif
+    std::string collapsed;
+    for (std::size_t start = 0; start < path.size();) {
+        const auto end     = path.find('/', start);
+        const auto segment = std::string_view(path).substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!segment.empty() && segment != ".") {
+            collapsed += '/';
+            collapsed += segment;
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    if (collapsed.empty() || path.ends_with('/')) collapsed += '/';
+    return collapsed;
+}
+
+/// The normalized path and raw query of an origin-form request target, or nothing when it is not a safe one.
+/// The path is percent-decoded and a literal '+' stays a '+', as in any URL path.
 inline std::optional<std::pair<std::string, std::string>> splitTarget(const std::string& uri) {
-    const auto mark = uri.find('?');
-    auto       path = uri::decode(std::string_view(uri).substr(0, mark));
-    if (!path.starts_with('/') || path.find("..") != std::string::npos) return {};
-    if (std::any_of(path.begin(), path.end(), [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; })) return {};
-    return std::pair{std::move(path), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
+    const auto mark    = uri.find('?');
+    const auto decoded = uri::decode(std::string_view(uri).substr(0, mark), false);
+    if (!decoded.starts_with('/') || decoded.find("..") != std::string::npos) return {};
+    if (std::any_of(decoded.begin(), decoded.end(), [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; })) return {};
+    return std::pair{collapseSegments(decoded), mark == std::string::npos ? std::string{} : uri.substr(mark + 1)};
 }
 
 /// Refuses what could split a response or contradict the framing the server owns.
 inline void validateReply(const RouteReply& reply) {
     const auto isToken = [](std::string_view name) {
         return !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
-            return std::isalnum(static_cast<unsigned char>(c)) || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
+            // RFC 9110 tchar, spelled out: std::isalnum depends on the locale and may accept non-ASCII bytes.
+            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
         });
     };
     for (const auto& [name, value] : reply.headers) {
@@ -837,7 +861,7 @@ private:
             response = Response::getStatusResponse(Response::internalServerError);
             reply.body = nullptr;
         }
-        const bool streaming = !head && reply.body && response.statusCode != Response::methodNotAllowed;
+        const bool streaming = !head && reply.body;  // the built-in 405 has no reply.body
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
         if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix);

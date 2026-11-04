@@ -19,7 +19,7 @@
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-10-14** (version 2.4).
+Dernière révision : **2026-11-03** (version 2.5).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte

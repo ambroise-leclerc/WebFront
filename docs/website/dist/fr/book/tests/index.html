@@ -1,0 +1,117 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tester un parcours utilisateur · Le livre — WebFront</title><meta name="description" content="Écrire des tests Jasmine, puis les exécuter dans la page d’une application C++."><meta name="theme-color" content="#f6f7f2"><meta property="og:title" content="Tester un parcours utilisateur · Le livre — WebFront"><meta property="og:description" content="Écrire des tests Jasmine, puis les exécuter dans la page d’une application C++."><link rel="canonical" href="https://webfront.fr/fr/book/tests/"><meta property="og:url" content="https://webfront.fr/fr/book/tests/"><link rel="alternate" hreflang="fr" href="https://webfront.fr/fr/book/tests/"><link rel="alternate" hreflang="en-GB" href="https://webfront.fr/en/book/tests/"><link rel="icon" href="/assets/icon.svg"><link rel="stylesheet" href="/assets/site.css"><script type="module" src="/assets/site.js"></script></head><body data-lang="fr" data-chapter="tests"><a class="skip" href="#main">Aller au contenu</a><header><a class="brand" href="/fr/"><img class="mark" src="/assets/webfront-swallow.svg" width="60" height="34" alt="">WebFront <small>C++23</small></a><nav aria-label="Navigation principale"><a href="/fr/#why">Présentation</a><a href="/fr/#demo">Exemple</a><a href="/fr/book/">Le livre</a><a href="/fr/#reference">Documentation</a></nav><div class="header-actions"><a lang="en-GB" href="/en/book/tests/">EN ↗</a><a href="https://github.com/ambroise-leclerc/WebFront">GitHub ↗</a></div></header><main class="book-layout wrap" id="main"><aside class="book-sidebar"><a class="book-name" href="/fr/book/">↳ Le livre</a><label class="sr-only" for="chapter-search">Rechercher un chapitre…</label><input type="search" id="chapter-search" placeholder="Rechercher un chapitre…"><p class="eyebrow">Parcours</p><nav aria-label="Parcours"><a class="chapter-link " data-id="start" href="/fr/book/" ><span>01</span>Partir du C++<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="window" href="/fr/book/window/" ><span>02</span>Ouvrir une fenêtre<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="interface" href="/fr/book/interface/" ><span>03</span>Créer l’interface<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="bridge" href="/fr/book/bridge/" ><span>04</span>Appeler le C++ depuis TypeScript<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="patterns" href="/fr/book/patterns/" ><span>05</span>Choisir un modèle d’interface<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link active" data-id="tests" href="/fr/book/tests/" aria-current="page"><span>06</span>Tester un parcours utilisateur<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="automation" href="/fr/book/automation/" ><span>07</span>Développer avec un harnais d’IA<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="embed" href="/fr/book/embed/" ><span>08</span>Embarquer et distribuer<b class="read-indicator" aria-hidden="true"></b></a></nav><p class="eyebrow">Notions complémentaires</p><nav aria-label="Notions complémentaires"><a class="chapter-link " data-id="dom" href="/fr/book/dom/" ><span>↳</span>Le DOM et le navigateur<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="react" href="/fr/book/react/" ><span>↳</span>Composants React et état<b class="read-indicator" aria-hidden="true"></b></a><a class="chapter-link " data-id="cpp" href="/fr/book/cpp/" ><span>↳</span>C++ moderne et asynchronisme<b class="read-indicator" aria-hidden="true"></b></a></nav><p id="no-results" hidden>Aucun chapitre trouvé.</p><div class="progress-label">Progression<span id="progress-count">0 / 8</span></div><progress id="progress" value="0" max="8" aria-label="Progression"></progress></aside><article class="lesson"><p class="eyebrow">CHAPITRE 06 / WEBFRONT</p><h1>Tester un parcours utilisateur</h1><p class="lesson-intro">Écrire des tests Jasmine, puis les exécuter dans la page d’une application C++.</p><details class="notation" id="notation" ><summary>Conventions de notation</summary><p>Les noms de fonctions, types, commandes, options et fichiers sont composés en chasse fixe, par exemple <code class="inline-code">describe</code>, <code class="inline-code">wf test</code> ou <code class="inline-code">main.cpp</code>. L’italique introduit un <em>terme</em> lors de sa définition. Les blocs de code donnent les extraits à saisir ; le texte qui les précède précise leur emplacement et leurs prérequis.</p></details><nav class="lesson-toc" aria-label="Dans ce chapitre"><a href="#part-0">Les éléments d’un test Jasmine ↓</a><a href="#part-1">Vérifier le format de la grille ↓</a><a href="#part-2">Déclarer les fichiers de test ↓</a><a href="#part-3">Vérifier les types TypeScript ↓</a><a href="#part-4">Installer les déclarations de types ↓</a><a href="#part-5">Tester le projet ou l’application ↓</a><a href="#part-6">L’écran de l’exemple ↓</a><a href="#part-7">Écrire le test du parcours ↓</a><a href="#part-8">Préparer l’application C++ ↓</a><a href="#part-9">Enregistrer le test dans CMake ↓</a><a href="#part-10">Exécuter et interpréter le résultat ↓</a><a href="#part-11">Choisir d’autres parcours ↓</a></nav><section id="part-0"><h2>Les éléments d’un test Jasmine</h2><p>Jasmine est une bibliothèque de tests JavaScript. Un test décrit une opération et vérifie le résultat qu’elle doit produire. Les exemples de ce chapitre emploient les fonctions suivantes :</p><ul class="explanation-list"><li><code class="inline-code">describe</code> regroupe les tests qui concernent un même comportement.</li><li><code class="inline-code">it</code> définit un cas de test.</li><li><code class="inline-code">expect</code> vérifie une valeur ou une propriété du résultat.</li><li><code class="inline-code">beforeAll</code> prépare les conditions communes à une suite.</li><li><code class="inline-code">beforeEach</code> rétablit les conditions nécessaires avant chaque cas.</li></ul><p>Un test asynchrone peut employer <code class="inline-code">async</code> et <code class="inline-code">await</code> pour attendre une réponse C++. Nous commencerons par un test du format des données, avant de tester un parcours dans une interface réelle.</p></section><section id="part-1"><h2>Vérifier le format de la grille</h2><p>Dans le terminal de WebFront, installez Jasmine avec <code class="inline-code">wf install jasmine-core@7.0.2</code>. Créez ensuite le fichier <code class="inline-code">tests/life.spec.js</code> dans <code class="inline-code">life-project</code>.</p><p>Le test suivant vérifie le compactage de trois cellules dans un tableau d’octets. Il porte sur la représentation JavaScript de la grille ; il ne vérifie pas encore les règles du Jeu de la vie calculées en C++.</p><div class="code"><div class="codebar"><span>JAVASCRIPT / JASMINE</span><button class="copy">Copier</button></div><pre><code>describe('the Life grid', () =&gt; {
+    it('packs 1024 cells into 128 bytes', () =&gt; {
+        const cells = new Uint8Array(32 * 32 / 8);
+        for (const i of [330, 331, 332])
+            cells[i &gt;&gt; 3] |= 1 &lt;&lt; (i &amp; 7);
+        expect(cells.length).toBe(128);
+        expect(cells[41]).toBe(0b00011100);
+    });
+});</code></pre></div></section><section id="part-2"><h2>Déclarer les fichiers de test</h2><p>Ajoutez la propriété suivante à la racine de <code class="inline-code">webfront.project.json</code>, en conservant les virgules nécessaires au JSON. Cette recette n’est pas créée par <code class="inline-code">wf init</code>.</p><p>Exécutez <code class="inline-code">wf test</code>. Jasmine est chargé dans la fenêtre et la commande échoue lorsqu’une assertion est fausse. Pour vérifier ce comportement, remplacez temporairement <code class="inline-code">128</code> par <code class="inline-code">127</code> dans le test, puis rétablissez la valeur correcte.</p><div class="code"><div class="codebar"><span>SOURCE</span><button class="copy">Copier</button></div><pre><code>&quot;test&quot;: {&quot;specs&quot;: [&quot;tests/life.spec.js&quot;]}</code></pre></div></section><section id="part-3"><h2>Vérifier les types TypeScript</h2><p>Créez un fichier <code class="inline-code">tsconfig.json</code> à la racine de <code class="inline-code">life-project</code>, avec la configuration ci-dessous. Le contrôle des types utilisera la version de TypeScript inscrite dans le fichier de verrouillage.</p><p>La vérification des types et l’exécution des tests ont des rôles distincts. La première vérifie la cohérence statique du programme ; les seconds observent son comportement à l’exécution.</p><div class="code"><div class="codebar"><span>SOURCE</span><button class="copy">Copier</button></div><pre><code>{
+  &quot;compilerOptions&quot;: {
+    &quot;strict&quot;: true,
+    &quot;target&quot;: &quot;ES2022&quot;,
+    &quot;module&quot;: &quot;ESNext&quot;,
+    &quot;moduleResolution&quot;: &quot;Bundler&quot;,
+    &quot;jsx&quot;: &quot;react-jsx&quot;,
+    &quot;lib&quot;: [&quot;ES2022&quot;, &quot;DOM&quot;, &quot;DOM.Iterable&quot;],
+    &quot;noEmit&quot;: true
+  },
+  &quot;include&quot;: [&quot;ui&quot;]
+}</code></pre></div></section><section id="part-4"><h2>Installer les déclarations de types</h2><p>Le starter importe React et React DOM. Leur contrôle en mode strict demande les déclarations de types correspondantes, en plus du compilateur TypeScript. Les commandes suivantes les installent, puis exécutent <code class="inline-code">wf check</code>.</p><div class="code"><div class="codebar"><span>TERMINAL WEBFRONT</span><button class="copy">Copier</button></div><pre><code>wf install typescript@5.9.3 @types/react@19.3.0 @types/react-dom@19.3.0
+wf check</code></pre></div></section><section id="part-5"><h2>Tester le projet ou l’application</h2><p>La commande <code class="inline-code">wf test</code> exécute les spécifications déclarées dans le manifeste du projet de développement, avec la version verrouillée de <code class="inline-code">jasmine-core</code>.</p><p>Pour tester la page d’une application C++ existante, on peut aussi employer <code class="inline-code">webfront_add_jasmine_test</code>. Ce helper charge Jasmine et les tests dans la page effective de l’application. Ses scripts, ses éléments DOM et ses callbacks C++ habituels restent disponibles.</p><p>Cette seconde méthode s’intègre à CTest. Elle ne demande ni terminal développeur, ni manifeste <code class="inline-code">wf</code>, ni runtime JavaScript sur l’hôte. Elle ne dépend pas de MCP.</p></section><section id="part-6"><h2>L’écran de l’exemple</h2><p>Considérons un petit écran de devis. L’utilisateur saisit une quantité, puis demande le calcul. Le programme appelle la fonction C++ <code class="inline-code">quote.calculate</code> et affiche le total obtenu.</p><p>Créez <code class="inline-code">ui/index.html</code> avec le contenu suivant. Le bouton reste désactivé pendant l’appel ; une erreur est affichée dans la page. La promesse <code class="inline-code">appReady</code> appartient à cet exemple : ce n’est pas une propriété définie par WebFront. Les tests l’utiliseront pour attendre que la page ait installé ses gestionnaires.</p><div class="code"><div class="codebar"><span>HTML / JAVASCRIPT</span><button class="copy">Copier</button></div><pre><code>&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;title&gt;Quotation&lt;/title&gt;
+&lt;label for=&quot;quantity&quot;&gt;Quantity&lt;/label&gt;
+&lt;input id=&quot;quantity&quot; type=&quot;number&quot; value=&quot;1&quot; min=&quot;1&quot;&gt;
+&lt;button id=&quot;calculate&quot; disabled&gt;Calculate&lt;/button&gt;
+&lt;output id=&quot;total&quot; aria-live=&quot;polite&quot;&gt;&lt;/output&gt;
+&lt;p id=&quot;status&quot; role=&quot;status&quot;&gt;&lt;/p&gt;
+&lt;script src=&quot;/WebFront.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+const quantity = document.getElementById('quantity');
+const button = document.getElementById('calculate');
+const total = document.getElementById('total');
+const status = document.getElementById('status');
+window.appReady = webFront.ready.then(() =&gt; {
+    button.disabled = false;
+    button.addEventListener('click', async () =&gt; {
+        button.disabled = true;
+        status.textContent = 'Calculating';
+        total.textContent = '';
+        try {
+            const count = Number(quantity.value);
+            if (!Number.isInteger(count) || count &lt; 1 || count &gt; 1000)
+                throw new Error('Quantity must be between 1 and 1000');
+            total.textContent = String(await webFront.cppFunction('quote.calculate')(count));
+            status.textContent = 'Ready';
+        } catch (error) {
+            status.textContent = 'Error: ' + error.message;
+        } finally { button.disabled = false; }
+    });
+});
+window.appReady.catch(error =&gt; { status.textContent = 'Error: ' + error.message; });
+&lt;/script&gt;&lt;/html&gt;</code></pre></div></section><section id="part-7"><h2>Écrire le test du parcours</h2><p>Créez <code class="inline-code">tests/ui/quote.spec.js</code>. Le premier cas saisit trois unités, actionne le bouton et vérifie que le total affiché vaut <code class="inline-code">75</code>. Le second saisit une quantité invalide et vérifie la présence d’une erreur.</p><p>Le calcul C++ n’est pas simulé. Le premier cas exerce donc le gestionnaire du clic, le pont, le callback C++ et la mise à jour de l’affichage. L’attente se termine lorsque le bouton redevient disponible, avec une limite de deux secondes.</p><p>Les événements produits par ce test sont synthétiques. Ils ne vérifient ni la disposition des pixels, ni les périphériques d’entrée natifs, ni l’ensemble des propriétés d’accessibilité. Avec des champs contrôlés par React, adaptez également la méthode de saisie.</p><div class="code"><div class="codebar"><span>JAVASCRIPT / JASMINE</span><button class="copy">Copier</button></div><pre><code>// tests/ui/quote.spec.js — classic JavaScript, loaded into the real page.
+describe('quotation journey', () =&gt; {
+    beforeAll(async () =&gt; { await window.appReady; });
+    const element = id =&gt; document.getElementById(id);
+    function until(predicate) {
+        if (predicate()) return Promise.resolve();
+        return new Promise((resolve, reject) =&gt; {
+            const observer = new MutationObserver(() =&gt; {
+                if (predicate()) { cleanup(); resolve(); }
+            });
+            const timer = setTimeout(() =&gt; {
+                cleanup(); reject(new Error('UI did not settle within 2 seconds'));
+            }, 2000);
+            function cleanup() { clearTimeout(timer); observer.disconnect(); }
+            observer.observe(document.body, {
+                subtree: true, childList: true, characterData: true, attributes: true
+            });
+        });
+    }
+    it('enters a quantity and displays the C++ price', async () =&gt; {
+        element('quantity').value = '3';
+        element('quantity').dispatchEvent(new Event('input', {bubbles: true}));
+        element('calculate').click();
+        await until(() =&gt; !element('calculate').disabled);
+        expect(element('status').textContent).toBe('Ready');
+        expect(element('total').textContent).toBe('75');
+    });
+    it('shows an error for an invalid quantity', async () =&gt; {
+        element('quantity').value = '0';
+        element('calculate').click();
+        await until(() =&gt; !element('calculate').disabled);
+        expect(element('status').textContent).toContain('Error:');
+        expect(element('total').textContent).toBe('');
+    });
+});</code></pre></div></section><section id="part-8"><h2>Préparer l’application C++</h2><p>Le fichier <code class="inline-code">main.cpp</code> ci-dessous utilise WKWebView et demande macOS 13.3 ou une version ultérieure. Le port <code class="inline-code">0</code> laisse le système choisir un port disponible. La racine documentaire <code class="inline-code">ui</code> est relative au répertoire de travail défini dans CMake.</p><p>L’objet <code class="inline-code">JasmineTest</code> doit exister avant l’appel à <code class="inline-code">show</code>. Après fermeture de la fenêtre, <code class="inline-code">shutdown</code> draine les opérations et <code class="inline-code">exitCode()</code> fournit le statut à renvoyer.</p><p>Le helper CMake définit <code class="inline-code">WEBFRONT_JASMINE_TESTING</code> sur cette cible. Sans cette macro, <code class="inline-code">JasmineTest</code> est inerte. Une cible destinée à la distribution doit rester distincte de la cible instrumentée.</p><div class="code"><div class="codebar"><span>C++23</span><button class="copy">Copier</button></div><pre><code>#include &lt;webfront/WebFront.hpp&gt;
+#include &lt;webfront/testing/Jasmine.hpp&gt;
+#include &lt;stdexcept&gt;
+
+using App = webfront::WebFrontWithFrontend&lt;webfront::frontend::WKWebViewFrontend&gt;;
+
+int main() {
+    App app{{.port = &quot;0&quot;, .documentRoot = &quot;ui&quot;}};
+    app.cppFunction(&quot;quote.calculate&quot;, [](int count) {
+        if (count &lt; 1 || count &gt; 1000)
+            throw std::invalid_argument(&quot;Invalid quantity&quot;);
+        return count * 25;
+    });
+    webfront::testing::JasmineTest tests{app};
+    app.show();
+    app.shutdown();
+    return tests.exitCode();
+}</code></pre></div></section><section id="part-9"><h2>Enregistrer le test dans CMake</h2><p>Placez le dépôt WebFront 0.7.0 dans le sous-répertoire <code class="inline-code">WebFront/</code>. Le fichier <code class="inline-code">main.cpp</code> et le <code class="inline-code">CMakeLists.txt</code> suivant se trouvent à la racine du projet ; la page et les tests conservent les chemins indiqués plus haut.</p><p>L’argument <code class="inline-code">FRONTEND</code> vérifie que le moteur demandé est activé. Le programme C++ choisit lui aussi explicitement ce moteur. À la configuration, le helper télécharge et vérifie <code class="inline-code">jasmine-core</code> 7.0.2.</p><p>Les fichiers de spécifications sont des scripts JavaScript classiques. Si les sources sont écrites en TypeScript ou organisées en modules, compilez-les au préalable.</p><div class="code"><div class="codebar"><span>CMAKE</span><button class="copy">Copier</button></div><pre><code>cmake_minimum_required(VERSION 3.31)
+project(Quote LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(WEBFRONT_EMBED_WKWEBVIEW ON CACHE BOOL &quot;&quot; FORCE)
+add_subdirectory(WebFront)
+enable_testing()
+add_executable(Quote main.cpp)
+target_link_libraries(Quote PRIVATE WebFront::WebFront)
+webfront_use_native_window(Quote)
+webfront_add_jasmine_test(NAME QuoteJourney TARGET Quote
+    SPECS tests/ui/quote.spec.js FRONTEND WKWebView TIMEOUT 60)
+set_tests_properties(QuoteJourney PROPERTIES
+    WORKING_DIRECTORY &quot;${CMAKE_CURRENT_SOURCE_DIR}&quot;)</code></pre></div></section><section id="part-10"><h2>Exécuter et interpréter le résultat</h2><p>Construisez l’application, puis exécutez CTest avec les commandes suivantes. Le rapport JSON du test se trouve sous <code class="inline-code">build/webfront-jasmine/QuoteJourney/</code>.</p><p>Le test échoue en cas d’assertion fausse, de suite focalisée, d’absence de spécification exécutée, de rapport absent, d’erreur applicative ou de dépassement du délai. Vérifiez-le en remplaçant <code class="inline-code">75</code> par <code class="inline-code">74</code>, puis corrigez le test.</p><p>Sur Linux, choisissez CEF ou WebKitGTK et installez <code class="inline-code">xvfb-run</code>. Sur Windows, choisissez WebView2. Le navigateur système ne convient pas à ce mode de test. Après le provisionnement des dépendances, l’exécution ne demande aucun accès au réseau public.</p><div class="code"><div class="codebar"><span>TERMINAL SYSTÈME</span><button class="copy">Copier</button></div><pre><code>cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure</code></pre></div></section><section id="part-11"><h2>Choisir d’autres parcours</h2><p>Un bon test de parcours part d’un état connu et vérifie un résultat observable. Dans Life, on peut sélectionner un motif, avancer d’une génération, vérifier la grille et remettre la simulation à zéro. Dans un outil de réglage, on peut modifier une valeur, l’enregistrer, recharger la page et vérifier sa persistance.</p><p>Chaque cas doit rétablir ses conditions initiales et attendre un signal de fin déterminé. Les erreurs C++ et les déconnexions méritent des cas distincts. Le clavier, le focus, les dialogues natifs et la présentation demandent des vérifications complémentaires.</p></section><nav class="related-links" aria-label="Références du chapitre"><a href="https://jasmine.github.io/" >Jasmine ↗</a> · <a href="/examples/quote/main.cpp" download><code class="inline-code">main.cpp</code> ↗</a> · <a href="/examples/quote/CMakeLists.txt" download><code class="inline-code">CMakeLists.txt</code> ↗</a> · <a href="/examples/quote/ui/index.html" download><code class="inline-code">ui/index.html</code> ↗</a> · <a href="/examples/quote/tests/ui/quote.spec.js" download><code class="inline-code">quote.spec.js</code> ↗</a> · <a href="https://github.com/ambroise-leclerc/WebFront/blob/v0.7.0/docs/CONSUMER_TESTING.md" >Consumer testing ↗</a></nav><aside class="mission"><p class="eyebrow">↗ Exercice</p><p>Construisez l’exemple de devis. Remplacez le résultat attendu <code class="inline-code">75</code> par <code class="inline-code">74</code> et vérifiez l’échec de CTest, puis rétablissez la valeur correcte. Ajoutez un cas qui calcule deux devis successifs.</p></aside><section class="quiz" data-right="0"><p class="eyebrow">Vérifier sa compréhension</p><h2>Que vérifie le parcours Devis ?</h2><div><button data-answer="0" aria-pressed="false">La saisie, le clic, le pont, le calcul C++ et le total visible.</button><button data-answer="1" aria-pressed="false">Tous les pixels et tous les périphériques natifs.</button></div><p class="quiz-result" aria-live="polite"></p></section><div class="lesson-bottom"><button class="button primary" id="mark-read" aria-pressed="false">✓ Marquer comme lu</button><a href="https://github.com/ambroise-leclerc/WebFront/blob/v0.7.0/docs/CONSUMER_TESTING.md">Aller à la documentation source ↗</a></div><nav class="page-turn" aria-label="Navigation du livre"><a href="/fr/book/patterns/">← Précédent<strong>Choisir un modèle d’interface</strong></a><a href="/fr/book/automation/">Continuer →<strong>Développer avec un harnais d’IA</strong></a></nav></article></main><footer><div><a class="brand" href="/fr/"><img class="mark" src="/assets/webfront-swallow.svg" width="60" height="34" alt="">WebFront <small>/ C++23</small></a><p>Framework C++23 pour la création d’applications graphiques.</p></div><div><a href="https://github.com/ambroise-leclerc/WebFront">Code source ↗</a> · <a href="https://github.com/ambroise-leclerc/WebFront/blob/v0.7.0/.github/CONTRIBUTING.md">Contribuer ↗</a><small>Sans mesure d’audience ni cookies publicitaires. La progression du livre reste dans ce navigateur.</small><a class="notation-link" href="/fr/book/#notation">Conventions de notation</a></div></footer></body></html>

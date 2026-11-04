@@ -3,6 +3,7 @@
 #include "Mocks.hpp"
 #include "TemporaryDirectory.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <webfront/http/BlockingWorker.hpp>
 #include <webfront/http/HTTPServer.hpp>
 
@@ -98,7 +99,7 @@ SCENARIO("Route prefixes are validated when registered") {
     RouteTable table;
     const auto handler = [](const RouteRequest&) { return RouteReply{}; };
     GIVEN("prefixes that cannot be routes") {
-        for (const auto* prefix : {"", "/", "/files", "files/", "/a//b/", "/a/../b/", "/a b/", "/a?b/", "/a#/", "/a%2e/"}) {
+        for (const auto* prefix : {"", "/", "/files", "files/", "/a//b/", "/a/../b/", "/a/./b/", "/a b/", "/a?b/", "/a#/", "/a%2e/"}) {
             THEN("'" << prefix << "' is refused") { REQUIRE_THROWS_AS(table.add(prefix, handler), std::invalid_argument); }
         }
         THEN("a route without handler is refused") { REQUIRE_THROWS_AS(table.add("/webfront/services/files/", nullptr), std::invalid_argument); }
@@ -567,15 +568,27 @@ SCENARIO("A blocked job does not delay the others of a worker with several threa
     auto               quickEnded   = quickDone.get_future();
     auto               slow = networking::ex::connect(worker.run([&] { blocked = true; shared.wait(); }), Completes{&blockedDone});
     auto               fast = networking::ex::connect(worker.run([] {}), Completes{&quickDone});
+    // The blocked job is released whatever happens: the worker's destructor waits for it.
+    struct Release {
+        std::promise<void>& promise;
+        bool                done = false;
+        void                now() {
+            if (!std::exchange(done, true)) promise.set_value();
+        }
+        ~Release() { now(); }
+    } releaseGuard{release};
     networking::ex::start(slow);
-    REQUIRE(waitFor([&] { return blocked.load(); }));
-    networking::ex::start(fast);
+    const bool started = waitFor([&] { return blocked.load(); });
+    if (started) networking::ex::start(fast);
+    const bool quickDoneInTime = started && quickEnded.wait_for(5s) == std::future_status::ready;
+    const bool slowStillBlocked = blockedEnded.wait_for(10ms) == std::future_status::timeout;
+    releaseGuard.now();
+    if (started) blockedEnded.wait();
     THEN("the quick job completes while the slow one still runs") {
-        REQUIRE(quickEnded.wait_for(5s) == std::future_status::ready);
-        REQUIRE(blockedEnded.wait_for(10ms) == std::future_status::timeout);
+        REQUIRE(started);
+        REQUIRE(quickDoneInTime);
+        REQUIRE(slowStillBlocked);
     }
-    release.set_value();
-    blockedEnded.wait();
 }
 
 SCENARIO("A single-thread worker keeps the jobs in order") {
@@ -609,4 +622,64 @@ SCENARIO("A handler or a body throwing something else than a std::exception is c
         const auto response = fixture.answer(get("/webfront/services/files/x"));
         THEN("the connection ends after the headers") { REQUIRE(response.ends_with("\r\n\r\n")); }
     }
+}
+
+SCENARIO("Route matching sees the path as a URL path") {
+    Fixture fixture;
+    Router  server("127.0.0.1", "0");
+    std::string seen;
+    auto        route = server.addRoute("/webfront/services/files/", [&](const RouteRequest& request) {
+        seen = std::string(request.path);
+        return text("ok");
+    });
+    auto plus = server.addRoute("/a+b/", [&](const RouteRequest& request) {
+        seen = std::string(request.path);
+        return text("plus");
+    });
+    GIVEN("a prefix with a literal plus") {
+        const auto response = fixture.answer(get("/a+b/x+y"));
+        THEN("the plus stays a plus in the matching and in the path") {
+            REQUIRE(response.ends_with("plus"));
+            REQUIRE(seen == "/a+b/x+y");
+        }
+    }
+    GIVEN("a percent-encoded plus") {
+        const auto response = fixture.answer(get("/a%2Bb/x"));
+        THEN("it matches the same route") { REQUIRE(response.ends_with("plus")); }
+    }
+    GIVEN("empty and dot segments before the prefix") {
+        const auto target = GENERATE(as<std::string>{}, "/webfront//services/files/x", "/webfront/./services/files/x", "//webfront/services//files/./x");
+        const auto response = fixture.answer(get(target));
+        THEN("the route answers, not a file provider, with the normalized path") {
+            REQUIRE(response.ends_with("ok"));
+            REQUIRE(seen == "/webfront/services/files/x");
+        }
+    }
+}
+
+SCENARIO("A handler may answer 405 with a body of its own") {
+    Fixture fixture;
+    Router  server("127.0.0.1", "0");
+    auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
+        auto reply   = text("not this path");
+        reply.status = Response::methodNotAllowed;
+        return reply;
+    });
+    const auto response = fixture.answer(get("/webfront/services/files/x"));
+    THEN("its body is streamed after its headers") {
+        REQUIRE(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+        REQUIRE(response.ends_with("\r\n\r\nnot this path"));
+    }
+}
+
+SCENARIO("Header names are ASCII tokens whatever the locale") {
+    Fixture fixture;
+    Router  server("127.0.0.1", "0");
+    auto    route = server.addRoute("/webfront/services/files/", [](const RouteRequest&) {
+        auto reply = text("x");
+        reply.headers.emplace_back("X-Caf\xC3\xA9", "v");
+        return reply;
+    });
+    const auto response = fixture.answer(get("/webfront/services/files/x"));
+    THEN("a non-ASCII name is refused") { REQUIRE(response.starts_with("HTTP/1.1 500 Internal Server Error\r\n")); }
 }

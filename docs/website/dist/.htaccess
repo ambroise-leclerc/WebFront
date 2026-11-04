@@ -1,0 +1,10 @@
+DirectoryIndex index.html
+Options -Indexes
+ErrorDocument 404 /404.html
+AddType text/javascript .js .mjs
+
+RewriteEngine On
+RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+RewriteCond %{HTTPS} !=on [OR]
+RewriteCond %{HTTP_HOST} !^webfront\.fr$ [NC]
+RewriteRule ^ https://webfront.fr%{REQUEST_URI} [R=301,L,NE]
