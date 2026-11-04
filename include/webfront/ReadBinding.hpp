@@ -122,7 +122,11 @@ struct ReadPresentation {
     static constexpr std::string_view active[] = {"text/html",       "application/xhtml+xml",   "text/xml",         "application/xml",
                                                   "text/javascript", "application/javascript",  "application/x-javascript",
                                                   "text/ecmascript", "application/ecmascript",  "application/wasm"};
-    const bool isActive = std::ranges::find(active, essence) != std::end(active)
+    // Every spelling a browser runs as a script (text/javascript1.5, application/x-ecmascript, text/jscript, ...), and
+    // stylesheets, are announced as opaque bytes.
+    const bool scripting = essence.contains("javascript") || essence.contains("ecmascript") || essence.contains("jscript")
+                           || essence.contains("livescript") || essence.contains("vbscript") || essence == "text/css";
+    const bool isActive = scripting || std::ranges::find(active, essence) != std::end(active)
                           || (essence.ends_with("+xml") && essence != "image/svg+xml") || essence.ends_with("+wasm");
     if (isActive)
         return {"application/octet-stream", false};
@@ -252,6 +256,8 @@ public:
         // The server refuses a target holding ".." or a control character before any route sees it: such a URL would never work.
         if (rest.contains("..") || std::ranges::any_of(rest, [](char c) { return static_cast<unsigned char>(c) < 32 || c == 127; }))
             throw ReadRefused("The path of a read cannot contain \"..\" or control characters");
+        if (http::routing::collapseSegments("/" + std::string(rest)) != "/" + std::string(rest))
+            throw ReadRefused("The path of a read cannot hold empty or dot segments");
         std::string      id = automation::channel::nonce().substr(0, 16), secret = automation::channel::nonce();
         std::scoped_lock lock{mutex};
         reapExpired();
@@ -260,7 +266,7 @@ public:
             throw ReadRefused("The connection is closed");
         if (!connection->second.local && transport == RemoteFileTransport::refused)
             throw ReadRefused("This connection is not the view of an embedded frontend: declare WebFrontConfig::remoteFileTransport to read files");
-        Grant record{.owner = key, .route = std::string(routeId), .secret = secret, .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
+        Grant record{.owner = key, .route = std::string(routeId), .secret = secret, .path = std::string(rest), .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
         if (options.lifetime.count() > 0)
             record.expiry = now() + options.lifetime;
         grants[id] = std::move(record);
@@ -319,7 +325,7 @@ public:
             const auto slash = after.find('/');
             const auto token = after.substr(0, slash);
             const auto rest  = slash == std::string_view::npos ? std::string_view{} : after.substr(slash + 1);
-            auto       context = authorize(routeId, token, detail::requestCookies(request.request));
+            auto       context = authorize(routeId, token, rest, detail::requestCookies(request.request));
             if (!context) {
                 auto denied = plain(http::Response::forbidden);
                 detail::hardenRead(denied, {});
@@ -332,8 +338,8 @@ public:
     }
 
     /// True when `token` is accepted for a request that presents `cookies`: used by the route, exposed for tests.
-    [[nodiscard]] bool accepts(std::string_view routeId, std::string_view token, const std::vector<std::pair<std::string, std::string>>& cookies) {
-        return authorize(routeId, token, cookies).has_value();
+    [[nodiscard]] bool accepts(std::string_view routeId, std::string_view token, std::string_view rest, const std::vector<std::pair<std::string, std::string>>& cookies) {
+        return authorize(routeId, token, rest, cookies).has_value();
     }
 
 private:
@@ -350,6 +356,7 @@ private:
         ConnectionKey                                        owner = 0;
         std::string                                          route;  // the registration that issued it
         std::string                                          secret;
+        std::string                                          path;  // the path it was issued for
         bool                                                 transferable = false;
         std::optional<std::chrono::steady_clock::time_point> expiry;
         std::shared_ptr<const std::any>                      context;
@@ -441,7 +448,7 @@ private:
     }
 
     /// The context of the grant, when `token` and the cookies are acceptable. Every refusal looks alike.
-    std::optional<std::shared_ptr<const std::any>> authorize(std::string_view routeId, std::string_view token, const std::vector<std::pair<std::string, std::string>>& cookies) {
+    std::optional<std::shared_ptr<const std::any>> authorize(std::string_view routeId, std::string_view token, std::string_view rest, const std::vector<std::pair<std::string, std::string>>& cookies) {
         const auto dot = token.find('.');
         if (dot == std::string_view::npos)
             return std::nullopt;
@@ -451,6 +458,8 @@ private:
         if (found == grants.end() || !detail::viewSecretMatches(found->second.secret, token.substr(dot + 1)))
             return std::nullopt;
         const auto& grant = found->second;
+        if (grant.path != rest)  // a token opens the path it was issued for, nothing else under the route
+            return std::nullopt;
         if (grant.route != routeId)  // a grant is valid for the registration that issued it, not for a later route on the prefix
             return std::nullopt;
         if (grant.expiry && now() >= *grant.expiry) {

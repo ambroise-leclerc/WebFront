@@ -431,6 +431,8 @@ private:
             if (grant.rest == "hello.txt") { type = "text/plain"; body = "hello"; }
             else if (grant.rest == "evil.html") { type = "text/html"; body = "<script>" + string(marker) + "</script>"; }
             else if (grant.rest == "evil.svg") { type = "image/svg+xml"; body = "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><script>" + string(marker) + "</script><rect width='4' height='4' fill='red'/></svg>"; }
+            else if (grant.rest == "legacy.js") { type = "text/javascript1.5"; body = string(marker); }
+            else if (grant.rest == "legacy-ecma.js") { type = "application/x-ecmascript"; body = string(marker); }
             else { http::RouteReply reply; reply.status = http::Response::notFound; reply.contentLength = 0; return reply; }
             http::RouteReply reply;
             reply.headers.emplace_back("Content-Type", type);

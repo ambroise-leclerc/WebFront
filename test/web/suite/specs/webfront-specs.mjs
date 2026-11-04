@@ -519,6 +519,18 @@ describe('Bound HTTP reads', () => {
         }
     });
 
+    it('does not run a read announced with a legacy JavaScript type as a script', async () => {
+        await webFront.bound;
+        for (const name of ['legacy.js', 'legacy-ecma.js']) {
+            const script = document.createElement('script');
+            script.src = await readUrl(name);
+            document.head.appendChild(script);
+            await settle(700);
+            script.remove();
+            expect(window.__readExecuted).toBeUndefined();
+        }
+    });
+
     it('rejects bound when the initial connection fails', async () => {
         const bridge = new WebFrontBridge('ws://127.0.0.1:1');
         await expectAsync(bridge.bound).toBeRejected();

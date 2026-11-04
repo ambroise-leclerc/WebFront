@@ -50,7 +50,9 @@ http::RouteReply call(const http::RouteHandler& handler, std::string path, std::
     http::Request request;
     request.parseSomeData(raw.begin(), raw.end());
     REQUIRE(request.completed());
-    return handler(http::RouteRequest{request, path, {}});
+    const auto split = http::routing::splitTarget(path);  // the server decodes the target before dispatch
+    REQUIRE(split);
+    return handler(http::RouteRequest{request, split->first, split->second});
 }
 
 /// "name=value" of a Set-Cookie header.
@@ -117,7 +119,7 @@ SCENARIO("A read needs the token and the cookie of the client of the connection 
             const auto reply = call(fixture.read, url, cookie);
             THEN("the handler runs with the decoded rest of the path") {
                 REQUIRE(reply.status == http::Response::ok);
-                REQUIRE(fixture.lastRest == "dir/a%20b.txt");  // the test passes the raw URL as path: the server decodes it
+                REQUIRE(fixture.lastRest == "dir/a b.txt");
             }
         }
         WHEN("the URL is presented without cookie") {
@@ -387,7 +389,7 @@ SCENARIO("Read responses neutralize active content", "[read-binding]") {
     }
     GIVEN("active types") {
         for (const auto* type : {"text/html", "text/html; charset=utf-8", "application/xhtml+xml", "text/xml", "application/xml", "application/atom+xml",
-                                 "text/javascript", "application/javascript", "application/ecmascript", "application/wasm", "TEXT/HTML"}) {
+                                 "text/javascript", "application/javascript", "application/ecmascript", "text/javascript1.5", "application/x-ecmascript", "text/jscript", "text/livescript", "text/css", "application/wasm", "TEXT/HTML"}) {
             THEN(type << " is a download announced as octet-stream") {
                 const auto reply = present(type);
                 REQUIRE(header(reply, "Content-Type") == "application/octet-stream");
@@ -666,4 +668,18 @@ SCENARIO("A grant is refused for a path the server would never route", "[read-bi
     for (const std::string_view path : {"report..txt", "../up.txt", "a/../b", "tab\there.txt", "line\nbreak"})
         REQUIRE_THROWS_AS(fixture.url(1, path), ReadRefused);
     REQUIRE_NOTHROW(fixture.url(1, "dir/report.v2.txt"));
+}
+
+SCENARIO("A token opens only the path it was issued for", "[read-binding]") {
+    Fixture fixture;
+    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
+    const auto url    = fixture.url(1, "public.txt");
+    REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
+    const auto other = url.substr(0, url.rfind('/')) + "/private.txt";
+    REQUIRE(call(fixture.read, other, cookie).status == http::Response::forbidden);
+    REQUIRE(fixture.lastRest == "public.txt");
+    const auto transferable = fixture.url(1, "public.txt", {.lifetime = 60s, .transferable = true});
+    REQUIRE(call(fixture.read, transferable).status == http::Response::ok);
+    REQUIRE(call(fixture.read, transferable.substr(0, transferable.rfind('/')) + "/private.txt").status == http::Response::forbidden);
+    REQUIRE_THROWS_AS(fixture.url(1, "a//b"), ReadRefused);
 }

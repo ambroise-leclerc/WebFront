@@ -298,6 +298,9 @@
         }
 
         executeFunction(name, args) {
+            // The exchange of the read binding belongs to the bridge that received the call, not to a global singleton.
+            if (name === "wfBind.exchange")
+                return this.bindClient(...args);
             const path = name.split(".");
             const member = path.pop();
             let context = global;
@@ -616,6 +619,4 @@
     // pointed at a different URL, e.g. to exercise the initial-connection-failure path.
     global.WebFrontBridge = WebFrontBridge;
     global.webFront = new WebFrontBridge();
-    // Called by C++ after the handshake: the one-time secret of the read binding (see WebFrontBridge.bindClient).
-    global.wfBind = {exchange: secret => global.webFront.bindClient(secret)};
 })(globalThis);
