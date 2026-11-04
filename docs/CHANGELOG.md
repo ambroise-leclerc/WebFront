@@ -12,8 +12,9 @@
   or behind a proxy or tunnel). A frontend receives the proof through an optional
   `open(address, port, file, policy, window, ViewLaunch)` overload. The handshake is accepted once per connection and a proof is copied only at the size of a secret; the
   script handed to a view is refused (no association) for an origin or a secret that would need escaping; an IPv4 loopback
-  seen through a dual-stack socket counts as loopback. The association does not protect against a script
-  admitted into the view. WebView2, WebKitGTK and CEF code is covered by their own CI jobs; WKWebView is also tested here.
+  seen through a dual-stack socket counts as loopback. The injection script normalizes its expected origin with the browser's
+  URL parser, so expanded IPv6 and IPv6 with embedded IPv4 notation match `location.origin`. The association does not protect
+  against a script admitted into the view. WebView2, WebKitGTK and CEF code is covered by their own CI jobs; WKWebView is also tested here.
 
 - HTTP server: dynamic routes (#454, ADR-020 prerequisite). `addRoute(prefix, handler)` on the application answers `GET` and
   `HEAD` under an absolute prefix with a reply produced at run time (`http::RouteReply`: status, headers, exact or unknown

@@ -9,6 +9,21 @@
         try {
             await webFront.ready;
             if ("__webfrontView" in window) throw new Error("the launch secret is still readable by the page");
+            // Run the C++-generated injection against origins serialized by the real engine. A synthetic window
+            // keeps the fixed test secret separate from the real view's launch secret and needs no IPv6 listener.
+            for (const address of ["0:0:0:0:0:0:0:1", "::ffff:127.0.0.1", "2001:0DB8:0:0:1:0:0:1"]) {
+                const script = await webFront.cppFunction("associationScript")(address);
+                const target = {};
+                target.top = target;
+                const origin = new URL(`http://[${address}]:9002/`).origin;
+                new Function("window", "location", script)(target, {origin});
+                if (target.__webfrontView !== "a".repeat(64)) throw new Error(`association failed for ${origin}`);
+                const foreign = {};
+                foreign.top = foreign;
+                new Function("window", "location", script)(foreign, {origin: origin.replace(":9002", ":9003")});
+                if ("__webfrontView" in foreign) throw new Error("a foreign origin received the secret");
+            }
+            await webFront.cppFunction("originsChecked")();
             await new Promise((resolve, reject) => {
                 const socket = new WebSocket(`ws://${location.host}`, "WebFront_0.1");
                 socket.binaryType = "arraybuffer";

@@ -156,7 +156,7 @@ SCENARIO("The script that hands the secret to a view refuses what it cannot writ
     GIVEN("a hexadecimal secret and a plain origin") {
         const auto script = detail::viewSecretScript(secret, "http://127.0.0.1:9002");
         THEN("the script names the origin and the secret") {
-            REQUIRE(script.contains("location.origin === 'http://127.0.0.1:9002'"));
+            REQUIRE(script.contains("location.origin === new URL('http://127.0.0.1:9002').origin"));
             REQUIRE(script.contains(secret));
         }
     }

@@ -41,6 +41,7 @@ int checkViewAssociation() {
     std::mutex          mutex;
     std::vector<bool>   embedded;
     std::vector<bool>   local;
+    std::atomic<bool>   originsChecked = false;
     app.onUIStarted([&](App::UI ui) {
         std::scoped_lock lock{mutex};
         embedded.push_back(ui.isEmbeddedView());
@@ -50,7 +51,13 @@ int checkViewAssociation() {
         std::scoped_lock lock{mutex};
         return static_cast<std::uint32_t>(embedded.size());
     });
+    app.cppFunction("associationScript", [](std::string address) {
+        return webfront::detail::viewSecretScript(std::string(64, 'a'), webfront::detail::browserOrigin(address, "9002"));
+    });
+    app.cppFunction("originsChecked", [&] { originsChecked = true; });
     app.show("view-association.html");
+    if (!originsChecked)
+        throw std::runtime_error("The view association script did not match the browser's serialized IPv6 origins");
     std::scoped_lock lock{mutex};
     if (embedded.size() != 2)
         throw std::runtime_error("Expected two bridge connections");

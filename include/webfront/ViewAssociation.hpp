@@ -49,8 +49,8 @@ inline std::string newViewSecret() {
     return mismatch == 0;
 }
 
-/// The origin as the browser writes `location.origin`: lowercase, without the default port 80. The comparison of the script
-/// below is a string comparison, so an origin written otherwise would never match and the view would stay unassociated.
+/// The application origin prepared for injection: lowercase, without the default port 80. The script below lets the
+/// browser's URL parser finish serialization, including compression of IPv6 and its embedded IPv4 notation.
 [[nodiscard]] inline std::string browserOrigin(std::string_view address, std::string_view port) {
     auto origin = applicationOrigin(address, port);
     std::ranges::transform(origin, origin.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -67,9 +67,9 @@ inline std::string newViewSecret() {
     const auto isOrigin = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || std::string_view{":/.[]-"}.contains(c); };
     if (secret.empty() || origin.empty() || !std::ranges::all_of(secret, isHex) || !std::ranges::all_of(origin, isOrigin))
         return {};
-    std::string script = "if (window === window.top && location.origin === '";
+    std::string script = "if (window === window.top && location.origin === new URL('";
     script += origin;
-    script += "') Object.defineProperty(window, '";
+    script += "').origin) Object.defineProperty(window, '";
     script += viewSecretProperty;
     script += "', {value: '";
     script += secret;

@@ -53,8 +53,9 @@ on a command line or in a URL.
 - A custom frontend that wants services restricted to its own view implements the overload and applies
   `webfront::detail::viewSecretScript(secret, origin)` (or the engine's equivalent) at the start of the document. The helper
   returns an empty script, hence no association, unless the secret is lowercase hexadecimal and the origin a plain http origin;
-  give it `webfront::detail::browserOrigin(address, port)` (the origin as `location.origin` writes it: lowercase, without port 80),
-  which `ViewLaunch::origin` already is.
+  give it `webfront::detail::browserOrigin(address, port)` (lowercase, without port 80), which `ViewLaunch::origin` already is.
+  The script uses the browser's `URL` parser to serialize that origin before comparing it with `location.origin`, including
+  IPv6 compression and embedded IPv4 notation (`::ffff:127.0.0.1` becomes `[::ffff:7f00:1]` as a URL host).
 
 ## Window title and size
 
