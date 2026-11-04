@@ -617,3 +617,45 @@ SCENARIO("Two applications on one host keep their own cookies", "[read-binding]"
         }
     }
 }
+
+SCENARIO("A frame never logs the bytes of its payload", "[read-binding]") {
+    webfront::log::setLogLevel(webfront::log::Debug);
+    std::string logged;
+    const auto  sink = webfront::log::addSinks([&](std::string_view line) { logged += std::string(line) + "\n"; });
+    const std::string      secret(64, 'q');
+    std::vector<std::byte> bytes;
+    for (const char c : secret)
+        bytes.push_back(static_cast<std::byte>(c));
+    websocket::Frame<ReadNet> frame{std::string_view{}};
+    frame.addBuffer(bytes);
+    webfront::log::removeSinks(sink);
+    webfront::log::setLogLevel(webfront::log::Error);
+    REQUIRE_FALSE(logged.contains("qqqq"));
+    REQUIRE_FALSE(logged.contains("71 71"));
+}
+
+SCENARIO("Expired grants release their context without being requested again", "[read-binding]") {
+    Fixture fixture;
+    const auto cookie = cookiePair(headers(fixture.bind(1, true), "Set-Cookie").front());
+    (void)cookie;
+    auto       token  = std::make_shared<int>(7);
+    std::weak_ptr<int> watch = token;
+    (void)fixture.url(1, "a", {.lifetime = 60s, .context = token});
+    token.reset();
+    REQUIRE_FALSE(watch.expired());
+    fixture.time += 61s;
+    (void)fixture.url(1, "b");  // issuing another grant sweeps the expired ones
+    REQUIRE(watch.expired());
+}
+
+SCENARIO("A namespace named after the port survives a restart", "[read-binding]") {
+    Fixture before, after;
+    before.binding.useNamespace("9002");
+    after.binding.useNamespace("9002");
+    const auto cookie = cookiePair(headers(before.bind(1, true), "Set-Cookie").front());
+    REQUIRE(cookie.starts_with("wf-client-9002-"));
+    bool erased = false;
+    for (const auto& line : headers(after.bind(1, true, cookie), "Set-Cookie"))
+        erased = erased || (line.starts_with(cookie.substr(0, cookie.find('=')) + "=;") && line.contains("Max-Age=0"));
+    REQUIRE(erased);
+}

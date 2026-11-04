@@ -481,6 +481,7 @@ public:
             link->start();  // registered first: every event it dispatches finds it
         });
         // The exchange of the binding secret for the client cookie; the secret is part of the path, so it is never logged.
+        readBinding->useNamespace(httpPort);
         bindRoute = httpServer.addRoute(std::string(ReadBinding::bindPath), readBinding->exchangeHandler(), true);
     }
 

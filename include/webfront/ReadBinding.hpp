@@ -199,6 +199,13 @@ public:
     explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
         : transport(declared), now(std::move(clock)), ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
 
+    /// Names the cookies after `name` (the port the server listens on) instead of a random word, so that a restart on the
+    /// same port erases the cookies of its previous run. Call before the first `open`.
+    void useNamespace(std::string_view name) {
+        std::scoped_lock lock{mutex};
+        ownPrefix = std::string(cookiePrefix) + std::string(name) + "-";
+    }
+
     /// The cookie name prefix of this application: cookies are shared across ports of a host, so each binding names (and
     /// erases) only its own, `wf-client-<application>-<client>`.
     [[nodiscard]] const std::string& clientCookiePrefix() const noexcept { return ownPrefix; }
@@ -244,6 +251,7 @@ public:
             throw ReadRefused("A transferable read needs a lifetime of at most 15 minutes");
         std::string      id = automation::channel::nonce().substr(0, 16), secret = automation::channel::nonce();
         std::scoped_lock lock{mutex};
+        reapExpired();
         const auto       connection = connections.find(key);
         if (connection == connections.end())
             throw ReadRefused("The connection is closed");
@@ -367,6 +375,12 @@ private:
         return encoded;
     }
 
+    /// Drops the expired grants and their contexts, whether or not their tokens are ever presented again. Caller holds the lock.
+    void reapExpired() {
+        const auto instant = now();
+        std::erase_if(grants, [instant](const auto& grant) { return grant.second.expiry && instant >= *grant.second.expiry; });
+    }
+
     /// The id of the first client whose cookie is presented with its right secret; empty if none. Caller holds the lock.
     std::string cookieClient(const std::vector<std::pair<std::string, std::string>>& cookies) const {
         for (const auto& [name, value] : cookies) {
@@ -429,6 +443,7 @@ private:
         if (dot == std::string_view::npos)
             return std::nullopt;
         std::scoped_lock lock{mutex};
+        reapExpired();
         const auto       found = grants.find(std::string(token.substr(0, dot)));
         if (found == grants.end() || !detail::viewSecretMatches(found->second.secret, token.substr(dot + 1)))
             return std::nullopt;

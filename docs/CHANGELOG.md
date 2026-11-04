@@ -6,7 +6,7 @@
   `/webfront/services/` whose URLs are grants: `ui.grantRead(route, path, ReadOptions)` returns `prefix + token + "/" + path`
   (a 256-bit secret and an identifier, compared in constant time, reusable for byte ranges, revoked with the connection,
   `app.revokeRead(url)` or an optional lifetime). After its handshake each connection receives a one-time secret through the
-  bridge (`wfBind.exchange`) and exchanges it by a same-origin `fetch` for a `wf-client-<application>-<id>` cookie (`HttpOnly`,
+  bridge (`wfBind.exchange`) and exchanges it by a same-origin `fetch` for a `wf-client-<port>-<id>` cookie (`HttpOnly`,
   `SameSite=Strict`, `Path=/webfront/services/`) naming its browser client; `webFront.bound` resolves once the cookie is
   held, or rejects with an explicit error when the browser refuses it, and bound reads then answer `403` without a fallback.
   The tabs of a profile that present the cookie share one client; concurrent exchanges of a blank profile create two
