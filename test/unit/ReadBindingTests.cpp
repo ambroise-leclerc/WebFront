@@ -247,12 +247,15 @@ SCENARIO("The exchange secret is single use and only the right one works", "[rea
         fixture.binding.close(1);
         REQUIRE(call(fixture.exchange, path).status == http::Response::forbidden);
     }
-    THEN("the check answers only to a request that carries a cookie of a known client") {
-        const auto check = std::string(ReadBinding::bindPath) + "check";
-        REQUIRE(call(fixture.exchange, check).status == http::Response::forbidden);
-        const auto cookie = cookiePair(headers(call(fixture.exchange, path), "Set-Cookie").front());
-        REQUIRE(call(fixture.exchange, check, cookie).status == http::Response::ok);
-        REQUIRE(call(fixture.exchange, check, fixture.binding.clientCookiePrefix() + "0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
+    THEN("the check answers only to a request whose cookies designate the client the exchange named") {
+        const auto base = std::string(ReadBinding::bindPath) + "check/";
+        const auto reply  = call(fixture.exchange, path);
+        const auto client = *header(reply, "X-WebFront-Client");
+        const auto cookie = cookiePair(headers(reply, "Set-Cookie").front());
+        REQUIRE(call(fixture.exchange, base + client).status == http::Response::forbidden);
+        REQUIRE(call(fixture.exchange, base + client, cookie).status == http::Response::ok);
+        REQUIRE(call(fixture.exchange, base + "0000000000000000", cookie).status == http::Response::forbidden);
+        REQUIRE(call(fixture.exchange, base + "0000000000000000", fixture.binding.clientCookiePrefix() + "0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
     }
 }
 
@@ -725,4 +728,42 @@ SCENARIO("A binding that was shut down grants nothing and holds nothing", "[read
     REQUIRE(watch.expired());
     REQUIRE_THROWS_AS(fixture.url(1, "b"), ReadRefused);
     REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
+}
+
+SCENARIO("The check of one exchange is not satisfied by the cookie of a concurrent one", "[read-binding]") {
+    Fixture fixture;
+    const auto first  = fixture.bind(1, true);
+    const auto second = fixture.bind(2, true);
+    const auto clientB = *header(second, "X-WebFront-Client");
+    const auto cookieA = cookiePair(headers(first, "Set-Cookie").front());
+    // The browser kept A's cookie and rejected B's: B must not be told it is bound.
+    REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + "check/" + clientB, cookieA).status == http::Response::forbidden);
+}
+
+SCENARIO("The error of a failing secret route is not logged", "[read-binding]") {
+    testing::InjectableSocket::reset();
+    ReadNet::accepts = 0;
+    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
+    auto route = server.addRoute(std::string(readPrefix), [](const http::RouteRequest& request) -> http::RouteReply {
+        throw std::runtime_error("cannot open " + std::string(request.path));
+    }, true);
+    webfront::log::setLogLevel(webfront::log::Debug);
+    std::string logged;
+    std::mutex  loggedMutex;
+    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += std::string(line) + "\n";
+    });
+    const std::string      raw = "GET " + std::string(readPrefix) + "0123456789abcdef.TOKENSECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    std::vector<std::byte> bytes;
+    for (const char c : raw)
+        bytes.push_back(static_cast<std::byte>(c));
+    testing::InjectableSocket::receive(bytes);
+    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+    webfront::log::removeSinks(sink);
+    webfront::log::setLogLevel(webfront::log::Error);
+    std::scoped_lock lock{loggedMutex};
+    REQUIRE(logged.contains("failed"));
+    REQUIRE_FALSE(logged.contains("TOKENSECRET"));
+    testing::InjectableSocket::reset();
 }

@@ -924,7 +924,7 @@ private:
     // previous one was sent (back-pressure). A failure cannot change the status line already sent: it is
     // logged, and the caller closes the connection, which the client sees as a truncated body.
     networking::Task streamBody(BlockingWorker& worker, typename Net::Socket& socket, std::function<std::size_t(std::span<char>)> body,
-                                std::optional<std::uint64_t> length, std::string label) {
+                                std::optional<std::uint64_t> length, std::string label, bool secret = false) {
         try {
             std::vector<char> chunk(Policy::emissionBufferSize);
             std::uint64_t     sent = 0;
@@ -940,7 +940,9 @@ private:
             if (length && sent != *length) throw std::length_error("The body is shorter than announced");
         }
         catch (const std::exception& error) {
-            log::warn("{} ended its response early: {}", label, error.what());
+            // The message of a handler can quote the request path, which holds a token on a secret route.
+            if (secret) log::warn("{} ended its response early (the error is not logged)", label);
+            else log::warn("{} ended its response early: {}", label, error.what());
         }
         catch (...) {
             log::warn("{} ended its response early: unknown exception", label);
@@ -970,7 +972,8 @@ private:
             }
         }
         catch (const std::exception& error) {
-            log::warn("Route {} failed: {}", match.route->prefix, error.what());
+            if (match.route->secretPath) log::warn("Route {} failed (the error is not logged: it may quote a secret)", match.route->prefix);
+            else log::warn("Route {} failed: {}", match.route->prefix, error.what());
             response = Response::getStatusResponse(Response::internalServerError);
             reply.body = nullptr;
         }
@@ -982,7 +985,7 @@ private:
         const bool streaming = !head && reply.body;  // the built-in 405 has no reply.body
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
-        if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix);
+        if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
         socket.shutdown(Net::Socket::shutdown_both);
     }
 
@@ -1042,7 +1045,8 @@ private:
             response.headers.emplace_back("Vary", "Accept-Encoding");
         }
         catch (const std::exception& error) {
-            log::warn("HTTP asset request failed: {}", error.what());
+            if (routing::mentionsServices(request.uri)) log::warn("HTTP asset request on a services path failed (the error is not logged)");
+            else log::warn("HTTP asset request failed: {}", error.what());
             response = Response::getStatusResponse(Response::internalServerError);
         }
         catch (...) {

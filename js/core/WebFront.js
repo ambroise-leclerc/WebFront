@@ -168,7 +168,9 @@
             try {
                 const exchange = await fetch(base + encodeURIComponent(secret), {credentials: "same-origin", cache: "no-store"});
                 if (!exchange.ok) throw new Error(`the server refused the exchange (HTTP ${exchange.status})`);
-                const check = await fetch(base + "check", {credentials: "same-origin", cache: "no-store"});
+                const client = exchange.headers.get("X-WebFront-Client");
+                if (!client) throw new Error("the server did not name the client");
+                const check = await fetch(base + "check/" + encodeURIComponent(client), {credentials: "same-origin", cache: "no-store"});
                 if (!check.ok) throw new Error("the browser refused the binding cookie");
                 this.resolveBound();
             } catch (error) {

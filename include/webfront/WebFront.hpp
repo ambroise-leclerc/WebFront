@@ -1068,18 +1068,22 @@ private:
                 uiSubscribers->notify(ui);
                 break;
             }
-            case WebLinkEvent::Code::closed:
+            case WebLinkEvent::Code::closed: {
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
+                std::optional<WebLinkGeneration> closedGeneration;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.closed = true;
                         found->second.deferred.clear();
-                        readBinding->close(found->second.generation);  // its read URLs stop working at once
+                        closedGeneration = found->second.generation;
                     }
                 }
+                // Outside linksMutex: dropping the grants destroys their contexts, whose destructors may use the application.
+                if (closedGeneration)
+                    readBinding->close(*closedGeneration);  // its read URLs stop working at once
                 if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
                     found->second->close();
                     domDocuments.erase(found);
@@ -1089,6 +1093,7 @@ private:
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
+            }
             case WebLinkEvent::Code::cppFunctionCalled: {
                 // Links are registered before they read, and released after their closure: the caller is registered.
                 const auto [link, generation] = linkAndGeneration(event.webLinkId);

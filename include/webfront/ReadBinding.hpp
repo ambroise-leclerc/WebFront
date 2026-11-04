@@ -317,7 +317,7 @@ public:
     }
 
     /// The handler of the exchange route (`bindPath`): `<secret>` swaps the one-time secret for a cookie, `check`
-    /// answers 200 only to a request that carries a cookie of a known client.
+    /// answers 200 only to a request whose cookies designate the client `check/<id>` names.
     [[nodiscard]] http::RouteHandler exchangeHandler() {
         return [this](const http::RouteRequest& request) {
             auto reply = plain(http::Response::ok);
@@ -325,9 +325,9 @@ public:
             detail::setHeader(reply, "Referrer-Policy", "no-referrer");
             const auto what = request.path.substr(bindPath.size());
             const auto cookies = detail::requestCookies(request.request);
-            if (what == "check") {
+            if (what.starts_with("check/")) {  // the client the exchange assigned to this page, which must be the one whose cookie came back
                 std::scoped_lock lock{mutex};
-                if (cookieClient(cookies).empty())
+                if (!cookieDesignates(cookies, std::string(what.substr(6))))
                     reply.status = http::Response::forbidden;
                 return reply;
             }
@@ -480,6 +480,7 @@ private:
         }
         clients[id].connections.insert(key);
         connection->second.client = id;
+        reply.headers.emplace_back("X-WebFront-Client", id);  // not a secret: the cookie name holds it
         return true;
     }
 
