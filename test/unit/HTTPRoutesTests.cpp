@@ -362,8 +362,9 @@ SCENARIO("A large body is streamed without being held") {
     InjectableSocket::discardWrites();
     const auto before = peakResidentBytes();
     send(get("/webfront/services/files/big"));
-    // 16384 chunks, each crossing to the worker thread: slow under Debug, coverage and sanitizers.
-    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }, 120s));
+    // 16384 chunks, each crossing to the worker thread: slow under Debug, coverage and sanitizers. The limit stays below
+    // the 60 s CTest timeout of the scenarios, so that a stall is reported by the test rather than by a kill.
+    REQUIRE(waitFor([] { return InjectableSocket::shutdownCount() > 0; }, 45s));
     THEN("the peak memory of the process did not grow with the size sent") {
         // Holding the body would add its 128 MiB to the peak; ctest runs each scenario in its own process.
         if (const auto after = peakResidentBytes()) REQUIRE(after - before < 48ull * 1024 * 1024);
@@ -584,6 +585,7 @@ SCENARIO("A blocked job does not delay the others of a worker with several threa
     const bool slowStillBlocked = blockedEnded.wait_for(10ms) == std::future_status::timeout;
     releaseGuard.now();
     if (started) blockedEnded.wait();
+    if (started) quickEnded.wait();  // `fast` and `worker` outlive any use of each other, even when an assertion fails
     THEN("the quick job completes while the slow one still runs") {
         REQUIRE(started);
         REQUIRE(quickDoneInTime);

@@ -324,9 +324,10 @@ SCENARIO("Draining pumps cancelled tasks while a route handler waits for their c
     connect(client, port);
     const std::string request = "GET /webfront/services/wait/x HTTP/1.1\r\nHost: localhost\r\n\r\n";
     client.send(std::as_bytes(std::span(request)));
-    REQUIRE(entered.get_future().wait_for(5s) == std::future_status::ready);
+    const bool handlerEntered = entered.get_future().wait_for(5s) == std::future_status::ready;
     server.stop();
-    serverThread.join();
+    serverThread.join();  // before any assertion: a joinable thread would terminate the process
+    REQUIRE(handlerEntered);
     WHEN("the server is drained") {
         auto drained = std::async(std::launch::async, [&server] { server.drain(); });
         const bool finished = drained.wait_for(5s) == std::future_status::ready;
