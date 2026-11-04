@@ -60,7 +60,7 @@ struct ReadOptions {
     /// The token alone suffices, as a bearer capability: for handing the URL to an external application. Off by default.
     bool transferable = false;
     /// Handed back to the route handler with each request of this grant (a file handle, a path, a permission...).
-    std::any context;
+    std::any context{};
 };
 
 /// What a read route handler learns about the grant a request presented.
@@ -197,7 +197,11 @@ public:
     static constexpr std::chrono::seconds maxTransferableLifetime{15 * 60};
 
     explicit ReadBinding(RemoteFileTransport declared = RemoteFileTransport::refused, Clock clock = [] { return std::chrono::steady_clock::now(); })
-        : transport(declared), now(std::move(clock)) {}
+        : transport(declared), now(std::move(clock)), ownPrefix(std::string(cookiePrefix) + automation::channel::nonce().substr(0, 8) + "-") {}
+
+    /// The cookie name prefix of this application: cookies are shared across ports of a host, so each binding names (and
+    /// erases) only its own, `wf-client-<application>-<client>`.
+    [[nodiscard]] const std::string& clientCookiePrefix() const noexcept { return ownPrefix; }
 
     ReadBinding(const ReadBinding&)            = delete;
     ReadBinding& operator=(const ReadBinding&) = delete;
@@ -366,9 +370,9 @@ private:
     /// The id of the first client whose cookie is presented with its right secret; empty if none. Caller holds the lock.
     std::string cookieClient(const std::vector<std::pair<std::string, std::string>>& cookies) const {
         for (const auto& [name, value] : cookies) {
-            if (!name.starts_with(cookiePrefix))
+            if (!name.starts_with(ownPrefix))
                 continue;
-            const auto id = name.substr(cookiePrefix.size());
+            const auto id = name.substr(ownPrefix.size());
             if (const auto client = clients.find(id); client != clients.end() && detail::viewSecretMatches(client->second.secret, value))
                 return id;
         }
@@ -384,7 +388,7 @@ private:
             return false;
         bool designated = false;
         for (const auto& [name, value] : cookies)
-            if (name.size() == cookiePrefix.size() + id.size() && name.starts_with(cookiePrefix) && name.ends_with(id))
+            if (name.size() == ownPrefix.size() + id.size() && name.starts_with(ownPrefix) && name.ends_with(id))
                 designated = detail::viewSecretMatches(client->second.secret, value) || designated;
         return designated;
     }
@@ -402,13 +406,13 @@ private:
         connection->second.exchange.clear();
         // Cookies named after a client the server forgot are erased; the ones of a known client are left alone.
         for (const auto& [name, value] : cookies)
-            if (name.starts_with(cookiePrefix) && !clients.contains(name.substr(cookiePrefix.size())))
+            if (name.starts_with(ownPrefix) && !clients.contains(name.substr(ownPrefix.size())))
                 reply.headers.emplace_back("Set-Cookie", name + "=; Max-Age=0; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict");
         auto id = cookieClient(cookies);
         if (id.empty()) {
             id = automation::channel::nonce().substr(0, 16);
             Client created{.secret = automation::channel::nonce(), .connections = {}};
-            std::string cookie = std::string(cookiePrefix) + id + "=" + created.secret + "; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict";
+            std::string cookie = ownPrefix + id + "=" + created.secret + "; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict";
             if (transport == RemoteFileTransport::encryptedByDeployment)
                 cookie += "; Secure";
             reply.headers.emplace_back("Set-Cookie", std::move(cookie));
@@ -450,6 +454,7 @@ private:
 
     RemoteFileTransport                transport;
     Clock                              now;
+    std::string                        ownPrefix;
     std::mutex                         mutex;
     std::map<ConnectionKey, Connection> connections;
     std::map<std::string, ConnectionKey> exchanges;

@@ -164,12 +164,10 @@ SCENARIO("A read needs the token and the cookie of the client of the connection 
         WHEN("the server restarts: another binding sees the old cookie and URL") {
             Fixture restarted;
             THEN("neither is known") { REQUIRE(call(restarted.read, url, cookie).status == http::Response::forbidden); }
-            AND_THEN("the old cookie is erased at the next exchange") {
+            AND_THEN("the old cookie, indistinguishable from another application's, is left alone (it is a session cookie)") {
                 const auto again = restarted.bind(1, true, cookie);
-                bool erased = false;
                 for (const auto& line : headers(again, "Set-Cookie"))
-                    erased = erased || (line.starts_with(cookie.substr(0, cookie.find('=')) + "=;") && line.contains("Max-Age=0"));
-                REQUIRE(erased);
+                    REQUIRE_FALSE(line.contains("Max-Age=0"));
             }
         }
     }
@@ -252,7 +250,7 @@ SCENARIO("The exchange secret is single use and only the right one works", "[rea
         REQUIRE(call(fixture.exchange, check).status == http::Response::forbidden);
         const auto cookie = cookiePair(headers(call(fixture.exchange, path), "Set-Cookie").front());
         REQUIRE(call(fixture.exchange, check, cookie).status == http::Response::ok);
-        REQUIRE(call(fixture.exchange, check, "wf-client-0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
+        REQUIRE(call(fixture.exchange, check, fixture.binding.clientCookiePrefix() + "0000000000000000=" + std::string(64, 'a')).status == http::Response::forbidden);
     }
 }
 
@@ -600,4 +598,22 @@ SCENARIO("An application registers read routes under the services path only", "[
                           std::invalid_argument);
     }
     testing::InjectableSocket::reset();
+}
+
+SCENARIO("Two applications on one host keep their own cookies", "[read-binding]") {
+    Fixture first, second;
+    GIVEN("a client bound to each application, whose cookies the browser shares") {
+        const auto cookieA = cookiePair(headers(first.bind(1, true), "Set-Cookie").front());
+        const auto both    = cookieA + "; " + cookiePair(headers(second.bind(1, true), "Set-Cookie").front());
+        REQUIRE(cookieA.starts_with("wf-client-"));
+        REQUIRE(first.binding.clientCookiePrefix() != second.binding.clientCookiePrefix());
+
+        THEN("binding the second one erases nothing of the first, and the reads still pass") {
+            const auto again = second.bind(2, true, both);
+            for (const auto& setCookie : headers(again, "Set-Cookie"))
+                REQUIRE_FALSE(setCookie.contains("Max-Age=0"));
+            const auto url = first.url(1);
+            REQUIRE(call(first.read, url, both).status == http::Response::ok);
+        }
+    }
 }
