@@ -125,8 +125,6 @@ std::string fetch(const std::string& text) {
     return written;
 }
 
-bool contains(const std::string& haystack, std::string_view needle) { return haystack.find(needle) != std::string::npos; }
-
 std::string body(const std::string& response) {
     const auto end = response.find("\r\n\r\n");
     return end == std::string::npos ? std::string{} : response.substr(end + 4);
@@ -292,7 +290,8 @@ SCENARIO("A file is served by ranges") {
                 THEN("416 tells the size and sends no content") {
                     REQUIRE(response.starts_with("HTTP/1.1 416 Range Not Satisfiable\r\n"));
                     REQUIRE(header(response, "Content-Range") == "bytes */" + std::to_string(content.size()));
-                    REQUIRE_FALSE(contains(response, content.substr(0, 40)));
+                    REQUIRE(header(response, "Content-Length") == "0");
+                    REQUIRE(body(response).empty());
                 }
             }
             WHEN("several ranges are requested") {

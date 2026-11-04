@@ -660,7 +660,10 @@ private:
                 // Range is defined for GET only (RFC 9110 §14.2): HEAD describes the full response.
                 const auto selection = request.method == Request::Method::Get ? range::select(request, *size, file->entityTag()) : range::Selection{};
                 if (selection.outcome == range::Outcome::unsatisfiable) {
-                    auto unsatisfiable = Response::getStatusResponse(Response::rangeNotSatisfiable);
+                    // As in fileReply: the status and Content-Range say it all, there is no payload.
+                    Response unsatisfiable;
+                    unsatisfiable.statusCode = Response::rangeNotSatisfiable;
+                    unsatisfiable.headers.emplace_back("Content-Length", "0");
                     unsatisfiable.headers.emplace_back("Content-Range", range::unsatisfiedContentRange(*size));
                     unsatisfiable.headers.emplace_back("Accept-Ranges", "bytes");
                     return unsatisfiable;
