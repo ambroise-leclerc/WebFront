@@ -431,16 +431,35 @@ SCENARIO("A program does not outlive an application killed without a destructor"
 #endif
 
 SCENARIO("A program that keeps its pipes full cannot hold off the deadline") {
-    auto spec           = probeSpec({"flood"});
-    spec.timeout        = 300ms;
+    for (const auto delay : {0, 1000}) {
+        WHEN("the child delays its first write by " + std::to_string(delay) + " milliseconds") {
+            auto spec           = probeSpec({"flood", std::to_string(delay)});
+            spec.timeout        = 300ms;
+            spec.maxOutputBytes = 1000;
+            const auto begin    = std::chrono::steady_clock::now();
+            const auto result   = run(spec);
+            THEN("the timeout is honoured and any captured output stays bounded") {
+                REQUIRE(result.status == ProcessStatus::timeout);
+                REQUIRE(std::chrono::steady_clock::now() - begin < 5s);
+                // The deadline includes child startup: a busy runner may kill it before its first write.
+                REQUIRE(result.standardOutput.size() <= spec.maxOutputBytes);
+                REQUIRE(result.standardError.size() <= spec.maxOutputBytes);
+            }
+        }
+    }
+}
+
+SCENARIO("A finite flood drains both pipes and truncates each captured stream") {
+    auto spec           = probeSpec({"flood-finite"});
     spec.maxOutputBytes = 1000;
-    const auto begin    = std::chrono::steady_clock::now();
     const auto result   = run(spec);
-    THEN("the timeout is honoured and the output stays bounded") {
-        REQUIRE(result.status == ProcessStatus::timeout);
-        REQUIRE(std::chrono::steady_clock::now() - begin < 5s);
-        REQUIRE(result.standardOutput.size() == 1000);
-        REQUIRE(result.standardError.size() == 1000);
+    THEN("both streams reach the limit and the child completes without blocking") {
+        REQUIRE(result.status == ProcessStatus::exited);
+        REQUIRE(result.exitCode == 0);
+        REQUIRE(result.standardOutput == std::string(1000, 'f'));
+        REQUIRE(result.standardError == std::string(1000, 'f'));
+        REQUIRE(result.outputTruncated);
+        REQUIRE(result.errorTruncated);
     }
 }
 

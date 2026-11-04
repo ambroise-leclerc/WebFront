@@ -129,12 +129,15 @@ int main(int argc, char** argv) {
             std::cout.write(block.data(), static_cast<std::streamsize>(std::min<unsigned long long>(block.size(), total - written)));
         return 0;
     }
-    if (mode == "flood") {  // Never stops writing to either stream.
+    if (mode == "flood" || mode == "flood-finite") {
+        if (argc > 2)
+            sleepFor(std::stoi(argv[2]));
         const std::string block(65536, 'f');
-        for (;;) {
+        for (unsigned count = 0; mode == "flood" || count < 64; ++count) {
             std::cout.write(block.data(), static_cast<std::streamsize>(block.size()));
             std::cerr.write(block.data(), static_cast<std::streamsize>(block.size()));
         }
+        return 0;
     }
     if (mode == "hang") {
         for (;;)
