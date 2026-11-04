@@ -809,31 +809,29 @@ private:
         installViewAssociationThenNavigate();
     }
 
-    // AddScriptToExecuteOnDocumentCreated completes asynchronously and only documents created after its completion run the
-    // script: the initial navigation waits for it, and a registration that fails fails the opening instead of leaving the
-    // view silently unassociated (ADR-020).
+    // The script is registered, then the first navigation is issued: WebView2 executes its commands in the order they are
+    // issued, so the document created by that navigation runs the script. The completion handler only reports a registration
+    // that failed, which fails the opening instead of leaving the view silently unassociated (ADR-020).
     void installViewAssociationThenNavigate() {
         const auto source = webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin);
-        if (source.empty()) {
-            check(view->Navigate(url.c_str()), "navigating to application");
-            return;
-        }
-        auto       weak   = weak_from_this();
-        const auto script = utf16(source);
-        check(view->AddScriptToExecuteOnDocumentCreated(
-                  script.c_str(),
-                  Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak](HRESULT result, LPCWSTR) -> HRESULT {
-                      if (const auto self = weak.lock(); self && !self->closed) {
-                          try {
-                              check(result, "installing the view association script");
-                              check(self->view->Navigate(self->url.c_str()), "navigating to application");
-                          } catch (...) {
-                              self->fail();
+        if (!source.empty()) {
+            auto       weak   = weak_from_this();
+            const auto script = utf16(source);
+            check(view->AddScriptToExecuteOnDocumentCreated(
+                      script.c_str(),
+                      Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak](HRESULT result, LPCWSTR) -> HRESULT {
+                          if (const auto self = weak.lock(); self && !self->closed) {
+                              try {
+                                  check(result, "installing the view association script");
+                              } catch (...) {
+                                  self->fail();
+                              }
                           }
-                      }
-                      return S_OK;
-                  }).Get()),
-              "starting the view association script installation");
+                          return S_OK;
+                      }).Get()),
+                  "starting the view association script installation");
+        }
+        check(view->Navigate(url.c_str()), "navigating to application");
     }
 };
 

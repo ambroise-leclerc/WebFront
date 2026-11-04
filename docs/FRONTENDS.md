@@ -40,7 +40,7 @@ on a command line or in a URL.
 | Engine | Injection at the start of the document |
 | --- | --- |
 | WKWebView | `WKUserScript`, `WKUserScriptInjectionTimeAtDocumentStart`, main frame only |
-| WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`); the registration is asynchronous, so the first navigation starts from its completion handler and a failed registration fails the opening |
+| WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`); the first navigation is issued right after the registration, which WebView2 executes in order, and a registration that fails fails the opening |
 | WebKitGTK | `WebKitUserScript` at document start, top frame, no URL allow list (the script compares `location.origin`, port included) |
 | CEF | extra browser information given to `CefBrowserView::CreateBrowserView`, read by the renderer process's `OnBrowserCreated` and defined on the window by `OnContextCreated` through the same script as the other engines, evaluated in the new context so that the page itself answers for its origin (the render process app is the one given to `CefExecuteProcess`; a separate helper executable must give it its own `ViewSecretRenderApp`) |
 
