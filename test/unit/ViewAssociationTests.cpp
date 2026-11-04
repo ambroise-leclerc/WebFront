@@ -5,6 +5,7 @@
 #include <webfront/networking/TCPNetworkingStdnet.hpp>
 #include <webfront/system/DefaultFS.hpp>
 #include <webfront/WebFront.hpp>
+#include <webfront/tooling/Logger.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -157,4 +158,26 @@ SCENARIO("A loopback peer is a local client only when the application trusts loo
             REQUIRE_FALSE(verdict.local);
         }
     }
+}
+
+SCENARIO("The handshake's secret never reaches the diagnostics", "[view-association]") {
+    freshNetwork();
+    App                    app{WebFrontConfig{.port = "0"}};
+    std::vector<std::string> records;
+    log::setLogLevel(log::Debug);
+    const auto sink = log::addSinks([&records](std::string_view text) { records.emplace_back(text); });
+
+    WHEN("a handshake carrying a recognizable proof is received") {
+        connect(app, std::string(64, 'Q'));
+        log::removeSinks(sink);
+        THEN("the message is logged, but no record contains the proof in text or as a hexadecimal dump") {
+            REQUIRE(std::ranges::any_of(records, [](const std::string& record) { return record.contains("onMessage(binary)"); }));
+            for (const auto& record : records) {
+                REQUIRE_FALSE(record.contains("QQQQ"));
+                REQUIRE_FALSE(record.contains("51 51 51"));
+                REQUIRE_FALSE(record.contains("515151"));
+            }
+        }
+    }
+    log::removeSinks(sink);
 }

@@ -38,7 +38,7 @@ on a command line or in a URL.
 | Engine | Injection at the start of the document |
 | --- | --- |
 | WKWebView | `WKUserScript`, `WKUserScriptInjectionTimeAtDocumentStart`, main frame only |
-| WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`) |
+| WebView2 | `AddScriptToExecuteOnDocumentCreated`, top-level documents of the origin (the script checks `window === window.top`); the registration is asynchronous, so the first navigation starts from its completion handler and a failed registration fails the opening |
 | WebKitGTK | `WebKitUserScript` at document start, top frame, allow list of the application's origin |
 | CEF | extra browser information given to `CefBrowserView::CreateBrowserView`, read by the renderer process's `OnBrowserCreated` and defined on the window in `OnContextCreated` (the render process app is the one given to `CefExecuteProcess`) |
 

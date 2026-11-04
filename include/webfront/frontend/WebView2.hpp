@@ -726,10 +726,6 @@ private:
         Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
         check(view->get_Settings(&settings), "getting browser settings");
         configureContentSettings(settings.Get(), contentPolicy.options());
-        if (!viewLaunch.secret.empty()) {
-            const auto script = utf16(webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin));
-            check(view->AddScriptToExecuteOnDocumentCreated(script.c_str(), nullptr), "installing the view association script");
-        }
         check(view->add_NavigationStarting(
                   Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>([weak](ICoreWebView2*,
                                                                                                ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
@@ -810,7 +806,33 @@ private:
         captureRegistration = CaptureRegistration{captureProvider(captureQueue)};
         if (viewReady)
             viewReady();
-        check(view->Navigate(url.c_str()), "navigating to application");
+        installViewAssociationThenNavigate();
+    }
+
+    // AddScriptToExecuteOnDocumentCreated completes asynchronously and only documents created after its completion run the
+    // script: the initial navigation waits for it, and a registration that fails fails the opening instead of leaving the
+    // view silently unassociated (ADR-020).
+    void installViewAssociationThenNavigate() {
+        if (viewLaunch.secret.empty()) {
+            check(view->Navigate(url.c_str()), "navigating to application");
+            return;
+        }
+        auto       weak   = weak_from_this();
+        const auto script = utf16(webfront::detail::viewSecretScript(viewLaunch.secret, viewLaunch.origin));
+        check(view->AddScriptToExecuteOnDocumentCreated(
+                  script.c_str(),
+                  Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>([weak](HRESULT result, LPCWSTR) -> HRESULT {
+                      if (const auto self = weak.lock(); self && !self->closed) {
+                          try {
+                              check(result, "installing the view association script");
+                              check(self->view->Navigate(self->url.c_str()), "navigating to application");
+                          } catch (...) {
+                              self->fail();
+                          }
+                      }
+                      return S_OK;
+                  }).Get()),
+              "starting the view association script installation");
     }
 };
 

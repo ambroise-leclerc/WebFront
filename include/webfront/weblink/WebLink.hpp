@@ -252,7 +252,10 @@ public:
 private:
     void onBinaryMessage(std::span<const std::byte> data) {
         const log::ContextScope context(linkContext());
-        log::infoHex("onMessage(binary) :", data);
+        // Log records reach connected browsers: a handshake carries the launch secret of an embedded view, so only its
+        // two header bytes are dumped.
+        const bool isHandshake = !data.empty() && static_cast<msg::Command>(data[0]) == msg::Command::handshake;
+        log::infoHex("onMessage(binary) :", isHandshake ? data.first(std::min(data.size(), sizeof(msg::Handshake))) : data);
         if (data.empty()) {
             log::error("Received an empty WebFront message");
             return;
