@@ -139,6 +139,7 @@ globalThis.webfrontTests = {
     rejectWithCode(code) {
         return Promise.reject(Object.assign(new Error(`failure ${code}`), {code}));
     },
+    rejectLong() { return Promise.reject(Object.assign(new Error('\u00e9'.repeat(40000)), {code: 'long'})); },
     errorChecksFinished(passed) { finishErrorChecks(passed); },
     listChecksFinished(passed) { finishListChecks(passed); },
     senderValue(value) { return Promise.resolve(`sender:${value}`); },

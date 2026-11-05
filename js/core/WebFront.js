@@ -91,6 +91,7 @@
     /// A list the application sends as one value of homogeneous elements, built by webFront.list(): a plain JavaScript
     /// array stays a tuple, whose elements may differ and which holds at most 255 of them.
     class WebFrontList {
+        /// Keeps a copy of the elements.
         constructor(items) {
             this.items = Array.from(items);
         }
@@ -157,6 +158,7 @@
     /// The errors that WebFront made, or received from C++ with their code: only they may carry a reserved code to the other side.
     const bridgeErrors = new WeakSet();
 
+    /// An Error with a read-only `code`, known to the bridge as its own.
     function bridgeError(code, message) {
         const error = new Error(message);
         // Not writable: user code could otherwise rewrite the code of an error of the bridge to forge a reserved one.
@@ -435,6 +437,7 @@
             }
         }
 
+        /// Settles a pending call with the value, the exception or the absence of value that a return message carries.
         settleReturn(pending, message) {
             const count = message.getUint8(1);
             const payloadSize = message.getUint32(4, this.littleEndian);
@@ -469,6 +472,7 @@
             return values[0];
         }
 
+        /// Decodes `count` consecutive values; returns them with the bytes consumed, and records their shapes in `shapes` when given.
         decodeParameters(count, view, offset = 0, shapes = null) {
             const values = [];
             let cursor = offset;
@@ -498,6 +502,7 @@
             return {value: view.getFloat64(offset + 1, this.littleEndian), bytes: 9};
         }
 
+        /// Decodes a smallString, string or longString.
         decodeString(type, view, offset) {
             const sizeBytes = type === ParamType.smallString ? 1 : type === ParamType.longString ? 4 : 2;
             requireBytes(view, offset + 1, sizeBytes, "string length");
@@ -655,12 +660,16 @@
             this.socket.send(buffer);
         }
 
+        /// Rejects the C++ call `callId` with the message and the code of `error` (the generic code when it has none or a reserved one).
         sendFunctionError(callId, error) {
             const message = error instanceof Error ? error.message : String(error);
             const code = new TextEncoder().encode(exceptionCode(error));
-            const bytes = new TextEncoder().encode(message);
-            if (bytes.length >= 65536)
-                return this.sendFunctionError(callId, bridgeError(exceptionCode(error), "JavaScript exception message exceeds 65535 UTF-8 bytes"));
+            const whole = new TextEncoder().encode(message);
+            // A message longer than the 16-bit length is cut before the first UTF-8 character that would not fit whole.
+            let cut = Math.min(whole.length, 65535);
+            while (cut > 0 && cut < whole.length && (whole[cut] & 0xc0) === 0x80)
+                --cut;
+            const bytes = whole.subarray(0, cut);
             const buffer = new ArrayBuffer(12 + code.length + bytes.length);
             const view = new DataView(buffer);
             view.setUint8(0, Command.functionReturn);
@@ -689,11 +698,13 @@
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
 
+        /// The encoded size of a string: its header and its UTF-8 bytes.
         stringParameterSize(value) {
             const length = new TextEncoder().encode(value).length;
             return stringHeaderSize(length) + length;
         }
 
+        /// The encoded size of a list, tuple or typed array.
         objectParameterSize(value) {
             if (value instanceof WebFrontList)
                 return this.listParameterSize(value);
@@ -723,6 +734,7 @@
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
 
+        /// The encoded size of a list, after checking that its elements have one shape and hold no list.
         listParameterSize(list) {
             if (list.items.length > 0xffffffff)
                 throw new RangeError("WebFront lists cannot exceed 4294967295 elements");
@@ -769,6 +781,7 @@
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
 
+        /// Writes a string with the smallest header its UTF-8 length allows and returns the bytes written.
         encodeString(value, view, offset) {
             const bytes = new TextEncoder().encode(value);
             const headerSize = stringHeaderSize(bytes.length);
@@ -786,6 +799,7 @@
             return headerSize + bytes.length;
         }
 
+        /// Writes a list, tuple or typed array and returns the bytes written.
         encodeObject(value, view, offset) {
             if (value instanceof WebFrontList)
                 return this.encodeList(value, view, offset);
@@ -796,6 +810,7 @@
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
 
+        /// Writes a list at `offset` and returns the bytes written.
         encodeList(list, view, offset) {
             view.setUint8(offset, ParamType.list);
             view.setUint32(offset + 1, list.items.length, this.littleEndian);

@@ -353,7 +353,8 @@ private:
     Task checkErrorCodes(TestWF::UI ui) {
         bool passed = false;
         try {
-            string application, reserved, missing, plain;
+            string application, reserved, missing, plain, longCode;
+            size_t longSize = 0;
             try {
                 co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("quota:exceeded");
             } catch (const BridgeError& error) {
@@ -370,12 +371,19 @@ private:
                 missing = error.code();
             }
             try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectLong")();
+            } catch (const BridgeError& error) {
+                longCode = error.code();
+                longSize = string_view(error.what()).size();
+            }
+            try {
                 co_await ui.jsFunctionSender<string>("webfrontTests.senderThrows")();
             } catch (const BridgeError& error) {
                 plain = error.code();
             }
             passed = application == "quota:exceeded|failure quota:exceeded" && reserved == bridge_code::generic && missing == bridge_code::notFound
-                     && plain == bridge_code::generic;
+                     && plain == bridge_code::generic
+                     && longCode == "long" && longSize == 65534;  // the 80000-byte message is cut before the character that straddles 65535
         } catch (const exception& error) {
             log::error("Error code checks failed: {}", error.what());
         }
