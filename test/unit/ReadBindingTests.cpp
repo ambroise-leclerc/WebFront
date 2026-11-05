@@ -361,7 +361,7 @@ SCENARIO("A connection that is not the view of an embedded frontend reads only u
 SCENARIO("A declaration of a loopback server is checked against the address it listens on", "[read-binding]") {
     for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0::1", "::0001", "[0:0::1]"})
         THEN("'" << address << "' is a loopback address") { REQUIRE(detail::isLoopbackName(address)); }
-    for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "localhost", "LocalHost", "127.0.0.1.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
+    for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "localhost", "LocalHost", "127.0.0.1.", "127.256.0.1", "127.0.256.1", "127.0.0.1000", "127.0.0.010", "127.00.0.1", "127.0.0.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
         THEN("'" << address << "' is not") { REQUIRE_FALSE(detail::isLoopbackName(address)); }
     THEN("loopbackAttested is refused for a server that listens elsewhere, and accepted on the loopback") {
         REQUIRE_THROWS_AS(detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}),

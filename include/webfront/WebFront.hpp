@@ -458,14 +458,32 @@ namespace detail {
         return true;
     if (!address.starts_with("127."))
         return false;
-    int dots = 0;
+    // Four decimal octets of 0 to 255 without leading zeros: the string must read the same to every resolver (127.256.0.1 or
+    // 127.0.0.010 are not literal addresses, and a resolver could take them for names).
+    int      octets = 0;
+    unsigned value  = 0;
+    int      digits = 0;
+    bool     leadingZero = false;
     for (const char c : address) {
-        if (c == '.')
-            ++dots;
-        else if (c < '0' || c > '9')
+        if (c == '.') {
+            if (digits == 0)
+                return false;
+            ++octets;
+            value = 0;
+            digits = 0;
+            leadingZero = false;
+        } else if (c >= '0' && c <= '9') {
+            if (digits == 1 && leadingZero)
+                return false;
+            leadingZero = digits == 0 && c == '0';
+            value       = value * 10 + static_cast<unsigned>(c - '0');
+            if (++digits > 3 || value > 255)
+                return false;
+        } else {
             return false;
+        }
     }
-    return dots == 3 && !address.ends_with('.') && address.find("..") == std::string_view::npos;
+    return octets == 3 && digits > 0;
 }
 
 /// Refuses the configurations whose declaration WebFront can disprove, before anything is bound.
