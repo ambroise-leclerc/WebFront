@@ -326,6 +326,7 @@ private:
 
 
 public:
+    /// Rejects the call `callId` with `message` and `code` (the generic one by default); nothing is sent for call 0.
     void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
         if (callId == 0) return;
         msg::FunctionReturn<Policy> result;

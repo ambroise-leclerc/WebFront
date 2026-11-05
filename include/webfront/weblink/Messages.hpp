@@ -396,6 +396,7 @@ protected:
             throw std::length_error("WebFront message exceeds the maximum message size of the buffers policy");
     }
 
+    /// Encodes a string with the smallest header its byte length allows (smallString, string or longString).
     template <typename WebSocketFrame>
     void encodeString(const char* str, size_t size, WebSocketFrame& frame) {
         using namespace std;
@@ -446,10 +447,14 @@ protected:
     void encodeException(const std::exception& e, WebSocketFrame& frame) {
         using namespace std;
         const auto code = exceptionCode(e);
-        const auto text = fitStringLength(e.what());
         if (encodeBufferIndex + 1 + 1 + sizeof(uint16_t) > buffer.size())
             throw http::BufferOverflowException("FunctionCall encode buffer overflow");
-        reservePayload(2 + code.size() + 2 + text.size());
+        // The message is cut to what the policy's message size leaves after the code, so that the rejection always reaches the
+        // other side; only a policy too small for the code itself cannot carry one.
+        const size_t overhead = 2 + code.size() + 2;
+        reservePayload(overhead);
+        const auto text = fitStringLength(e.what(), maxPayloadBytes() - getPayloadSize() - overhead);
+        reservePayload(overhead + text.size());
         encodeTypeHeader(msg::CodedType::exception, static_cast<uint8_t>(code.size()), frame);
         frame.addBuffer(span(reinterpret_cast<const std::byte*>(code.data()), code.size()));
         incrementPayloadSize(code.size());
@@ -462,17 +467,19 @@ protected:
         incrementPayloadSize(text.size());
     }
 
-    /// An error message must still reach the other side, so an overlong one is cut to the 16-bit length of an
-    /// exception before the first UTF-8 character that would not fit whole.
-    static std::string_view fitStringLength(std::string_view text) {
-        if (text.size() <= maxShortStringBytes)
+    /// An error message must still reach the other side, so an overlong one is cut to `limit` bytes (at most the 16-bit
+    /// length of an exception) before the first UTF-8 character that would not fit whole.
+    static std::string_view fitStringLength(std::string_view text, size_t limit = maxShortStringBytes) {
+        limit = std::min(limit, maxShortStringBytes);
+        if (text.size() <= limit)
             return text;
-        size_t cut = maxShortStringBytes;
+        size_t cut = limit;
         while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
             --cut;
         return text.substr(0, cut);
     }
 
+    /// Encodes a typed array: its header, then its elements copied by reference into the frame.
     template <typename Array, typename WebSocketFrame>
     void encodeNumericArray(const Array& value, WebSocketFrame& frame) {
         using Element           = std::remove_cv_t<numeric_array_element_t<Array>>;
@@ -528,6 +535,7 @@ public:
     [[nodiscard]] size_t getPayloadSize() const {
         return head.parametersDataSize;
     }
+    /// Adds encoded bytes to the payload size, refusing a message past the policy's maximum.
     void incrementPayloadSize(auto value) {
         reservePayload(static_cast<size_t>(value));
         setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value));
@@ -541,6 +549,8 @@ public:
         return {functionName, data};
     }
 
+    /// Encodes a list: the list code, its 32-bit element count, then each element with its own code.
+    /// Each element is one parameter on the wire, not one more of the message.
     template <typename List, typename WebSocketFrame>
     void encodeList(const List& list, WebSocketFrame& frame) {
         static_assert(!contains_list_v<typename List::value_type>, "WebFront lists cannot contain lists");
@@ -551,6 +561,7 @@ public:
             encodeParameter(element, frame);
     }
 
+    /// Encodes one parameter of any supported type; a tuple or a list counts as a single parameter.
     template <typename T, typename WebSocketFrame>
     void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
@@ -595,6 +606,7 @@ public:
         setParametersCount(static_cast<uint8_t>(parametersCountBefore + 1));
     }
 
+    /// Decodes the next parameter of the payload into `param` and advances `data` past it; throws if the type does not match.
     template <typename T>
     static void decodeParameter(T& param, std::span<const std::byte>& data) {
         if (data.empty())
@@ -638,6 +650,7 @@ private:
             throw std::runtime_error("Wrong parameter type: std::string expected");
     }
 
+    /// Decodes a string with a 16-bit length.
     template <typename T>
     static void decodeLongString(T& param, std::span<const std::byte>& data) {
         if constexpr (std::is_same_v<T, std::string>) {
@@ -681,6 +694,7 @@ private:
             throw std::runtime_error("Wrong parameter type: std::string expected");
     }
 
+    /// Decodes a longString (32-bit length) into a std::string, refusing a header or payload cut short.
     template <typename T>
     static void decodeHugeString(T& param, std::span<const std::byte>& data) {
         if constexpr (std::is_same_v<T, std::string>) {
@@ -756,6 +770,7 @@ private:
         param = std::move(result);
     }
 
+    /// Decodes a list into a std::vector; a count larger than the bytes that follow is refused before any allocation.
     template <typename T>
     static void decodeList(T& param, std::span<const std::byte>& data) {
         if constexpr (is_list_v<T>) {
@@ -771,6 +786,7 @@ private:
             throw std::runtime_error("Wrong parameter type: std::vector of strings, tuples or arrays expected");
     }
 
+    /// Decodes a tuple into a std::tuple, or into a std::vector when a JavaScript array was sent as a tuple.
     template <typename T>
     static void decodeTuple(T& param, std::span<const std::byte>& data) {
         if constexpr (is_tuple_v<T>) {

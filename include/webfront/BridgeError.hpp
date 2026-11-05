@@ -54,6 +54,7 @@ public:
         return codeText;
     }
 
+    /// True for 1 to 64 letters, digits or `. _ : -`.
     [[nodiscard]] static bool isValidCode(std::string_view code) noexcept {
         if (code.empty() || code.size() > maxCodeSize)
             return false;
@@ -65,6 +66,7 @@ public:
         return true;
     }
 
+    /// True for a code reserved to the bridge (starting with `webfront.`).
     [[nodiscard]] static bool isReserved(std::string_view code) noexcept {
         return code.starts_with(reservedPrefix);
     }

@@ -777,17 +777,18 @@ std::string respondWith(R value) {
 
 namespace {
 /// The code and the message of the exception a responder sent.
+template <http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 std::pair<std::string, std::string> sentException(std::function<void()> thrower) {
     ResultLinkMock link;
-    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, int>([thrower](std::span<const std::byte>) -> int {
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, Policy, int>([thrower](std::span<const std::byte>) -> int {
         thrower();
         return 0;
     });
     responder({}, link, 9);
-    auto             result = msg::FunctionReturn<http::DefaultBuffersPolicy>::castFromRawData(link.message);
+    auto             result = msg::FunctionReturn<Policy>::castFromRawData(link.message);
     auto             payload = result->payload();
     std::string      code, message;
-    msg::FunctionReturn<http::DefaultBuffersPolicy>::decodeException(code, message, payload);
+    msg::FunctionReturn<Policy>::decodeException(code, message, payload);
     return {code, message};
 }
 }  // namespace
@@ -802,6 +803,22 @@ SCENARIO("A callback failure is sent with its code") {
         THEN("the code is the generic one") {
             REQUIRE(sentException([] { throw std::runtime_error("plain"); }) == std::pair<std::string, std::string>{std::string(bridge_code::generic), "plain"});
             REQUIRE(sentException([] { throw 42; }).first == bridge_code::generic);
+        }
+    }
+    GIVEN("a callback whose message exceeds what a small policy leaves") {
+        using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 64>;
+        THEN("the rejection is still sent, with the message cut to fit") {
+            const auto [code, message] = sentException<SmallPolicy>([] { throw BridgeError("quota", std::string(1000, 'x')); });
+            REQUIRE(code == "quota");
+            REQUIRE(message == std::string(64 - 8 - 2 - 5 - 2, 'x'));
+        }
+        THEN("a multi-byte character is never cut in two") {
+            std::string text;
+            for (int i = 0; i < 500; ++i)
+                text += "\xc3\xa9";
+            const auto message = sentException<SmallPolicy>([text] { throw BridgeError("quota", text); }).second;
+            REQUIRE(message.size() == 46);  // 47 bytes fit, the 24th character would need the 48th
+            REQUIRE(message == text.substr(0, 46));
         }
     }
     GIVEN("a callback whose argument cannot be decoded") {
