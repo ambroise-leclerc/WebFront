@@ -64,9 +64,11 @@ ResultTask<std::string> countingLater(std::string value) {
     co_return "counted:" + value;
 }
 
-ResultTask<std::string> failLater(std::string) {
+ResultTask<std::string> failLater(std::string value) {
     co_await deferredGate();
-    throw BridgeError("quota:exceeded", "the disk is full");
+    if (!value.empty())  // always: keeps a value-returning coroutine free of unreachable code or a missing co_return
+        throw BridgeError("quota:exceeded", "the disk is full");
+    co_return value;
 }
 
 ResultTask<void> voidLater() {
