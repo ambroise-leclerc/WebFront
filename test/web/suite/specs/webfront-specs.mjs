@@ -227,10 +227,8 @@ describe('WebFront browser integration', () => {
 
     it('accepts tuples nested 32 deep in a list element, in both codecs, and refuses 33', async () => {
         const nest = levels => { let value = 'x'; for (let level = 0; level < levels; ++level) value = [value]; return value; };
-        const depthOf = value => { let depth = 0; while (Array.isArray(value)) { value = value[0]; ++depth; } return depth; };
-        const echoed = await webFront.cppFunction('deepEcho')(webFront.list([nest(32)]));
-        expect(echoed.length).toBe(1);
-        expect(depthOf(echoed[0])).toBe(32);
+        // The whole value comes back: the final string and the nesting, not only its depth.
+        expect(await webFront.cppFunction('deepEcho')(webFront.list([nest(32)]))).toEqual([nest(32)]);
         await expectAsync(webFront.cppFunction('deepEcho')(webFront.list([nest(33)])))
             .toBeRejectedWithError(TypeError, /at most 32 deep/);
         await expectAsync(webFront.cppFunction('listEcho')(webFront.list(['still works']))).toBeResolvedTo(['still works']);

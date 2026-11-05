@@ -43,7 +43,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | --- | --- | --- | --- | --- |
 | [ADR-001](ADR-001-coeur-cpp23-header-only.md) | A header-only C++23 core embedded in the application | Accepted | 2020-04-19 | 1.5 — 2026-10-13 |
 | [ADR-002](ADR-002-systemes-de-fichiers-composables.md) | An abstract, composable filesystem as the foundation for portability | Accepted | 2023-03-16 | 2.6 — 2026-11-04 |
-| [ADR-003](ADR-003-protocole-binaire-et-bornes.md) | A shared, typed and bounded binary protocol | Accepted through 1.13; 1.14 to 1.18 proposed | 2022-02-06 | 1.18 — 2026-11-05 |
+| [ADR-003](ADR-003-protocole-binaire-et-bornes.md) | A shared, typed and bounded binary protocol | Accepted through 1.13; 1.14 to 1.19 proposed | 2022-02-06 | 1.19 — 2026-11-05 |
 | [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | Asynchronous calls with deliberately asymmetric contracts | Accepted through 2.4; 2.5 and 2.6 proposed | 2022-02-06 | 2.6 — 2026-11-05 |
 | [ADR-005](ADR-005-evolution-reseau-asio-stdnet.md) | From standalone ASIO to stdnet: anticipating standard networking without blocking progress | Accepted through 3.1; 3.2 proposed | 2022-01-21 | 3.2 — 2026-10-26 |
 | [ADR-006](ADR-006-taches-structurees-et-arret.md) | Owning, cancelling and joining every task | Accepted | 2026-10-13 | 2.1 — 2026-10-25 |

@@ -23,12 +23,13 @@
 | 1.16 | 2026-11-05 | Proposée | Ambroise Leclerc | Chaînes de 65 536 octets et plus : code `longString` à longueur sur 32 bits ; seule borne, la taille de message de la politique (#456, ADR-020). | À renseigner après intégration. |
 | 1.17 | 2026-11-05 | Proposée | Ambroise Leclerc | Listes homogènes de chaînes, de tuples, de tableaux typés et de bitsets : code `list` à nombre d'éléments sur 32 bits (#457, ADR-020). | À renseigner après intégration. |
 | 1.18 | 2026-11-05 | Proposée | Ambroise Leclerc | Erreurs typées : le code `exception` porte un code d'erreur avant son message (#458, ADR-020, ADR-004). | À renseigner après intégration. |
+| 1.19 | 2026-11-05 | Proposée | Ambroise Leclerc | Les tuples d'un élément de liste s'imbriquent sur 32 niveaux au plus, dans les deux codecs, comptés à la descente ; une liste plus profonde, auparavant acceptée, est refusée (#457, ADR-020). | À renseigner après intégration. |
 
 ## État et chronologie
 
 **Acceptée jusqu’à la version 1.13.** Les extensions 1.14 et suivantes sont **proposées**, en attente d’intégration.
 Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-11-05** (version 1.18).
+Dernière révision : **2026-11-05** (version 1.19).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
