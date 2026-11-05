@@ -404,11 +404,56 @@ struct WebFrontConfig {
 };
 
 namespace detail {
+/// True when `address` parses as the IPv6 address ::1 in any spelling (::1, 0:0:0:0:0:0:0:1, 0::0001...).
+[[nodiscard]] inline bool isIPv6Loopback(std::string_view address) {
+    if (address.find(':') == std::string_view::npos)
+        return false;
+    const auto compress = address.find("::");
+    if (compress != std::string_view::npos && address.find("::", compress + 1) != std::string_view::npos)
+        return false;
+    const auto groups = [](std::string_view text, std::vector<unsigned>& out) {
+        while (!text.empty()) {
+            const auto colon = text.find(':');
+            const auto group = text.substr(0, colon);
+            if (group.empty() || group.size() > 4)
+                return false;
+            unsigned value = 0;
+            for (const char c : group) {
+                const unsigned digit = c >= '0' && c <= '9' ? static_cast<unsigned>(c - '0')
+                                       : c >= 'a' && c <= 'f' ? static_cast<unsigned>(c - 'a' + 10)
+                                       : c >= 'A' && c <= 'F' ? static_cast<unsigned>(c - 'A' + 10) : 16u;
+                if (digit > 15)
+                    return false;
+                value = value * 16 + digit;
+            }
+            out.push_back(value);
+            if (colon == std::string_view::npos)
+                break;
+            text.remove_prefix(colon + 1);
+            if (text.empty())
+                return false;  // a trailing single colon
+        }
+        return true;
+    };
+    std::vector<unsigned> head, tail;
+    if (compress == std::string_view::npos) {
+        if (!groups(address, head) || head.size() != 8)
+            return false;
+    } else {
+        if (!groups(address.substr(0, compress), head) || !groups(address.substr(compress + 2), tail) || head.size() + tail.size() > 7)
+            return false;
+    }
+    std::vector<unsigned> all = head;
+    all.insert(all.end(), 8 - head.size() - tail.size(), 0u);
+    all.insert(all.end(), tail.begin(), tail.end());
+    return all.size() == 8 && std::all_of(all.begin(), all.end() - 1, [](unsigned g) { return g == 0; }) && all.back() == 1;
+}
+
 /// True for the textual loopback addresses a server can be configured with: 127.x.y.z, ::1, [::1] and localhost.
 [[nodiscard]] inline bool isLoopbackName(std::string_view address) {
     if (address.size() > 2 && address.front() == '[' && address.back() == ']')
         address = address.substr(1, address.size() - 2);
-    if (address == "::1" || lowerAscii(address) == "localhost")
+    if (lowerAscii(address) == "localhost" || isIPv6Loopback(address))
         return true;
     if (!address.starts_with("127."))
         return false;
@@ -545,7 +590,8 @@ public:
         if (!prefix.starts_with(ReadBinding::servicesPath) || prefix.size() == ReadBinding::servicesPath.size() || prefix.starts_with(ReadBinding::bindPath))
             throw std::invalid_argument("A read route lives under " + std::string(ReadBinding::servicesPath) + ", not under " + std::string(ReadBinding::bindPath));
         auto id = automation::channel::nonce();  // this registration's identity: its grants work nowhere else
-        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true);
+        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true,
+                                                  [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
         return ReadRoute{std::move(id), prefix, readBinding, std::move(registration)};
     }
 

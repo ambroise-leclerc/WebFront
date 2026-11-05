@@ -331,6 +331,8 @@ public:
         RouteHandler handler;
         /// The path after the prefix carries a secret (a read token): the server never writes it to its logs.
         bool         secretPath = false;
+        /// Applied to the answers the server generates for this route (405, 500), which never pass through the handler.
+        std::function<void(RouteReply&)> harden;
     };
 
 private:
@@ -379,10 +381,10 @@ public:
     ///        anything that would cover the protected "/WebFront.js" (ADR-002).
     /// @throws std::invalid_argument for a malformed prefix, an empty handler, or a prefix that contains
     ///         or is contained in a registered one.
-    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, bool secretPath = false) {
+    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
         if (!handler) throw std::invalid_argument("A route needs a handler");
         if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
-        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), secretPath});
+        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), secretPath, std::move(harden)});
         std::lock_guard lock(state->mutex);
         for (const auto& other : state->entries)
             if (other->prefix.starts_with(entry->prefix) || entry->prefix.starts_with(other->prefix))
@@ -842,8 +844,8 @@ public:
     /// Answers the `GET` and `HEAD` requests under `prefix` with `handler` (see RouteTable::add for the
     /// prefix rules). The route lasts as long as the returned registration; it never masks the embedded
     /// `WebFront.js`, and takes precedence over the file providers. Thread-safe.
-    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler, bool secretPath = false) {
-        return routes.add(std::move(prefix), std::move(handler), secretPath);
+    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
+        return routes.add(std::move(prefix), std::move(handler), secretPath, std::move(harden));
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
@@ -956,10 +958,19 @@ private:
         const bool head = request.method == Request::Method::Head;
         RouteReply reply;
         Response   response;
+        // The route's policy for the answers the server writes itself; the type and disposition stay those of the error page.
+        const auto hardenError = [&] {
+            if (!match.route->harden) return;
+            RouteReply policy;
+            match.route->harden(policy);
+            for (auto& [name, value] : policy.headers)
+                if (name != "Content-Type" && name != "Content-Disposition") response.headers.emplace_back(name, value);
+        };
         try {
             if (!head && request.method != Request::Method::Get) {
                 response = Response::getStatusResponse(Response::methodNotAllowed);
                 response.headers.emplace_back("Allow", "GET, HEAD");
+                hardenError();
             } else {
                 co_await networking::ex::continues_on(routeWorker.run([&] {
                     reply = match.route->handler(RouteRequest{request, match.path, match.query});
@@ -975,11 +986,13 @@ private:
             if (match.route->secretPath) log::warn("Route {} failed (the error is not logged: it may quote a secret)", match.route->prefix);
             else log::warn("Route {} failed: {}", match.route->prefix, error.what());
             response = Response::getStatusResponse(Response::internalServerError);
+            hardenError();
             reply.body = nullptr;
         }
         catch (...) {
             log::warn("Route {} failed with an exception which is not a std::exception", match.route->prefix);
             response = Response::getStatusResponse(Response::internalServerError);
+            hardenError();
             reply.body = nullptr;
         }
         const bool streaming = !head && reply.body;  // the built-in 405 has no reply.body

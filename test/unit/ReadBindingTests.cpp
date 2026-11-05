@@ -350,9 +350,9 @@ SCENARIO("A connection that is not the view of an embedded frontend reads only u
 }
 
 SCENARIO("A declaration of a loopback server is checked against the address it listens on", "[read-binding]") {
-    for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "localhost", "LocalHost"})
+    for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0::1", "::0001", "[0:0::1]", "localhost", "LocalHost"})
         THEN("'" << address << "' is a loopback address") { REQUIRE(detail::isLoopbackName(address)); }
-    for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "127.0.0.1."})
+    for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "127.0.0.1.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
         THEN("'" << address << "' is not") { REQUIRE_FALSE(detail::isLoopbackName(address)); }
     THEN("loopbackAttested is refused for a server that listens elsewhere, and accepted on the loopback") {
         REQUIRE_THROWS_AS(detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}),
@@ -766,4 +766,29 @@ SCENARIO("The error of a failing secret route is not logged", "[read-binding]") 
     REQUIRE(logged.contains("failed"));
     REQUIRE_FALSE(logged.contains("TOKENSECRET"));
     testing::InjectableSocket::reset();
+}
+
+SCENARIO("The answers the server writes for a read route are hardened too", "[read-binding]") {
+    for (const auto* method : {"GET", "POST"}) {
+        testing::InjectableSocket::reset();
+        ReadNet::accepts = 0;
+        http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
+        auto route = server.addRoute(std::string(readPrefix), [](const http::RouteRequest&) -> http::RouteReply { throw std::runtime_error("boom"); }, true,
+                                     [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
+        const std::string      raw = std::string(method) + " " + std::string(readPrefix) + "0123456789abcdef.SECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        std::vector<std::byte> bytes;
+        for (const char c : raw)
+            bytes.push_back(static_cast<std::byte>(c));
+        testing::InjectableSocket::receive(bytes);
+        REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+        const auto response = testing::InjectableSocket::writtenText();
+        THEN(std::string(method) + " is refused with the hardening headers") {
+            REQUIRE((response.starts_with("HTTP/1.1 500") || response.starts_with("HTTP/1.1 405")));
+            REQUIRE(response.contains("Cache-Control: no-store\r\n"));
+            REQUIRE(response.contains("Referrer-Policy: no-referrer\r\n"));
+            REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
+            REQUIRE(response.contains("X-Content-Type-Options: nosniff\r\n"));
+        }
+        testing::InjectableSocket::reset();
+    }
 }
