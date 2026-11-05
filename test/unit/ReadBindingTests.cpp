@@ -792,3 +792,39 @@ SCENARIO("The answers the server writes for a read route are hardened too", "[re
         testing::InjectableSocket::reset();
     }
 }
+
+namespace {
+
+/// A file provider whose failure quotes the path it was asked for.
+struct ThrowingFileSystem {
+    ThrowingFileSystem(std::filesystem::path) {}
+    std::optional<webfront::fs::File> open(std::filesystem::path file) { throw std::runtime_error("cannot open " + file.string()); }
+};
+
+}  // namespace
+
+SCENARIO("A file provider that fails on a services target does not log the token", "[read-binding]") {
+    testing::InjectableSocket::reset();
+    ReadNet::accepts = 0;
+    http::Server<ReadNet, ThrowingFileSystem> server("127.0.0.1", "0");
+    webfront::log::setLogLevel(webfront::log::Debug);
+    std::string logged;
+    std::mutex  loggedMutex;
+    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += std::string(line) + "\n";
+    });
+    // No route is registered: the target falls to the file providers, which throw.
+    const std::string      raw = "GET /webfront/services/files/0123456789abcdef.PROVIDERSECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    std::vector<std::byte> bytes;
+    for (const char c : raw)
+        bytes.push_back(static_cast<std::byte>(c));
+    testing::InjectableSocket::receive(bytes);
+    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+    webfront::log::removeSinks(sink);
+    webfront::log::setLogLevel(webfront::log::Error);
+    std::scoped_lock lock{loggedMutex};
+    REQUIRE(logged.contains("failed"));
+    REQUIRE_FALSE(logged.contains("PROVIDERSECRET"));
+    testing::InjectableSocket::reset();
+}

@@ -1008,6 +1008,7 @@ private:
         std::unique_ptr<fs::File> streamed;
         std::uint64_t streamOffset = 0, streamLength = 0;
         bool head = false;
+        bool servicesTarget = false;
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
@@ -1028,6 +1029,7 @@ private:
                 co_return;
             }
             head = request.method == Request::Method::Head;
+            servicesTarget = routing::mentionsServices(request.uri);  // before the request is moved away
             auto prepared = requestHandler.prepareRequest(std::move(request));
             if (prepared.needsDecode) {
                 lease.emplace(co_await networking::ex::continues_on(
@@ -1058,7 +1060,7 @@ private:
             response.headers.emplace_back("Vary", "Accept-Encoding");
         }
         catch (const std::exception& error) {
-            if (routing::mentionsServices(request.uri)) log::warn("HTTP asset request on a services path failed (the error is not logged)");
+            if (servicesTarget) log::warn("HTTP asset request on a services path failed (the error is not logged)");
             else log::warn("HTTP asset request failed: {}", error.what());
             response = Response::getStatusResponse(Response::internalServerError);
         }
