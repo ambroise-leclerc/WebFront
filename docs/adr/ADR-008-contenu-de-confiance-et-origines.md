@@ -5,8 +5,8 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Décision initiale : politique commune des origines du pont, de la navigation et des fenêtres surgissantes. | [d59db71](https://github.com/ambroise-leclerc/WebFront/commit/d59db712f1d390abe1457a5046b904bd330b85cc) |
-| 1.1 | 2026-11-04 | Proposée | Ambroise Leclerc | Le contrôle d'origine reste seul juge de l'accès au pont ; un secret de lancement, présenté à la poignée de main, distingue la vue d'un frontend intégré sans l'autoriser davantage (#453, ADR-020). | À renseigner après intégration. |
-| 1.2 | 2026-11-04 | Proposée | Ambroise Leclerc | Le cookie de liaison des lectures HTTP (#469, ADR-020) ne remplace pas le contrôle d'origine du pont : il prouve la possession d'un cookie par un client, ne désigne aucune connexion, et une autre page de même origine du même profil lit les URL de lecture, car elle partage déjà l'autorité du pont. | Branche `469-read-binding` |
+| 1.1 | 2026-11-04 | Proposée | Ambroise Leclerc | Le contrôle d'origine reste seul juge de l'accès au pont ; un secret de lancement, présenté à la poignée de main, distingue la vue d'un frontend intégré sans l'autoriser davantage (#453, ADR-020). | [29ba6db](https://github.com/ambroise-leclerc/WebFront/commit/29ba6dbab77356b3fbeee22d7e012ec929b819af) |
+| 1.2 | 2026-11-04 | Proposée | Ambroise Leclerc | Le cookie de liaison des lectures HTTP (#469, ADR-020) ne remplace pas le contrôle d'origine du pont : il prouve la possession d'un cookie par un client, ne désigne aucune connexion, et une autre page de même origine du même profil lit les URL de lecture, car elle partage déjà l'autorité du pont. | [ecf17ba](https://github.com/ambroise-leclerc/WebFront/commit/ecf17ba124969037fcdaf4ce4175b9b5f53fe661) |
 
 ## État et chronologie
 
