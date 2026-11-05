@@ -1186,7 +1186,7 @@ private:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
-                    link->sendError(event.callId, "C++ function '" + event.text + "' was not found", bridge_code::notFound);
+                    link->sendBridgeError(event.callId, "C++ function '" + event.text + "' was not found", bridge_code::notFound);
                 break;
             }
         }

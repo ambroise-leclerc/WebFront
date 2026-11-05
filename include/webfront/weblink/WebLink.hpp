@@ -325,8 +325,21 @@ private:
 
 
 public:
-    /// Rejects the call `callId` with `message` and `code` (the generic one by default); nothing is sent for call 0.
-    void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
+    /// Rejects the call `callId` with `message` and the generic code; nothing is sent for call 0.
+    void sendError(msg::CallId callId, std::string_view message) {
+        sendRejection(callId, message, bridge_code::generic);
+    }
+
+    /// Rejects the call `callId` with one of the codes of the bridge (bridge_code), for WebFront's own failures. Any other
+    /// code is sent as the generic one, so that this path cannot forge an error that looks like the bridge's own.
+    void sendBridgeError(msg::CallId callId, std::string_view message, std::string_view code) {
+        const bool known = code == bridge_code::notFound || code == bridge_code::malformed || code == bridge_code::disconnected
+                           || code == bridge_code::cancelled;
+        sendRejection(callId, message, known ? code : bridge_code::generic);
+    }
+
+private:
+    void sendRejection(msg::CallId callId, std::string_view message, std::string_view code) {
         if (callId == 0) return;
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
@@ -337,7 +350,6 @@ public:
         sendFrame(std::move(frame));
     }
 
-private:
     struct Writer {
         std::size_t           limit;
         std::function<void()> ready;
