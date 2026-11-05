@@ -164,13 +164,16 @@
         /// Exchanges the one-time secret received through the bridge for the cookie of this client, then checks that the
         /// browser kept it. The secret is single use; the cookie is HttpOnly, so the page never reads it.
         async bindClient(secret) {
-            const base = "/webfront/services/bind/";
+            // Absolute and pinned to the origin of the application: a <base href> in the page must never redirect the
+            // one-time secret to another host, and a redirect must never carry it away.
+            const base = global.location.origin + "/webfront/services/bind/";
+            const pinned = {credentials: "same-origin", mode: "same-origin", redirect: "error", cache: "no-store"};
             try {
-                const exchange = await fetch(base + encodeURIComponent(secret), {credentials: "same-origin", cache: "no-store"});
+                const exchange = await fetch(base + encodeURIComponent(secret), pinned);
                 if (!exchange.ok) throw new Error(`the server refused the exchange (HTTP ${exchange.status})`);
                 const client = exchange.headers.get("X-WebFront-Client");
                 if (!client) throw new Error("the server did not name the client");
-                const check = await fetch(base + "check/" + encodeURIComponent(client), {credentials: "same-origin", cache: "no-store"});
+                const check = await fetch(base + "check/" + encodeURIComponent(client), pinned);
                 if (!check.ok) throw new Error("the browser refused the binding cookie");
                 this.resolveBound();
             } catch (error) {

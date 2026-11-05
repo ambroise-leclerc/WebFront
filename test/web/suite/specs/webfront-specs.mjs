@@ -531,6 +531,29 @@ describe('Bound HTTP reads', () => {
         }
     });
 
+    it('sends the binding exchange to the application origin whatever <base href> says', async () => {
+        const base = document.createElement('base');
+        base.href = 'https://cdn.example.invalid/assets/';
+        document.head.prepend(base);
+        const realFetch = window.fetch;
+        const seen = [];
+        window.fetch = (input, init) => { seen.push({url: String(input), init}); return Promise.reject(new Error('stubbed')); };
+        try {
+            const bridge = new WebFrontBridge('ws://127.0.0.1:1');
+            bridge.boundPromise.catch(() => {});
+            await bridge.bindClient('0'.repeat(64));
+        } finally {
+            window.fetch = realFetch;
+            base.remove();
+        }
+        expect(seen.length).toBe(1);
+        const target = new URL(seen[0].url, base.href);  // resolved against the hostile base, as the browser would
+        expect(target.origin).toBe(window.location.origin);
+        expect(target.pathname.startsWith('/webfront/services/bind/')).toBeTrue();
+        expect(seen[0].init.mode).toBe('same-origin');
+        expect(seen[0].init.redirect).toBe('error');
+    });
+
     it('rejects bound when the initial connection fails', async () => {
         const bridge = new WebFrontBridge('ws://127.0.0.1:1');
         await expectAsync(bridge.bound).toBeRejected();
