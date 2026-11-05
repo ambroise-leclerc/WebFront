@@ -146,6 +146,7 @@ struct ScenarioFrontend : Frontend {
             gtk::Session& session;
             std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(45);
             unsigned timer = 0;
+            std::exception_ptr failure{};
         } poll{session};
         poll.timer = session.a.timeoutAdd(
             100,
@@ -155,7 +156,14 @@ struct ScenarioFrontend : Frontend {
                     probe.timer = 0;  // Returning 0 removes the source: it must not be removed again.
                     return 0;
                 }
-                if (finished(probe.session) || std::chrono::steady_clock::now() >= probe.deadline) {
+                bool done = false;
+                try {
+                    done = finished(probe.session);
+                } catch (...) {
+                    probe.failure = std::current_exception();
+                    done = true;
+                }
+                if (done || std::chrono::steady_clock::now() >= probe.deadline) {
                     probe.timer = 0;
                     probe.session.close();
                     return 0;
@@ -166,10 +174,21 @@ struct ScenarioFrontend : Frontend {
         session.run(webfront::frontend::detail::applicationUrl(address, port, page));
         if (poll.timer)
             session.a.sourceRemove(poll.timer);
+        if (poll.failure)
+            std::rethrow_exception(poll.failure);
     }
 };
 
 using ScenarioApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, ScenarioFrontend>;
+
+void pollFailure() {
+    ScenarioFrontend::configure = [](gtk::Session&) {};
+    ScenarioFrontend::finished = [](gtk::Session&) -> bool {
+        throw std::runtime_error("poll failure");
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    expectFailure([&] { app.show("no-bridge.html"); }, "poll failure");
+}
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
@@ -324,7 +343,7 @@ void chooseFile(bool cancel) {
     std::filesystem::remove(fixture);
     if (!asked)
         throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " +
-                                 std::to_string(ticks / 5 + (ticks % 5 >= 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
+                                 std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
     const std::string expected = cancel ? "cancelled" : "picked:chosen by the test";
     if (title != expected)
         throw std::runtime_error("Unexpected page state after the chooser: " + title);
@@ -361,7 +380,7 @@ void closeWithDialog() {
     app.show("file-services.html?choose");
     if (!opened)
         throw std::runtime_error("The file dialog was not opened (page title \"" + title + "\", " +
-                                 std::to_string(ticks / 5 + (ticks % 5 >= 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
+                                 std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
 }
 
 /// alert, confirm and prompt reach the injection point and their answers reach the page (issue #452).
@@ -460,6 +479,7 @@ void run(std::string_view mode) {
         {         "http-error",          httpError},
         {       "native-close",        nativeClose},
         {    "pre-run-failure",      preRunFailure},
+        {       "poll-failure",         pollFailure},
         {"profile-permissions", profilePermissions},
         {       "window-title",        windowTitle},
         {          "download",           download},
