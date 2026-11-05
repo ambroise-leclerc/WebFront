@@ -10,8 +10,9 @@
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2026-10-18** (version 1.0).
-Dernière révision : **2026-10-18** (version 1.0).
+**Acceptée.** Décision initiale : **2026-10-18** (version 1.0). Les révisions 1.1 et 1.2 (secret de lancement, cookie de liaison des
+lectures) sont proposées : elles précisent la décision sans changer le contrôle d'origine.
+Dernière révision : **2026-11-04** (version 1.2).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
