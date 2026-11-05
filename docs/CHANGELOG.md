@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The bridge supports long strings, homogeneous lists of strings, tuples, typed arrays and bitsets, and typed errors
+  with application codes. A `cppFunction` callback can return a `webfront::ResultTask<R>` or another sender and answer
+  when it completes; disconnecting the browser requests cancellation and drops late answers (#456–#459).
 - `Server::drain()` and `shutdown()` no longer throw `std::logic_error` while a route handler or file read is still running on a
   server worker; the gzip tests drain with the retrying variant, and a read lifetime the clock cannot represent is refused (#469).
 - HTTP reads bound to the browser client (#469, ADR-020 rule 4). `app.addReadRoute(prefix, handler)` registers a route under

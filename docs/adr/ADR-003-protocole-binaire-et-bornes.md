@@ -18,16 +18,16 @@
 | 1.11 | 2026-10-27 | Acceptée | Ambroise Leclerc | Validation par delta, budget cumulé des noms, récupération et contrat des événements précisés (#380). | — |
 | 1.12 | 2026-10-27 | Acceptée | Ambroise Leclerc | Identifiant de lot non nul, plafond d’opérations, codec canonique et nettoyage limité aux sous-arbres concernés (#380). | — |
 | 1.13 | 2026-10-27 | Acceptée | Ambroise Leclerc | Rejet de PROPERTY value sur output pour préserver les identifiants de ses enfants (#380). | — |
-| 1.14 | 2026-10-27 | Proposée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [PR #394](https://github.com/ambroise-leclerc/WebFront/pull/394) |
-| 1.15 | 2026-11-04 | Proposée | Ambroise Leclerc | La poignée de main peut porter, après ses deux octets, le secret de lancement d'une vue intégrée (#453, ADR-020). | À renseigner après intégration. |
-| 1.16 | 2026-11-05 | Proposée | Ambroise Leclerc | Chaînes de 65 536 octets et plus : code `longString` à longueur sur 32 bits ; seule borne, la taille de message de la politique (#456, ADR-020). | À renseigner après intégration. |
-| 1.17 | 2026-11-05 | Proposée | Ambroise Leclerc | Listes homogènes de chaînes, de tuples, de tableaux typés et de bitsets : code `list` à nombre d'éléments sur 32 bits (#457, ADR-020). | À renseigner après intégration. |
-| 1.18 | 2026-11-05 | Proposée | Ambroise Leclerc | Erreurs typées : le code `exception` porte un code d'erreur avant son message (#458, ADR-020, ADR-004). | À renseigner après intégration. |
-| 1.19 | 2026-11-05 | Proposée | Ambroise Leclerc | Les tuples d'un élément de liste s'imbriquent sur 32 niveaux au plus, dans les deux codecs, comptés à la descente ; une liste plus profonde, auparavant acceptée, est refusée (#457, ADR-020). | À renseigner après intégration. |
+| 1.14 | 2026-10-27 | Acceptée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [81db4af](https://github.com/ambroise-leclerc/WebFront/commit/81db4af6cb90a3c528496df10891b3ecf8664fd2) |
+| 1.15 | 2026-11-04 | Acceptée | Ambroise Leclerc | La poignée de main peut porter, après ses deux octets, le secret de lancement d'une vue intégrée (#453, ADR-020). | [29ba6db](https://github.com/ambroise-leclerc/WebFront/commit/29ba6dbab77356b3fbeee22d7e012ec929b819af) |
+| 1.16 | 2026-11-05 | Acceptée | Ambroise Leclerc | Chaînes de 65 536 octets et plus : code `longString` à longueur sur 32 bits ; seule borne, la taille de message de la politique (#456, ADR-020). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 1.17 | 2026-11-05 | Acceptée | Ambroise Leclerc | Listes homogènes de chaînes, de tuples, de tableaux typés et de bitsets : code `list` à nombre d'éléments sur 32 bits (#457, ADR-020). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 1.18 | 2026-11-05 | Acceptée | Ambroise Leclerc | Erreurs typées : le code `exception` porte un code d'erreur avant son message (#458, ADR-020, ADR-004). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 1.19 | 2026-11-05 | Acceptée | Ambroise Leclerc | Les tuples d'un élément de liste s'imbriquent sur 32 niveaux au plus, dans les deux codecs, comptés à la descente ; une liste plus profonde, auparavant acceptée, est refusée (#457, ADR-020). | [c817501](https://github.com/ambroise-leclerc/WebFront/commit/c81750191ff0d1e1e1e8f4b42ee5ef49d0d69d64) |
 
 ## État et chronologie
 
-**Acceptée jusqu’à la version 1.13.** Les extensions 1.14 et suivantes sont **proposées**, en attente d’intégration.
+**Acceptée jusqu’à la version 1.19.**
 Décision initiale : **2022-02-06** (version 1.0).
 Dernière révision : **2026-11-05** (version 1.19).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
