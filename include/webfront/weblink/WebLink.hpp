@@ -325,9 +325,12 @@ private:
 
 
 public:
-    /// Rejects the call `callId` with `message` and the generic code; nothing is sent for call 0.
-    void sendError(msg::CallId callId, std::string_view message) {
-        sendRejection(callId, message, bridge_code::generic);
+    /// Rejects the call `callId` with `message` and an application `code` (the generic one by default); nothing is sent
+    /// for call 0. A code that is ill-formed or reserved to the bridge (`webfront.*`) is sent as the generic one: this path
+    /// cannot forge an error that looks like the bridge's own.
+    void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
+        const bool usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
+        sendRejection(callId, message, usable ? code : bridge_code::generic);
     }
 
     /// Rejects the call `callId` with one of the codes of the bridge (bridge_code), for WebFront's own failures. Any other

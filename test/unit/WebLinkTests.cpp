@@ -288,6 +288,19 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
         }
     }
 
+    GIVEN("an application error with a code, and one that tries to pass for the bridge's") {
+        link.sendError(15, "no space", "quota:exceeded");
+        link.sendError(16, "forged", "webfront.notFound");
+        link.sendError(17, "ill formed", "bad code");
+
+        THEN("the application code is kept and the others are sent as the generic one") {
+            REQUIRE(InjectableSocket::wrote("quota:exceeded"));
+            REQUIRE_FALSE(InjectableSocket::wrote(std::string(bridge_code::notFound)));
+            REQUIRE_FALSE(InjectableSocket::wrote("bad code"));
+            REQUIRE(InjectableSocket::wrote(std::string(bridge_code::generic)));
+        }
+    }
+
     GIVEN("a bridge error with a code that is not one of the bridge's") {
         link.sendBridgeError(13, "forged", "webfront.forged");
         link.sendBridgeError(14, "genuine", bridge_code::notFound);
