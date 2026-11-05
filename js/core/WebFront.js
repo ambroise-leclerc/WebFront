@@ -80,7 +80,7 @@
         [ParamType.smallString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
         [ParamType.string, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
         [ParamType.longString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
-        [ParamType.exception, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.exception, (bridge, type, view, offset) => bridge.decodeException(view, offset)],
         [ParamType.tuple, (bridge, type, view, offset) => bridge.decodeTuple(view, offset)],
         [ParamType.list, (bridge, type, view, offset) => bridge.decodeList(view, offset)],
     ]);
@@ -143,6 +143,38 @@
         return length < 256 ? 2 : length < 65536 ? 3 : 5;
     }
 
+    /// Codes of the failures the bridge itself reports; they start with "webfront.", which an application cannot use.
+    const BridgeCode = Object.freeze({
+        generic: "webfront.error",
+        notFound: "webfront.notFound",
+        malformed: "webfront.malformed",
+        disconnected: "webfront.disconnected",
+        cancelled: "webfront.cancelled",
+    });
+    const reservedPrefix = "webfront.";
+    const validCode = /^[A-Za-z0-9._:-]{1,64}$/;
+
+    /// The errors that WebFront made, or received from C++ with their code: only they may carry a reserved code to the other side.
+    const bridgeErrors = new WeakSet();
+
+    function bridgeError(code, message) {
+        const error = new Error(message);
+        error.code = code;
+        bridgeErrors.add(error);
+        return error;
+    }
+
+    /// The code an exception is sent with: the `code` of an Error rejected by the application when it is well formed and not
+    /// reserved, otherwise the generic code. A reserved code is kept only on an error of the bridge.
+    function exceptionCode(error) {
+        const code = error !== null && typeof error === "object" ? error.code : undefined;
+        if (typeof code !== "string" || !validCode.test(code))
+            return BridgeCode.generic;
+        if (code.startsWith(reservedPrefix) && !bridgeErrors.has(error))
+            return BridgeCode.generic;
+        return code;
+    }
+
     function isNonNegativeInteger(candidate) {
         return Number.isSafeInteger(candidate) && candidate >= 0;
     }
@@ -193,7 +225,7 @@
             this.socket.onmessage = event => this.onMessage(event.data);
             this.socket.onclose = event => {
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
-                const error = new Error(`WebFront connection closed: ${detail}`);
+                const error = bridgeError(BridgeCode.disconnected, `WebFront connection closed: ${detail}`);
                 this.settleReadyRejected(error);
                 this.rejectBound(error);  // a no-op once settled
                 for (const pending of this.pendingCalls.values())
@@ -373,11 +405,11 @@
             let context = global;
             for (const component of path) {
                 if (context == null || !(component in context))
-                    throw new Error(`JavaScript namespace '${component}' was not found while resolving '${name}'`);
+                    throw bridgeError(BridgeCode.notFound, `JavaScript namespace '${component}' was not found while resolving '${name}'`);
                 context = context[component];
             }
             if (context == null || typeof context[member] !== "function")
-                throw new Error(`JavaScript function '${name}' was not found`);
+                throw bridgeError(BridgeCode.notFound, `JavaScript function '${name}' was not found`);
             return context[member](...args);
         }
 
@@ -394,6 +426,10 @@
             try {
                 this.settleReturn(pending, message);
             } catch (error) {
+                if (error instanceof Error) {
+                    error.code ??= BridgeCode.malformed;
+                    bridgeErrors.add(error);
+                }
                 pending.reject(error);
             }
         }
@@ -405,7 +441,7 @@
             const payload = new DataView(message.buffer, message.byteOffset + 8, payloadSize);
 
             if (this.carriesException(count, payloadSize, payload)) {
-                pending.reject(new Error(this.singleValue(payload, payloadSize, "Exception")));
+                pending.reject(this.singleValue(payload, payloadSize, "Exception"));
                 return;
             }
             if (count === 0) {
@@ -472,6 +508,20 @@
             return {value: new TextDecoder("utf-8").decode(bytes), bytes: 1 + sizeBytes + length};
         }
 
+        /// An exception is a 1-byte code size, the code, a 16-bit message size and the message. It decodes to an Error with
+        /// `code`, which a settled call rejects with.
+        decodeException(view, offset) {
+            requireBytes(view, offset + 1, 1, "exception code size");
+            const codeSize = view.getUint8(offset + 1);
+            requireBytes(view, offset + 2, codeSize + 2, "exception code");
+            const code = new TextDecoder("utf-8").decode(new Uint8Array(view.buffer, view.byteOffset + offset + 2, codeSize));
+            const messageSize = view.getUint16(offset + 2 + codeSize, this.littleEndian);
+            const payload = offset + 4 + codeSize;
+            requireBytes(view, payload, messageSize, "exception message");
+            const message = new TextDecoder("utf-8").decode(new Uint8Array(view.buffer, view.byteOffset + payload, messageSize));
+            return {value: bridgeError(validCode.test(code) ? code : BridgeCode.generic, message), bytes: 4 + codeSize + messageSize};
+        }
+
         decodeTuple(view, offset) {
             requireBytes(view, offset, 2, "tuple header");
             const shapes = [];
@@ -490,6 +540,8 @@
             let listShape = null;
             for (let index = 0; index < count; ++index) {
                 requireBytes(view, cursor, 1, "list element type");
+                if (view.getUint8(cursor) === ParamType.exception)
+                    throw new TypeError("A WebFront list element cannot be an exception");
                 const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
                 requireListElementShape(shape);
                 if (listShape === null)
@@ -544,7 +596,7 @@
                 let callId = 0;
                 try {
                     if (this.state !== "linked")
-                        throw new Error("WebFront bridge is not connected");
+                        throw bridgeError(BridgeCode.disconnected, "WebFront bridge is not connected");
                     const values = [name, ...args];
                     if (values.length > 255)
                         throw new RangeError("A function call cannot contain more than 255 top-level values");
@@ -604,18 +656,21 @@
 
         sendFunctionError(callId, error) {
             const message = error instanceof Error ? error.message : String(error);
+            const code = new TextEncoder().encode(exceptionCode(error));
             const bytes = new TextEncoder().encode(message);
             if (bytes.length >= 65536)
-                return this.sendFunctionError(callId, "JavaScript exception message exceeds 65535 UTF-8 bytes");
-            const buffer = new ArrayBuffer(11 + bytes.length);
+                return this.sendFunctionError(callId, bridgeError(exceptionCode(error), "JavaScript exception message exceeds 65535 UTF-8 bytes"));
+            const buffer = new ArrayBuffer(12 + code.length + bytes.length);
             const view = new DataView(buffer);
             view.setUint8(0, Command.functionReturn);
             view.setUint8(1, 1);
             view.setUint16(2, callId, this.littleEndian);
-            view.setUint32(4, 3 + bytes.length, this.littleEndian);
+            view.setUint32(4, 4 + code.length + bytes.length, this.littleEndian);
             view.setUint8(8, ParamType.exception);
-            view.setUint16(9, bytes.length, this.littleEndian);
-            new Uint8Array(buffer, 11).set(bytes);
+            view.setUint8(9, code.length);
+            new Uint8Array(buffer, 10).set(code);
+            view.setUint16(10 + code.length, bytes.length, this.littleEndian);
+            new Uint8Array(buffer, 12 + code.length).set(bytes);
             this.socket.send(buffer);
         }
 

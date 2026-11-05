@@ -11,11 +11,12 @@
 | 2.2 | 2026-07-22 | Acceptée | Ambroise Leclerc | Déduction des signatures des callbacks ordinaires. | [c065a25](https://github.com/ambroise-leclerc/WebFront/commit/c065a25a476b91a6bf2f77214f32c955b779310c) |
 | 2.3 | 2026-10-13 | Acceptée | Ambroise Leclerc | Contrat explicite de l’asymétrie et couverture séparée des échecs dans les deux directions. | [aa7457b](https://github.com/ambroise-leclerc/WebFront/commit/aa7457ba98b6cf8109838e98345cfcfaa52d82f0) |
 | 2.4 | 2026-10-18 | Acceptée | Ambroise Leclerc | API de senders différée et annulation locale, en complément des futures. | [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) |
+| 2.5 | 2026-11-05 | Proposée | Ambroise Leclerc | Erreurs typées : un rejet porte un code (`BridgeError`, `Error.code`) en plus de son message (#458, ADR-020). | À renseigner après intégration. |
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-18** (version 2.4).
+**Acceptée** jusqu'à la version 2.4 ; l'extension 2.5 est **proposée**. Décision initiale : **2022-02-06** (version 1.0).
+Dernière révision : **2026-11-05** (version 2.5).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -39,6 +40,13 @@ Que chaque direction et chaque forme d’API conserve son contrat propre :
 
 Fonctions absentes, exceptions de callback, réponses malformées et déconnexions
 font échouer le résultat attendu : `future.get()` lève, la Promise rejette, le sender termine en erreur.
+Un échec porte un **code** avec son message (ADR-003) : `webfront::BridgeError(code, message)` levée par un callback
+rejette la Promise avec un `Error` dont `code` vaut ce code ; une Promise JavaScript rejetée avec un `code` fait lever
+`BridgeError` au `get()` du futur et au sender, dont `code()` donne le code. Une exception ordinaire garde son message et
+le code générique `webfront.error`. Les codes `webfront.notFound` (fonction absente), `webfront.malformed` (argument ou
+résultat mal formé), `webfront.disconnected` (connexion fermée, y compris pour un appel sur un pont non connecté) et
+`webfront.cancelled` sont réservés à WebFront et distincts de ceux des applications, qui ne peuvent ni les construire
+(`std::invalid_argument`) ni les envoyer depuis JavaScript.
 Les callbacks enregistrés sont possédés par le stockage de l’application. Les signatures
 ordinaires sont déduites ; les lambdas génériques et opérateurs surchargés utilisent
 `cppFunction<R, Args...>` explicitement.

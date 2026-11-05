@@ -774,6 +774,51 @@ std::string respondWith(R value) {
 
 }  // namespace
 
+namespace {
+/// The code and the message of the exception a responder sent.
+template <typename Thrower>
+std::pair<std::string, std::string> sentException(Thrower thrower) {
+    ResultLinkMock link;
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, int>([thrower](std::span<const std::byte>) -> int {
+        thrower();
+        return 0;
+    });
+    responder({}, link, 9);
+    auto             result = msg::FunctionReturn<http::DefaultBuffersPolicy>::castFromRawData(link.message);
+    auto             payload = result->payload();
+    std::string      code, message;
+    msg::FunctionReturn<http::DefaultBuffersPolicy>::decodeException(code, message, payload);
+    return {code, message};
+}
+}  // namespace
+
+SCENARIO("A callback failure is sent with its code") {
+    GIVEN("a callback throwing a BridgeError") {
+        THEN("the rejection carries its code") {
+            REQUIRE(sentException([] { throw BridgeError("denied", "no"); }) == std::pair<std::string, std::string>{"denied", "no"});
+        }
+    }
+    GIVEN("a callback throwing an ordinary exception or something else") {
+        THEN("the code is the generic one") {
+            REQUIRE(sentException([] { throw std::runtime_error("plain"); }) == std::pair<std::string, std::string>{std::string(bridge_code::generic), "plain"});
+            REQUIRE(sentException([] { throw 42; }).first == bridge_code::generic);
+        }
+    }
+    GIVEN("a callback whose argument cannot be decoded") {
+        ResultLinkMock link;
+        auto           handler = detail::makeCppFunctionHandler<http::DefaultBuffersPolicy, void, std::string>([](std::string) {});
+        const std::array<std::byte, 1> boolean{std::byte{static_cast<std::uint8_t>(msg::CodedType::booleanTrue)}};
+        THEN("the failure has the malformed code") {
+            try {
+                handler(boolean);
+                FAIL("The call did not throw");
+            } catch (const BridgeError& error) {
+                REQUIRE(error.code() == bridge_code::malformed);
+            }
+        }
+    }
+}
+
 SCENARIO("C++ string results cross the bridge up to the message size of the policy") {
     const std::string longText(100000, 'x');
     using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024 * 1024>;

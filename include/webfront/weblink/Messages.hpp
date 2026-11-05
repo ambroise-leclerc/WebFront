@@ -3,6 +3,7 @@
 /// @brief Messages exchanged between webfront clients and server
 #pragma once
 
+#include "../BridgeError.hpp"
 #include "../http/BuffersPolicy.hpp"
 
 #include <algorithm>
@@ -46,7 +47,7 @@ enum class CodedType : uint8_t {
     number,        // opcode + 8 bytes IEEE754 floating point number
     smallString,   // opcode + 1 byte size
     string,        // opcode + 2 bytes size
-    exception,     // opcode + 2 bytes size
+    exception,     // opcode + 1 byte code size + code + 2 bytes message size + message
     smallArrayU8,  // opcode + 1 byte size,
     arrayU8,       // opcode + 4 bytes size,
     array8,        // opcode + 4 bytes size,
@@ -60,6 +61,7 @@ enum class CodedType : uint8_t {
     arrayDouble,   // opcode + 4 bytes size,
     tuple,         // opcode + 1 byte for number of parameters which constitute the tuple
     longString,    // opcode + 4 bytes size: strings of 65536 bytes or more
+    list,          // opcode + 4 bytes element count, then that many values of one shape (no list inside)
 };
 
 inline std::string_view toString(CodedType t) {
@@ -102,6 +104,8 @@ inline std::string_view toString(CodedType t) {
             return "tuple";
         case CodedType::longString:
             return "longString";
+        case CodedType::list:
+            return "list";
         default:
             return "undefined";
     }
@@ -191,11 +195,38 @@ struct is_std_array<std::array<T, Size>> : std::true_type {};
 template <typename T>
 inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::value;
 
+template <typename T>
+inline constexpr bool is_string_like_v = std::is_same_v<std::remove_cvref_t<T>, std::string> || std::is_same_v<std::remove_cvref_t<T>, std::string_view>;
+
+template <typename T>
+struct is_list : std::false_type {};
+
+/// A list is a std::vector whose elements are not scalars (a vector of numbers is a typed array): strings, tuples, typed
+/// arrays and bitsets. Lists do not nest, neither directly nor inside a tuple that is an element.
+template <typename T>
+inline constexpr bool is_list_v = is_list<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+struct contains_list : std::bool_constant<is_list_v<T>> {};
+template <typename... T>
+struct contains_list<std::tuple<T...>> : std::bool_constant<(contains_list<std::remove_cvref_t<T>>::value || ...)> {};
+template <typename T>
+inline constexpr bool contains_list_v = contains_list<std::remove_cvref_t<T>>::value;
+
+template <typename T>
+struct is_list_element : std::bool_constant<is_string_like_v<T> || is_tuple_v<T> || is_bitset_v<T> || is_numeric_array_v<T>> {};
+template <typename T>
+inline constexpr bool is_list_element_v = is_list_element<std::remove_cvref_t<T>>::value;
+
+template <typename E, typename Allocator>
+struct is_list<std::vector<E, Allocator>> : std::bool_constant<is_list_element_v<E> && !std::is_same_v<E, bool>> {};
+
 /// The numeric array opcodes form one contiguous run, so membership is a range test rather than a
 /// case per element type. The asserts below pin the two ends against an accidental reordering.
 static_assert(static_cast<uint8_t>(CodedType::arrayU8) == static_cast<uint8_t>(CodedType::smallArrayU8) + 1);
 static_assert(static_cast<uint8_t>(CodedType::arrayDouble) + 1 == static_cast<uint8_t>(CodedType::tuple));
 static_assert(static_cast<uint8_t>(CodedType::tuple) + 1 == static_cast<uint8_t>(CodedType::longString));
+static_assert(static_cast<uint8_t>(CodedType::longString) + 1 == static_cast<uint8_t>(CodedType::list));
 
 constexpr bool isNumericArrayCode(CodedType type) {
     return type >= CodedType::smallArrayU8 && type <= CodedType::arrayDouble;
@@ -404,11 +435,29 @@ protected:
         incrementPayloadSize(1 + sizeof(number));
     }
 
+    /// The code of an exception: the one a BridgeError carries, the generic one for any other.
+    static std::string_view exceptionCode(const std::exception& e) {
+        if (const auto* typed = dynamic_cast<const BridgeError*>(&e))
+            return typed->code();
+        return bridge_code::generic;
+    }
+
     template <typename WebSocketFrame>
     void encodeException(const std::exception& e, WebSocketFrame& frame) {
         using namespace std;
+        const auto code = exceptionCode(e);
         const auto text = fitStringLength(e.what());
-        encodeTypeHeader(msg::CodedType::exception, static_cast<uint16_t>(text.size()), frame);
+        if (encodeBufferIndex + 1 + 1 + sizeof(uint16_t) > buffer.size())
+            throw http::BufferOverflowException("FunctionCall encode buffer overflow");
+        reservePayload(2 + code.size() + 2 + text.size());
+        encodeTypeHeader(msg::CodedType::exception, static_cast<uint8_t>(code.size()), frame);
+        frame.addBuffer(span(reinterpret_cast<const std::byte*>(code.data()), code.size()));
+        incrementPayloadSize(code.size());
+        const auto size = static_cast<uint16_t>(text.size());
+        frame.addBuffer(span(&buffer[encodeBufferIndex], sizeof(size)));
+        copy_n(reinterpret_cast<const std::byte*>(&size), sizeof(size), &buffer[encodeBufferIndex]);
+        encodeBufferIndex += sizeof(size);
+        incrementPayloadSize(sizeof(size));
         frame.addBuffer(span(reinterpret_cast<const std::byte*>(text.data()), text.size()));
         incrementPayloadSize(text.size());
     }
@@ -492,6 +541,16 @@ public:
         return {functionName, data};
     }
 
+    template <typename List, typename WebSocketFrame>
+    void encodeList(const List& list, WebSocketFrame& frame) {
+        static_assert(!contains_list_v<typename List::value_type>, "WebFront lists cannot contain lists");
+        if (list.size() > std::numeric_limits<std::uint32_t>::max())
+            throw std::length_error("WebFront lists cannot exceed 4294967295 elements");
+        encodeTypeHeader(msg::CodedType::list, static_cast<std::uint32_t>(list.size()), frame);
+        for (const auto& element : list)
+            encodeParameter(element, frame);
+    }
+
     template <typename T, typename WebSocketFrame>
     void encodeParameter(T&& t, WebSocketFrame& frame) {
         using namespace std;
@@ -508,7 +567,9 @@ public:
                     ((encodeParameter(tupleArgs, frame)), ...);
                 },
                 t);
-        } else if constexpr (is_same_v<ParamType, bool>)
+        } else if constexpr (is_list_v<ParamType>)
+            encodeList(t, frame);
+        else if constexpr (is_same_v<ParamType, bool>)
             encodeBool(t, frame);
         else if constexpr (is_arithmetic_v<ParamType>)
             encodeNumber(static_cast<double>(t), frame);
@@ -541,11 +602,13 @@ public:
         const auto type = static_cast<CodedType>(data[0]);
         if (type == CodedType::booleanTrue || type == CodedType::booleanFalse) return decodeBoolean(param, data);
         if (type == CodedType::smallString) return decodeSmallString(param, data);
-        if (type == CodedType::string || type == CodedType::exception) return decodeLongString(param, data);
+        if (type == CodedType::string) return decodeLongString(param, data);
+        if (type == CodedType::exception) return decodeExceptionMessage(param, data);
         if (type == CodedType::longString) return decodeHugeString(param, data);
         if (type == CodedType::number) return decodeNumber(param, data);
         if (isNumericArrayCode(type)) return decodeArray(param, data);
         if (type == CodedType::tuple) return decodeTuple(param, data);
+        if (type == CodedType::list) return decodeList(param, data);
         throw std::runtime_error("Unsupported coded parameter type");
     }
 
@@ -586,6 +649,34 @@ private:
                 throw std::runtime_error("Truncated string payload");
             param = std::string(reinterpret_cast<const char*>(data.data() + 3), size);
             data  = data.subspan(3 + size);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+public:
+    /// An exception: its code and its message. Throws when it is truncated.
+    static void decodeException(std::string& code, std::string& message, std::span<const std::byte>& data) {
+        if (data.size() < 2u || static_cast<CodedType>(data[0]) != CodedType::exception)
+            throw std::runtime_error("Truncated exception header");
+        const auto codeSize = static_cast<size_t>(data[1]);
+        if (data.size() < 2u + codeSize + 2u)
+            throw std::runtime_error("Truncated exception code");
+        std::uint16_t messageSize;
+        std::memcpy(&messageSize, data.data() + 2 + codeSize, sizeof(messageSize));
+        if (data.size() - (4u + codeSize) < messageSize)
+            throw std::runtime_error("Truncated exception message");
+        code    = std::string(reinterpret_cast<const char*>(data.data() + 2), codeSize);
+        message = std::string(reinterpret_cast<const char*>(data.data() + 4 + codeSize), messageSize);
+        data    = data.subspan(4 + codeSize + messageSize);
+    }
+
+private:
+    /// Decoded as a string, an exception is its message.
+    template <typename T>
+    static void decodeExceptionMessage(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            std::string code;
+            decodeException(code, param, data);
         } else
             throw std::runtime_error("Wrong parameter type: std::string expected");
     }
@@ -644,6 +735,42 @@ private:
             throw std::runtime_error("Wrong parameter type: owning numeric array expected");
     }
 
+    /// The elements of a list, decoded into the vector T. A list holds at least one byte per element and neither a list nor
+    /// an exception: a count the message cannot hold, or such an element, is refused before it is decoded.
+    template <typename T>
+    static void decodeListElements(T& param, std::size_t count, std::span<const std::byte>& data) {
+        using Element = typename T::value_type;
+        static_assert(!contains_list_v<Element>, "WebFront lists cannot contain lists");
+        T result;
+        result.reserve(std::min<std::size_t>(count, 1024));
+        for (std::size_t index = 0; index < count; ++index) {
+            if (data.empty())
+                throw std::runtime_error("Truncated list element");
+            const auto type = static_cast<CodedType>(data[0]);
+            if (type == CodedType::list || type == CodedType::exception)
+                throw std::runtime_error("A list element cannot be a list or an exception");
+            Element element{};
+            decodeParameter(element, data);
+            result.push_back(std::move(element));
+        }
+        param = std::move(result);
+    }
+
+    template <typename T>
+    static void decodeList(T& param, std::span<const std::byte>& data) {
+        if constexpr (is_list_v<T>) {
+            if (data.size() < 5u)
+                throw std::runtime_error("Truncated list header");
+            std::uint32_t count;
+            std::memcpy(&count, data.data() + 1, sizeof(count));
+            data = data.subspan(5);
+            if (count > data.size())
+                throw std::runtime_error("List length exceeds the message");
+            decodeListElements(param, count, data);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::vector of strings, tuples or arrays expected");
+    }
+
     template <typename T>
     static void decodeTuple(T& param, std::span<const std::byte>& data) {
         if constexpr (is_tuple_v<T>) {
@@ -655,6 +782,13 @@ private:
                                          + " elements tuple but decoded tuple only has " + std::to_string(tupleSize) + " elements.");
             data = data.subspan(2);
             std::apply([&](auto&... tupleArgs) { ((decodeParameter(tupleArgs, data)), ...); }, param);
+        } else if constexpr (is_list_v<T>) {
+            // A JavaScript array that is not marked as a list arrives as a tuple of at most 255 elements.
+            if (data.size() < 2u)
+                throw std::runtime_error("Truncated tuple header");
+            const auto count = static_cast<size_t>(data[1]);
+            data = data.subspan(2);
+            decodeListElements(param, count, data);
         } else
             throw std::runtime_error("Wrong parameter type : std::tuple expected");
     }

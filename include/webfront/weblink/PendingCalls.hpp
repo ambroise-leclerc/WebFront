@@ -1,5 +1,6 @@
 /// @brief Shared correlation state for future and sender based browser calls.
 #pragma once
+#include "../BridgeError.hpp"
 #include "Messages.hpp"
 
 #include <cstddef>
@@ -16,6 +17,11 @@
 
 namespace webfront::detail {
 
+/// The error reported when the browser connection closed before a call completed.
+inline BridgeError disconnectedError(const std::string& message = "Browser connection closed") {
+    return BridgeError::fromBridge(bridge_code::disconnected, message);
+}
+
 template <http::BuffersPolicyType Policy>
 void checkReturnException(const msg::FunctionReturn<Policy>& result, std::span<const std::byte> payload) {
     if (result.getParametersCount() != 1)
@@ -24,11 +30,11 @@ void checkReturnException(const msg::FunctionReturn<Policy>& result, std::span<c
         return;
     if (static_cast<msg::CodedType>(payload.front()) != msg::CodedType::exception)
         return;
-    std::string message;
-    result.decodeParameter(message, payload);
+    std::string code, message;
+    msg::FunctionReturn<Policy>::decodeException(code, message, payload);
     if (!payload.empty())
         throw std::runtime_error("Malformed exception return payload");
-    throw std::runtime_error(message);
+    throw BridgeError::fromBridge(code, message);
 }
 
 template <http::BuffersPolicyType Policy>
@@ -48,14 +54,22 @@ Result decodeValueReturn(const msg::FunctionReturn<Policy>& result, std::span<co
     return value;
 }
 
+/// The result of a browser call. A rejection of the browser is a BridgeError with its code; a return that cannot be
+/// decoded as the expected type is a BridgeError with the `webfront.malformed` code.
 template <typename Result, http::BuffersPolicyType Policy>
 Result decodeReturn(const msg::FunctionReturn<Policy>& result) {
-    auto payload = result.payload();
-    checkReturnException(result, payload);
-    if constexpr (std::is_void_v<Result>)
-        return decodeVoidReturn(result, payload);
-    else
-        return decodeValueReturn<Result>(result, payload);
+    try {
+        auto payload = result.payload();
+        checkReturnException(result, payload);
+        if constexpr (std::is_void_v<Result>)
+            return decodeVoidReturn(result, payload);
+        else
+            return decodeValueReturn<Result>(result, payload);
+    } catch (const BridgeError&) {
+        throw;
+    } catch (const std::exception& error) {
+        throw BridgeError::fromBridge(bridge_code::malformed, error.what());
+    }
 }
 
 template <http::BuffersPolicyType Policy>
@@ -70,7 +84,7 @@ public:
     msg::CallId add(Call call) {
         std::lock_guard lock(mutex);
         if (closed)
-            throw std::runtime_error("Browser connection closed");
+            throw disconnectedError();
         for (std::size_t attempts = 0; attempts < std::numeric_limits<msg::CallId>::max(); ++attempts) {
             const auto candidate = takeNextId();
             if (pending.contains(candidate))

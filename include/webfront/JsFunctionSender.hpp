@@ -92,7 +92,7 @@ class BrowserCallSender {
                 return;
             auto calls = pending.lock();
             if (!calls)
-                throw std::runtime_error("Browser connection closed");
+                throw disconnectedError();
             auto self = this->shared_from_this();
             id        = calls->add({.complete =
                                         [self](const msg::FunctionReturn<Policy>& result) {
@@ -116,7 +116,7 @@ class BrowserCallSender {
             std::memcpy(payload.data() + offsetof(msg::FunctionCallHeader<msg::Command::callFunction>, callId), &id, sizeof(id));
             auto ws = socket.lock();
             if (!ws)
-                throw std::runtime_error("Browser connection closed");
+                throw disconnectedError();
             ws->write(websocket::Frame<Net>{std::span<const std::byte>(payload)});
         }
 

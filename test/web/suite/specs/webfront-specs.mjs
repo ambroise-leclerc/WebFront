@@ -95,6 +95,12 @@ let senderStopped;
 const senderCancelled = new Promise(resolve => { senderStopped = resolve; });
 let finishSlowSender;
 
+let finishListChecks;
+const listChecks = new Promise(resolve => { finishListChecks = resolve; });
+
+let finishErrorChecks;
+const errorChecks = new Promise(resolve => { finishErrorChecks = resolve; });
+
 let finishBitsetChecks;
 const bitsetChecks = new Promise(resolve => { finishBitsetChecks = resolve; });
 
@@ -120,6 +126,21 @@ globalThis.webfrontTests = {
     },
     bitsetChecksFinished(passed) { finishBitsetChecks(passed); },
     bitsetFutureChecksFinished(passed) { finishBitsetFutureChecks(passed); },
+    listEcho(value) {
+        if (!Array.isArray(value)) throw new Error('A C++ list must arrive as an array');
+        return globalThis.webFront.list(value);
+    },
+    recordsEcho(value) {
+        if (!Array.isArray(value) || !value.every(Array.isArray)) throw new Error('A C++ list of tuples must arrive as an array of arrays');
+        if (!(value[0][3] instanceof Uint8Array)) throw new Error('A record field must keep its typed array');
+        return globalThis.webFront.list(value);
+    },
+    heterogeneousList() { return globalThis.webFront.list(['text', 1]); },
+    rejectWithCode(code) {
+        return Promise.reject(Object.assign(new Error(`failure ${code}`), {code}));
+    },
+    errorChecksFinished(passed) { finishErrorChecks(passed); },
+    listChecksFinished(passed) { finishListChecks(passed); },
     senderValue(value) { return Promise.resolve(`sender:${value}`); },
     senderVoid() {},
     senderThrows() { return Promise.reject(new Error('sender browser failure')); },
@@ -171,6 +192,42 @@ describe('WebFront browser integration', () => {
         expect(Array.from(tuple[0])).toEqual([0x81, 1]); expect(tuple[1]).toBe(42);
         for (const value of [new Uint8Array([0, 2]), new Uint8Array(1), new Uint8Array(3), new Int8Array(2), '01'])
             await expectAsync(echo(value)).toBeRejected();
+    });
+
+    it('exchanges lists with C++ futures and senders, and refuses a heterogeneous one', async () => {
+        await expectAsync(listChecks).toBeResolvedTo(true);
+    });
+
+    it('receives lists of strings and of records from C++ callbacks', async () => {
+        expect(await webFront.cppFunction('listFromCpp')(0)).toEqual([]);
+        const many = await webFront.cppFunction('listFromCpp')(100000);
+        expect(many.length).toBe(100000);
+        expect(many[0]).toBe('entry-0');
+        expect(many[99999]).toBe('entry-99999');
+        expect(await webFront.cppFunction('pageFromCpp')()).toEqual([['a', 'b'], 'cursor']);
+    });
+
+    it('sends lists to C++ as marked lists, and short plain arrays as tuples C++ also accepts', async () => {
+        const echo = webFront.cppFunction('listEcho');
+        expect(await echo(webFront.list(['one', '', 'x'.repeat(70000)]))).toEqual(['one', '', 'x'.repeat(70000)]);
+        expect(await echo(webFront.list([]))).toEqual([]);
+        expect(await echo(['plain', 'array'])).toEqual(['plain', 'array']);
+        const big = Array.from({length: 300}, (_, index) => `item-${index}`);
+        expect(await echo(webFront.list(big))).toEqual(big);
+        const records = [['a.txt', 12.5, true, new Uint8Array([1, 2, 3])], ['b', 0, false, new Uint8Array(300)]];
+        const echoed = await webFront.cppFunction('recordsEcho')(webFront.list(records));
+        expect(echoed.map(record => record.slice(0, 3))).toEqual([['a.txt', 12.5, true], ['b', 0, false]]);
+        expect(Array.from(echoed[0][3])).toEqual([1, 2, 3]);
+        expect(echoed[1][3].length).toBe(300);
+    });
+
+    it('refuses to send a heterogeneous or nested list, and C++ refuses a wrong element type', async () => {
+        const echo = webFront.cppFunction('listEcho');
+        await expectAsync(echo(webFront.list(['text', 1]))).toBeRejectedWithError(TypeError, /not of one type/);
+        await expectAsync(echo(webFront.list([webFront.list(['a'])]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
+        await expectAsync(echo(webFront.list([[webFront.list(['a'])]]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
+        await expectAsync(echo(webFront.list([1, 2]))).toBeRejectedWithError(/wrong parameter type|Wrong parameter type/i);
+        await expectAsync(echo(webFront.list(['still', 'works']))).toBeResolvedTo(['still', 'works']);
     });
 
     it('resumes C++ coroutines with sender values, void completion and exceptions', async () => {
@@ -245,6 +302,33 @@ describe('WebFront browser integration', () => {
     it('returns successful C++ calls as promises', async () => {
         await expectAsync(webFront.cppFunction('returnFromCpp')('from-js'))
             .toBeResolvedTo('cpp-result:from-js');
+    });
+
+    it('rejects with the code of the failure: application, generic and reserved', async () => {
+        const denied = await webFront.cppFunction('throwCodedFromCpp')().then(() => null, error => error);
+        expect(denied instanceof Error).toBeTrue();
+        expect(denied.code).toBe('denied');
+        expect(denied.message).toBe('the user said no');
+        const plain = await webFront.cppFunction('throwFromCpp')().then(() => null, error => error);
+        expect(plain.code).toBe('webfront.error');
+        const missing = await webFront.cppFunction('missingCppFunction')().then(() => null, error => error);
+        expect(missing.code).toBe('webfront.notFound');
+        const malformed = await webFront.cppFunction('integerInCpp')(NaN).then(() => null, error => error);
+        expect(malformed.code).toBe('webfront.malformed');
+        const mistyped = await webFront.cppFunction('integerInCpp')('text').then(() => null, error => error);
+        expect(mistyped.code).toBe('webfront.malformed');
+    });
+
+    it('reports to C++ the code of a rejection, and refuses a reserved code from the application', async () => {
+        await expectAsync(errorChecks).toBeResolvedTo(true);
+    });
+
+    it('rejects a call on a bridge that is not connected with the disconnected code', async () => {
+        const url = await webFront.cppFunction('rejectedWebSocketUrl')();
+        const failingBridge = new WebFrontBridge(url);
+        await failingBridge.ready.catch(() => {});
+        const error = await failingBridge.cppFunction('returnFromCpp')('x').then(() => null, failure => failure);
+        expect(error.code).toBe('webfront.disconnected');
     });
 
     it('rejects missing functions and C++ exceptions', async () => {
