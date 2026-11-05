@@ -227,7 +227,7 @@ describe('WebFront browser integration', () => {
 
     it('refuses to send a heterogeneous or nested list, and C++ refuses a wrong element type', async () => {
         const echo = webFront.cppFunction('listEcho');
-        await expectAsync(echo(webFront.list(['text', 1]))).toBeRejectedWithError(TypeError, /not of one type/);
+        await expectAsync(echo(webFront.list(['text', new Uint8Array(1)]))).toBeRejectedWithError(TypeError, /not of one type/);
         await expectAsync(echo(webFront.list([webFront.list(['a'])]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
         await expectAsync(echo(webFront.list([[webFront.list(['a'])]]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
         await expectAsync(echo(webFront.list([1, 2]))).toBeRejectedWithError(TypeError, /typed array/);
