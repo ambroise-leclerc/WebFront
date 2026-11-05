@@ -236,6 +236,24 @@ describe('WebFront browser integration', () => {
         await expectAsync(webFront.cppFunction('listEcho')(webFront.list(['still works']))).toBeResolvedTo(['still works']);
     });
 
+    it('refuses absurdly deep tuples in a list element at the limit, on sending and on receiving, without exhausting the stack', async () => {
+        // Sending: 200,000 nested arrays are refused at depth 33, long before the recursion could overflow.
+        const nest = levels => { let value = 'x'; for (let level = 0; level < levels; ++level) value = [value]; return value; };
+        await expectAsync(webFront.cppFunction('deepEcho')(webFront.list([nest(200000)])))
+            .toBeRejectedWithError(TypeError, /at most 32 deep/);
+        // Receiving: a list whose one element is 200,000 one-field tuples (2 bytes of header each) around a boolean.
+        const levels = 200000;
+        const bytes = new Uint8Array(5 + 2 * levels + 1);
+        const view = new DataView(bytes.buffer);
+        view.setUint8(0, 20);                                // list
+        view.setUint32(1, 1, webFront.littleEndian);         // one element
+        for (let level = 0; level < levels; ++level) { bytes[5 + 2 * level] = 18; bytes[6 + 2 * level] = 1; }  // tuple of one field
+        bytes[5 + 2 * levels] = 1;                           // booleanTrue
+        expect(() => webFront.decodeParameters(1, view)).toThrowError(TypeError, /at most 32 deep/);
+        expect(webFront.listElementDepth).toBeUndefined();   // the counter is restored whatever happened
+        await expectAsync(webFront.cppFunction('listEcho')(webFront.list(['still works']))).toBeResolvedTo(['still works']);
+    });
+
     it('refuses to send a heterogeneous or nested list, and C++ refuses a wrong element type', async () => {
         const echo = webFront.cppFunction('listEcho');
         await expectAsync(echo(webFront.list(['text', new Uint8Array(1)]))).toBeRejectedWithError(TypeError, /not of one type/);
