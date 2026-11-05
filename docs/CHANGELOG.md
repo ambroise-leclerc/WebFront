@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `Server::drain()` and `shutdown()` no longer throw `std::logic_error` while a route handler or file read is still running on a
+  server worker; the gzip tests drain with the retrying variant, and a read lifetime the clock cannot represent is refused (#469).
 - HTTP reads bound to the browser client (#469, ADR-020 rule 4). `app.addReadRoute(prefix, handler)` registers a route under
   `/webfront/services/` whose URLs are grants: `ui.grantRead(route, path, ReadOptions)` returns `prefix + token + "/" + path`
   (a 256-bit secret and an identifier, compared in constant time, reusable for byte ranges, revoked with the connection,

@@ -807,7 +807,18 @@ public:
         // of a cancelled task does, and the tasks awaiting a running job end when that job returns.
         routeWorker.stop();
         fileWorker.stop();
-        tasks.drain(ioContext);
+        // A task awaiting a job the workers are still running has no work in the context until that job returns: it is
+        // pending, not stalled. Only a scope that stays idle while the workers did nothing is reported (std::logic_error).
+        for (;;) {
+            const auto route = routeWorker.activity(), file = fileWorker.activity();
+            try {
+                tasks.drain(ioContext);
+                break;
+            } catch (const std::logic_error&) {
+                if (!route.busy && !file.busy && route == routeWorker.activity() && file == fileWorker.activity()) throw;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
         routeWorker.join();
         fileWorker.join();
     }

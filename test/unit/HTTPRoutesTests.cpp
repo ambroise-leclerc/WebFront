@@ -326,6 +326,27 @@ SCENARIO("A slow handler does not block the server context") {
     }
 }
 
+SCENARIO("Draining waits for a handler still running on the worker instead of reporting a stalled scope") {
+    Fixture fixture;
+    Router  server("127.0.0.1", "0");
+    std::atomic<bool> entered{false}, release{false};
+    auto route = server.addRoute("/webfront/services/files/", [&](const RouteRequest&) {
+        entered = true;
+        while (!release) std::this_thread::sleep_for(1ms);
+        return text("late");
+    });
+    send(get("/webfront/services/files/x"));
+    REQUIRE(waitFor([&] { return entered.load(); }));
+    WHEN("the server is stopped and drained while the handler has not returned") {
+        server.stop();
+        std::jthread finishing([&] {
+            std::this_thread::sleep_for(100ms);
+            release = true;
+        });
+        THEN("the drain waits for the handler and returns without an error") { REQUIRE_NOTHROW(server.drain()); }
+    }
+}
+
 namespace {
 // Peak resident set of the process in bytes, or 0 where it cannot be read.
 std::uint64_t peakResidentBytes() {
