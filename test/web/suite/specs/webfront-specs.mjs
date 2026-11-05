@@ -323,6 +323,23 @@ describe('WebFront browser integration', () => {
         expect(sent).toEqual([100]);
     });
 
+    it('still answers a C++ call whose rejection has a throwing code or message accessor', () => {
+        const sent = [];
+        const send = webFront.socket.send.bind(webFront.socket);
+        webFront.socket.send = buffer => { sent.push(new Uint8Array(buffer.slice(0))); };
+        const text = bytes => new TextDecoder().decode(bytes.subarray(10));
+        try {
+            const hostileCode = Object.defineProperty(new Error('visible'), 'code', {get() { throw new Error('getter'); }});
+            const hostileMessage = Object.defineProperty(new Error('x'), 'message', {get() { throw new Error('getter'); }});
+            const hostileString = {toString() { throw new Error('toString'); }};
+            for (const error of [hostileCode, hostileMessage, hostileString])
+                expect(() => webFront.sendFunctionError(0, error)).not.toThrow();
+        } finally { webFront.socket.send = send; }
+        expect(sent.length).toBe(3);
+        for (const frame of sent) expect(text(frame)).toContain('webfront.error');
+        expect(text(sent[0])).toContain('visible');
+    });
+
     it('rejects with the code of the failure: application, generic and reserved', async () => {
         const denied = await webFront.cppFunction('throwCodedFromCpp')().then(() => null, error => error);
         expect(denied instanceof Error).toBeTrue();

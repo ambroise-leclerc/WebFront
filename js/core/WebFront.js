@@ -170,12 +170,26 @@
     /// The code an exception is sent with: the `code` of an Error rejected by the application when it is well formed and not
     /// reserved, otherwise the generic code. A reserved code is kept only on an error of the bridge.
     function exceptionCode(error) {
-        const code = error !== null && typeof error === "object" ? error.code : undefined;
+        let code;
+        try {
+            code = error !== null && typeof error === "object" ? error.code : undefined;
+        } catch {
+            return BridgeCode.generic;  // a `code` accessor that throws must not leave the C++ call unanswered
+        }
         if (typeof code !== "string" || !validCode.test(code))
             return BridgeCode.generic;
         if (code.startsWith(reservedPrefix) && !bridgeErrors.has(error))
             return BridgeCode.generic;
         return code;
+    }
+
+    /// The text of a rejection, whatever the rejected value: a `message` accessor or a `toString` that throws gives a fixed text.
+    function exceptionText(error) {
+        try {
+            return error instanceof Error ? String(error.message) : String(error);
+        } catch {
+            return "JavaScript exception whose message cannot be read";
+        }
     }
 
     function isNonNegativeInteger(candidate) {
@@ -663,7 +677,7 @@
 
         /// Rejects the C++ call `callId` with the message and the code of `error` (the generic code when it has none or a reserved one).
         sendFunctionError(callId, error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = exceptionText(error);
             const code = new TextEncoder().encode(exceptionCode(error));
             const whole = new TextEncoder().encode(message);
             // A message longer than the 16-bit length, or than what the maximum message size leaves after the 8-byte header, the
