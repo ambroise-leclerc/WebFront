@@ -256,10 +256,9 @@ public:
 private:
     void onBinaryMessage(std::span<const std::byte> data) {
         const log::ContextScope context(linkContext());
-        // Log records reach connected browsers: a handshake carries the launch secret of an embedded view, so only its
-        // two header bytes are dumped.
-        const bool isHandshake = !data.empty() && static_cast<msg::Command>(data[0]) == msg::Command::handshake;
-        log::infoHex("onMessage(binary) :", isHandshake ? data.first(std::min(data.size(), sizeof(msg::Handshake))) : data);
+        // Log records reach connected browsers, and a message can carry a credential (the launch secret of a handshake, a
+        // read URL returned by a callback): only the command byte and the size are logged, never the payload.
+        log::info("onMessage(binary) : {} bytes, command {}", data.size(), data.empty() ? -1 : static_cast<int>(data[0]));
         if (data.empty()) {
             log::error("Received an empty WebFront message");
             return;

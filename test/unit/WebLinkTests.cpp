@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <future>
 #include <span>
 #include <string>
@@ -34,6 +35,15 @@ void browserHandshake() {
     msg::Handshake message;
     InjectableSocket::receive(clientFrame(span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())));
 }
+
+/// Runs its cleanup once, on request or at scope exit: a failing REQUIRE must not leave a sink that points into the test.
+struct LogRestore {
+    std::function<void()> cleanup;
+    ~LogRestore() { run(); }
+    void run() {
+        if (auto once = std::move(cleanup); once) { cleanup = nullptr; once(); }
+    }
+};
 
 template <typename Result>
 string futureError(future<Result>& result) {
@@ -429,4 +439,31 @@ SCENARIO("A writer resumes after a failed write reported the closure") {
         }
     }
     InjectableSocket::reset();
+}
+
+SCENARIO("WebLink never logs the payload of an incoming message") {
+    InjectableSocket::reset();
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
+    auto [callId, result] = link.expectResult<string>();
+
+    log::setLogLevel(log::Info);
+    string     logged;
+    std::mutex loggedMutex;
+    const auto sink = log::addSinks([&](string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += string(line) + "\n";
+    });
+    LogRestore restore_sink{[&] { log::removeSinks(sink); log::setLogLevel(log::Error); }};
+    auto response = returnMessage(callId, [](auto& message, auto& frame) {
+        const string value{"/webfront/services/files/0123456789abcdef.QQQQQQQQQQQQQQQQ/a.txt"};
+        message.encodeParameter(value, frame);
+        frame.freeze();
+    });
+    InjectableSocket::receive(response);
+    REQUIRE(result.get().starts_with("/webfront/services/files/"));
+    restore_sink.run();
+    std::scoped_lock lock{loggedMutex};
+    REQUIRE(logged.find("QQQQ") == string::npos);
+    REQUIRE(logged.find("51 51") == string::npos);
 }

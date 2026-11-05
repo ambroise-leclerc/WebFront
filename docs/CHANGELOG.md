@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- `Server::drain()` and `shutdown()` no longer throw `std::logic_error` while a route handler or file read is still running on a
+  server worker; the gzip tests drain with the retrying variant, and a read lifetime the clock cannot represent is refused (#469).
+- HTTP reads bound to the browser client (#469, ADR-020 rule 4). `app.addReadRoute(prefix, handler)` registers a route under
+  `/webfront/services/` whose URLs are grants: `ui.grantRead(route, path, ReadOptions)` returns `prefix + token + "/" + path`
+  (a 256-bit secret and an identifier, compared in constant time, reusable for byte ranges, revoked with the connection,
+  `app.revokeRead(url)` or an optional lifetime). After its handshake each connection receives a one-time secret through the
+  bridge (`wfBind.exchange`) and exchanges it by a same-origin `fetch` for a `wf-client-<port>-<id>` cookie (`HttpOnly`,
+  `SameSite=Strict`, `Path=/webfront/services/`) naming its browser client; `webFront.bound` resolves once the cookie is
+  held, or rejects with an explicit error when the browser refuses it, and bound reads then answer `403` without a fallback.
+  The tabs of a profile that present the cookie share one client; concurrent exchanges of a blank profile create two
+  coexisting cookies; cookies of forgotten clients are erased at a later exchange; a client is forgotten with its last
+  connection. A token without the cookie of the owning connection's client, or after that connection closed, or after a
+  restart, is refused without saying whether it exists. A transferable grant (token alone) needs a lifetime of at most
+  15 minutes. Every read answer carries `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+  `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff` and
+  `Cross-Origin-Resource-Policy: same-origin`; types outside the closed passive list (raster images, audio, video,
+  `text/plain`) are attachments; HTML, XML, JavaScript and WebAssembly are announced as `application/octet-stream`; SVG keeps
+  its type but downloads on navigation. The server logs a route flagged secret without the rest of its path. The transport is
+  declared, never deduced: only the view of an embedded frontend is local; any other connection (the system browser
+  included) is refused a grant unless `WebFrontConfig::remoteFileTransport` is `loopbackAttested` (refused at construction
+  unless the server listens on a literal loopback address: `localhost` is a name the host resolves, so it is not accepted), `encryptedByDeployment` (a tunnel under http://, so the cookie is not `Secure`), `httpsByDeployment` (a TLS proxy: the cookie is `Secure`) or `plaintextAccepted`.
+  The shared Jasmine suite covers the binding (cookie required, neutralizing headers, hostile HTML and SVG in frames, SVG by
+  `<img>`, `bound` rejecting on a failed connection); it passes under WKWebView. Qualification under CEF, WebView2, WebKitGTK
+  and the system browsers remains to be run in the corresponding CI jobs.
+
 - Embedded frontends: a connection proves it comes from the view (#453, ADR-020 rule 3). Each launch creates a random
   256-bit secret that the adapter gives to its own view at the start of every top-level document of the application's
   origin (WKWebView `WKUserScript`, WebView2 `AddScriptToExecuteOnDocumentCreated`, WebKitGTK `WebKitUserScript`, CEF

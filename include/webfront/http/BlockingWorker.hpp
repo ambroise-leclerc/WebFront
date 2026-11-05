@@ -3,6 +3,7 @@
 #include "../networking/Tasks.hpp"
 
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -55,6 +56,19 @@ public:
         }
         for (auto& thread : ending)
             if (thread.joinable()) thread.join();
+    }
+
+    /// Thread-safe. True while a job runs or is queued, and counts the completions: a changed `completions` between two
+    /// observations means a job ended in between. A job's continuation is posted before it is counted as ended, so
+    /// that an idle worker with the same count has nothing left to post to the context.
+    struct Activity {
+        bool          busy        = false;
+        std::uint64_t completions = 0;
+        bool operator==(const Activity&) const = default;
+    };
+    [[nodiscard]] Activity activity() const {
+        std::lock_guard lock(mutex);
+        return {running != 0 || !queue.empty(), completions};
     }
 
     struct Sender {
@@ -111,13 +125,15 @@ public:
     [[nodiscard]] Sender run(std::function<void()> work) { return {this, std::move(work)}; }
 
 private:
-    std::mutex              mutex;
+    mutable std::mutex      mutex;
     std::condition_variable changed;
     std::deque<Job*>        queue;
     bool                    stopping = false;
     std::vector<std::thread> threads;
     std::size_t             limit;
     std::size_t             idle = 0;
+    std::size_t             running = 0;      // jobs taken from the queue (or cancelled by a stop) and not yet ended
+    std::uint64_t           completions = 0;
 
     bool enqueue(Job* job) {
         {
@@ -139,6 +155,12 @@ private:
         return true;
     }
 
+    void finished(std::size_t count) noexcept {
+        std::lock_guard lock(mutex);
+        running -= count;
+        completions += count;
+    }
+
     void loop() noexcept {
         for (;;) {
             Job* job = nullptr;
@@ -150,16 +172,21 @@ private:
                 --idle;
                 if (stopping) {
                     cancelled.swap(queue);
+                    running += cancelled.size();
                 } else {
                     job = queue.front();
                     queue.pop_front();
+                    ++running;
                 }
             }
             if (job) {
                 job->run();
+                finished(1);
                 continue;
             }
+            const auto count = cancelled.size();
             for (auto* pending : cancelled) pending->cancel();
+            finished(count);
             return;
         }
     }

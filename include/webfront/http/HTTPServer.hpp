@@ -329,6 +329,10 @@ public:
     struct Entry {
         std::string  prefix;
         RouteHandler handler;
+        /// The path after the prefix carries a secret (a read token): the server never writes it to its logs.
+        bool         secretPath = false;
+        /// Applied to the answers the server generates for this route (405, 500), which never pass through the handler.
+        std::function<void(RouteReply&)> harden;
     };
 
 private:
@@ -377,10 +381,13 @@ public:
     ///        anything that would cover the protected "/WebFront.js" (ADR-002).
     /// @throws std::invalid_argument for a malformed prefix, an empty handler, or a prefix that contains
     ///         or is contained in a registered one.
-    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler) {
+    [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
         if (!handler) throw std::invalid_argument("A route needs a handler");
         if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
-        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler)});
+        // The log redaction recognizes the services space only: a secret route elsewhere could not be masked reliably.
+        if (secretPath && !prefix.starts_with("/webfront/services/"))
+            throw std::invalid_argument("A secret route must live under /webfront/services/, not '" + prefix + "'");
+        auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), secretPath, std::move(harden)});
         std::lock_guard lock(state->mutex);
         for (const auto& other : state->entries)
             if (other->prefix.starts_with(entry->prefix) || entry->prefix.starts_with(other->prefix))
@@ -411,6 +418,32 @@ private:
 };
 
 namespace routing {
+
+/// True when a request target may carry a read token (it names the services space): its text is then never logged,
+/// whether or not the target qualifies for route dispatch (a rejected target, an upgrade request...). The target is
+/// judged as the server and the file providers would read it: percent-decoded (twice, for a doubly encoded one),
+/// with backslashes as separators and empty or "." segments dropped, in any letter case.
+inline bool mentionsServices(std::string_view target) {
+    constexpr std::string_view marker = "webfront/services";
+    std::string                text(target.substr(0, target.find('?')));
+    for (int pass = 0; pass < 3; ++pass) {
+        std::string lowered;
+        lowered.reserve(text.size());
+        for (const char c : text) lowered += c == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::string normalized;
+        for (std::size_t from = 0; from <= lowered.size();) {
+            const auto end     = std::min(lowered.find('/', from), lowered.size());
+            const auto segment = std::string_view(lowered).substr(from, end - from);
+            if (!segment.empty() && segment != ".") normalized += (normalized.empty() ? "" : "/") + std::string(segment);
+            from = end + 1;
+        }
+        if (normalized.find(marker) != std::string::npos) return true;
+        auto decoded = uri::decode(lowered, false);
+        if (decoded == lowered) return false;
+        text = std::move(decoded);
+    }
+    return true;  // still encoded after three layers: nothing is worth showing
+}
 
 /// The path without empty and "." segments, so that "/a//b/./c" reaches the route of "/a/b/c" instead of falling
 /// through to the file providers, which would resolve it to the same file. A trailing slash is kept.
@@ -604,10 +637,11 @@ private:
         // The query is not part of the file name; it is cut before decoding, so "%3F" stays in the name.
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
         auto       requestUri = uri::decode(rawPath);
-        log::debug("Request uri - raw:'{}' decoded path:'{}'", uri, requestUri);
+        const bool secret = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
+        if (!secret) log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query
         if (!isSafePath(requestUri)) return {};
         auto requestPath = std::filesystem::path(requestUri).relative_path();
-        log::debug("  -> requestPath : {}", requestPath.string());
+        if (!secret) log::debug("  -> requestPath : {}", requestPath.string());
         if (!requestPath.has_filename()) requestPath /= "index.html";
         return requestPath;
     }
@@ -773,7 +807,18 @@ public:
         // of a cancelled task does, and the tasks awaiting a running job end when that job returns.
         routeWorker.stop();
         fileWorker.stop();
-        tasks.drain(ioContext);
+        // A task awaiting a job the workers are still running has no work in the context until that job returns: it is
+        // pending, not stalled. Only a scope that stays idle while the workers did nothing is reported (std::logic_error).
+        for (;;) {
+            const auto route = routeWorker.activity(), file = fileWorker.activity();
+            try {
+                tasks.drain(ioContext);
+                break;
+            } catch (const std::logic_error&) {
+                if (!route.busy && !file.busy && route == routeWorker.activity() && file == fileWorker.activity()) throw;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
         routeWorker.join();
         fileWorker.join();
     }
@@ -813,8 +858,8 @@ public:
     /// Answers the `GET` and `HEAD` requests under `prefix` with `handler` (see RouteTable::add for the
     /// prefix rules). The route lasts as long as the returned registration; it never masks the embedded
     /// `WebFront.js`, and takes precedence over the file providers. Thread-safe.
-    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler) {
-        return routes.add(std::move(prefix), std::move(handler));
+    [[nodiscard]] RouteTable::Registration addRoute(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
+        return routes.add(std::move(prefix), std::move(handler), secretPath, std::move(harden));
     }
 
     /// Called, on the context's thread, with the socket of a connection upgraded to a WebSocket.
@@ -895,7 +940,7 @@ private:
     // previous one was sent (back-pressure). A failure cannot change the status line already sent: it is
     // logged, and the caller closes the connection, which the client sees as a truncated body.
     networking::Task streamBody(BlockingWorker& worker, typename Net::Socket& socket, std::function<std::size_t(std::span<char>)> body,
-                                std::optional<std::uint64_t> length, std::string label) {
+                                std::optional<std::uint64_t> length, std::string label, bool secret = false) {
         try {
             std::vector<char> chunk(Policy::emissionBufferSize);
             std::uint64_t     sent = 0;
@@ -911,7 +956,9 @@ private:
             if (length && sent != *length) throw std::length_error("The body is shorter than announced");
         }
         catch (const std::exception& error) {
-            log::warn("{} ended its response early: {}", label, error.what());
+            // The message of a handler can quote the request path, which holds a token on a secret route.
+            if (secret) log::warn("{} ended its response early (the error is not logged)", label);
+            else log::warn("{} ended its response early: {}", label, error.what());
         }
         catch (...) {
             log::warn("{} ended its response early: unknown exception", label);
@@ -925,10 +972,22 @@ private:
         const bool head = request.method == Request::Method::Head;
         RouteReply reply;
         Response   response;
+        // The route's policy for the answers the server writes itself; the type and disposition stay those of the error page.
+        const auto sameHeader = [](std::string_view a, std::string_view b) {
+            return std::ranges::equal(a, b, [](char x, char y) { return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y)); });
+        };
+        const auto hardenError = [&] {
+            if (!match.route->harden) return;
+            RouteReply policy;
+            match.route->harden(policy);
+            for (auto& [name, value] : policy.headers)
+                if (!sameHeader(name, "Content-Type") && !sameHeader(name, "Content-Disposition")) response.headers.emplace_back(name, value);
+        };
         try {
             if (!head && request.method != Request::Method::Get) {
                 response = Response::getStatusResponse(Response::methodNotAllowed);
                 response.headers.emplace_back("Allow", "GET, HEAD");
+                hardenError();
             } else {
                 co_await networking::ex::continues_on(routeWorker.run([&] {
                     reply = match.route->handler(RouteRequest{request, match.path, match.query});
@@ -941,19 +1000,22 @@ private:
             }
         }
         catch (const std::exception& error) {
-            log::warn("Route {} failed: {}", match.route->prefix, error.what());
+            if (match.route->secretPath) log::warn("Route {} failed (the error is not logged: it may quote a secret)", match.route->prefix);
+            else log::warn("Route {} failed: {}", match.route->prefix, error.what());
             response = Response::getStatusResponse(Response::internalServerError);
+            hardenError();
             reply.body = nullptr;
         }
         catch (...) {
             log::warn("Route {} failed with an exception which is not a std::exception", match.route->prefix);
             response = Response::getStatusResponse(Response::internalServerError);
+            hardenError();
             reply.body = nullptr;
         }
         const bool streaming = !head && reply.body;  // the built-in 405 has no reply.body
         if (head) response.content.clear();  // an error page keeps its Content-Length; HEAD never has a body
         co_await Net::Send(socket, response.toBuffers<Net>());
-        if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix);
+        if (streaming) co_await streamBody(routeWorker, socket, std::move(reply.body), reply.contentLength, match.route->prefix, match.route->secretPath);
         socket.shutdown(Net::Socket::shutdown_both);
     }
 
@@ -963,6 +1025,7 @@ private:
         std::unique_ptr<fs::File> streamed;
         std::uint64_t streamOffset = 0, streamLength = 0;
         bool head = false;
+        bool servicesTarget = false;
         Response response;
         try {
             std::array<char, Policy::receptionBufferSize> buffer;
@@ -971,12 +1034,19 @@ private:
                 if (received == 0) co_return;  // the client closed the connection
                 request.parseSomeData(buffer.data(), buffer.data() + received);
             }
-            log::info("Received request {} on {}", request.getMethodName(), request.uri);
-            if (auto match = matchRoute(request)) {
+            auto match = matchRoute(request);
+            if (match && match->route->secretPath)
+                log::info("Received request {} on {}...", request.getMethodName(), match->route->prefix);  // the rest is a secret
+            else if (routing::mentionsServices(request.uri))
+                log::info("Received request {} on a services path (not logged)", request.getMethodName());
+            else
+                log::info("Received request {} on {}", request.getMethodName(), std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
+            if (match) {
                 co_await serveRoute(socket, std::move(request), std::move(*match));
                 co_return;
             }
             head = request.method == Request::Method::Head;
+            servicesTarget = routing::mentionsServices(request.uri);  // before the request is moved away
             auto prepared = requestHandler.prepareRequest(std::move(request));
             if (prepared.needsDecode) {
                 lease.emplace(co_await networking::ex::continues_on(
@@ -1007,7 +1077,8 @@ private:
             response.headers.emplace_back("Vary", "Accept-Encoding");
         }
         catch (const std::exception& error) {
-            log::warn("HTTP asset request failed: {}", error.what());
+            if (servicesTarget) log::warn("HTTP asset request on a services path failed (the error is not logged)");
+            else log::warn("HTTP asset request failed: {}", error.what());
             response = Response::getStatusResponse(Response::internalServerError);
         }
         catch (...) {

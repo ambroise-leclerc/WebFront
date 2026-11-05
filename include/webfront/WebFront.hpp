@@ -16,6 +16,7 @@
 #include "system/WindowsCompat.hpp"
 #include "Task.hpp"
 #include "UISubscribers.hpp"
+#include "ReadBinding.hpp"
 #include "ViewAssociation.hpp"
 #include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
@@ -165,6 +166,18 @@ public:
     /// consulted. False once the connection is gone.
     [[nodiscard]] bool isLocalClient() const {
         return webFront->isLocalClient(webLinkId, generation);
+    }
+
+    /// A read URL on `route` for this browser's connection: the page reads it with `<img>`, `<video>`, `fetch` or a
+    /// download; `path` is what the route's handler receives (ReadGrant::rest). Unless `options.transferable`, the URL
+    /// works only from the browser client of this connection and only while the connection is open; it stays valid for
+    /// repeated requests (byte ranges). Throws ReadRefused when the connection is gone, when it is not the view of an
+    /// embedded frontend and WebFrontConfig::remoteFileTransport was not declared, or when the options are unacceptable.
+    [[nodiscard]] std::string grantRead(const ReadRoute& route, std::string_view path, ReadOptions options = {}) const {
+        // A generation is only unique within its application: a route of another one would own the wrong connection.
+        if (route.binding().get() != webFront->readBinding.get())
+            throw ReadRefused("The read route belongs to another application");
+        return route.binding()->grant(generation, route.id(), route.prefix(), path, std::move(options));
     }
 
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
@@ -383,7 +396,109 @@ struct WebFrontConfig {
     /// not the view of an embedded frontend. This reintroduces a decision by address: it is unsafe on a shared machine
     /// and behind a local proxy or an SSH tunnel, which also arrive from the loopback. Off by default (ADR-020).
     bool                  trustLoopbackClients = false;
+    /// How the application declares that a connection other than the view of an embedded frontend (the system browser
+    /// among them) reaches it, which decides whether such a connection may read files (ADR-020 rule 3). Never deduced
+    /// from an address or a `Forwarded` header. `loopbackAttested` is refused at construction unless `address` is a
+    /// loopback address; the other declarations are the integrator's word, which WebFront does not verify.
+    RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
 };
+
+namespace detail {
+/// True when `address` parses as the IPv6 address ::1 in any spelling (::1, 0:0:0:0:0:0:0:1, 0::0001...).
+[[nodiscard]] inline bool isIPv6Loopback(std::string_view address) {
+    if (address.find(':') == std::string_view::npos)
+        return false;
+    const auto compress = address.find("::");
+    if (compress != std::string_view::npos && address.find("::", compress + 1) != std::string_view::npos)
+        return false;
+    const auto groups = [](std::string_view text, std::vector<unsigned>& out) {
+        while (!text.empty()) {
+            const auto colon = text.find(':');
+            const auto group = text.substr(0, colon);
+            if (group.empty() || group.size() > 4)
+                return false;
+            unsigned value = 0;
+            for (const char c : group) {
+                const unsigned digit = c >= '0' && c <= '9' ? static_cast<unsigned>(c - '0')
+                                       : c >= 'a' && c <= 'f' ? static_cast<unsigned>(c - 'a' + 10)
+                                       : c >= 'A' && c <= 'F' ? static_cast<unsigned>(c - 'A' + 10) : 16u;
+                if (digit > 15)
+                    return false;
+                value = value * 16 + digit;
+            }
+            out.push_back(value);
+            if (colon == std::string_view::npos)
+                break;
+            text.remove_prefix(colon + 1);
+            if (text.empty())
+                return false;  // a trailing single colon
+        }
+        return true;
+    };
+    std::vector<unsigned> head, tail;
+    if (compress == std::string_view::npos) {
+        if (!groups(address, head) || head.size() != 8)
+            return false;
+    } else {
+        if (!groups(address.substr(0, compress), head) || !groups(address.substr(compress + 2), tail) || head.size() + tail.size() > 7)
+            return false;
+    }
+    std::vector<unsigned> all = head;
+    all.insert(all.end(), 8 - head.size() - tail.size(), 0u);
+    all.insert(all.end(), tail.begin(), tail.end());
+    return all.size() == 8 && std::all_of(all.begin(), all.end() - 1, [](unsigned g) { return g == 0; }) && all.back() == 1;
+}
+
+/// True for the literal loopback addresses a server can be configured with: 127.x.y.z and ::1 in any spelling, bracketed or not.
+[[nodiscard]] inline bool isLoopbackName(std::string_view address) {
+    if (address.size() > 2 && address.front() == '[' && address.back() == ']')
+        address = address.substr(1, address.size() - 2);
+    // "localhost" is a name, resolved later by the server to whatever the host says: only literal addresses are verifiable here.
+    if (isIPv6Loopback(address))
+        return true;
+    if (!address.starts_with("127."))
+        return false;
+    // Four decimal octets of 0 to 255 without leading zeros: the string must read the same to every resolver (127.256.0.1 or
+    // 127.0.0.010 are not literal addresses, and a resolver could take them for names).
+    int      octets = 0;
+    unsigned value  = 0;
+    int      digits = 0;
+    bool     leadingZero = false;
+    for (const char c : address) {
+        if (c == '.') {
+            if (digits == 0)
+                return false;
+            ++octets;
+            value = 0;
+            digits = 0;
+            leadingZero = false;
+        } else if (c >= '0' && c <= '9') {
+            if (digits == 1 && leadingZero)
+                return false;
+            leadingZero = digits == 0 && c == '0';
+            value       = value * 10 + static_cast<unsigned>(c - '0');
+            if (++digits > 3 || value > 255)
+                return false;
+        } else {
+            return false;
+        }
+    }
+    return octets == 3 && digits > 0;
+}
+
+/// Refuses the configurations whose declaration WebFront can disprove, before anything is bound.
+inline const std::string& checkedAddress(const WebFrontConfig& config) {
+    if (config.remoteFileTransport == RemoteFileTransport::loopbackAttested && !isLoopbackName(config.address))
+        throw std::invalid_argument("remoteFileTransport::loopbackAttested needs a server that listens on the loopback only, not '" + config.address + "'");
+    return config.address;
+}
+
+/// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
+inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
+    checkedAddress(config);
+    return std::make_shared<ReadBinding>(config.remoteFileTransport);
+}
+}  // namespace detail
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
           frontend::FrontendType Frontend = frontend::DefaultFrontend>
@@ -398,7 +513,8 @@ public:
     BasicWF() : BasicWF(WebFrontConfig{}) {}
 
     explicit BasicWF(WebFrontConfig config)
-        : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
+        : readBinding(detail::makeReadBinding(config)),
+          httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
           httpAddress(config.address),
           httpPort(httpServer.port()),
           httpDocRoot(config.documentRoot),
@@ -434,6 +550,9 @@ public:
             }
             link->start();  // registered first: every event it dispatches finds it
         });
+        // The exchange of the binding secret for the client cookie; the secret is part of the path, so it is never logged.
+        readBinding->useNamespace(httpPort);
+        bindRoute = httpServer.addRoute(std::string(ReadBinding::bindPath), readBinding->exchangeHandler(), true);
     }
 
     // Preserved for source compatibility; binds all interfaces like it always has, unlike the
@@ -481,6 +600,29 @@ public:
      */
     [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler) {
         return httpServer.addRoute(std::move(prefix), std::move(handler));
+    }
+
+    /** @brief Registers a route whose URLs are read grants (UI::grantRead): `handler` is called only for a request that
+     * presents a valid token and, unless the grant is transferable, the cookie of the client of the connection that owns
+     * the grant (ADR-020, rule 4). Every answer is neutralized: `no-store`, `no-referrer`, `nosniff`, a sandboxing
+     * Content-Security-Policy, and an attachment disposition outside the passive types; HTML, XML, JavaScript and
+     * WebAssembly are announced as application/octet-stream. `prefix` is under "/webfront/services/" (the cookie's
+     * path) and is not "/webfront/services/bind/", which belongs to the exchange. Same rules as addRoute otherwise.
+     */
+    [[nodiscard]] ReadRoute addReadRoute(std::string prefix, ReadHandler handler) {
+        if (!handler)
+            throw std::invalid_argument("A read route needs a handler");
+        if (!prefix.starts_with(ReadBinding::servicesPath) || prefix.size() == ReadBinding::servicesPath.size() || prefix.starts_with(ReadBinding::bindPath))
+            throw std::invalid_argument("A read route lives under " + std::string(ReadBinding::servicesPath) + ", not under " + std::string(ReadBinding::bindPath));
+        auto id = automation::channel::nonce();  // this registration's identity: its grants work nowhere else
+        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true,
+                                                  [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
+        return ReadRoute{std::move(id), prefix, readBinding, std::move(registration)};
+    }
+
+    /// Revokes the read grant of a URL returned by UI::grantRead (or of its token); an unknown one is ignored.
+    void revokeRead(std::string_view urlOrToken) {
+        readBinding->revoke(urlOrToken);
     }
 
     /** @brief A sender completing on the server context once the duration has elapsed. co_await propagates the
@@ -809,6 +951,7 @@ private:
     }
 
     void releaseLinks() {
+        readBinding->shutdown();  // read URLs die with the application, and no grant is issued afterwards
         for (auto& [id, document] : domDocuments)
             document->close();
         domDocuments.clear();
@@ -830,7 +973,10 @@ private:
             .second;
     }
 
+    // Before the server: the routes' handlers use it, and the server drains them before it is destroyed.
+    std::shared_ptr<ReadBinding>                                             readBinding;
     http::Server<Net, Filesystem, Policy>                                    httpServer;
+    http::RouteTable::Registration                                           bindRoute;
     std::string                                                              httpAddress;
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
@@ -959,12 +1105,16 @@ private:
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
             case WebLinkEvent::Code::linked: {
+                std::optional<WebLinkGeneration> bindKey;
+                bool                             local = false;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.stage          = Connection::Stage::starting;
                         // Raised once, never lowered: the secret is judged at the single handshake WebLink dispatches.
                         found->second.viewAssociated = found->second.viewAssociated || detail::viewSecretMatches(viewSecret, event.text);
+                        bindKey                      = found->second.generation;
+                        local                        = found->second.viewAssociated;  // the only local transport (ADR-020, rule 3)
                     }
                 }
                 // Even when a handler throws: the browser must not keep collecting deferred sends.
@@ -976,22 +1126,35 @@ private:
                     }
                 } started{this, event.webLinkId};
                 const auto ui = uiOf(event.webLinkId);
+                if (bindKey) {
+                    // The page swaps this one-time secret for the cookie that binds its reads to its browser client.
+                    try {
+                        ui.jsFunction("wfBind.exchange")(readBinding->open(*bindKey, local));
+                    } catch (const std::exception& error) {
+                        log::error("The read binding could not be offered to a browser: {}", error.what());
+                    }
+                }
                 if (uiStartedHandler)
                     uiStartedHandler(ui);
                 uiSubscribers->notify(ui);
                 break;
             }
-            case WebLinkEvent::Code::closed:
+            case WebLinkEvent::Code::closed: {
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
+                std::optional<WebLinkGeneration> closedGeneration;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.closed = true;
                         found->second.deferred.clear();
+                        closedGeneration = found->second.generation;
                     }
                 }
+                // Outside linksMutex: dropping the grants destroys their contexts, whose destructors may use the application.
+                if (closedGeneration)
+                    readBinding->close(*closedGeneration);  // its read URLs stop working at once
                 if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
                     found->second->close();
                     domDocuments.erase(found);
@@ -1001,6 +1164,7 @@ private:
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
+            }
             case WebLinkEvent::Code::cppFunctionCalled: {
                 // Links are registered before they read, and released after their closure: the caller is registered.
                 const auto [link, generation] = linkAndGeneration(event.webLinkId);

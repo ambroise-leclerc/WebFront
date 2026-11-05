@@ -509,7 +509,7 @@ int run(const Options& options, Setup&& setup = {}) {
     };
     DriverDeadline deadlines{options.timeout};
     Outcome        outcome;
-    App            app{options.project, {.port = "0"}};
+    App            app{options.project, {.port = "0", .remoteFileTransport = webfront::RemoteFileTransport::loopbackAttested}};  // 127.0.0.1: the test pages are not the embedded view
     bool           commandStarted = false;
     app.cppFunction("wf.commandStarted", [&] {
         if (options.suite || std::exchange(commandStarted, true))

@@ -105,7 +105,13 @@
     }
 
     class WebFrontBridge {
-        constructor(url = `ws://${global.location.host}`) {
+        /// The WebSocket address of the page that serves this script: wss:// on an https:// page, where a browser blocks ws://
+        /// as mixed content.
+        static defaultUrl(location = global.location) {
+            return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
+        }
+
+        constructor(url = WebFrontBridge.defaultUrl()) {
             this.state = "uninitialized";
             this.littleEndian = false;
             this.nextCallId = 1;
@@ -120,6 +126,11 @@
             // gets its own independent settlement via .then()/.catch()/await on the same promise;
             // attaching a handler here doesn't consume or affect those.
             this.readyPromise.catch(() => {});
+            this.boundPromise = new Promise((resolve, reject) => {
+                this.resolveBound = resolve;
+                this.rejectBound = reject;
+            });
+            this.boundPromise.catch(() => {});
             this.socket = new WebSocket(url, "WebFront_0.1");
             this.socket.binaryType = "arraybuffer";
             this.socket.onopen = () => this.handshake();
@@ -128,6 +139,7 @@
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
                 const error = new Error(`WebFront connection closed: ${detail}`);
                 this.settleReadyRejected(error);
+                this.rejectBound(error);  // a no-op once settled
                 for (const pending of this.pendingCalls.values())
                     pending.reject(error);
                 this.pendingCalls.clear();
@@ -137,6 +149,7 @@
             this.socket.onerror = () => {
                 const error = new Error("WebFront connection failed");
                 this.settleReadyRejected(error);
+                this.rejectBound(error);
                 console.error("[WebFront socket error]", error);
             };
         }
@@ -145,6 +158,35 @@
         /// closes or fails before that. Does not reflect later disconnects; see pendingCalls/state.
         get ready() {
             return this.readyPromise;
+        }
+
+        /// Resolves once this browser client holds the cookie that binds the read URLs given to this page (ADR-020), and
+        /// rejects, with an explicit error, when the exchange fails or the browser refuses the cookie: bound reads
+        /// then fail, without falling back to the token alone. C++ starts it right after the handshake.
+        get bound() {
+            return this.boundPromise;
+        }
+
+        /// Exchanges the one-time secret received through the bridge for the cookie of this client, then checks that the
+        /// browser kept it. The secret is single use; the cookie is HttpOnly, so the page never reads it.
+        async bindClient(secret) {
+            // Absolute and pinned to the origin of the application: a <base href> in the page must never redirect the
+            // one-time secret to another host, and a redirect must never carry it away.
+            const base = global.location.origin + "/webfront/services/bind/";
+            const pinned = {credentials: "same-origin", mode: "same-origin", redirect: "error", cache: "no-store"};
+            try {
+                const exchange = await fetch(base + encodeURIComponent(secret), pinned);
+                if (!exchange.ok) throw new Error(`the server refused the exchange (HTTP ${exchange.status})`);
+                const client = exchange.headers.get("X-WebFront-Client");
+                if (!client) throw new Error("the server did not name the client");
+                const check = await fetch(base + "check/" + encodeURIComponent(client), pinned);
+                if (!check.ok) throw new Error("the browser refused the binding cookie");
+                this.resolveBound();
+            } catch (error) {
+                const failure = new Error(`WebFront could not bind this browser for reads: ${error.message || error}`);
+                this.rejectBound(failure);
+                console.error("[WebFront binding]", failure);
+            }
         }
 
         /// Rejects the initial-readiness promise at most once, and only while still waiting on the
@@ -267,6 +309,9 @@
         }
 
         executeFunction(name, args) {
+            // The exchange of the read binding belongs to the bridge that received the call, not to a global singleton.
+            if (name === "wfBind.exchange")
+                return this.bindClient(...args);
             const path = name.split(".");
             const member = path.pop();
             let context = global;

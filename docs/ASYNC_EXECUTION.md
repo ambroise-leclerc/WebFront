@@ -40,7 +40,10 @@ sleep until the operations finish, keeping their owners alive. It can therefore
 wait indefinitely for a non-cooperative operation, but does not spin or propagate
 a drain exception. Explicit `shutdown()` keeps reporting the error so its caller
 can complete the external operation and retry. An external completion in flight
-can also make the explicit no-work check report a pending join.
+can also make the explicit no-work check report a pending join. The server's own
+workers (route handlers, file reads) are not such an operation: `Server::drain()`
+(so `shutdown()`) waits while one of them runs or ended since the check, and reports
+the error only for a scope that stays idle while they did nothing.
 
 Low-level users constructing `WebSocket::create` or `WebLink` directly now pass
 an external `TaskScope&`. That scope and the context must outlive their tasks;
