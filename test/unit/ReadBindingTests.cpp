@@ -325,7 +325,7 @@ SCENARIO("A connection that is not the view of an embedded frontend reads only u
             REQUIRE(call(fixture.read, fixture.url(2), viewCookie).status == http::Response::ok);
         }
     }
-    for (const auto transport : {RemoteFileTransport::loopbackAttested, RemoteFileTransport::encryptedByDeployment, RemoteFileTransport::plaintextAccepted}) {
+    for (const auto transport : {RemoteFileTransport::loopbackAttested, RemoteFileTransport::encryptedByDeployment, RemoteFileTransport::httpsByDeployment, RemoteFileTransport::plaintextAccepted}) {
         GIVEN("the declared transport " << static_cast<int>(transport)) {
             Fixture fixture{transport};
             const auto bound  = fixture.bind(1, false);
@@ -335,8 +335,8 @@ SCENARIO("A connection that is not the view of an embedded frontend reads only u
                 REQUIRE(call(fixture.read, url, cookie, "X-Forwarded-Proto: https\r\nForwarded: for=127.0.0.1;proto=https\r\n").status == http::Response::ok);
                 REQUIRE(call(fixture.read, url).status == http::Response::forbidden);
             }
-            THEN("the cookie is Secure only when the deployment declares encryption") {
-                REQUIRE(headers(bound, "Set-Cookie").front().contains("; Secure") == (transport == RemoteFileTransport::encryptedByDeployment));
+            THEN("the cookie is Secure only when the browser is declared to use https://, not for an encrypted tunnel under http://") {
+                REQUIRE(headers(bound, "Set-Cookie").front().contains("; Secure") == (transport == RemoteFileTransport::httpsByDeployment));
             }
         }
     }

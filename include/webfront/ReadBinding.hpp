@@ -43,7 +43,8 @@ namespace webfront {
 enum class RemoteFileTransport {
     refused,                ///< Default: such a connection reads no file.
     loopbackAttested,       ///< The server listens on the loopback only (checked at configuration); the integrator attests no proxy or tunnel exposes it and the machine is not shared with untrusted users.
-    encryptedByDeployment,  ///< The deployment encrypts (TLS reverse proxy, encrypted tunnel): unverified. The binding cookie is `Secure`.
+    encryptedByDeployment,  ///< The deployment encrypts below HTTP (VPN, SSH or other tunnel) while the browser still uses http://: unverified. The cookie is not `Secure`, which a browser would refuse over http://.
+    httpsByDeployment,      ///< The browser reaches the application by https:// (TLS reverse proxy): unverified. The binding cookie is `Secure`.
     plaintextAccepted       ///< An isolated trusted network: unverified.
 };
 
@@ -473,7 +474,7 @@ private:
             id = automation::channel::nonce().substr(0, 16);
             Client created{.secret = automation::channel::nonce(), .connections = {}};
             std::string cookie = ownPrefix + id + "=" + created.secret + "; Path=" + std::string(servicesPath) + "; HttpOnly; SameSite=Strict";
-            if (transport == RemoteFileTransport::encryptedByDeployment)
+            if (transport == RemoteFileTransport::httpsByDeployment)
                 cookie += "; Secure";
             reply.headers.emplace_back("Set-Cookie", std::move(cookie));
             clients.emplace(id, std::move(created));

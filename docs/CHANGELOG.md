@@ -20,7 +20,7 @@
   its type but downloads on navigation. The server logs a route flagged secret without the rest of its path. The transport is
   declared, never deduced: only the view of an embedded frontend is local; any other connection (the system browser
   included) is refused a grant unless `WebFrontConfig::remoteFileTransport` is `loopbackAttested` (refused at construction
-  unless the server listens on the loopback), `encryptedByDeployment` (the cookie is then `Secure`) or `plaintextAccepted`.
+  unless the server listens on the loopback), `encryptedByDeployment` (a tunnel under http://, so the cookie is not `Secure`), `httpsByDeployment` (a TLS proxy: the cookie is `Secure`) or `plaintextAccepted`.
   The shared Jasmine suite covers the binding (cookie required, neutralizing headers, hostile HTML and SVG in frames, SVG by
   `<img>`, `bound` rejecting on a failed connection); it passes under WKWebView. Qualification under CEF, WebView2, WebKitGTK
   and the system browsers remains to be run in the corresponding CI jobs.
