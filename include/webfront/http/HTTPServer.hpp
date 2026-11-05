@@ -384,6 +384,9 @@ public:
     [[nodiscard]] Registration add(std::string prefix, RouteHandler handler, bool secretPath = false, std::function<void(RouteReply&)> harden = {}) {
         if (!handler) throw std::invalid_argument("A route needs a handler");
         if (!validPrefix(prefix)) throw std::invalid_argument("Invalid route prefix '" + prefix + "'");
+        // The log redaction recognizes the services space only: a secret route elsewhere could not be masked reliably.
+        if (secretPath && !prefix.starts_with("/webfront/services/"))
+            throw std::invalid_argument("A secret route must live under /webfront/services/, not '" + prefix + "'");
         auto entry = std::make_shared<Entry>(Entry{std::move(prefix), std::move(handler), secretPath, std::move(harden)});
         std::lock_guard lock(state->mutex);
         for (const auto& other : state->entries)
@@ -635,7 +638,7 @@ private:
         const auto rawPath    = std::string_view(uri).substr(0, uri.find('?'));
         auto       requestUri = uri::decode(rawPath);
         const bool secret = routing::mentionsServices(uri) || routing::mentionsServices(requestUri);
-        if (!secret) log::debug("Request uri - raw:'{}' decoded path:'{}'", uri, requestUri);
+        if (!secret) log::debug("Request path - raw:'{}' decoded:'{}'", rawPath, requestUri);  // never the query
         if (!isSafePath(requestUri)) return {};
         auto requestPath = std::filesystem::path(requestUri).relative_path();
         if (!secret) log::debug("  -> requestPath : {}", requestPath.string());
@@ -959,12 +962,15 @@ private:
         RouteReply reply;
         Response   response;
         // The route's policy for the answers the server writes itself; the type and disposition stay those of the error page.
+        const auto sameHeader = [](std::string_view a, std::string_view b) {
+            return std::ranges::equal(a, b, [](char x, char y) { return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y)); });
+        };
         const auto hardenError = [&] {
             if (!match.route->harden) return;
             RouteReply policy;
             match.route->harden(policy);
             for (auto& [name, value] : policy.headers)
-                if (name != "Content-Type" && name != "Content-Disposition") response.headers.emplace_back(name, value);
+                if (!sameHeader(name, "Content-Type") && !sameHeader(name, "Content-Disposition")) response.headers.emplace_back(name, value);
         };
         try {
             if (!head && request.method != Request::Method::Get) {
@@ -1023,7 +1029,7 @@ private:
             else if (routing::mentionsServices(request.uri))
                 log::info("Received request {} on a services path (not logged)", request.getMethodName());
             else
-                log::info("Received request {} on {}", request.getMethodName(), request.uri);
+                log::info("Received request {} on {}", request.getMethodName(), std::string_view(request.uri).substr(0, request.uri.find('?')));  // the query may quote a URL
             if (match) {
                 co_await serveRoute(socket, std::move(request), std::move(*match));
                 co_return;

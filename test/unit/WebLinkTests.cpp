@@ -36,6 +36,15 @@ void browserHandshake() {
     InjectableSocket::receive(clientFrame(span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())));
 }
 
+/// Runs its cleanup once, on request or at scope exit: a failing REQUIRE must not leave a sink that points into the test.
+struct LogRestore {
+    std::function<void()> cleanup;
+    ~LogRestore() { run(); }
+    void run() {
+        if (auto once = std::move(cleanup); once) { cleanup = nullptr; once(); }
+    }
+};
+
 template <typename Result>
 string futureError(future<Result>& result) {
     try {
@@ -445,6 +454,7 @@ SCENARIO("WebLink never logs the payload of an incoming message") {
         std::scoped_lock lock{loggedMutex};
         logged += string(line) + "\n";
     });
+    LogRestore restore_sink{[&] { log::removeSinks(sink); log::setLogLevel(log::Error); }};
     auto response = returnMessage(callId, [](auto& message, auto& frame) {
         const string value{"/webfront/services/files/0123456789abcdef.QQQQQQQQQQQQQQQQ/a.txt"};
         message.encodeParameter(value, frame);
@@ -452,8 +462,7 @@ SCENARIO("WebLink never logs the payload of an incoming message") {
     });
     InjectableSocket::receive(response);
     REQUIRE(result.get().starts_with("/webfront/services/files/"));
-    log::removeSinks(sink);
-    log::setLogLevel(log::Error);
+    restore_sink.run();
     std::scoped_lock lock{loggedMutex};
     REQUIRE(logged.find("QQQQ") == string::npos);
     REQUIRE(logged.find("51 51") == string::npos);

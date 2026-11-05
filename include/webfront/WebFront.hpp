@@ -449,11 +449,12 @@ namespace detail {
     return all.size() == 8 && std::all_of(all.begin(), all.end() - 1, [](unsigned g) { return g == 0; }) && all.back() == 1;
 }
 
-/// True for the textual loopback addresses a server can be configured with: 127.x.y.z, ::1, [::1] and localhost.
+/// True for the literal loopback addresses a server can be configured with: 127.x.y.z and ::1 in any spelling, bracketed or not.
 [[nodiscard]] inline bool isLoopbackName(std::string_view address) {
     if (address.size() > 2 && address.front() == '[' && address.back() == ']')
         address = address.substr(1, address.size() - 2);
-    if (lowerAscii(address) == "localhost" || isIPv6Loopback(address))
+    // "localhost" is a name, resolved later by the server to whatever the host says: only literal addresses are verifiable here.
+    if (isIPv6Loopback(address))
         return true;
     if (!address.starts_with("127."))
         return false;
@@ -473,6 +474,12 @@ inline const std::string& checkedAddress(const WebFrontConfig& config) {
         throw std::invalid_argument("remoteFileTransport::loopbackAttested needs a server that listens on the loopback only, not '" + config.address + "'");
     return config.address;
 }
+
+/// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
+inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
+    checkedAddress(config);
+    return std::make_shared<ReadBinding>(config.remoteFileTransport);
+}
 }  // namespace detail
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
@@ -488,7 +495,7 @@ public:
     BasicWF() : BasicWF(WebFrontConfig{}) {}
 
     explicit BasicWF(WebFrontConfig config)
-        : readBinding(std::make_shared<ReadBinding>((detail::checkedAddress(config), config.remoteFileTransport))),
+        : readBinding(detail::makeReadBinding(config)),
           httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
           httpAddress(config.address),
           httpPort(httpServer.port()),

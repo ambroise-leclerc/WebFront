@@ -44,6 +44,10 @@ l'application (`UI::isEmbeddedView()`), critère de « client local » des servi
 d'un script admis dans la vue, qui partage l'autorité du pont et pourrait le lire avant `WebFront.js`, ou le rejouer depuis une autre connexion tant que la page vit ; le navigateur
 système n'en reçoit aucun.
 
+Que le cookie de liaison des lectures HTTP (#469, ADR-020, règle 4) prouve seulement la possession d'un cookie par un client
+(un profil de navigateur) : il ne désigne pas une connexion et ne remplace pas le contrôle d'origine du pont. Une autre page
+de même origine et du même profil peut lire les URL de lecture, car elle partage déjà l'autorité du pont.
+
 ## Options écartées et motifs
 
 - Accepter toute origine par défaut : remplacé par le contrôle d’origine commun.

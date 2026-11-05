@@ -350,9 +350,9 @@ SCENARIO("A connection that is not the view of an embedded frontend reads only u
 }
 
 SCENARIO("A declaration of a loopback server is checked against the address it listens on", "[read-binding]") {
-    for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0::1", "::0001", "[0:0::1]", "localhost", "LocalHost"})
+    for (const auto* address : {"127.0.0.1", "127.1.2.3", "::1", "[::1]", "0:0:0:0:0:0:0:1", "0000:0000:0000:0000:0000:0000:0000:0001", "0::1", "::0001", "[0:0::1]"})
         THEN("'" << address << "' is a loopback address") { REQUIRE(detail::isLoopbackName(address)); }
-    for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "127.0.0.1.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
+    for (const auto* address : {"0.0.0.0", "::", "", "192.168.1.5", "10.0.0.1", "127.0.0", "127.0.0.1.5", "127.a.0.1", "127..0.1", "example.com", "localhost", "LocalHost", "127.0.0.1.", ":::1", "0:0:0:0:0:0:0:2", "1:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0:1", "::1::", "::12345", "::g"})
         THEN("'" << address << "' is not") { REQUIRE_FALSE(detail::isLoopbackName(address)); }
     THEN("loopbackAttested is refused for a server that listens elsewhere, and accepted on the loopback") {
         REQUIRE_THROWS_AS(detail::checkedAddress(WebFrontConfig{.address = "0.0.0.0", .remoteFileTransport = RemoteFileTransport::loopbackAttested}),
@@ -451,6 +451,15 @@ SCENARIO("Read responses neutralize active content", "[read-binding]") {
 
 namespace {
 
+/// Runs its cleanup once, on request or at scope exit: a failing REQUIRE must not leave a sink that points into the test.
+struct LogRestore {
+    std::function<void()> cleanup;
+    ~LogRestore() { run(); }
+    void run() {
+        if (auto once = std::move(cleanup); once) { cleanup = nullptr; once(); }
+    }
+};
+
 struct NoFiles {
     static inline std::list<std::string_view> names{};
 };
@@ -494,14 +503,14 @@ SCENARIO("The server never writes a read token to its logs", "[read-binding]") {
         std::scoped_lock lock{loggedMutex};
         logged += std::string(line) + "\n";
     });
+    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
     std::string raw = "GET " + url + " HTTP/1.1\r\nHost: localhost\r\nCookie: " + cookie + "\r\n\r\n";
     std::vector<std::byte> bytes;
     for (const char c : raw)
         bytes.push_back(static_cast<std::byte>(c));
     testing::InjectableSocket::receive(bytes);
     REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    webfront::log::removeSinks(sink);
-    webfront::log::setLogLevel(webfront::log::Error);
+    restore_sink.run();
 
     THEN("the response is the neutralized read, and no log line holds the token") {
         const auto response = testing::InjectableSocket::writtenText();
@@ -528,6 +537,7 @@ SCENARIO("A rejected or upgraded services target is not logged either", "[read-b
         std::scoped_lock lock{loggedMutex};
         logged += std::string(line) + "\n";
     });
+    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
     // "report..txt" makes the target unfit for route dispatch: it falls to the file providers.
     const std::string raw = "GET /webfront/services/files/0123456789abcdef.TOKENSECRET/report..txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
     std::vector<std::byte> bytes;
@@ -535,8 +545,7 @@ SCENARIO("A rejected or upgraded services target is not logged either", "[read-b
         bytes.push_back(static_cast<std::byte>(c));
     testing::InjectableSocket::receive(bytes);
     REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    webfront::log::removeSinks(sink);
-    webfront::log::setLogLevel(webfront::log::Error);
+    restore_sink.run();
     // The same target spelled with an encoded first letter and doubled separators.
     testing::InjectableSocket::reset();
     ReadNet::accepts = 0;
@@ -550,10 +559,10 @@ SCENARIO("A rejected or upgraded services target is not logged either", "[read-b
         std::scoped_lock lock{loggedMutex};
         logged += std::string(line) + "\n";
     });
+    LogRestore restore_encodedSink{[&] { webfront::log::removeSinks(encodedSink); webfront::log::setLogLevel(webfront::log::Error); }};
     testing::InjectableSocket::receive(encodedBytes);
     REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    webfront::log::removeSinks(encodedSink);
-    webfront::log::setLogLevel(webfront::log::Error);
+    restore_encodedSink.run();
     std::scoped_lock lock{loggedMutex};
     THEN("no log line holds the encoded token either") {
         REQUIRE_FALSE(logged.contains("ENCODEDSECRET"));
@@ -627,14 +636,14 @@ SCENARIO("A frame never logs the bytes of its payload", "[read-binding]") {
     webfront::log::setLogLevel(webfront::log::Debug);
     std::string logged;
     const auto  sink = webfront::log::addSinks([&](std::string_view line) { logged += std::string(line) + "\n"; });
+    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
     const std::string      secret(64, 'q');
     std::vector<std::byte> bytes;
     for (const char c : secret)
         bytes.push_back(static_cast<std::byte>(c));
     websocket::Frame<ReadNet> frame{std::string_view{}};
     frame.addBuffer(bytes);
-    webfront::log::removeSinks(sink);
-    webfront::log::setLogLevel(webfront::log::Error);
+    restore_sink.run();
     REQUIRE_FALSE(logged.contains("qqqq"));
     REQUIRE_FALSE(logged.contains("71 71"));
 }
@@ -754,14 +763,14 @@ SCENARIO("The error of a failing secret route is not logged", "[read-binding]") 
         std::scoped_lock lock{loggedMutex};
         logged += std::string(line) + "\n";
     });
+    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
     const std::string      raw = "GET " + std::string(readPrefix) + "0123456789abcdef.TOKENSECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
     std::vector<std::byte> bytes;
     for (const char c : raw)
         bytes.push_back(static_cast<std::byte>(c));
     testing::InjectableSocket::receive(bytes);
     REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    webfront::log::removeSinks(sink);
-    webfront::log::setLogLevel(webfront::log::Error);
+    restore_sink.run();
     std::scoped_lock lock{loggedMutex};
     REQUIRE(logged.contains("failed"));
     REQUIRE_FALSE(logged.contains("TOKENSECRET"));
@@ -783,7 +792,7 @@ SCENARIO("The answers the server writes for a read route are hardened too", "[re
         REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
         const auto response = testing::InjectableSocket::writtenText();
         THEN(std::string(method) + " is refused with the hardening headers") {
-            REQUIRE((response.starts_with("HTTP/1.1 500") || response.starts_with("HTTP/1.1 405")));
+            REQUIRE(response.starts_with(std::string_view(method) == "GET" ? "HTTP/1.1 500" : "HTTP/1.1 405"));
             REQUIRE(response.contains("Cache-Control: no-store\r\n"));
             REQUIRE(response.contains("Referrer-Policy: no-referrer\r\n"));
             REQUIRE(response.contains("Content-Security-Policy: sandbox; default-src 'none'\r\n"));
@@ -814,6 +823,7 @@ SCENARIO("A file provider that fails on a services target does not log the token
         std::scoped_lock lock{loggedMutex};
         logged += std::string(line) + "\n";
     });
+    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
     // No route is registered: the target falls to the file providers, which throw.
     const std::string      raw = "GET /webfront/services/files/0123456789abcdef.PROVIDERSECRET/a.txt HTTP/1.1\r\nHost: localhost\r\n\r\n";
     std::vector<std::byte> bytes;
@@ -821,10 +831,43 @@ SCENARIO("A file provider that fails on a services target does not log the token
         bytes.push_back(static_cast<std::byte>(c));
     testing::InjectableSocket::receive(bytes);
     REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
-    webfront::log::removeSinks(sink);
-    webfront::log::setLogLevel(webfront::log::Error);
+    restore_sink.run();
     std::scoped_lock lock{loggedMutex};
     REQUIRE(logged.contains("failed"));
     REQUIRE_FALSE(logged.contains("PROVIDERSECRET"));
+    testing::InjectableSocket::reset();
+}
+
+SCENARIO("A connection key opened twice starts over", "[read-binding]") {
+    Fixture fixture;
+    const auto stale  = fixture.binding.open(1, true);
+    const auto secret = fixture.binding.open(1, true);
+    REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + stale).status == http::Response::forbidden);
+    REQUIRE(call(fixture.exchange, std::string(ReadBinding::bindPath) + secret).status == http::Response::ok);
+}
+
+SCENARIO("A secret route lives under the services space and the query of a request is never logged", "[read-binding]") {
+    testing::InjectableSocket::reset();
+    ReadNet::accepts = 0;
+    http::Server<ReadNet, MockFileSystem<NoFiles>> server("127.0.0.1", "0");
+    REQUIRE_THROWS_AS(server.addRoute("/files/", [](const http::RouteRequest&) { return http::RouteReply{}; }, true), std::invalid_argument);
+    webfront::log::setLogLevel(webfront::log::Debug);
+    std::string logged;
+    std::mutex  loggedMutex;
+    const auto  sink = webfront::log::addSinks([&](std::string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += std::string(line) + "\n";
+    });
+    LogRestore restore_sink{[&] { webfront::log::removeSinks(sink); webfront::log::setLogLevel(webfront::log::Error); }};
+    const std::string      raw = "GET /viewer?file=%2Fwebfront%2Fservices%2Ffiles%2FQUERYSECRET%2Fdoc HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    std::vector<std::byte> bytes;
+    for (const char c : raw)
+        bytes.push_back(static_cast<std::byte>(c));
+    testing::InjectableSocket::receive(bytes);
+    REQUIRE(waitFor([] { return testing::InjectableSocket::shutdownCount() > 0; }));
+    restore_sink.run();
+    std::scoped_lock lock{loggedMutex};
+    REQUIRE(logged.contains("Received request GET on /viewer"));
+    REQUIRE_FALSE(logged.contains("QUERYSECRET"));
     testing::InjectableSocket::reset();
 }

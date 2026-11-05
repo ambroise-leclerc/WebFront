@@ -106,6 +106,11 @@ namespace detail {
     return cookies;
 }
 
+/// Letters and digits of ASCII only: std::isalnum depends on the locale and may accept other bytes.
+[[nodiscard]] constexpr bool asciiAlnum(unsigned char c) noexcept {
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
 /// How a read response is presented to the browser.
 struct ReadPresentation {
     std::string contentType;  ///< What is announced: an active type is announced as application/octet-stream.
@@ -147,7 +152,7 @@ struct ReadPresentation {
         const auto c = static_cast<unsigned char>(raw);
         const bool plain = c >= 0x20 && c < 0x7f && c != '"' && c != '\\' && c != ';' && c != '%' && c != '/';
         ascii += plain ? static_cast<char>(c) : '_';
-        if (std::isalnum(c) || std::string_view{"!#$&+-.^_`|~"}.contains(static_cast<char>(c))) {
+        if (asciiAlnum(c) || std::string_view{"!#$&+-.^_`|~"}.contains(static_cast<char>(c))) {
             encoded += static_cast<char>(c);
         } else {
             constexpr std::string_view digits = "0123456789ABCDEF";
@@ -224,9 +229,12 @@ public:
     /// that the page exchanges for its cookie.
     [[nodiscard]] std::string open(ConnectionKey key, bool local) {
         auto             secret = automation::channel::nonce();
+        Released         released;
         std::scoped_lock lock{mutex};
         if (stopped)
             return secret;  // nothing is registered: the exchange of this secret finds no connection
+        if (connections.contains(key))  // a key opened twice starts over: the old secret, client link and grants die
+            dropConnection(key, released);
         connections[key] = Connection{.local = local, .client = {}, .exchange = secret};
         exchanges[secret] = key;
         return secret;
@@ -249,17 +257,7 @@ public:
     void close(ConnectionKey key) {
         Released         released;
         std::scoped_lock lock{mutex};
-        const auto       found = connections.find(key);
-        if (found == connections.end())
-            return;
-        exchanges.erase(found->second.exchange);
-        if (const auto client = clients.find(found->second.client); client != clients.end()) {
-            client->second.connections.erase(key);
-            if (client->second.connections.empty())
-                clients.erase(client);
-        }
-        connections.erase(found);
-        detach([key](const auto& grant) { return grant.second.owner == key; }, released);
+        dropConnection(key, released);
     }
 
     /// Gives a read URL to the connection `key`: `prefix` is the route's, `rest` the path under the token (it is
@@ -396,7 +394,7 @@ private:
         std::string encoded;
         for (const char raw : path) {
             const auto c = static_cast<unsigned char>(raw);
-            if (std::isalnum(c) || c == '/' || std::string_view{"-._~"}.contains(static_cast<char>(c))) {
+            if (detail::asciiAlnum(c) || c == '/' || std::string_view{"-._~"}.contains(static_cast<char>(c))) {
                 encoded += static_cast<char>(c);
             } else {
                 constexpr std::string_view digits = "0123456789ABCDEF";
@@ -406,6 +404,21 @@ private:
             }
         }
         return encoded;
+    }
+
+    /// Forgets a connection, its one-time secret, its place in its client and its grants. Caller holds the lock.
+    void dropConnection(ConnectionKey key, Released& released) {
+        const auto found = connections.find(key);
+        if (found == connections.end())
+            return;
+        exchanges.erase(found->second.exchange);
+        if (const auto client = clients.find(found->second.client); client != clients.end()) {
+            client->second.connections.erase(key);
+            if (client->second.connections.empty())
+                clients.erase(client);
+        }
+        connections.erase(found);
+        detach([key](const auto& grant) { return grant.second.owner == key; }, released);
     }
 
     /// Drops the expired grants and their contexts, whether or not their tokens are ever presented again. Caller holds the lock.
