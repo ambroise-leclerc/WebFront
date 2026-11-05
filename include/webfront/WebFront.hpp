@@ -1049,7 +1049,7 @@ private:
         if (key == 0) {
             // The connection closed, or the browser reused the identifier of a call that is still running.
             if (callId != 0)
-                link.sendError(callId, calls ? "The call identifier is already in use" : "Browser connection closed",
+                link.sendBridgeError(callId, calls ? "The call identifier is already in use" : "Browser connection closed",
                                calls ? bridge_code::malformed : bridge_code::disconnected);
             return;
         }
