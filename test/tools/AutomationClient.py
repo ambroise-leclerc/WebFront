@@ -315,9 +315,12 @@ def watchdog(args):
                     if args.scenario == "mcp-watchdog":
                         connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
                         assert len(connect) == 1
-                        # A bridge RangeError consumes a JS sequence without reaching native code.
+                        # A bridge RangeError (a message past the bridge's maximum, lowered for this call) consumes a JS
+                        # sequence without reaching native code.
                         data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
-                                 b"=context=>{void context.call('poll','x'.repeat(65536)).then(()=>window.close(),()=>beforeGap(context));};")
+                                 b"=context=>{const limit=context.bridge.maxMessageBytes;context.bridge.maxMessageBytes=70000;"
+                                 b"void context.call('poll','x'.repeat(70000)).then(()=>window.close(),"
+                                 b"()=>{context.bridge.maxMessageBytes=limit;beforeGap(context);});};")
                         # Only this startup test needs a delay longer than the operation's two-second deadline.
                         data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
                     member.size = len(data)
