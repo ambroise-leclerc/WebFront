@@ -200,11 +200,14 @@ describe('WebFront browser integration', () => {
 
     it('receives lists of strings and of records from C++ callbacks', async () => {
         expect(await webFront.cppFunction('listFromCpp')(0)).toEqual([]);
-        const many = await webFront.cppFunction('listFromCpp')(100000);
-        expect(many.length).toBe(100000);
+        const many = await webFront.cppFunction('listFromCpp')(3000);
+        expect(many.length).toBe(3000);
         expect(many[0]).toBe('entry-0');
-        expect(many[99999]).toBe('entry-99999');
+        expect(many[2999]).toBe('entry-2999');
         expect(await webFront.cppFunction('pageFromCpp')()).toEqual([['a', 'b'], 'cursor']);
+        // The headers of the elements share the policy's 32 KiB buffer: a longer list is rejected explicitly, not truncated.
+        const tooMany = await webFront.cppFunction('listFromCpp')(100000).then(() => null, error => error);
+        expect(tooMany.message).toMatch(/encode buffer overflow/);
     });
 
     it('sends lists to C++ as marked lists, and short plain arrays as tuples C++ also accepts', async () => {
