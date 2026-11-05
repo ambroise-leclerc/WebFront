@@ -9,6 +9,12 @@
 
 namespace webfront {
 
+class BridgeError;
+namespace detail {
+/// Builds an error of the bridge itself, with a reserved code. For WebFront's own use: not part of the public API.
+[[nodiscard]] BridgeError makeBridgeError(std::string_view code, const std::string& message);
+}  // namespace detail
+
 /// Codes the bridge itself reports. They all start with `webfront.`, a prefix an application cannot use.
 namespace bridge_code {
 /// An exception that carries no code of its own (a `std::exception` thrown by a callback, a JavaScript `Error` without `code`).
@@ -63,17 +69,19 @@ public:
         return code.starts_with(reservedPrefix);
     }
 
-    /// An error of the bridge itself, whose code is one of bridge_code; also rebuilds the error a peer reported. A code that is
-    /// ill-formed (a peer is not trusted) becomes the generic one.
-    [[nodiscard]] static BridgeError fromBridge(std::string_view code, const std::string& message) {
-        return BridgeError(Bridge{}, isValidCode(code) ? std::string(code) : std::string(bridge_code::generic), message);
-    }
-
 private:
+    friend BridgeError detail::makeBridgeError(std::string_view, const std::string&);
     struct Bridge {};
     BridgeError(Bridge, std::string errorCode, const std::string& message) : std::runtime_error(message), codeText(std::move(errorCode)) {}
 
     std::string codeText;
 };
+
+namespace detail {
+/// A code that is ill-formed (a peer is not trusted) becomes the generic one.
+[[nodiscard]] inline BridgeError makeBridgeError(std::string_view code, const std::string& message) {
+    return BridgeError(BridgeError::Bridge{}, BridgeError::isValidCode(code) ? std::string(code) : std::string(bridge_code::generic), message);
+}
+}  // namespace detail
 
 }  // namespace webfront

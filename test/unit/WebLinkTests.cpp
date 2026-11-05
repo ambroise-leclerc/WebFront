@@ -166,7 +166,7 @@ SCENARIO("A browser rejection reaches C++ with its code") {
     GIVEN("a pending call the browser rejects with a code of the bridge") {
         auto [callId, result] = link.expectResult<void>();
         InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
-            const auto error = BridgeError::fromBridge(bridge_code::notFound, "JavaScript function 'x' was not found");
+            const auto error = detail::makeBridgeError(bridge_code::notFound, "JavaScript function 'x' was not found");
             message.encodeParameter(error, frame);
             frame.freeze();
         }));

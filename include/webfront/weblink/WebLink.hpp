@@ -330,7 +330,7 @@ public:
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-        const auto error = BridgeError::fromBridge(code, std::string(message));
+        const auto error = detail::makeBridgeError(code, std::string(message));
         result.encodeParameter(error, frame);
         frame.freeze();
         sendFrame(std::move(frame));

@@ -19,7 +19,7 @@ namespace webfront::detail {
 
 /// The error reported when the browser connection closed before a call completed.
 inline BridgeError disconnectedError(const std::string& message = "Browser connection closed") {
-    return BridgeError::fromBridge(bridge_code::disconnected, message);
+    return detail::makeBridgeError(bridge_code::disconnected, message);
 }
 
 template <http::BuffersPolicyType Policy>
@@ -34,7 +34,7 @@ void checkReturnException(const msg::FunctionReturn<Policy>& result, std::span<c
     msg::FunctionReturn<Policy>::decodeException(code, message, payload);
     if (!payload.empty())
         throw std::runtime_error("Malformed exception return payload");
-    throw BridgeError::fromBridge(code, message);
+    throw detail::makeBridgeError(code, message);
 }
 
 template <http::BuffersPolicyType Policy>
@@ -68,7 +68,7 @@ Result decodeReturn(const msg::FunctionReturn<Policy>& result) {
     } catch (const BridgeError&) {
         throw;
     } catch (const std::exception& error) {
-        throw BridgeError::fromBridge(bridge_code::malformed, error.what());
+        throw detail::makeBridgeError(bridge_code::malformed, error.what());
     }
 }
 
