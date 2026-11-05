@@ -59,7 +59,10 @@ le régulier sont une forme), même arité et mêmes formes de champs pour les t
 décodant chaque élément dans le type de la destination ; le décodeur et l'encodeur JavaScript comparent les formes. Les
 **listes ne s'imbriquent pas**, ni directement ni dans un tuple élément : un `std::vector<std::vector<std::string>>`
 est refusé à la compilation, une telle liste reçue ou envoyée par JavaScript est rejetée ; une liste dans un tuple de
-premier niveau (une page de résultats et son curseur) est permise. Un élément ne peut pas être une exception.
+premier niveau (une page de résultats et son curseur) est permise. Un élément ne peut pas être une exception. Les tuples s'imbriquent sur **32 niveaux au plus** dans un élément de liste, dans
+les deux codecs : le décodeur C++ et le codec JavaScript refusent le 33e niveau, l'encodeur C++ le refuse à la compilation
+(`maxListTupleDepth`) et l'encodeur JavaScript par une `TypeError` ; la borne protège la pile, que les décodeurs récursifs
+parcourent.
 Bornes : la taille de message ; un nombre d'éléments supérieur au nombre d'octets restants est rejeté avant toute
 allocation ; une liste tronquée ou hétérogène est rejetée. L'encodeur C++ place l'en-tête de chaque élément dans le
 tampon de la politique (`functionCallBufferSize`, 32 Kio par défaut, soit de 10 000 à 16 000 chaînes) : une liste plus

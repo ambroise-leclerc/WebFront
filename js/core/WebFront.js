@@ -121,10 +121,21 @@
         }
     }
 
-    /// A list element is neither a list nor a tuple holding one: their shapes contain "L".
+    /// Tuples nest at most this deep inside a list element, as in the C++ codec (ADR-003).
+    const maxListTupleDepth = 32;
+
+    /// A list element is neither a list nor a tuple holding one (their shapes contain "L"), and nests tuples at most
+    /// maxListTupleDepth deep (the parentheses of its shape).
     function requireListElementShape(shape) {
         if (shape.includes("L"))
             throw new TypeError("WebFront lists cannot contain lists");
+        let depth = 0;
+        for (const character of shape) {
+            if (character === "(" && ++depth > maxListTupleDepth)
+                throw new TypeError(`WebFront list elements nest tuples at most ${maxListTupleDepth} deep`);
+            else if (character === ")")
+                --depth;
+        }
     }
 
     function isTypedArray(value) {

@@ -225,6 +225,17 @@ describe('WebFront browser integration', () => {
         expect(echoed[1][3].length).toBe(300);
     });
 
+    it('accepts tuples nested 32 deep in a list element, in both codecs, and refuses 33', async () => {
+        const nest = levels => { let value = 'x'; for (let level = 0; level < levels; ++level) value = [value]; return value; };
+        const depthOf = value => { let depth = 0; while (Array.isArray(value)) { value = value[0]; ++depth; } return depth; };
+        const echoed = await webFront.cppFunction('deepEcho')(webFront.list([nest(32)]));
+        expect(echoed.length).toBe(1);
+        expect(depthOf(echoed[0])).toBe(32);
+        await expectAsync(webFront.cppFunction('deepEcho')(webFront.list([nest(33)])))
+            .toBeRejectedWithError(TypeError, /at most 32 deep/);
+        await expectAsync(webFront.cppFunction('listEcho')(webFront.list(['still works']))).toBeResolvedTo(['still works']);
+    });
+
     it('refuses to send a heterogeneous or nested list, and C++ refuses a wrong element type', async () => {
         const echo = webFront.cppFunction('listEcho');
         await expectAsync(echo(webFront.list(['text', new Uint8Array(1)]))).toBeRejectedWithError(TypeError, /not of one type/);
