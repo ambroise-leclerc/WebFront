@@ -245,7 +245,7 @@ auto makeCppFunctionHandler(Function&& function) {
 }
 
 /// Like makeCppFunctionHandler for a callback that answers later: it returns the sender of the callback, which owns the decoded
-/// arguments (they live in its operation state). A callback that takes them by reference, a coroutine for instance, can thus
+/// arguments and the calling UI (they live in its operation state). A callback that takes them by reference, a coroutine for instance, can thus
 /// use them until it completes, long after this handler returned.
 template <http::BuffersPolicyType Policy, typename... Args, typename Function>
 auto makeDeferredHandler(Function&& function) {
@@ -253,17 +253,22 @@ auto makeDeferredHandler(Function&& function) {
     auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
 
     return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) {
-        auto parameters = std::make_shared<std::tuple<Args...>>();
+        // The caller (the calling UI) is kept with the arguments, as a copy: a callback taking it by reference lives as long as them.
+        using State = std::pair<std::tuple<std::decay_t<decltype(caller)>...>, std::tuple<Args...>>;
+        auto state  = std::make_shared<State>(std::tuple<std::decay_t<decltype(caller)>...>{caller...}, std::tuple<Args...>{});
         try {
-            std::apply([&](auto&... decoded) { (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...); }, *parameters);
+            std::apply([&](auto&... decoded) { (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...); }, state->second);
             if (!data.empty())
                 throw std::runtime_error("Function call contains trailing parameter data");
         } catch (const std::exception& error) {
             throw detail::makeBridgeError(bridge_code::malformed, error.what());
         }
-        auto sender = std::apply([&](auto&... decoded) { return std::invoke(*callable, caller..., decoded...); }, *parameters);
-        return networking::ex::let_value(networking::ex::just(std::move(parameters)),
-                                         [sender = std::move(sender)](auto&) mutable { return std::move(sender); });
+        auto sender = std::apply(
+            [&](auto&... kept) {
+                return std::apply([&](auto&... decoded) { return std::invoke(*callable, kept..., decoded...); }, state->second);
+            },
+            state->first);
+        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable { return std::move(sender); });
     };
 }
 

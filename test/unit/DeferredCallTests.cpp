@@ -57,6 +57,17 @@ ResultTask<std::string> byReferenceLater(const std::string& value) {
     co_return "reference:" + value;
 }
 
+/// Takes the calling UI by reference and reads it after suspending.
+ResultTask<std::string> uiReferenceLater(const DeferredApp::UI& caller, const std::string& value) {
+    co_await deferredGate();
+    co_return "ui" + std::to_string(caller.id()) + ":" + value;
+}
+
+ResultTask<std::string> uiMutableLater(DeferredApp::UI& caller, std::string value) {
+    co_await deferredGate();
+    co_return "mutable" + std::to_string(caller.id()) + ":" + value;
+}
+
 int sideEffects = 0;
 
 ResultTask<std::string> countingLater(std::string value) {
@@ -335,5 +346,21 @@ SCENARIO("A call refused as a duplicate does not run the callback", "[deferred]"
     THEN("the callback ran once and the duplicate was refused") {
         REQUIRE(sideEffects == 1);
         REQUIRE(Socket::wrote("already in use"));
+    }
+}
+
+SCENARIO("The calling UI of a deferred callback lives until it completes", "[deferred]") {
+    DeferredBrowser browser;
+    browser.app.cppFunction<ResultTask<std::string>, const DeferredApp::UI&, std::string>("uiReference", &uiReferenceLater);
+    browser.app.cppFunction<ResultTask<std::string>, DeferredApp::UI&, std::string>("uiMutable", &uiMutableLater);
+    browser.connect();
+    browser.call("uiReference", 1, std::string(60, 'u'));
+    browser.call("uiMutable", 2, std::string(60, 'm'));
+    deferredGates.release(0);
+    deferredGates.release(1);
+    THEN("the coroutines still read the UI they were given") {
+        REQUIRE(Socket::wrote(":" + std::string(60, 'u')));
+        REQUIRE(Socket::wrote(":" + std::string(60, 'm')));
+        REQUIRE(Socket::wrote("mutable"));
     }
 }
