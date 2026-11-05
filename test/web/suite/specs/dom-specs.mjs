@@ -85,16 +85,18 @@ describe('Embedded DOM command interpreter', () => {
         expect(received).toEqual([[2, 3, ''], [2, 4, '']]);
     });
 
-    it('reports an oversized UTF-8 event value in the browser without truncating it', async () => {
+    it('delivers a UTF-8 event value above 65535 bytes whole, since long strings cross the bridge', async () => {
         const diagnostic = spyOn(console, 'error');
-        bridge.cppFunction = webFront.cppFunction.bind(webFront);
+        const received = [];
+        bridge.cppFunction.and.returnValue((...args) => { received.push(args); return Promise.resolve(); });
         dom.apply(packet([name(3, 'textarea'), name(4, 'input'), [2, 2, 3], [8, 1, 2], [11, 2, 4, 0]]));
         const textarea = root.firstChild;
-        textarea.value = 'é'.repeat(32768); // 65,536 UTF-8 bytes, despite only 32,768 UTF-16 units.
+        textarea.value = '\u00e9'.repeat(32768); // 65,536 UTF-8 bytes, despite only 32,768 UTF-16 units.
         textarea.dispatchEvent(new Event('input'));
         await Promise.resolve();
-        expect(diagnostic).toHaveBeenCalledWith('WebFront DOM event delivery failed', jasmine.any(RangeError));
-        expect(textarea.value).toBe('é'.repeat(32768));
+        expect(received.length).toBe(1);
+        expect(received[0][2]).toBe('\u00e9'.repeat(32768));
+        expect(diagnostic).not.toHaveBeenCalled();
     });
 
     it('logs a failed post-connection island revocation instead of silently ignoring it', async () => {

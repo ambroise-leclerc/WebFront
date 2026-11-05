@@ -1,6 +1,7 @@
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include "Version.hpp"
+#include <functional>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -776,8 +777,7 @@ std::string respondWith(R value) {
 
 namespace {
 /// The code and the message of the exception a responder sent.
-template <typename Thrower>
-std::pair<std::string, std::string> sentException(Thrower thrower) {
+std::pair<std::string, std::string> sentException(std::function<void()> thrower) {
     ResultLinkMock link;
     auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, int>([thrower](std::span<const std::byte>) -> int {
         thrower();
