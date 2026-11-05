@@ -20,10 +20,11 @@
 | 1.13 | 2026-10-27 | Acceptée | Ambroise Leclerc | Rejet de PROPERTY value sur output pour préserver les identifiants de ses enfants (#380). | — |
 | 1.14 | 2026-10-27 | Proposée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [PR #394](https://github.com/ambroise-leclerc/WebFront/pull/394) |
 | 1.15 | 2026-11-04 | Proposée | Ambroise Leclerc | La poignée de main peut porter, après ses deux octets, le secret de lancement d'une vue intégrée (#453, ADR-020). | À renseigner après intégration. |
+| 1.16 | 2026-11-05 | Proposée | Ambroise Leclerc | Chaînes de 65 536 octets et plus : code `longString` à longueur sur 32 bits ; seule borne, la taille de message de la politique (#456, ADR-020). | À renseigner après intégration. |
 
 ## État et chronologie
 
-**Acceptée jusqu’à la version 1.13.** L’extension 1.14 est **proposée** dans la PR #394, en attente d’intégration.
+**Acceptée jusqu’à la version 1.13.** Les extensions 1.14 et suivantes sont **proposées**, en attente d’intégration.
 Décision initiale : **2022-02-06** (version 1.0).
 Dernière révision : **2026-10-27** (version 1.14).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
@@ -44,9 +45,17 @@ Les messages d’appel et de retour portent des identifiants de corrélation sur
 Les types pris en charge sont les scalaires, chaînes, tuples, tableaux numériques typés et `std::bitset<N>` ;
 les objets JavaScript arbitraires et objets DOM ne traversent pas automatiquement le pont.
 
-La longueur des chaînes est bornée à 65 535 octets : C++ lève `std::length_error` à l’encodage et
-JavaScript produit une `RangeError`. Un résultat de callback trop long rejette la Promise.
-Les tableaux utilisent leur encodage propre et ne sont pas soumis à la limite des chaînes.
+Une chaîne de 255 octets au plus est un `smallString` (longueur sur 8 bits), de 256 à 65 535 octets un `string`
+(16 bits), de 65 536 octets et plus un `longString` (code 19, longueur sur 32 bits) que l'encodeur choisit seul ;
+les deux premiers codes sont inchangés. La longueur compte des octets UTF-8, jamais des caractères, et un
+caractère multi-octets à cheval sur 65 535 n'est jamais coupé. Les messages d'exception (code `exception`) gardent
+leur longueur sur 16 bits : un message plus long est coupé avant le premier caractère qui ne tient pas entier.
+La seule borne des chaînes est la taille de message de la politique de tampons (`maxMessageSize`, 64 Mio par défaut,
+en-tête de 8 octets compris) : au-delà, C++ lève `std::length_error` à l'encodage sans rien mettre en file
+(le résultat d'un callback rejette alors la Promise), JavaScript lève une `RangeError` avant d'envoyer
+(`maxMessageBytes` du pont, 64 Mio par défaut, à aligner sur une politique qui change la borne), et le récepteur ferme
+la connexion pour un message plus grand que sa propre limite. Un `longString` tronqué ou dont la longueur dépasse les
+octets présents est rejeté au décodage des deux côtés. Les tableaux ont leur propre encodage (longueur sur 32 bits).
 
 Les bitsets réutilisent les en-têtes unsigned-byte courts ou réguliers : exactement
 `N / 8 + (N % 8 != 0)` octets, avec le bit C++ `i` dans le bit `i % 8` de l’octet
@@ -194,7 +203,7 @@ l'absence de module installé ou une exception DOM résiduelle pendant l'applica
 callback ordinaire `wfDom.rejected(uint32 batchId, string reason)` ; l'application doit l'enregistrer.
 Le motif est limité à 4 096 unités UTF-16 avant encodage. Si l'en-tête est tronqué, l'identifiant vaut zéro.
 Les événements utilisent `wfDom.event(uint32 nodeId, uint32 nameIndex, string value)` et leurs
-Promises sont traitées. Une valeur d’événement dépassant 65 535 octets UTF-8
+Promises sont traitées. Une valeur d’événement dépassant la taille de message
 n’est pas livrée à C++ et n’est pas tronquée ; le rejet d’encodage, de transport ou
 de callback est journalisé dans la console du navigateur. Il n’existe pas de
 notification C++ distincte pour cet échec. `nameIndex` désigne le nom interné à LISTEN. La valeur est celle du nœud

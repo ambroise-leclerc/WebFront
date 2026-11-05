@@ -254,9 +254,29 @@ describe('WebFront browser integration', () => {
             .toBeRejectedWithError('C++ callback failed');
     });
 
-    it('rejects a C++ result longer than the 65535-byte string limit', async () => {
-        await expectAsync(webFront.cppFunction('returnOverlongFromCpp')())
-            .toBeRejectedWithError('WebFront strings cannot exceed 65535 bytes');
+    it('receives C++ strings on both sides of the 16-bit length boundary', async () => {
+        const longStringFromCpp = webFront.cppFunction('longStringFromCpp');
+        for (const size of [255, 256, 65535, 65536, 65537, 1 << 20]) {
+            const text = await longStringFromCpp(size);
+            expect(text.length).toBe(size);
+            expect(text === 'x'.repeat(size)).toBeTrue();
+        }
+    });
+
+    it('echoes strings of 65536 bytes or more, multi-byte characters included, in both directions', async () => {
+        const echoString = webFront.cppFunction('echoString');
+        const euros = '\u20ac'.repeat(40000);  // 120000 UTF-8 bytes
+        expect(await echoString(euros) === euros).toBeTrue();
+        const straddling = 'x'.repeat(65534) + '\u00e9' + 'y'.repeat(10);  // the 2-byte character crosses the 65535 boundary
+        expect(await echoString(straddling) === straddling).toBeTrue();
+    });
+
+    it('refuses a message past the maximum before sending it, and keeps the bridge usable', async () => {
+        const echoString = webFront.cppFunction('echoString');
+        const limit = webFront.maxMessageBytes;
+        await expectAsync(echoString('x'.repeat(limit)))
+            .toBeRejectedWithError(RangeError, /exceeds the maximum of/);
+        await expectAsync(echoString('still alive')).toBeResolvedTo('still alive');
     });
 
     it('round-trips empty strings and rejects numbers outside C++ integer range', async () => {
@@ -269,11 +289,11 @@ describe('WebFront browser integration', () => {
         await expectAsync(integerInCpp(-2147483648)).toBeResolvedTo(-2147483648);
     });
 
-    it('sends strings up to the limit and rejects longer ones before sending', async () => {
+    it('sends strings on both sides of the 16-bit length boundary', async () => {
         const lengthInCpp = webFront.cppFunction('lengthInCpp');
         await expectAsync(lengthInCpp('x'.repeat(65535))).toBeResolvedTo(65535);
-        await expectAsync(lengthInCpp('x'.repeat(65536)))
-            .toBeRejectedWithError(RangeError, 'WebFront strings cannot exceed 65535 UTF-8 bytes');
+        await expectAsync(lengthInCpp('x'.repeat(65536))).toBeResolvedTo(65536);
+        await expectAsync(lengthInCpp('x'.repeat(3 << 20))).toBeResolvedTo(3 << 20);
     });
 
     it('receives a callback message and then its return value on the same connection', async () => {

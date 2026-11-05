@@ -5,6 +5,7 @@
 
 #include "../http/BuffersPolicy.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <bitset>
@@ -58,6 +59,7 @@ enum class CodedType : uint8_t {
     arrayFloat,    // opcode + 4 bytes size,
     arrayDouble,   // opcode + 4 bytes size,
     tuple,         // opcode + 1 byte for number of parameters which constitute the tuple
+    longString,    // opcode + 4 bytes size: strings of 65536 bytes or more
 };
 
 inline std::string_view toString(CodedType t) {
@@ -98,6 +100,8 @@ inline std::string_view toString(CodedType t) {
             return "arrayDouble";
         case CodedType::tuple:
             return "tuple";
+        case CodedType::longString:
+            return "longString";
         default:
             return "undefined";
     }
@@ -191,6 +195,7 @@ inline constexpr bool is_std_array_v = is_std_array<std::remove_cvref_t<T>>::val
 /// case per element type. The asserts below pin the two ends against an accidental reordering.
 static_assert(static_cast<uint8_t>(CodedType::arrayU8) == static_cast<uint8_t>(CodedType::smallArrayU8) + 1);
 static_assert(static_cast<uint8_t>(CodedType::arrayDouble) + 1 == static_cast<uint8_t>(CodedType::tuple));
+static_assert(static_cast<uint8_t>(CodedType::tuple) + 1 == static_cast<uint8_t>(CodedType::longString));
 
 constexpr bool isNumericArrayCode(CodedType type) {
     return type >= CodedType::smallArrayU8 && type <= CodedType::arrayDouble;
@@ -343,18 +348,36 @@ protected:
         incrementPayloadSize(1 + sizeof(size));
     }
 
-    /// Strings carry a 16-bit length on the wire.
-    static constexpr size_t maxStringBytes = std::numeric_limits<std::uint16_t>::max();
+    /// A string of up to this many bytes has a 16-bit length; a longer one is a longString with a 32-bit length.
+    static constexpr size_t maxShortStringBytes = std::numeric_limits<std::uint16_t>::max();
+
+    /// The largest payload this policy lets a message carry: its maxMessageSize less the 8-byte header, and at most
+    /// what the 32-bit payload size of the header can express. The receiving side enforces the same limit on the socket.
+    static constexpr size_t maxPayloadBytes() {
+        constexpr size_t limit = http::maxMessageSize<Policy>();
+        constexpr size_t head  = sizeof(Header);
+        return std::min<size_t>(limit > head ? limit - head : 0, std::numeric_limits<std::uint32_t>::max());
+    }
+
+    /// Refuses, before anything is queued, an encoding that would take the message past maxPayloadBytes().
+    void reservePayload(size_t bytes) const {
+        if (bytes > maxPayloadBytes() || getPayloadSize() > maxPayloadBytes() - bytes)
+            throw std::length_error("WebFront message exceeds the maximum message size of the buffers policy");
+    }
 
     template <typename WebSocketFrame>
     void encodeString(const char* str, size_t size, WebSocketFrame& frame) {
         using namespace std;
-        if (size > maxStringBytes)
-            throw std::length_error("WebFront strings cannot exceed 65535 bytes");
+        const auto headerSize = size < 256 ? 2u : size <= maxShortStringBytes ? 3u : 5u;
+        if (size > numeric_limits<uint32_t>::max())
+            throw std::length_error("WebFront strings cannot exceed 4294967295 bytes");
+        reservePayload(headerSize + size);
         if (size < 256)
             encodeTypeHeader(msg::CodedType::smallString, static_cast<uint8_t>(size), frame);
-        else
+        else if (size <= maxShortStringBytes)
             encodeTypeHeader(msg::CodedType::string, static_cast<uint16_t>(size), frame);
+        else
+            encodeTypeHeader(msg::CodedType::longString, static_cast<uint32_t>(size), frame);
         frame.addBuffer(span(reinterpret_cast<const std::byte*>(str), size));
         incrementPayloadSize(size);
     }
@@ -390,12 +413,12 @@ protected:
         incrementPayloadSize(text.size());
     }
 
-    /// An error message must still reach the other side, so an overlong one is cut to the wire limit
-    /// before the first UTF-8 character that would not fit whole.
+    /// An error message must still reach the other side, so an overlong one is cut to the 16-bit length of an
+    /// exception before the first UTF-8 character that would not fit whole.
     static std::string_view fitStringLength(std::string_view text) {
-        if (text.size() <= maxStringBytes)
+        if (text.size() <= maxShortStringBytes)
             return text;
-        size_t cut = maxStringBytes;
+        size_t cut = maxShortStringBytes;
         while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
             --cut;
         return text.substr(0, cut);
@@ -425,6 +448,7 @@ protected:
             encodeTypeHeader(numericArrayCode<Element>(), static_cast<std::uint32_t>(elementCount), frame);
 
         const auto byteCount = elementCount * sizeof(Element);
+        reservePayload(5 + byteCount);
         frame.addBuffer(std::span(reinterpret_cast<const std::byte*>(value.data()), byteCount));
         incrementPayloadSize(byteCount);
     }
@@ -456,6 +480,7 @@ public:
         return head.parametersDataSize;
     }
     void incrementPayloadSize(auto value) {
+        reservePayload(static_cast<size_t>(value));
         setPayloadSize(static_cast<uint32_t>(getPayloadSize()) + static_cast<uint32_t>(value));
     }
     [[nodiscard]] std::tuple<std::string, std::span<const std::byte>> getFunctionName() const {
@@ -517,6 +542,7 @@ public:
         if (type == CodedType::booleanTrue || type == CodedType::booleanFalse) return decodeBoolean(param, data);
         if (type == CodedType::smallString) return decodeSmallString(param, data);
         if (type == CodedType::string || type == CodedType::exception) return decodeLongString(param, data);
+        if (type == CodedType::longString) return decodeHugeString(param, data);
         if (type == CodedType::number) return decodeNumber(param, data);
         if (isNumericArrayCode(type)) return decodeArray(param, data);
         if (type == CodedType::tuple) return decodeTuple(param, data);
@@ -560,6 +586,21 @@ private:
                 throw std::runtime_error("Truncated string payload");
             param = std::string(reinterpret_cast<const char*>(data.data() + 3), size);
             data  = data.subspan(3 + size);
+        } else
+            throw std::runtime_error("Wrong parameter type: std::string expected");
+    }
+
+    template <typename T>
+    static void decodeHugeString(T& param, std::span<const std::byte>& data) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (data.size() < 5u)
+                throw std::runtime_error("Truncated longString header");
+            std::uint32_t size;
+            std::memcpy(&size, data.data() + 1, sizeof(size));
+            if (data.size() - 5u < size)
+                throw std::runtime_error("Truncated longString payload");
+            param = std::string(reinterpret_cast<const char*>(data.data() + 5), size);
+            data  = data.subspan(5 + static_cast<size_t>(size));
         } else
             throw std::runtime_error("Wrong parameter type: std::string expected");
     }

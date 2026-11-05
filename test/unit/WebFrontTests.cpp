@@ -751,8 +751,9 @@ SCENARIO("C++ function responders encode values and failures") {
 namespace {
 
 // The single string parameter of the return message a responder sent.
+template <http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 std::string sentString(const ResultLinkMock& link) {
-    auto        result  = msg::FunctionReturn<http::DefaultBuffersPolicy>::castFromRawData(link.message);
+    auto        result  = msg::FunctionReturn<Policy>::castFromRawData(link.message);
     auto        payload = result->payload();
     std::string value;
     result->decodeParameter(value, payload);
@@ -761,29 +762,37 @@ std::string sentString(const ResultLinkMock& link) {
     return value;
 }
 
-template <typename R>
+template <typename R, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 std::string respondWith(R value) {
     ResultLinkMock link;
-    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, R>([value](std::span<const std::byte>) {
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, Policy, R>([value](std::span<const std::byte>) {
         return value;
     });
     responder({}, link, 9);
-    return sentString(link);
+    return sentString<Policy>(link);
 }
 
 }  // namespace
 
-SCENARIO("C++ results too long for the wire reject the JavaScript Promise") {
-    const std::string overlong(65536, 'x');
+SCENARIO("C++ string results cross the bridge up to the message size of the policy") {
+    const std::string longText(100000, 'x');
+    using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024 * 1024>;
+    const std::string overlong(1024 * 1024, 'x');
+    const std::string tooLong = "WebFront message exceeds the maximum message size of the buffers policy";
 
-    GIVEN("a callback returning a string over 65535 bytes") {
+    GIVEN("a callback returning a string of more than 65535 bytes") {
+        THEN("it is sent whole as a longString") {
+            REQUIRE(respondWith(longText) == longText);
+        }
+    }
+    GIVEN("a callback returning a string that does not fit the message size of the policy") {
         THEN("a single well-formed exception is sent") {
-            REQUIRE(respondWith(overlong) == "WebFront strings cannot exceed 65535 bytes");
+            REQUIRE(respondWith<std::string, SmallPolicy>(overlong) == tooLong);
         }
     }
     GIVEN("a callback returning such a string inside a tuple") {
         THEN("the partly encoded result is replaced by a single well-formed exception") {
-            REQUIRE(respondWith(std::tuple<int, std::string>{1, overlong}) == "WebFront strings cannot exceed 65535 bytes");
+            REQUIRE(respondWith<std::tuple<int, std::string>, SmallPolicy>(std::tuple<int, std::string>{1, overlong}) == tooLong);
         }
     }
 }

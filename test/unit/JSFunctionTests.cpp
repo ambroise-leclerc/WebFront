@@ -129,10 +129,10 @@ SCENARIO("JsFunction") {
             }
         }
 
-        WHEN("print is called with a string too long for the wire") {
+        WHEN("print is called with a string too long for a message") {
             encodedBuffer.assign({0xEE});
             THEN("the call throws before anything is sent") {
-                REQUIRE_THROWS_AS(print(std::string(65536, 'x')), std::length_error);
+                REQUIRE_THROWS_AS(print(std::string(http::defaultMaxMessageSize, 'x')), std::length_error);
                 REQUIRE(encodedBuffer == std::vector<uint8_t>{0xEE});
             }
         }

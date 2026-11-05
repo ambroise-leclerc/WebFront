@@ -206,26 +206,101 @@ string roundTrip(const T& value) {
     return text;
 }
 
-SCENARIO("Strings beyond the 16-bit wire length are rejected instead of truncated") {
-    GIVEN("a string of exactly 65535 bytes") {
-        const string text(65535, 'x');
-        THEN("it crosses the wire whole") {
+namespace {
+/// The coded type byte that opens the first parameter of a return message holding 'value'.
+template <typename T>
+msg::CodedType firstCodeOf(const T& value) {
+    msg::FunctionReturn<>                        message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(value, frame);
+    return static_cast<msg::CodedType>(messageBytes(frame).at(8));
+}
+}  // namespace
+
+SCENARIO("Strings of 65536 bytes or more use a 32-bit length") {
+    GIVEN("strings on both sides of the 16-bit boundary") {
+        THEN("255 bytes is a smallString, 256 to 65535 a string and 65536 a longString") {
+            REQUIRE(firstCodeOf(string(255, 'x')) == msg::CodedType::smallString);
+            REQUIRE(firstCodeOf(string(256, 'x')) == msg::CodedType::string);
+            REQUIRE(firstCodeOf(string(65535, 'x')) == msg::CodedType::string);
+            REQUIRE(firstCodeOf(string(65536, 'x')) == msg::CodedType::longString);
+        }
+        THEN("each crosses the wire whole") {
+            for (const auto size : {255uz, 256uz, 65535uz, 65536uz, 65537uz, 1000000uz}) {
+                const string text(size, 'x');
+                REQUIRE(roundTrip(text) == text);
+            }
+        }
+    }
+    GIVEN("a UTF-8 character that straddles the 65535-byte boundary") {
+        const string text = string(65534, 'x') + "\xc3\xa9" + string(10, 'y');  // 'é' occupies bytes 65534 and 65535
+        THEN("it is not cut: the whole string is a longString") {
+            REQUIRE(text.size() == 65546);
+            REQUIRE(firstCodeOf(text) == msg::CodedType::longString);
             REQUIRE(roundTrip(text) == text);
         }
     }
-    GIVEN("a string of 65536 bytes and a function return message") {
-        const string                                 text(65536, 'x');
-        msg::FunctionReturn<> message;
-        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
-
-        THEN("encoding throws without counting the parameter") {
-            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
-            REQUIRE(message.getParametersCount() == 0);
+    GIVEN("a string whose multi-byte characters take it past 65535 bytes") {
+        string text;
+        for (int i = 0; i < 40000; ++i)
+            text += "\xe2\x82\xac";  // the euro sign, 3 bytes
+        THEN("the size counts bytes, not characters") {
+            REQUIRE(roundTrip(text) == text);
         }
-        THEN("the message and its frame are left untouched") {
-            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
+    }
+    GIVEN("a longString header whose payload is truncated or inconsistent") {
+        auto decode = [](span<const byte> bytes) {
+            string           target;
+            span<const byte> payload{bytes};
+            msg::FunctionCall<>::decodeParameter(target, payload);
+        };
+        const auto long5 = [](uint32_t size, size_t present) {
+            vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::longString)}};
+            for (int i = 0; i < 4; ++i)
+                bytes.push_back(byte{static_cast<uint8_t>(size >> (8 * i))});
+            bytes.insert(bytes.end(), present, byte{'a'});
+            return bytes;
+        };
+        THEN("a header shorter than five bytes is refused") {
+            const vector<byte> header{byte{static_cast<uint8_t>(msg::CodedType::longString)}, byte{1}, byte{0}};
+            REQUIRE_THROWS_AS(decode(header), runtime_error);
+        }
+        THEN("a length that exceeds the bytes present is refused") {
+            REQUIRE_THROWS_AS(decode(long5(70000, 69999)), runtime_error);
+            REQUIRE_THROWS_AS(decode(long5(0xffffffffu, 10)), runtime_error);
+        }
+        THEN("the exact length decodes and leaves the cursor after it") {
+            auto             bytes = long5(70000, 70000);
+            string           target;
+            span<const byte> payload{bytes};
+            msg::FunctionCall<>::decodeParameter(target, payload);
+            REQUIRE(target.size() == 70000);
+            REQUIRE(payload.empty());
+        }
+        THEN("a destination that is not a string is refused") {
+            auto bytes = long5(5, 5);
+            int  number{};
+            span<const byte> payload{bytes};
+            REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(number, payload), runtime_error);
+        }
+    }
+    GIVEN("a policy whose messages cannot exceed 1 MiB") {
+        using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024 * 1024>;
+        msg::FunctionReturn<SmallPolicy>             message;
+        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+        THEN("a string that fits is encoded") {
+            message.encodeParameter(string(1024 * 1024 - 8 - 5, 'x'), frame);
+            REQUIRE(message.getPayloadSize() == 1024 * 1024 - 8);
+        }
+        THEN("a string one byte too large throws length_error and leaves the message untouched") {
+            REQUIRE_THROWS_AS(message.encodeParameter(string(1024 * 1024 - 8 - 4, 'x'), frame), length_error);
             REQUIRE(message.getPayloadSize() == 0);
+            REQUIRE(message.getParametersCount() == 0);
             REQUIRE(frame.size() == message.header().size());
+        }
+        THEN("the bound counts what the message already carries") {
+            message.encodeParameter(string(600 * 1024, 'x'), frame);
+            REQUIRE_THROWS_AS(message.encodeParameter(string(600 * 1024, 'y'), frame), length_error);
         }
     }
     GIVEN("an exception message longer than 65535 bytes, with a two-byte character across the limit") {

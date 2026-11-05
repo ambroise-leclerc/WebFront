@@ -34,6 +34,8 @@
         arrayFloat: 16,
         arrayDouble: 17,
         tuple: 18,
+        longString: 19,
+        list: 20,
     });
 
     const arrayTypes = new Map([
@@ -77,12 +79,52 @@
         [ParamType.number, (bridge, type, view, offset) => bridge.decodeNumber(view, offset)],
         [ParamType.smallString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
         [ParamType.string, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.longString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
         [ParamType.exception, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
         [ParamType.tuple, (bridge, type, view, offset) => bridge.decodeTuple(view, offset)],
+        [ParamType.list, (bridge, type, view, offset) => bridge.decodeList(view, offset)],
     ]);
 
     for (const code of [ParamType.smallArrayU8, ...arrayCodes.keys()])
         valueDecoders.set(code, (bridge, type, view, offset) => bridge.decodeTypedArray(type, view, offset));
+
+    /// A list the application sends as one value of homogeneous elements, built by webFront.list(): a plain JavaScript
+    /// array stays a tuple, whose elements may differ and which holds at most 255 of them.
+    class WebFrontList {
+        constructor(items) {
+            this.items = Array.from(items);
+        }
+    }
+
+    /// The shape of a wire value: two list elements must have the same one. Strings share a shape whatever their length
+    /// header, typed arrays one per element type (the compact and the regular Uint8Array alike), tuples one made of their elements'.
+    function wireShape(type) {
+        switch (type) {
+        case ParamType.booleanTrue:
+        case ParamType.booleanFalse:
+            return "b";
+        case ParamType.number:
+            return "n";
+        case ParamType.smallString:
+        case ParamType.string:
+        case ParamType.longString:
+            return "s";
+        case ParamType.exception:
+            return "e";
+        case ParamType.smallArrayU8:
+            return `a${ParamType.arrayU8}`;
+        case ParamType.list:
+            return "L";
+        default:
+            return `a${type}`;
+        }
+    }
+
+    /// A list element is neither a list nor a tuple holding one: their shapes contain "L".
+    function requireListElementShape(shape) {
+        if (shape.includes("L"))
+            throw new TypeError("WebFront lists cannot contain lists");
+    }
 
     function isTypedArray(value) {
         return ArrayBuffer.isView(value) && !(value instanceof DataView);
@@ -92,6 +134,13 @@
     /// this, so both go through here: a disagreement would mis-size the send buffer.
     function typedArrayHeaderSize(value) {
         return value instanceof Uint8Array && value.length < 256 ? 2 : 5;
+    }
+
+    /// A string of 255 bytes or less has a 1-byte length, up to 65535 a 2-byte one, beyond a 4-byte one (longString).
+    function stringHeaderSize(length) {
+        if (length > 0xffffffff)
+            throw new RangeError("WebFront strings cannot exceed 4294967295 UTF-8 bytes");
+        return length < 256 ? 2 : length < 65536 ? 3 : 5;
     }
 
     function isNonNegativeInteger(candidate) {
@@ -111,7 +160,14 @@
             return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
         }
 
+        /// The largest message the C++ side accepts by default (http::defaultMaxMessageSize): a policy with another
+        /// maxMessageSize needs the same value in `maxMessageBytes` of the bridge.
+        static get defaultMaxMessageBytes() {
+            return 64 * 1024 * 1024;
+        }
+
         constructor(url = WebFrontBridge.defaultUrl()) {
+            this.maxMessageBytes = WebFrontBridge.defaultMaxMessageBytes;
             this.state = "uninitialized";
             this.littleEndian = false;
             this.nextCallId = 1;
@@ -376,13 +432,15 @@
             return values[0];
         }
 
-        decodeParameters(count, view, offset = 0) {
+        decodeParameters(count, view, offset = 0, shapes = null) {
             const values = [];
             let cursor = offset;
             for (let index = 0; index < count; ++index) {
                 requireBytes(view, cursor, 1, "parameter type");
-                const {value, bytes} = this.decodeValue(view.getUint8(cursor), view, cursor);
+                const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
                 values.push(value);
+                if (shapes)
+                    shapes.push(shape);
                 cursor += bytes;
             }
             return [values, cursor - offset];
@@ -393,7 +451,9 @@
             const decoder = valueDecoders.get(type);
             if (!decoder)
                 throw new TypeError(`Unsupported parameter type ${type}`);
-            return decoder(this, type, view, offset);
+            const decoded = decoder(this, type, view, offset);
+            decoded.shape ??= wireShape(type);
+            return decoded;
         }
 
         decodeNumber(view, offset) {
@@ -402,9 +462,10 @@
         }
 
         decodeString(type, view, offset) {
-            const sizeBytes = type === ParamType.smallString ? 1 : 2;
+            const sizeBytes = type === ParamType.smallString ? 1 : type === ParamType.longString ? 4 : 2;
             requireBytes(view, offset + 1, sizeBytes, "string length");
-            const length = sizeBytes === 1 ? view.getUint8(offset + 1) : view.getUint16(offset + 1, this.littleEndian);
+            const length = sizeBytes === 1 ? view.getUint8(offset + 1)
+                : sizeBytes === 2 ? view.getUint16(offset + 1, this.littleEndian) : view.getUint32(offset + 1, this.littleEndian);
             const payload = offset + 1 + sizeBytes;
             requireBytes(view, payload, length, "string payload");
             const bytes = new Uint8Array(view.buffer, view.byteOffset + payload, length);
@@ -413,8 +474,32 @@
 
         decodeTuple(view, offset) {
             requireBytes(view, offset, 2, "tuple header");
-            const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2);
-            return {value: tuple, bytes: 2 + consumed};
+            const shapes = [];
+            const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2, shapes);
+            return {value: tuple, bytes: 2 + consumed, shape: `(${shapes.join(",")})`};
+        }
+
+        /// A list is a 32-bit count followed by that many values of one shape; the elements arrive as a JavaScript array.
+        decodeList(view, offset) {
+            requireBytes(view, offset, 5, "list header");
+            const count = view.getUint32(offset + 1, this.littleEndian);
+            // Every element takes at least one byte: a count the message cannot hold is refused before anything is allocated.
+            requireBytes(view, offset + 5, count, "list elements");
+            const values = [];
+            let cursor = offset + 5;
+            let listShape = null;
+            for (let index = 0; index < count; ++index) {
+                requireBytes(view, cursor, 1, "list element type");
+                const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
+                requireListElementShape(shape);
+                if (listShape === null)
+                    listShape = shape;
+                else if (shape !== listShape)
+                    throw new TypeError("WebFront list elements are not of one type");
+                values.push(value);
+                cursor += bytes;
+            }
+            return {value: values, bytes: cursor - offset, shape: "L"};
         }
 
         /// Resolves the element spec and length prefix for a typed array, whose header is 2 bytes in the
@@ -444,6 +529,12 @@
             return {value: result, bytes: headerSize + byteLength};
         }
 
+        /// Marks `items` to be sent as a list: any number of elements of one type (strings, numbers, booleans, typed arrays or
+        /// tuples of those), which C++ receives as a std::vector. A plain array is a tuple of at most 255 elements of any types.
+        list(items) {
+            return new WebFrontList(items);
+        }
+
         cppFunction(name) {
             return (...args) => this.callCppFunction(name, args);
         }
@@ -458,6 +549,7 @@
                     if (values.length > 255)
                         throw new RangeError("A function call cannot contain more than 255 top-level values");
                     const payloadSize = values.reduce((size, value) => size + this.parameterSize(value), 0);
+                    this.checkMessageSize(payloadSize);
                     const buffer = new ArrayBuffer(8 + payloadSize);
                     const view = new DataView(buffer);
                     callId = this.allocateCallId();
@@ -478,6 +570,12 @@
             });
         }
 
+        /// Refuses a message the C++ side would close the connection for: the 8-byte header and the payload together.
+        checkMessageSize(payloadSize) {
+            if (8 + payloadSize > this.maxMessageBytes)
+                throw new RangeError(`WebFront message of ${8 + payloadSize} bytes exceeds the maximum of ${this.maxMessageBytes} bytes`);
+        }
+
         allocateCallId() {
             for (let attempts = 0; attempts < 0xffff; ++attempts) {
                 const candidate = this.nextCallId;
@@ -491,6 +589,7 @@
         sendFunctionReturn(callId, value) {
             const values = value === undefined ? [] : [value];
             const payloadSize = values.reduce((size, item) => size + this.parameterSize(item), 0);
+            this.checkMessageSize(payloadSize);
             const buffer = new ArrayBuffer(8 + payloadSize);
             const view = new DataView(buffer);
             view.setUint8(0, Command.functionReturn);
@@ -536,17 +635,51 @@
 
         stringParameterSize(value) {
             const length = new TextEncoder().encode(value).length;
-            if (length >= 65536)
-                throw new RangeError("WebFront strings cannot exceed 65535 UTF-8 bytes");
-            return length + (length < 256 ? 2 : 3);
+            return stringHeaderSize(length) + length;
         }
 
         objectParameterSize(value) {
+            if (value instanceof WebFrontList)
+                return this.listParameterSize(value);
             if (Array.isArray(value))
                 return this.tupleParameterSize(value);
             if (isTypedArray(value))
                 return this.typedArrayParameterSize(value);
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        /// The shape, as the decoder computes it, of a value about to be encoded as a list element.
+        valueShape(value) {
+            switch (typeof value) {
+            case "boolean":
+                return "b";
+            case "number":
+                return "n";
+            case "string":
+                return "s";
+            }
+            if (value instanceof WebFrontList)
+                return "L";
+            if (Array.isArray(value))
+                return `(${value.map(element => this.valueShape(element)).join(",")})`;
+            if (isTypedArray(value) && arrayTypes.has(value.constructor))
+                return `a${arrayTypes.get(value.constructor).code}`;
+            throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        listParameterSize(list) {
+            if (list.items.length > 0xffffffff)
+                throw new RangeError("WebFront lists cannot exceed 4294967295 elements");
+            let shape = null;
+            for (const item of list.items) {
+                const itemShape = this.valueShape(item);
+                requireListElementShape(itemShape);
+                if (shape === null)
+                    shape = itemShape;
+                else if (itemShape !== shape)
+                    throw new TypeError("WebFront list elements are not of one type");
+            }
+            return 5 + list.items.reduce((size, item) => size + this.parameterSize(item), 0);
         }
 
         tupleParameterSize(value) {
@@ -582,23 +715,38 @@
 
         encodeString(value, view, offset) {
             const bytes = new TextEncoder().encode(value);
-            const small = bytes.length < 256;
-            view.setUint8(offset, small ? ParamType.smallString : ParamType.string);
-            if (small)
+            const headerSize = stringHeaderSize(bytes.length);
+            if (headerSize === 2) {
+                view.setUint8(offset, ParamType.smallString);
                 view.setUint8(offset + 1, bytes.length);
-            else
+            } else if (headerSize === 3) {
+                view.setUint8(offset, ParamType.string);
                 view.setUint16(offset + 1, bytes.length, this.littleEndian);
-            const headerSize = small ? 2 : 3;
+            } else {
+                view.setUint8(offset, ParamType.longString);
+                view.setUint32(offset + 1, bytes.length, this.littleEndian);
+            }
             new Uint8Array(view.buffer, view.byteOffset + offset + headerSize, bytes.length).set(bytes);
             return headerSize + bytes.length;
         }
 
         encodeObject(value, view, offset) {
+            if (value instanceof WebFrontList)
+                return this.encodeList(value, view, offset);
             if (Array.isArray(value))
                 return this.encodeTuple(value, view, offset);
             if (isTypedArray(value))
                 return this.encodeTypedArray(value, view, offset);
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        encodeList(list, view, offset) {
+            view.setUint8(offset, ParamType.list);
+            view.setUint32(offset + 1, list.items.length, this.littleEndian);
+            let written = 5;
+            for (const item of list.items)
+                written += this.encodeParameter(item, view, offset + written);
+            return written;
         }
 
         encodeTuple(value, view, offset) {

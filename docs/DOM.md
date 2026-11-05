@@ -110,7 +110,7 @@ limits follow ADR-003. For bubbling input/change events the value belongs to the
 subscribed node (`currentTarget`), not the originating child; it is empty if that
 node has no `value` property. Flags cannot be decided after the asynchronous callback.
 
-Event values above **65,535 UTF-8 bytes** cannot cross the bridge and are **not
+Event values that do not fit a bridge message (64 MiB by default, ADR-003) cannot cross it and are **not
 delivered to C++**. They are not truncated. The interpreter logs the rejected
 Promise to the browser console (`WebFront DOM event delivery failed`), including
 encoding, transport and callback errors. There is no C++ event-error notification;
