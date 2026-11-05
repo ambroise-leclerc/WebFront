@@ -105,7 +105,13 @@
     }
 
     class WebFrontBridge {
-        constructor(url = `ws://${global.location.host}`) {
+        /// The WebSocket address of the page that serves this script: wss:// on an https:// page, where a browser blocks ws://
+        /// as mixed content.
+        static defaultUrl(location = global.location) {
+            return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
+        }
+
+        constructor(url = WebFrontBridge.defaultUrl()) {
             this.state = "uninitialized";
             this.littleEndian = false;
             this.nextCallId = 1;

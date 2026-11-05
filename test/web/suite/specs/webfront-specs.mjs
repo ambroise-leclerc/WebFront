@@ -554,6 +554,12 @@ describe('Bound HTTP reads', () => {
         expect(seen[0].init.redirect).toBe('error');
     });
 
+    it('derives the WebSocket address from the protocol of the page', () => {
+        expect(WebFrontBridge.defaultUrl({protocol: 'http:', host: 'localhost:9002'})).toBe('ws://localhost:9002');
+        expect(WebFrontBridge.defaultUrl({protocol: 'https:', host: 'app.example:443'})).toBe('wss://app.example:443');
+        expect(WebFrontBridge.defaultUrl()).toBe(`${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`);
+    });
+
     it('rejects bound when the initial connection fails', async () => {
         const bridge = new WebFrontBridge('ws://127.0.0.1:1');
         await expectAsync(bridge.bound).toBeRejected();
