@@ -51,11 +51,17 @@ public:
     /// entry, or 0 when the connection closed or a call of that identifier has not been answered yet.
     [[nodiscard]] std::uint64_t reserve(msg::CallId callId) {
         std::lock_guard lock(mutex);
-        if (closed || (callId != 0 && !inFlight.insert(callId).second))
+        if (closed || (callId != 0 && !inFlightIds.insert(callId).second))
             return 0;
         const auto key = ++lastKey;
         tasks.emplace(key, std::optional<TaskHandle>{});
         return key;
+    }
+
+    /// True while a call with this identifier has been claimed and not yet answered or dropped.
+    [[nodiscard]] bool inFlight(msg::CallId callId) const {
+        std::lock_guard lock(mutex);
+        return callId != 0 && this->inFlightIds.contains(callId);
     }
 
     /// Remembers the task that will answer the reserved call, to stop it if the connection closes.
@@ -74,7 +80,7 @@ public:
     /// The call is answered, or dropped: its identifier can be used again.
     void finish(msg::CallId callId, std::uint64_t key) {
         std::lock_guard lock(mutex);
-        inFlight.erase(callId);
+        inFlightIds.erase(callId);
         tasks.erase(key);
     }
 
@@ -99,7 +105,7 @@ public:
 
 private:
     mutable std::mutex                 mutex;
-    std::set<msg::CallId>              inFlight;
+    std::set<msg::CallId>              inFlightIds;
     std::map<std::uint64_t, std::optional<TaskHandle>> tasks;
     std::uint64_t                      lastKey = 0;
     bool                               closed  = false;

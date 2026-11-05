@@ -328,32 +328,21 @@ private:
 public:
     /// Rejects the call `callId` with `message` and an application `code` (the generic one by default); nothing is sent
     /// for call 0. A code that is ill-formed or reserved to the bridge (`webfront.*`) is sent as the generic one: this path
-    /// cannot forge an error that looks like the bridge's own.
+    /// cannot forge an error that looks like the bridge's own. WebFront's own codes leave through the internal
+    /// detail::rejectWithBridgeCode, not through a method of the link.
     void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
-        const bool usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
-        sendRejection(callId, message, usable ? code : bridge_code::generic);
-    }
-
-    /// Rejects the call `callId` with one of the codes of the bridge (bridge_code), for WebFront's own failures. Any other
-    /// code is sent as the generic one, so that this path cannot forge an error that looks like the bridge's own.
-    void sendBridgeError(msg::CallId callId, std::string_view message, std::string_view code) {
-        const bool known = code == bridge_code::notFound || code == bridge_code::malformed || code == bridge_code::disconnected
-                           || code == bridge_code::cancelled;
-        sendRejection(callId, message, known ? code : bridge_code::generic);
-    }
-
-private:
-    void sendRejection(msg::CallId callId, std::string_view message, std::string_view code) {
         if (callId == 0) return;
+        const bool usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-        const auto error = detail::makeBridgeError(code, std::string(message));
+        const auto error = detail::makeBridgeError(usable ? code : bridge_code::generic, std::string(message));
         result.encodeParameter(error, frame);
         frame.freeze();
         sendFrame(std::move(frame));
     }
 
+private:
     struct Writer {
         std::size_t           limit;
         std::function<void()> ready;

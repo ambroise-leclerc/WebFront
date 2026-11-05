@@ -185,7 +185,7 @@ the callback returns. The callback itself runs at once on the server context and
 spawned in the server's scope and tracked by its connection. When the browser disconnects its tasks are asked to stop
 and their late answers are dropped; shutting the application down stops and joins them. Completing stopped without a
 stop request rejects with `webfront.cancelled`. Calls are correlated by the identifier JavaScript chose, so several can
-be in flight per connection; reusing an identifier still in flight is refused. The answer is sent from the server
+be in flight per connection; a call that reuses an identifier still in flight is dropped on reception, for any function, without being run and without an answer (an answer could settle the wrong Promise). The answer is sent from the server
 context, whichever thread the awaited operation completed on.
 
 ```cpp

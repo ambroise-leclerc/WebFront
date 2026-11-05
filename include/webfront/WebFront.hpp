@@ -383,6 +383,14 @@ websocket::Frame<Net> makeFailureFrame(msg::CallId callId, const std::exception&
     return frame;
 }
 
+/// WebFront's own rejection of a call, with one of the codes of the bridge (bridge_code). Internal: the public ways to
+/// reject (BridgeError thrown by a callback, WebLink::sendError) can never carry a reserved code.
+template <typename Net, http::BuffersPolicyType Policy, typename Link>
+void rejectWithBridgeCode(Link& link, msg::CallId callId, std::string_view code, const std::string& message) {
+    if (callId != 0)
+        link.sendFrame(makeFailureFrame<Net, Policy>(callId, makeBridgeError(code, message)));
+}
+
 /// A self-contained return message carrying `value`, or the failure of its encoding (a string over the message size).
 template <typename Net, http::BuffersPolicyType Policy, typename Value>
 websocket::Frame<Net> makeValueFrame(msg::CallId callId, const Value& value) {
@@ -1064,10 +1072,8 @@ private:
         const auto [calls, generation] = deferredCallsOf(caller);
         const auto key                  = calls ? calls->reserve(callId) : 0;
         if (key == 0) {
-            // The connection closed, or the browser reused the identifier of a call that is still running.
-            if (callId != 0)
-                link.sendBridgeError(callId, calls ? "The call identifier is already in use" : "Browser connection closed",
-                                     calls ? bridge_code::malformed : bridge_code::disconnected);
+            // The connection closed (nobody is left to answer), or a call with this identifier is still running: the common
+            // reception drops such a call before it gets here, and this claim is the last guard.
             return;
         }
         std::optional<std::remove_cvref_t<decltype(invoke())>> sender;
@@ -1091,6 +1097,18 @@ private:
             return;
         }
         calls->attach(key, handle);
+    }
+
+    [[nodiscard]] bool callInFlight(WebLinkId id, WebLinkGeneration generation, msg::CallId callId) const {
+        std::shared_ptr<detail::DeferredCalls> calls;
+        {
+            std::scoped_lock lock{linksMutex};
+            const auto       found = webLinks.find(id);
+            if (found == webLinks.end() || found->second.generation != generation)
+                return false;
+            calls = found->second.deferredCalls;
+        }
+        return calls->inFlight(callId);
     }
 
     std::pair<std::shared_ptr<detail::DeferredCalls>, WebLinkGeneration> deferredCallsOf(const UI& caller) const {
@@ -1353,6 +1371,13 @@ private:
                 const auto [link, generation] = linkAndGeneration(event.webLinkId);
                 if (!link)
                     break;
+                // A browser that reuses the identifier of a call a callback has not answered yet breaks the protocol (its own
+                // calls never do). Whatever the function, no second call and no answer with that identifier: an answer could
+                // settle the first call's Promise, and the first call's own answer a later call that reuses the identifier.
+                if (callInFlight(event.webLinkId, generation, event.callId)) {
+                    log::error("Ignoring a call to '{}' that reuses the identifier {} of a call still running", event.text, event.callId);
+                    break;
+                }
                 if constexpr (requires(typename Net::Acceptor& acceptor) { Net::ResumeAfter(acceptor, std::chrono::milliseconds(1)); }) {
                     if (domCall(event, *link))
                         break;
@@ -1363,7 +1388,7 @@ private:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
-                    link->sendBridgeError(event.callId, "C++ function '" + event.text + "' was not found", bridge_code::notFound);
+                    detail::rejectWithBridgeCode<Net, Policy>(*link, event.callId, bridge_code::notFound, "C++ function '" + event.text + "' was not found");
                 break;
             }
         }

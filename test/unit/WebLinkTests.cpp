@@ -301,17 +301,6 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
         }
     }
 
-    GIVEN("a bridge error with a code that is not one of the bridge's") {
-        link.sendBridgeError(13, "forged", "webfront.forged");
-        link.sendBridgeError(14, "genuine", bridge_code::notFound);
-
-        THEN("it is sent as the generic error, while a known code is kept") {
-            REQUIRE_FALSE(InjectableSocket::wrote("webfront.forged"));
-            REQUIRE(InjectableSocket::wrote(std::string(bridge_code::generic)));
-            REQUIRE(InjectableSocket::wrote(std::string(bridge_code::notFound)));
-        }
-    }
-
     GIVEN("a closed browser connection") {
         InjectableSocket::fail(make_error_code(errc::connection_reset));
         auto [callId, result] = link.expectResult<string>();

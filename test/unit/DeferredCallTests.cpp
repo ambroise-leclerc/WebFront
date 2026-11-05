@@ -244,17 +244,25 @@ SCENARIO("Several deferred calls of one connection are answered independently", 
     }
 }
 
-SCENARIO("A call identifier that is still in flight cannot be reused", "[deferred]") {
+SCENARIO("A call that reuses the identifier of a running call is dropped without any answer", "[deferred]") {
     DeferredBrowser browser;
     browser.app.cppFunction("echoLater", &echoLater);
+    browser.app.cppFunction<std::string>("plain", [] { return std::string("plain-result"); });
     browser.connect();
     browser.call("echoLater", 7, "first");
     browser.call("echoLater", 7, "again");
-    THEN("the second call is rejected and the first one still completes") {
+    browser.call("plain", 7);
+    browser.call("noSuchFunction", 7);
+    THEN("no callback runs and nothing is sent for the duplicates, whatever the function") {
         REQUIRE(deferredGates.open.size() == 1);
-        REQUIRE(Socket::wrote("already in use"));
+        REQUIRE_FALSE(Socket::wrote("plain-result"));
+        REQUIRE_FALSE(Socket::wrote("already in use"));
+        REQUIRE_FALSE(Socket::wrote("was not found"));
+    }
+    THEN("the first call still completes with its own answer") {
         deferredGates.release(0);
         REQUIRE(Socket::wrote("answered:first"));
+        REQUIRE_FALSE(Socket::wrote("answered:again"));
     }
     AND_WHEN("it was answered") {
         deferredGates.release(0);
@@ -345,7 +353,7 @@ SCENARIO("A call refused as a duplicate does not run the callback", "[deferred]"
     browser.call("counting", 7, "again");
     THEN("the callback ran once and the duplicate was refused") {
         REQUIRE(sideEffects == 1);
-        REQUIRE(Socket::wrote("already in use"));
+        REQUIRE_FALSE(Socket::wrote("already in use"));
     }
 }
 
@@ -362,5 +370,15 @@ SCENARIO("The calling UI of a deferred callback lives until it completes", "[def
         REQUIRE(Socket::wrote(":" + std::string(60, 'u')));
         REQUIRE(Socket::wrote(":" + std::string(60, 'm')));
         REQUIRE(Socket::wrote("mutable"));
+    }
+}
+
+SCENARIO("A call to an unknown function is rejected with the not-found code of the bridge", "[deferred]") {
+    DeferredBrowser browser;
+    browser.connect();
+    browser.call("noSuchFunction", 4);
+    THEN("the code reserved to the bridge reaches the browser") {
+        REQUIRE(Socket::wrote(std::string(bridge_code::notFound)));
+        REQUIRE(Socket::wrote("was not found"));
     }
 }

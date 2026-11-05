@@ -54,8 +54,9 @@ arrêté sans que l'appel l'ait été, avec `webfront.cancelled`. Le travail est
 connexion : la fermeture de la connexion demande son arrêt et écarte la réponse tardive sans rien envoyer, l'arrêt de
 l'application l'arrête et le joint. La réponse est émise sur le contexte du serveur. Plusieurs appels différés d'une
 connexion sont simultanés, chacun identifié par l'identifiant sur 16 bits que choisit JavaScript (au plus 65 535 en
-vol : au-delà, `Too many outstanding WebFront calls` rejette côté navigateur) ; un identifiant déjà en vol est refusé
-(`webfront.malformed`, « already in use ») sans toucher à l'appel en cours. Une exception levée avant le retour du
+vol : au-delà, `Too many outstanding WebFront calls` rejette côté navigateur) ; un identifiant déjà en vol est une violation du protocole (les appels du navigateur n'en réutilisent jamais) : à la réception, pour toute
+fonction, l'appel est écarté sans être exécuté et sans réponse, car une réponse portant cet identifiant pourrait régler la Promise
+du premier appel, et la réponse différée de celui-ci un appel ultérieur qui le réutiliserait. Une exception levée avant le retour du
 sender rejette aussitôt. Aucun délai automatique : un sender qui ne se termine jamais laisse la Promise en attente
 jusqu'à la déconnexion.
 Les callbacks enregistrés sont possédés par le stockage de l’application. Les signatures
