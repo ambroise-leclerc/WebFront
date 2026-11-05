@@ -28,7 +28,7 @@
 
 **Acceptée jusqu’à la version 1.13.** Les extensions 1.14 et suivantes sont **proposées**, en attente d’intégration.
 Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-27** (version 1.14).
+Dernière révision : **2026-11-05** (version 1.18).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte

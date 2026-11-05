@@ -159,7 +159,8 @@
 
     function bridgeError(code, message) {
         const error = new Error(message);
-        error.code = code;
+        // Not writable: user code could otherwise rewrite the code of an error of the bridge to forge a reserved one.
+        Object.defineProperty(error, "code", {value: code, enumerable: true, writable: false, configurable: false});
         bridgeErrors.add(error);
         return error;
     }
@@ -426,8 +427,8 @@
             try {
                 this.settleReturn(pending, message);
             } catch (error) {
-                if (error instanceof Error) {
-                    error.code ??= BridgeCode.malformed;
+                if (error instanceof Error && error.code === undefined) {
+                    Object.defineProperty(error, "code", {value: BridgeCode.malformed, enumerable: true, writable: false, configurable: false});
                     bridgeErrors.add(error);
                 }
                 pending.reject(error);

@@ -318,6 +318,7 @@ describe('WebFront browser integration', () => {
         expect(missing.code).toBe('webfront.notFound');
         const malformed = await webFront.cppFunction('integerInCpp')(NaN).then(() => null, error => error);
         expect(malformed.code).toBe('webfront.malformed');
+        expect(() => { 'use strict'; missing.code = 'webfront.cancelled'; }).toThrow();
         const mistyped = await webFront.cppFunction('integerInCpp')('text').then(() => null, error => error);
         expect(mistyped.code).toBe('webfront.malformed');
     });
