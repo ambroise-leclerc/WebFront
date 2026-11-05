@@ -749,6 +749,94 @@ private:
             throw std::runtime_error("Wrong parameter type: owning numeric array expected");
     }
 
+    /// The bytes a typed array code gives to each element.
+    static constexpr std::size_t numericArrayElementSize(CodedType type) {
+        switch (type) {
+            case CodedType::smallArrayU8:
+            case CodedType::arrayU8:
+            case CodedType::array8: return 1;
+            case CodedType::arrayU16:
+            case CodedType::array16: return 2;
+            case CodedType::arrayU32:
+            case CodedType::array32:
+            case CodedType::arrayFloat: return 4;
+            default: return 8;
+        }
+    }
+
+    /// Walks the value at the start of `data` without decoding it: appends its shape to `shape` and returns the bytes it takes.
+    /// Two list elements must have the same shape: the same kind of value (any string header is a string, the short and the
+    /// regular Uint8Array are one array type) and, for a tuple, the same shapes of fields.
+    static std::size_t appendWireShape(std::span<const std::byte> data, std::string& shape) {
+        if (data.empty())
+            throw std::runtime_error("Truncated list element");
+        const auto type = static_cast<CodedType>(data[0]);
+        const auto need = [&](std::size_t bytes) {
+            if (data.size() < bytes)
+                throw std::runtime_error("Truncated list element");
+        };
+        std::uint32_t size{};
+        if (type == CodedType::booleanTrue || type == CodedType::booleanFalse) {
+            shape += 'b';
+            return 1;
+        }
+        if (type == CodedType::number) {
+            need(9);
+            shape += 'n';
+            return 9;
+        }
+        if (type == CodedType::smallString) {
+            need(2);
+            const auto total = 2 + static_cast<std::size_t>(data[1]);
+            need(total);
+            shape += 's';
+            return total;
+        }
+        if (type == CodedType::string || type == CodedType::longString) {
+            const std::size_t header = type == CodedType::string ? 3 : 5;
+            need(header);
+            if (type == CodedType::string) {
+                std::uint16_t small;
+                std::memcpy(&small, data.data() + 1, sizeof(small));
+                size = small;
+            } else
+                std::memcpy(&size, data.data() + 1, sizeof(size));
+            need(header);
+            if (data.size() - header < size)
+                throw std::runtime_error("Truncated list element");
+            shape += 's';
+            return header + size;
+        }
+        if (isNumericArrayCode(type)) {
+            const bool small = type == CodedType::smallArrayU8;
+            const std::size_t header = small ? 2 : 5;
+            need(header);
+            if (small)
+                size = static_cast<std::uint8_t>(data[1]);
+            else
+                std::memcpy(&size, data.data() + 1, sizeof(size));
+            const auto bytes = static_cast<std::size_t>(size) * numericArrayElementSize(type);
+            if (data.size() - header < bytes)
+                throw std::runtime_error("Truncated list element");
+            shape += 'a';
+            shape += std::to_string(static_cast<int>(small ? CodedType::arrayU8 : type));
+            return header + bytes;
+        }
+        if (type == CodedType::tuple) {
+            need(2);
+            std::size_t used = 2;
+            shape += '(';
+            for (std::size_t field = 0; field < static_cast<std::size_t>(data[1]); ++field) {
+                if (field != 0)
+                    shape += ',';
+                used += appendWireShape(data.subspan(used), shape);
+            }
+            shape += ')';
+            return used;
+        }
+        throw std::runtime_error("A list element cannot be a list, an exception or of an unknown type");
+    }
+
     /// The elements of a list, decoded into the vector T. A list holds at least one byte per element and neither a list nor
     /// an exception: a count the message cannot hold, or such an element, is refused before it is decoded.
     template <typename T>
@@ -757,12 +845,16 @@ private:
         static_assert(!contains_list_v<Element>, "WebFront lists cannot contain lists");
         T result;
         result.reserve(std::min<std::size_t>(count, 1024));
+        // Decoding into the destination type is not enough to prove the elements alike (a number decodes as a bool): their
+        // shapes on the wire must be those of the first element.
+        std::string firstShape, shape;
         for (std::size_t index = 0; index < count; ++index) {
-            if (data.empty())
-                throw std::runtime_error("Truncated list element");
-            const auto type = static_cast<CodedType>(data[0]);
-            if (type == CodedType::list || type == CodedType::exception)
-                throw std::runtime_error("A list element cannot be a list or an exception");
+            shape.clear();
+            appendWireShape(data, shape);
+            if (index == 0)
+                firstShape = shape;
+            else if (shape != firstShape)
+                throw std::runtime_error("List elements are not of one type");
             Element element{};
             decodeParameter(element, data);
             result.push_back(std::move(element));
