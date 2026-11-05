@@ -488,6 +488,37 @@ SCENARIO("Lists of strings, tuples and arrays are encoded as one list value") {
                               runtime_error);
         }
     }
+    GIVEN("tuples nested far deeper than any application type") {
+        // A list whose first element is 100000 tuples of one field each: 2 bytes of header per level.
+        vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::list)}, byte{1}, byte{0}, byte{0}, byte{0}};
+        for (int level = 0; level < 100000; ++level) {
+            bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::tuple)});
+            bytes.push_back(byte{1});
+        }
+        bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::booleanTrue)});
+        THEN("the shape check refuses them before the stack is at risk") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<tuple<bool>>>(bytes), runtime_error);
+        }
+    }
+    GIVEN("tuples nested exactly at and just past the shared limit of 32 levels") {
+        const auto nested = [](int levels) {
+            vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::list)}, byte{1}, byte{0}, byte{0}, byte{0}};
+            for (int level = 0; level < levels; ++level) {
+                bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::tuple)});
+                bytes.push_back(byte{1});
+            }
+            bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::booleanTrue)});
+            return bytes;
+        };
+        // The destination only has to be as deep as the wire value for decoding to reach the check: a 33-level destination
+        // type is refused at compile time by the encoder, so the wire is built by hand.
+        THEN("32 levels pass the shape check and 33 are refused") {
+            using Level32 = tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<bool>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>;
+            static_assert(msg::tuple_depth_v<Level32> == 32);
+            REQUIRE_NOTHROW(decodedParameter<vector<Level32>>(nested(32)));
+            REQUIRE_THROWS_AS(decodedParameter<vector<Level32>>(nested(33)), runtime_error);
+        }
+    }
     GIVEN("a policy whose messages cannot exceed 1 KiB") {
         using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024>;
         msg::FunctionReturn<SmallPolicy>             message;

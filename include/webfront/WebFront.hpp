@@ -6,6 +6,7 @@
 
 #include "BridgeError.hpp"
 #include "Broadcast.hpp"
+#include "DeferredCalls.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
@@ -243,6 +244,34 @@ auto makeCppFunctionHandler(Function&& function) {
     };
 }
 
+/// Like makeCppFunctionHandler for a callback that answers later: it returns the sender of the callback, which owns the decoded
+/// arguments and the calling UI (they live in its operation state). A callback that takes them by reference, a coroutine for instance, can thus
+/// use them until it completes, long after this handler returned.
+template <http::BuffersPolicyType Policy, typename... Args, typename Function>
+auto makeDeferredHandler(Function&& function) {
+    using StoredFunction = std::decay_t<Function>;
+    auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
+
+    return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) {
+        // The caller (the calling UI) is kept with the arguments, as a copy: a callback taking it by reference lives as long as them.
+        using State = std::pair<std::tuple<std::decay_t<decltype(caller)>...>, std::tuple<Args...>>;
+        auto state  = std::make_shared<State>(std::tuple<std::decay_t<decltype(caller)>...>{caller...}, std::tuple<Args...>{});
+        try {
+            std::apply([&](auto&... decoded) { (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...); }, state->second);
+            if (!data.empty())
+                throw std::runtime_error("Function call contains trailing parameter data");
+        } catch (const std::exception& error) {
+            throw detail::makeBridgeError(bridge_code::malformed, error.what());
+        }
+        auto sender = std::apply(
+            [&](auto&... kept) {
+                return std::apply([&](auto&... decoded) { return std::invoke(*callable, kept..., decoded...); }, state->second);
+            },
+            state->first);
+        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable { return std::move(sender); });
+    };
+}
+
 // --- Callable signature inference for cppFunction(name, callable), without explicit <R, Args...> ---
 
 // Primary template intentionally has no Return/DecayedArgs members: has_callable_traits below
@@ -350,6 +379,40 @@ websocket::Frame<Net> makeFailureFrame(msg::CallId callId, const std::exception&
     failure.setCallId(callId);
     websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(failure.header().data()), failure.header().size())};
     failure.encodeParameter(error, frame);
+    frame.freeze();
+    return frame;
+}
+
+/// WebFront's own rejection of a call, with one of the codes of the bridge (bridge_code). Internal: the public ways to
+/// reject (BridgeError thrown by a callback, WebLink::sendError) can never carry a reserved code.
+template <typename Net, http::BuffersPolicyType Policy, typename Link>
+void rejectWithBridgeCode(Link& link, msg::CallId callId, std::string_view code, const std::string& message) {
+    if (callId != 0)
+        link.sendFrame(makeFailureFrame<Net, Policy>(callId, makeBridgeError(code, message)));
+}
+
+/// A self-contained return message carrying `value`, or the failure of its encoding (a string over the message size).
+template <typename Net, http::BuffersPolicyType Policy, typename Value>
+websocket::Frame<Net> makeValueFrame(msg::CallId callId, const Value& value) {
+    msg::FunctionReturn<Policy> result;
+    result.setCallId(callId);
+    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+    try {
+        if constexpr (!std::is_void_v<Value>)
+            result.encodeParameter(value, frame);
+        frame.freeze();
+        return frame;
+    } catch (const std::exception& error) {
+        return makeFailureFrame<Net, Policy>(callId, error);
+    }
+}
+
+/// A return message without value.
+template <typename Net, http::BuffersPolicyType Policy>
+websocket::Frame<Net> makeVoidFrame(msg::CallId callId) {
+    msg::FunctionReturn<Policy> result;
+    result.setCallId(callId);
+    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
     frame.freeze();
     return frame;
 }
@@ -833,7 +896,9 @@ public:
      */
     template <typename R, typename... Args>
     bool cppFunction(std::string functionName, auto&& function) {
-        if constexpr (detail::takes_caller<UI, Args...>::value)
+        if constexpr (detail::deferred_result<R>)
+            return registerDeferred<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+        else if constexpr (detail::takes_caller<UI, Args...>::value)
             return registerWithCaller<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
         else {
             auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
@@ -966,6 +1031,129 @@ private:
         released.swap(webLinks);
     }
 
+    /// A callback that returns a sender (a ResultTask<R> among them) answers when it completes, not when it returns: the
+    /// call is owned by the connection (its closure stops the work and drops the late answer) and by the server scope
+    /// (shutdown stops and joins it). The answer is sent on the server context.
+    template <typename R, typename... Args>
+    bool registerDeferred(std::string functionName, auto&& function) {
+        // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
+        using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
+        const auto start = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+            this->startDeferred(std::move(invoke), link, callId, caller);
+        };
+        if constexpr (detail::takes_caller<UI, Args...>::value) {
+            auto handler = registerDeferredHandler<Args...>(std::forward<decltype(function)>(function));
+            return cppFunctions
+                .try_emplace(std::move(functionName),
+                             [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                                 start([&] { return handler(data, caller); }, link, callId, caller);
+                             })
+                .second;
+        } else {
+            auto handler = detail::makeDeferredHandler<Policy, Args...>(std::forward<decltype(function)>(function));
+            return cppFunctions
+                .try_emplace(std::move(functionName),
+                             [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                                 start([&] { return handler(data); }, link, callId, caller);
+                             })
+                .second;
+        }
+    }
+
+    template <typename Caller, typename... Args>
+    auto registerDeferredHandler(auto&& function) {
+        return detail::makeDeferredHandler<Policy, Args...>(detail::adaptCaller<Caller>(std::forward<decltype(function)>(function)));
+    }
+
+    /// Claims the call identifier, then calls the callback and hands the sender it returned to a task that answers when it
+    /// completes. The claim comes first: a call refused as a duplicate, or on a closed connection, never runs the callback.
+    template <typename Invoke>
+    void startDeferred(Invoke invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+        const auto [calls, generation] = deferredCallsOf(caller);
+        const auto key                  = calls ? calls->reserve(callId) : 0;
+        if (key == 0) {
+            // The connection closed (nobody is left to answer), or a call with this identifier is still running: the common
+            // reception drops such a call before it gets here, and this claim is the last guard.
+            return;
+        }
+        std::optional<std::remove_cvref_t<decltype(invoke())>> sender;
+        try {
+            sender.emplace(invoke());
+        } catch (const std::exception& error) {
+            calls->finish(callId, key);
+            if (callId != 0)
+                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, error));
+            return;
+        } catch (...) {
+            calls->finish(callId, key);
+            if (callId != 0)
+                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
+            return;
+        }
+        const auto handle = spawn(respondLater(caller, generation, calls, callId, key, std::move(*sender)));
+        if (handle.stopRequested()) {
+            // The server refused the task (it is shutting down): it never runs, so nothing would release the identifier.
+            calls->finish(callId, key);
+            return;
+        }
+        calls->attach(key, handle);
+    }
+
+    [[nodiscard]] bool callInFlight(WebLinkId id, WebLinkGeneration generation, msg::CallId callId) const {
+        std::shared_ptr<detail::DeferredCalls> calls;
+        {
+            std::scoped_lock lock{linksMutex};
+            const auto       found = webLinks.find(id);
+            if (found == webLinks.end() || found->second.generation != generation)
+                return false;
+            calls = found->second.deferredCalls;
+        }
+        return calls->inFlight(callId);
+    }
+
+    std::pair<std::shared_ptr<detail::DeferredCalls>, WebLinkGeneration> deferredCallsOf(const UI& caller) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(caller.id());
+        if (found == webLinks.end() || found->second.closed)
+            return {nullptr, WebLinkGeneration{0}};
+        return {found->second.deferredCalls, found->second.generation};
+    }
+
+    /// Awaits the sender of a deferred callback and sends its result, its failure, or `webfront.cancelled` when it
+    /// completed stopped by something other than this call's own stop request. When that request was made (the
+    /// connection closed, the application is stopping) nothing is sent: nobody is left to read it.
+    template <typename Sender>
+    Task respondLater(UI caller, WebLinkGeneration generation, std::shared_ptr<detail::DeferredCalls> calls, msg::CallId callId, std::uint64_t key, Sender sender) {
+        struct Finish {
+            detail::DeferredCalls& calls;
+            msg::CallId            callId;
+            std::uint64_t          key;
+            ~Finish() { calls.finish(callId, key); }
+        } finish{*calls, callId, key};
+        const auto token = co_await networking::ex::read_env(networking::ex::get_stop_token);
+        std::optional<websocket::Frame<Net>> answer;
+        try {
+            auto stoppable = networking::ex::stopped_as_error(
+                std::move(sender), std::make_exception_ptr(detail::makeBridgeError(bridge_code::cancelled, "The C++ callback was cancelled")));
+            // One answer frame whether the sender completes with a value or without: the message is built where it completes.
+            auto framed = networking::ex::then(std::move(stoppable), [callId](auto&&... values) -> websocket::Frame<Net> {
+                if constexpr (sizeof...(values) == 0)
+                    return detail::makeVoidFrame<Net, Policy>(callId);
+                else
+                    return detail::makeValueFrame<Net, Policy>(callId, values...);
+            });
+            answer.emplace(co_await std::move(framed));
+        } catch (const std::exception& error) {
+            answer.emplace(detail::makeFailureFrame<Net, Policy>(callId, error));
+        } catch (...) {
+            answer.emplace(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
+        }
+        if (token.stop_requested() || callId == 0)
+            co_return;
+        if (const auto link = findLink(caller.id(), generation))
+            link->sendFrame(std::move(*answer));
+    }
+
     template <typename R, typename Caller, typename... Args>
     bool registerWithCaller(std::string functionName, auto&& function) {
         auto adapted   = detail::adaptCaller<Caller>(std::forward<decltype(function)>(function));
@@ -1001,6 +1189,7 @@ private:
         std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
         bool                                    viewAssociated = false;              // presented the launch secret of an embedded view
         bool                                    loopbackPeer   = false;              // peer address was the loopback (read only with trustLoopbackClients)
+        std::shared_ptr<detail::DeferredCalls>  deferredCalls = std::make_shared<detail::DeferredCalls>();  // calls a callback answers later
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -1150,14 +1339,20 @@ private:
                 if (httpServer.taskScope().stopRequested())
                     break;
                 std::optional<WebLinkGeneration> closedGeneration;
+                std::shared_ptr<detail::DeferredCalls> stoppedCalls;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.closed = true;
                         found->second.deferred.clear();
                         closedGeneration = found->second.generation;
+                        stoppedCalls     = found->second.deferredCalls;
                     }
                 }
+                // The calls a callback has not answered are stopped and their late answers dropped, outside the lock: a
+                // stop callback runs on this thread.
+                if (stoppedCalls)
+                    stoppedCalls->close();
                 // Outside linksMutex: dropping the grants destroys their contexts, whose destructors may use the application.
                 if (closedGeneration)
                     readBinding->close(*closedGeneration);  // its read URLs stop working at once
@@ -1176,6 +1371,13 @@ private:
                 const auto [link, generation] = linkAndGeneration(event.webLinkId);
                 if (!link)
                     break;
+                // A browser that reuses the identifier of a call a callback has not answered yet breaks the protocol (its own
+                // calls never do). Whatever the function, no second call and no answer with that identifier: an answer could
+                // settle the first call's Promise, and the first call's own answer a later call that reuses the identifier.
+                if (callInFlight(event.webLinkId, generation, event.callId)) {
+                    log::error("Ignoring a call to '{}' that reuses the identifier {} of a call still running", event.text, event.callId);
+                    break;
+                }
                 if constexpr (requires(typename Net::Acceptor& acceptor) { Net::ResumeAfter(acceptor, std::chrono::milliseconds(1)); }) {
                     if (domCall(event, *link))
                         break;
@@ -1186,7 +1388,7 @@ private:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
-                    link->sendError(event.callId, "C++ function '" + event.text + "' was not found", bridge_code::notFound);
+                    detail::rejectWithBridgeCode<Net, Policy>(*link, event.callId, bridge_code::notFound, "C++ function '" + event.text + "' was not found");
                 break;
             }
         }

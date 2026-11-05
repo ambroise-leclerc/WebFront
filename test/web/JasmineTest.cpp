@@ -41,6 +41,16 @@ namespace {
 constexpr string_view cppToJsToken{"cpp-to-js-token"};
 constexpr string_view jsToCppToken{"js-to-cpp-token"};
 
+/// A string wrapped in `Levels` one-field tuples: the deepest list element the bridge accepts has 32 of them.
+template <int Levels>
+struct Nested {
+    using type = tuple<typename Nested<Levels - 1>::type>;
+};
+template <>
+struct Nested<0> {
+    using type = string;
+};
+
 struct TestState {
     atomic<bool> browserReady{false};
     atomic<bool> domDocumentObserved{false};
@@ -329,7 +339,24 @@ private:
 
     using Record = tuple<string, double, bool, vector<uint8_t>>;
 
+    static ResultTask<string> deferredEcho(TestWF* app, string value, int delayMs) {
+        co_await app->resumeAfter(chrono::milliseconds(delayMs));
+        co_return "deferred:" + value;
+    }
+    static ResultTask<string> deferredFailure(TestWF* app, string reason) {
+        co_await app->resumeAfter(chrono::milliseconds(20));
+        if (!reason.empty())  // always: a value-returning coroutine needs a co_return and no unreachable code (MSVC)
+            throw BridgeError("late:failure", reason);
+        co_return reason;
+    }
+
     void registerListCallbacks() {
+        webFront->cppFunction("deepEcho", [](const vector<Nested<32>::type>& value) {
+            return value;
+        });
+        webFront->cppFunction("deferredEcho", [this](string value, int delayMs) { return deferredEcho(webFront, std::move(value), delayMs); });
+        webFront->cppFunction("deferredFailure", [this]() { return deferredFailure(webFront, "rejected after a delay"); });
+
         webFront->cppFunction("listEcho", [](const vector<string>& value) {
             return value;
         });

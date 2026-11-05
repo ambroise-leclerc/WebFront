@@ -177,6 +177,24 @@ cancellation API. The untyped `ui.jsFunction(name)` remains fire-and-forget.
 JavaScript-to-C++ calls still always return Promises. None of these changes adds
 richer bridge result types or remote Promise cancellation.
 
+## Callbacks that answer later
+
+A function registered with `cppFunction` may return a sender, in practice a coroutine `webfront::ResultTask<R>`
+(`ResultTask<void>` for no value), instead of its result: the JavaScript Promise settles when it completes, not when
+the callback returns. The callback itself runs at once on the server context and only builds the task; the task is
+spawned in the server's scope and tracked by its connection. When the browser disconnects its tasks are asked to stop
+and their late answers are dropped; shutting the application down stops and joins them. Completing stopped without a
+stop request rejects with `webfront.cancelled`. Calls are correlated by the identifier JavaScript chose, so several can
+be in flight per connection; a call that reuses an identifier still in flight is dropped on reception, for any function, without being run and without an answer (an answer could settle the wrong Promise). The answer is sent from the server
+context, whichever thread the awaited operation completed on.
+
+```cpp
+app.cppFunction("slowSquare", [&app](int value) -> webfront::ResultTask<int> {
+    co_await app.resumeAfter(std::chrono::seconds(1));
+    co_return value * value;
+});
+```
+
 ## Threads
 
 WebFront runs its HTTP/WebSocket server on one thread: the thread `show()` starts, or the thread

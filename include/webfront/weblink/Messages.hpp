@@ -213,6 +213,18 @@ struct contains_list<std::tuple<T...>> : std::bool_constant<(contains_list<std::
 template <typename T>
 inline constexpr bool contains_list_v = contains_list<std::remove_cvref_t<T>>::value;
 
+/// Tuples nest at most this deep inside a list element, in both codecs (ADR-003): the decoders walk an element recursively,
+/// and a browser must not exhaust the stack with a few hundred KiB of tuple headers.
+inline constexpr std::size_t maxListTupleDepth = 32;
+
+template <typename T>
+struct tuple_depth : std::integral_constant<std::size_t, 0> {};
+template <typename... T>
+struct tuple_depth<std::tuple<T...>>
+    : std::integral_constant<std::size_t, 1 + std::max({std::size_t{0}, tuple_depth<std::remove_cvref_t<T>>::value...})> {};
+template <typename T>
+inline constexpr std::size_t tuple_depth_v = tuple_depth<std::remove_cvref_t<T>>::value;
+
 template <typename T>
 struct is_list_element : std::bool_constant<is_string_like_v<T> || is_tuple_v<T> || is_bitset_v<T> || is_numeric_array_v<T>> {};
 template <typename T>
@@ -554,6 +566,7 @@ public:
     template <typename List, typename WebSocketFrame>
     void encodeList(const List& list, WebSocketFrame& frame) {
         static_assert(!contains_list_v<typename List::value_type>, "WebFront lists cannot contain lists");
+        static_assert(tuple_depth_v<typename List::value_type> <= maxListTupleDepth, "WebFront list elements nest tuples at most 32 deep");
         if (list.size() > std::numeric_limits<std::uint32_t>::max())
             throw std::length_error("WebFront lists cannot exceed 4294967295 elements");
         encodeTypeHeader(msg::CodedType::list, static_cast<std::uint32_t>(list.size()), frame);
@@ -767,7 +780,9 @@ private:
     /// Walks the value at the start of `data` without decoding it: appends its shape to `shape` and returns the bytes it takes.
     /// Two list elements must have the same shape: the same kind of value (any string header is a string, the short and the
     /// regular Uint8Array are one array type) and, for a tuple, the same shapes of fields.
-    static std::size_t appendWireShape(std::span<const std::byte> data, std::string& shape) {
+    static constexpr std::size_t maxShapeDepth = maxListTupleDepth;
+
+    static std::size_t appendWireShape(std::span<const std::byte> data, std::string& shape, std::size_t depth = 0) {
         if (data.empty())
             throw std::runtime_error("Truncated list element");
         const auto type = static_cast<CodedType>(data[0]);
@@ -823,13 +838,15 @@ private:
             return header + bytes;
         }
         if (type == CodedType::tuple) {
+            if (depth >= maxShapeDepth)
+                throw std::runtime_error("List element tuples are nested too deeply");
             need(2);
             std::size_t used = 2;
             shape += '(';
             for (std::size_t field = 0; field < static_cast<std::size_t>(data[1]); ++field) {
                 if (field != 0)
                     shape += ',';
-                used += appendWireShape(data.subspan(used), shape);
+                used += appendWireShape(data.subspan(used), shape, depth + 1);
             }
             shape += ')';
             return used;

@@ -149,8 +149,9 @@ public:
                 auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
                 rejectPending(std::make_exception_ptr(detail::disconnectedError(message)));
                 // The WebSocket reports its closure once, and never when it is stopped by the server or the link.
+                const auto queue = writerQueue;  // the event may release this link
                 eventsHandler({WebLinkEvent::Code::closed, id});
-                wakeAllWriters();  // after the closure is known: nothing will be written any more
+                wakeAll(*queue);  // after the closure is known: nothing will be written any more
             });
         });
 
@@ -189,21 +190,21 @@ public:
     /// the thread that writes the frame bringing them down, and returns its identifier for cancelWrites(). The waiters
     /// are also called when the connection closes or the link is destroyed: nothing is left to wait for.
     std::uint64_t whenWritesAtMost(std::size_t limit, std::function<void()> ready) {
-        std::lock_guard lock(writersMutex);
+        std::lock_guard lock(writerQueue->mutex);
         if (ws->pendingWrites() <= limit)
             return 0;
-        const auto waiter = ++lastWriter;
-        writers.emplace(waiter, Writer{limit, std::move(ready)});
+        const auto waiter = ++writerQueue->last;
+        writerQueue->writers.emplace(waiter, Writer{limit, std::move(ready)});
         return waiter;
     }
 
     /// Forgets a waiter of whenWritesAtMost() that was not called yet.
     void cancelWrites(std::uint64_t waiter) {
         std::function<void()> removed;  // destroyed outside the lock
-        std::lock_guard lock(writersMutex);
-        if (auto found = writers.find(waiter); found != writers.end()) {
+        std::lock_guard lock(writerQueue->mutex);
+        if (auto found = writerQueue->writers.find(waiter); found != writerQueue->writers.end()) {
             removed = std::move(found->second.ready);
-            writers.erase(found);
+            writerQueue->writers.erase(found);
         }
     }
 
@@ -325,13 +326,17 @@ private:
 
 
 public:
-    /// Rejects the call `callId` with `message` and `code` (the generic one by default); nothing is sent for call 0.
+    /// Rejects the call `callId` with `message` and an application `code` (the generic one by default); nothing is sent
+    /// for call 0. A code that is ill-formed or reserved to the bridge (`webfront.*`) is sent as the generic one: this path
+    /// cannot forge an error that looks like the bridge's own. WebFront's own codes leave through the internal
+    /// detail::rejectWithBridgeCode, not through a method of the link.
     void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
         if (callId == 0) return;
+        const bool usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-        const auto error = detail::makeBridgeError(code, std::string(message));
+        const auto error = detail::makeBridgeError(usable ? code : bridge_code::generic, std::string(message));
         result.encodeParameter(error, frame);
         frame.freeze();
         sendFrame(std::move(frame));
@@ -342,36 +347,43 @@ private:
         std::size_t           limit;
         std::function<void()> ready;
     };
-    std::mutex                        writersMutex;
-    std::map<std::uint64_t, Writer>   writers;  // waiters of whenWritesAtMost(), by identifier
-    std::uint64_t                     lastWriter = 0;
+    /// The waiters of whenWritesAtMost(), by identifier. Shared, so that the closure handler can wake them after its event
+    /// released the link (an application whose scheduler runs the release at once destroys the link inside that handler).
+    struct WriterQueue {
+        std::mutex                      mutex;
+        std::map<std::uint64_t, Writer> writers;
+        std::uint64_t                   last = 0;
+    };
+    std::shared_ptr<WriterQueue> writerQueue = std::make_shared<WriterQueue>();
 
     // The queue shrank: the waiters it now satisfies are removed, then called outside the lock.
     void wakeWriters() {
         std::vector<std::function<void()>> ready;
         {
-            std::lock_guard lock(writersMutex);
-            if (writers.empty())
+            std::lock_guard lock(writerQueue->mutex);
+            if (writerQueue->writers.empty())
                 return;
             const auto queued = ws->pendingWrites();
-            for (auto writer = writers.begin(); writer != writers.end();) {
+            for (auto writer = writerQueue->writers.begin(); writer != writerQueue->writers.end();) {
                 if (queued > writer->second.limit) {
                     ++writer;
                     continue;
                 }
                 ready.push_back(std::move(writer->second.ready));
-                writer = writers.erase(writer);
+                writer = writerQueue->writers.erase(writer);
             }
         }
         for (auto& call : ready)
             call();
     }
 
-    void wakeAllWriters() {
+    void wakeAllWriters() { wakeAll(*writerQueue); }
+
+    static void wakeAll(WriterQueue& queue) {
         std::map<std::uint64_t, Writer> ready;
         {
-            std::lock_guard lock(writersMutex);
-            ready.swap(writers);
+            std::lock_guard lock(queue.mutex);
+            ready.swap(queue.writers);
         }
         for (auto& [waiter, writer] : ready)
             writer.ready();

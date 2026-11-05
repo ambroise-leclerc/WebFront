@@ -225,6 +225,33 @@ describe('WebFront browser integration', () => {
         expect(echoed[1][3].length).toBe(300);
     });
 
+    it('accepts tuples nested 32 deep in a list element, in both codecs, and refuses 33', async () => {
+        const nest = levels => { let value = 'x'; for (let level = 0; level < levels; ++level) value = [value]; return value; };
+        // The whole value comes back: the final string and the nesting, not only its depth.
+        expect(await webFront.cppFunction('deepEcho')(webFront.list([nest(32)]))).toEqual([nest(32)]);
+        await expectAsync(webFront.cppFunction('deepEcho')(webFront.list([nest(33)])))
+            .toBeRejectedWithError(TypeError, /at most 32 deep/);
+        await expectAsync(webFront.cppFunction('listEcho')(webFront.list(['still works']))).toBeResolvedTo(['still works']);
+    });
+
+    it('refuses absurdly deep tuples in a list element at the limit, on sending and on receiving, without exhausting the stack', async () => {
+        // Sending: 200,000 nested arrays are refused at depth 33, long before the recursion could overflow.
+        const nest = levels => { let value = 'x'; for (let level = 0; level < levels; ++level) value = [value]; return value; };
+        await expectAsync(webFront.cppFunction('deepEcho')(webFront.list([nest(200000)])))
+            .toBeRejectedWithError(TypeError, /at most 32 deep/);
+        // Receiving: a list whose one element is 200,000 one-field tuples (2 bytes of header each) around a boolean.
+        const levels = 200000;
+        const bytes = new Uint8Array(5 + 2 * levels + 1);
+        const view = new DataView(bytes.buffer);
+        view.setUint8(0, 20);                                // list
+        view.setUint32(1, 1, webFront.littleEndian);         // one element
+        for (let level = 0; level < levels; ++level) { bytes[5 + 2 * level] = 18; bytes[6 + 2 * level] = 1; }  // tuple of one field
+        bytes[5 + 2 * levels] = 1;                           // booleanTrue
+        expect(() => webFront.decodeParameters(1, view)).toThrowError(TypeError, /at most 32 deep/);
+        expect(webFront.listElementDepth).toBeUndefined();   // the counter is restored whatever happened
+        await expectAsync(webFront.cppFunction('listEcho')(webFront.list(['still works']))).toBeResolvedTo(['still works']);
+    });
+
     it('refuses to send a heterogeneous or nested list, and C++ refuses a wrong element type', async () => {
         const echo = webFront.cppFunction('listEcho');
         await expectAsync(echo(webFront.list(['text', new Uint8Array(1)]))).toBeRejectedWithError(TypeError, /not of one type/);
@@ -366,6 +393,23 @@ describe('WebFront browser integration', () => {
         await failingBridge.ready.catch(() => {});
         const error = await failingBridge.cppFunction('returnFromCpp')('x').then(() => null, failure => failure);
         expect(error.code).toBe('webfront.disconnected');
+    });
+
+    it('resolves a Promise when a C++ coroutine finishes later, and rejects it with its code', async () => {
+        const started = performance.now();
+        await expectAsync(webFront.cppFunction('deferredEcho')('x', 150)).toBeResolvedTo('deferred:x');
+        expect(performance.now() - started).toBeGreaterThanOrEqual(100);
+        const error = await webFront.cppFunction('deferredFailure')().then(() => null, failure => failure);
+        expect(error.code).toBe('late:failure');
+        expect(error.message).toBe('rejected after a delay');
+    });
+
+    it('answers concurrent deferred calls in the order they finish', async () => {
+        const echo = webFront.cppFunction('deferredEcho');
+        const order = [];
+        const calls = [300, 50, 150].map(delay => echo(String(delay), delay).then(value => order.push(value)));
+        await Promise.all(calls);
+        expect(order).toEqual(['deferred:50', 'deferred:150', 'deferred:300']);
     });
 
     it('rejects missing functions and C++ exceptions', async () => {

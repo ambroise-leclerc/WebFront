@@ -121,10 +121,21 @@
         }
     }
 
-    /// A list element is neither a list nor a tuple holding one: their shapes contain "L".
+    /// Tuples nest at most this deep inside a list element, as in the C++ codec (ADR-003).
+    const maxListTupleDepth = 32;
+
+    /// A list element is neither a list nor a tuple holding one (their shapes contain "L"), and nests tuples at most
+    /// maxListTupleDepth deep (the parentheses of its shape).
     function requireListElementShape(shape) {
         if (shape.includes("L"))
             throw new TypeError("WebFront lists cannot contain lists");
+        let depth = 0;
+        for (const character of shape) {
+            if (character === "(" && ++depth > maxListTupleDepth)
+                throw new TypeError(`WebFront list elements nest tuples at most ${maxListTupleDepth} deep`);
+            else if (character === ")")
+                --depth;
+        }
     }
 
     function isTypedArray(value) {
@@ -544,9 +555,21 @@
 
         decodeTuple(view, offset) {
             requireBytes(view, offset, 2, "tuple header");
-            const shapes = [];
-            const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2, shapes);
-            return {value: tuple, bytes: 2 + consumed, shape: `(${shapes.join(",")})`};
+            // Inside a list element the nesting is counted while descending, so that a message of thousands of nested tuples
+            // is refused at the limit and never exhausts the stack.
+            const counted = this.listElementDepth !== undefined;
+            if (counted && this.listElementDepth >= maxListTupleDepth)
+                throw new TypeError(`WebFront list elements nest tuples at most ${maxListTupleDepth} deep`);
+            if (counted)
+                ++this.listElementDepth;
+            try {
+                const shapes = [];
+                const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2, shapes);
+                return {value: tuple, bytes: 2 + consumed, shape: `(${shapes.join(",")})`};
+            } finally {
+                if (counted)
+                    --this.listElementDepth;
+            }
         }
 
         /// A list is a 32-bit count followed by that many values of one shape; the elements arrive as a JavaScript array.
@@ -558,18 +581,24 @@
             const values = [];
             let cursor = offset + 5;
             let listShape = null;
-            for (let index = 0; index < count; ++index) {
-                requireBytes(view, cursor, 1, "list element type");
-                if (view.getUint8(cursor) === ParamType.exception)
-                    throw new TypeError("A WebFront list element cannot be an exception");
-                const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
-                requireListElementShape(shape);
-                if (listShape === null)
-                    listShape = shape;
-                else if (shape !== listShape)
-                    throw new TypeError("WebFront list elements are not of one type");
-                values.push(value);
-                cursor += bytes;
+            const outerDepth = this.listElementDepth;
+            try {
+                for (let index = 0; index < count; ++index) {
+                    requireBytes(view, cursor, 1, "list element type");
+                    if (view.getUint8(cursor) === ParamType.exception)
+                        throw new TypeError("A WebFront list element cannot be an exception");
+                    this.listElementDepth = 0;  // each element counts its own tuple nesting
+                    const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
+                    requireListElementShape(shape);
+                    if (listShape === null)
+                        listShape = shape;
+                    else if (shape !== listShape)
+                        throw new TypeError("WebFront list elements are not of one type");
+                    values.push(value);
+                    cursor += bytes;
+                }
+            } finally {
+                this.listElementDepth = outerDepth;
             }
             return {value: values, bytes: cursor - offset, shape: "L"};
         }
@@ -733,7 +762,7 @@
         }
 
         /// The shape, as the decoder computes it, of a value about to be encoded as a list element.
-        valueShape(value) {
+        valueShape(value, depth = 0) {
             switch (typeof value) {
             case "boolean":
                 return "b";
@@ -744,8 +773,12 @@
             }
             if (value instanceof WebFrontList)
                 return "L";
-            if (Array.isArray(value))
-                return `(${value.map(element => this.valueShape(element)).join(",")})`;
+            if (Array.isArray(value)) {
+                // Counted while descending: an array nested thousands deep is refused at the limit, not after exhausting the stack.
+                if (depth >= maxListTupleDepth)
+                    throw new TypeError(`WebFront list elements nest tuples at most ${maxListTupleDepth} deep`);
+                return `(${value.map(element => this.valueShape(element, depth + 1)).join(",")})`;
+            }
             if (isTypedArray(value) && arrayTypes.has(value.constructor))
                 return `a${arrayTypes.get(value.constructor).code}`;
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
