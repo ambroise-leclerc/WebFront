@@ -244,6 +244,29 @@ auto makeCppFunctionHandler(Function&& function) {
     };
 }
 
+/// Like makeCppFunctionHandler for a callback that answers later: it returns the sender of the callback, which owns the decoded
+/// arguments (they live in its operation state). A callback that takes them by reference, a coroutine for instance, can thus
+/// use them until it completes, long after this handler returned.
+template <http::BuffersPolicyType Policy, typename... Args, typename Function>
+auto makeDeferredHandler(Function&& function) {
+    using StoredFunction = std::decay_t<Function>;
+    auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
+
+    return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) {
+        auto parameters = std::make_shared<std::tuple<Args...>>();
+        try {
+            std::apply([&](auto&... decoded) { (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...); }, *parameters);
+            if (!data.empty())
+                throw std::runtime_error("Function call contains trailing parameter data");
+        } catch (const std::exception& error) {
+            throw detail::makeBridgeError(bridge_code::malformed, error.what());
+        }
+        auto sender = std::apply([&](auto&... decoded) { return std::invoke(*callable, caller..., decoded...); }, *parameters);
+        return networking::ex::let_value(networking::ex::just(std::move(parameters)),
+                                         [sender = std::move(sender)](auto&) mutable { return std::move(sender); });
+    };
+}
+
 // --- Callable signature inference for cppFunction(name, callable), without explicit <R, Args...> ---
 
 // Primary template intentionally has no Return/DecayedArgs members: has_callable_traits below
@@ -1003,10 +1026,10 @@ private:
         // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
         using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
         const auto start = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
-            this->template startDeferred<R>(std::move(invoke), link, callId, caller);
+            this->startDeferred(std::move(invoke), link, callId, caller);
         };
         if constexpr (detail::takes_caller<UI, Args...>::value) {
-            auto handler = registerDeferredHandler<R, Args...>(std::forward<decltype(function)>(function));
+            auto handler = registerDeferredHandler<Args...>(std::forward<decltype(function)>(function));
             return cppFunctions
                 .try_emplace(std::move(functionName),
                              [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
@@ -1014,7 +1037,7 @@ private:
                              })
                 .second;
         } else {
-            auto handler = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
+            auto handler = detail::makeDeferredHandler<Policy, Args...>(std::forward<decltype(function)>(function));
             return cppFunctions
                 .try_emplace(std::move(functionName),
                              [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
@@ -1024,33 +1047,36 @@ private:
         }
     }
 
-    template <typename R, typename Caller, typename... Args>
+    template <typename Caller, typename... Args>
     auto registerDeferredHandler(auto&& function) {
-        return detail::makeCppFunctionHandler<Policy, R, Args...>(detail::adaptCaller<Caller>(std::forward<decltype(function)>(function)));
+        return detail::makeDeferredHandler<Policy, Args...>(detail::adaptCaller<Caller>(std::forward<decltype(function)>(function)));
     }
 
-    /// Calls the callback, then hands the sender it returned to a task that answers when it completes.
-    template <typename R, typename Invoke>
+    /// Claims the call identifier, then calls the callback and hands the sender it returned to a task that answers when it
+    /// completes. The claim comes first: a call refused as a duplicate, or on a closed connection, never runs the callback.
+    template <typename Invoke>
     void startDeferred(Invoke invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
-        std::optional<std::remove_cvref_t<R>> sender;
-        try {
-            sender.emplace(invoke());
-        } catch (const std::exception& error) {
-            if (callId != 0)
-                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, error));
-            return;
-        } catch (...) {
-            if (callId != 0)
-                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
-            return;
-        }
         const auto [calls, generation] = deferredCallsOf(caller);
         const auto key                  = calls ? calls->reserve(callId) : 0;
         if (key == 0) {
             // The connection closed, or the browser reused the identifier of a call that is still running.
             if (callId != 0)
                 link.sendBridgeError(callId, calls ? "The call identifier is already in use" : "Browser connection closed",
-                               calls ? bridge_code::malformed : bridge_code::disconnected);
+                                     calls ? bridge_code::malformed : bridge_code::disconnected);
+            return;
+        }
+        std::optional<std::remove_cvref_t<decltype(invoke())>> sender;
+        try {
+            sender.emplace(invoke());
+        } catch (const std::exception& error) {
+            calls->finish(callId, key);
+            if (callId != 0)
+                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, error));
+            return;
+        } catch (...) {
+            calls->finish(callId, key);
+            if (callId != 0)
+                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
             return;
         }
         const auto handle = spawn(respondLater(caller, generation, calls, callId, key, std::move(*sender)));

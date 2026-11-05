@@ -51,6 +51,19 @@ ResultTask<std::string> echoLater(std::string value) {
     co_return "answered:" + value;
 }
 
+/// Takes its argument by reference and uses it after suspending: the decoded argument must outlive the handler.
+ResultTask<std::string> byReferenceLater(const std::string& value) {
+    co_await deferredGate();
+    co_return "reference:" + value;
+}
+
+int sideEffects = 0;
+
+ResultTask<std::string> countingLater(std::string value) {
+    co_await deferredGate();
+    co_return "counted:" + value;
+}
+
 ResultTask<std::string> failLater(std::string) {
     co_await deferredGate();
     throw BridgeError("quota:exceeded", "the disk is full");
@@ -293,5 +306,32 @@ SCENARIO("The identifiers of in-flight calls are claimed once and released on fi
         THEN("nothing can be claimed any more") {
             REQUIRE(calls.reserve(6) == 0);
         }
+    }
+}
+
+SCENARIO("The decoded arguments of a deferred callback live until it completes", "[deferred]") {
+    DeferredBrowser browser;
+    browser.app.cppFunction("byReference", &byReferenceLater);
+    browser.connect();
+    browser.call("byReference", 3, std::string(60, 'r'));  // beyond the small string buffer: a dangling reference would read freed memory
+    deferredGates.release(0);
+    THEN("the coroutine still reads its argument") {
+        REQUIRE(Socket::wrote("reference:" + std::string(60, 'r')));
+    }
+}
+
+SCENARIO("A call refused as a duplicate does not run the callback", "[deferred]") {
+    DeferredBrowser browser;
+    sideEffects = 0;
+    browser.app.cppFunction<ResultTask<std::string>, std::string>("counting", [](const std::string& value) -> ResultTask<std::string> {
+        ++sideEffects;  // an action taken before the task is returned
+        return countingLater(value);
+    });
+    browser.connect();
+    browser.call("counting", 7, "first");
+    browser.call("counting", 7, "again");
+    THEN("the callback ran once and the duplicate was refused") {
+        REQUIRE(sideEffects == 1);
+        REQUIRE(Socket::wrote("already in use"));
     }
 }
