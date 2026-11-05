@@ -1000,6 +1000,8 @@ private:
     /// (shutdown stops and joins it). The answer is sent on the server context.
     template <typename R, typename... Args>
     bool registerDeferred(std::string functionName, auto&& function) {
+        // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
+        using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
         const auto start = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
             this->template startDeferred<R>(std::move(invoke), link, callId, caller);
         };
@@ -1052,6 +1054,11 @@ private:
             return;
         }
         const auto handle = spawn(respondLater(caller, generation, calls, callId, key, std::move(*sender)));
+        if (handle.stopRequested()) {
+            // The server refused the task (it is shutting down): it never runs, so nothing would release the identifier.
+            calls->finish(callId, key);
+            return;
+        }
         calls->attach(key, handle);
     }
 

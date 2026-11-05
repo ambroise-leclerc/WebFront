@@ -274,3 +274,24 @@ SCENARIO("Shutting the application down joins its pending deferred calls", "[def
         REQUIRE_FALSE(Socket::wrote("late"));
     }
 }
+
+SCENARIO("The identifiers of in-flight calls are claimed once and released on finish", "[deferred]") {
+    detail::DeferredCalls calls;
+    const auto            key = calls.reserve(5);
+    REQUIRE(key != 0);
+    REQUIRE(calls.reserve(5) == 0);
+    REQUIRE(calls.reserve(0) != 0);  // zero asks for no answer: never in flight
+    REQUIRE(calls.reserve(0) != 0);
+    WHEN("the call finishes, as a task the server refused does at once") {
+        calls.finish(5, key);
+        THEN("the identifier can be claimed again") {
+            REQUIRE(calls.reserve(5) != 0);
+        }
+    }
+    WHEN("the connection closes") {
+        calls.close();
+        THEN("nothing can be claimed any more") {
+            REQUIRE(calls.reserve(6) == 0);
+        }
+    }
+}
