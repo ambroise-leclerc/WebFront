@@ -177,7 +177,7 @@ inline constexpr int searchFlags = O_RDONLY | O_DIRECTORY;
 class Fd {
 public:
     Fd() = default;
-    explicit Fd(int descriptor) : descriptor(descriptor) { }
+    explicit Fd(int value) : descriptor(value) { }
     Fd(Fd&& other) noexcept : descriptor(std::exchange(other.descriptor, -1)) { }
     Fd& operator=(Fd&& other) noexcept {
         if (this != &other) {
@@ -343,7 +343,7 @@ inline int renameNoReplace(int fromDirectory, const char* from, int toDirectory,
 // The content of a file opened relative to a directory of the root.
 class FdSource : public ByteSource {
 public:
-    FdSource(Fd file, std::uint64_t total) : file(std::move(file)), total(total) { }
+    FdSource(Fd opened, std::uint64_t length) : file(std::move(opened)), total(length) { }
 
     std::size_t read(std::span<char> buffer) override {
         std::size_t count = 0;
@@ -663,8 +663,8 @@ public:
 
 private:
     friend class NativeStorage;
-    Writer(std::shared_ptr<State> state, State::Walk walk, std::vector<std::string> components, std::string name, WriteMode mode)
-        : state(std::move(state)), walk(std::move(walk)), components(std::move(components)), name(std::move(name)), mode(mode) { }
+    Writer(std::shared_ptr<State> storageState, State::Walk opened, std::vector<std::string> path, std::string finalName, WriteMode writeMode)
+        : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) { }
 
     void abandon() noexcept {
         if (!file)
@@ -871,7 +871,7 @@ inline constexpr NTSTATUS statusDirectoryNotEmpty   = static_cast<NTSTATUS>(0xC0
 class Handle {
 public:
     Handle() = default;
-    explicit Handle(HANDLE handle) : handle(handle == INVALID_HANDLE_VALUE ? nullptr : handle) { }
+    explicit Handle(HANDLE value) : handle(value == INVALID_HANDLE_VALUE ? nullptr : value) { }
     Handle(Handle&& other) noexcept : handle(std::exchange(other.handle, nullptr)) { }
     Handle& operator=(Handle&& other) noexcept {
         if (this != &other) {
@@ -1117,7 +1117,7 @@ inline std::wstring finalPath(HANDLE handle) {
 // The content of a file opened relative to a directory of the root.
 class HandleSource : public ByteSource {
 public:
-    HandleSource(Handle file, std::uint64_t total) : file(std::move(file)), total(total) { }
+    HandleSource(Handle opened, std::uint64_t length) : file(std::move(opened)), total(length) { }
 
     std::size_t read(std::span<char> buffer) override {
         std::size_t count = 0;
@@ -1226,18 +1226,24 @@ struct NativeStorage::State {
         return current;
     }
 
-    void verifyLocation() {
+    // Opens the declared location and checks that it still designates the root: the handle an operation starts from.
+    Handle verifiedRoot(ULONG sharing) {
         if (moved)
             throw StorageError(StorageErrc::rootMoved, "The root is no longer at its declared location");
         try {
-            const auto found = openLocation(StorageErrc::rootMoved, detail::windows::fullSharing);
+            auto found = openLocation(StorageErrc::rootMoved, sharing);
             if (detail::windows::identityOf(found.get()) != rootIdentity)
                 throw StorageError(StorageErrc::rootMoved, "The root is no longer at its declared location");
+            return found;
         } catch (const StorageError& error) {
             if (error.errc() == StorageErrc::rootMoved)
                 moved = true;
             throw;
         }
+    }
+
+    void verifyLocation() {
+        verifiedRoot(detail::windows::fullSharing);
     }
 
     // The final path of a directory begins with the root's: its handles prevent the moves, this checks it still holds.
@@ -1264,15 +1270,8 @@ struct NativeStorage::State {
     }
 
     Walk start() {
-        verifyLocation();
-        Walk   walk;
-        Handle top{::ReOpenFile(root.get(),
-                                detail::windows::directoryAccess | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                                detail::windows::heldSharing,
-                                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)};
-        if (!top)
-            detail::windows::failLast("Cannot open the root");
-        walk.directories.push_back(std::move(top));
+        Walk walk;
+        walk.directories.push_back(verifiedRoot(detail::windows::heldSharing));
         return walk;
     }
 
@@ -1353,8 +1352,8 @@ public:
 
 private:
     friend class NativeStorage;
-    Writer(std::shared_ptr<State> state, State::Walk walk, std::vector<std::string> components, std::string name, WriteMode mode)
-        : state(std::move(state)), walk(std::move(walk)), components(std::move(components)), name(std::move(name)), mode(mode) { }
+    Writer(std::shared_ptr<State> storageState, State::Walk opened, std::vector<std::string> path, std::string finalName, WriteMode writeMode)
+        : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) { }
 
     void abandon() noexcept {
         if (!file)

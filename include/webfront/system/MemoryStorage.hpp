@@ -41,7 +41,7 @@ class MemoryStorage {
     // The bytes a File reads: shared with the node, so a later replacement does not change an opened file.
     class Content : public ByteSource {
     public:
-        explicit Content(std::shared_ptr<const std::string> bytes) : bytes(std::move(bytes)) { }
+        explicit Content(std::shared_ptr<const std::string> shared) : bytes(std::move(shared)) { }
         std::size_t read(std::span<char> buffer) override {
             const auto count = std::min(buffer.size(), bytes->size() - position);
             std::copy_n(bytes->data() + position, count, buffer.data());
@@ -87,15 +87,17 @@ public:
                 if (!existing->second.writable)
                     throw StorageError(StorageErrc::accessDenied, "'" + detail::joinComponents(components) + "' is read-only");
             }
-            Node file{.type = EntryType::file, .content = std::make_shared<const std::string>(std::move(buffer))};
+            Node file;
+            file.type    = EntryType::file;
+            file.content = std::make_shared<const std::string>(std::move(buffer));
             parent.children.insert_or_assign(name, std::move(file));
             done = true;
         }
 
     private:
         friend class MemoryStorage;
-        Writer(std::shared_ptr<State> state, std::vector<std::string> components, WriteMode mode)
-            : state(std::move(state)), components(std::move(components)), mode(mode) { }
+        Writer(std::shared_ptr<State> storageState, std::vector<std::string> path, WriteMode writeMode)
+            : state(std::move(storageState)), components(std::move(path)), mode(writeMode) { }
 
         std::shared_ptr<State>   state;
         std::vector<std::string> components;
