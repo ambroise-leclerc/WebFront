@@ -333,14 +333,16 @@ private:
         co_await app->resumeAfter(chrono::milliseconds(delayMs));
         co_return "deferred:" + value;
     }
-    static ResultTask<string> deferredFailure(TestWF* app) {
+    static ResultTask<string> deferredFailure(TestWF* app, string reason) {
         co_await app->resumeAfter(chrono::milliseconds(20));
-        throw BridgeError("late:failure", "rejected after a delay");
+        if (!reason.empty())  // always: a value-returning coroutine needs a co_return and no unreachable code (MSVC)
+            throw BridgeError("late:failure", reason);
+        co_return reason;
     }
 
     void registerListCallbacks() {
         webFront->cppFunction("deferredEcho", [this](string value, int delayMs) { return deferredEcho(webFront, std::move(value), delayMs); });
-        webFront->cppFunction("deferredFailure", [this]() { return deferredFailure(webFront); });
+        webFront->cppFunction("deferredFailure", [this]() { return deferredFailure(webFront, "rejected after a delay"); });
 
         webFront->cppFunction("listEcho", [](const vector<string>& value) {
             return value;
