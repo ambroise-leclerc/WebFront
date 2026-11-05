@@ -350,6 +350,7 @@ private:
         });
         webFront->cppFunction("listFromCpp", [](size_t count) {
             vector<string> entries;
+            entries.reserve(count);
             for (size_t index = 0; index < count; ++index)
                 entries.push_back("entry-" + to_string(index));
             return entries;

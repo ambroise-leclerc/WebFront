@@ -497,7 +497,7 @@ protected:
             encodeTypeHeader(numericArrayCode<Element>(), static_cast<std::uint32_t>(elementCount), frame);
 
         const auto byteCount = elementCount * sizeof(Element);
-        reservePayload(5 + byteCount);
+        reservePayload(byteCount);  // its header was counted by encodeTypeHeader
         frame.addBuffer(std::span(reinterpret_cast<const std::byte*>(value.data()), byteCount));
         incrementPayloadSize(byteCount);
     }

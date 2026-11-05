@@ -231,7 +231,7 @@ auto makeCppFunctionHandler(Function&& function) {
                 if (!data.empty())
                     throw std::runtime_error("Function call contains trailing parameter data");
             } catch (const std::exception& error) {
-                throw BridgeError::fromBridge(bridge_code::malformed, error.what());
+                throw detail::makeBridgeError(bridge_code::malformed, error.what());
             }
             if constexpr (std::is_void_v<R>) {
                 std::invoke(*callable, caller..., std::get<Is>(tuple)...);

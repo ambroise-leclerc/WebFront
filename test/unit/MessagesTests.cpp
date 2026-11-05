@@ -477,6 +477,20 @@ SCENARIO("Lists of strings, tuples and arrays are encoded as one list value") {
     }
 }
 
+SCENARIO("A typed array that exactly fills the message size is encoded") {
+    using ExactPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 32>;
+    msg::FunctionReturn<ExactPolicy>             message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    THEN("its header is counted once") {
+        const vector<uint8_t> bytes(22, 1);  // 8 header bytes + 2 + 22 = 32
+        REQUIRE_NOTHROW(message.encodeParameter(bytes, frame));
+        REQUIRE(message.getPayloadSize() == 24);
+    }
+    THEN("one more byte is refused") {
+        REQUIRE_THROWS_AS(message.encodeParameter(vector<uint8_t>(23, 1), frame), length_error);
+    }
+}
+
 SCENARIO("Exceptions carry a code and a message") {
     auto decodeBoth = [](const vector<byte>& bytes) {
         string           code, message;
@@ -506,7 +520,7 @@ SCENARIO("Exceptions carry a code and a message") {
     }
     GIVEN("an error of the bridge") {
         THEN("its reserved code crosses the wire") {
-            REQUIRE(decodeBoth(encodedParameter(BridgeError::fromBridge(bridge_code::cancelled, "stopped"))).first == bridge_code::cancelled);
+            REQUIRE(decodeBoth(encodedParameter(detail::makeBridgeError(bridge_code::cancelled, "stopped"))).first == bridge_code::cancelled);
         }
     }
     GIVEN("an exception message longer than 65535 bytes") {
@@ -535,7 +549,7 @@ SCENARIO("Exceptions carry a code and a message") {
             REQUIRE_NOTHROW(BridgeError(string(64, 'a'), "m"));
         }
         THEN("a peer's ill-formed code becomes the generic one") {
-            REQUIRE(BridgeError::fromBridge("bad code", "m").code() == bridge_code::generic);
+            REQUIRE(detail::makeBridgeError("bad code", "m").code() == bridge_code::generic);
         }
     }
 }
