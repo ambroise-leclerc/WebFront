@@ -131,7 +131,7 @@ void nativeClose() {
     app.show("no-bridge.html");
 }
 
-/// Runs a page of the test folder in a session configured by the scenario, for at most `seconds`.
+/// Runs a page of the test folder in a session configured by the scenario, for at most 45 seconds.
 struct ScenarioFrontend : Frontend {
     static inline std::function<void(gtk::Session&)> configure;
     static inline std::function<bool(gtk::Session&)> finished;  // Polled; true closes the window.
@@ -144,9 +144,10 @@ struct ScenarioFrontend : Frontend {
         configure(session);
         struct Poll {
             gtk::Session& session;
-            int           remaining = 150;  // 15 s
-            unsigned      timer     = 0;
-        } poll{session, 150, 0};
+            std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(45);
+            unsigned timer = 0;
+            std::exception_ptr failure{};
+        } poll{session};
         poll.timer = session.a.timeoutAdd(
             100,
             [](void* data) -> int {
@@ -155,7 +156,14 @@ struct ScenarioFrontend : Frontend {
                     probe.timer = 0;  // Returning 0 removes the source: it must not be removed again.
                     return 0;
                 }
-                if (finished(probe.session) || --probe.remaining == 0) {
+                bool done = false;
+                try {
+                    done = finished(probe.session);
+                } catch (...) {
+                    probe.failure = std::current_exception();
+                    done = true;
+                }
+                if (done || std::chrono::steady_clock::now() >= probe.deadline) {
                     probe.timer = 0;
                     probe.session.close();
                     return 0;
@@ -166,10 +174,21 @@ struct ScenarioFrontend : Frontend {
         session.run(webfront::frontend::detail::applicationUrl(address, port, page));
         if (poll.timer)
             session.a.sourceRemove(poll.timer);
+        if (poll.failure)
+            std::rethrow_exception(poll.failure);
     }
 };
 
 using ScenarioApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, ScenarioFrontend>;
+
+void pollFailure() {
+    ScenarioFrontend::configure = [](gtk::Session&) {};
+    ScenarioFrontend::finished = [](gtk::Session&) -> bool {
+        throw std::runtime_error("poll failure");
+    };
+    ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    expectFailure([&] { app.show("no-bridge.html"); }, "poll failure");
+}
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
@@ -252,6 +271,7 @@ struct FakeClick {
     using Root          = unsigned long (*)(void*);
     using Surface       = void* (*)(void*);
     using Xid           = unsigned long (*)(void*);
+    using Mapped        = int (*)(void*);
     Open      open      = x11 ? reinterpret_cast<Open>(dlsym(x11, "XOpenDisplay")) : nullptr;
     Flush     flush     = x11 ? reinterpret_cast<Flush>(dlsym(x11, "XFlush")) : nullptr;
     Move      move      = xtest ? reinterpret_cast<Move>(dlsym(xtest, "XTestFakeMotionEvent")) : nullptr;
@@ -261,10 +281,11 @@ struct FakeClick {
     // GTK's client surface need not start at the root window's origin, even under Xvfb.
     Surface surface = gtkModule ? reinterpret_cast<Surface>(dlsym(gtkModule, "gtk_native_get_surface")) : nullptr;
     Xid     xid     = gtkModule ? reinterpret_cast<Xid>(dlsym(gtkModule, "gdk_x11_surface_get_xid")) : nullptr;
+    Mapped  mapped  = gtkModule ? reinterpret_cast<Mapped>(dlsym(gtkModule, "gtk_widget_get_mapped")) : nullptr;
     void*   display = open ? open(nullptr) : nullptr;
 
     bool available() const {
-        return display && move && press && flush && translate && root && surface && xid;
+        return display && move && press && flush && translate && root && surface && xid && mapped;
     }
     void click(void* window, int x, int y, int phase) const {
         const auto native = surface(window);
@@ -313,7 +334,7 @@ void chooseFile(bool cancel) {
     ScenarioFrontend::finished = [&](gtk::Session& session) {
         const char* current = session.a.viewTitle(session.view);
         title               = current ? current : "";
-        if (title == "ready" && !asked)
+        if (title == "ready" && pointer.mapped(session.window) && !asked)
             pointer.click(session.window, 40, 20, ticks++ % 5);  // The button's position within the GTK client surface.
         return title.starts_with("picked:") || title == "cancelled";
     };
@@ -321,7 +342,8 @@ void chooseFile(bool cancel) {
     app.show("file-services.html?choose");
     std::filesystem::remove(fixture);
     if (!asked)
-        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " + std::to_string(ticks) + " pointer steps)");
+        throw std::runtime_error("The file chooser was not requested (page title \"" + title + "\", " +
+                                 std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
     const std::string expected = cancel ? "cancelled" : "picked:chosen by the test";
     if (title != expected)
         throw std::runtime_error("Unexpected page state after the chooser: " + title);
@@ -350,14 +372,15 @@ void closeWithDialog() {
     ScenarioFrontend::finished = [&](gtk::Session& session) {
         const char* current = session.a.viewTitle(session.view);
         title               = current ? current : "";
-        if (title == "ready" && !opened)
+        if (title == "ready" && pointer.mapped(session.window) && !opened)
             pointer.click(session.window, 40, 20, ticks++ % 5);
         return opened && ++open > 10;  // Let the dialog map, then close the window under it.
     };
     ScenarioApp app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     app.show("file-services.html?choose");
     if (!opened)
-        throw std::runtime_error("The file dialog was not opened");
+        throw std::runtime_error("The file dialog was not opened (page title \"" + title + "\", " +
+                                 std::to_string(ticks / 5 + (ticks % 5 == 4)) + " clicks, " + std::to_string(ticks) + " pointer steps)");
 }
 
 /// alert, confirm and prompt reach the injection point and their answers reach the page (issue #452).
@@ -456,6 +479,7 @@ void run(std::string_view mode) {
         {         "http-error",          httpError},
         {       "native-close",        nativeClose},
         {    "pre-run-failure",      preRunFailure},
+        {       "poll-failure",         pollFailure},
         {"profile-permissions", profilePermissions},
         {       "window-title",        windowTitle},
         {          "download",           download},
