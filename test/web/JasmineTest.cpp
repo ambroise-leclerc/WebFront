@@ -329,7 +329,19 @@ private:
 
     using Record = tuple<string, double, bool, vector<uint8_t>>;
 
+    static ResultTask<string> deferredEcho(TestWF* app, string value, int delayMs) {
+        co_await app->resumeAfter(chrono::milliseconds(delayMs));
+        co_return "deferred:" + value;
+    }
+    static ResultTask<string> deferredFailure(TestWF* app) {
+        co_await app->resumeAfter(chrono::milliseconds(20));
+        throw BridgeError("late:failure", "rejected after a delay");
+    }
+
     void registerListCallbacks() {
+        webFront->cppFunction("deferredEcho", [this](string value, int delayMs) { return deferredEcho(webFront, std::move(value), delayMs); });
+        webFront->cppFunction("deferredFailure", [this]() { return deferredFailure(webFront); });
+
         webFront->cppFunction("listEcho", [](const vector<string>& value) {
             return value;
         });

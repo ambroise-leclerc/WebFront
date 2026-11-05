@@ -331,6 +331,23 @@ describe('WebFront browser integration', () => {
         expect(error.code).toBe('webfront.disconnected');
     });
 
+    it('resolves a Promise when a C++ coroutine finishes later, and rejects it with its code', async () => {
+        const started = performance.now();
+        await expectAsync(webFront.cppFunction('deferredEcho')('x', 150)).toBeResolvedTo('deferred:x');
+        expect(performance.now() - started).toBeGreaterThanOrEqual(100);
+        const error = await webFront.cppFunction('deferredFailure')().then(() => null, failure => failure);
+        expect(error.code).toBe('late:failure');
+        expect(error.message).toBe('rejected after a delay');
+    });
+
+    it('answers concurrent deferred calls in the order they finish', async () => {
+        const echo = webFront.cppFunction('deferredEcho');
+        const order = [];
+        const calls = [300, 50, 150].map(delay => echo(String(delay), delay).then(value => order.push(value)));
+        await Promise.all(calls);
+        expect(order).toEqual(['deferred:50', 'deferred:150', 'deferred:300']);
+    });
+
     it('rejects missing functions and C++ exceptions', async () => {
         await expectAsync(webFront.cppFunction('missingCppFunction')())
             .toBeRejectedWithError(/was not found/);
