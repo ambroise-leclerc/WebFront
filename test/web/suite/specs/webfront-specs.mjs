@@ -227,10 +227,12 @@ describe('WebFront browser integration', () => {
 
     it('refuses to send a heterogeneous or nested list, and C++ refuses a wrong element type', async () => {
         const echo = webFront.cppFunction('listEcho');
-        await expectAsync(echo(webFront.list(['text', 1]))).toBeRejectedWithError(TypeError, /not of one type/);
+        await expectAsync(echo(webFront.list(['text', new Uint8Array(1)]))).toBeRejectedWithError(TypeError, /not of one type/);
         await expectAsync(echo(webFront.list([webFront.list(['a'])]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
         await expectAsync(echo(webFront.list([[webFront.list(['a'])]]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
-        await expectAsync(echo(webFront.list([1, 2]))).toBeRejectedWithError(/wrong parameter type|Wrong parameter type/i);
+        await expectAsync(echo(webFront.list([1, 2]))).toBeRejectedWithError(TypeError, /typed array/);
+        await expectAsync(echo(webFront.list([true, false]))).toBeRejectedWithError(TypeError, /typed array/);
+        await expectAsync(echo(webFront.list([[1, 2], [3, 4]]))).toBeRejectedWithError(/wrong parameter type|Wrong parameter type/i);
         await expectAsync(echo(webFront.list(['still', 'works']))).toBeResolvedTo(['still', 'works']);
     });
 
@@ -306,6 +308,36 @@ describe('WebFront browser integration', () => {
     it('returns successful C++ calls as promises', async () => {
         await expectAsync(webFront.cppFunction('returnFromCpp')('from-js'))
             .toBeResolvedTo('cpp-result:from-js');
+    });
+
+    it('cuts a rejection message to what the maximum message size leaves', async () => {
+        const bridge = webFront;
+        const limit = bridge.maxMessageBytes;
+        const sent = [];
+        const send = bridge.socket.send.bind(bridge.socket);
+        bridge.socket.send = buffer => { sent.push(buffer.byteLength); };  // captured, not sent: no C++ call is waiting
+        try {
+            bridge.maxMessageBytes = 100;
+            bridge.sendFunctionError(0, Object.assign(new Error('x'.repeat(1000)), {code: 'tight'}));
+        } finally { bridge.maxMessageBytes = limit; bridge.socket.send = send; }
+        expect(sent).toEqual([100]);
+    });
+
+    it('still answers a C++ call whose rejection has a throwing code or message accessor', () => {
+        const sent = [];
+        const send = webFront.socket.send.bind(webFront.socket);
+        webFront.socket.send = buffer => { sent.push(new Uint8Array(buffer.slice(0))); };
+        const text = bytes => new TextDecoder().decode(bytes.subarray(10));
+        try {
+            const hostileCode = Object.defineProperty(new Error('visible'), 'code', {get() { throw new Error('getter'); }});
+            const hostileMessage = Object.defineProperty(new Error('x'), 'message', {get() { throw new Error('getter'); }});
+            const hostileString = {toString() { throw new Error('toString'); }};
+            for (const error of [hostileCode, hostileMessage, hostileString])
+                expect(() => webFront.sendFunctionError(0, error)).not.toThrow();
+        } finally { webFront.socket.send = send; }
+        expect(sent.length).toBe(3);
+        for (const frame of sent) expect(text(frame)).toContain('webfront.error');
+        expect(text(sent[0])).toContain('visible');
     });
 
     it('rejects with the code of the failure: application, generic and reserved', async () => {

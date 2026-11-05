@@ -459,6 +459,35 @@ SCENARIO("Lists of strings, tuples and arrays are encoded as one list value") {
             REQUIRE_THROWS_AS(decodedParameter<vector<string>>(encodedParameter(vector<uint8_t>{1})), runtime_error);
         }
     }
+    GIVEN("elements whose values decode into the destination but whose wire shapes differ") {
+        const auto boolTuple   = encodedParameter(tuple<bool>{true});
+        const auto numberTuple = encodedParameter(tuple<double>{1});
+        THEN("a list of [true] and [1] is refused although a number decodes as a bool") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<tuple<bool>>>(listBytes(2, {boolTuple, numberTuple})), runtime_error);
+        }
+        THEN("the same holds for a plain JavaScript array, which arrives as a tuple") {
+            vector<byte> asTuple{byte{static_cast<uint8_t>(msg::CodedType::tuple)}, byte{2}};
+            for (const auto* element : {&boolTuple, &numberTuple})
+                asTuple.insert(asTuple.end(), element->begin(), element->end());
+            REQUIRE_THROWS_AS(decodedParameter<vector<tuple<bool>>>(asTuple), runtime_error);
+        }
+        THEN("true and false are one shape") {
+            REQUIRE(decodedParameter<vector<tuple<bool>>>(listBytes(2, {boolTuple, encodedParameter(tuple<bool>{false})})).size() == 2);
+        }
+        THEN("different fields at the same position are refused, equal shapes with different string headers are accepted") {
+            REQUIRE_THROWS_AS((decodedParameter<vector<tuple<string, double>>>(
+                                   listBytes(2, {encodedParameter(tuple<string, double>{"a", 1}), encodedParameter(tuple<double, string>{2, "b"})}))),
+                              runtime_error);
+            const vector<tuple<string, double>> mixed{{"a", 1}, {string(300, 'b'), 2}, {string(70000, 'c'), 3}};
+            REQUIRE(listRoundTrip(mixed) == mixed);
+        }
+        THEN("the short and the regular Uint8Array are one shape, other element types are not") {
+            const vector<vector<uint8_t>> bytes{vector<uint8_t>(3, 1), vector<uint8_t>(300, 2)};
+            REQUIRE(listRoundTrip(bytes) == bytes);
+            REQUIRE_THROWS_AS(decodedParameter<vector<vector<uint8_t>>>(listBytes(2, {encodedParameter(vector<uint8_t>{1}), encodedParameter(vector<int8_t>{1})})),
+                              runtime_error);
+        }
+    }
     GIVEN("a policy whose messages cannot exceed 1 KiB") {
         using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024>;
         msg::FunctionReturn<SmallPolicy>             message;
