@@ -307,6 +307,15 @@ SCENARIO("The transferable mode makes the token alone a short-lived bearer capab
             REQUIRE(call(fixture.read, url, cookie).status == http::Response::forbidden);
         }
     }
+    GIVEN("a lifetime the clock cannot represent") {
+        THEN("it is refused instead of overflowing the expiry, and a lifetime that fits is accepted") {
+            REQUIRE_THROWS_AS(fixture.url(1, "a", {.lifetime = std::chrono::seconds::max()}), ReadRefused);
+            const auto remaining = std::chrono::duration_cast<std::chrono::seconds>(Fixture::Clock::time_point::max() - fixture.time);
+            REQUIRE_THROWS_AS(fixture.url(1, "a", {.lifetime = remaining + 1s}), ReadRefused);
+            const auto url = fixture.url(1, "a", {.lifetime = remaining - 1s});
+            REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);
+        }
+    }
     THEN("the context of the grant reaches the handler") {
         const auto url = fixture.url(1, "a", {.context = std::string("handle-7")});
         REQUIRE(call(fixture.read, url, cookie).status == http::Response::ok);

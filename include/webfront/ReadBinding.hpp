@@ -283,8 +283,13 @@ public:
         if (!connection->second.local && transport == RemoteFileTransport::refused)
             throw ReadRefused("This connection is not the view of an embedded frontend: declare WebFrontConfig::remoteFileTransport to read files");
         Grant record{.owner = key, .route = std::string(routeId), .secret = secret, .path = std::string(rest), .transferable = options.transferable, .expiry = {}, .context = std::make_shared<const std::any>(std::move(options.context))};
-        if (options.lifetime.count() > 0)
-            record.expiry = now() + options.lifetime;
+        if (options.lifetime.count() > 0) {
+            // now() + lifetime must not overflow the clock's representation (seconds::max() converts to ticks that do not fit).
+            const auto current = now();
+            if (options.lifetime > std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::time_point::max() - current))
+                throw ReadRefused("The read lifetime is longer than the clock can represent");
+            record.expiry = current + options.lifetime;
+        }
         grants[id] = std::move(record);
         return std::string(prefix) + id + "." + secret + "/" + encodePath(rest);
     }
