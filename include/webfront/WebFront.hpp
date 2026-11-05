@@ -1001,7 +1001,7 @@ private:
     template <typename R, typename... Args>
     bool registerDeferred(std::string functionName, auto&& function) {
         const auto start = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
-            startDeferred<R>(std::move(invoke), link, callId, caller);
+            this->template startDeferred<R>(std::move(invoke), link, callId, caller);
         };
         if constexpr (detail::takes_caller<UI, Args...>::value) {
             auto handler = registerDeferredHandler<R, Args...>(std::forward<decltype(function)>(function));
@@ -1078,7 +1078,7 @@ private:
         std::optional<websocket::Frame<Net>> answer;
         try {
             auto stoppable = networking::ex::stopped_as_error(
-                std::move(sender), std::make_exception_ptr(BridgeError::fromBridge(bridge_code::cancelled, "The C++ callback was cancelled")));
+                std::move(sender), std::make_exception_ptr(detail::makeBridgeError(bridge_code::cancelled, "The C++ callback was cancelled")));
             // One answer frame whether the sender completes with a value or without: the message is built where it completes.
             auto framed = networking::ex::then(std::move(stoppable), [callId](auto&&... values) -> websocket::Frame<Net> {
                 if constexpr (sizeof...(values) == 0)
