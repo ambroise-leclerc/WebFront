@@ -587,8 +587,9 @@
             return {value: result, bytes: headerSize + byteLength};
         }
 
-        /// Marks `items` to be sent as a list: any number of elements of one type (strings, numbers, booleans, typed arrays or
-        /// tuples of those), which C++ receives as a std::vector. A plain array is a tuple of at most 255 elements of any types.
+        /// Marks `items` to be sent as a list: any number of elements of one type, each a string, a typed array or a tuple, which
+        /// C++ receives as a std::vector. Numbers go as a typed array (a list of numbers or booleans is refused). A plain
+        /// array is a tuple of at most 255 elements of any types.
         list(items) {
             return new WebFrontList(items);
         }
@@ -665,8 +666,10 @@
             const message = error instanceof Error ? error.message : String(error);
             const code = new TextEncoder().encode(exceptionCode(error));
             const whole = new TextEncoder().encode(message);
-            // A message longer than the 16-bit length is cut before the first UTF-8 character that would not fit whole.
-            let cut = Math.min(whole.length, 65535);
+            // A message longer than the 16-bit length, or than what the maximum message size leaves after the 8-byte header, the
+            // code and the two sizes, is cut before the first UTF-8 character that would not fit whole.
+            const room = Math.max(0, this.maxMessageBytes - 12 - code.length);
+            let cut = Math.min(whole.length, 65535, room);
             while (cut > 0 && cut < whole.length && (whole[cut] & 0xc0) === 0x80)
                 --cut;
             const bytes = whole.subarray(0, cut);
@@ -742,6 +745,8 @@
             for (const item of list.items) {
                 const itemShape = this.valueShape(item);
                 requireListElementShape(itemShape);
+                if (itemShape === "n" || itemShape === "b")
+                    throw new TypeError("A WebFront list holds strings, typed arrays or tuples: send numbers as a typed array");
                 if (shape === null)
                     shape = itemShape;
                 else if (itemShape !== shape)

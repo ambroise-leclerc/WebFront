@@ -230,7 +230,9 @@ describe('WebFront browser integration', () => {
         await expectAsync(echo(webFront.list(['text', 1]))).toBeRejectedWithError(TypeError, /not of one type/);
         await expectAsync(echo(webFront.list([webFront.list(['a'])]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
         await expectAsync(echo(webFront.list([[webFront.list(['a'])]]))).toBeRejectedWithError(TypeError, /cannot contain lists/);
-        await expectAsync(echo(webFront.list([1, 2]))).toBeRejectedWithError(/wrong parameter type|Wrong parameter type/i);
+        await expectAsync(echo(webFront.list([1, 2]))).toBeRejectedWithError(TypeError, /typed array/);
+        await expectAsync(echo(webFront.list([true, false]))).toBeRejectedWithError(TypeError, /typed array/);
+        await expectAsync(echo(webFront.list([[1, 2], [3, 4]]))).toBeRejectedWithError(/wrong parameter type|Wrong parameter type/i);
         await expectAsync(echo(webFront.list(['still', 'works']))).toBeResolvedTo(['still', 'works']);
     });
 
@@ -306,6 +308,19 @@ describe('WebFront browser integration', () => {
     it('returns successful C++ calls as promises', async () => {
         await expectAsync(webFront.cppFunction('returnFromCpp')('from-js'))
             .toBeResolvedTo('cpp-result:from-js');
+    });
+
+    it('cuts a rejection message to what the maximum message size leaves', async () => {
+        const bridge = webFront;
+        const limit = bridge.maxMessageBytes;
+        const sent = [];
+        const send = bridge.socket.send.bind(bridge.socket);
+        bridge.socket.send = buffer => { sent.push(buffer.byteLength); };  // captured, not sent: no C++ call is waiting
+        try {
+            bridge.maxMessageBytes = 100;
+            bridge.sendFunctionError(0, Object.assign(new Error('x'.repeat(1000)), {code: 'tight'}));
+        } finally { bridge.maxMessageBytes = limit; bridge.socket.send = send; }
+        expect(sent).toEqual([100]);
     });
 
     it('rejects with the code of the failure: application, generic and reserved', async () => {

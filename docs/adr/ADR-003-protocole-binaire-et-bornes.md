@@ -50,8 +50,8 @@ Les types pris en charge sont les scalaires, chaînes, tuples, tableaux numériq
 Une **liste** (code `list`, 20) est le code, un nombre d'éléments sur 32 bits, puis ces éléments encodés chacun avec
 son code habituel. C++ : `std::vector<E>` où `E` est une chaîne, un `std::tuple`, un tableau typé (`std::vector` ou
 `std::array` de nombres) ou un `std::bitset` ; un `std::vector` de nombres reste un tableau typé et `std::vector<bool>`
-n'est pas pris en charge. JavaScript : un tableau dont les éléments sont du même type, que `webFront.list(éléments)`
-marque pour l'envoi ; une liste reçue arrive comme un `Array`. Un tableau JavaScript ordinaire reste un tuple
+n'est pas pris en charge. JavaScript : un tableau de chaînes, de tableaux typés ou de tuples de même forme, que `webFront.list(éléments)`
+marque pour l'envoi (une liste de nombres ou de booléens est refusée : les nombres vont en tableau typé) ; une liste reçue arrive comme un `Array`. Un tableau JavaScript ordinaire reste un tuple
 (éléments de types quelconques, 255 au plus) ; une destination `std::vector` accepte aussi un tuple, ce qui permet
 d'envoyer un court tableau sans le marquer. Les éléments d'une liste ont tous la **même forme** : même famille de
 chaîne (`smallString`, `string` et `longString` sont une forme), même type de tableau typé (le `Uint8Array` court et
