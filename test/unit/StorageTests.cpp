@@ -325,6 +325,23 @@ SCENARIO("The simulated storage follows the storage contract") {
                     == fs::StorageErrc::invalidPath);
         }
     }
+    GIVEN("names starting with the prefix reserved to temporary files") {
+        THEN("they are refused, so that a listing never hides a committed file") {
+            REQUIRE(errorOf([&] {
+                        writeFile(storage, ".wf-tmp-report.txt", "report");
+                    })
+                    == fs::StorageErrc::invalidPath);
+            REQUIRE(errorOf([&] {
+                        storage.createDirectory("dir/.wf-tmp-x");
+                    })
+                    == fs::StorageErrc::invalidPath);
+            REQUIRE(errorOf([&] {
+                        storage.status(".wf-tmp-report.txt");
+                    })
+                    == fs::StorageErrc::invalidPath);
+            REQUIRE(fs::isSafeFileName(".wf-tmp-report.txt"));  // SafePath alone accepts it: the reservation is the storage's
+        }
+    }
     GIVEN("operations that need an entry") {
         THEN("the root is refused") {
             REQUIRE(errorOf([&] {

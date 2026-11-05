@@ -24,6 +24,7 @@
 #include <vector>
 
 #ifndef _WIN32
+    #include <pwd.h>
     #include <sys/stat.h>
     #include <unistd.h>
 #endif
@@ -234,6 +235,20 @@ SCENARIO("A native storage reads and writes under its root") {
                     == fs::StorageErrc::notDirectory);
         }
     }
+}
+
+SCENARIO("A native storage reserves the names of its temporary files") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    REQUIRE(errorOf([&] {
+                writeFile(storage, ".wf-tmp-report.txt", "report");
+            })
+            == fs::StorageErrc::invalidPath);
+    REQUIRE(errorOf([&] {
+                storage.rename("a", ".wf-tmp-a");
+            })
+            == fs::StorageErrc::invalidPath);
+    REQUIRE(namesOn(sandbox.root).empty());
 }
 
 SCENARIO("An interrupted write leaves no partial file") {
@@ -771,6 +786,57 @@ SCENARIO("POSIX directories another user could move refuse the root or the opera
         }
     }
 }
+
+    #if defined(__APPLE__)
+SCENARIO("macOS ACLs that let another user change a directory refuse the root or the operation") {
+    Sandbox sandbox;
+    auto    grant = [](const stdfs::path& directory, const string& who) {
+        const auto command = "chmod +a '" + who + " allow add_file,add_subdirectory,delete_child' '" + directory.string() + "'";
+        REQUIRE(std::system(command.c_str()) == 0);
+    };
+
+    GIVEN("a root in mode 0700 whose ACL lets everyone add and remove entries") {
+        stdfs::permissions(sandbox.root, stdfs::perms::owner_all, stdfs::perm_options::replace);
+        grant(sandbox.root, "everyone");
+        THEN("its declaration is refused, unless the root is declared shared") {
+            REQUIRE(errorOf([&] {
+                        fs::NativeStorage(sandbox.root);
+                    })
+                    == fs::StorageErrc::unsafeDirectory);
+            fs::NativeStorage shared(sandbox.root, {.shared = true});
+            shared.createDirectory("dir");
+        }
+    }
+    GIVEN("an ancestor whose ACL lets everyone remove its entries") {
+        grant(sandbox.base.path(), "everyone");
+        THEN("the declaration is refused") {
+            REQUIRE(errorOf([&] {
+                        fs::NativeStorage(sandbox.root);
+                    })
+                    == fs::StorageErrc::unsafeDirectory);
+        }
+    }
+    GIVEN("a directory inside the root granted to everyone after the declaration") {
+        fs::NativeStorage storage(sandbox.root);
+        stdfs::create_directories(sandbox.root / "shared" / "deep");
+        grant(sandbox.root / "shared", "everyone");
+        THEN("operations through it are refused before any effect") {
+            REQUIRE(errorOf([&] {
+                        storage.createDirectory("shared/deep/new");
+                    })
+                    == fs::StorageErrc::unsafeDirectory);
+            REQUIRE(stdfs::is_empty(sandbox.root / "shared" / "deep"));
+        }
+    }
+    GIVEN("an ACL that grants those rights to the effective user only") {
+        grant(sandbox.root, "user:" + string(::getpwuid(::geteuid())->pw_name));
+        THEN("the root is accepted") {
+            fs::NativeStorage storage(sandbox.root);
+            storage.createDirectory("dir");
+        }
+    }
+}
+    #endif
 
 SCENARIO("A root under the real /tmp of the superuser is accepted") {
     // /tmp is owned by the superuser, writable by all and sticky: an element of the effective user under it is safe.

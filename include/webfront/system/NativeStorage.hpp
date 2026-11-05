@@ -40,7 +40,10 @@
     #include <sys/stat.h>
     #include <unistd.h>
     #if defined(__APPLE__)
+        #include <membership.h>
         #include <stdio.h>
+        #include <sys/acl.h>
+        #include <uuid/uuid.h>
     #elif defined(__linux__)
         #include <sys/syscall.h>
     #endif
@@ -75,6 +78,10 @@ enum class StoragePoint {
 struct DirectoryFacts {
     std::uint32_t owner{};
     std::uint32_t mode{};
+    /// An extended ACL (macOS) lets someone else than the effective user and the superuser add, remove or rename
+    /// entries of the directory, delete it, or change its ACL or owner. Linux POSIX ACLs need no such flag: a named
+    /// entry that grants writing also sets the group write bit of the mode (the ACL mask).
+    bool othersMayChange{};
 };
 
 /**
@@ -92,7 +99,6 @@ struct StorageHooks {
 
 namespace detail {
 
-inline constexpr std::string_view temporaryPrefix = ".wf-tmp-";
 
 inline std::string temporaryName() {
     thread_local std::mt19937_64 random{std::random_device{}()};
@@ -311,8 +317,8 @@ inline EntryInfo infoOf(std::string name, const struct stat& status) {
 }
 
 // The rename that refuses to replace: renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS. On a
-// Linux file system without it, a file is linked then unlinked (link() never replaces); a directory is checked then
-// renamed, so a directory created meanwhile under the target name may be replaced if it is empty.
+// Linux file system without it, a file is linked then unlinked (link() never replaces); a directory, which no atomic
+// primitive can then move without risking to replace an empty directory created meanwhile, is refused (ENOTSUP).
 inline int renameNoReplace(int fromDirectory, const char* from, int toDirectory, const char* to) {
     #if defined(__APPLE__)
     return ::renameatx_np(fromDirectory, from, toDirectory, to, RENAME_EXCL);
@@ -332,11 +338,50 @@ inline int renameNoReplace(int fromDirectory, const char* from, int toDirectory,
             return -1;
         return ::unlinkat(fromDirectory, from, 0);
     }
-    if (::fstatat(toDirectory, to, &status, AT_SYMLINK_NOFOLLOW) == 0) {
-        errno = EEXIST;
-        return -1;
+    errno = ENOTSUP;
+    return -1;
+    #endif
+}
+
+// True when an extended ACL of the directory grants someone else than `user` and the superuser a right to change its
+// entries, delete it, or change its ACL or owner. Fails closed: an ACL that cannot be read counts as granting.
+inline bool othersMayChange(int directory, std::uint32_t user) {
+    #if defined(__APPLE__)
+    acl_t acl = ::acl_get_fd_np(directory, ACL_TYPE_EXTENDED);
+    if (!acl)
+        return errno != ENOENT && errno != ENOTSUP && errno != EOPNOTSUPP;
+    uuid_t admitted[2]{};
+    if (::mbr_uid_to_uuid(static_cast<uid_t>(user), admitted[0]) != 0 || ::mbr_uid_to_uuid(0, admitted[1]) != 0) {
+        ::acl_free(acl);
+        return true;
     }
-    return ::renameat(fromDirectory, from, toDirectory, to);
+    bool        granting = false;
+    acl_entry_t entry{};
+    for (int which = ACL_FIRST_ENTRY; !granting && ::acl_get_entry(acl, which, &entry) == 0; which = ACL_NEXT_ENTRY) {
+        acl_tag_t     tag{};
+        acl_permset_t permissions{};
+        if (::acl_get_tag_type(entry, &tag) != 0 || ::acl_get_permset(entry, &permissions) != 0) {
+            granting = true;
+            break;
+        }
+        if (tag != ACL_EXTENDED_ALLOW)
+            continue;
+        bool changes = false;
+        for (const auto permission : {ACL_ADD_FILE, ACL_ADD_SUBDIRECTORY, ACL_DELETE_CHILD, ACL_DELETE, ACL_WRITE_SECURITY, ACL_CHANGE_OWNER})
+            changes = changes || ::acl_get_perm_np(permissions, permission) == 1;
+        if (!changes)
+            continue;
+        auto* qualifier = static_cast<unsigned char*>(::acl_get_qualifier(entry));
+        granting        = !qualifier || (::uuid_compare(qualifier, admitted[0]) != 0 && ::uuid_compare(qualifier, admitted[1]) != 0);
+        if (qualifier)
+            ::acl_free(qualifier);
+    }
+    ::acl_free(acl);
+    return granting;
+    #else
+    (void)directory;
+    (void)user;
+    return false;
     #endif
 }
 
@@ -407,8 +452,11 @@ struct NativeStorage::State {
         return owner == effectiveUser || owner == 0;
     }
 
-    DirectoryFacts factsOf(const struct stat& status, const std::filesystem::path& path) const {
-        DirectoryFacts facts{static_cast<std::uint32_t>(status.st_uid), static_cast<std::uint32_t>(status.st_mode)};
+    DirectoryFacts factsOf(int directory, const std::filesystem::path& path) const {
+        const auto     status = detail::posix::statOf(directory, "Cannot inspect a directory of the root or an ancestor");
+        DirectoryFacts facts{static_cast<std::uint32_t>(status.st_uid),
+                             static_cast<std::uint32_t>(status.st_mode),
+                             !options.shared && detail::posix::othersMayChange(directory, effectiveUser)};
         if (hooks && hooks->facts)
             hooks->facts(path, facts);
         return facts;
@@ -418,7 +466,7 @@ struct NativeStorage::State {
     void checkTraversed(const DirectoryFacts& facts, const std::string& what) const {
         if (options.shared)
             return;
-        if (!admissible(facts.owner) || (facts.mode & (S_IWGRP | S_IWOTH)) != 0)
+        if (!admissible(facts.owner) || (facts.mode & (S_IWGRP | S_IWOTH)) != 0 || facts.othersMayChange)
             throw StorageError(StorageErrc::unsafeDirectory, what + " can be moved by another user");
     }
 
@@ -428,7 +476,7 @@ struct NativeStorage::State {
             return;
         const bool othersWrite = (ancestor.mode & (S_IWGRP | S_IWOTH)) != 0;
         const bool sticky      = (ancestor.mode & S_ISVTX) != 0;
-        if (!admissible(ancestor.owner) || (othersWrite && !(sticky && admissible(next.owner))))
+        if (!admissible(ancestor.owner) || ancestor.othersMayChange || (othersWrite && !(sticky && admissible(next.owner))))
             throw StorageError(StorageErrc::unsafeDirectory, "An ancestor of the root can be moved by another user");
     }
 
@@ -439,7 +487,7 @@ struct NativeStorage::State {
         if (!current)
             detail::posix::fail(errno, "Cannot open the file system root");
         std::filesystem::path path  = "/";
-        auto                  facts = factsOf(detail::posix::statOf(current.get(), "Cannot inspect an ancestor of the root"), path);
+        auto                  facts = factsOf(current.get(), path);
         for (const auto& component : locationComponents) {
             Fd next = detail::posix::openAt(current.get(), component.c_str(), detail::posix::searchFlags | O_NOFOLLOW);
             if (!next) {
@@ -449,7 +497,7 @@ struct NativeStorage::State {
                 throw StorageError(onMove, "The root is no longer at its declared location");
             }
             path                /= component;
-            const auto nextFacts = factsOf(detail::posix::statOf(next.get(), "Cannot inspect an ancestor of the root"), path);
+            const auto nextFacts = factsOf(next.get(), path);
             checkAncestor(facts, nextFacts);
             facts   = nextFacts;
             current = std::move(next);
@@ -571,7 +619,7 @@ struct NativeStorage::State {
             auto path = location;
             for (const auto& component : walk.names)
                 path /= component;
-            checkTraversed(factsOf(detail::posix::statOf(next.get(), "Cannot inspect a directory"), path), detail::quoted(walk.names));
+            checkTraversed(factsOf(next.get(), path), detail::quoted(walk.names));
             walk.directories.push_back(std::move(next));
             notify(StoragePoint::componentOpened, walk.names.back());
         }
@@ -721,7 +769,7 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
     std::vector<EntryInfo> entries;
     while (const auto* entry = ::readdir(directory)) {
         const std::string_view name = entry->d_name;
-        if (name.starts_with(detail::temporaryPrefix) || !isSafeFileName(name))
+        if (name.starts_with(temporaryPrefix) || !isSafeFileName(name))
             continue;
         struct stat status{};
         if (::fstatat(::dirfd(directory), entry->d_name, &status, AT_SYMLINK_NOFOLLOW) == 0)
@@ -952,22 +1000,25 @@ struct Ntdll {
     using CreateFunction =
         NTSTATUS(NTAPI*)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK, PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
     using ToDosFunction = ULONG(NTAPI*)(NTSTATUS);
+    using SetFunction   = NTSTATUS(NTAPI*)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, ULONG);
 
     CreateFunction createFile{};
     ToDosFunction  toDosError{};
+    SetFunction    setInformation{};
 
     static const Ntdll& get() {
         static const Ntdll functions = [] {
             Ntdll      found;
             const auto library = ::GetModuleHandleW(L"ntdll.dll");
             if (library) {
-                found.createFile = reinterpret_cast<CreateFunction>(reinterpret_cast<void*>(::GetProcAddress(library, "NtCreateFile")));
-                found.toDosError = reinterpret_cast<ToDosFunction>(reinterpret_cast<void*>(::GetProcAddress(library, "RtlNtStatusToDosError")));
+                found.createFile     = reinterpret_cast<CreateFunction>(reinterpret_cast<void*>(::GetProcAddress(library, "NtCreateFile")));
+                found.toDosError     = reinterpret_cast<ToDosFunction>(reinterpret_cast<void*>(::GetProcAddress(library, "RtlNtStatusToDosError")));
+                found.setInformation = reinterpret_cast<SetFunction>(reinterpret_cast<void*>(::GetProcAddress(library, "NtSetInformationFile")));
             }
             return found;
         }();
-        if (!functions.createFile || !functions.toDosError)
-            throw StorageError(StorageErrc::ioError, "ntdll.dll does not provide NtCreateFile");
+        if (!functions.createFile || !functions.toDosError || !functions.setInformation)
+            throw StorageError(StorageErrc::ioError, "ntdll.dll does not provide NtCreateFile and NtSetInformationFile");
         return functions;
     }
 };
@@ -1082,16 +1133,21 @@ inline EntryInfo infoOf(std::string name, HANDLE handle, const std::string& what
     return infoOf(std::move(name), basic.FileAttributes, standard.EndOfFile.QuadPart, basic.LastWriteTime.QuadPart);
 }
 
-// Renames the entry of `handle` to `name` in the directory `directory`.
-inline bool renameHandle(HANDLE handle, HANDLE directory, const std::wstring& name, bool replace) {
-    const auto                 nameBytes = name.size() * sizeof(wchar_t);
-    std::vector<std::uint64_t> buffer((sizeof(FILE_RENAME_INFO) + nameBytes + sizeof(std::uint64_t)) / sizeof(std::uint64_t) + 1);
+// Renames the entry of `handle` to `name` in the directory `directory`, by NtSetInformationFile: SetFileInformationByHandle
+// turns a bare name into an absolute path before the call, which a rename relative to a directory handle refuses
+// (STATUS_INVALID_PARAMETER). FILE_RENAME_INFO has the layout of the NT FILE_RENAME_INFORMATION.
+inline NTSTATUS renameHandle(HANDLE handle, HANDLE directory, const std::wstring& name, bool replace) {
+    constexpr ULONG            fileRenameInformation = 10;
+    const auto                 nameBytes             = name.size() * sizeof(wchar_t);
+    const auto                 size                  = offsetof(FILE_RENAME_INFO, FileName) + nameBytes;
+    std::vector<std::uint64_t> buffer(size / sizeof(std::uint64_t) + 1);
     auto*                      info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
     info->ReplaceIfExists           = replace ? TRUE : FALSE;
     info->RootDirectory             = directory;
     info->FileNameLength            = static_cast<DWORD>(nameBytes);
     std::memcpy(reinterpret_cast<std::byte*>(buffer.data()) + offsetof(FILE_RENAME_INFO, FileName), name.data(), nameBytes);
-    return ::SetFileInformationByHandle(handle, FileRenameInfo, info, static_cast<DWORD>(buffer.size() * sizeof(std::uint64_t))) != FALSE;
+    IO_STATUS_BLOCK io{};
+    return Ntdll::get().setInformation(handle, &io, info, static_cast<ULONG>(size), fileRenameInformation);
 }
 
 inline bool markDeleted(HANDLE handle) {
@@ -1339,12 +1395,9 @@ public:
             abandon();
             throw;
         }
-        if (!detail::windows::renameHandle(file.get(), walk.top(), detail::windows::wide(name), mode == WriteMode::replace)) {
-            const auto error = ::GetLastError();
+        if (const auto status = detail::windows::renameHandle(file.get(), walk.top(), detail::windows::wide(name), mode == WriteMode::replace); status < 0) {
             abandon();
-            if (error == ERROR_ACCESS_DENIED && mode == WriteMode::replace)
-                throw StorageError(StorageErrc::accessDenied, "Cannot replace " + detail::quoted(components));
-            detail::windows::fail(error, "Cannot commit " + detail::quoted(components));
+            detail::windows::failStatus(status, "Cannot commit " + detail::quoted(components));
         }
         file.reset();
         state->confirm({walk.top()});
@@ -1413,7 +1466,7 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
             const std::wstring wideName(reinterpret_cast<const wchar_t*>(bytes + offsetof(FILE_ID_BOTH_DIR_INFO, FileName)),
                                         entry->FileNameLength / sizeof(wchar_t));
             const auto         name = detail::windows::utf8(wideName);
-            if (name != "." && name != ".." && !std::string_view(name).starts_with(detail::temporaryPrefix) && isSafeFileName(name))
+            if (name != "." && name != ".." && !std::string_view(name).starts_with(temporaryPrefix) && isSafeFileName(name))
                 entries.push_back(detail::windows::infoOf(name, entry->FileAttributes, entry->EndOfFile.QuadPart, entry->LastWriteTime.QuadPart));
             if (entry->NextEntryOffset == 0)
                 break;
@@ -1535,8 +1588,8 @@ inline void NativeStorage::rename(std::string_view from, std::string_view to) {
         detail::windows::openRelative(entry, sourceWalk.top(), detail::windows::wide(sourceName), DELETE, detail::windows::fullSharing, FILE_OPEN, 0);
     if (status < 0)
         detail::windows::failStatus(status, "Cannot rename " + detail::quoted(source));
-    if (!detail::windows::renameHandle(entry.get(), targetWalk.top(), detail::windows::wide(targetName), false))
-        detail::windows::failLast("Cannot rename " + detail::quoted(source));
+    if (const auto renamed = detail::windows::renameHandle(entry.get(), targetWalk.top(), detail::windows::wide(targetName), false); renamed < 0)
+        detail::windows::failStatus(renamed, "Cannot rename " + detail::quoted(source));
     entry.reset();
     state->confirm({sourceWalk.top(), targetWalk.top()});
 }

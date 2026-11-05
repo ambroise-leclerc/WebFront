@@ -140,7 +140,8 @@ concept StorageWriter = requires(W writer, std::span<const char> bytes) {
 /**
  * @brief A writable storage confined to one root.
  *
- * Paths are '/'-separated and relative to the root, checked by safePathComponents() (the empty path is the root).
+ * Paths are '/'-separated and relative to the root, checked by safePathComponents() (the empty path is the root);
+ * names starting with temporaryPrefix are reserved to the temporary files of writes.
  * Every operation is resolved inside the root and fails with a StorageError; a storage never follows a component
  * outside its root.
  *
@@ -164,15 +165,24 @@ concept Storage = requires(S& storage, std::string_view path, std::size_t limit,
     storage.rename(path, path);
 };
 
+/// The prefix a storage reserves for the temporary files of its writes in progress: no path may have a component that
+/// starts with it (invalidPath), and listings omit such entries.
+inline constexpr std::string_view temporaryPrefix = ".wf-tmp-";
+
 namespace detail {
 
 /// The components of a path given to a storage operation, or StorageError(invalidPath).
 inline std::vector<std::string> storageComponents(std::string_view path) {
+    std::vector<std::string> components;
     try {
-        return safePathComponents(path);
+        components = safePathComponents(path);
     } catch (const std::invalid_argument&) {
         throw StorageError(StorageErrc::invalidPath, "Invalid storage path '" + std::string(path) + "'");
     }
+    for (const auto& component : components)
+        if (component.starts_with(temporaryPrefix))
+            throw StorageError(StorageErrc::invalidPath, "Names starting with '" + std::string(temporaryPrefix) + "' are reserved");
+    return components;
 }
 
 /// The components of a path that must name an entry, not the root.

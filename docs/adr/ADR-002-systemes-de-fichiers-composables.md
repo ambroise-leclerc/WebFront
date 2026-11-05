@@ -93,13 +93,15 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
   une entrée présente pendant tout le listage y figure exactement une fois, quoi qu’on ajoute ou retire entre deux
   pages ; `status` (un lien n’est pas suivi), `openRead`, `beginWrite(path, createNew | replace)` qui écrit dans un
   fichier temporaire rendu visible par un renommage atomique à `commit()` et supprimé si l’écrivain est détruit avant,
-  `createDirectory`, `remove` (fichier, lien ou dossier vide), `rename` (jamais de remplacement). Le concept ne fait
+  `createDirectory`, `remove` (fichier, lien ou dossier vide), `rename` (jamais de remplacement). Les noms commençant
+  par `.wf-tmp-` (`fs::temporaryPrefix`) sont réservés aux temporaires : refusés (`invalidPath`) et omis des listages,
+  de sorte qu’un listage ne masque jamais un fichier validé. Le concept ne fait
   aucune hypothèse POSIX : un stockage sans `std::filesystem` (FatFs, LittleFS) peut le satisfaire.
 - **Erreurs typées.** `fs::StorageError` est une `BridgeError` (ADR-004) de code `storage.<nom>` : `notFound`,
   `alreadyExists`, `notDirectory`, `isDirectory`, `notEmpty`, `accessDenied`, `invalidPath`, `linkRefused`,
   `unsafeDirectory`, `rootMoved`, `confinementViolated`, `busy`, `ioError`. Son message nomme le chemin relatif,
   jamais l’emplacement de la racine sur l’hôte. Les droits rapportés par `status` et le listage sont indicatifs (bits
-  de mode POSIX, attribut lecture seule de Windows ; les ACL ne sont pas examinées).
+  de mode POSIX, attribut lecture seule de Windows ; les ACL n’y sont pas examinées).
 - **Syntaxe.** `SafePath` refuse en outre, sur toutes les plateformes, les noms de périphériques réservés de Windows
   (`CON`, `PRN`, `AUX`, `NUL`, `COM1` à `COM9`, `LPT1` à `LPT9`, `CONIN$`, `CONOUT$`, quelle que soit l’extension),
   et les noms terminés par un point ou une espace, que Windows modifie. Un nom qu’il
@@ -111,8 +113,10 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
   Windows : `NtCreateFile` relatif au handle parent, `FILE_OPEN_REPARSE_POINT`, points de réanalyse refusés) ; le
   dernier composant est traité par `openat(O_CREAT | O_EXCL | O_NOFOLLOW)`, `fstatat(AT_SYMLINK_NOFOLLOW)`,
   `mkdirat`, `unlinkat`, `renameat`, renommage sans remplacement par `renameat2(RENAME_NOREPLACE)` (Linux) ou
-  `renameatx_np(RENAME_EXCL)` (macOS), et sous Windows `SetFileInformationByHandle` (renommage relatif au handle du
-  dossier, suppression par disposition). Aucun descripteur ne survit à l’opération. `openat2(RESOLVE_BENEATH)` n’est
+  `renameatx_np(RENAME_EXCL)` (macOS) ; sur un système de fichiers Linux sans `renameat2`, un fichier est lié puis
+  délié (`link` ne remplace jamais) et un dossier est refusé, faute de primitive atomique. Sous Windows, le renommage
+  passe par `NtSetInformationFile` relatif au handle du dossier (`SetFileInformationByHandle` convertit le nom en
+  chemin absolu, que ce renommage refuse), la suppression par disposition. Aucun descripteur ne survit à l’opération. `openat2(RESOLVE_BENEATH)` n’est
   pas utilisé : chaque répertoire traversé doit de toute façon être ouvert pour contrôler son propriétaire.
   Les liens sont refusés par défaut (`linkRefused`) ; `LinkPolicy::followInside` suit sous POSIX un lien relatif dont
   la résolution, faite par la même descente, reste dans la racine (au plus 32 liens) ; un lien absolu ou qui sort est
@@ -123,8 +127,11 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
 - **Propriétaires (POSIX).** Chaque répertoire traversé et la racine appartiennent à l’utilisateur effectif ou au
   superutilisateur et ne sont modifiables ni par le groupe ni par les autres ; chaque ancêtre appartient à l’un d’eux
   et, s’il est modifiable par le groupe ou les autres, porte le bit collant et l’élément suivant appartient aussi à
-  l’un d’eux (cas de `/tmp`). Contrôle à la déclaration et à chaque opération, avant tout effet ; sinon
-  `unsafeDirectory`. Les dossiers créés le sont en mode 0755, les fichiers en 0644 (masqués par l’umask), pour rester
+  l’un d’eux (cas de `/tmp`). Sous macOS, une ACL étendue qui accorde à un autre que ces deux utilisateurs le droit
+  d’ajouter, de retirer ou de renommer des entrées, de supprimer le répertoire ou de changer son ACL ou son
+  propriétaire rend aussi le répertoire ou l’ancêtre inadmissible (une ACL illisible compte comme telle) ; sous Linux,
+  une entrée nommée d’ACL POSIX qui accorde l’écriture positionne le bit d’écriture du groupe (masque) et tombe sous la
+  règle des bits. Contrôle à la déclaration et à chaque opération, avant tout effet ; sinon `unsafeDirectory`. Les dossiers créés le sont en mode 0755, les fichiers en 0644 (masqués par l’umask), pour rester
   utilisables. `RootOptions::shared` lève ces contrôles : confinement affaibli, pour un dossier partagé ou un support
   monté sans permissions.
 - **Windows.** La racine est tenue sans `FILE_SHARE_DELETE` pendant toute la déclaration, chaque répertoire traversé
