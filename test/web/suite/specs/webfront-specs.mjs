@@ -412,6 +412,17 @@ describe('WebFront browser integration', () => {
         expect(order).toEqual(['deferred:50', 'deferred:150', 'deferred:300']);
     });
 
+    it('rejects a pending deferred call when its browser connection closes', async () => {
+        const bridge = new WebFrontBridge();
+        await bridge.ready;
+        const answer = bridge.cppFunction('deferredEcho')('pending', 5000).then(() => null, error => error);
+        // The server processes messages in order: this reply confirms the deferred call was received before closing.
+        await bridge.cppFunction('integerInCpp')(1);
+        bridge.socket.close();
+        const error = await answer;
+        expect(error.code).toBe('webfront.disconnected');
+    });
+
     it('rejects missing functions and C++ exceptions', async () => {
         await expectAsync(webFront.cppFunction('missingCppFunction')())
             .toBeRejectedWithError(/was not found/);

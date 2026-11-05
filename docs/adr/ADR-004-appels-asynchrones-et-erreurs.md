@@ -11,12 +11,12 @@
 | 2.2 | 2026-07-22 | Acceptée | Ambroise Leclerc | Déduction des signatures des callbacks ordinaires. | [c065a25](https://github.com/ambroise-leclerc/WebFront/commit/c065a25a476b91a6bf2f77214f32c955b779310c) |
 | 2.3 | 2026-10-13 | Acceptée | Ambroise Leclerc | Contrat explicite de l’asymétrie et couverture séparée des échecs dans les deux directions. | [aa7457b](https://github.com/ambroise-leclerc/WebFront/commit/aa7457ba98b6cf8109838e98345cfcfaa52d82f0) |
 | 2.4 | 2026-10-18 | Acceptée | Ambroise Leclerc | API de senders différée et annulation locale, en complément des futures. | [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) |
-| 2.5 | 2026-11-05 | Proposée | Ambroise Leclerc | Erreurs typées : un rejet porte un code (`BridgeError`, `Error.code`) en plus de son message (#458, ADR-020). | À renseigner après intégration. |
-| 2.6 | 2026-11-05 | Proposée | Ambroise Leclerc | Réponse différée : un callback `cppFunction` peut renvoyer un sender ou un `ResultTask<R>` (#459, ADR-020). | À renseigner après intégration. |
+| 2.5 | 2026-11-05 | Acceptée | Ambroise Leclerc | Erreurs typées : un rejet porte un code (`BridgeError`, `Error.code`) en plus de son message (#458, ADR-020). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 2.6 | 2026-11-05 | Acceptée | Ambroise Leclerc | Réponse différée : un callback `cppFunction` peut renvoyer un sender ou un `ResultTask<R>` (#459, ADR-020). | [c817501](https://github.com/ambroise-leclerc/WebFront/commit/c81750191ff0d1e1e1e8f4b42ee5ef49d0d69d64) |
 
 ## État et chronologie
 
-**Acceptée** jusqu'à la version 2.4 ; les extensions 2.5 et suivantes sont **proposées**. Décision initiale : **2022-02-06** (version 1.0).
+**Acceptée** jusqu'à la version 2.6. Décision initiale : **2022-02-06** (version 1.0).
 Dernière révision : **2026-11-05** (version 2.6).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
