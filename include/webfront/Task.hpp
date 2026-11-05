@@ -8,6 +8,11 @@
 namespace webfront {
 using Task = networking::Task;
 
+/** @brief A coroutine with a result: the type a callback registered with `cppFunction` returns to answer later.
+ * `co_return value;` resolves the JavaScript Promise with the value; an exception rejects it. */
+template <typename Result>
+using ResultTask = networking::ex::task<Result>;
+
 /** @brief Requests cancellation of one spawned task. Discarding the handle does not stop it. */
 class TaskHandle {
     std::shared_ptr<networking::ex::inplace_stop_source> source{std::make_shared<networking::ex::inplace_stop_source>()};

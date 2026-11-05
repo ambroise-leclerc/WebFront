@@ -12,11 +12,12 @@
 | 2.3 | 2026-10-13 | Acceptée | Ambroise Leclerc | Contrat explicite de l’asymétrie et couverture séparée des échecs dans les deux directions. | [aa7457b](https://github.com/ambroise-leclerc/WebFront/commit/aa7457ba98b6cf8109838e98345cfcfaa52d82f0) |
 | 2.4 | 2026-10-18 | Acceptée | Ambroise Leclerc | API de senders différée et annulation locale, en complément des futures. | [0657923](https://github.com/ambroise-leclerc/WebFront/commit/0657923697ef697019f2a898754740971e79a79f) |
 | 2.5 | 2026-11-05 | Proposée | Ambroise Leclerc | Erreurs typées : un rejet porte un code (`BridgeError`, `Error.code`) en plus de son message (#458, ADR-020). | À renseigner après intégration. |
+| 2.6 | 2026-11-05 | Proposée | Ambroise Leclerc | Réponse différée : un callback `cppFunction` peut renvoyer un sender ou un `ResultTask<R>` (#459, ADR-020). | À renseigner après intégration. |
 
 ## État et chronologie
 
-**Acceptée** jusqu'à la version 2.4 ; l'extension 2.5 est **proposée**. Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-11-05** (version 2.5).
+**Acceptée** jusqu'à la version 2.4 ; les extensions 2.5 et suivantes sont **proposées**. Décision initiale : **2022-02-06** (version 1.0).
+Dernière révision : **2026-11-05** (version 2.6).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -47,6 +48,16 @@ le code générique `webfront.error`. Les codes `webfront.notFound` (fonction ab
 résultat mal formé), `webfront.disconnected` (connexion fermée, y compris pour un appel sur un pont non connecté) et
 `webfront.cancelled` sont réservés à WebFront et distincts de ceux des applications, qui ne peuvent ni les construire
 (`std::invalid_argument`) ni les envoyer depuis JavaScript.
+Un callback qui renvoie un sender, un `webfront::ResultTask<R>` (`ex::task<R>`) ou `ResultTask<void>`, répond quand il
+se termine : la Promise se résout avec la valeur encodée, se rejette s'il échoue (message et code) et, s'il se termine
+arrêté sans que l'appel l'ait été, avec `webfront.cancelled`. Le travail est possédé par la portée du serveur et par la
+connexion : la fermeture de la connexion demande son arrêt et écarte la réponse tardive sans rien envoyer, l'arrêt de
+l'application l'arrête et le joint. La réponse est émise sur le contexte du serveur. Plusieurs appels différés d'une
+connexion sont simultanés, chacun identifié par l'identifiant sur 16 bits que choisit JavaScript (au plus 65 535 en
+vol : au-delà, `Too many outstanding WebFront calls` rejette côté navigateur) ; un identifiant déjà en vol est refusé
+(`webfront.malformed`, « already in use ») sans toucher à l'appel en cours. Une exception levée avant le retour du
+sender rejette aussitôt. Aucun délai automatique : un sender qui ne se termine jamais laisse la Promise en attente
+jusqu'à la déconnexion.
 Les callbacks enregistrés sont possédés par le stockage de l’application. Les signatures
 ordinaires sont déduites ; les lambdas génériques et opérateurs surchargés utilisent
 `cppFunction<R, Args...>` explicitement.

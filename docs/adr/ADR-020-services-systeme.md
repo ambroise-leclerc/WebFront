@@ -46,12 +46,9 @@ différentes.
 
 - Le serveur HTTP ne traite que `GET` et `HEAD` ; les écritures passent par le pont, par morceaux séquentiels
   (modèle de l'installation `wf`, ADR-010).
-- Les chaînes du pont sont bornées à 65 535 octets par leur en-tête (longueur sur 16 bits, `maxStringBytes`) ; ce
-  n'est pas une limite de WebSocket. Les tableaux typés ont une longueur sur 32 bits et un message est borné à 64 Mio
-  par défaut (`BuffersPolicy`). Le pont ne transporte ni liste de chaînes ni liste d'enregistrements, et un rejet ne
-  porte qu'un message (ADR-003, ADR-004).
-- `cppFunction` encode immédiatement le résultat du callback et `webfront::Task` (`ex::task<void>`) n'est pas un
-  template : un callback ne peut pas différer sa réponse jusqu'à la fin d'une coroutine, d'un dialogue ou d'une lecture.
+- Le pont transporte les chaînes jusqu'à la taille de message de la politique (`longString`, 32 bits), des listes de
+  chaînes, de tuples et de tableaux typés, des erreurs à code (`BridgeError`) et des réponses différées
+  (`cppFunction` acceptant un `webfront::ResultTask<R>`), depuis l'épique #448 (ADR-003, ADR-004).
 - Un fournisseur (ADR-002) ne voit que `open(path)` et rend un `fs::File` ; il ne voit ni la requête (`Range`), ni la
   connexion, ni des jetons émis à l'exécution. Le serveur copie le fichier entier dans la réponse avant l'envoi
   (`readFile`) : la mémoire croît avec la taille du fichier, ce qui interdit les gros fichiers sur cible embarquée.
@@ -305,25 +302,21 @@ lève).
 
 ### 5. Appels depuis C++ et depuis JavaScript
 
-Esquisse ; les noms ne sont pas contractuels avant l'implémentation. `cppFunction` répond aujourd'hui dès le retour
-du callback : la forme ci-dessous suppose la **réponse différée** des préalables (un callback qui renvoie une tâche à
-résultat, `ex::task<R>`). La Promise JavaScript se résout quand la tâche se termine, avec la valeur encodée ; elle se
+Esquisse ; les noms de services ne sont pas contractuels avant l'implémentation. `cppFunction` accepte un callback qui
+renvoie une tâche à résultat (`webfront::ResultTask<R>`, alias de `ex::task<R>`) et répond à la fin de la tâche. La Promise JavaScript se résout quand la tâche se termine, avec la valeur encodée ; elle se
 rejette si la tâche lève (message et code d'erreur typé) ou se termine arrêtée (code d'annulation), et à la
 déconnexion, qui demande l'arrêt de la tâche et écarte sa réponse.
 
 ```cpp
 webfront::services::Files files{app, {.roots = {{"Données", dataDirectory}}, .backends = Backends::automatic}};
 
-app.cppFunction("importer", [&](App::UI ui) -> ex::task<int> {
+app.cppFunction("importer", [&](App::UI ui) -> webfront::ResultTask<int> {
     auto picked = co_await files.open(ui, {.title = "Importer", .filters = {{"Images", {"*.png", "*.jpg"}}}});
     for (auto& grant : picked) load(grant.path());   // C++ : autorisation complète
     co_return static_cast<int>(picked.size());       // résout la Promise de la page
 });
 ```
 
-Sans cette extension, une application peut seulement lancer le travail avec `ui.spawn(task)` et répondre aussitôt ;
-la Promise se résout alors avant la fin du dialogue, et le résultat comme les erreurs doivent revenir par un appel
-`ui.jsFunction` séparé. Cette forme dégradée ne sert pas de contrat aux services.
 
 ```ts
 import { files } from "@webfront/services/files";
