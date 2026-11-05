@@ -314,7 +314,7 @@ SCENARIO("A gated cold gzip decode leaves HTTP and WebSocket upgrades responsive
         gate->release();
         server.stop();
         io.join();
-        server.drain();
+        server.drainUntilJoined();
     }};
     send(cold, port, "/asset.js");
     gate->wait();
@@ -356,7 +356,7 @@ SCENARIO("HTTP stop and disconnected clients cannot outlive the owned gzip worke
         server.stop();
         if (io.joinable())
             io.join();
-        server.drain();
+        server.drainUntilJoined();
     }};
     send(client, port, "/asset.js");
     gate->wait();
@@ -365,7 +365,7 @@ SCENARIO("HTTP stop and disconnected clients cannot outlive the owned gzip worke
     io.join();
     REQUIRE(server.fallbackDecodeStatistics().jobs == 1);
     gate->release();
-    server.drain();
+    server.drainUntilJoined();
     REQUIRE(server.fallbackDecodeStatistics().jobs == 0);
     REQUIRE(server.fallbackDecodeStatistics().waiters == 0);
     REQUIRE(server.fallbackDecodeStatistics().bytes == 0);
@@ -520,7 +520,7 @@ SCENARIO("A disconnected gzip requester leaves the shared decode usable by anoth
         gate->release();
         server.stop();
         io.join();
-        server.drain();
+        server.drainUntilJoined();
     }};
     send(lost, port, "/asset.js");
     gate->wait();
@@ -549,7 +549,7 @@ SCENARIO("HTTP gzip workers preserve failure statuses and remain lazy on pass-th
         Finally                                      cleanup{[&] {
             server.stop();
             io.join();
-            server.drain();
+            server.drainUntilJoined();
         }};
         send(allocationFailure, port, "/allocation-failure.js");
         REQUIRE(receive(allocationFailure).starts_with("HTTP/1.1 503"));
@@ -573,7 +573,7 @@ SCENARIO("HTTP gzip workers preserve failure statuses and remain lazy on pass-th
                 Finally                                      cleanup{[&] {
                     server.stop();
                     io.join();
-                    server.drain();
+                    server.drainUntilJoined();
                 }};
                 send(client, port, fail ? "/asset.js" : "/corrupt.js", {}, head);
                 const auto response = receive(client, head);
@@ -618,7 +618,7 @@ SCENARIO("HTTP rejects oversized fallback input before enqueue while preserving 
     Finally                            cleanup{[&] {
         server.stop();
         io.join();
-        server.drain();
+        server.drainUntilJoined();
     }};
     send(fallback, port, "/asset.js");
     REQUIRE(receive(fallback).starts_with("HTTP/1.1 500"));
