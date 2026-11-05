@@ -12,8 +12,10 @@
 #include <fstream>
 #include <filesystem>
 #include <ios>
+#include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -34,14 +36,32 @@ concept EncodedData = IsData<T> && HasEncoding<T>;
 template<typename T>
 concept RawData = IsData<T>;
 
+/// @brief The bytes of a file a provider or a storage reads through its own handle: a descriptor opened relative to a
+/// storage root (fs::NativeStorage), and later the handles a platform grants instead of a path (an Android
+/// `content://` URI, a macOS security-scoped URL), which a provider wraps without WebFront knowing them.
+class ByteSource {
+public:
+    virtual ~ByteSource() = default;
+    /// Reads up to `buffer.size()` bytes; fewer only at the end of the content.
+    virtual std::size_t read(std::span<char> buffer) = 0;
+    /// The number of bytes left from the position the source had when the File was built, when known.
+    [[nodiscard]] virtual std::optional<std::uint64_t> size() const = 0;
+    /// Positions the next read at `offset` bytes from that original position; false when the source cannot seek.
+    [[nodiscard]] virtual bool seek(std::uint64_t offset) = 0;
+};
+
 class File {
-    enum class FileType { nativeFStream, staticData };
+    enum class FileType { nativeFStream, staticData, byteSource };
 public:
     File(EncodedData auto t) : File(decltype(t)::data, decltype(t)::dataSize, decltype(t)::encoding) {}
     File(RawData auto t) : File(decltype(t)::data, decltype(t)::dataSize) {}
     File(std::span<const uint64_t> input, size_t fileSize, std::string_view contentEncoding = "")
         : fileType{FileType::staticData}, data(input), size(fileSize), eofBit(fileSize==0), encoding(contentEncoding) {}
     File(std::ifstream ifstream) : fileType{FileType::nativeFStream}, fstream{std::move(ifstream)} { measureStream(); }
+    /// A file read through a provider's own handle (see ByteSource).
+    explicit File(std::unique_ptr<ByteSource> byteSource) : fileType{FileType::byteSource}, source{std::move(byteSource)} {
+        if (!source) throw std::invalid_argument("A File needs a byte source");
+    }
 
     [[nodiscard]] bool isEncoded() const { return !encoding.empty(); }
     [[nodiscard]] std::string_view getEncoding() const { return encoding; }
@@ -49,7 +69,10 @@ public:
 
     /// The number of bytes this file yields, when known before reading it (always for embedded data, and for a
     /// native file whose stream can seek). A server uses it to announce a length and stream the file in chunks.
-    [[nodiscard]] std::optional<std::uint64_t> knownSize() const { return fileType == FileType::staticData ? std::optional<std::uint64_t>{size} : streamSize; }
+    [[nodiscard]] std::optional<std::uint64_t> knownSize() const {
+        if (fileType == FileType::byteSource) return source->size();
+        return fileType == FileType::staticData ? std::optional<std::uint64_t>{size} : streamSize;
+    }
 
     /// A strong entity tag (RFC 9110 §8.8.3) for the bytes this file yields, when its provider can guarantee one.
     /// WebFront derives none from a pathname, a size or a modification time: those can describe another version than
@@ -70,6 +93,10 @@ public:
             eofBit    = readIndex == size;
             return true;
         }
+        if (fileType == FileType::byteSource) {
+            eofBit = false;
+            return source->seek(offset);
+        }
         if (!streamSize || !fstream.is_open()) return false;
         const auto target = std::min(offset, *streamSize);
         fstream.clear();
@@ -83,7 +110,8 @@ public:
     // @return bytes read
     size_t read(std::span<char> buffer) {
         if (fileType == FileType::staticData) return readData(buffer);
-        else return readFStream(buffer);
+        if (fileType == FileType::byteSource) return readSource(buffer);
+        return readFStream(buffer);
     }
 
 private:
@@ -96,6 +124,13 @@ private:
     bool eofBit{false};
     const std::string encoding{};
     std::ifstream fstream;
+    std::unique_ptr<ByteSource> source;
+
+    size_t readSource(std::span<char> buffer) {
+        const auto count = source->read(buffer);
+        if (count < buffer.size()) eofBit = true;
+        return count;
+    }
 
     // The generated headers pack the bytes into big-endian 64-bit words. Each byte is taken from
     // its word by position, so a read may stop in the middle of a word.

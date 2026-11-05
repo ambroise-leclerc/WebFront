@@ -16,11 +16,12 @@
 | 2.4 | 2026-10-14 | Acceptée | Ambroise Leclerc | Fournisseur PackageFS et stockage transactionnel des outils installés. | [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) |
 | 2.5 | 2026-11-03 | Acceptée | Ambroise Leclerc | `fs::File::knownSize()` : taille connue avant lecture (données embarquées, fichier natif sur flux positionnable), pour annoncer `Content-Length` et envoyer le fichier en flux (#454). Les routes dynamiques passent après le `WebFront.js` protégé et ne peuvent pas le masquer. | Branche `454-dynamic-routes` |
 | 2.6 | 2026-11-04 | Acceptée | Ambroise Leclerc | `fs::File::seek`, `entityTag()` et `setEntityTag()` : positionnement dans un fichier de taille connue et validateur fort fourni par le fournisseur (jamais déduit d'un chemin, d'une taille ou d'une date), pour les requêtes `Range` et `If-Range` (#455). Le serveur traite les plages ; `fs::Provider` ne voit toujours pas la requête. | Branche `455-range-requests` |
+| 3.0 | 2026-11-05 | Acceptée | Ambroise Leclerc | Stockage modifiable sous des racines déclarées (#460, ADR-020) : concept `fs::Storage` (listage paginé stable, métadonnées, lecture, écriture par fichier temporaire validée par renommage atomique, création de dossier, suppression, renommage sans remplacement), erreurs typées `fs::StorageError` (`storage.*`), `fs::NativeStorage` confiné pendant la résolution par descripteurs (POSIX) ou handles (Windows), contrôle des propriétaires des répertoires et des ancêtres, `rootMoved` et `confinementViolated`, `fs::MemoryStorage` simulé ; `fs::ByteSource`, point d'extension de `fs::File` pour les handles natifs ; `SafePath` refuse les noms réservés de Windows. Les fournisseurs restent en lecture seule. | Branche `460-writable-storage` |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2023-03-16** (version 1.0).
-Dernière révision : **2026-11-03** (version 2.5).
+Dernière révision : **2026-11-05** (version 3.0).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -39,6 +40,12 @@ orientation ; les portages et packagings correspondants restent à réaliser et 
 Les fichiers modifiables ne sont qu’un usage de cette abstraction. Il faut en outre que le
 script du pont demeure conforme au codec C++, même si une racine locale contient un autre
 `WebFront.js`.
+
+Jusqu’à la version 2.6, cette décision ne définissait que la lecture (`open → fs::File`). Les services du
+système (ADR-020) doivent aussi lister, écrire, créer, renommer et supprimer des fichiers de l’hôte, sous des
+racines que l’application déclare, sans qu’un script de la page ni un processus local sans droit sur ces racines
+puisse les faire agir à l’extérieur. Une vérification du chemin suivie d’une ouverture par nom ne suffit pas :
+entre les deux, un processus local peut remplacer un composant par un lien vers l’extérieur.
 
 ## Décision
 
@@ -60,6 +67,11 @@ un handle natif mobile ou un stockage spécialisé devra adapter ses octets à c
 faire évoluer explicitement `File` avec ses tests. Le `span` des données statiques emprunte
 leur stockage, qui doit survivre à la lecture.
 
+`fs::File` lit aussi les octets d’un `fs::ByteSource`, que fournit un stockage ou un provider lisant par son propre
+handle : un descripteur ouvert relativement à une racine (`fs::NativeStorage`), plus tard une URI `content://`
+d’Android ou une URL « security-scoped » de macOS, que WebFront n’a pas à connaître. Ces handles natifs ne sont
+pas implémentés ; `ByteSource` est leur point d’extension.
+
 Le filesystem par défaut consulte, dans cet ordre : le `WebFront.js` embarqué protégé,
 la racine de développement optionnelle, puis la page de repli embarquée d’`IndexFS`.
 `fs::DefaultFSWith<Extra...>` place les providers supplémentaires entre le bridge protégé
@@ -69,6 +81,68 @@ Les espaces réservés `webfront/components/<name>/` et `webfront/tools/<pkg>/` 
 ressources réutilisables des pages applicatives ; `PackageFS` et les composants qui les servaient
 sont retirés (ADR-010 v1.7), l'environnement développeur sert les siennes sous `webfront/developer/`. Les fichiers natifs de développement et `NativeDebugFS`
 ne constituent pas un sandbox de production.
+
+### Stockage modifiable sous des racines déclarées
+
+Un fournisseur sert des ressources en lecture ; un **stockage** (`fs::Storage`, `Storage.hpp`) est modifiable et
+confiné à une racine. Ce sont deux contrats distincts : le serveur HTTP ne consomme que des fournisseurs, et un
+stockage n’est servi que par une route à jeton de l’ADR-020.
+
+- **Contrat.** Chemins relatifs séparés par `/`, vérifiés par `SafePath` (le chemin vide désigne la racine) ;
+  `list(dir, after, limit)` rend une page triée par nom, au plus `maxStoragePageSize` (1000) entrées, et un curseur :
+  une entrée présente pendant tout le listage y figure exactement une fois, quoi qu’on ajoute ou retire entre deux
+  pages ; `status` (un lien n’est pas suivi), `openRead`, `beginWrite(path, createNew | replace)` qui écrit dans un
+  fichier temporaire rendu visible par un renommage atomique à `commit()` et supprimé si l’écrivain est détruit avant,
+  `createDirectory`, `remove` (fichier, lien ou dossier vide), `rename` (jamais de remplacement). Le concept ne fait
+  aucune hypothèse POSIX : un stockage sans `std::filesystem` (FatFs, LittleFS) peut le satisfaire.
+- **Erreurs typées.** `fs::StorageError` est une `BridgeError` (ADR-004) de code `storage.<nom>` : `notFound`,
+  `alreadyExists`, `notDirectory`, `isDirectory`, `notEmpty`, `accessDenied`, `invalidPath`, `linkRefused`,
+  `unsafeDirectory`, `rootMoved`, `confinementViolated`, `busy`, `ioError`. Son message nomme le chemin relatif,
+  jamais l’emplacement de la racine sur l’hôte. Les droits rapportés par `status` et le listage sont indicatifs (bits
+  de mode POSIX, attribut lecture seule de Windows ; les ACL ne sont pas examinées).
+- **Syntaxe.** `SafePath` refuse en outre, sur toutes les plateformes, les noms de périphériques réservés de Windows
+  (`CON`, `PRN`, `AUX`, `NUL`, `COM1` à `COM9`, `LPT1` à `LPT9`, `CONIN$`, `CONOUT$`, quelle que soit l’extension),
+  et les noms terminés par un point ou une espace, que Windows modifie. Un nom qu’il
+  refuse n’est pas listé, puisqu’aucune opération ne pourrait le désigner. La syntaxe ne confine pas : elle suffit
+  seulement aux stockages sans liens.
+- **`fs::NativeStorage`.** La racine est la forme canonique de l’emplacement déclaré (ses liens sont résolus une fois,
+  à la déclaration). Chaque opération repart de la racine ouverte et ouvre chaque composant relativement au précédent,
+  sans suivre de lien (POSIX : `openat(O_NOFOLLOW | O_DIRECTORY)`, `O_PATH` sous Linux, `O_SEARCH` sous macOS ;
+  Windows : `NtCreateFile` relatif au handle parent, `FILE_OPEN_REPARSE_POINT`, points de réanalyse refusés) ; le
+  dernier composant est traité par `openat(O_CREAT | O_EXCL | O_NOFOLLOW)`, `fstatat(AT_SYMLINK_NOFOLLOW)`,
+  `mkdirat`, `unlinkat`, `renameat`, renommage sans remplacement par `renameat2(RENAME_NOREPLACE)` (Linux) ou
+  `renameatx_np(RENAME_EXCL)` (macOS), et sous Windows `SetFileInformationByHandle` (renommage relatif au handle du
+  dossier, suppression par disposition). Aucun descripteur ne survit à l’opération. `openat2(RESOLVE_BENEATH)` n’est
+  pas utilisé : chaque répertoire traversé doit de toute façon être ouvert pour contrôler son propriétaire.
+  Les liens sont refusés par défaut (`linkRefused`) ; `LinkPolicy::followInside` suit sous POSIX un lien relatif dont
+  la résolution, faite par la même descente, reste dans la racine (au plus 32 liens) ; un lien absolu ou qui sort est
+  refusé. Sous Windows, tout point de réanalyse est refusé.
+- **Emplacement déclaré.** Chaque opération vérifie d’abord que l’emplacement déclaré, ouvert composant par composant
+  sans suivre de lien, désigne encore l’identité de la racine (`st_dev`/`st_ino`, `FILE_ID_INFO`) ; sinon `rootMoved`,
+  pour cette opération et les suivantes, jusqu’à une nouvelle déclaration.
+- **Propriétaires (POSIX).** Chaque répertoire traversé et la racine appartiennent à l’utilisateur effectif ou au
+  superutilisateur et ne sont modifiables ni par le groupe ni par les autres ; chaque ancêtre appartient à l’un d’eux
+  et, s’il est modifiable par le groupe ou les autres, porte le bit collant et l’élément suivant appartient aussi à
+  l’un d’eux (cas de `/tmp`). Contrôle à la déclaration et à chaque opération, avant tout effet ; sinon
+  `unsafeDirectory`. Les dossiers créés le sont en mode 0755, les fichiers en 0644 (masqués par l’umask), pour rester
+  utilisables. `RootOptions::shared` lève ces contrôles : confinement affaibli, pour un dossier partagé ou un support
+  monté sans permissions.
+- **Windows.** La racine est tenue sans `FILE_SHARE_DELETE` pendant toute la déclaration, chaque répertoire traversé
+  pendant toute l’opération (écriture du temporaire et renommage compris) : leur renommage ou leur suppression
+  échoue. NTFS refuse aussi le renommage d’un ancêtre sous lequel un handle est ouvert ; le test le vérifie. Coût
+  accepté : la racine ne peut pas être renommée tant qu’elle est déclarée.
+- **Détection.** Avant de valider une écriture et après toute opération, le stockage vérifie que le répertoire où il
+  a agi est encore sous la racine (remontée par `..` jusqu’à l’identité de la racine sous POSIX, chemin final du
+  handle sous Windows) et que la racine est à son emplacement ; sinon `confinementViolated`, la validation n’a pas lieu
+  et le temporaire est supprimé. Les renommages, validations, suppressions et créations d’un stockage sont sérialisés.
+- **Garantie.** Windows : empêchement pendant toute l’opération. POSIX : empêchement face à tout autre utilisateur que
+  l’utilisateur effectif et le superutilisateur ; face à eux, détection au mieux : un déplacement entre la dernière
+  vérification et le renommage, ou pendant l’écriture du temporaire après la vérification, peut laisser un fichier à
+  l’extérieur.
+- **`fs::MemoryStorage`** est le stockage simulé des tests (arbre en mémoire, droits simulés par `setAccess`), et le
+  modèle d’un stockage sans liens. `fs::StorageHooks` est réservé aux tests : points d’injection entre deux étapes
+  de résolution, avant l’effet, après la création du temporaire et avant la validation, et substitution de
+  l’utilisateur effectif ou du propriétaire d’un répertoire.
 
 ## Orientation embarquée, Yocto et mobile
 
@@ -120,11 +194,21 @@ un store restent optionnels et demandent un emplacement adapté à la cible.
 - Respecter le traitement URI de la couche HTTP : ne pas utiliser query ou fragment comme nom
   de fichier. Ne pas introduire une seconde convention de résolution dans un composant.
 - Conserver métadonnées MIME/encodage et taille servie cohérentes ; voir ADR-009 pour gzip.
+- Ne jamais confiner une écriture ou une lecture de l’hôte par une vérification de chemin suivie d’une ouverture par
+  nom : passer par un `fs::Storage`, dont chaque opération résout son chemin relativement à la racine ouverte.
+- Ne pas présenter `RootOptions::shared` ni un stockage sans liens comme un confinement complet ; documenter la
+  garantie POSIX (aucun empêchement face au même utilisateur ou au superutilisateur).
+- Un nouveau stockage satisfait `fs::Storage`, lève `fs::StorageError` et se teste comme `MemoryStorage` ; un
+  stockage natif ajoute les tests de liens, de remplacement et de déplacement concurrents par `StorageHooks`.
 
 ## Sources et vérification
 
 - [DefaultFS](../../include/webfront/system/DefaultFS.hpp), [FileSystem](../../include/webfront/system/FileSystem.hpp),
-  [NativeFS](../../include/webfront/system/NativeFS.hpp).
+  [NativeFS](../../include/webfront/system/NativeFS.hpp), [Storage](../../include/webfront/system/Storage.hpp),
+  [NativeStorage](../../include/webfront/system/NativeStorage.hpp), [MemoryStorage](../../include/webfront/system/MemoryStorage.hpp),
+  [SafePath](../../include/webfront/system/SafePath.hpp).
 - Tests : [FileSystemTests](../../test/unit/FileSystemTests.cpp), [DefaultFSTests](../../test/unit/DefaultFSTests.cpp),
-  [ModuleHTTPServerTests](../../test/unit/ModuleHTTPServerTests.cpp).
+  [ModuleHTTPServerTests](../../test/unit/ModuleHTTPServerTests.cpp), [StorageTests](../../test/unit/StorageTests.cpp),
+  [NativeStorageTests](../../test/unit/NativeStorageTests.cpp), [SafePathTests](../../test/unit/SafePathTests.cpp).
+- Décision qui motive le stockage modifiable : [ADR-020](ADR-020-services-systeme.md), règles 2 à 4 et prescriptions.
 - Voir [ADR-009](ADR-009-modules-et-assets-reproductibles.md) et [ADR-010](ADR-010-composants-et-outils-optionnels.md).
