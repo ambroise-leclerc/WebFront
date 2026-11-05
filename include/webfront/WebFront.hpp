@@ -4,6 +4,7 @@
 /// @brief WebFront UI main objet
 #pragma once
 
+#include "BridgeError.hpp"
 #include "Broadcast.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
@@ -223,9 +224,14 @@ auto makeCppFunctionHandler(Function&& function) {
     return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) -> R {
         std::tuple<Args...> parameters;
         auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
-            (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
-            if (!data.empty())
-                throw std::runtime_error("Function call contains trailing parameter data");
+            // Arguments that cannot be decoded as the callback declared them reject with the `webfront.malformed` code.
+            try {
+                (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
+                if (!data.empty())
+                    throw std::runtime_error("Function call contains trailing parameter data");
+            } catch (const std::exception& error) {
+                throw detail::makeBridgeError(bridge_code::malformed, error.what());
+            }
             if constexpr (std::is_void_v<R>) {
                 std::invoke(*callable, caller..., std::get<Is>(tuple)...);
                 return;
@@ -1180,7 +1186,7 @@ private:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
-                    link->sendError(event.callId, "C++ function '" + event.text + "' was not found");
+                    link->sendError(event.callId, "C++ function '" + event.text + "' was not found", bridge_code::notFound);
                 break;
             }
         }

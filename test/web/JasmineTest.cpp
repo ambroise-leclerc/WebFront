@@ -107,6 +107,7 @@ public:
         rejectedWebSocket.emplace();
         registerCallbacks();
         registerBitsetCallbacks();
+        registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
         registerMediaRoute(app);
         registerReadRoute(app);
@@ -324,6 +325,91 @@ private:
             throw;
         }
         throw runtime_error("Cancelled browser sender resumed with a result");
+    }
+
+    using Record = tuple<string, double, bool, vector<uint8_t>>;
+
+    void registerListCallbacks() {
+        webFront->cppFunction("listEcho", [](const vector<string>& value) {
+            return value;
+        });
+        webFront->cppFunction("recordsEcho", [](const vector<Record>& value) {
+            return value;
+        });
+        webFront->cppFunction("listFromCpp", [](size_t count) {
+            vector<string> entries;
+            entries.reserve(count);
+            for (size_t index = 0; index < count; ++index)
+                entries.push_back("entry-" + to_string(index));
+            return entries;
+        });
+        webFront->cppFunction("pageFromCpp", []() {
+            return tuple<vector<string>, string>{{"a", "b"}, "cursor"};
+        });
+        webFront->cppFunction("heterogeneousList", [](const vector<string>&) {});
+    }
+
+    /// C++ -> JavaScript: the code of a rejection of the browser reaches C++, and an application cannot forge a reserved one.
+    Task checkErrorCodes(TestWF::UI ui) {
+        bool passed = false;
+        try {
+            string application, reserved, missing, plain, longCode;
+            size_t longSize = 0;
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("quota:exceeded");
+            } catch (const BridgeError& error) {
+                application = error.code() + "|" + error.what();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("webfront.cancelled");
+            } catch (const BridgeError& error) {
+                reserved = error.code();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.noSuchFunction")();
+            } catch (const BridgeError& error) {
+                missing = error.code();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectLong")();
+            } catch (const BridgeError& error) {
+                longCode = error.code();
+                longSize = string_view(error.what()).size();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.senderThrows")();
+            } catch (const BridgeError& error) {
+                plain = error.code();
+            }
+            passed = application == "quota:exceeded|failure quota:exceeded" && reserved == bridge_code::generic && missing == bridge_code::notFound
+                     && plain == bridge_code::generic
+                     && longCode == "long" && longSize == 65534;  // the 80000-byte message is cut before the character that straddles 65535
+        } catch (const exception& error) {
+            log::error("Error code checks failed: {}", error.what());
+        }
+        ui.jsFunction("webfrontTests.errorChecksFinished")(passed);
+    }
+
+    /// C++ -> JavaScript: a list of strings and a list of records as arguments and as the result of the browser's callback.
+    Task checkLists(TestWF::UI ui) {
+        bool passed = false;
+        try {
+            const vector<string> names{"alpha", "", string(70000, 'z'), "\xe2\x82\xac"};
+            const auto echoed = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(names);
+            const vector<Record> records{{"a.txt", 12.5, true, {1, 2, 3}}, {"b", 0, false, {}}};
+            const auto echoedRecords = co_await ui.jsFunctionSender<vector<Record>>("webfrontTests.recordsEcho")(records);
+            const auto none = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(vector<string>{});
+            bool heterogeneousRejected = false;
+            try {
+                co_await ui.jsFunctionSender<vector<string>>("webfrontTests.heterogeneousList")();
+            } catch (const runtime_error&) {
+                heterogeneousRejected = true;
+            }
+            passed = echoed == names && echoedRecords == records && none.empty() && heterogeneousRejected;
+        } catch (const exception& error) {
+            log::error("List checks failed: {}", error.what());
+        }
+        ui.jsFunction("webfrontTests.listChecksFinished")(passed);
     }
 
     void registerBitsetCallbacks() {
@@ -638,7 +724,9 @@ private:
         });
         webFront->cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
         webFront->cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
-        webFront->cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
+        webFront->cppFunction<void>("throwCodedFromCpp", [] { throw BridgeError("denied", "the user said no"); });
+        webFront->cppFunction<string, size_t>("longStringFromCpp", [](size_t size) { return string(size, 'x'); });
+        webFront->cppFunction<string, string>("echoString", [](const string& value) { return value; });
         webFront->cppFunction("integerInCpp", [](int value) {
             return value;
         });
@@ -700,6 +788,8 @@ private:
         webFront->spawn(checkSenderResults(requireUI()));
         startBitsetFutureChecks(requireUI());
         webFront->spawn(checkBitsetResults(requireUI()));
+        webFront->spawn(checkLists(requireUI()));
+        webFront->spawn(checkErrorCodes(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
         requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(

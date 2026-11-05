@@ -44,7 +44,7 @@ public:
         } else {
             if (!link) {
                 std::promise<Result> closed;
-                closed.set_exception(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
+                closed.set_exception(std::make_exception_ptr(detail::disconnectedError()));
                 return closed.get_future();
             }
             auto [callId, result] = link->template expectResult<Result>();

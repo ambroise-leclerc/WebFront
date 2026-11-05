@@ -82,8 +82,9 @@ are retained for investigation; diagnostics alone do not establish a correction.
 
 - Bridge calls from JavaScript always return Promises and reject on failure, including `void`
   callbacks. Untyped C++ calls are fire-and-forget; typed calls return futures. Result types
-  are scalar, string, tuple, numeric typed-array and packed bitset values. Strings have a
-  16-bit byte length. See [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md).
+  are scalar, string, tuple, numeric typed-array, packed bitset and list (strings, tuples, typed
+  arrays) values; strings and messages are bounded by the buffers policy's message size (64 MiB by
+  default). See [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md).
 - `webfront::Task`, `app.spawn` / `ui.spawn` and `TaskHandle` provide owned coroutine lifetime
   and individual cancellation. Typed senders support local cancellation; futures and JavaScript
   Promises do not expose it. Already-dispatched JavaScript continues running. Cancelled calls

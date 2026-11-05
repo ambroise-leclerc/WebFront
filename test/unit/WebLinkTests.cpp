@@ -120,6 +120,83 @@ SCENARIO("WebLink settles correlated asynchronous results") {
     }
 }
 
+namespace {
+/// The BridgeError a future rethrows, as its code and message.
+template <typename Result>
+pair<string, string> futureFailure(future<Result>& result) {
+    try {
+        static_cast<void>(result.get());
+    } catch (const BridgeError& error) {
+        return {error.code(), error.what()};
+    } catch (const exception& error) {
+        FAIL("The failure is not a BridgeError: " << error.what());
+    }
+    FAIL("The asynchronous result did not throw");
+    return {};
+}
+}  // namespace
+
+SCENARIO("A browser rejection reaches C++ with its code") {
+    InjectableSocket::reset();
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
+
+    GIVEN("a pending call the browser rejects with an application code") {
+        auto [callId, result] = link.expectResult<string>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const BridgeError error{"denied", "the user said no"};
+            message.encodeParameter(error, frame);
+            frame.freeze();
+        }));
+        THEN("the future throws a BridgeError with that code and message") {
+            REQUIRE(futureFailure(result) == pair<string, string>{"denied", "the user said no"});
+        }
+    }
+    GIVEN("a pending call the browser rejects with a plain error") {
+        auto [callId, result] = link.expectResult<string>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const runtime_error error{"plain failure"};
+            message.encodeParameter(error, frame);
+            frame.freeze();
+        }));
+        THEN("the code is the generic one") {
+            REQUIRE(futureFailure(result) == pair<string, string>{string(bridge_code::generic), "plain failure"});
+        }
+    }
+    GIVEN("a pending call the browser rejects with a code of the bridge") {
+        auto [callId, result] = link.expectResult<void>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const auto error = detail::makeBridgeError(bridge_code::notFound, "JavaScript function 'x' was not found");
+            message.encodeParameter(error, frame);
+            frame.freeze();
+        }));
+        THEN("the reserved code is kept, which tells it from an application's") {
+            const auto [code, text] = futureFailure(result);
+            REQUIRE(code == bridge_code::notFound);
+            REQUIRE(BridgeError::isReserved(code));
+        }
+    }
+    GIVEN("a pending call whose result is not of the expected type") {
+        auto [callId, result] = link.expectResult<double>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const string text{"text"};  // the frame borrows it until freeze()
+            message.encodeParameter(text, frame);
+            frame.freeze();
+        }));
+        THEN("the failure has the malformed code") {
+            REQUIRE(futureFailure(result).first == bridge_code::malformed);
+        }
+    }
+    GIVEN("a call pending when the connection closes") {
+        auto [callId, result] = link.expectResult<string>();
+        static_cast<void>(callId);
+        InjectableSocket::fail(make_error_code(errc::connection_reset));
+        THEN("the failure has the disconnected code") {
+            REQUIRE(futureFailure(result).first == bridge_code::disconnected);
+        }
+    }
+}
+
 SCENARIO("WebLink rejects incomplete asynchronous results") {
     InjectableSocket::reset();
     InlineTaskScope               scope;

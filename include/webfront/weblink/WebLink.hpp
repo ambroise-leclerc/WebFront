@@ -147,7 +147,7 @@ public:
                 const log::ContextScope context(linkContext());
                 detachTransport(false);
                 auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
-                rejectPending(std::make_exception_ptr(std::runtime_error(message)));
+                rejectPending(std::make_exception_ptr(detail::disconnectedError(message)));
                 // The WebSocket reports its closure once, and never when it is stopped by the server or the link.
                 eventsHandler({WebLinkEvent::Code::closed, id});
                 wakeAllWriters();  // after the closure is known: nothing will be written any more
@@ -176,7 +176,7 @@ public:
         ws->stop();
         const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");
-        rejectPending(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
+        rejectPending(std::make_exception_ptr(detail::disconnectedError()));
         wakeAllWriters();
     }
 
@@ -325,12 +325,13 @@ private:
 
 
 public:
-    void sendError(msg::CallId callId, std::string_view message) {
+    /// Rejects the call `callId` with `message` and `code` (the generic one by default); nothing is sent for call 0.
+    void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
         if (callId == 0) return;
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-        std::runtime_error error{std::string(message)};
+        const auto error = detail::makeBridgeError(code, std::string(message));
         result.encodeParameter(error, frame);
         frame.freeze();
         sendFrame(std::move(frame));

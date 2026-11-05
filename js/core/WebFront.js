@@ -34,6 +34,8 @@
         arrayFloat: 16,
         arrayDouble: 17,
         tuple: 18,
+        longString: 19,
+        list: 20,
     });
 
     const arrayTypes = new Map([
@@ -77,12 +79,53 @@
         [ParamType.number, (bridge, type, view, offset) => bridge.decodeNumber(view, offset)],
         [ParamType.smallString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
         [ParamType.string, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
-        [ParamType.exception, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.longString, (bridge, type, view, offset) => bridge.decodeString(type, view, offset)],
+        [ParamType.exception, (bridge, type, view, offset) => bridge.decodeException(view, offset)],
         [ParamType.tuple, (bridge, type, view, offset) => bridge.decodeTuple(view, offset)],
+        [ParamType.list, (bridge, type, view, offset) => bridge.decodeList(view, offset)],
     ]);
 
     for (const code of [ParamType.smallArrayU8, ...arrayCodes.keys()])
         valueDecoders.set(code, (bridge, type, view, offset) => bridge.decodeTypedArray(type, view, offset));
+
+    /// A list the application sends as one value of homogeneous elements, built by webFront.list(): a plain JavaScript
+    /// array stays a tuple, whose elements may differ and which holds at most 255 of them.
+    class WebFrontList {
+        /// Keeps a copy of the elements.
+        constructor(items) {
+            this.items = Array.from(items);
+        }
+    }
+
+    /// The shape of a wire value: two list elements must have the same one. Strings share a shape whatever their length
+    /// header, typed arrays one per element type (the compact and the regular Uint8Array alike), tuples one made of their elements'.
+    function wireShape(type) {
+        switch (type) {
+        case ParamType.booleanTrue:
+        case ParamType.booleanFalse:
+            return "b";
+        case ParamType.number:
+            return "n";
+        case ParamType.smallString:
+        case ParamType.string:
+        case ParamType.longString:
+            return "s";
+        case ParamType.exception:
+            return "e";
+        case ParamType.smallArrayU8:
+            return `a${ParamType.arrayU8}`;
+        case ParamType.list:
+            return "L";
+        default:
+            return `a${type}`;
+        }
+    }
+
+    /// A list element is neither a list nor a tuple holding one: their shapes contain "L".
+    function requireListElementShape(shape) {
+        if (shape.includes("L"))
+            throw new TypeError("WebFront lists cannot contain lists");
+    }
 
     function isTypedArray(value) {
         return ArrayBuffer.isView(value) && !(value instanceof DataView);
@@ -92,6 +135,61 @@
     /// this, so both go through here: a disagreement would mis-size the send buffer.
     function typedArrayHeaderSize(value) {
         return value instanceof Uint8Array && value.length < 256 ? 2 : 5;
+    }
+
+    /// A string of 255 bytes or less has a 1-byte length, up to 65535 a 2-byte one, beyond a 4-byte one (longString).
+    function stringHeaderSize(length) {
+        if (length > 0xffffffff)
+            throw new RangeError("WebFront strings cannot exceed 4294967295 UTF-8 bytes");
+        return length < 256 ? 2 : length < 65536 ? 3 : 5;
+    }
+
+    /// Codes of the failures the bridge itself reports; they start with "webfront.", which an application cannot use.
+    const BridgeCode = Object.freeze({
+        generic: "webfront.error",
+        notFound: "webfront.notFound",
+        malformed: "webfront.malformed",
+        disconnected: "webfront.disconnected",
+        cancelled: "webfront.cancelled",
+    });
+    const reservedPrefix = "webfront.";
+    const validCode = /^[A-Za-z0-9._:-]{1,64}$/;
+
+    /// The errors that WebFront made, or received from C++ with their code: only they may carry a reserved code to the other side.
+    const bridgeErrors = new WeakSet();
+
+    /// An Error with a read-only `code`, known to the bridge as its own.
+    function bridgeError(code, message) {
+        const error = new Error(message);
+        // Not writable: user code could otherwise rewrite the code of an error of the bridge to forge a reserved one.
+        Object.defineProperty(error, "code", {value: code, enumerable: true, writable: false, configurable: false});
+        bridgeErrors.add(error);
+        return error;
+    }
+
+    /// The code an exception is sent with: the `code` of an Error rejected by the application when it is well formed and not
+    /// reserved, otherwise the generic code. A reserved code is kept only on an error of the bridge.
+    function exceptionCode(error) {
+        let code;
+        try {
+            code = error !== null && typeof error === "object" ? error.code : undefined;
+        } catch {
+            return BridgeCode.generic;  // a `code` accessor that throws must not leave the C++ call unanswered
+        }
+        if (typeof code !== "string" || !validCode.test(code))
+            return BridgeCode.generic;
+        if (code.startsWith(reservedPrefix) && !bridgeErrors.has(error))
+            return BridgeCode.generic;
+        return code;
+    }
+
+    /// The text of a rejection, whatever the rejected value: a `message` accessor or a `toString` that throws gives a fixed text.
+    function exceptionText(error) {
+        try {
+            return error instanceof Error ? String(error.message) : String(error);
+        } catch {
+            return "JavaScript exception whose message cannot be read";
+        }
     }
 
     function isNonNegativeInteger(candidate) {
@@ -111,7 +209,14 @@
             return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
         }
 
+        /// The largest message the C++ side accepts by default (http::defaultMaxMessageSize): a policy with another
+        /// maxMessageSize needs the same value in `maxMessageBytes` of the bridge.
+        static get defaultMaxMessageBytes() {
+            return 64 * 1024 * 1024;
+        }
+
         constructor(url = WebFrontBridge.defaultUrl()) {
+            this.maxMessageBytes = WebFrontBridge.defaultMaxMessageBytes;
             this.state = "uninitialized";
             this.littleEndian = false;
             this.nextCallId = 1;
@@ -137,7 +242,7 @@
             this.socket.onmessage = event => this.onMessage(event.data);
             this.socket.onclose = event => {
                 const detail = event.wasClean ? `code=${event.code} reason=${event.reason}` : "connection lost";
-                const error = new Error(`WebFront connection closed: ${detail}`);
+                const error = bridgeError(BridgeCode.disconnected, `WebFront connection closed: ${detail}`);
                 this.settleReadyRejected(error);
                 this.rejectBound(error);  // a no-op once settled
                 for (const pending of this.pendingCalls.values())
@@ -317,11 +422,11 @@
             let context = global;
             for (const component of path) {
                 if (context == null || !(component in context))
-                    throw new Error(`JavaScript namespace '${component}' was not found while resolving '${name}'`);
+                    throw bridgeError(BridgeCode.notFound, `JavaScript namespace '${component}' was not found while resolving '${name}'`);
                 context = context[component];
             }
             if (context == null || typeof context[member] !== "function")
-                throw new Error(`JavaScript function '${name}' was not found`);
+                throw bridgeError(BridgeCode.notFound, `JavaScript function '${name}' was not found`);
             return context[member](...args);
         }
 
@@ -338,10 +443,15 @@
             try {
                 this.settleReturn(pending, message);
             } catch (error) {
+                if (error instanceof Error && error.code === undefined) {
+                    Object.defineProperty(error, "code", {value: BridgeCode.malformed, enumerable: true, writable: false, configurable: false});
+                    bridgeErrors.add(error);
+                }
                 pending.reject(error);
             }
         }
 
+        /// Settles a pending call with the value, the exception or the absence of value that a return message carries.
         settleReturn(pending, message) {
             const count = message.getUint8(1);
             const payloadSize = message.getUint32(4, this.littleEndian);
@@ -349,7 +459,7 @@
             const payload = new DataView(message.buffer, message.byteOffset + 8, payloadSize);
 
             if (this.carriesException(count, payloadSize, payload)) {
-                pending.reject(new Error(this.singleValue(payload, payloadSize, "Exception")));
+                pending.reject(this.singleValue(payload, payloadSize, "Exception"));
                 return;
             }
             if (count === 0) {
@@ -376,13 +486,16 @@
             return values[0];
         }
 
-        decodeParameters(count, view, offset = 0) {
+        /// Decodes `count` consecutive values; returns them with the bytes consumed, and records their shapes in `shapes` when given.
+        decodeParameters(count, view, offset = 0, shapes = null) {
             const values = [];
             let cursor = offset;
             for (let index = 0; index < count; ++index) {
                 requireBytes(view, cursor, 1, "parameter type");
-                const {value, bytes} = this.decodeValue(view.getUint8(cursor), view, cursor);
+                const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
                 values.push(value);
+                if (shapes)
+                    shapes.push(shape);
                 cursor += bytes;
             }
             return [values, cursor - offset];
@@ -393,7 +506,9 @@
             const decoder = valueDecoders.get(type);
             if (!decoder)
                 throw new TypeError(`Unsupported parameter type ${type}`);
-            return decoder(this, type, view, offset);
+            const decoded = decoder(this, type, view, offset);
+            decoded.shape ??= wireShape(type);
+            return decoded;
         }
 
         decodeNumber(view, offset) {
@@ -401,20 +516,62 @@
             return {value: view.getFloat64(offset + 1, this.littleEndian), bytes: 9};
         }
 
+        /// Decodes a smallString, string or longString.
         decodeString(type, view, offset) {
-            const sizeBytes = type === ParamType.smallString ? 1 : 2;
+            const sizeBytes = type === ParamType.smallString ? 1 : type === ParamType.longString ? 4 : 2;
             requireBytes(view, offset + 1, sizeBytes, "string length");
-            const length = sizeBytes === 1 ? view.getUint8(offset + 1) : view.getUint16(offset + 1, this.littleEndian);
+            const length = sizeBytes === 1 ? view.getUint8(offset + 1)
+                : sizeBytes === 2 ? view.getUint16(offset + 1, this.littleEndian) : view.getUint32(offset + 1, this.littleEndian);
             const payload = offset + 1 + sizeBytes;
             requireBytes(view, payload, length, "string payload");
             const bytes = new Uint8Array(view.buffer, view.byteOffset + payload, length);
             return {value: new TextDecoder("utf-8").decode(bytes), bytes: 1 + sizeBytes + length};
         }
 
+        /// An exception is a 1-byte code size, the code, a 16-bit message size and the message. It decodes to an Error with
+        /// `code`, which a settled call rejects with.
+        decodeException(view, offset) {
+            requireBytes(view, offset + 1, 1, "exception code size");
+            const codeSize = view.getUint8(offset + 1);
+            requireBytes(view, offset + 2, codeSize + 2, "exception code");
+            const code = new TextDecoder("utf-8").decode(new Uint8Array(view.buffer, view.byteOffset + offset + 2, codeSize));
+            const messageSize = view.getUint16(offset + 2 + codeSize, this.littleEndian);
+            const payload = offset + 4 + codeSize;
+            requireBytes(view, payload, messageSize, "exception message");
+            const message = new TextDecoder("utf-8").decode(new Uint8Array(view.buffer, view.byteOffset + payload, messageSize));
+            return {value: bridgeError(validCode.test(code) ? code : BridgeCode.generic, message), bytes: 4 + codeSize + messageSize};
+        }
+
         decodeTuple(view, offset) {
             requireBytes(view, offset, 2, "tuple header");
-            const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2);
-            return {value: tuple, bytes: 2 + consumed};
+            const shapes = [];
+            const [tuple, consumed] = this.decodeParameters(view.getUint8(offset + 1), view, offset + 2, shapes);
+            return {value: tuple, bytes: 2 + consumed, shape: `(${shapes.join(",")})`};
+        }
+
+        /// A list is a 32-bit count followed by that many values of one shape; the elements arrive as a JavaScript array.
+        decodeList(view, offset) {
+            requireBytes(view, offset, 5, "list header");
+            const count = view.getUint32(offset + 1, this.littleEndian);
+            // Every element takes at least one byte: a count the message cannot hold is refused before anything is allocated.
+            requireBytes(view, offset + 5, count, "list elements");
+            const values = [];
+            let cursor = offset + 5;
+            let listShape = null;
+            for (let index = 0; index < count; ++index) {
+                requireBytes(view, cursor, 1, "list element type");
+                if (view.getUint8(cursor) === ParamType.exception)
+                    throw new TypeError("A WebFront list element cannot be an exception");
+                const {value, bytes, shape} = this.decodeValue(view.getUint8(cursor), view, cursor);
+                requireListElementShape(shape);
+                if (listShape === null)
+                    listShape = shape;
+                else if (shape !== listShape)
+                    throw new TypeError("WebFront list elements are not of one type");
+                values.push(value);
+                cursor += bytes;
+            }
+            return {value: values, bytes: cursor - offset, shape: "L"};
         }
 
         /// Resolves the element spec and length prefix for a typed array, whose header is 2 bytes in the
@@ -444,6 +601,13 @@
             return {value: result, bytes: headerSize + byteLength};
         }
 
+        /// Marks `items` to be sent as a list: any number of elements of one type, each a string, a typed array or a tuple, which
+        /// C++ receives as a std::vector. Numbers go as a typed array (a list of numbers or booleans is refused). A plain
+        /// array is a tuple of at most 255 elements of any types.
+        list(items) {
+            return new WebFrontList(items);
+        }
+
         cppFunction(name) {
             return (...args) => this.callCppFunction(name, args);
         }
@@ -453,11 +617,12 @@
                 let callId = 0;
                 try {
                     if (this.state !== "linked")
-                        throw new Error("WebFront bridge is not connected");
+                        throw bridgeError(BridgeCode.disconnected, "WebFront bridge is not connected");
                     const values = [name, ...args];
                     if (values.length > 255)
                         throw new RangeError("A function call cannot contain more than 255 top-level values");
                     const payloadSize = values.reduce((size, value) => size + this.parameterSize(value), 0);
+                    this.checkMessageSize(payloadSize);
                     const buffer = new ArrayBuffer(8 + payloadSize);
                     const view = new DataView(buffer);
                     callId = this.allocateCallId();
@@ -478,6 +643,12 @@
             });
         }
 
+        /// Refuses a message the C++ side would close the connection for: the 8-byte header and the payload together.
+        checkMessageSize(payloadSize) {
+            if (8 + payloadSize > this.maxMessageBytes)
+                throw new RangeError(`WebFront message of ${8 + payloadSize} bytes exceeds the maximum of ${this.maxMessageBytes} bytes`);
+        }
+
         allocateCallId() {
             for (let attempts = 0; attempts < 0xffff; ++attempts) {
                 const candidate = this.nextCallId;
@@ -491,6 +662,7 @@
         sendFunctionReturn(callId, value) {
             const values = value === undefined ? [] : [value];
             const payloadSize = values.reduce((size, item) => size + this.parameterSize(item), 0);
+            this.checkMessageSize(payloadSize);
             const buffer = new ArrayBuffer(8 + payloadSize);
             const view = new DataView(buffer);
             view.setUint8(0, Command.functionReturn);
@@ -503,20 +675,29 @@
             this.socket.send(buffer);
         }
 
+        /// Rejects the C++ call `callId` with the message and the code of `error` (the generic code when it has none or a reserved one).
         sendFunctionError(callId, error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const bytes = new TextEncoder().encode(message);
-            if (bytes.length >= 65536)
-                return this.sendFunctionError(callId, "JavaScript exception message exceeds 65535 UTF-8 bytes");
-            const buffer = new ArrayBuffer(11 + bytes.length);
+            const message = exceptionText(error);
+            const code = new TextEncoder().encode(exceptionCode(error));
+            const whole = new TextEncoder().encode(message);
+            // A message longer than the 16-bit length, or than what the maximum message size leaves after the 8-byte header, the
+            // code and the two sizes, is cut before the first UTF-8 character that would not fit whole.
+            const room = Math.max(0, this.maxMessageBytes - 12 - code.length);
+            let cut = Math.min(whole.length, 65535, room);
+            while (cut > 0 && cut < whole.length && (whole[cut] & 0xc0) === 0x80)
+                --cut;
+            const bytes = whole.subarray(0, cut);
+            const buffer = new ArrayBuffer(12 + code.length + bytes.length);
             const view = new DataView(buffer);
             view.setUint8(0, Command.functionReturn);
             view.setUint8(1, 1);
             view.setUint16(2, callId, this.littleEndian);
-            view.setUint32(4, 3 + bytes.length, this.littleEndian);
+            view.setUint32(4, 4 + code.length + bytes.length, this.littleEndian);
             view.setUint8(8, ParamType.exception);
-            view.setUint16(9, bytes.length, this.littleEndian);
-            new Uint8Array(buffer, 11).set(bytes);
+            view.setUint8(9, code.length);
+            new Uint8Array(buffer, 10).set(code);
+            view.setUint16(10 + code.length, bytes.length, this.littleEndian);
+            new Uint8Array(buffer, 12 + code.length).set(bytes);
             this.socket.send(buffer);
         }
 
@@ -534,19 +715,58 @@
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
 
+        /// The encoded size of a string: its header and its UTF-8 bytes.
         stringParameterSize(value) {
             const length = new TextEncoder().encode(value).length;
-            if (length >= 65536)
-                throw new RangeError("WebFront strings cannot exceed 65535 UTF-8 bytes");
-            return length + (length < 256 ? 2 : 3);
+            return stringHeaderSize(length) + length;
         }
 
+        /// The encoded size of a list, tuple or typed array.
         objectParameterSize(value) {
+            if (value instanceof WebFrontList)
+                return this.listParameterSize(value);
             if (Array.isArray(value))
                 return this.tupleParameterSize(value);
             if (isTypedArray(value))
                 return this.typedArrayParameterSize(value);
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        /// The shape, as the decoder computes it, of a value about to be encoded as a list element.
+        valueShape(value) {
+            switch (typeof value) {
+            case "boolean":
+                return "b";
+            case "number":
+                return "n";
+            case "string":
+                return "s";
+            }
+            if (value instanceof WebFrontList)
+                return "L";
+            if (Array.isArray(value))
+                return `(${value.map(element => this.valueShape(element)).join(",")})`;
+            if (isTypedArray(value) && arrayTypes.has(value.constructor))
+                return `a${arrayTypes.get(value.constructor).code}`;
+            throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        /// The encoded size of a list, after checking that its elements have one shape and hold no list.
+        listParameterSize(list) {
+            if (list.items.length > 0xffffffff)
+                throw new RangeError("WebFront lists cannot exceed 4294967295 elements");
+            let shape = null;
+            for (const item of list.items) {
+                const itemShape = this.valueShape(item);
+                requireListElementShape(itemShape);
+                if (itemShape === "n" || itemShape === "b")
+                    throw new TypeError("A WebFront list holds strings, typed arrays or tuples: send numbers as a typed array");
+                if (shape === null)
+                    shape = itemShape;
+                else if (itemShape !== shape)
+                    throw new TypeError("WebFront list elements are not of one type");
+            }
+            return 5 + list.items.reduce((size, item) => size + this.parameterSize(item), 0);
         }
 
         tupleParameterSize(value) {
@@ -580,25 +800,43 @@
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
         }
 
+        /// Writes a string with the smallest header its UTF-8 length allows and returns the bytes written.
         encodeString(value, view, offset) {
             const bytes = new TextEncoder().encode(value);
-            const small = bytes.length < 256;
-            view.setUint8(offset, small ? ParamType.smallString : ParamType.string);
-            if (small)
+            const headerSize = stringHeaderSize(bytes.length);
+            if (headerSize === 2) {
+                view.setUint8(offset, ParamType.smallString);
                 view.setUint8(offset + 1, bytes.length);
-            else
+            } else if (headerSize === 3) {
+                view.setUint8(offset, ParamType.string);
                 view.setUint16(offset + 1, bytes.length, this.littleEndian);
-            const headerSize = small ? 2 : 3;
+            } else {
+                view.setUint8(offset, ParamType.longString);
+                view.setUint32(offset + 1, bytes.length, this.littleEndian);
+            }
             new Uint8Array(view.buffer, view.byteOffset + offset + headerSize, bytes.length).set(bytes);
             return headerSize + bytes.length;
         }
 
+        /// Writes a list, tuple or typed array and returns the bytes written.
         encodeObject(value, view, offset) {
+            if (value instanceof WebFrontList)
+                return this.encodeList(value, view, offset);
             if (Array.isArray(value))
                 return this.encodeTuple(value, view, offset);
             if (isTypedArray(value))
                 return this.encodeTypedArray(value, view, offset);
             throw new TypeError(`Unsupported WebFront parameter type '${typeof value}'`);
+        }
+
+        /// Writes a list at `offset` and returns the bytes written.
+        encodeList(list, view, offset) {
+            view.setUint8(offset, ParamType.list);
+            view.setUint32(offset + 1, list.items.length, this.littleEndian);
+            let written = 5;
+            for (const item of list.items)
+                written += this.encodeParameter(item, view, offset + written);
+            return written;
         }
 
         encodeTuple(value, view, offset) {
