@@ -766,7 +766,13 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
     detail::posix::Fd readable = detail::posix::openAt(walk.top(), ".", O_RDONLY | O_DIRECTORY);
     if (!readable)
         detail::posix::fail(errno, "Cannot list " + detail::quoted(components));
-    const std::unique_ptr<DIR, decltype(&::closedir)> directory(::fdopendir(readable.get()), &::closedir);
+    // A function object rather than decltype(&closedir): glibc's attributes on closedir would be dropped from the type.
+    struct CloseDirectory {
+        void operator()(DIR* stream) const noexcept {
+            ::closedir(stream);
+        }
+    };
+    const std::unique_ptr<DIR, CloseDirectory> directory(::fdopendir(readable.get()));
     if (!directory)
         detail::posix::fail(errno, "Cannot list " + detail::quoted(components));
     readable.release();
