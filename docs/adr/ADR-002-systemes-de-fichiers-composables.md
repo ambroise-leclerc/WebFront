@@ -136,7 +136,8 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
   monté sans permissions.
 - **Windows.** La racine est tenue sans `FILE_SHARE_DELETE` pendant toute la déclaration, chaque répertoire traversé
   pendant toute l’opération (écriture du temporaire et renommage compris) : leur renommage ou leur suppression
-  échoue. NTFS refuse aussi le renommage d’un ancêtre sous lequel un handle est ouvert ; le test le vérifie. Coût
+  échoue. Un fichier remplacé reçoit sous Windows l’ACL héritée du dossier, pas celle de l’ancien fichier (limite
+  connue) ; sous POSIX, il garde ses bits de permission, sans setuid, setgid ni bit collant. NTFS refuse aussi le renommage d’un ancêtre sous lequel un handle est ouvert ; le test le vérifie. Coût
   accepté : la racine ne peut pas être renommée tant qu’elle est déclarée.
 - **Détection.** Avant de valider une écriture et après toute opération, le stockage vérifie que le répertoire où il
   a agi est encore sous la racine (remontée par `..` jusqu’à l’identité de la racine sous POSIX, chemin final du

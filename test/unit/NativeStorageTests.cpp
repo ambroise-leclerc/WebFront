@@ -838,6 +838,16 @@ SCENARIO("macOS ACLs that let another user change a directory refuse the root or
 }
     #endif
 
+SCENARIO("A replaced file keeps its permission bits") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    writeDisk(sandbox.root / "private.txt", "old");
+    stdfs::permissions(sandbox.root / "private.txt", stdfs::perms::owner_read | stdfs::perms::owner_write, stdfs::perm_options::replace);
+    writeFile(storage, "private.txt", "new secret", fs::WriteMode::replace);
+    REQUIRE(readDisk(sandbox.root / "private.txt") == "new secret");
+    REQUIRE(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+}
+
 SCENARIO("A root under the real /tmp of the superuser is accepted") {
     // /tmp is owned by the superuser, writable by all and sticky: an element of the effective user under it is safe.
     std::error_code error;

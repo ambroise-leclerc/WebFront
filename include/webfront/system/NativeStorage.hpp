@@ -573,10 +573,14 @@ struct NativeStorage::State {
             throw StorageError(StorageErrc::linkRefused, where + " is a link");
         if (++walk.links > 32)
             throw StorageError(StorageErrc::linkRefused, "Too many links resolving " + where);
-        std::string target(4096, '\0');
+        // readlinkat() truncates silently: a target that fills the buffer may be longer, and is refused rather than
+        // resolved as another path.
+        std::string target(4097, '\0');
         const auto  length = ::readlinkat(walk.top(), name.c_str(), target.data(), target.size());
         if (length < 0)
             detail::posix::fail(errno, "Cannot read the link " + where);
+        if (static_cast<std::size_t>(length) >= target.size())
+            throw StorageError(StorageErrc::linkRefused, "The target of the link " + where + " is too long");
         target.resize(static_cast<std::size_t>(length));
         if (target.empty() || target.front() == '/')
             throw StorageError(StorageErrc::linkRefused, "The link " + where + " is absolute");
@@ -762,20 +766,26 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
     detail::posix::Fd readable = detail::posix::openAt(walk.top(), ".", O_RDONLY | O_DIRECTORY);
     if (!readable)
         detail::posix::fail(errno, "Cannot list " + detail::quoted(components));
-    DIR* directory = ::fdopendir(readable.get());
+    const std::unique_ptr<DIR, decltype(&::closedir)> directory(::fdopendir(readable.get()), &::closedir);
     if (!directory)
         detail::posix::fail(errno, "Cannot list " + detail::quoted(components));
     readable.release();
     std::vector<EntryInfo> entries;
-    while (const auto* entry = ::readdir(directory)) {
+    while (true) {
+        errno             = 0;  // readdir() returns null both at the end and on an error
+        const auto* entry = ::readdir(directory.get());
+        if (!entry) {
+            if (errno != 0)
+                detail::posix::fail(errno, "Cannot list " + detail::quoted(components));
+            break;
+        }
         const std::string_view name = entry->d_name;
         if (name.starts_with(temporaryPrefix) || !isSafeFileName(name))
             continue;
         struct stat status{};
-        if (::fstatat(::dirfd(directory), entry->d_name, &status, AT_SYMLINK_NOFOLLOW) == 0)
+        if (::fstatat(::dirfd(directory.get()), entry->d_name, &status, AT_SYMLINK_NOFOLLOW) == 0)
             entries.push_back(detail::posix::infoOf(std::string(name), status));
     }
-    ::closedir(directory);
     state->confirm({walk.top()});
     return detail::pageOf(std::move(entries), after, limit);
 }
@@ -825,13 +835,20 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
         if (S_ISDIR(status.st_mode))
             throw StorageError(StorageErrc::isDirectory, detail::quoted(components) + " is a directory");
     }
+    // A replaced file keeps its permission bits (never setuid, setgid nor sticky): replacing a private 0600 file must not
+    // publish its new content as 0644. The temporary file stays private until then.
+    std::optional<mode_t> keptMode;
+    if (mode == WriteMode::replace && S_ISREG(status.st_mode) && status.st_nlink > 0)
+        keptMode = static_cast<mode_t>(status.st_mode & 0777);
     Writer writer{state, std::move(walk), std::move(components), std::move(name), mode};
     for (int attempt = 0; !writer.file; ++attempt) {
         writer.temporary = detail::temporaryName();
-        writer.file      = detail::posix::openAt(writer.walk.top(), writer.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
+        writer.file      = detail::posix::openAt(writer.walk.top(), writer.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, keptMode ? 0600 : 0644);
         if (!writer.file && (errno != EEXIST || attempt == 8))
             detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
     }
+    if (keptMode && ::fchmod(writer.file.get(), *keptMode) != 0)
+        detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
     state->notify(StoragePoint::temporaryCreated, writer.name);
     return writer;
 }
@@ -1465,8 +1482,14 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
             const auto*        entry = reinterpret_cast<const FILE_ID_BOTH_DIR_INFO*>(bytes);
             const std::wstring wideName(reinterpret_cast<const wchar_t*>(bytes + offsetof(FILE_ID_BOTH_DIR_INFO, FileName)),
                                         entry->FileNameLength / sizeof(wchar_t));
-            const auto         name = detail::windows::utf8(wideName);
-            if (name != "." && name != ".." && !std::string_view(name).starts_with(temporaryPrefix) && isSafeFileName(name))
+            // A name with an unpaired surrogate has no UTF-8 form: no path can name it, so it is not listed.
+            std::string name;
+            try {
+                name = detail::windows::utf8(wideName);
+            } catch (const std::system_error&) {
+                name.clear();
+            }
+            if (!name.empty() && name != "." && name != ".." && !std::string_view(name).starts_with(temporaryPrefix) && isSafeFileName(name))
                 entries.push_back(detail::windows::infoOf(name, entry->FileAttributes, entry->EndOfFile.QuadPart, entry->LastWriteTime.QuadPart));
             if (entry->NextEntryOffset == 0)
                 break;
