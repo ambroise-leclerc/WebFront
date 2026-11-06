@@ -1154,23 +1154,31 @@ SCENARIO("A root under the real /tmp of the superuser is accepted") {
 
 #ifdef _WIN32
 SCENARIO("Windows opens a root from its drive, its share or its volume") {
-    using Split = std::pair<std::wstring, vector<string>>;
-    REQUIRE(fs::detail::windows::splitLocation(L"C:\\a\\b")
+    using Split      = std::pair<std::wstring, vector<string>>;
+    const auto split = [](const wchar_t* path) {
+        return fs::detail::windows::splitLocation(path);
+    };
+    REQUIRE(split(LR"(C:\a\b)")
             == Split{
-                L"\\\\?\\C:\\",
+                LR"(\\?\C:\)",
                 {"a", "b"}
     });
-    REQUIRE(fs::detail::windows::splitLocation(L"C:\\") == Split{L"\\\\?\\C:\\", {}});
-    REQUIRE(fs::detail::windows::splitLocation(L"\\\\server\\share\\a") == Split{L"\\\\?\\UNC\\server\\share\\", {"a"}});
-    REQUIRE(fs::detail::windows::splitLocation(L"\\\\server\\share") == Split{L"\\\\?\\UNC\\server\\share\\", {}});
-    REQUIRE(errorOf([] {
-                fs::detail::windows::splitLocation(L"\\\\server");
-            })
-            == fs::StorageErrc::invalidPath);
-    REQUIRE(errorOf([] {
-                fs::detail::windows::splitLocation(L"\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1\\a");
-            })
-            == fs::StorageErrc::invalidPath);
+    REQUIRE(split(LR"(C:\)") == Split{LR"(\\?\C:\)", {}});
+    REQUIRE(split(LR"(\\server\share\a)") == Split{LR"(\\?\UNC\server\share\)", {"a"}});
+    REQUIRE(split(LR"(\\server\share)") == Split{LR"(\\?\UNC\server\share\)", {}});
+    // Extended paths, whose root name MSVC reports as `\\?`.
+    REQUIRE(split(LR"(\\?\C:\a\b)")
+            == Split{
+                LR"(\\?\C:\)",
+                {"a", "b"}
+    });
+    REQUIRE(split(LR"(\\?\UNC\server\share\a)") == Split{LR"(\\?\UNC\server\share\)", {"a"}});
+    REQUIRE(split(LR"(\\?\Volume{12345678-0000-0000-0000-000000000000}\a)") == Split{LR"(\\?\Volume{12345678-0000-0000-0000-000000000000}\)", {"a"}});
+    for (const auto* refused : {LR"(\\server)", LR"(\\?\UNC\server)", LR"(\\?\GLOBALROOT\Device\HarddiskVolume1\a)", LR"(\\?\globalroot\Device\X)", LR"(a\b)"})
+        REQUIRE(errorOf([&] {
+                    split(refused);
+                })
+                == fs::StorageErrc::invalidPath);
 }
 
 SCENARIO("Windows holds the directories of an operation so that nobody moves them") {

@@ -1413,49 +1413,55 @@ inline bool equalsAscii(std::wstring_view text, std::wstring_view expected) {
 }
 
 /// The volume a canonical location is opened from, as CreateFileW takes it, and the components below it.
-/// `C:\a` gives `\\?\C:\` and {a}; a UNC path `\\server\share\a` gives `\\?\UNC\server\share\` and {a} (the share belongs to
-/// the volume: `\\?\UNC\server\` alone names nothing); `\\?\Volume{...}\a` keeps its volume. A `\\?\GLOBALROOT` path,
-/// which canonical() returns for a volume without a DOS name, and a server without a share are refused (invalidPath).
+/// `C:\a` and `\\?\C:\a` give `\\?\C:\` and {a}; `\\server\share\a` and `\\?\UNC\server\share\a` give
+/// `\\?\UNC\server\share\` and {a} (the share belongs to the volume: `\\?\UNC\server\` alone names nothing);
+/// `\\?\Volume{...}\a` gives `\\?\Volume{...}\` and {a}. A `\\?\GLOBALROOT` path, which canonical() returns for a volume
+/// without a DOS name, a server without a share and a relative path are refused (invalidPath).
+///
+/// The native string is parsed rather than root_name(): MSVC returns `\\?` as the root name of `\\?\C:\a`, and leaves
+/// the drive, `UNC` or the volume in the relative path.
 inline std::pair<std::wstring, std::vector<std::string>> splitLocation(const std::filesystem::path& canonical) {
-    std::vector<std::string> components;
-    for (const auto& component : canonical.relative_path())
-        components.push_back(utf8(component.wstring()));
     const auto unsupported = [] {
         return StorageError(StorageErrc::invalidPath, "This root location has no volume WebFront can open");
     };
-    const std::wstring separator = L"\\";
-    const auto         name      = canonical.root_name().wstring();
-    auto               takeShare = [&](std::wstring server) {
-        if (components.empty() || server.empty())
-            throw unsupported();
-        auto volume = L"\\\\?\\UNC\\" + server + separator + wide(components.front()) + separator;
-        components.erase(components.begin());
+    std::wstring text = canonical.native();
+    std::ranges::replace(text, L'/', L'\\');
+    const auto split = [](std::wstring_view rest) {
+        std::vector<std::wstring> parts;
+        for (const auto part : std::views::split(rest, L'\\'))
+            if (!part.empty())
+                parts.emplace_back(part.begin(), part.end());
+        return parts;
+    };
+    const auto result = [](std::wstring volume, const std::vector<std::wstring>& parts, std::size_t first) {
+        std::vector<std::string> components;
+        for (auto part = parts.begin() + static_cast<std::ptrdiff_t>(first); part != parts.end(); ++part)
+            components.push_back(utf8(*part));
         return std::pair{std::move(volume), std::move(components)};
     };
-    if (name.starts_with(L"\\\\?\\") || name.starts_with(L"\\\\.\\")) {
-        const auto rest = std::wstring_view(name).substr(4);
-        if (equalsAscii(rest.substr(0, 10), L"GLOBALROOT") || (rest.empty() && !components.empty() && equalsAscii(wide(components.front()), L"GLOBALROOT")))
+    const auto share = [&](const std::vector<std::wstring>& parts, std::size_t server) {
+        if (parts.size() < server + 2)
             throw unsupported();
-        if (equalsAscii(rest.substr(0, 3), L"UNC")) {
-            // \\?\UNC\server\share: the server may be in the root name or be the first component.
-            std::wstring server(rest.size() > 4 ? rest.substr(4) : std::wstring_view{});
-            if (server.empty()) {
-                if (components.empty())
-                    throw unsupported();
-                server = wide(components.front());
-                components.erase(components.begin());
-            }
-            return takeShare(std::move(server));
-        }
-        if (rest.empty())
+        return result(L"\\\\?\\UNC\\" + parts[server] + L"\\" + parts[server + 1] + L"\\", parts, server + 2);
+    };
+    const auto isDrive = [](std::wstring_view part) {
+        return part.size() == 2 && part[1] == L':' && ((part[0] >= L'A' && part[0] <= L'Z') || (part[0] >= L'a' && part[0] <= L'z'));
+    };
+    if (text.starts_with(L"\\\\?\\") || text.starts_with(L"\\\\.\\")) {
+        const auto parts = split(std::wstring_view(text).substr(4));
+        if (parts.empty() || equalsAscii(parts[0], L"GLOBALROOT"))
             throw unsupported();
-        return {name + separator, std::move(components)};
+        if (equalsAscii(parts[0], L"UNC"))
+            return share(parts, 1);
+        // A drive (`C:`) or a volume (`Volume{...}`): both name a volume root.
+        return result(L"\\\\?\\" + parts[0] + L"\\", parts, 1);
     }
-    if (name.starts_with(L"\\\\"))
-        return takeShare(name.substr(2));
-    if (name.empty())
+    if (text.starts_with(L"\\\\"))
+        return share(split(std::wstring_view(text).substr(2)), 0);
+    const auto parts = split(text);
+    if (parts.empty() || !isDrive(parts[0]))
         throw unsupported();
-    return {L"\\\\?\\" + name + separator, std::move(components)};
+    return result(L"\\\\?\\" + parts[0] + L"\\", parts, 1);
 }
 
 inline constexpr ACCESS_MASK directoryAccess = FILE_LIST_DIRECTORY | FILE_TRAVERSE;
