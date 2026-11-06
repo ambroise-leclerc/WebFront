@@ -46,6 +46,7 @@
         #include <uuid/uuid.h>
     #elif defined(__linux__)
         #include <sys/syscall.h>
+        #include <sys/xattr.h>
     #endif
 #endif
 
@@ -385,6 +386,56 @@ inline bool othersMayChange(int directory, std::uint32_t user) {
     #endif
 }
 
+// Gives the temporary file of a replacing write the access control list of the file it replaces (macOS extended ACL,
+// Linux POSIX access ACL). Throws accessDenied when an existing ACL cannot be read or copied: the replacement is then
+// refused rather than publishing the new content with looser rights. On macOS, reading the ACL through a descriptor
+// needs the right to read the file: a file the effective user may not read cannot be replaced.
+inline void copyAccessControl(int directory, const std::string& name, int temporary, const std::string& what) {
+    #if defined(__APPLE__)
+    const Fd existing = openAt(directory, name.c_str(), O_EVTONLY | O_NOFOLLOW);
+    if (!existing) {
+        if (errno == ENOENT)
+            return;
+        throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+    }
+    acl_t acl = ::acl_get_fd_np(existing.get(), ACL_TYPE_EXTENDED);
+    if (!acl) {
+        if (errno == ENOENT || errno == ENOTSUP || errno == EOPNOTSUPP)
+            return;
+        throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+    }
+    const int copied = ::acl_set_fd_np(temporary, acl, ACL_TYPE_EXTENDED);
+    ::acl_free(acl);
+    if (copied != 0)
+        throw StorageError(StorageErrc::accessDenied, "Cannot keep the access control list of " + what);
+    #elif defined(__linux__)
+    const Fd existing = openAt(directory, name.c_str(), O_PATH | O_NOFOLLOW);
+    if (!existing) {
+        if (errno == ENOENT)
+            return;
+        fail(errno, "Cannot read the access control list of " + what);
+    }
+    // An O_PATH descriptor has no fgetxattr(): its /proc link reads the attribute of that very file.
+    const auto  link = "/proc/self/fd/" + std::to_string(existing.get());
+    const char* key  = "system.posix_acl_access";
+    auto        size = ::getxattr(link.c_str(), key, nullptr, 0);
+    if (size < 0) {
+        if (errno == ENODATA || errno == ENOTSUP || errno == EOPNOTSUPP)
+            return;
+        throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+    }
+    std::vector<char> acl(static_cast<std::size_t>(size));
+    size = ::getxattr(link.c_str(), key, acl.data(), acl.size());
+    if (size < 0 || ::fsetxattr(temporary, key, acl.data(), static_cast<std::size_t>(size), 0) != 0)
+        throw StorageError(StorageErrc::accessDenied, "Cannot keep the access control list of " + what);
+    #else
+    (void)directory;
+    (void)name;
+    (void)temporary;
+    (void)what;
+    #endif
+}
+
 // The content of a file opened relative to a directory of the root.
 class FdSource : public ByteSource {
 public:
@@ -588,6 +639,11 @@ struct NativeStorage::State {
         for (const auto part : std::views::split(std::string_view(target), '/'))
             if (!part.empty())
                 parts.emplace_back(part.begin(), part.end());
+        // A link must not reach what a path may not name: the temporary file of a write in progress.
+        if (std::ranges::any_of(parts, [](const std::string& part) {
+                return isTemporaryName(part);
+            }))
+            throw StorageError(StorageErrc::linkRefused, "The link " + where + " names a temporary file");
         pending.insert(pending.begin(), parts.begin(), parts.end());
     }
 
@@ -841,8 +897,9 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
         if (S_ISDIR(status.st_mode))
             throw StorageError(StorageErrc::isDirectory, detail::quoted(components) + " is a directory");
     }
-    // A replaced file keeps its permission bits (never setuid, setgid nor sticky): replacing a private 0600 file must not
-    // publish its new content as 0644. The temporary file stays private until then.
+    // A replaced file keeps its permission bits (never setuid, setgid nor sticky) and its access control list: replacing a
+    // private 0600 file, or one an ACL hides from some users, must not publish its new content more widely. The temporary
+    // file stays private until then. Its owner is the effective user, whoever owned the replaced file.
     std::optional<mode_t> keptMode;
     if (mode == WriteMode::replace && S_ISREG(status.st_mode) && status.st_nlink > 0)
         keptMode = static_cast<mode_t>(status.st_mode & 0777);
@@ -855,6 +912,8 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
     }
     if (keptMode && ::fchmod(writer.file.get(), *keptMode) != 0)
         detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
+    if (keptMode)
+        detail::posix::copyAccessControl(writer.walk.top(), writer.name, writer.file.get(), detail::quoted(writer.components));
     state->notify(StoragePoint::temporaryCreated, writer.name);
     return writer;
 }

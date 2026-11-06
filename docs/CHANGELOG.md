@@ -16,7 +16,7 @@
   accepted; `RootOptions::shared` lifts the check as a weakened confinement), holds the root and the traversed
   directories without `FILE_SHARE_DELETE` on Windows, and detects a directory or a root moved by the same user before a
   commit and after every operation (`confinementViolated`). On POSIX a move by the same user or the superuser after the
-  last check is not prevented. Names starting with `.wf-tmp-`, in any letter case, are reserved to temporary files. `fs::MemoryStorage` is the simulated storage of the tests. `fs::File` reads a
+  last check is not prevented. Names starting with `.wf-tmp-`, in any letter case, are reserved to temporary files. A replaced file keeps its permission bits and ACL, or the replacement is refused. `fs::MemoryStorage` is the simulated storage of the tests. `fs::File` reads a
   `fs::ByteSource`, the extension point for native handles. `safeRelativePath` now also refuses, on every platform, the
   device names Windows reserves (`CON`, `NUL`, `COM1`…, with any extension) and names ending with a dot or a space.
 - The bridge supports long strings, homogeneous lists of strings, tuples, typed arrays and bitsets, and typed errors

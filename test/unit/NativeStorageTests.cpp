@@ -875,6 +875,67 @@ SCENARIO("A replaced file keeps its permission bits") {
     REQUIRE(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
 }
 
+SCENARIO("A replaced file keeps its access control list") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    const auto        file = sandbox.root / "guarded.txt";
+    writeDisk(file, "old");
+    #if defined(__APPLE__)
+    GIVEN("an ACL that denies another user reading the file") {
+        REQUIRE(std::system(("chmod +a 'user:nobody deny read' '" + file.string() + "'").c_str()) == 0);
+        writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
+        THEN("the new file keeps it") {
+            REQUIRE(readDisk(file) == "new secret");
+            REQUIRE(std::system(("ls -le '" + file.string() + "' | grep -q 'user:nobody deny read'").c_str()) == 0);
+        }
+    }
+    GIVEN("an ACL that denies everyone, the effective user included, reading the file") {
+        REQUIRE(std::system(("chmod +a 'everyone deny read' '" + file.string() + "'").c_str()) == 0);
+        THEN("the ACL cannot be read, so the replacement is refused and the file left as it was") {
+            REQUIRE(errorOf([&] {
+                        storage.openRead("guarded.txt");
+                    })
+                    == fs::StorageErrc::accessDenied);
+            REQUIRE(errorOf([&] {
+                        writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
+                    })
+                    == fs::StorageErrc::accessDenied);
+            REQUIRE(std::system(("ls -le '" + file.string() + "' | grep -q 'everyone deny read'").c_str()) == 0);
+            REQUIRE(namesOn(sandbox.root) == vector<string>{"guarded.txt"});
+        }
+    }
+    #else
+    if (std::system("command -v setfacl >/dev/null 2>&1 && command -v getfacl >/dev/null 2>&1") != 0)
+        SKIP("setfacl and getfacl are not installed");
+    if (std::system(("setfacl -m u:nobody:--- '" + file.string() + "' 2>/dev/null").c_str()) != 0)
+        SKIP("This file system has no POSIX ACL");
+    writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
+    REQUIRE(readDisk(file) == "new secret");
+    REQUIRE(std::system(("getfacl -c '" + file.string() + "' 2>/dev/null | grep -q '^user:nobody:---'").c_str()) == 0);
+    #endif
+}
+
+SCENARIO("A link followed inside the root never reaches a temporary file") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
+    auto              writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
+    writer.write(span<const char>("partial", 7));
+    const auto temporary = namesOn(sandbox.root).at(0);
+    stdfs::create_symlink(temporary, sandbox.root / "alias");
+    stdfs::create_directory(sandbox.root / "dir");
+    stdfs::create_symlink("../" + temporary, sandbox.root / "dir" / "deep");
+    REQUIRE(errorOf([&] {
+                storage.openRead("alias");
+            })
+            == fs::StorageErrc::linkRefused);
+    REQUIRE(errorOf([&] {
+                storage.openRead("dir/deep");
+            })
+            == fs::StorageErrc::linkRefused);
+    writer.commit();
+    REQUIRE(readAll(storage.openRead("report.txt")) == "partial");
+}
+
 SCENARIO("A root under the real /tmp of the superuser is accepted") {
     // /tmp is owned by the superuser, writable by all and sticky: an element of the effective user under it is safe.
     std::error_code error;
