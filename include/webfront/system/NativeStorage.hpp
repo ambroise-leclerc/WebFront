@@ -344,13 +344,22 @@ inline int renameNoReplace(int fromDirectory, const char* from, int toDirectory,
     #endif
 }
 
+// The file system has no ACL or extended attribute. ENOTSUP and EOPNOTSUPP are the same value on Linux, not on macOS.
+inline bool unsupported(int error) noexcept {
+    #if ENOTSUP == EOPNOTSUPP
+    return error == ENOTSUP;
+    #else
+    return error == ENOTSUP || error == EOPNOTSUPP;
+    #endif
+}
+
 // True when an extended ACL of the directory grants someone else than `user` and the superuser a right to change its
 // entries, delete it, or change its ACL or owner. Fails closed: an ACL that cannot be read counts as granting.
 inline bool othersMayChange(int directory, std::uint32_t user) {
     #if defined(__APPLE__)
     acl_t acl = ::acl_get_fd_np(directory, ACL_TYPE_EXTENDED);
     if (!acl)
-        return errno != ENOENT && errno != ENOTSUP && errno != EOPNOTSUPP;
+        return errno != ENOENT && !unsupported(errno);
     uuid_t admitted[2]{};
     if (::mbr_uid_to_uuid(static_cast<uid_t>(user), admitted[0]) != 0 || ::mbr_uid_to_uuid(0, admitted[1]) != 0) {
         ::acl_free(acl);
@@ -400,7 +409,7 @@ inline void copyAccessControl(int directory, const std::string& name, int tempor
     }
     acl_t acl = ::acl_get_fd_np(existing.get(), ACL_TYPE_EXTENDED);
     if (!acl) {
-        if (errno == ENOTSUP || errno == EOPNOTSUPP)
+        if (unsupported(errno))
             return;
         if (errno != ENOENT)
             throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
@@ -425,7 +434,7 @@ inline void copyAccessControl(int directory, const std::string& name, int tempor
     const char* key  = "system.posix_acl_access";
     auto        size = ::getxattr(link.c_str(), key, nullptr, 0);
     if (size < 0) {
-        if (errno == ENOTSUP || errno == EOPNOTSUPP)
+        if (unsupported(errno))
             return;
         if (errno != ENODATA)
             throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
