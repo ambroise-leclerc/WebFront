@@ -377,6 +377,15 @@ inline bool othersMayChange(int directory, std::uint32_t user) {
         }
         if (tag != ACL_EXTENDED_ALLOW)
             continue;
+        // An entry marked only_inherit applies to the descendants it is passed on to, not to this directory: a
+        // subdirectory that inherits it is checked in its turn when an operation traverses it.
+        acl_flagset_t flags{};
+        if (::acl_get_flagset_np(entry, &flags) != 0) {
+            granting = true;
+            break;
+        }
+        if (::acl_get_flag_np(flags, ACL_ENTRY_ONLY_INHERIT) == 1)
+            continue;
         bool changes = false;
         for (const auto permission : {ACL_ADD_FILE, ACL_ADD_SUBDIRECTORY, ACL_DELETE_CHILD, ACL_DELETE, ACL_WRITE_SECURITY, ACL_CHANGE_OWNER})
             changes = changes || ::acl_get_perm_np(permissions, permission) == 1;

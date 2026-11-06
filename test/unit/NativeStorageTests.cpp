@@ -892,6 +892,20 @@ SCENARIO("macOS ACLs that let another user change a directory refuse the root or
             REQUIRE(stdfs::is_empty(sandbox.root / "shared" / "deep"));
         }
     }
+    GIVEN("a root whose ACL passes those rights to everyone, only to its descendants") {
+        stdfs::permissions(sandbox.root, stdfs::perms::owner_all, stdfs::perm_options::replace);
+        const auto command = "chmod +a 'everyone allow add_file,add_subdirectory,delete_child,file_inherit,directory_inherit,only_inherit' '"
+                             + sandbox.root.string() + "'";
+        REQUIRE(std::system(command.c_str()) == 0);
+        THEN("the root is accepted, and a subdirectory that inherits the rights is refused when traversed") {
+            fs::NativeStorage storage(sandbox.root);
+            storage.createDirectory("inherits");
+            REQUIRE(errorOf([&] {
+                        storage.list("inherits");
+                    })
+                    == fs::StorageErrc::unsafeDirectory);
+        }
+    }
     GIVEN("an ACL that grants those rights to the effective user only") {
         grant(sandbox.root, "user:" + string(::getpwuid(::geteuid())->pw_name));
         THEN("the root is accepted") {

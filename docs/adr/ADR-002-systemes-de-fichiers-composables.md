@@ -132,7 +132,9 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
   et, s’il est modifiable par le groupe ou les autres, porte le bit collant et l’élément suivant appartient aussi à
   l’un d’eux (cas de `/tmp`). Sous macOS, une ACL étendue qui accorde à un autre que ces deux utilisateurs le droit
   d’ajouter, de retirer ou de renommer des entrées, de supprimer le répertoire ou de changer son ACL ou son
-  propriétaire rend aussi le répertoire ou l’ancêtre inadmissible (une ACL illisible compte comme telle) ; sous Linux,
+  propriétaire rend aussi le répertoire ou l’ancêtre inadmissible (une ACL illisible compte comme telle ; une entrée
+  `only_inherit`, qui ne vaut que pour les descendants, est ignorée pour ce répertoire et contrôlée sur le
+  sous-répertoire qui en hérite) ; sous Linux,
   une entrée nommée d’ACL POSIX qui accorde l’écriture positionne le bit d’écriture du groupe (masque) et tombe sous la
   règle des bits. Contrôle à la déclaration et à chaque opération, avant tout effet ; sinon `unsafeDirectory`. Les dossiers créés le sont en mode 0755, les fichiers en 0644 (masqués par l’umask), pour rester
   utilisables. `RootOptions::shared` lève ces contrôles : confinement affaibli, pour un dossier partagé ou un support
