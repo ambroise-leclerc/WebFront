@@ -786,7 +786,7 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
             break;
         }
         const std::string_view name = entry->d_name;
-        if (name.starts_with(temporaryPrefix) || !isSafeFileName(name))
+        if (isTemporaryName(name) || !isSafeFileName(name))
             continue;
         struct stat status{};
         if (::fstatat(::dirfd(directory.get()), entry->d_name, &status, AT_SYMLINK_NOFOLLOW) == 0)
@@ -1495,7 +1495,7 @@ inline DirectoryPage NativeStorage::list(std::string_view path, std::string_view
             } catch (const std::system_error&) {
                 name.clear();
             }
-            if (!name.empty() && name != "." && name != ".." && !std::string_view(name).starts_with(temporaryPrefix) && isSafeFileName(name))
+            if (!name.empty() && name != "." && name != ".." && !isTemporaryName(name) && isSafeFileName(name))
                 entries.push_back(detail::windows::infoOf(name, entry->FileAttributes, entry->EndOfFile.QuadPart, entry->LastWriteTime.QuadPart));
             if (entry->NextEntryOffset == 0)
                 break;

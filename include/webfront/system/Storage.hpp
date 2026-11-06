@@ -166,8 +166,22 @@ concept Storage = requires(S& storage, std::string_view path, std::size_t limit,
 };
 
 /// The prefix a storage reserves for the temporary files of its writes in progress: no path may have a component that
-/// starts with it (invalidPath), and listings omit such entries.
+/// starts with it, in any letter case (invalidPath), and listings omit such entries. The case does not matter because
+/// case-insensitive volumes (macOS by default, Windows) name the same file with ".WF-TMP-": the prefix is ASCII, and no
+/// other character folds to its letters.
 inline constexpr std::string_view temporaryPrefix = ".wf-tmp-";
+
+/// True when a name starts with temporaryPrefix, whatever the case of its letters.
+[[nodiscard]] inline bool isTemporaryName(std::string_view name) noexcept {
+    if (name.size() < temporaryPrefix.size())
+        return false;
+    for (std::size_t index = 0; index < temporaryPrefix.size(); ++index) {
+        const char c = name[index];
+        if ((c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c) != temporaryPrefix[index])
+            return false;
+    }
+    return true;
+}
 
 namespace detail {
 
@@ -180,7 +194,7 @@ inline std::vector<std::string> storageComponents(std::string_view path) {
         throw StorageError(StorageErrc::invalidPath, "Invalid storage path '" + std::string(path) + "'");
     }
     for (const auto& component : components)
-        if (component.starts_with(temporaryPrefix))
+        if (isTemporaryName(component))
             throw StorageError(StorageErrc::invalidPath, "Names starting with '" + std::string(temporaryPrefix) + "' are reserved");
     return components;
 }

@@ -94,7 +94,8 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
   pages ; `status` (un lien n’est pas suivi), `openRead`, `beginWrite(path, createNew | replace)` qui écrit dans un
   fichier temporaire rendu visible par un renommage atomique à `commit()` et supprimé si l’écrivain est détruit avant,
   `createDirectory`, `remove` (fichier, lien ou dossier vide), `rename` (jamais de remplacement). Les noms commençant
-  par `.wf-tmp-` (`fs::temporaryPrefix`) sont réservés aux temporaires : refusés (`invalidPath`) et omis des listages,
+  par `.wf-tmp-` (`fs::temporaryPrefix`), quelle que soit la casse de ses lettres (un volume insensible à la casse
+  désigne le même fichier par `.WF-TMP-`), sont réservés aux temporaires : refusés (`invalidPath`) et omis des listages,
   de sorte qu’un listage ne masque jamais un fichier validé. Le concept ne fait
   aucune hypothèse POSIX : un stockage sans `std::filesystem` (FatFs, LittleFS) peut le satisfaire.
 - **Erreurs typées.** `fs::StorageError` est une `BridgeError` (ADR-004) de code `storage.<nom>` : `notFound`,

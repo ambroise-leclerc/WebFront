@@ -249,6 +249,33 @@ SCENARIO("A native storage reserves the names of its temporary files") {
             })
             == fs::StorageErrc::invalidPath);
     REQUIRE(namesOn(sandbox.root).empty());
+    GIVEN("a write in progress, its temporary file named in another case") {
+        auto writer = storage.beginWrite("report.txt", fs::WriteMode::createNew);
+        writer.write(span<const char>("partial", 7));
+        const auto temporary = namesOn(sandbox.root).at(0);
+        auto       upper     = temporary;
+        ranges::transform(upper, upper.begin(), [](char c) {
+            return c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
+        });
+        THEN("it can be neither read nor published, on a case-insensitive volume as elsewhere") {
+            // macOS (by default) and Windows volumes name the same file in any case: the reservation must cover it.
+            if (!stdfs::exists(sandbox.root / upper))
+                WARN("This volume is case-sensitive: the other case names no file here");
+            REQUIRE(errorOf([&] {
+                        storage.openRead(upper);
+                    })
+                    == fs::StorageErrc::invalidPath);
+            REQUIRE(errorOf([&] {
+                        storage.rename(upper, "published.txt");
+                    })
+                    == fs::StorageErrc::invalidPath);
+            REQUIRE(errorOf([&] {
+                        storage.remove(upper);
+                    })
+                    == fs::StorageErrc::invalidPath);
+            REQUIRE_FALSE(stdfs::exists(sandbox.root / "published.txt"));
+        }
+    }
 }
 
 SCENARIO("An interrupted write leaves no partial file") {

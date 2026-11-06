@@ -340,6 +340,14 @@ SCENARIO("The simulated storage follows the storage contract") {
                     })
                     == fs::StorageErrc::invalidPath);
             REQUIRE(fs::isSafeFileName(".wf-tmp-report.txt"));  // SafePath alone accepts it: the reservation is the storage's
+            for (auto name : {".WF-TMP-report.txt", ".Wf-Tmp-x", ".wF-tMp-"})
+                REQUIRE(errorOf([&] {
+                            storage.status(name);
+                        })
+                        == fs::StorageErrc::invalidPath);
+            REQUIRE(fs::isTemporaryName(".WF-tmp-a"));
+            REQUIRE_FALSE(fs::isTemporaryName(".wf-tmp"));
+            REQUIRE_FALSE(fs::isTemporaryName("x.wf-tmp-a"));
         }
     }
     GIVEN("operations that need an entry") {
