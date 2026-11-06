@@ -1464,6 +1464,16 @@ inline std::pair<std::wstring, std::vector<std::string>> splitLocation(const std
     return result(L"\\\\?\\" + parts[0] + L"\\", parts, 1);
 }
 
+/// True when the final path `path` is `root` or below it, letter case aside. A root at the top of its volume already ends
+/// with a separator (`\Device\HarddiskVolume3\`): its entries follow it directly.
+inline bool isBelow(std::wstring_view path, std::wstring_view root) {
+    if (path.empty() || root.empty() || path.size() < root.size())
+        return false;
+    if (::CompareStringOrdinal(path.data(), static_cast<int>(root.size()), root.data(), static_cast<int>(root.size()), TRUE) != CSTR_EQUAL)
+        return false;
+    return path.size() == root.size() || root.back() == L'\\' || path[root.size()] == L'\\';
+}
+
 inline constexpr ACCESS_MASK directoryAccess = FILE_LIST_DIRECTORY | FILE_TRAVERSE;
 // The directories of an operation are held without FILE_SHARE_DELETE: nobody can rename or remove them meanwhile.
 inline constexpr ULONG heldSharing = FILE_SHARE_READ | FILE_SHARE_WRITE;
@@ -1568,12 +1578,7 @@ struct NativeStorage::State {
 
     // The final path of a directory begins with the root's: its handles prevent the moves, this checks it still holds.
     bool isUnderRoot(HANDLE directory) const {
-        const auto path = detail::windows::finalPath(directory);
-        if (path.empty() || rootPath.empty() || path.size() < rootPath.size())
-            return false;
-        if (::CompareStringOrdinal(path.data(), static_cast<int>(rootPath.size()), rootPath.data(), static_cast<int>(rootPath.size()), TRUE) != CSTR_EQUAL)
-            return false;
-        return path.size() == rootPath.size() || path[rootPath.size()] == L'\\';
+        return detail::windows::isBelow(detail::windows::finalPath(directory), rootPath);
     }
 
     void confirm(std::initializer_list<HANDLE> directories) {

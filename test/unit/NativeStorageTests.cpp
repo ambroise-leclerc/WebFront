@@ -1181,6 +1181,30 @@ SCENARIO("Windows opens a root from its drive, its share or its volume") {
                 == fs::StorageErrc::invalidPath);
 }
 
+SCENARIO("Windows finds a directory below a root at the top of its volume") {
+    using fs::detail::windows::isBelow;
+    REQUIRE(isBelow(LR"(\Device\HarddiskVolume3\Users)", LR"(\Device\HarddiskVolume3\)"));
+    REQUIRE(isBelow(LR"(\Device\HarddiskVolume3\)", LR"(\Device\HarddiskVolume3\)"));
+    REQUIRE(isBelow(LR"(\Device\HarddiskVolume3\a\b)", LR"(\device\harddiskvolume3\A)"));
+    REQUIRE_FALSE(isBelow(LR"(\Device\HarddiskVolume3\ab)", LR"(\Device\HarddiskVolume3\a)"));
+    REQUIRE_FALSE(isBelow(LR"(\Device\HarddiskVolume4\a)", LR"(\Device\HarddiskVolume3\)"));
+
+    GIVEN("a root declared at the top of the volume of the temporary directory") {
+        Sandbox           sandbox;
+        const auto        root     = stdfs::canonical(sandbox.root).root_path();
+        const auto        relative = stdfs::canonical(sandbox.root).relative_path().generic_string();
+        fs::NativeStorage storage(root);
+        THEN("its subdirectories are listed and written in, inside the root") {
+            REQUIRE_FALSE(storage.list("").entries.empty());
+            storage.createDirectory(relative + "/dir");
+            REQUIRE(stdfs::is_directory(sandbox.root / "dir"));
+            REQUIRE(storage.list(relative).entries.size() == 1);
+            writeFile(storage, relative + "/dir/file.txt", "data");
+            REQUIRE(readDisk(sandbox.root / "dir" / "file.txt") == "data");
+        }
+    }
+}
+
 SCENARIO("Windows holds the directories of an operation so that nobody moves them") {
     Sandbox sandbox;
     stdfs::create_directories(sandbox.root / "a" / "b");
