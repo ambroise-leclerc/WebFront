@@ -86,6 +86,22 @@ vector<string> namesOn(const stdfs::path& directory) {
     return names;
 }
 
+// The temporary file of the single write in progress under `root`: in the root for a new file, in the private directory
+// of the write for a replacing one.
+stdfs::path temporaryOf(const stdfs::path& root) {
+    for (const auto& entry : stdfs::directory_iterator(root)) {
+        if (!fs::isTemporaryName(entry.path().filename().string()))
+            continue;
+        if (!entry.is_directory())
+            return entry.path();
+        const auto inner = stdfs::directory_iterator(entry.path());
+        REQUIRE(inner != stdfs::directory_iterator());
+        return inner->path();
+    }
+    FAIL("No temporary file under the root");
+    return {};
+}
+
 // A link at `link` to the directory `target`: a symbolic link on POSIX, a junction on Windows (which needs no privilege).
 void linkDirectory(const stdfs::path& target, const stdfs::path& link) {
 #ifdef _WIN32
@@ -307,6 +323,23 @@ SCENARIO("An interrupted write leaves no partial file") {
             REQUIRE(readDisk(sandbox.root / "kept.txt") == "original");
         }
     }
+}
+
+SCENARIO("A committed writer holds none of its directories") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    storage.createDirectory("dir");
+    auto writer = storage.beginWrite("dir/file.txt", fs::WriteMode::createNew);
+    writer.write(span<const char>("data", 4));
+    writer.commit();
+    // The writer stays alive: on Windows, handles it kept without FILE_SHARE_DELETE would make these fail.
+    std::error_code renamed, removed;
+    stdfs::rename(sandbox.root / "dir", sandbox.root / "moved", renamed);
+    REQUIRE_FALSE(renamed);
+    stdfs::remove(sandbox.root / "moved" / "file.txt", removed);
+    REQUIRE_FALSE(removed);
+    stdfs::remove(sandbox.root / "moved", removed);
+    REQUIRE_FALSE(removed);
 }
 
 SCENARIO("Native listings are paginated and stable") {
@@ -1028,18 +1061,31 @@ SCENARIO("The temporary file of a replacing write keeps no inherited ACL") {
     REQUIRE(std::system(("chmod +a 'everyone allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
     auto writer = storage.beginWrite("private.txt", fs::WriteMode::replace);
     writer.write(span<const char>("secret", 6));
-    const auto names = namesOn(sandbox.root);
-    const auto found = ranges::find_if(names, [](const string& name) {
-        return fs::isTemporaryName(name);
-    });
-    REQUIRE(found != names.end());
-    const auto temporary = *found;
-    REQUIRE(std::system(("ls -le '" + (sandbox.root / temporary).string() + "' | grep -q everyone").c_str()) != 0);
+    // The temporary file lives in a private directory created without the inherited entries, so it never had them.
+    const auto temporary = temporaryOf(sandbox.root);
+    REQUIRE(std::system(("ls -led '" + temporary.parent_path().string() + "' | grep -q everyone").c_str()) != 0);
+    REQUIRE(std::system(("ls -le '" + temporary.string() + "' | grep -q everyone").c_str()) != 0);
     writer.commit();
     REQUIRE(std::system(("ls -le '" + (sandbox.root / "private.txt").string() + "' | grep -q everyone").c_str()) != 0);
     REQUIRE(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
 }
     #endif
+
+SCENARIO("A replacing write is private from the creation of its temporary file") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    // No file to replace when the write begins: a private one may appear under that name before the commit.
+    auto writer = storage.beginWrite("later.txt", fs::WriteMode::replace);
+    writer.write(span<const char>("secret", 6));
+    const auto temporary = temporaryOf(sandbox.root);
+    REQUIRE(fs::isTemporaryName(temporary.parent_path().filename().string()));
+    REQUIRE(stdfs::status(temporary).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+    REQUIRE(stdfs::status(temporary.parent_path()).permissions() == stdfs::perms::owner_all);
+    writer.commit();
+    REQUIRE(readDisk(sandbox.root / "later.txt") == "secret");
+    REQUIRE(stdfs::status(sandbox.root / "later.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+    REQUIRE(namesOn(sandbox.root) == vector<string>{"later.txt"});
+}
 
 SCENARIO("A replaced file keeps its group") {
     // A group of the effective user other than its effective group, which a new file would not get.
@@ -1107,6 +1153,26 @@ SCENARIO("A root under the real /tmp of the superuser is accepted") {
 #endif
 
 #ifdef _WIN32
+SCENARIO("Windows opens a root from its drive, its share or its volume") {
+    using Split = std::pair<std::wstring, vector<string>>;
+    REQUIRE(fs::detail::windows::splitLocation(L"C:\\a\\b")
+            == Split{
+                L"\\\\?\\C:\\",
+                {"a", "b"}
+    });
+    REQUIRE(fs::detail::windows::splitLocation(L"C:\\") == Split{L"\\\\?\\C:\\", {}});
+    REQUIRE(fs::detail::windows::splitLocation(L"\\\\server\\share\\a") == Split{L"\\\\?\\UNC\\server\\share\\", {"a"}});
+    REQUIRE(fs::detail::windows::splitLocation(L"\\\\server\\share") == Split{L"\\\\?\\UNC\\server\\share\\", {}});
+    REQUIRE(errorOf([] {
+                fs::detail::windows::splitLocation(L"\\\\server");
+            })
+            == fs::StorageErrc::invalidPath);
+    REQUIRE(errorOf([] {
+                fs::detail::windows::splitLocation(L"\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1\\a");
+            })
+            == fs::StorageErrc::invalidPath);
+}
+
 SCENARIO("Windows holds the directories of an operation so that nobody moves them") {
     Sandbox sandbox;
     stdfs::create_directories(sandbox.root / "a" / "b");

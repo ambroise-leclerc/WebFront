@@ -30,6 +30,7 @@
     #include <cstddef>
     #include <cstring>
     #include <iterator>
+    #include <tuple>
 
     #include <winternl.h>
 #else
@@ -795,7 +796,7 @@ public:
         std::scoped_lock lock(state->structure);
         state->notify(StoragePoint::beforeCommit, name);
         try {
-            state->confirm({walk.top()});
+            state->confirm({walk.top(), fileDirectory()});
         } catch (...) {
             abandon();
             throw;
@@ -809,7 +810,7 @@ public:
                 throw;
             }
         }
-        const int result = mode == WriteMode::replace ? ::renameat(parent, temporary.c_str(), parent, name.c_str())
+        const int result = mode == WriteMode::replace ? ::renameat(fileDirectory(), temporary.c_str(), parent, name.c_str())
                                                       : detail::posix::renameNoReplace(parent, temporary.c_str(), parent, name.c_str());
         if (result != 0) {
             const int error = errno;
@@ -817,7 +818,18 @@ public:
             detail::posix::fail(error, "Cannot commit " + detail::quoted(components));
         }
         file.reset();
-        state->confirm({parent});
+        if (privateDirectory) {
+            privateDirectory.reset();
+            ::unlinkat(parent, privateName.c_str(), AT_REMOVEDIR);
+        }
+        // The directories are released once the last check is done: a committed writer holds nothing.
+        try {
+            state->confirm({parent});
+        } catch (...) {
+            walk = {};
+            throw;
+        }
+        walk = {};
     }
 
 private:
@@ -828,7 +840,7 @@ private:
     // Gives the temporary file the group, the permission bits (never setuid, setgid nor sticky) and the ACL of the file it replaces,
     // read now, under the lock that serializes the storage's operations: whatever the storage moved to that name since
     // beginWrite(), the new content is never published more widely than the file it replaces. Without a file to
-    // replace, the temporary file keeps the mode it was created with. Its owner is the effective user.
+    // replace, the new file stays private (0600, no ACL). Its owner is the effective user.
     void keepRights(int parent) {
         struct stat target{};
         if (::fstatat(parent, name.c_str(), &target, AT_SYMLINK_NOFOLLOW) != 0) {
@@ -848,11 +860,20 @@ private:
             detail::posix::fail(errno, "Cannot commit " + detail::quoted(components));
     }
 
+    // The directory the temporary file is in: the private directory of a replacing write, otherwise the parent.
+    [[nodiscard]] int fileDirectory() const {
+        return privateDirectory ? privateDirectory.get() : walk.top();
+    }
+
     void abandon() noexcept {
-        if (!file)
-            return;
-        file.reset();
-        ::unlinkat(walk.top(), temporary.c_str(), 0);
+        if (file) {
+            file.reset();
+            ::unlinkat(fileDirectory(), temporary.c_str(), 0);
+        }
+        if (privateDirectory) {
+            privateDirectory.reset();
+            ::unlinkat(walk.top(), privateName.c_str(), AT_REMOVEDIR);
+        }
     }
 
     std::shared_ptr<State>   state;
@@ -861,6 +882,8 @@ private:
     std::string              name;
     WriteMode                mode;
     std::string              temporary;
+    std::string              privateName;
+    detail::posix::Fd        privateDirectory;
     detail::posix::Fd        file;
 };
 
@@ -971,17 +994,45 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
         if (S_ISDIR(status.st_mode))
             throw StorageError(StorageErrc::isDirectory, detail::quoted(components) + " is a directory");
     }
-    // A replacing write stays private (0600) until its commit, which gives it the rights of the file it then replaces.
-    const bool replacing = mode == WriteMode::replace && S_ISREG(status.st_mode) && status.st_nlink > 0;
-    Writer     writer{state, std::move(walk), std::move(components), std::move(name), mode};
+    Writer writer{state, std::move(walk), std::move(components), std::move(name), mode};
+    // A replacing write may replace a private file, now or by its commit: its temporary file must be private from its
+    // creation. A file created in the parent receives the ACL its directory passes on (a macOS ACL is not limited by the
+    // mode) before anyone can remove it, and someone who opens it in between keeps a descriptor on the content written
+    // later. So it is created in a private directory of its own (0700, its own inherited ACL removed before the file
+    // exists), where it inherits nothing, then renamed into place by the commit.
+    if (mode == WriteMode::replace) {
+        const auto what = detail::quoted(writer.components);
+        for (int attempt = 0; !writer.privateDirectory; ++attempt) {
+            writer.privateName = detail::temporaryName();
+            if (::mkdirat(writer.walk.top(), writer.privateName.c_str(), 0700) != 0) {
+                if (errno != EEXIST || attempt == 8)
+                    detail::posix::fail(errno, "Cannot write " + what);
+                continue;
+            }
+            writer.privateDirectory = detail::posix::openAt(writer.walk.top(), writer.privateName.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+            if (!writer.privateDirectory) {
+                const int error = errno;
+                ::unlinkat(writer.walk.top(), writer.privateName.c_str(), AT_REMOVEDIR);
+                detail::posix::fail(error, "Cannot write " + what);
+            }
+        }
+        detail::posix::clearAccessControl(writer.privateDirectory.get(), what);
+    #if defined(__linux__)
+        if (::fremovexattr(writer.privateDirectory.get(), "system.posix_acl_default") != 0 && errno != ENODATA && !detail::posix::unsupported(errno))
+            throw StorageError(StorageErrc::accessDenied, "Cannot make " + what + " private");
+    #endif
+        if (::fchmod(writer.privateDirectory.get(), 0700) != 0)
+            detail::posix::fail(errno, "Cannot write " + what);
+    }
     for (int attempt = 0; !writer.file; ++attempt) {
         writer.temporary = detail::temporaryName();
-        writer.file = detail::posix::openAt(writer.walk.top(), writer.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, replacing ? 0600 : 0644);
+        writer.file      = detail::posix::openAt(writer.fileDirectory(),
+                                                 writer.temporary.c_str(),
+                                                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+                                                 mode == WriteMode::replace ? 0600 : 0644);
         if (!writer.file && (errno != EEXIST || attempt == 8))
             detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
     }
-    if (replacing)  // before any byte is written: an inherited ACL would let others read the content of a private file
-        detail::posix::clearAccessControl(writer.file.get(), detail::quoted(writer.components));
     state->notify(StoragePoint::temporaryCreated, writer.name);
     return writer;
 }
@@ -1352,6 +1403,61 @@ private:
     std::uint64_t total;
 };
 
+inline bool equalsAscii(std::wstring_view text, std::wstring_view expected) {
+    return std::ranges::equal(text, expected, [](wchar_t a, wchar_t b) {
+        const auto lower = [](wchar_t c) {
+            return c >= L'A' && c <= L'Z' ? static_cast<wchar_t>(c - L'A' + L'a') : c;
+        };
+        return lower(a) == lower(b);
+    });
+}
+
+/// The volume a canonical location is opened from, as CreateFileW takes it, and the components below it.
+/// `C:\a` gives `\\?\C:\` and {a}; a UNC path `\\server\share\a` gives `\\?\UNC\server\share\` and {a} (the share belongs to
+/// the volume: `\\?\UNC\server\` alone names nothing); `\\?\Volume{...}\a` keeps its volume. A `\\?\GLOBALROOT` path,
+/// which canonical() returns for a volume without a DOS name, and a server without a share are refused (invalidPath).
+inline std::pair<std::wstring, std::vector<std::string>> splitLocation(const std::filesystem::path& canonical) {
+    std::vector<std::string> components;
+    for (const auto& component : canonical.relative_path())
+        components.push_back(utf8(component.wstring()));
+    const auto unsupported = [] {
+        return StorageError(StorageErrc::invalidPath, "This root location has no volume WebFront can open");
+    };
+    const std::wstring separator = L"\\";
+    const auto         name      = canonical.root_name().wstring();
+    auto               takeShare = [&](std::wstring server) {
+        if (components.empty() || server.empty())
+            throw unsupported();
+        auto volume = L"\\\\?\\UNC\\" + server + separator + wide(components.front()) + separator;
+        components.erase(components.begin());
+        return std::pair{std::move(volume), std::move(components)};
+    };
+    if (name.starts_with(L"\\\\?\\") || name.starts_with(L"\\\\.\\")) {
+        const auto rest = std::wstring_view(name).substr(4);
+        if (equalsAscii(rest.substr(0, 10), L"GLOBALROOT") || (rest.empty() && !components.empty() && equalsAscii(wide(components.front()), L"GLOBALROOT")))
+            throw unsupported();
+        if (equalsAscii(rest.substr(0, 3), L"UNC")) {
+            // \\?\UNC\server\share: the server may be in the root name or be the first component.
+            std::wstring server(rest.size() > 4 ? rest.substr(4) : std::wstring_view{});
+            if (server.empty()) {
+                if (components.empty())
+                    throw unsupported();
+                server = wide(components.front());
+                components.erase(components.begin());
+            }
+            return takeShare(std::move(server));
+        }
+        if (rest.empty())
+            throw unsupported();
+        return {name + separator, std::move(components)};
+    }
+    if (name.starts_with(L"\\\\"))
+        return takeShare(name.substr(2));
+    if (name.empty())
+        throw unsupported();
+    return {L"\\\\?\\" + name + separator, std::move(components)};
+}
+
 inline constexpr ACCESS_MASK directoryAccess = FILE_LIST_DIRECTORY | FILE_TRAVERSE;
 // The directories of an operation are held without FILE_SHARE_DELETE: nobody can rename or remove them meanwhile.
 inline constexpr ULONG heldSharing = FILE_SHARE_READ | FILE_SHARE_WRITE;
@@ -1408,9 +1514,10 @@ struct NativeStorage::State {
 
     // Opens the declared location from its volume, refusing reparse points on the way.
     Handle openLocation(StorageErrc onMove, ULONG rootSharing) const {
+        // A root at the top of its volume (C:\, a share) is the volume itself, held like any root.
         Handle current{::CreateFileW(volume.c_str(),
                                      detail::windows::directoryAccess | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                                     detail::windows::fullSharing,
+                                     locationComponents.empty() ? rootSharing : detail::windows::fullSharing,
                                      nullptr,
                                      OPEN_EXISTING,
                                      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
@@ -1551,7 +1658,15 @@ public:
             detail::windows::failStatus(status, "Cannot commit " + detail::quoted(components));
         }
         file.reset();
-        state->confirm({walk.top()});
+        // The directories, held without FILE_SHARE_DELETE, are released once the last check is done: a committed writer
+        // must not keep anyone from renaming or removing them.
+        try {
+            state->confirm({walk.top()});
+        } catch (...) {
+            walk = {};
+            throw;
+        }
+        walk = {};
     }
 
 private:
@@ -1583,18 +1698,13 @@ inline NativeStorage::NativeStorage(const std::filesystem::path& location, RootO
                            "Cannot declare the root: " + error.message());
     if (!std::filesystem::is_directory(canonical, error))
         throw StorageError(StorageErrc::notDirectory, "The root must be a directory");
-    state->location = canonical;
-    const auto name = canonical.root_name().wstring();
-    state->volume   = name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) + L"\\" : L"\\\\?\\" + name + L"\\";
-    for (const auto& component : canonical.relative_path()) {
-        const auto bytes = component.u8string();
-        state->locationComponents.emplace_back(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    }
-    state->options      = options;
-    state->hooks        = std::move(hooks);
-    state->root         = state->openLocation(StorageErrc::notFound, detail::windows::heldSharing);
-    state->rootIdentity = detail::windows::identityOf(state->root.get());
-    state->rootPath     = detail::windows::finalPath(state->root.get());
+    state->location                                    = canonical;
+    std::tie(state->volume, state->locationComponents) = detail::windows::splitLocation(canonical);
+    state->options                                     = options;
+    state->hooks                                       = std::move(hooks);
+    state->root                                        = state->openLocation(StorageErrc::notFound, detail::windows::heldSharing);
+    state->rootIdentity                                = detail::windows::identityOf(state->root.get());
+    state->rootPath                                    = detail::windows::finalPath(state->root.get());
 }
 
 inline const std::filesystem::path& NativeStorage::location() const {

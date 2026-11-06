@@ -16,7 +16,7 @@
 | 2.4 | 2026-10-14 | Acceptée | Ambroise Leclerc | Fournisseur PackageFS et stockage transactionnel des outils installés. | [4bcfc28](https://github.com/ambroise-leclerc/WebFront/commit/4bcfc28c7b78672603a2114a72d9decf25d36387) |
 | 2.5 | 2026-11-03 | Acceptée | Ambroise Leclerc | `fs::File::knownSize()` : taille connue avant lecture (données embarquées, fichier natif sur flux positionnable), pour annoncer `Content-Length` et envoyer le fichier en flux (#454). Les routes dynamiques passent après le `WebFront.js` protégé et ne peuvent pas le masquer. | Branche `454-dynamic-routes` |
 | 2.6 | 2026-11-04 | Acceptée | Ambroise Leclerc | `fs::File::seek`, `entityTag()` et `setEntityTag()` : positionnement dans un fichier de taille connue et validateur fort fourni par le fournisseur (jamais déduit d'un chemin, d'une taille ou d'une date), pour les requêtes `Range` et `If-Range` (#455). Le serveur traite les plages ; `fs::Provider` ne voit toujours pas la requête. | Branche `455-range-requests` |
-| 3.0 | 2026-11-05 | Acceptée | Ambroise Leclerc | Stockage modifiable sous des racines déclarées (#460, ADR-020) : concept `fs::Storage` (listage paginé stable, métadonnées, lecture, écriture par fichier temporaire validée par renommage atomique, création de dossier, suppression, renommage sans remplacement), erreurs typées `fs::StorageError` (`storage.*`), `fs::NativeStorage` confiné pendant la résolution par descripteurs (POSIX) ou handles (Windows), contrôle des propriétaires des répertoires et des ancêtres, `rootMoved` et `confinementViolated`, `fs::MemoryStorage` simulé ; `fs::ByteSource`, point d'extension de `fs::File` pour les handles natifs ; `SafePath` refuse les noms réservés de Windows. Les fournisseurs restent en lecture seule. | Branche `460-writable-storage` |
+| 3.0 | 2026-11-05 | Acceptée | Ambroise Leclerc | Stockage modifiable sous des racines déclarées (#460, ADR-020) : concept `fs::Storage` (listage paginé stable, métadonnées, lecture, écriture par fichier temporaire validée par renommage atomique, création de dossier, suppression, renommage sans remplacement), erreurs typées `fs::StorageError` (`storage.*`), `fs::NativeStorage` confiné pendant la résolution par descripteurs (POSIX) ou handles (Windows), contrôle des propriétaires des répertoires et des ancêtres, `rootMoved` et `confinementViolated`, `fs::MemoryStorage` simulé ; `fs::ByteSource`, point d'extension de `fs::File` pour les handles natifs ; `SafePath` refuse les noms réservés de Windows. Les fournisseurs restent en lecture seule. | [509de1a](https://github.com/ambroise-leclerc/WebFront/commit/509de1a), branche `460-writable-storage` (PR #500) |
 
 ## État et chronologie
 
@@ -137,16 +137,23 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
   règle des bits. Contrôle à la déclaration et à chaque opération, avant tout effet ; sinon `unsafeDirectory`. Les dossiers créés le sont en mode 0755, les fichiers en 0644 (masqués par l’umask), pour rester
   utilisables. `RootOptions::shared` lève ces contrôles : confinement affaibli, pour un dossier partagé ou un support
   monté sans permissions.
+- **Windows (volumes).** L’emplacement est ouvert depuis son volume : lettre de lecteur, partage UNC (le partage fait
+  partie du volume) ou `\\?\Volume{…}` ; un chemin `\\?\GLOBALROOT` (volume sans nom DOS) est refusé (`invalidPath`).
 - **Windows.** La racine est tenue sans `FILE_SHARE_DELETE` pendant toute la déclaration, chaque répertoire traversé
-  pendant toute l’opération (écriture du temporaire et renommage compris) : leur renommage ou leur suppression
-  échoue. Un fichier remplacé reçoit sous Windows l’ACL héritée du dossier, pas celle de l’ancien fichier (limite
-  connue) ; sous POSIX, il prend, à la validation et sous le verrou du stockage, le groupe (refus si l’utilisateur
-  effectif n’en est pas membre), les bits de permission (sans setuid, setgid ni bit collant) et l’ACL (ACL étendue de macOS, ACL d’accès POSIX de Linux) du fichier qu’il remplace à ce
-  moment, et aucune ACL si ce fichier n’en a pas, même si son dossier en transmet une ; le temporaire reste en 0600,
-  sans l’ACL héritée de son dossier (retirée avant toute écriture), jusque-là. Si cette ACL ne peut être lue ou recopiée (sous macOS, un fichier que l’utilisateur effectif ne peut pas
-  lire), le remplacement est refusé (`accessDenied`). Son propriétaire devient l’utilisateur
-  effectif. Un lien suivi dans la racine ne peut pas désigner un temporaire (`linkRefused`). NTFS refuse aussi le renommage d’un ancêtre sous lequel un handle est ouvert ; le test le vérifie. Coût
-  accepté : la racine ne peut pas être renommée tant qu’elle est déclarée.
+  pendant toute l’opération (écriture du temporaire et renommage compris), puis relâché une fois la validation
+  vérifiée : leur renommage ou leur suppression échoue pendant l’opération, plus après. NTFS refuse aussi le renommage
+  d’un ancêtre sous lequel un handle est ouvert ; le test le vérifie. Coût accepté : la racine ne peut pas être
+  renommée tant qu’elle est déclarée.
+- **Remplacement.** Sous POSIX, le temporaire d’une écriture `replace` est créé en 0600 dans un répertoire privé (0700)
+  ouvert pour lui, dont l’ACL héritée est retirée avant qu’il existe : il n’hérite d’aucune entrée et personne d’autre
+  ne peut l’ouvrir dès sa création, même si le fichier à remplacer n’apparaît qu’après `beginWrite()`. À la validation,
+  sous le verrou du stockage, il prend le groupe (refus si l’utilisateur effectif n’en est pas membre), les bits de
+  permission (sans setuid, setgid ni bit collant) et l’ACL (ACL étendue de macOS, ACL d’accès POSIX de Linux) du fichier
+  qu’il remplace à ce moment, et aucune ACL si ce fichier n’en a pas ; sans fichier à remplacer, le nouveau fichier
+  reste privé (0600). Si l’ACL ne peut être lue ou recopiée (sous macOS, un fichier que l’utilisateur effectif ne peut
+  pas lire), le remplacement est refusé (`accessDenied`). Le propriétaire devient l’utilisateur effectif. Sous Windows,
+  le fichier remplacé reçoit l’ACL héritée du dossier, pas celle de l’ancien fichier (limite connue). Un lien suivi dans
+  la racine ne peut pas désigner un temporaire (`linkRefused`).
 - **Détection.** Avant de valider une écriture et après toute opération, le stockage vérifie que le répertoire où il
   a agi est encore sous la racine (remontée par `..` jusqu’à l’identité de la racine sous POSIX, chemin final du
   handle sous Windows) et que la racine est à son emplacement ; sinon `confinementViolated`, la validation n’a pas lieu
