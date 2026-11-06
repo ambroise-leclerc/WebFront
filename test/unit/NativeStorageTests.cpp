@@ -25,6 +25,7 @@
 
 #ifndef _WIN32
     #include <pwd.h>
+    #include <sys/resource.h>
     #if defined(__linux__)
         #include <sys/xattr.h>
     #endif
@@ -935,6 +936,86 @@ SCENARIO("A replaced file keeps its access control list") {
     kept.resize(static_cast<size_t>(size));
     REQUIRE(kept.find(entry(0x02, 0, nobody)) != string::npos);
     #endif
+}
+
+SCENARIO("A replaced file without an ACL gets none from its directory") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    const auto        file = sandbox.root / "plain.txt";
+    writeDisk(file, "old");
+    stdfs::permissions(file, stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read, stdfs::perm_options::replace);
+    #if defined(__APPLE__)
+    // Entries the directory passes on to new files: the temporary file receives them, the file it replaces had none.
+    REQUIRE(std::system(("chmod +a 'user:nobody allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
+    writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
+    REQUIRE(std::system(("ls -le '" + file.string() + "' | grep -q nobody").c_str()) != 0);
+    #else
+    // A default ACL of the directory that lets the user nobody (65534) read new files.
+    const auto entry = [](std::uint16_t tag, std::uint16_t permissions, std::uint32_t id) {
+        std::array<char, 8> bytes{};
+        for (int index = 0; index < 2; ++index) {
+            bytes[static_cast<size_t>(index)]     = static_cast<char>(tag >> (8 * index));
+            bytes[static_cast<size_t>(index + 2)] = static_cast<char>(permissions >> (8 * index));
+        }
+        for (int index = 0; index < 4; ++index)
+            bytes[static_cast<size_t>(index + 4)] = static_cast<char>(id >> (8 * index));
+        return string(bytes.data(), bytes.size());
+    };
+    constexpr std::uint32_t undefined = 0xFFFFFFFF;
+    const string defaults = string("\x02\0\0\0", 4) + entry(0x01, 7, undefined) + entry(0x02, 4, 65534) + entry(0x04, 5, undefined) + entry(0x10, 5, undefined)
+                            + entry(0x20, 5, undefined);
+    if (::setxattr(sandbox.root.c_str(), "system.posix_acl_default", defaults.data(), defaults.size(), 0) != 0)
+        SKIP("This file system has no POSIX ACL");
+    writeFile(storage, "plain.txt", "new secret", fs::WriteMode::replace);
+    REQUIRE(::getxattr(file.c_str(), "system.posix_acl_access", nullptr, 0) < 0);
+    #endif
+    REQUIRE(readDisk(file) == "new secret");
+    REQUIRE(stdfs::status(file).permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read));
+}
+
+SCENARIO("A commit takes the rights of the file it replaces at that moment") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    writeDisk(sandbox.root / "doc.txt", "public");
+    stdfs::permissions(sandbox.root / "doc.txt",
+                       stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read | stdfs::perms::others_read,
+                       stdfs::perm_options::replace);
+    auto writer = storage.beginWrite("doc.txt", fs::WriteMode::replace);
+    writer.write(span<const char>("new", 3));
+    // Meanwhile the storage itself puts a private file under that name.
+    writeDisk(sandbox.root / "private.txt", "private");
+    stdfs::permissions(sandbox.root / "private.txt", stdfs::perms::owner_read | stdfs::perms::owner_write, stdfs::perm_options::replace);
+    storage.remove("doc.txt");
+    storage.rename("private.txt", "doc.txt");
+    writer.commit();
+    REQUIRE(readDisk(sandbox.root / "doc.txt") == "new");
+    REQUIRE(stdfs::status(sandbox.root / "doc.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+}
+
+SCENARIO("Running out of descriptors does not mark the root as moved") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    struct ::rlimit   previous{};
+    REQUIRE(::getrlimit(RLIMIT_NOFILE, &previous) == 0);
+    auto lowered     = previous;
+    lowered.rlim_cur = std::min<rlim_t>(previous.rlim_cur, 256);
+    REQUIRE(::setrlimit(RLIMIT_NOFILE, &lowered) == 0);
+    vector<int> held;
+    for (int descriptor = ::dup(0); descriptor >= 0; descriptor = ::dup(0))
+        held.push_back(descriptor);
+    // One descriptor left: `/` opens, the next component of the declared location does not.
+    REQUIRE_FALSE(held.empty());
+    ::close(held.back());
+    held.pop_back();
+    const auto exhausted = errorOf([&] {
+        storage.createDirectory("dir");
+    });
+    for (const int descriptor : held)
+        ::close(descriptor);
+    REQUIRE(::setrlimit(RLIMIT_NOFILE, &previous) == 0);
+    REQUIRE(exhausted != fs::StorageErrc::rootMoved);
+    storage.createDirectory("dir");
+    REQUIRE(stdfs::is_directory(sandbox.root / "dir"));
 }
 
 SCENARIO("A link followed inside the root never reaches a temporary file") {

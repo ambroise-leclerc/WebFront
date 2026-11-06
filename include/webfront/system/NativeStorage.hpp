@@ -400,9 +400,14 @@ inline void copyAccessControl(int directory, const std::string& name, int tempor
     }
     acl_t acl = ::acl_get_fd_np(existing.get(), ACL_TYPE_EXTENDED);
     if (!acl) {
-        if (errno == ENOENT || errno == ENOTSUP || errno == EOPNOTSUPP)
+        if (errno == ENOTSUP || errno == EOPNOTSUPP)
             return;
-        throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+        if (errno != ENOENT)
+            throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+        // No ACL on the replaced file: the temporary file must not keep entries it inherited from its directory.
+        acl = ::acl_init(0);
+        if (!acl)
+            throw StorageError(StorageErrc::accessDenied, "Cannot keep the access control list of " + what);
     }
     const int copied = ::acl_set_fd_np(temporary, acl, ACL_TYPE_EXTENDED);
     ::acl_free(acl);
@@ -420,9 +425,14 @@ inline void copyAccessControl(int directory, const std::string& name, int tempor
     const char* key  = "system.posix_acl_access";
     auto        size = ::getxattr(link.c_str(), key, nullptr, 0);
     if (size < 0) {
-        if (errno == ENODATA || errno == ENOTSUP || errno == EOPNOTSUPP)
+        if (errno == ENOTSUP || errno == EOPNOTSUPP)
             return;
-        throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+        if (errno != ENODATA)
+            throw StorageError(StorageErrc::accessDenied, "Cannot read the access control list of " + what);
+        // No ACL on the replaced file: the temporary file must not keep the one a default ACL of its directory gave it.
+        if (::fremovexattr(temporary, key) != 0 && errno != ENODATA)
+            throw StorageError(StorageErrc::accessDenied, "Cannot keep the access control list of " + what);
+        return;
     }
     std::vector<char> acl(static_cast<std::size_t>(size));
     size = ::getxattr(link.c_str(), key, acl.data(), acl.size());
@@ -542,8 +552,10 @@ struct NativeStorage::State {
         for (const auto& component : locationComponents) {
             Fd next = detail::posix::openAt(current.get(), component.c_str(), detail::posix::searchFlags | O_NOFOLLOW);
             if (!next) {
+                // Only a missing component, a non-directory or a link shows that the location changed; any other
+                // failure (EMFILE, ENOMEM, EACCES, EIO...) is reported as such and does not mark the root as moved.
                 const int error = errno;
-                if (error == EACCES || error == EPERM)
+                if (error != ENOENT && error != ENOTDIR && error != ELOOP && error != EMLINK)
                     detail::posix::fail(error, "Cannot reach the root");
                 throw StorageError(onMove, "The root is no longer at its declared location");
             }
@@ -758,6 +770,14 @@ public:
             throw;
         }
         const int parent = walk.top();
+        if (mode == WriteMode::replace) {
+            try {
+                keepRights(parent);
+            } catch (...) {
+                abandon();
+                throw;
+            }
+        }
         const int result = mode == WriteMode::replace ? ::renameat(parent, temporary.c_str(), parent, name.c_str())
                                                       : detail::posix::renameNoReplace(parent, temporary.c_str(), parent, name.c_str());
         if (result != 0) {
@@ -773,6 +793,24 @@ private:
     friend class NativeStorage;
     Writer(std::shared_ptr<State> storageState, State::Walk opened, std::vector<std::string> path, std::string finalName, WriteMode writeMode)
         : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) { }
+
+    // Gives the temporary file the permission bits (never setuid, setgid nor sticky) and the ACL of the file it replaces,
+    // read now, under the lock that serializes the storage's operations: whatever the storage moved to that name since
+    // beginWrite(), the new content is never published more widely than the file it replaces. Without a file to
+    // replace, the temporary file keeps the mode it was created with. Its owner is the effective user.
+    void keepRights(int parent) {
+        struct stat target{};
+        if (::fstatat(parent, name.c_str(), &target, AT_SYMLINK_NOFOLLOW) != 0) {
+            if (errno == ENOENT)
+                return;
+            detail::posix::fail(errno, "Cannot commit " + detail::quoted(components));
+        }
+        if (!S_ISREG(target.st_mode))
+            return;  // a directory makes the rename fail; a link is replaced by the new file, not written through
+        detail::posix::copyAccessControl(parent, name, file.get(), detail::quoted(components));
+        if (::fchmod(file.get(), static_cast<mode_t>(target.st_mode & 0777)) != 0)
+            detail::posix::fail(errno, "Cannot commit " + detail::quoted(components));
+    }
 
     void abandon() noexcept {
         if (!file)
@@ -897,23 +935,15 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
         if (S_ISDIR(status.st_mode))
             throw StorageError(StorageErrc::isDirectory, detail::quoted(components) + " is a directory");
     }
-    // A replaced file keeps its permission bits (never setuid, setgid nor sticky) and its access control list: replacing a
-    // private 0600 file, or one an ACL hides from some users, must not publish its new content more widely. The temporary
-    // file stays private until then. Its owner is the effective user, whoever owned the replaced file.
-    std::optional<mode_t> keptMode;
-    if (mode == WriteMode::replace && S_ISREG(status.st_mode) && status.st_nlink > 0)
-        keptMode = static_cast<mode_t>(status.st_mode & 0777);
-    Writer writer{state, std::move(walk), std::move(components), std::move(name), mode};
+    // A replacing write stays private (0600) until its commit, which gives it the rights of the file it then replaces.
+    const bool replacing = mode == WriteMode::replace && S_ISREG(status.st_mode) && status.st_nlink > 0;
+    Writer     writer{state, std::move(walk), std::move(components), std::move(name), mode};
     for (int attempt = 0; !writer.file; ++attempt) {
         writer.temporary = detail::temporaryName();
-        writer.file      = detail::posix::openAt(writer.walk.top(), writer.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, keptMode ? 0600 : 0644);
+        writer.file = detail::posix::openAt(writer.walk.top(), writer.temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, replacing ? 0600 : 0644);
         if (!writer.file && (errno != EEXIST || attempt == 8))
             detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
     }
-    if (keptMode && ::fchmod(writer.file.get(), *keptMode) != 0)
-        detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
-    if (keptMode)
-        detail::posix::copyAccessControl(writer.walk.top(), writer.name, writer.file.get(), detail::quoted(writer.components));
     state->notify(StoragePoint::temporaryCreated, writer.name);
     return writer;
 }
@@ -1356,7 +1386,8 @@ struct NativeStorage::State {
                 current = last ? openDirectory(current.get(), locationComponents[index], rootSharing, "The location")
                                : openDirectory(current.get(), locationComponents[index], detail::windows::fullSharing, "The location", FILE_TRAVERSE);
             } catch (const StorageError& error) {
-                if (error.errc() == StorageErrc::accessDenied || error.errc() == StorageErrc::busy)
+                // Only a missing component, a non-directory or a reparse point shows that the location changed.
+                if (error.errc() != StorageErrc::notFound && error.errc() != StorageErrc::notDirectory && error.errc() != StorageErrc::linkRefused)
                     throw;
                 throw StorageError(onMove, "The root is no longer at its declared location");
             }
