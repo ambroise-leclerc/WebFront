@@ -1018,6 +1018,54 @@ SCENARIO("Running out of descriptors does not mark the root as moved") {
     REQUIRE(stdfs::is_directory(sandbox.root / "dir"));
 }
 
+    #if defined(__APPLE__)
+SCENARIO("The temporary file of a replacing write keeps no inherited ACL") {
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    writeDisk(sandbox.root / "private.txt", "old");
+    stdfs::permissions(sandbox.root / "private.txt", stdfs::perms::owner_read | stdfs::perms::owner_write, stdfs::perm_options::replace);
+    // The ACL the directory passes on lets everyone read new files: not the temporary file of a private one.
+    REQUIRE(std::system(("chmod +a 'everyone allow read,file_inherit' '" + sandbox.root.string() + "'").c_str()) == 0);
+    auto writer = storage.beginWrite("private.txt", fs::WriteMode::replace);
+    writer.write(span<const char>("secret", 6));
+    const auto names = namesOn(sandbox.root);
+    const auto found = ranges::find_if(names, [](const string& name) {
+        return fs::isTemporaryName(name);
+    });
+    REQUIRE(found != names.end());
+    const auto temporary = *found;
+    REQUIRE(std::system(("ls -le '" + (sandbox.root / temporary).string() + "' | grep -q everyone").c_str()) != 0);
+    writer.commit();
+    REQUIRE(std::system(("ls -le '" + (sandbox.root / "private.txt").string() + "' | grep -q everyone").c_str()) != 0);
+    REQUIRE(stdfs::status(sandbox.root / "private.txt").permissions() == (stdfs::perms::owner_read | stdfs::perms::owner_write));
+}
+    #endif
+
+SCENARIO("A replaced file keeps its group") {
+    // A group of the effective user other than its effective group, which a new file would not get.
+    const int     count = ::getgroups(0, nullptr);
+    vector<gid_t> groups(static_cast<size_t>(max(count, 0)));
+    if (count > 0)
+        groups.resize(static_cast<size_t>(::getgroups(count, groups.data())));
+    const auto other = ranges::find_if(groups, [](gid_t group) {
+        return group != ::getegid();
+    });
+    if (other == groups.end())
+        SKIP("The effective user belongs to no other group");
+    Sandbox           sandbox;
+    fs::NativeStorage storage(sandbox.root);
+    const auto        file = sandbox.root / "shared.txt";
+    writeDisk(file, "old");
+    REQUIRE(::chown(file.c_str(), static_cast<uid_t>(-1), *other) == 0);
+    stdfs::permissions(file, stdfs::perms::owner_read | stdfs::perms::owner_write | stdfs::perms::group_read, stdfs::perm_options::replace);
+    writeFile(storage, "shared.txt", "new", fs::WriteMode::replace);
+    struct ::stat status{};
+    REQUIRE(::stat(file.c_str(), &status) == 0);
+    REQUIRE(status.st_gid == *other);
+    REQUIRE((status.st_mode & 0777) == 0640);
+    REQUIRE(readDisk(file) == "new");
+}
+
 SCENARIO("A link followed inside the root never reaches a temporary file") {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});

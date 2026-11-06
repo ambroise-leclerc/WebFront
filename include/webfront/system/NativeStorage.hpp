@@ -455,6 +455,28 @@ inline void copyAccessControl(int directory, const std::string& name, int tempor
     #endif
 }
 
+// Removes from a new file the access control list its directory passed on to it, so that its mode alone decides who may
+// read it: a macOS ACL inherited with file_inherit is not limited by the mode. On Linux a default ACL is limited by the
+// mode the file was created with, and is removed too.
+inline void clearAccessControl(int file, const std::string& what) {
+    #if defined(__APPLE__)
+    acl_t empty = ::acl_init(0);
+    if (!empty)
+        throw StorageError(StorageErrc::accessDenied, "Cannot make " + what + " private");
+    const int cleared = ::acl_set_fd_np(file, empty, ACL_TYPE_EXTENDED);
+    const int error   = errno;
+    ::acl_free(empty);
+    if (cleared != 0 && !unsupported(error))
+        throw StorageError(StorageErrc::accessDenied, "Cannot make " + what + " private");
+    #elif defined(__linux__)
+    if (::fremovexattr(file, "system.posix_acl_access") != 0 && errno != ENODATA && !unsupported(errno))
+        throw StorageError(StorageErrc::accessDenied, "Cannot make " + what + " private");
+    #else
+    (void)file;
+    (void)what;
+    #endif
+}
+
 // The content of a file opened relative to a directory of the root.
 class FdSource : public ByteSource {
 public:
@@ -803,7 +825,7 @@ private:
     Writer(std::shared_ptr<State> storageState, State::Walk opened, std::vector<std::string> path, std::string finalName, WriteMode writeMode)
         : state(std::move(storageState)), walk(std::move(opened)), components(std::move(path)), name(std::move(finalName)), mode(writeMode) { }
 
-    // Gives the temporary file the permission bits (never setuid, setgid nor sticky) and the ACL of the file it replaces,
+    // Gives the temporary file the group, the permission bits (never setuid, setgid nor sticky) and the ACL of the file it replaces,
     // read now, under the lock that serializes the storage's operations: whatever the storage moved to that name since
     // beginWrite(), the new content is never published more widely than the file it replaces. Without a file to
     // replace, the temporary file keeps the mode it was created with. Its owner is the effective user.
@@ -816,6 +838,11 @@ private:
         }
         if (!S_ISREG(target.st_mode))
             return;  // a directory makes the rename fail; a link is replaced by the new file, not written through
+        // The group first: the group bits of the mode grant to that group, and a new file belongs to the effective group
+        // (or to its directory's). A group the effective user is not a member of cannot be given: the replacement is
+        // then refused rather than granting the bits to another group.
+        if (::fchown(file.get(), static_cast<uid_t>(-1), target.st_gid) != 0)
+            throw StorageError(StorageErrc::accessDenied, "Cannot keep the group of " + detail::quoted(components));
         detail::posix::copyAccessControl(parent, name, file.get(), detail::quoted(components));
         if (::fchmod(file.get(), static_cast<mode_t>(target.st_mode & 0777)) != 0)
             detail::posix::fail(errno, "Cannot commit " + detail::quoted(components));
@@ -953,6 +980,8 @@ inline NativeStorage::Writer NativeStorage::beginWrite(std::string_view path, Wr
         if (!writer.file && (errno != EEXIST || attempt == 8))
             detail::posix::fail(errno, "Cannot write " + detail::quoted(writer.components));
     }
+    if (replacing)  // before any byte is written: an inherited ACL would let others read the content of a private file
+        detail::posix::clearAccessControl(writer.file.get(), detail::quoted(writer.components));
     state->notify(StoragePoint::temporaryCreated, writer.name);
     return writer;
 }

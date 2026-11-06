@@ -140,10 +140,10 @@ stockage n’est servi que par une route à jeton de l’ADR-020.
 - **Windows.** La racine est tenue sans `FILE_SHARE_DELETE` pendant toute la déclaration, chaque répertoire traversé
   pendant toute l’opération (écriture du temporaire et renommage compris) : leur renommage ou leur suppression
   échoue. Un fichier remplacé reçoit sous Windows l’ACL héritée du dossier, pas celle de l’ancien fichier (limite
-  connue) ; sous POSIX, il prend, à la validation et sous le verrou du stockage, les bits de permission (sans setuid,
-  setgid ni bit collant) et l’ACL (ACL étendue de macOS, ACL d’accès POSIX de Linux) du fichier qu’il remplace à ce
-  moment, et aucune ACL si ce fichier n’en a pas, même si son dossier en transmet une ; le temporaire reste en 0600
-  jusque-là. Si cette ACL ne peut être lue ou recopiée (sous macOS, un fichier que l’utilisateur effectif ne peut pas
+  connue) ; sous POSIX, il prend, à la validation et sous le verrou du stockage, le groupe (refus si l’utilisateur
+  effectif n’en est pas membre), les bits de permission (sans setuid, setgid ni bit collant) et l’ACL (ACL étendue de macOS, ACL d’accès POSIX de Linux) du fichier qu’il remplace à ce
+  moment, et aucune ACL si ce fichier n’en a pas, même si son dossier en transmet une ; le temporaire reste en 0600,
+  sans l’ACL héritée de son dossier (retirée avant toute écriture), jusque-là. Si cette ACL ne peut être lue ou recopiée (sous macOS, un fichier que l’utilisateur effectif ne peut pas
   lire), le remplacement est refusé (`accessDenied`). Son propriétaire devient l’utilisateur
   effectif. Un lien suivi dans la racine ne peut pas désigner un temporaire (`linkRefused`). NTFS refuse aussi le renommage d’un ancêtre sous lequel un handle est ouvert ; le test le vérifie. Coût
   accepté : la racine ne peut pas être renommée tant qu’elle est déclarée.
