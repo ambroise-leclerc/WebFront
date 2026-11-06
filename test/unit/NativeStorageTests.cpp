@@ -25,6 +25,9 @@
 
 #ifndef _WIN32
     #include <pwd.h>
+    #if defined(__linux__)
+        #include <sys/xattr.h>
+    #endif
     #include <sys/stat.h>
     #include <unistd.h>
 #endif
@@ -905,13 +908,32 @@ SCENARIO("A replaced file keeps its access control list") {
         }
     }
     #else
-    if (std::system("command -v setfacl >/dev/null 2>&1 && command -v getfacl >/dev/null 2>&1") != 0)
-        SKIP("setfacl and getfacl are not installed");
-    if (std::system(("setfacl -m u:nobody:--- '" + file.string() + "' 2>/dev/null").c_str()) != 0)
+    // The POSIX access ACL in its extended attribute form (version 2, then tag, permissions and identifier per entry),
+    // written directly so that the test needs no setfacl: the owner reads and writes, the user nobody (65534) gets
+    // nothing, the group and the others read.
+    const auto entry = [](std::uint16_t tag, std::uint16_t permissions, std::uint32_t id) {
+        std::array<char, 8> bytes{};
+        for (int index = 0; index < 2; ++index) {
+            bytes[static_cast<size_t>(index)]     = static_cast<char>(tag >> (8 * index));
+            bytes[static_cast<size_t>(index + 2)] = static_cast<char>(permissions >> (8 * index));
+        }
+        for (int index = 0; index < 4; ++index)
+            bytes[static_cast<size_t>(index + 4)] = static_cast<char>(id >> (8 * index));
+        return string(bytes.data(), bytes.size());
+    };
+    constexpr std::uint32_t undefined = 0xFFFFFFFF, nobody = 65534;
+    const string acl = string("\x02\0\0\0", 4) + entry(0x01, 6, undefined) + entry(0x02, 0, nobody) + entry(0x04, 4, undefined) + entry(0x10, 4, undefined)
+                       + entry(0x20, 4, undefined);
+    const char*  key = "system.posix_acl_access";
+    if (::setxattr(file.c_str(), key, acl.data(), acl.size(), 0) != 0)
         SKIP("This file system has no POSIX ACL");
     writeFile(storage, "guarded.txt", "new secret", fs::WriteMode::replace);
     REQUIRE(readDisk(file) == "new secret");
-    REQUIRE(std::system(("getfacl -c '" + file.string() + "' 2>/dev/null | grep -q '^user:nobody:---'").c_str()) == 0);
+    string     kept(256, '\0');
+    const auto size = ::getxattr(file.c_str(), key, kept.data(), kept.size());
+    REQUIRE(size > 0);
+    kept.resize(static_cast<size_t>(size));
+    REQUIRE(kept.find(entry(0x02, 0, nobody)) != string::npos);
     #endif
 }
 
