@@ -291,7 +291,18 @@ SCENARIO("A window that ignores the deadline's close request is declared unrespo
             }
         }
     }
-    GIVEN("an ordinary closure of the window, without any deadline") {
+    GIVEN("an attached client's explicit shutdown that a stuck renderer ignores") {
+        auto automation = enable(std::chrono::milliseconds{100});
+        automation->controller()->poll();
+        automation->controller()->start(checkRequest(*automation->controller()));
+        // --shutdown closes the session and clears the active operation: its deadline can no longer expire.
+        automation->controller()->close("Shutdown requested by an attached client");
+        THEN("the window is still declared unresponsive after the grace") {
+            REQUIRE(eventually([&] { return unresponsive.load() == 1; }));
+            REQUIRE(discovery::list(sessions).empty());
+        }
+    }
+    GIVEN("the window disconnecting by itself") {
         auto automation = enable(std::chrono::milliseconds{50});
         automation->controller()->close("Developer window disconnected");
         THEN("the application is not declared unresponsive, whatever the time it takes to close the automation") {

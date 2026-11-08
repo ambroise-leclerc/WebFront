@@ -306,7 +306,9 @@ export async function loadSnapshot(ts, {read, list, lock, typescript, entries = 
             throw new Error('wf check needs a tsconfig.json or TypeScript entries in webfront.project.json');
         // The directories of the entries, recursively: the files they import are found there.
         const directories = [...new Set(sources.map(entry => entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')) : ''))];
-        const listed = await listProject(snapshot, list, directories.map(directory => [directory, true]), bounds, signal);
+        const listed = await listProject(snapshot, list, [...directories.map(directory => [directory, true]),
+            // The project root, not recursively: a globals.d.ts there applies to entries in any subdirectory.
+            ...(directories.includes('') ? [] : [['', false]])], bounds, signal);
         const wanted = new Set([...sources, ...listed.filter(projectSource(options))]);
         for (const path of wanted) await loadProjectFile(path);
         await loadPackageScopes(wanted);

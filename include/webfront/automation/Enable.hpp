@@ -66,16 +66,16 @@ public:
         // The native deadline of a stuck operation revokes the session and asks the window to close, as the launcher does.
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
-            bool expired = false;
             while (!stop.stop_requested()) {
-                if (session->expire()) {
-                    expired = true;
+                if (session->expire())
                     session->close("Native automation deadline exceeded");
-                }
                 if (session->isClosed()) {
                     binding.closeBrowser();
-                    if (!expired)
-                        return;  // an ordinary closure: the application ends `show()` and calls close() itself
+                    // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure
+                    // report), the window was only asked to close: a stuck renderer ignores it. Only a window that already
+                    // disconnected has nothing left to watch.
+                    if (Object(session->describe()).string("failure") == "Developer window disconnected")
+                        return;
                     const auto deadline = std::chrono::steady_clock::now() + grace;
                     while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});

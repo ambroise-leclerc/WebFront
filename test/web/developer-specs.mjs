@@ -538,6 +538,16 @@ try {
         const declared = await checked([], {bridge: withoutConfig});
         assert(declared.text && declared.output.includes('No type errors in 2 project files'),
             `A project .d.ts must be checked with the entries: ${declared.error}\n${declared.output}`);
+        // A declaration at the project root applies to an entry in a subdirectory, which lists only its own subtree.
+        await writeFile('dts-root/main.ts', "import styles from './style.css';\nexport const name: string = styles;\n");
+        await writeFile('webfront.project.json', JSON.stringify({...manifest, entries: {declarations: 'dts-root/main.ts'}}));
+        const rootUndeclared = await checked([], {bridge: withoutConfig});
+        assert(rootUndeclared.error?.exitCode === 1 && /dts-root\/main\.ts\(1,\d+\): error TS2307/.test(rootUndeclared.output),
+            `An entry in a subdirectory without any declaration must fail: ${rootUndeclared.error}\n${rootUndeclared.output}`);
+        await writeFile('globals.d.ts', "declare module '*.css' { const text: string; export default text; }\n");
+        const rootDeclared = await checked([], {bridge: withoutConfig});
+        assert(rootDeclared.text && rootDeclared.output.includes('No type errors in 2 project files'),
+            `A root .d.ts must be checked with an entry of a subdirectory: ${rootDeclared.error}\n${rootDeclared.output}`);
         await writeFile('webfront.project.json', manifestBeforeDeclarations);
         // A long check is synchronous in its Worker: Ctrl+C terminates it after the grace period, and nothing is written.
         const slow =['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
