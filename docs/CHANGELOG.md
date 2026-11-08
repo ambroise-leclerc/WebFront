@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Writable storage confined to declared roots (#460, ADR-002 3.0, ADR-020 step 4). `fs::Storage` is the contract of a
+  writable storage: stable paginated listing (`list(dir, after, limit)`, at most 1000 entries a page), `status`,
+  `openRead`, `beginWrite(path, createNew | replace)` whose `commit()` renames a temporary file atomically (an uncommitted
+  writer removes it), `createDirectory`, `remove` and `rename` (never replacing). Failures are `fs::StorageError`, a
+  `BridgeError` with a `storage.*` code (`notFound`, `linkRefused`, `unsafeDirectory`, `rootMoved`,
+  `confinementViolated`…) whose message never names the root's host location. `fs::NativeStorage` resolves every path
+  from the opened root, one component at a time, without following links (`openat(O_NOFOLLOW)` on POSIX, `NtCreateFile`
+  relative to the parent handle with reparse points refused on Windows; `LinkPolicy::followInside` follows a relative
+  link that stays inside, POSIX only), checks on every operation that the declared location still designates the root
+  (`rootMoved`), refuses on POSIX a root, a directory or an ancestor another user could move, by its mode or, on macOS,
+  its extended ACL (`unsafeDirectory`; `/tmp`
+  accepted; `RootOptions::shared` lifts the check as a weakened confinement), holds the root and the traversed
+  directories without `FILE_SHARE_DELETE` on Windows, and detects a directory or a root moved by the same user before a
+  commit and after every operation (`confinementViolated`). On POSIX a move by the same user or the superuser after the
+  last check is not prevented. Names starting with `.wf-tmp-`, in any letter case, are reserved to temporary files. A replacing write creates its temporary file private (0600, in a private 0700 directory, without inherited ACL) and its commit gives the new file the group, permission bits and ACL of the file it then replaces (none if it has none), or refuses the replacement; running out of descriptors is not taken for a moved root. `fs::MemoryStorage` is the simulated storage of the tests. `fs::File` reads a
+  `fs::ByteSource`, the extension point for native handles. `safeRelativePath` now also refuses, on every platform, the
+  device names Windows reserves (`CON`, `NUL`, `COM1`…, with any extension) and names ending with a dot or a space.
 - The bridge supports long strings, homogeneous lists of strings, tuples, typed arrays and bitsets, and typed errors
   with application codes. A `cppFunction` callback can return a `webfront::ResultTask<R>` or another sender and answer
   when it completes; disconnecting the browser requests cancellation and drops late answers (#456–#459).
