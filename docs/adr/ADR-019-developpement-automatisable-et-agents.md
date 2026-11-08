@@ -7,6 +7,7 @@
 | 1.0 | 2026-10-28 | Proposée | Ambroise Leclerc | Comparaison des voies d'automatisation, orientation MCP locale et modèle de menace de l'épique #403 ; #402 comme premier cas consommateur. | À renseigner après intégration. |
 | 1.1 | 2026-10-28 | Proposée | Ambroise Leclerc | Contrat d'opérations décrit en JSON Schema et projeté vers plusieurs adaptateurs ; CLI et consignes d'agent comme voie de premier rang ; WebDriver BiDi et WebMCP au comparatif ; exigences propres aux modèles locaux ; précisions sur le premier incrément et la gravité conditionnelle de HTTP. | — |
 | 1.2 | 2026-10-29 | Acceptée | Ambroise Leclerc | Décision fondée sur les livraisons #405, #406 et #407 : contrat v1, CLI/MCP stdio, attachement authentifié, protections et réserves ; qualification de cinq modèles locaux, preuves CI et préparation de la distribution 0.6.3. | [#407](https://github.com/ambroise-leclerc/WebFront/pull/407), tête `4a1c92b`, intégration `22f6795` ; révision ADR `cf1bf15`. |
+| 1.3 | 2026-11-08 | Acceptée | Ambroise Leclerc | Issue #501 : une application consommatrice active l'automatisation par un appel natif explicite (`enableAutomation`), avec les mêmes grants, le même canal privé et la même révocation ; découverte par enregistrement par utilisateur sans capacité (`--list`) ; configuration cliente générée sans grant ni secret. L'exposition de `cppFunction` comme outils MCP typés reste écartée : elle exigerait une liste blanche native, des types bornés et ses propres grants, donc une décision distincte. | Issue #501. |
 
 ## État et portée
 

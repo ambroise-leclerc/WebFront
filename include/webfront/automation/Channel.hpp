@@ -387,6 +387,10 @@ public:
     ~ChannelServer() {
         stop();
     }
+    /// The private endpoint directory a client attaches to.
+    const std::filesystem::path& directory() const {
+        return privateDirectory.path;
+    }
     // Explicit revocation is also used before _Exit, which skips C++ destructors.
     void stop() {
         worker.request_stop();

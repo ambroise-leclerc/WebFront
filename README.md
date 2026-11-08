@@ -260,6 +260,12 @@ local stdio MCP or a JSON CLI, with explicit permissions for check/build/test/pr
 UI inspection/actions. It requires an environment containing automation API v1 (0.6.3 or later),
 built from the sources or obtained from a verified published distribution.
 
+An agent finds what it may drive without being told: `webfront-agent --list` prints the sessions their owners shared
+(project, grants, process and endpoint, never the attachment capability), `webfront-agent --print-mcp-config --attach <dir>`
+prints a ready `.mcp.json`, and `webfront-agent --schema` / `--agent-help` describe the contract. Your own application opts in
+with `webfront::automation::enableAutomation(app, {.grants = {...}, .listen = dir})`, so that the agent drives *its* window
+and callbacks; see [automation of your own application](docs/AUTOMATION.md#automating-your-own-application).
+
 ### 5. Try the result
 
 ![Game of Life running in a native window](docs/images/life-preview.jpg)

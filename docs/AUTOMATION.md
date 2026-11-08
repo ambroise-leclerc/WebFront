@@ -165,6 +165,58 @@ Closing a window without a command result does not imply success.
 MCP operation failures are returned as tool errors or failed run states; clients must inspect
 the result instead of interpreting successful JSON-RPC delivery as a successful build.
 
+## Automating your own application
+
+`webfront-agent` owns its window, so it cannot exercise an application's own `cppFunction` callbacks. An application that
+wants to be driven opts in explicitly; it then keeps its callbacks, and check/build/test/preview/inspect/interact run in
+**its** window. It must have called `bootstrap("developer")` (the developer environment is hosted in its page).
+
+```cpp
+#include <webfront/automation/Enable.hpp>
+
+webfront::NativeApp app{project};
+app.bootstrap("developer");
+app.cppFunction("bf.render", render);                       // stays available to the previewed page
+auto automation = webfront::automation::enableAutomation(
+    app, {.grants = {"check", "build", "inspect", "interact"}, .listen = privateEndpointDirectory});
+app.show(automation->launchPage());                         // the single-use claim selects this window
+automation->close();                                        // revokes the session and removes record and endpoint
+app.shutdown();
+```
+
+Nothing is registered unless `enableAutomation` is called, and the grants, project and endpoint are fixed there by the
+native owner, as with `--allow`/`--listen`. `listen` must be a new directory outside the project. The call prints one line on
+stderr (grants and how to attach; no secret, disable with `announce = false`), `automation->windowTitle(base)` returns a title
+marked as shared, and the terminal's own `wf` keeps working. Then, from another process:
+
+```sh
+webfront-agent --list
+webfront-agent --attach /absolute/private-endpoint --operation check
+```
+
+The native deadline of an operation revokes the session and closes the window, as for the launcher. A callback of the
+application is not an MCP tool: exposing an explicit allow-list of typed callbacks needs its own security decision
+([ADR-019](adr/ADR-019-developpement-automatisable-et-agents.md)) and is not implemented. Enabling automation in a
+distribution build is an application choice: gate the call (for example behind a macro) so that shipped binaries have none.
+
+## Discovering shared sessions
+
+A session with an endpoint (`--serve --listen`, or `enableAutomation`) publishes `<session>.json` in a private per-user
+directory: `%LOCALAPPDATA%\WebFront\sessions` on Windows, `~/Library/Application Support/WebFront/sessions` on macOS,
+`$XDG_STATE_HOME/webfront/sessions` or `~/.local/state/webfront/sessions` elsewhere (`--sessions-dir` overrides it for the
+launcher and for `--list`). On POSIX it must be owned by the user and closed to others, otherwise it is not read. The record has
+the project, grants, process identifier, API version and the endpoint directory, **never the capability**, which stays in the
+private endpoint: listing a session does not let anyone operate it. It is removed on closure and on catchable signals; one
+whose process is gone is dropped by the next `--list`. A recycled process identifier can keep a dead record for a while.
+
+```sh
+webfront-agent --list                                        # {"version":1,"sessions":[{"session":...,"allow":[...],"endpoint":...}]}
+webfront-agent --print-mcp-config --attach /absolute/private-endpoint [--name app] > .mcp.json
+```
+
+The generated configuration is one stdio server `webfront-agent --attach <dir> --mcp`; it carries no grant (the owner's
+process fixes them) and no secret. It is never written into the project manifest.
+
 ## MCP profile and results
 
 The server supports protocol revision **2025-11-25**, initialization, ping and tools. It advertises

@@ -523,8 +523,24 @@ try {
         assert(esm.text && esm.output.includes('No type errors in 1 project file (TypeScript 6.0.3).'), `A valid NodeNext composite project must pass: ${esm.error}\n${esm.output}`);
         assert(await readFile('tsconfig.tsbuildinfo').then(() => false, () => true), 'An incremental check must not write build information');
         await writeFile('tsconfig.json', checkFiles['tsconfig.json']);
+        // Without a tsconfig.json, the project's own .d.ts files are roots: an ambient `declare module '*.css'` types a
+        // side-effect-free `import './style.css'` that nothing else references (#501).
+        await writeFile('dts-check/main.ts', "import styles from './style.css';\nexport const name: string = styles;\n");
+        await writeFile('dts-check/style.css', '.a{}');
+        const withoutConfig = {...checkBridge, cppFunction: name => name !== 'webfront.developer.read' ? checkBridge.cppFunction(name) :
+            (path, offset) => path === 'tsconfig.json' ? Promise.reject(new Error('Cannot read project file: tsconfig.json')) : checkBridge.cppFunction(name)(path, offset)};
+        const manifestBeforeDeclarations = JSON.stringify(manifest);
+        await writeFile('webfront.project.json', JSON.stringify({...manifest, entries: {declarations: 'dts-check/main.ts'}}));
+        const undeclared = await checked([], {bridge: withoutConfig});
+        assert(undeclared.error?.exitCode === 1 && /dts-check\/main\.ts\(1,\d+\): error TS2307/.test(undeclared.output),
+            `A stylesheet import without a declaration must fail: ${undeclared.error}\n${undeclared.output}`);
+        await writeFile('dts-check/style.d.ts', "declare module '*.css' { const text: string; export default text; }\n");
+        const declared = await checked([], {bridge: withoutConfig});
+        assert(declared.text && declared.output.includes('No type errors in 2 project files'),
+            `A project .d.ts must be checked with the entries: ${declared.error}\n${declared.output}`);
+        await writeFile('webfront.project.json', manifestBeforeDeclarations);
         // A long check is synchronous in its Worker: Ctrl+C terminates it after the grace period, and nothing is written.
-        const slow = ['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
+        const slow =['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
         for (let n = 400; n < 1000; ++n) slow.push(`export const v${n}: Build<${n}>['length'] = ${n};`);
         await writeFile('check/slow.ts', slow.join('\n') + '\n');
         const listing = async path => new TextDecoder().decode(await call('list', path));

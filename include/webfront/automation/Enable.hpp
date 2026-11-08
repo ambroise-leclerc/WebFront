@@ -1,0 +1,141 @@
+/// @brief Opt-in automation of a consumer's own developer window.
+///
+/// `enableAutomation(app, options)` mounts the controller (`Session`), the page binding (`Binding`) and the private
+/// attachment endpoint on an application that already called `bootstrap("developer")`, then publishes a discovery
+/// record. `webfront-agent --attach <listen>` then drives that application's own window: check, build, test, preview,
+/// inspect and interact run in the page of the consumer, whose `cppFunction` callbacks stay registered. Nothing is
+/// registered unless this function is called, and the grants are fixed here by the native owner.
+///
+/// ```cpp
+/// webfront::NativeApp app{project};
+/// app.bootstrap("developer");
+/// app.cppFunction("bf.render", render);
+/// auto automation = webfront::automation::enableAutomation(
+///     app, {.grants = {"check", "build", "inspect", "interact"}, .listen = privateDirectory});
+/// app.show(automation->launchPage());
+/// automation->close();
+/// app.shutdown();
+/// ```
+#pragma once
+#include "Binding.hpp"
+#include "Channel.hpp"
+#include "Discovery.hpp"
+
+#include <atomic>
+#include <iostream>
+#include <memory>
+#include <thread>
+
+namespace webfront::automation {
+struct AutomationOptions {
+    /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, and the setup grants). None
+    /// leaves only session discovery.
+    std::vector<std::string> grants;
+    /// A new private directory outside the project that receives the attachment endpoint.
+    std::filesystem::path listen;
+    /// Where the discovery record goes; the per-user default when empty. Tests use their own.
+    std::filesystem::path discovery;
+    /// Per-operation native deadline.
+    std::chrono::seconds timeout{120};
+    /// Whether to tell the human, on stderr, that an agent can attach and with which grants.
+    bool announce = true;
+};
+
+template <typename App>
+class Automation {
+public:
+    /// @throws std::invalid_argument for an unknown grant, a missing `listen` directory, or one inside the project
+    Automation(App& app, AutomationOptions options)
+        : session(make(app, options)),
+          binding(app, session),
+          channel(session, options.listen),
+          registration(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery, record(*session, channel.directory())),
+          grants(std::move(options.grants)),
+          endpointDirectory(channel.directory()) {
+        // The native deadline of a stuck operation revokes the session and closes the window, as the launcher does.
+        supervisor = std::jthread([this](std::stop_token stop) {
+            while (!stop.stop_requested()) {
+                if (session->expire())
+                    session->close("Native automation deadline exceeded");
+                if (session->isClosed()) {
+                    binding.closeBrowser();
+                    return;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds{20});
+            }
+        });
+        if (options.announce)
+            std::cerr << banner() << '\n';
+    }
+    Automation(const Automation&)            = delete;
+    Automation& operator=(const Automation&) = delete;
+    ~Automation() {
+        close();
+    }
+
+    /// The page to give to `app.show()`: it carries the single-use claim that selects this window.
+    std::string launchPage() const {
+        return binding.launchPage();
+    }
+    /// The endpoint directory to give to `webfront-agent --attach`.
+    const std::filesystem::path& endpoint() const {
+        return endpointDirectory;
+    }
+    /// What the human sees: the grants and how to attach. It contains no secret.
+    std::string banner() const {
+        std::string list;
+        for (const auto& grant : grants)
+            list += (list.empty() ? "" : ", ") + grant;
+        return "WebFront automation enabled (grants: " + (list.empty() ? std::string{"none"} : list) + "). Attach with: webfront-agent --attach \""
+               + endpointDirectory.generic_string() + "\" --mcp";
+    }
+    /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
+    std::string windowTitle(std::string_view base) const {
+        return std::string{base} + " [automation]";
+    }
+    /// Revokes the session, withdraws the discovery record and the endpoint. Idempotent; call after `show()` returns.
+    void close(const std::string& reason = "Developer window closed") {
+        session->close(reason);
+        registration.remove();
+        channel.stop();
+        if (supervisor.joinable()) {
+            supervisor.request_stop();
+            if (supervisor.get_id() != std::this_thread::get_id())
+                supervisor.join();
+        }
+    }
+    const std::shared_ptr<Session>& controller() const {
+        return session;
+    }
+
+private:
+    static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
+        if (options.listen.empty())
+            throw std::invalid_argument("Automation needs a new private `listen` directory for its endpoint");
+        return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout});
+    }
+    static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint) {
+        const Object description{session.describe()};
+        return {.session  = description.string("session"),
+                .project  = description.string("project"),
+                .endpoint = endpoint.generic_string(),
+                .allow    = description.raw("allow"),
+                .pid      = discovery::currentProcess()};
+    }
+
+    std::shared_ptr<Session>      session;
+    Binding<App>                  binding;
+    ChannelServer                 channel;
+    discovery::Registration       registration;
+    std::vector<std::string>      grants;
+    std::filesystem::path         endpointDirectory;
+    std::jthread                  supervisor;
+};
+
+/// Enables automation on an application; keep the result alive until after `show()` and call `close()` before
+/// `shutdown()`.
+template <typename App>
+std::unique_ptr<Automation<App>> enableAutomation(App& app, AutomationOptions options) {
+    return std::make_unique<Automation<App>>(app, std::move(options));
+}
+}  // namespace webfront::automation

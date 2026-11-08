@@ -4,8 +4,10 @@
 namespace webfront::automation {
 inline constexpr std::string_view agentInstructions = R"(WebFront developer automation, contract v1
 1. Read `webfront-agent --schema` once. It is the trusted operation contract.
-2. Ask the owner to launch a developer window with --serve --listen DIRECTORY and explicit --allow grants.
-   Attach only to the exact directory supplied by the owner; never discover or read unrelated endpoints.
+2. Run `webfront-agent --list` to see the sessions their owners shared (project, grants, endpoint directory; no secret),
+   or ask the owner to launch a window with --serve --listen DIRECTORY and explicit --allow grants (an application can
+   enable automation itself). Attach only to an endpoint that --list shows or the owner supplied; never read others.
+   `webfront-agent --print-mcp-config --attach DIRECTORY` prints a client configuration for it.
 3. Run `webfront-agent --attach DIRECTORY --operation check` or build/test/preview as authorized.
    Setup operations init, create, install, restore and embed need their own grants and plain arguments.
    Add --entry or --pattern only for the operation that accepts it. No shell string is interpreted.

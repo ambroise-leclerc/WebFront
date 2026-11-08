@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Automation of a consumer's own application and discoverability (#501). `webfront::automation::enableAutomation(app, options)`
+  (`automation/Enable.hpp`) mounts the controller, the page binding and the private attachment endpoint on an application
+  that called `bootstrap("developer")`, so `webfront-agent --attach` drives its own window, with its own `cppFunction`
+  callbacks, under native grants; it registers nothing unless called, announces itself on stderr and offers a window title
+  marker. A shared session publishes a record without capability in a private per-user directory
+  (`%LOCALAPPDATA%\WebFront\sessions`, `~/.local/state/webfront/sessions`, `~/Library/Application Support/WebFront/sessions`),
+  removed on closure and dropped when its process is gone. `webfront-agent --list` prints these records and
+  `--print-mcp-config --attach <dir> [--name n]` prints a `.mcp.json`; `--sessions-dir` overrides the directory.
+  `webfront_add_agent([INSTALL] [DESTINATION dir])` checks and installs the launcher target for `add_subdirectory` and
+  `FetchContent` consumers. `wf check` without a `tsconfig.json` now also roots the project's own `.d.ts` files, so an ambient
+  `declare module '*.css'` applies. Publishing environment 0.6.4 and updating the pin remain a release action.
+
 - The bridge supports long strings, homogeneous lists of strings, tuples, typed arrays and bitsets, and typed errors
   with application codes. A `cppFunction` callback can return a `webfront::ResultTask<R>` or another sender and answer
   when it completes; disconnecting the browser requests cancellation and drops late answers (#456–#459).
