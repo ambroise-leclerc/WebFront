@@ -4,7 +4,9 @@
 #include <webfront/automation/Enable.hpp>
 
 #include <fstream>
+#include <atomic>
 #include <functional>
+#include <thread>
 #include <sstream>
 
 namespace {
@@ -225,6 +227,76 @@ SCENARIO("A consumer enables automation explicitly, with fixed grants and a visi
             REQUIRE(automation->controller()->isClosed());
             REQUIRE(discovery::list(sessions).empty());
             REQUIRE_FALSE(std::filesystem::exists(endpoint / "endpoint.json"));
+        }
+    }
+}
+
+namespace {
+// A renderer running `while (true) {}` never executes the window.close() the supervisor injects: the page never polls
+// again, so the operation's native deadline passes and nothing else ends it.
+Object checkRequest(const Session& session) {
+    return Object(objectJson({
+        {  "session", webfront::json::quote(Object(session.describe()).string("session"))},
+        {"operation",                                    webfront::json::quote("check")},
+        {"arguments",                                                               "{}"}
+    }));
+}
+
+template <typename Predicate>
+bool eventually(Predicate done, std::chrono::milliseconds limit = std::chrono::seconds{10}) {
+    const auto deadline = std::chrono::steady_clock::now() + limit;
+    while (!done() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    return done();
+}
+}  // namespace
+
+SCENARIO("A window that ignores the deadline's close request is declared unresponsive by the consumer's automation") {
+    webfront::test::TemporaryDirectory root;
+    std::filesystem::create_directory(root.path() / "project");
+    ConsumerApp           app{.project = root.path() / "project"};
+    const auto            sessions = root.path() / "sessions";
+    std::atomic<int>      unresponsive{0};
+    const auto            enable = [&](std::chrono::milliseconds grace) {
+        return enableAutomation(app,
+                                {.grants         = {"check"},
+                                 .listen         = root.path() / ("endpoint" + std::to_string(grace.count())),
+                                 .discovery      = sessions,
+                                 .timeout        = std::chrono::seconds{1},
+                                 .closeGrace     = grace,
+                                 .onUnresponsive = [&] { ++unresponsive; },
+                                 .announce       = false});
+    };
+    GIVEN("an operation that never completes and a window that never closes") {
+        auto automation = enable(std::chrono::milliseconds{100});
+        automation->controller()->poll();  // the page is ready, then stops polling
+        automation->controller()->start(checkRequest(*automation->controller()));
+        THEN("past the deadline and the grace, the record and endpoint are withdrawn and the owner is told") {
+            REQUIRE(eventually([&] { return unresponsive.load() == 1; }));
+            REQUIRE(automation->controller()->isClosed());
+            REQUIRE(discovery::list(sessions).empty());
+            REQUIRE_FALSE(std::filesystem::exists(automation->endpoint() / "endpoint.json"));
+        }
+    }
+    GIVEN("a window that does close within the grace after the deadline") {
+        auto automation = enable(std::chrono::seconds{30});
+        automation->controller()->poll();
+        automation->controller()->start(checkRequest(*automation->controller()));
+        REQUIRE(eventually([&] { return automation->controller()->isClosed(); }));
+        WHEN("the application ends show() and closes the automation") {
+            automation->close();
+            THEN("it is never declared unresponsive") {
+                std::this_thread::sleep_for(std::chrono::milliseconds{200});
+                REQUIRE(unresponsive.load() == 0);
+            }
+        }
+    }
+    GIVEN("an ordinary closure of the window, without any deadline") {
+        auto automation = enable(std::chrono::milliseconds{50});
+        automation->controller()->close("Developer window disconnected");
+        THEN("the application is not declared unresponsive, whatever the time it takes to close the automation") {
+            std::this_thread::sleep_for(std::chrono::milliseconds{300});
+            REQUIRE(unresponsive.load() == 0);
         }
     }
 }

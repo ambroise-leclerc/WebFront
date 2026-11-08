@@ -22,8 +22,11 @@
 #include "Discovery.hpp"
 
 #include <atomic>
+#include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 namespace webfront::automation {
@@ -37,6 +40,12 @@ struct AutomationOptions {
     std::filesystem::path discovery;
     /// Per-operation native deadline.
     std::chrono::seconds timeout{120};
+    /// After a deadline revokes the session, how long the window may take to close on its own. `window.close()` cannot run
+    /// in a renderer stuck in a loop, so past this grace the endpoint and record are removed and `onUnresponsive` is called.
+    std::chrono::milliseconds closeGrace{5000};
+    /// What to do with a window that did not close. By default the process ends with status 72 (as `webfront-agent`
+    /// does): `show()` cannot be interrupted from another thread. Set it to close the application another way.
+    std::function<void()> onUnresponsive;
     /// Whether to tell the human, on stderr, that an agent can attach and with which grants.
     bool announce = true;
 };
@@ -51,14 +60,32 @@ public:
           channel(session, options.listen),
           registration(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery, record(*session, channel.directory())),
           grants(std::move(options.grants)),
-          endpointDirectory(channel.directory()) {
-        // The native deadline of a stuck operation revokes the session and closes the window, as the launcher does.
+          endpointDirectory(channel.directory()),
+          grace(options.closeGrace),
+          unresponsive(std::move(options.onUnresponsive)) {
+        // The native deadline of a stuck operation revokes the session and asks the window to close, as the launcher does.
+        // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
+            bool expired = false;
             while (!stop.stop_requested()) {
-                if (session->expire())
+                if (session->expire()) {
+                    expired = true;
                     session->close("Native automation deadline exceeded");
+                }
                 if (session->isClosed()) {
                     binding.closeBrowser();
+                    if (!expired)
+                        return;  // an ordinary closure: the application ends `show()` and calls close() itself
+                    const auto deadline = std::chrono::steady_clock::now() + grace;
+                    while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
+                        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+                    if (!stop.stop_requested()) {
+                        revoke();
+                        if (unresponsive)
+                            unresponsive();
+                        else
+                            std::_Exit(72);
+                    }
                     return;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
@@ -96,8 +123,7 @@ public:
     /// Revokes the session, withdraws the discovery record and the endpoint. Idempotent; call after `show()` returns.
     void close(const std::string& reason = "Developer window closed") {
         session->close(reason);
-        registration.remove();
-        channel.stop();
+        revoke();
         if (supervisor.joinable()) {
             supervisor.request_stop();
             if (supervisor.get_id() != std::this_thread::get_id())
@@ -109,6 +135,14 @@ public:
     }
 
 private:
+    // Withdraws the record and the endpoint once, from whichever thread gets there first.
+    void revoke() {
+        const std::scoped_lock lock{revocation};
+        if (std::exchange(revoked, true))
+            return;
+        registration.remove();
+        channel.stop();
+    }
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
         if (options.listen.empty())
             throw std::invalid_argument("Automation needs a new private `listen` directory for its endpoint");
@@ -129,6 +163,10 @@ private:
     discovery::Registration       registration;
     std::vector<std::string>      grants;
     std::filesystem::path         endpointDirectory;
+    std::chrono::milliseconds     grace;
+    std::function<void()>         unresponsive;
+    std::mutex                    revocation;
+    bool                          revoked = false;
     std::jthread                  supervisor;
 };
 
