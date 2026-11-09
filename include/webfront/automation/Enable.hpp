@@ -60,7 +60,9 @@ struct AutomationOptions {
 template <typename App>
 class Automation {
 public:
-    /// @throws std::invalid_argument for an unknown grant, a missing `listen` directory, or one inside the project
+    /// @throws std::invalid_argument for an unknown grant, an empty `listen` path, or a `listen` directory inside the project
+    /// @throws std::runtime_error (including std::filesystem::filesystem_error) when the endpoint or the discovery directory cannot be
+    ///         created or is refused (an existing one that other users can read). Nothing stays registered in the application.
     Automation(App& app, AutomationOptions options)
         : session(make(app, options)),
           channel(session, options.listen),

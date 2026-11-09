@@ -115,21 +115,32 @@ inline long currentProcess() noexcept {
 
 /// Creates the directory when missing, private to the user on POSIX. An existing directory must already be ours and
 /// closed to other users: a shared or foreign one is refused, never trusted nor changed, so its permissions and the
-/// files it holds are left as they are.
+/// files it holds are left as they are. Whether the directory is new is read before creating it, not from the return value
+/// of create_directories, which some libraries report as false for a path ending in a separator; the directory is then
+/// opened without following a link, and only that descriptor is inspected and changed.
 inline void preparePrivateDirectory(const std::filesystem::path& directory) {
-    const bool created = std::filesystem::create_directories(directory);
+    std::error_code probe;
+    const bool      existed = std::filesystem::exists(std::filesystem::symlink_status(directory, probe));
+    std::filesystem::create_directories(directory);
 #ifndef _WIN32
+    const int descriptor = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (descriptor < 0)
+        throw std::runtime_error("The automation discovery directory must be a real directory");
+    struct Closer {
+        int fd;
+        ~Closer() { ::close(fd); }
+    } closer{descriptor};
     struct stat info{};
-    if (::lstat(directory.c_str(), &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid())
+    if (::fstat(descriptor, &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid())
         throw std::runtime_error("The automation discovery directory must be a directory owned by the current user");
     if ((info.st_mode & 077) != 0) {
-        if (!created)
+        if (existed)
             throw std::runtime_error("The automation discovery directory exists and is not private to the current user");
-        if (::chmod(directory.c_str(), 0700) != 0)
+        if (::fchmod(descriptor, 0700) != 0)
             throw std::runtime_error("Cannot make the automation discovery directory private");
     }
 #else
-    (void)created;
+    (void)existed;
 #endif
 }
 

@@ -18,8 +18,8 @@ include_guard(GLOBAL)
 # enables automation itself (webfront::automation::enableAutomation, docs/AUTOMATION.md); it grants nothing alone.
 function(webfront_add_agent)
     cmake_parse_arguments(ARG "INSTALL" "DESTINATION" "" ${ARGN})
-    if(ARG_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "webfront_add_agent: unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
+    if(ARG_UNPARSED_ARGUMENTS OR ARG_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR "webfront_add_agent: invalid arguments (unknown: ${ARG_UNPARSED_ARGUMENTS}; keywords without a value: ${ARG_KEYWORDS_MISSING_VALUES})")
     endif()
     if(NOT TARGET webfront-agent)
         message(FATAL_ERROR

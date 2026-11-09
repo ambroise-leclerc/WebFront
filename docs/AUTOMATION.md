@@ -229,7 +229,7 @@ directory: `%LOCALAPPDATA%\WebFront\sessions` on Windows, `~/Library/Application
 launcher and for `--list`). On POSIX it must be owned by the user and closed to others, otherwise it is not read. A missing directory is created private (0700); an existing one that others can read is refused and left untouched. The record has
 the project, grants, process identifier, API version and the endpoint directory, **never the capability**, which stays in the
 private endpoint: listing a session does not let anyone operate it. It is removed on closure and on catchable signals; one
-whose process is gone is dropped by the next `--list`. A recycled process identifier can keep a dead record for a while.
+whose process is gone is dropped by the next `--list`. A recycled process identifier can keep a dead record for a while. Discovery is a convenience: if the directory cannot be used (no home, read-only, shared or owned by someone else), `webfront-agent --serve --listen` says so on stderr and serves the session unlisted, while `enableAutomation` throws, so that an application never believes it is listed when it is not.
 
 ```sh
 webfront-agent --list                                        # {"version":1,"sessions":[{"session":...,"allow":[...],"endpoint":...}]}

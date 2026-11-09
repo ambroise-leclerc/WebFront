@@ -816,12 +816,18 @@ int main(int argc, char** argv) {
         std::optional<discovery::Registration> registration;
         if (channel) {
             const Object description{session->describe()};
-            registration.emplace(options.sessionsDirectory.empty() ? discovery::defaultDirectory() : options.sessionsDirectory,
-                                 discovery::Entry{.session  = description.string("session"),
-                                                  .project  = description.string("project"),
-                                                  .endpoint = channel->directory().generic_string(),
-                                                  .allow    = description.raw("allow"),
-                                                  .pid      = discovery::currentProcess()});
+            // Discovery is a convenience: attaching works without it. A directory that cannot be used (no HOME, read-only,
+            // shared or foreign) is reported and the session is served unlisted, as it was before discovery existed.
+            try {
+                registration.emplace(options.sessionsDirectory.empty() ? discovery::defaultDirectory() : options.sessionsDirectory,
+                                     discovery::Entry{.session  = description.string("session"),
+                                                      .project  = description.string("project"),
+                                                      .endpoint = channel->directory().generic_string(),
+                                                      .allow    = description.raw("allow"),
+                                                      .pid      = discovery::currentProcess()});
+            } catch (const std::exception& error) {
+                std::cerr << "Automation: this session is not listed by --list (" << error.what() << ")\n";
+            }
         }
         std::atomic<int>  status{0};
         std::atomic<bool> done{false};

@@ -111,6 +111,15 @@ SCENARIO("A shared session is listed with its grants and never with its capabili
             REQUIRE((info.st_mode & 0777) == 0700);
         }
     }
+    GIVEN("a new discovery directory written with a trailing separator") {
+        const auto directory = root.path() / "slash";
+        discovery::Registration registration{std::filesystem::path{directory.string() + "/"}, entry("alpha")};
+        THEN("it is still new, hence private, and not refused as an existing shared one") {
+            struct stat info{};
+            REQUIRE(::stat(directory.c_str(), &info) == 0);
+            REQUIRE((info.st_mode & 0777) == 0700);
+        }
+    }
     GIVEN("an existing directory that other users can read") {
         const auto directory = root.path() / "shared";
         std::filesystem::create_directory(directory);
