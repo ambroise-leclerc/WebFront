@@ -7,6 +7,7 @@ file(MAKE_DIRECTORY "${WORK}/archive/include/webfront")
 file(WRITE "${WORK}/archive/include/webfront/WebFront.hpp"
     "inline constexpr std::string_view version = \"0.1.0\";\n")
 file(MAKE_DIRECTORY "${WORK}/archive/include/webfront/system" "${WORK}/archive/docs")
+file(WRITE "${WORK}/archive/include/webfront/DeveloperApp.hpp" "inline constexpr int apiVersion      = 1;\n")
 file(WRITE "${WORK}/archive/include/webfront/system/DeveloperReleaseData.hpp"
     "inline constexpr std::string_view version{\"0.6.0\"};\n")
 function(write_table rows)
@@ -47,6 +48,9 @@ check_case("Release without a compatibility row" failure "has no row"
     -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=v0.1.0)
 write_table("| 0.1.0 | 0.5.0 | 1 |\n")
 check_case("Compatibility row that differs from the header" failure "names the environment"
+    -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=v0.1.0)
+write_table("| 0.1.0 | 0.6.0 | 999 |\n")
+check_case("Compatibility row with another minimum api" failure "minimum api"
     -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=v0.1.0)
 write_table("| 0.1.0 | 0.6.0 | 1 |\n")
 

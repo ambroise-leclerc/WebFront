@@ -60,13 +60,24 @@ if(release_tags)
     set(pinned_environment "${CMAKE_MATCH_1}")
     file(READ "${ROOT}/docs/DEVELOPER_ENVIRONMENT.md" environment_document)
     string(REPLACE "." "[.]" version_pattern "${header_version}")
-    if(NOT environment_document MATCHES "\n[|] ${version_pattern} [|] ([^ |]+) [|] [0-9]+ [|]\n")
+    if(NOT environment_document MATCHES "\n[|] ${version_pattern} [|] ([^ |]+) [|] ([0-9]+) [|]\n")
         message(FATAL_ERROR "The compatibility table of docs/DEVELOPER_ENVIRONMENT.md has no row for the library ${header_version}; "
             "freeze it with cmake/DeveloperCompatibility.cmake (MODE=freeze)")
     endif()
-    if(NOT "${CMAKE_MATCH_1}" STREQUAL "${pinned_environment}")
-        message(FATAL_ERROR "The compatibility row of ${header_version} names the environment ${CMAKE_MATCH_1}, "
+    set(row_environment "${CMAKE_MATCH_1}")
+    set(row_api "${CMAKE_MATCH_2}")
+    if(NOT "${row_environment}" STREQUAL "${pinned_environment}")
+        message(FATAL_ERROR "The compatibility row of ${header_version} names the environment ${row_environment}, "
             "but DeveloperReleaseData.hpp pins ${pinned_environment}")
     endif()
-    message(STATUS "Compatibility table: ${header_version} -> environment ${pinned_environment}")
+    # The minimum api is developer::apiVersion of the release commit.
+    file(READ "${ROOT}/include/webfront/DeveloperApp.hpp" application_header)
+    if(NOT application_header MATCHES "apiVersion *= *([0-9]+);")
+        message(FATAL_ERROR "DeveloperApp.hpp has no apiVersion")
+    endif()
+    if(NOT "${row_api}" STREQUAL "${CMAKE_MATCH_1}")
+        message(FATAL_ERROR "The compatibility row of ${header_version} gives the minimum api ${row_api}, "
+            "but developer::apiVersion is ${CMAKE_MATCH_1}")
+    endif()
+    message(STATUS "Compatibility table: ${header_version} -> environment ${pinned_environment}, api ${row_api}")
 endif()
