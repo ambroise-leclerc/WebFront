@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fails when the working tree differs from HEAD on a path outside the closed list of the release commit (ADR-021, decision 1),
-# or when an untracked file exists. The list is the arguments: the release-developer workflow declares it once.
+# or when an untracked file outside the list exists (the files of the list may be changed or new). The list is the arguments: the release-developer workflow declares it once.
 #   check-release-paths.sh <path>...
 set -euo pipefail
 
