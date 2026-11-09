@@ -178,7 +178,11 @@ add_test(NAME ReleaseDeveloperWorkflow
 add_test(NAME ReleaseDeveloperWorkflowRegression
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-workflow-regression
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseWorkflowTests.cmake)
+add_test(NAME DeveloperCompatibilityTable
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-compatibility
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperCompatibility.cmake)
 set_tests_properties(DeveloperPinConsistency DeveloperPinRegression ReleaseDeveloperWorkflow ReleaseDeveloperWorkflowRegression
+    DeveloperCompatibilityTable
     PROPERTIES TIMEOUT 60 LABELS fast)
 add_test(NAME BootstrapProvisioning
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bootstrap-provisioning

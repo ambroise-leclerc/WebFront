@@ -95,6 +95,8 @@ jobs:
       # developer journey starts and runs them. A defect found here costs no version.
       - name: Run the browser suite on the candidate bytes served locally
         run: |
+          # The driver was configured before the version was set: CTest read the former version of distribution.json then.
+          cmake -S . -B build-driver
           cmake --build build-driver --target webtest developer_integration webfront-wf --parallel 2
           xvfb-run -a ctest --test-dir build-driver -L web-integration --output-on-failure --no-tests=error --parallel 2
       - name: Collect the release files

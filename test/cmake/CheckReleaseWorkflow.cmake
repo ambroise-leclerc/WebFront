@@ -116,3 +116,7 @@ endif()
 if(NOT content MATCHES "ctest --test-dir build-driver -L web-integration")
     message(FATAL_ERROR "The rehearsal does not run the browser suite on the candidate bytes")
 endif()
+# CTest reads distribution.json when it configures: the build directory is configured again after the version is set.
+if(NOT content MATCHES "cmake -S [.] -B build-driver\n")
+    message(FATAL_ERROR "The rehearsal does not configure build-driver again after setting the version")
+endif()
