@@ -264,8 +264,8 @@ Call it inside an operation scheduled with `app.uiExecutor()` and do not keep th
 including after the user closed it, so check the object with the toolkit when that matters (`IsWindow`, `-[NSWindow isVisible]`).
 The connection's window is the frontend's single window, reached through the association of ADR-020 rule 3 (`ui.isEmbeddedView()`); the
 system browser never has one. `portalParent` is the `parent_window` of the desktop portals: under WebKitGTK `x11:<hex XID>` when the
-window is on X11, `wayland:<handle>` once `gdk_wayland_toplevel_export_handle` succeeds (retried for 5 s after the window is presented,
-empty until then); it is empty on Windows and macOS. A frontend author calls `nativeWindowHostOf<Frontend>().publish(...)` on the interface
+window is on X11, `wayland:<handle>` once `gdk_wayland_toplevel_export_handle` succeeds (either is tried every 100 ms for 5 s after the window is
+presented, until the surface exists and can be exported; empty until then); it is empty on Windows and macOS. A frontend author calls `nativeWindowHostOf<Frontend>().publish(...)` on the interface
 thread after the window exists and `retract()` before it is destroyed. `publish()` returns the generation of the publication, and an
 answer that completes later (the Wayland export) goes through `setPortalParent(text, generation)`, which drops it when its window was
 withdrawn or replaced by a newer one.

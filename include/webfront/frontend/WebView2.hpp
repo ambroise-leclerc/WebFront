@@ -878,6 +878,9 @@ inline void open(std::string_view address,
                  const WebView2Options& options,
                  const std::function<void(Session&)>& prepare = {}) {
     auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, ""), options.contentPolicy};
+    // One window per process: a second open() on the interface thread is refused before it creates anything.
+    if (uiExecutorHostOf<WebView2Frontend>().executor().available())
+        throw std::logic_error("WebView2Frontend: open() is already running; a process opens one window at a time");
     Apartment                                                apartment;
     LPWSTR                                                   rawVersion = nullptr;
     const auto                                               available  = GetAvailableCoreWebView2BrowserVersionString(nullptr, &rawVersion);

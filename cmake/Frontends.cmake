@@ -436,7 +436,7 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
             set(lifecycle_command "${XVFB_RUN_EXECUTABLE}" -a ${lifecycle_command})
         endif()
         set(lifecycle_modes no-bridge early-close rejected-ready navigation-failure path-encoding content-policy navigation-allow-list view-association)
-        list(APPEND lifecycle_modes ui-executor native-window)
+        list(APPEND lifecycle_modes ui-executor native-window second-open)
         foreach(mode ${lifecycle_modes})
             set(lifecycle_name "${frontend}Lifecycle-${mode}")
             add_test(NAME ${lifecycle_name} COMMAND ${lifecycle_command} ${mode})

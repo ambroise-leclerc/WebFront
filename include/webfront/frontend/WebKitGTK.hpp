@@ -729,30 +729,31 @@ struct Session : FailureState {
     }
     // gdk_wayland_toplevel_export_handle fails until the toplevel has its xdg role: retry every 100 ms for 5 s, then give up
     // (the identifier stays empty and a dialog is simply not parented).
-    static int onPortalTimer(void* data) noexcept {
-        auto* self   = static_cast<Session*>(data);
-        auto  target = self->surface();
-        auto& a      = self->a;
-        if (target && a.instanceIsA && a.waylandToplevelType && a.waylandExport && a.instanceIsA(target, a.waylandToplevelType())) {
-            if (a.waylandExport(target, onWaylandExported, reinterpret_cast<void*>(static_cast<std::uintptr_t>(self->portalGeneration)), nullptr)) {
-                self->portalTimer = 0;
-                return 0;
-            }
-            if (++self->portalAttempts < 50)
-                return 1;
+    // One attempt: true when the identifier is set (X11) or its export was requested (Wayland). False while the surface is not
+    // realized yet or the toplevel cannot be exported yet.
+    bool tryPortalParent() {
+        if (auto x11 = x11PortalParent(); !x11.empty()) {
+            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::move(x11), portalGeneration);
+            return true;
         }
-        self->portalTimer = 0;
-        return 0;
+        const auto target = surface();
+        return target && a.instanceIsA && a.waylandToplevelType && a.waylandExport && a.instanceIsA(target, a.waylandToplevelType())
+               && a.waylandExport(target, onWaylandExported, reinterpret_cast<void*>(static_cast<std::uintptr_t>(portalGeneration)), nullptr);
+    }
+    static int onPortalTimer(void* data) noexcept {
+        auto* self = static_cast<Session*>(data);
+        if (self->tryPortalParent() || ++self->portalAttempts >= 50) {
+            self->portalTimer = 0;
+            return 0;  // done, or given up: the identifier stays empty and a dialog is simply not parented
+        }
+        return 1;  // not ready yet (no surface, no xdg role): try again in 100 ms
     }
     void startPortalExport() {
         // open() published this session's window just before run(): that is the generation current now.
         portalGeneration = nativeWindowHostOf<WebKitGTKFrontend>().generation();
-        if (auto x11 = x11PortalParent(); !x11.empty()) {
-            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::move(x11), portalGeneration);
+        if (tryPortalParent())
             return;
-        }
-        if (!a.waylandExport)
-            return;
+        // GTK realizes the surface and the compositor gives the toplevel its role after present(): retry for 5 s.
         portalTimer = a.timeoutAdd(100, onPortalTimer, this);
     }
 
@@ -779,6 +780,9 @@ struct OpenOptions {
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const OpenOptions& options = {}) {
     initialize();
+    // One window per process: a second open() on the main thread is refused before it creates a window.
+    if (uiExecutorHostOf<WebKitGTKFrontend>().executor().available())
+        throw std::logic_error("WebKitGTKFrontend: open() is already running; a process opens one window at a time");
     Session session(webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), options.contentPolicy}, options.window);
     session.launch = options.launch;
     session.create();

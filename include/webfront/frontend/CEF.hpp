@@ -781,11 +781,11 @@ public:
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {
             captureTarget->browser = browser;
-            // This callback runs on the UI thread, inside the loop whose executor host open() attached.
+            // This callback runs on the UI thread. open() refused a second opening, so this browser is the only one.
             frontend::nativeWindowHostOf<frontend::CEFFrontend>().publish(
                 {.kind = frontend::NativeWindowKind::cef, .pointer = browser.get(), .portalParent = {}});
-        captureTarget->pending.open();
-            captureRegistration    = CaptureRegistration{detail::captureProvider(captureTarget)};
+            captureTarget->pending.open();
+            captureRegistration = CaptureRegistration{detail::captureProvider(captureTarget)};
         }
     }
     virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
@@ -915,6 +915,11 @@ private:
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
                        CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
                        WindowOptions windowSettings = {}, bool preserveSignalHandlers = false, const ViewLaunch& launch = {}) {
+    // One window per process. Refuse a second open() first, before CefInitialize (which succeeds again when the context
+    // exists) and before any view: its browser would reach OnAfterCreated and replace the published window of the running
+    // one, before host.attach() could refuse it, and the first connection's dialogs would be parented to the new window.
+    if (frontend::uiExecutorHostOf<frontend::CEFFrontend>().executor().available())
+        throw std::logic_error("CEFFrontend: open() is already running; a process opens one window at a time");
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
