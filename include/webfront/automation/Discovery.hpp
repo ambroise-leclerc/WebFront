@@ -146,23 +146,28 @@ inline void preparePrivateDirectory(const std::filesystem::path& directory) {
 #endif
 }
 
-/// Removes a file, retrying for a short while on Windows: a reader that has the record open (`list` reads it without
-/// sharing deletion) makes the removal fail with a sharing violation, and giving up would leave a withdrawn session
-/// listed for as long as its process lives. Other failures, and every failure on POSIX, are final.
-inline void removeWithRetry(const std::filesystem::path& file) noexcept {
+/// Whether a failed removal may succeed shortly: on Windows, a reader that has the record open (`list` reads it without
+/// sharing deletion) makes it fail with a sharing or lock violation, or with an access denial while a deletion is pending.
+/// Nothing is transient on POSIX, where unlinking an open file succeeds.
+inline bool transientRemovalFailure([[maybe_unused]] const std::error_code& error) noexcept {
 #ifdef _WIN32
-    constexpr int attempts = 200;
+    return error.category() == std::system_category()
+        && (error.value() == ERROR_SHARING_VIOLATION || error.value() == ERROR_LOCK_VIOLATION || error.value() == ERROR_ACCESS_DENIED);
 #else
-    constexpr int attempts = 1;
+    return false;
 #endif
-    for (int attempt = 0; attempt < attempts; ++attempt) {
+}
+
+/// Removes a file. A transient failure (see `transientRemovalFailure`) is retried until a one second deadline, because
+/// giving up would leave a withdrawn session listed for as long as its process lives; any other failure is final.
+inline void removeWithRetry(const std::filesystem::path& file) noexcept {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+    for (;;) {
         std::error_code error;
         std::filesystem::remove(file, error);
-        if (!error)
+        if (!error || !transientRemovalFailure(error) || std::chrono::steady_clock::now() >= deadline)
             return;
-#ifdef _WIN32
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
-#endif
     }
 }
 
