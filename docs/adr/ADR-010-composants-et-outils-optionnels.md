@@ -82,8 +82,9 @@ Les abonnements UI multiples et l'injection du navigateur appelant demeurent des
 `PackageFS` ne livre plus les ressources des composants : le code navigateur d'un composant facultatif est un
 paquet npm que `wf install` récupère dans un registre, que `wf build` intègre à l'application et que `wf embed`
 embarque dans sa distribution. `@webfront/react` (`js/react/`) en est le modèle ; `@webfront/services`
-(`js/services/`, #461, version 1.8) le suit : façade TypeScript et éléments personnalisés des services
-([ADR-020](ADR-020-services-systeme.md)), déclarations et licence du paquet. `wf run react-package` et
+(`js/services/`, #461, version 1.8) le suit. Il livre pour l'instant un squelette : un objet `services` vide
+et `selfTest()`, avec leurs déclarations et la licence du paquet ; la façade TypeScript et les éléments
+personnalisés des services ([ADR-020](ADR-020-services-systeme.md)) s'y ajouteront avec chaque service. `wf run react-package` et
 `wf run services-package` écrivent une archive déterministe (`js/developer/scripts/package-archive.mjs`) et son
 SHA-512 ; le registre de test sert ces mêmes octets, et la suite installe puis importe l'archive. Aucun de ces
 paquets n'entre dans les ressources du cœur (`MinimalCoreAssets` inchangé) ; la publication reste une action de

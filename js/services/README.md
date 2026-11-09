@@ -2,7 +2,8 @@
 
 Browser side of the optional WebFront system services (see ADR-020). It is installed with
 `wf`, bundled into the application by `wf build`, and embedded by `wf embed`; it is never added
-to the core's embedded resources. Its C++ counterparts live under `include/webfront/services/`.
+to the core's embedded resources. The C++ counterparts will live under `include/webfront/services/`
+as the services are delivered.
 
 This release is a skeleton: `services` is empty and `selfTest()` returns the package name, which
 proves the delivery chain. From the repository's wf project, run `wf run services-package` after
