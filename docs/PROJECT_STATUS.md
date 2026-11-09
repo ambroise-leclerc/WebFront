@@ -30,6 +30,9 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   lifecycle, limits and the supported MCP profile. It requires a compatible environment
   (0.6.3 or later), supplied as a rebuilt archive or verified published distribution. Explicitly shared human windows support authenticated
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
+  An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
+  listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
+  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published and pinned.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers

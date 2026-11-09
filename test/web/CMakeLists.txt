@@ -97,6 +97,22 @@ if(_browser_tests_available AND TARGET webfront-agent)
                 set_tests_properties(${_case} PROPERTIES RESOURCE_LOCK webfront_automation_watchdog)
             endif()
         endforeach()
+        # A consumer application that opted in with enableAutomation (#501), driven by an agent attached from another process.
+        add_executable(automation_consumer AutomationConsumer.cpp)
+        add_dependencies(webtest automation_consumer)
+        target_link_libraries(automation_consumer PRIVATE WebFront WebFront_test_hardening WebFront_options WebFront_warnings)
+        target_compile_definitions(automation_consumer PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+        webfront_setup_frontends_for_target(automation_consumer)
+        add_test(NAME AutomationConsumerWindow COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/test/tools/AutomationClient.py"
+            --scenario consumer --consumer "$<TARGET_FILE:automation_consumer>"
+            --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
+            --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
+            --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project"
+            --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer")
+        set_tests_properties(AutomationConsumerWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
+            LABELS web-integration TIMEOUT 180)
+        webfront_use_own_profile(AutomationConsumerWindow automation-consumer)
         execute_process(COMMAND "${Python3_EXECUTABLE}" -c
             "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
             RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)

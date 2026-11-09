@@ -570,3 +570,61 @@ SCENARIO("MCP errors keep the request id and distinguish a lost transport from b
         }
     }
 }
+
+SCENARIO("An application callback is called only when its name was allow-listed with the call grant") {
+    webfront::test::TemporaryDirectory directory;
+    Session                            session{
+        {.project = directory.path(), .allow = {"call"}, .callbacks = {"app.render", "app.count"}}
+    };
+    Session withoutList{
+        {directory.path(), {"call"}}
+    };
+    Session withoutGrant{
+        {directory.path(), {"check"}}
+    };
+    session.poll();
+    withoutList.poll();
+    withoutGrant.poll();
+    GIVEN("the names the owner allow-listed") {
+        const Object described{session.describe()};
+        REQUIRE(described.raw("callbacks") == R"(["app.render","app.count"])");
+        REQUIRE(Object(withoutList.describe()).raw("callbacks") == "[]");
+        const auto versioned = session.versionedOperations();
+        REQUIRE(versioned.size() == 1);
+        REQUIRE(versioned[0].first == "call");
+        REQUIRE(versioned[0].second == "0.6.6");
+        THEN("a call to one of them, with or without a string argument, is accepted") {
+            const auto id = Object(session.start(command(session, "call", R"({"callback":"app.render","value":"text"})"))).string("runId");
+            REQUIRE(Object(session.poll()).string("operation") == "call");
+            session.complete(id, R"({"exitCode":0,"output":"","report":null,"data":{"callback":"app.render","result":"rendered:text"}})");
+            const auto next = Object(session.start(command(session, "call", R"({"callback":"app.count"})"))).string("runId");
+            session.poll();
+            session.complete(next, R"({"exitCode":0,"output":"","report":null})");
+        }
+    }
+    GIVEN("a callback that was not allow-listed") {
+        THEN("it is refused and audited, whatever its name") {
+            for (const auto* name : {"app.secret", "app.render.extra", "app", "APP.RENDER"})
+                REQUIRE_THROWS_AS(session.start(command(session, "call", std::string(R"({"callback":")") + name + "\"}")), webfront::automation::OperationError);
+            REQUIRE(Object(session.describe()).raw("audit").find("\"decision\":\"denied\"") != std::string::npos);
+        }
+        THEN("a session without a list, or without the grant, refuses every call") {
+            REQUIRE_THROWS(withoutList.start(command(withoutList, "call", R"({"callback":"app.render"})")));
+            REQUIRE_THROWS(withoutGrant.start(command(withoutGrant, "call", R"({"callback":"app.render"})")));
+        }
+    }
+    GIVEN("names and arguments that could reach internals") {
+        THEN("webfront.* names, odd characters and extra arguments are refused before any allow-list lookup") {
+            const auto make = [&](std::vector<std::string> allow, std::vector<std::string> callbacks) {
+                return Session{webfront::automation::SessionOptions{.project = directory.path(), .allow = std::move(allow), .callbacks = std::move(callbacks)}};
+            };
+            REQUIRE_THROWS(make({"call"}, {"webfront.developer.read"}));
+            REQUIRE_THROWS(make({"call"}, {"app render"}));
+            REQUIRE_THROWS(make({"call"}, {""}));
+            REQUIRE_THROWS(make({"check"}, {"app.render"}));  // names need the grant
+            REQUIRE_THROWS(session.start(command(session, "call", "{}")));
+            REQUIRE_THROWS(session.start(command(session, "call", R"({"callback":"app.render","args":"x"})")));
+            REQUIRE_THROWS(session.start(command(session, "call", R"({"callback":"webfront.automation.poll"})")));
+        }
+    }
+}

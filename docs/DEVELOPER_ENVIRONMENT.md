@@ -35,8 +35,8 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
 lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
-runner (`init`, `create`, `install`, `restore`, `embed`). The release pin selects 0.6.5, published under the dedicated
-`developer-v0.6.5` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
+runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. The release pin selects 0.6.6, published under the dedicated
+`developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
 published 0.6.3 and advances in a separate pull request. Publication and pin changes follow
 [PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
@@ -66,10 +66,10 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 0.6.5 release pin selects
-`https://dist.webfront.fr/developer/0.6.5/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
+an exact versioned environment URL and the trusted digest. The 0.6.6 release pin selects
+`https://dist.webfront.fr/developer/0.6.6/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
 smoke test were verified before the pin was merged. Earlier publication gates are recorded for
-[0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
+[0.6.6](validation/developer-0.6.6-release.md), [0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
 0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable, while 0.4.0 and earlier target the former include layout.
 The configuration pins one version and its SHA-512 rather than resolving a mutable `latest` channel. An explicit

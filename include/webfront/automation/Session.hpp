@@ -15,6 +15,8 @@ struct SessionOptions {
     std::filesystem::path    project;
     std::vector<std::string> allow;
     std::chrono::seconds     timeout{120};
+    /// Application callbacks that `call` may invoke, fixed by the native owner. They need the `call` grant, and none refuses every call.
+    std::vector<std::string> callbacks{};
 };
 
 class Session {
@@ -33,6 +35,11 @@ public:
         for (const auto& permission : this->options.allow)
             if (!knownPermission(permission))
                 throw std::invalid_argument("Unknown automation permission: " + permission);
+        for (const auto& callback : this->options.callbacks)
+            if (!callbackName(callback))
+                throw std::invalid_argument("Invalid allow-listed callback name: " + callback);
+        if (!this->options.callbacks.empty() && std::ranges::find(this->options.allow, "call") == this->options.allow.end())
+            throw std::invalid_argument("Allow-listed callbacks need the call grant");
         identity = channel::nonce();
     }
 
@@ -51,7 +58,7 @@ public:
                + json::quote(closed  ? "closed"
                              : ready ? "ready"
                                      : "starting")
-               + ",\"allow\":" + stringArray(options.allow) + ",\"failure\":" + json::quote(failure) + ",\"audit\":" + auditJson() + "}";
+               + ",\"allow\":" + stringArray(options.allow) + ",\"callbacks\":" + stringArray(options.callbacks) + ",\"failure\":" + json::quote(failure) + ",\"audit\":" + auditJson() + "}";
     }
 
     std::string start(const Object& request) {
@@ -71,6 +78,10 @@ public:
         request.only({"session", "operation", "arguments"});
         const Object arguments{request.raw("arguments", "{}")};
         validateArguments(operation, arguments);
+        if (operation == "call" && std::ranges::find(options.callbacks, arguments.string("callback")) == options.callbacks.end()) {
+            audit("denied", "call", "");
+            throw OperationError("not_authorized", "This callback is not allow-listed for call");
+        }
         if (!ready || closed)
             throw OperationError("not_ready", "Developer session is not ready");
         if (active)
@@ -230,6 +241,12 @@ private:
         checked.string("output");
         return status;
     }
+    /// A name an application registered, never an internal `webfront.*` one: letters, digits, `.`, `_`, `-`, at most 128.
+    static bool callbackName(std::string_view name) {
+        return !name.empty() && name.size() <= 128 && !name.starts_with("webfront.") && std::ranges::all_of(name, [](char c) {
+                   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+               });
+    }
     static bool knownPermission(std::string_view name) {
         for (const auto& [operation, definition] : operationDefinitions())
             if (definition.permission == name)
@@ -269,6 +286,8 @@ private:
                 throw std::invalid_argument("Entry must be a project-relative path or manifest entry");
             if (key == "entry" && !value.empty() && !entryLabel(value))
                 fs::safeRelativePath(value);
+            if (key == "callback" && !callbackName(value))
+                throw std::invalid_argument("Callback must be a plain application callback name");
             if (key == "pattern" && value.starts_with('-'))
                 throw std::invalid_argument("Pattern must not be an option");
             if ((key == "name" || key == "starter" || key == "package" || key == "provider")

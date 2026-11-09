@@ -165,6 +165,87 @@ Closing a window without a command result does not imply success.
 MCP operation failures are returned as tool errors or failed run states; clients must inspect
 the result instead of interpreting successful JSON-RPC delivery as a successful build.
 
+## Automating your own application
+
+`webfront-agent` owns its window, so it cannot exercise an application's own `cppFunction` callbacks. An application that
+wants to be driven opts in explicitly; it then keeps its callbacks, and check/build/test/preview/inspect/interact run in
+**its** window. It must have called `bootstrap("developer")` (the developer environment is hosted in its page).
+
+```cpp
+#include <webfront/automation/Enable.hpp>
+
+webfront::NativeApp app{project};
+app.bootstrap("developer");
+app.cppFunction("bf.render", render);                       // stays available to the previewed page
+auto automation = webfront::automation::enableAutomation(
+    app, {.grants = {"check", "build", "inspect", "interact"}, .listen = privateEndpointDirectory});
+app.show(automation->launchPage());                         // the single-use claim selects this window
+automation->close();                                        // revokes the session and removes record and endpoint
+app.shutdown();
+```
+
+Nothing is registered unless `enableAutomation` is called, and the grants, project and endpoint are fixed there by the
+native owner, as with `--allow`/`--listen`. `listen` must be a new directory outside the project. The call prints one line on
+stderr (grants and how to attach; no secret, disable with `announce = false`), `automation->windowTitle(base)` returns a title
+marked as shared, and the terminal's own `wf` keeps working. Then, from another process:
+
+```sh
+webfront-agent --list
+webfront-agent --attach /absolute/private-endpoint --operation check
+```
+
+A lost WebSocket does not prove the native window is gone (a navigation or a broken connection can leave it open, with `show()` still blocked): the record and endpoint are withdrawn at once, but the grace still runs until the application calls `close()` after `show()` returns, so call it promptly. A window that never claims the session (`startupTimeout`, 120 s from the activation) is revoked the same way, since no operation exists for the deadline to expire. The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. Enabling automation in a
+distribution build is an application choice: gate the call (for example behind a macro) so that shipped binaries have none.
+
+### Calling the application's own callbacks
+
+Testing the behavior of the application, not only its interface, needs its C++ callbacks. They are never exported by
+default: the owner names the ones an agent may call and grants `call`.
+
+```cpp
+auto automation = webfront::automation::enableAutomation(
+    app, {.grants = {"check", "build", "preview", "inspect", "interact", "call"}, .callbacks = {"bf.render"},
+          .listen = privateEndpointDirectory});
+```
+
+```sh
+webfront-agent --attach /absolute/private-endpoint --operation call --callback bf.render --value "glider"
+```
+
+`call` takes the `callback` name and at most one string `value`; its result is `data: {callback, result}`, where `result` is a
+string, a number, a boolean, `null` or a list of at most 1000 of those (typed arrays included), and at most 40,000 bytes once serialized; a larger answer fails the run with that reason instead of succeeding without its value. Anything else, a
+`webfront.*` name, a name that is not in the list (matched exactly, never as a pattern) and a session without the grant are
+refused natively and audited, whatever the page or the agent asks; the list cannot come from the project manifest or from
+the agent. The names are visible in the session (`callbacks`), in `--list` and in the terminal notice. The callback runs in
+the application's own process with the application's authority: allow-list only callbacks that are safe to trigger. An
+environment older than 0.6.6 cannot run `call`, and the native owner refuses the grant rather than ignore it. `call` is an
+operation of `webfront.start`, not one MCP tool per callback, so the tool list stays at four. A callback in progress cannot be interrupted: cancelling a `call` keeps the run, the session's lock and the native deadline until the callback returns, then reports it cancelled (its effect is not undone); a callback that never returns ends with the native deadline, which revokes the session.
+
+## Discovering shared sessions
+
+A session with an endpoint (`--serve --listen`, or `enableAutomation`) publishes `<session>.json` in a private per-user
+directory: `%LOCALAPPDATA%\WebFront\sessions` on Windows, `~/Library/Application Support/WebFront/sessions` on macOS,
+`$XDG_STATE_HOME/webfront/sessions` or `~/.local/state/webfront/sessions` elsewhere (`--sessions-dir` overrides it for the
+launcher and for `--list`). On POSIX it must be owned by the user and closed to others, otherwise it is not read. A missing directory is created private (0700); an existing one that others can read is refused and left untouched. The record has
+the project, grants, process identifier, API version and the endpoint directory, **never the capability**, which stays in the
+private endpoint: listing a session does not let anyone operate it. It is removed on closure and on catchable signals; one
+whose process is gone is dropped by the next `--list`. A recycled process identifier can keep a dead record for a while. Discovery is a convenience: if the directory cannot be used (no home, read-only, shared or owned by someone else), `webfront-agent --serve --listen` says so on stderr and serves the session unlisted, while `enableAutomation` throws, so that an application never believes it is listed when it is not.
+
+```sh
+webfront-agent --list                                        # {"version":1,"sessions":[{"session":...,"allow":[...],"endpoint":...}]}
+webfront-agent --print-mcp-config --attach /absolute/private-endpoint [--name app] > .mcp.json
+```
+
+The generated configuration is one stdio server `webfront-agent --attach <dir> --mcp`; it carries no grant (the owner's
+process fixes them) and no secret. It is never written into the project manifest.
+
+`--print-mcp-config` is the client configuration generator (there is no `wf agent init`: the file belongs to the agent's client, not to the
+project, and `wf` cannot know where that client keeps it). Automation is also visible to the person at the window: once connected, the
+terminal prints the grants, the callbacks and the attach path in yellow, `wf help` ends with an `Automation:` line while it lasts, and
+`automation->windowTitle(base)` marks the title. `wf create` writes an `AGENTS.md` beside the starter's sources that tells an agent
+these commands, and the errors that ask for a package (`wf check` without typescript, `wf test` without jasmine-core) name the `install`
+operation. These need environment 0.6.6; an older one shows none of them and still works.
+
 ## MCP profile and results
 
 The server supports protocol revision **2025-11-25**, initialization, ping and tools. It advertises

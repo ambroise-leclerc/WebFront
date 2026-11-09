@@ -94,6 +94,11 @@ public:
         registerBridge(developer::bootstrapConfig(options));
     }
 
+    /// The canonical project directory, empty when none was given.
+    const std::filesystem::path& projectDirectory() const {
+        return project;
+    }
+
     void show(std::string_view page = {}) {
         Base::show(page.empty() ? (store ? "webfront-bootstrap.html" : "index.html") : page);
     }

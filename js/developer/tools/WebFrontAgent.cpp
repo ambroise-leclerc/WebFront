@@ -2,6 +2,7 @@
 // components.
 #include <webfront/automation/Binding.hpp>
 #include <webfront/automation/Channel.hpp>
+#include <webfront/automation/Discovery.hpp>
 #include <webfront/automation/ExitStatus.hpp>
 #include <webfront/automation/Instructions.hpp>
 #include <webfront/automation/Interrupt.hpp>
@@ -516,7 +517,7 @@ using Engine   = std::conditional_t<
 struct Options {
     SessionOptions                     session;
     std::string                        integrity, manifestDirectory, operation;
-    std::filesystem::path              listen;
+    std::filesystem::path              listen, sessionsDirectory;
     std::map<std::string, std::string> arguments;
     bool                               serve = false;
     std::chrono::seconds               startupTimeout{120};
@@ -661,6 +662,43 @@ int attach(int argc, char** argv) {
     return 0;
 }
 
+// `--list [--sessions-dir DIR]`: the sessions their owners shared. Prints their project, grants, process and endpoint
+// directory, never a capability: attaching still needs the private endpoint.
+int listSessions(int argc, char** argv) {
+    std::filesystem::path directory;
+    for (int index = 2; index < argc; ++index) {
+        if (std::string_view(argv[index]) != "--sessions-dir" || ++index == argc)
+            throw std::invalid_argument("Use --list [--sessions-dir <directory>]");
+        directory = argv[index];
+    }
+    std::cout << discovery::listJson(discovery::list(directory.empty() ? discovery::defaultDirectory() : directory)) << '\n';
+    return 0;
+}
+
+// `--print-mcp-config --attach DIR [--name NAME]`: a client configuration (.mcp.json) that attaches to the endpoint.
+// It carries neither grants nor the capability; the owner's process fixes the first and the endpoint file holds the second.
+int printMcpConfiguration(int argc, char** argv) {
+    std::filesystem::path endpoint;
+    std::string           name = "webfront";
+    for (int index = 2; index < argc; ++index) {
+        const std::string flag = argv[index];
+        if ((flag != "--attach" && flag != "--name") || ++index == argc)
+            throw std::invalid_argument("Use --print-mcp-config --attach <endpoint directory> [--name <server>]");
+        if (flag == "--attach")
+            endpoint = std::filesystem::absolute(argv[index]);
+        else
+            name = argv[index];
+    }
+    if (endpoint.empty())
+        throw std::invalid_argument("--print-mcp-config needs --attach <endpoint directory>");
+    // A command given by name is resolved by the client's PATH; a path is made absolute so that it works from any directory.
+    std::filesystem::path agent{argv[0]};
+    if (agent.has_parent_path())
+        agent = std::filesystem::absolute(agent);
+    std::cout << discovery::mcpConfiguration(agent, endpoint, name);
+    return 0;
+}
+
 Options parse(int argc, char** argv) {
     Options result;
     for (int i = 1; i < argc; ++i) {
@@ -686,6 +724,8 @@ Options parse(int argc, char** argv) {
             result.operation = value();
         else if (argument == "--listen")
             result.listen = value();
+        else if (argument == "--sessions-dir")
+            result.sessionsDirectory = value();
         else if (argument == "--serve")
             result.serve = true;
         else if (const auto field = argumentName(argument); !field.empty())
@@ -731,6 +771,10 @@ int main(int argc, char** argv) {
             std::cout << agentInstructions;
             return 0;
         }
+        if (argc >= 2 && std::string_view(argv[1]) == "--list")
+            return listSessions(argc, argv);
+        if (argc >= 2 && std::string_view(argv[1]) == "--print-mcp-config")
+            return printMcpConfiguration(argc, argv);
         if (argc >= 2 && std::string_view(argv[1]) == "--attach")
             return attach(argc, argv);
 #ifndef _WIN32
@@ -759,8 +803,32 @@ int main(int argc, char** argv) {
                        .manifestDirectory = options.manifestDirectory});
         Binding                      binding{app, session};
         std::optional<ChannelServer> channel;
-        if (!options.listen.empty())
+        if (!options.listen.empty()) {
             channel.emplace(session, options.listen);
+            // The terminal of this window tells the human that an agent may attach, with which grants.
+            std::string grants;
+            for (const auto& grant : options.session.allow)
+                grants += (grants.empty() ? "" : ", ") + grant;
+            binding.announce("WebFront automation enabled (grants: " + (grants.empty() ? std::string{"none"} : grants) + "). Attach with: webfront-agent --attach \""
+                             + channel->directory().generic_string() + "\" --mcp");
+        }
+        // A shared session is listed for `--list` until it closes; the record names the endpoint but holds no capability.
+        std::optional<discovery::Registration> registration;
+        if (channel) {
+            const Object description{session->describe()};
+            // Discovery is a convenience: attaching works without it. A directory that cannot be used (no HOME, read-only,
+            // shared or foreign) is reported and the session is served unlisted, as it was before discovery existed.
+            try {
+                registration.emplace(options.sessionsDirectory.empty() ? discovery::defaultDirectory() : options.sessionsDirectory,
+                                     discovery::Entry{.session  = description.string("session"),
+                                                      .project  = description.string("project"),
+                                                      .endpoint = channel->directory().generic_string(),
+                                                      .allow    = description.raw("allow"),
+                                                      .pid      = discovery::currentProcess()});
+            } catch (const std::exception& error) {
+                std::cerr << "Automation: this session is not listed by --list (" << error.what() << ")\n";
+            }
+        }
         std::atomic<int>  status{0};
         std::atomic<bool> done{false};
         std::atomic<bool> finished{false};  // the transport completed its work: a closed session is then a normal ending
@@ -786,6 +854,8 @@ int main(int argc, char** argv) {
                     if (!stop.stop_requested() && !done.load()) {
                         // A normal ending keeps its own status; only an abnormal one is reported as stuck.
                         const int code = status.load() ? status.load() : finished.load() ? 0 : 72;
+                        if (registration)
+                            registration->remove();
                         if (channel)
                             channel->stop();
                         // _Exit skips the destructors. The browser already had the close grace above: end it now.
@@ -832,6 +902,8 @@ int main(int argc, char** argv) {
             }
         }
         session->close("Developer window closed");
+        if (registration)
+            registration->remove();
         transport.request_stop();
         app.shutdown();
         transport.join();

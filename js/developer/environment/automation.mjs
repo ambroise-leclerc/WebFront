@@ -135,6 +135,39 @@ export function createPreviewInspector(frame) {
     };
 }
 
+const answerBytes = 40000;  // what a reported answer may take once escaped, inside the 56,000-byte completion
+/** A callback answer the agent can read: a scalar, or a short list of scalars (typed arrays included), nothing else. */
+function plainAnswer(value, depth = 0) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : String(value);
+    if (depth === 0 && (Array.isArray(value) || ArrayBuffer.isView(value) && !(value instanceof DataView))) {
+        if (value.length > 1000) throw new Error('The callback answered a list longer than 1000 items');
+        return Array.from(value, item => plainAnswer(item, 1));
+    }
+    throw new Error('The callback answered a value that automation does not report');
+}
+
+/** Calls one application callback that its native owner allow-listed (the native session already checked the name). */
+export async function callApplication(bridge, {callback, value}, signal) {
+    if (typeof callback !== 'string' || !callback || callback.startsWith('webfront.')) throw new Error('Not an application callback');
+    if (typeof bridge?.cppFunction !== 'function') throw new Error('The application bridge is not available');
+    const pending = bridge.cppFunction(callback)(...(value === undefined ? [] : [value]));
+    // A callback in progress cannot be interrupted from here: the run, the session's lock and the native deadline stay
+    // until it returns, so that no other operation overlaps it. A cancellation is reported once it has.
+    let answer;
+    try {
+        answer = plainAnswer(await pending);
+    } catch (error) {
+        if (signal?.aborted) throw new Error('Cancelled: the callback ran to its end and failed');
+        throw error;
+    }
+    if (signal?.aborted) throw new Error('Cancelled once the callback returned; its effect was not undone');
+    // An answer that cannot be reported is a failure with its reason, never a success without its value.
+    if (new TextEncoder().encode(serializeMessage(answer)).length > answerBytes) throw new Error(`The callback answered more than ${answerBytes} bytes, which cannot be reported`);
+    return answer;
+}
+
 const resultBytes = 56000;  // under the 60,000-byte native message limit and the bridge's 16-bit string length
 /** Shrinks a result's output until its JSON, which escapes control characters to six bytes each, fits one bridge string. */
 export function fitCompletion(result) {
@@ -147,7 +180,7 @@ export function fitCompletion(result) {
         result={...report,output:result.output,truncated:true};
     }
     while (size(result) > resultBytes && result.output.length) result = {...result, output: clipText(result.output, result.output.length >> 1,true), truncated: true};
-    return size(result) > resultBytes ? {exitCode: result.exitCode, output: 'The result is too large to report', truncated: true} : result;
+    return size(result) > resultBytes ? {exitCode: result.exitCode === 0 ? 1 : result.exitCode, output: 'The result is too large to report', truncated: true} : result;
 }
 
 /** One active native run, cooperatively cancellable; poll stays responsive while a command runs. */
@@ -171,7 +204,10 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
                 let result;
                 try {
                     const args = request.arguments ?? {};
-                    if (['inspect','click','fill'].includes(request.operation)) {
+                    if (request.operation === 'call') {
+                        result = await exclusive(context, async () => ({exitCode:0, output:'', report:null,
+                            data:{callback:args.callback, result:await callApplication(context.bridge, args, controller.signal)}}));
+                    } else if (['inspect','click','fill'].includes(request.operation)) {
                         result = await exclusive(context, async () => ({exitCode:0, output:'', report:null,
                             data:request.operation === 'inspect' ? inspector.inspect() : inspector.action(request.operation,args)}));
                     } else {
@@ -207,12 +243,13 @@ export function createAutomationRunner({run, exclusive, context, inspector, onSt
 }
 
 /** `call(name, ...args)` invokes a native automation callback; the page that connects holds its capability. */
-export function connectAutomation({bridge, call, preview, run, exclusive, ...context}) {
+export function connectAutomation({bridge, call, preview, run, exclusive, notice, ...context}) {
     if (typeof call !== 'function') throw new Error('Automation needs the page capability to call native code');
     const panel = document.createElement('section');
     panel.setAttribute('aria-label','Developer automation');
     const status = document.createElement('output');
     status.textContent = 'Automation connected';
+    if (notice) announceAutomation(notice);
     const stop = document.createElement('button');
     stop.textContent = 'Stop automation operation';
     panel.append(status,stop);
@@ -242,4 +279,26 @@ export function connectAutomation({bridge, call, preview, run, exclusive, ...con
     };
     void poll();
     return close;
+}
+
+const noticeEvent = 'webfront-automation';
+/** The sentence that tells the human, in the terminal, that an agent may drive this window (set by the native owner). */
+export function automationNotice() {
+    return typeof globalThis.webfrontAutomationNotice === 'string' ? globalThis.webfrontAutomationNotice : '';
+}
+/** What `wf help` adds while automation is connected: nothing otherwise. */
+export const automationHelp = () => automationNotice() ? `\nAutomation: ${automationNotice()}` : '';
+/** Control characters are removed: the text comes from the native owner but ends up in a terminal. */
+export function announceAutomation(text) {
+    const clean = String(text ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 512);
+    if (!clean) return;
+    globalThis.webfrontAutomationNotice = clean;
+    document.dispatchEvent(new CustomEvent(noticeEvent, {detail: clean}));
+}
+/** Calls `show(text)` for the notice that is already set and for the one that comes later; returns the unsubscribe. */
+export function onAutomationNotice(show) {
+    const listener = event => show(event.detail);
+    document.addEventListener(noticeEvent, listener);
+    if (automationNotice()) show(automationNotice());
+    return () => document.removeEventListener(noticeEvent, listener);
 }
