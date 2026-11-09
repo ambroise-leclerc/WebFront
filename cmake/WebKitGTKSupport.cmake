@@ -12,7 +12,6 @@ endif()
 # The adapter uses dlopen rather than linking GTK into all executables (including CEF subprocesses).
 # Do not propagate its SDK include paths or GTK/GLib headers through WebFront.
 target_compile_definitions(WebFront INTERFACE WEBFRONT_EMBED_WEBKITGTK)
-target_link_libraries(WebFront INTERFACE ${CMAKE_DL_LIBS})
 
 include("${CMAKE_CURRENT_LIST_DIR}/../test/cmake/WebKitGTKTestEnvironment.cmake")
 
