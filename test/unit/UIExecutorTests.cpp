@@ -407,6 +407,23 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             CHECK_FALSE(Browser::uiExecutor().available());
         }
     }
+    GIVEN("several stop requests arriving while the loop exits") {
+        launches = 0;
+        std::atomic<bool> finished{false};
+        std::jthread     client([&] {
+            const auto executor = Browser::uiExecutor();
+            REQUIRE(waitFor([&] { return executor.available(); }));
+            // Each request may queue a source in the platform loop: none may outlive it or touch what it freed.
+            while (!finished)
+                Browser::requestStop();
+        });
+        THEN("the loop ends") {
+            Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
+            finished = true;
+            client.join();
+            CHECK_FALSE(Browser::uiExecutor().available());
+        }
+    }
     GIVEN("a launcher that fails") {
         THEN("no executor is left attached") {
             CHECK_THROWS(Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) { throw std::runtime_error("no browser"); }));

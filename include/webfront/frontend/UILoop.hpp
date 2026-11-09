@@ -287,6 +287,7 @@ public:
     void (*loopRun)(Object)                                              = nullptr;
     void (*loopQuit)(Object)                                             = nullptr;
     void (*loopUnref)(Object)                                            = nullptr;
+    Object (*loopRef)(Object)                                            = nullptr;
     unsigned (*idleAddFull)(int, int (*)(void*), void*, void (*)(void*)) = nullptr;
     void (*contextWakeup)(Object)                                        = nullptr;
 
@@ -311,6 +312,7 @@ private:
         bind(module, loopRun, "g_main_loop_run");
         bind(module, loopQuit, "g_main_loop_quit");
         bind(module, loopUnref, "g_main_loop_unref");
+        bind(module, loopRef, "g_main_loop_ref");
         bind(module, idleAddFull, "g_idle_add_full");
         bind(module, contextWakeup, "g_main_context_wakeup");
     }
@@ -340,12 +342,15 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
             nullptr);
     });
     CloseGuard guard{host, stop};
-    // Quitting from an idle callback happens inside the loop: a request before g_main_loop_run is not lost.
+    // Quitting from an idle callback happens inside the loop: a request before g_main_loop_run is not lost. Each pending
+    // source owns a reference to the loop (released when the source is destroyed, run or not), so one that is still queued
+    // when run() returns, from a second request during the exit, never reaches a freed loop.
     static const auto quitLoop = +[](void* data) -> int {
         GLib::get().loopQuit(data);
         return 0;
     };
-    if (stop.arm([&glib, loop] { glib.idleAddFull(defaultIdle, quitLoop, loop, nullptr); }))
+    static const auto releaseLoop = +[](void* data) { GLib::get().loopUnref(data); };
+    if (stop.arm([&glib, loop] { glib.idleAddFull(defaultIdle, quitLoop, glib.loopRef(loop), releaseLoop); }))
         return;
     glib.loopRun(loop);
 }
