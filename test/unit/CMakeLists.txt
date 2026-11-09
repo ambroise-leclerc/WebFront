@@ -167,6 +167,19 @@ add_test(NAME ReleaseVersionRegression
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-version-regression
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseVersionTests.cmake)
+add_test(NAME DeveloperPinConsistency
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperPin.cmake)
+add_test(NAME DeveloperPinRegression
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-pin-regression
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperPinTests.cmake)
+add_test(NAME ReleaseDeveloperWorkflow
+    COMMAND ${CMAKE_COMMAND} -DWORKFLOW=${PROJECT_SOURCE_DIR}/.github/workflows/ReleaseDeveloper.yml
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseWorkflow.cmake)
+add_test(NAME ReleaseDeveloperWorkflowRegression
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-workflow-regression
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseWorkflowTests.cmake)
+set_tests_properties(DeveloperPinConsistency DeveloperPinRegression ReleaseDeveloperWorkflow ReleaseDeveloperWorkflowRegression
+    PROPERTIES TIMEOUT 60 LABELS fast)
 add_test(NAME BootstrapProvisioning
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bootstrap-provisioning
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBootstrapProvisioning.cmake)
@@ -176,6 +189,11 @@ if(UNIX)
     add_test(NAME RunWithDeadline COMMAND ${CMAKE_COMMAND} -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/RunWithDeadline.sh
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRunWithDeadline.cmake)
     set_tests_properties(RunWithDeadline PROPERTIES TIMEOUT 60 LABELS fast)
+    # The closed list of paths of the developer release commit (ADR-021).
+    add_test(NAME ReleasePathsClosedList
+        COMMAND ${CMAKE_COMMAND} -DSCRIPT=${PROJECT_SOURCE_DIR}/js/developer/tools/check-release-paths.sh
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-paths -DBASH=bash -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleasePaths.cmake)
+    set_tests_properties(ReleasePathsClosedList PROPERTIES TIMEOUT 60 LABELS fast)
     find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
     find_package(Git QUIET)
     if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)

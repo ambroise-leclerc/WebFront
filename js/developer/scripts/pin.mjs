@@ -17,19 +17,30 @@ export default async function (context) {
     const marker = `developer/${version}/environment.tgz`;
     if (!url.endsWith('/' + marker) || header !== bootstrapHeader(version, url.slice(0, -marker.length), integrity))
         throw new Error(`DeveloperReleaseData.hpp is not the header generated for the published ${version}`);
-    // The archive is fetched where the distribution is served now. A version pinned under a previous address (the
-    // github.io one, which redirects to the custom domain without CORS headers, so that a browser cannot follow it) is the
-    // same file there: the pinned integrity is what proves it.
-    const current = baseUrl(JSON.parse(await project.readText('js/developer/tools/distribution.json')).baseUrl);
+    // (ii) The pinned URL itself: on the origin of baseUrl, or under the declared migration waiver (ADR-021).
+    const distribution = JSON.parse(await project.readText('js/developer/tools/distribution.json'));
+    const current = baseUrl(distribution.baseUrl);
+    const {waiver, warning} = pinOrigin(url, current, distribution.previousBase);
+    // (i) The bytes, fetched where the distribution is served now: the pinned integrity proves the file.
     const served = new URL(marker, current).href;
     const response = await context.fetch(served, {signal: context.signal});
     if (!response.ok) throw new Error(`The pinned environment ${served} is not published (${response.status})`);
     if (await sriOf(new Uint8Array(await response.arrayBuffer())) !== integrity)
         throw new Error(`The published ${served} does not have the pinned integrity`);
+    if (waiver) {
+        context.console.warn(`WARNING: ${warning}`);
+    } else if (served !== url) {
+        // (ii) and (iii): the script's fetch rejects a redirect, and a cross-origin fetch from its Worker succeeds only
+        // with valid CORS headers.
+        let pinned;
+        try {
+            pinned = await context.fetch(url, {signal: context.signal});
+        } catch (error) {
+            throw new Error(`The pinned ${url} cannot be fetched without redirection and with CORS headers: ${error.message}`);
+        }
+        if (pinned.status !== 200) throw new Error(`The pinned ${url} answers ${pinned.status}, not 200`);
+        if (await sriOf(new Uint8Array(await pinned.arrayBuffer())) !== integrity)
+            throw new Error(`The archive at the pinned ${url} does not have the pinned integrity`);
+    }
     context.console.log(`DeveloperReleaseData.hpp pins the published ${version}.`);
-    // The check above proves the bytes, not that a browser can start from the pinned address: when that address is not
-    // the one the distribution is served from, the pinned URL redirects without CORS headers and an application built with
-    // this header cannot start its developer environment until a version pinned on the current address is published.
-    if (new URL(url).origin !== new URL(current).origin)
-        context.console.log(`WARNING: the pinned ${url} is not on ${new URL(current).origin}; its redirect carries no CORS headers, so a browser cannot start the developer environment from this pin.`);
 }

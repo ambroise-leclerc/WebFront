@@ -6,6 +6,14 @@ endif()
 file(MAKE_DIRECTORY "${WORK}/archive/include/webfront")
 file(WRITE "${WORK}/archive/include/webfront/WebFront.hpp"
     "inline constexpr std::string_view version = \"0.1.0\";\n")
+file(MAKE_DIRECTORY "${WORK}/archive/include/webfront/system" "${WORK}/archive/docs")
+file(WRITE "${WORK}/archive/include/webfront/system/DeveloperReleaseData.hpp"
+    "inline constexpr std::string_view version{\"0.6.0\"};\n")
+function(write_table rows)
+    file(WRITE "${WORK}/archive/docs/DEVELOPER_ENVIRONMENT.md"
+        "<!-- compatibility-table:begin -->\n| Library | Environment | Minimum api |\n| --- | --- | --- |\n| unreleased | 0.6.0 | 1 |\n${rows}<!-- compatibility-table:end -->\n")
+endfunction()
+write_table("| 0.1.0 | 0.6.0 | 1 |\n")
 
 function(check_case description expected_result expected_message)
     execute_process(COMMAND "${CMAKE_COMMAND}" "-DROOT=${WORK}/archive" ${ARGN}
@@ -34,6 +42,13 @@ check_case("Malformed release tag" failure "must have the form"
     -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=release-0.1.0)
 check_case("Empty release tag" failure "must have the form"
     -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=)
+write_table("")
+check_case("Release without a compatibility row" failure "has no row"
+    -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=v0.1.0)
+write_table("| 0.1.0 | 0.5.0 | 1 |\n")
+check_case("Compatibility row that differs from the header" failure "names the environment"
+    -DEXPECTED_VERSION=0.1.0 -DRELEASE_TAG=v0.1.0)
+write_table("| 0.1.0 | 0.6.0 | 1 |\n")
 
 find_package(Git REQUIRED QUIET)
 # Use a fresh repository on every run; keep the archive fixture independent of it.

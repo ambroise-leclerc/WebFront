@@ -49,3 +49,24 @@ foreach(tag IN LISTS release_tags)
     endif()
 endforeach()
 message(STATUS "WebFront.hpp/CMake version: ${header_version}; release tags checked: ${release_tags}")
+
+# ADR-021: a released library version has a row in the compatibility table of docs/DEVELOPER_ENVIRONMENT.md, and that row
+# names the environment that the header of the release commit pins.
+if(release_tags)
+    file(READ "${ROOT}/include/webfront/system/DeveloperReleaseData.hpp" pin_header)
+    if(NOT pin_header MATCHES "version\{\"([^\"]*)\"\}")
+        message(FATAL_ERROR "DeveloperReleaseData.hpp has no version")
+    endif()
+    set(pinned_environment "${CMAKE_MATCH_1}")
+    file(READ "${ROOT}/docs/DEVELOPER_ENVIRONMENT.md" environment_document)
+    string(REPLACE "." "[.]" version_pattern "${header_version}")
+    if(NOT environment_document MATCHES "\n[|] ${version_pattern} [|] ([^ |]+) [|] [0-9]+ [|]\n")
+        message(FATAL_ERROR "The compatibility table of docs/DEVELOPER_ENVIRONMENT.md has no row for the library ${header_version}; "
+            "freeze it with cmake/DeveloperCompatibility.cmake (MODE=freeze)")
+    endif()
+    if(NOT "${CMAKE_MATCH_1}" STREQUAL "${pinned_environment}")
+        message(FATAL_ERROR "The compatibility row of ${header_version} names the environment ${CMAKE_MATCH_1}, "
+            "but DeveloperReleaseData.hpp pins ${pinned_environment}")
+    endif()
+    message(STATUS "Compatibility table: ${header_version} -> environment ${pinned_environment}")
+endif()

@@ -1,0 +1,67 @@
+# Regression for CheckDeveloperPin.cmake: each normal state is accepted and each inconsistency of ADR-021 fails.
+cmake_minimum_required(VERSION 3.31)
+if(NOT ROOT OR NOT WORK)
+    message(FATAL_ERROR "ROOT and WORK are required")
+endif()
+
+string(REPEAT "A" 86 digest_a)
+string(REPEAT "B" 86 digest_b)
+
+function(fixture directory sources header bootstrap)
+    file(REMOVE_RECURSE "${WORK}/${directory}")
+    file(MAKE_DIRECTORY "${WORK}/${directory}/js/developer/tools" "${WORK}/${directory}/include/webfront/system"
+        "${WORK}/${directory}/cmake")
+    file(WRITE "${WORK}/${directory}/js/developer/tools/distribution.json" "{\"version\": \"${sources}\", \"baseUrl\": \"https://dist.example/\"}")
+    # header and bootstrap are "<version>[:<url version>[:<digest>]]".
+    foreach(kind header bootstrap)
+        string(REPLACE ":" ";" parts "${${kind}}")
+        list(GET parts 0 version)
+        list(LENGTH parts count)
+        set(url_version "${version}")
+        set(digest "${digest_a}")
+        if(count GREATER 1)
+            list(GET parts 1 url_version)
+        endif()
+        if(count GREATER 2)
+            list(GET parts 2 digest)
+            set(digest "${digest_${digest}}")
+        endif()
+        set(${kind}_version "${version}")
+        set(${kind}_url "https://dist.example/developer/${url_version}/environment.tgz")
+        set(${kind}_digest "sha512-${digest}==")
+    endforeach()
+    file(WRITE "${WORK}/${directory}/include/webfront/system/DeveloperReleaseData.hpp"
+        "inline constexpr std::string_view version{\"${header_version}\"};\n"
+        "inline constexpr std::string_view environment{\"${header_url}\"};\n"
+        "inline constexpr std::string_view integrity{\"${header_digest}\"};\n")
+    file(WRITE "${WORK}/${directory}/cmake/WebFrontBootstrap.cmake"
+        "set(WEBFRONT_BOOTSTRAP_VERSION \"${bootstrap_version}\")\n"
+        "set(WEBFRONT_BOOTSTRAP_URL \"${bootstrap_url}\")\n"
+        "set(WEBFRONT_BOOTSTRAP_INTEGRITY \"${bootstrap_digest}\")\n")
+endfunction()
+
+function(check description expected message sources header bootstrap)
+    fixture(case "${sources}" "${header}" "${bootstrap}")
+    execute_process(COMMAND "${CMAKE_COMMAND}" "-DROOT=${WORK}/case" -P "${ROOT}/test/cmake/CheckDeveloperPin.cmake"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(expected STREQUAL "accept" AND NOT result EQUAL 0)
+        message(FATAL_ERROR "${description}: refused: ${output}${error}")
+    elseif(expected STREQUAL "refuse" AND result EQUAL 0)
+        message(FATAL_ERROR "${description}: accepted")
+    endif()
+    if(NOT "${output}${error}" MATCHES "${message}")
+        message(FATAL_ERROR "${description}: missing diagnostic '${message}': ${output}${error}")
+    endif()
+endfunction()
+
+# Normal states.
+check("(a) sources ahead of the header" accept "Developer pin: [(]a[)]" 0.6.6 0.6.5 0.6.5)
+check("(b) sources equal to the header" accept "Developer pin: [(]b[)]" 0.6.5 0.6.5 0.6.5)
+check("(c) bootstrap earlier than the header" accept "bootstrap 0.6.4" 0.6.6 0.6.5 0.6.4)
+check("(c) bootstrap earlier, sources equal" accept "bootstrap 0.6.4" 0.6.5 0.6.5 0.6.4)
+# Inconsistencies.
+check("header newer than the sources" refuse "newer than distribution.json" 0.6.4 0.6.5 0.6.4)
+check("header that is not its version's" refuse "not the header of its version" 0.6.6 0.6.5:0.6.4 0.6.4)
+check("bootstrap ahead of the header" refuse "ahead of the header" 0.6.6 0.6.4 0.6.5)
+check("bootstrap that is not its version's" refuse "not the one of its version" 0.6.6 0.6.5 0.6.4:0.6.3)
+check("bootstrap equal to the header, other integrity" refuse "both name" 0.6.6 0.6.5 0.6.5:0.6.5:b)

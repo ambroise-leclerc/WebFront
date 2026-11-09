@@ -583,6 +583,26 @@ a missing archive and archives with an incompatible protocol or API. `BootstrapP
 configure-time provisioning (verified download, reuse, local directory, wrong digest, malformed value). The Linux CEF CI job
 blocks the public network after the configure step.
 
+## Compatibility table
+
+Which environment accompanies which library version (ADR-021). The two cycles are independent: the first row, **unreleased**,
+is the environment pinned by `develop` and is rewritten by the `release-developer` workflow at each pin; preparing a library
+release freezes it into a row carrying that library's version (`cmake -DROOT=. -DMODE=freeze -DLIBRARY_VERSION=<x.y.z> -P
+cmake/DeveloperCompatibility.cmake`, from the `DeveloperReleaseData.hpp` of the release commit). `CheckReleaseVersion.cmake`
+fails a `v*` tag whose version has no row, or whose row differs from that header. A release published without a new
+environment therefore reuses the previous one. "Minimum api" is `developer::apiVersion` (see the compatibility contract
+above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 predates the pin.
+
+<!-- compatibility-table:begin -->
+| Library | Environment | Minimum api |
+| --- | --- | --- |
+| unreleased | 0.6.6 | 1 |
+| 0.8.0 | 0.6.3 | 1 |
+| 0.7.0 | 0.6.3 | 1 |
+| 0.6.0 | 0.6.3 | 1 |
+| 0.5.0 | 0.6.2 | 1 |
+<!-- compatibility-table:end -->
+
 ## Dependencies, storage and limitations
 
 - `wf install` accepts exact versions, registry tags and semver ranges, resolves ordinary
