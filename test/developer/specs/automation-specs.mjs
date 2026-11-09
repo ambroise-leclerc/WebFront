@@ -58,7 +58,7 @@ describe('Developer automation', () => {
     it('calls an application callback and reports only plain answers', async () => {
         const calls=[], completed=[];
         const answers={'app.echo':async (...args) => {calls.push(args); return 'answer:'+args.join(',');}, 'app.list':async () => new Uint8Array([1,2,3]),
-            'app.object':async () => ({secret:true}), 'app.never':() => new Promise(() => {})};
+            'app.object':async () => ({secret:true}), 'app.huge':async () => 'x'.repeat(60000), 'app.never':() => new Promise(() => {})};
         const bridge={cppFunction:name => answers[name] ?? (async () => { throw new Error('missing '+name); })};
         const runner=createAutomationRunner({context:{bridge},exclusive,inspector:{},run:async () => { throw new Error('call is not a wf command'); },
             complete:async (_id,result) => {completed.push(result);}});
@@ -73,11 +73,17 @@ describe('Developer automation', () => {
         expect(completed[2].data.result).toEqual([1,2,3]);
         expect(completed[3].exitCode).toBe(1);
         expect(completed[4].exitCode).toBe(1);
+        await runner.start({runId:'g',operation:'call',arguments:{callback:'app.huge'}});
+        // A value that cannot be reported is a failure that says so, never a success without it.
+        expect(completed[5].exitCode).toBe(1);
+        expect(completed[5].output).toContain('cannot be reported');
+        expect(completed[5].data).toBeUndefined();
+        expect(fitCompletion({exitCode:0,output:'',report:null,data:{result:'x'.repeat(60000)}}).exitCode).toBe(1);
         const work=runner.start({runId:'f',operation:'call',arguments:{callback:'app.never'}});
         await Promise.resolve();
         runner.cancel('f');
         await work;
-        expect(completed[5].exitCode).toBe(130);
+        expect(completed[6].exitCode).toBe(130);
     });
 
     it('tells the person in the terminal and in wf help that automation is connected, without control characters', async () => {

@@ -135,6 +135,7 @@ export function createPreviewInspector(frame) {
     };
 }
 
+const answerBytes = 40000;  // what a reported answer may take once escaped, inside the 56,000-byte completion
 /** A callback answer the agent can read: a scalar, or a short list of scalars (typed arrays included), nothing else. */
 function plainAnswer(value, depth = 0) {
     if (value === null || value === undefined) return null;
@@ -154,7 +155,10 @@ export async function callApplication(bridge, {callback, value}, signal) {
     const pending = bridge.cppFunction(callback)(...(value === undefined ? [] : [value]));
     void Promise.resolve(pending).catch(() => {});
     const interrupted = new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), {once:true}));
-    return plainAnswer(await Promise.race([pending, interrupted]));
+    const answer = plainAnswer(await Promise.race([pending, interrupted]));
+    // An answer that cannot be reported is a failure with its reason, never a success without its value.
+    if (new TextEncoder().encode(serializeMessage(answer)).length > answerBytes) throw new Error(`The callback answered more than ${answerBytes} bytes, which cannot be reported`);
+    return answer;
 }
 
 const resultBytes = 56000;  // under the 60,000-byte native message limit and the bridge's 16-bit string length
@@ -169,7 +173,7 @@ export function fitCompletion(result) {
         result={...report,output:result.output,truncated:true};
     }
     while (size(result) > resultBytes && result.output.length) result = {...result, output: clipText(result.output, result.output.length >> 1,true), truncated: true};
-    return size(result) > resultBytes ? {exitCode: result.exitCode, output: 'The result is too large to report', truncated: true} : result;
+    return size(result) > resultBytes ? {exitCode: result.exitCode === 0 ? 1 : result.exitCode, output: 'The result is too large to report', truncated: true} : result;
 }
 
 /** One active native run, cooperatively cancellable; poll stays responsive while a command runs. */

@@ -213,7 +213,7 @@ webfront-agent --attach /absolute/private-endpoint --operation call --callback b
 ```
 
 `call` takes the `callback` name and at most one string `value`; its result is `data: {callback, result}`, where `result` is a
-string, a number, a boolean, `null` or a list of at most 1000 of those (typed arrays included). Anything else, a
+string, a number, a boolean, `null` or a list of at most 1000 of those (typed arrays included), and at most 40,000 bytes once serialized; a larger answer fails the run with that reason instead of succeeding without its value. Anything else, a
 `webfront.*` name, a name that is not in the list (matched exactly, never as a pattern) and a session without the grant are
 refused natively and audited, whatever the page or the agent asks; the list cannot come from the project manifest or from
 the agent. The names are visible in the session (`callbacks`), in `--list` and in the terminal notice. The callback runs in
