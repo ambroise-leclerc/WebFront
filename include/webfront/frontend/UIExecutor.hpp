@@ -68,13 +68,23 @@ public:
             if (phase != Phase::running)
                 return false;
             queue.push_back(job);
-            wake = wakeFunction;
-            ++wakesInFlight;  // close() waits for it: the wake may use what the loop frees once it has closed
+            // One notification per pass: while one is pending, the next drain() will see this job too.
+            if (!wakePending) {
+                wakePending = true;
+                wake        = wakeFunction;
+                ++wakesInFlight;  // close() waits for it: the wake may use what the loop frees once it has closed
+            }
         }
+        if (!wake)
+            return true;
         try {
             Done done{*this};
             wake();
         } catch (...) {
+            {
+                std::lock_guard lock(mutex);
+                wakePending = false;
+            }
             remove(job);
             job->fail(std::current_exception());
         }
@@ -91,6 +101,7 @@ public:
         if (phase == Phase::running)
             throw std::logic_error("UIExecutorHost::attach: a loop is already attached");
         wakeFunction = std::move(wake);
+        wakePending  = false;
         uiThread     = std::this_thread::get_id();
         phase        = Phase::running;
     }
@@ -102,7 +113,8 @@ public:
         std::size_t batch{};
         {
             std::lock_guard lock(mutex);
-            batch = queue.size();
+            wakePending = false;  // from here on a new job asks for a new pass
+            batch       = queue.size();
         }
         for (; batch > 0; --batch) {
             std::shared_ptr<UIJob> job;
@@ -118,9 +130,10 @@ public:
         std::function<void()> wake;
         {
             std::lock_guard lock(mutex);
-            if (queue.empty() || phase != Phase::running)
-                return;
-            wake = wakeFunction;
+            if (queue.empty() || phase != Phase::running || wakePending)
+                return;  // nothing left, or a job queued meanwhile already asked for the next pass
+            wakePending = true;
+            wake        = wakeFunction;
             ++wakesInFlight;
         }
         // A wake that throws leaves the rest for the next one: any later schedule() wakes the loop again.
@@ -128,6 +141,8 @@ public:
             Done done{*this};
             wake();
         } catch (...) {
+            std::lock_guard lock(mutex);
+            wakePending = false;
         }
     }
 
@@ -158,6 +173,7 @@ private:
     mutable std::mutex                 mutex;
     std::condition_variable            wakesDone;
     unsigned                           wakesInFlight{0};
+    bool                               wakePending{false};
     Phase                              phase{Phase::idle};
     std::thread::id                    uiThread;
     std::function<void()>              wakeFunction;

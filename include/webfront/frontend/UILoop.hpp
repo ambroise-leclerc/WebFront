@@ -23,6 +23,7 @@
     #include <windows.h>
 #elif defined(__APPLE__)
     #include <dlfcn.h>
+    #include <pthread.h>
 #elif defined(__linux__)
     #include <dlfcn.h>
 #endif
@@ -303,6 +304,9 @@ private:
 };
 
 inline void run(UIExecutorHost& host, UILoopStop& stop) {
+    // AppKit belongs to the main thread: fail before initializing it or attaching the executor.
+    if (!pthread_main_np())
+        throw std::runtime_error("UI loop: the system browser's interface loop must run on the main thread on macOS");
     const auto& cf = CoreFoundation::get();
     const AppKitPump pump;
     CoreFoundation::SourceContext context{};

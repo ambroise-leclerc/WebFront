@@ -424,6 +424,22 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
             CHECK_FALSE(Browser::uiExecutor().available());
         }
     }
+#if defined(__APPLE__)
+    GIVEN("a thread that is not the main thread") {
+        THEN("the loop fails before attaching anything") {
+            bool threw{false};
+            std::thread([&] {
+                try {
+                    Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) { });
+                } catch (const std::runtime_error&) {
+                    threw = true;
+                }
+            }).join();
+            CHECK(threw);
+            CHECK_FALSE(Browser::uiExecutor().available());
+        }
+    }
+#endif
     GIVEN("a launcher that fails") {
         THEN("no executor is left attached") {
             CHECK_THROWS(Browser::loop("127.0.0.1", "9002", "index.html", [](const std::string&) { throw std::runtime_error("no browser"); }));
@@ -572,7 +588,7 @@ SCENARIO("A pass of the interface thread runs a bounded batch") {
             host.drain();
             THEN("only the operations queued before the pass ran, and the loop is woken for the rest") {
                 CHECK(chain.completed == 1);
-                CHECK(wakes >= 2);
+                CHECK(wakes == 2);
             }
         }
         WHEN("the loop keeps draining after each wake") {
@@ -584,6 +600,7 @@ SCENARIO("A pass of the interface thread runs a bounded batch") {
             THEN("every operation ran, one per pass, and the loop got the thread back in between") {
                 CHECK(chain.completed == chain.limit);
                 CHECK(passes == chain.limit);
+                CHECK(wakes <= passes + 1);  // one notification per pass: they never pile up in the native queue
             }
         }
         host.close();
