@@ -173,6 +173,71 @@ int checkUIExecutor() {
     return 0;
 }
 
+// Reads the native window on the interface thread, from an operation of the executor.
+struct WindowReader {
+    using receiver_concept = webfront::networking::ex::receiver_tag;
+    std::promise<webfront::frontend::NativeWindowResult>* result;
+    webfront::frontend::NativeWindow                      window;
+    auto                                                  get_env() const noexcept {
+        return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
+    }
+    void set_value() && noexcept {
+        result->set_value(window.get());
+    }
+    void set_stopped() && noexcept {
+        result->set_value(std::unexpected(webfront::frontend::NativeWindowError::closed));
+    }
+    void set_error(std::exception_ptr) && noexcept {
+        result->set_value(std::unexpected(webfront::frontend::NativeWindowError::unsupported));
+    }
+};
+
+// The native window of the frontend: absent before open, refused to other threads, given on the interface thread while the
+// window lives, and gone once it closed.
+int checkNativeWindow() {
+    using webfront::frontend::NativeWindowError;
+    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    const auto window   = app.nativeWindow();
+    const auto executor = app.uiExecutor();
+    if (window.get().error_or(NativeWindowError::closed) != NativeWindowError::notOpen)
+        throw std::runtime_error("The window is given (or has a wrong error) before the window opens");
+    std::atomic<bool> error = false;
+    std::string       message;
+    std::jthread      client([&] {
+        try {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (window.get().error_or(NativeWindowError::closed) == NativeWindowError::notOpen) {
+                if (std::chrono::steady_clock::now() > deadline)
+                    throw std::runtime_error("The window was never published");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (window.get().error_or(NativeWindowError::notOpen) != NativeWindowError::wrongThread)
+                throw std::runtime_error("The window was given to a thread that is not the interface thread");
+            std::promise<webfront::frontend::NativeWindowResult> answer;
+            auto operation = webfront::networking::ex::connect(executor.schedule(), WindowReader{&answer, window});
+            auto future    = answer.get_future();
+            webfront::networking::ex::start(operation);
+            if (future.wait_for(std::chrono::seconds(30)) != std::future_status::ready)
+                throw std::runtime_error("The read on the interface thread never completed");
+            const auto read = future.get();
+            if (!read)
+                throw std::runtime_error("The window was not given on the interface thread");
+            if (!read->pointer)
+                throw std::runtime_error("The native window is a null pointer");
+        } catch (const std::exception& e) {
+            message = e.what();
+            error   = true;
+        }
+    });
+    app.show("no-bridge.html");
+    client.join();
+    if (error)
+        throw std::runtime_error(message);
+    if (window.get().error_or(NativeWindowError::notOpen) != NativeWindowError::closed)
+        throw std::runtime_error("The window is still given after the window closed");
+    return 0;
+}
+
 int expectNavigationFailure() {
     try {
         webfront::testdriver::QuietFrontend<Frontend>::open("0", "index.html");
@@ -339,6 +404,7 @@ int run(std::string_view mode) {
         });
     cases.emplace("navigation-failure", expectNavigationFailure);
     cases.emplace("ui-executor", checkUIExecutor);
+    cases.emplace("native-window", checkNativeWindow);
     cases.emplace("view-association", checkViewAssociation);
     const auto selected = cases.find(mode);
     if (selected == cases.end())

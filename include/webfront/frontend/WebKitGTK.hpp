@@ -6,6 +6,7 @@
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
+#include "NativeWindow.hpp"
 #include "ScriptDialogs.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
@@ -28,6 +29,7 @@
 
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)
     #include <cstdint>
+    #include <cstdio>
     #include <cstdlib>
     #include <exception>
 
@@ -141,6 +143,15 @@ public:
     Object (*scriptNew)(const char*, int, int, const char* const*, const char* const*) = symbol<decltype(scriptNew)>("webkit_user_script_new");
     void (*scriptAdd)(Object, Object)                           = symbol<decltype(scriptAdd)>("webkit_user_content_manager_add_script");
     void (*scriptUnref)(Object)                                 = symbol<decltype(scriptUnref)>("webkit_user_script_unref");
+    // Portal identifier of the window (ADR-020): the backend's own symbols exist only when GTK was built with it, so each is
+    // optional and a missing one leaves the identifier empty.
+    Object (*nativeSurface)(Object)                             = optionalSymbol<decltype(nativeSurface)>("gtk_native_get_surface");
+    int (*instanceIsA)(Object, std::uintptr_t)                  = optionalSymbol<decltype(instanceIsA)>("g_type_check_instance_is_a");
+    std::uintptr_t (*x11SurfaceType)()                          = optionalSymbol<decltype(x11SurfaceType)>("gdk_x11_surface_get_type");
+    unsigned long (*x11Xid)(Object)                             = optionalSymbol<decltype(x11Xid)>("gdk_x11_surface_get_xid");
+    std::uintptr_t (*waylandToplevelType)()                     = optionalSymbol<decltype(waylandToplevelType)>("gdk_wayland_toplevel_get_type");
+    int (*waylandExport)(Object, void (*)(Object, const char*, void*), void*, void (*)(void*)) =
+        optionalSymbol<decltype(waylandExport)>("gdk_wayland_toplevel_export_handle");
 };
 
 inline Api& api() {
@@ -327,6 +338,8 @@ struct Session : FailureState {
     bool                                 closed            = false;
     bool                                 initialNavigation = true;
     unsigned                             navigationTimer   = 0;
+    unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
+    int                                  portalAttempts    = 0;
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
@@ -337,6 +350,8 @@ struct Session : FailureState {
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;
     ~Session() {
+        if (portalTimer)
+            a.sourceRemove(std::exchange(portalTimer, 0));
         stopNavigationTimer();
         releaseDownloads();
         releaseView();
@@ -692,12 +707,58 @@ struct Session : FailureState {
         return 0;
     }
 
+    /// The GdkSurface of the window, once GTK has realized it (null before).
+    Api::Object surface() const {
+        return a.nativeSurface ? a.nativeSurface(window) : nullptr;
+    }
+    /// "x11:<hex XID>" under X11, empty otherwise (Wayland's identifier is exported asynchronously, see startPortalExport).
+    std::string x11PortalParent() const {
+        const auto target = surface();
+        if (!target || !a.instanceIsA || !a.x11SurfaceType || !a.x11Xid || !a.instanceIsA(target, a.x11SurfaceType()))
+            return {};
+        char text[32];
+        std::snprintf(text, sizeof text, "x11:%lx", a.x11Xid(target));
+        return text;
+    }
+    static void onWaylandExported(Api::Object, const char* handle, void*) {
+        // The host ignores it once the window is withdrawn; nothing here points into a session.
+        if (handle)
+            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::string("wayland:") + handle);
+    }
+    // gdk_wayland_toplevel_export_handle fails until the toplevel has its xdg role: retry every 100 ms for 5 s, then give up
+    // (the identifier stays empty and a dialog is simply not parented).
+    static int onPortalTimer(void* data) noexcept {
+        auto* self   = static_cast<Session*>(data);
+        auto  target = self->surface();
+        auto& a      = self->a;
+        if (target && a.instanceIsA && a.waylandToplevelType && a.waylandExport && a.instanceIsA(target, a.waylandToplevelType())) {
+            if (a.waylandExport(target, onWaylandExported, nullptr, nullptr)) {
+                self->portalTimer = 0;
+                return 0;
+            }
+            if (++self->portalAttempts < 50)
+                return 1;
+        }
+        self->portalTimer = 0;
+        return 0;
+    }
+    void startPortalExport() {
+        if (auto x11 = x11PortalParent(); !x11.empty()) {
+            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::move(x11));
+            return;
+        }
+        if (!a.waylandExport)
+            return;
+        portalTimer = a.timeoutAdd(100, onPortalTimer, this);
+    }
+
     void run(const std::string& url) {
         rethrowIfFailed();
         if (closed)
             return;
         navigationTimer = a.timeoutAdd(30'000, onNavigationTimeout, this);
         a.windowPresent(window);
+        startPortalExport();
         a.load(view, url.c_str());
         if (!closed)
             a.loopRun(loop);
@@ -732,12 +793,17 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
             &host,
             nullptr);
     });
+    // GTK realizes the window at present(): run() then sets the X11 identifier, and the Wayland one arrives later.
+    auto& windowHost = nativeWindowHostOf<WebKitGTKFrontend>();
+    windowHost.publish({.kind = NativeWindowKind::gtk, .pointer = session.window, .portalParent = {}});
     struct Closing {
-        UIExecutorHost& host;
+        UIExecutorHost&   host;
+        NativeWindowHost& windowHost;
         ~Closing() {
+            windowHost.retract();
             host.close();
         }
-    } closing{host};
+    } closing{host, windowHost};
     session.run(applicationUrl(address, port, file));
 }
 
@@ -751,6 +817,11 @@ struct WebKitGTKFrontend {
     /// The main thread while open() runs the GLib loop (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {
         return uiExecutorHostOf<WebKitGTKFrontend>().executor();
+    }
+
+    /// The GtkWindow, readable on the main thread while open() runs (see NativeWindow.hpp).
+    [[nodiscard]] static NativeWindow nativeWindow() {
+        return nativeWindowHostOf<WebKitGTKFrontend>().window();
     }
 
     static constexpr Action action{Action::closeServerAfterOpen};

@@ -9,6 +9,7 @@
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "ScriptDialogs.hpp"
+#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -780,6 +781,9 @@ public:
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {
             captureTarget->browser = browser;
+            // This callback runs on the UI thread, inside the loop whose executor host open() attached.
+            frontend::nativeWindowHostOf<frontend::CEFFrontend>().publish(
+                {.kind = frontend::NativeWindowKind::cef, .pointer = browser.get(), .portalParent = {}});
         captureTarget->pending.open();
             captureRegistration    = CaptureRegistration{detail::captureProvider(captureTarget)};
         }
@@ -790,6 +794,7 @@ public:
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
         if (captureTarget->browser && captureTarget->browser->IsSame(browser)) {
+            frontend::nativeWindowHostOf<frontend::CEFFrontend>().retract();
             captureRegistration = {};
             detail::abandonCaptures(*captureTarget);
         }
@@ -994,6 +999,7 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
         struct Closing {
             frontend::UIExecutorHost& host;
             ~Closing() {
+                frontend::nativeWindowHostOf<frontend::CEFFrontend>().retract();  // also when the loop ends before OnBeforeClose
                 host.close();
             }
         } closing{host};

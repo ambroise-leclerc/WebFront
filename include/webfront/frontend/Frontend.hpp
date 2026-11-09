@@ -7,6 +7,7 @@
 #include "CEF.hpp"
 #include "DefaultBrowser.hpp"
 #include "NativeWebView.hpp"
+#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "UILoop.hpp"
 #include "WebView2.hpp"
@@ -138,6 +139,11 @@ struct CEFFrontend {
         return uiExecutorHostOf<CEFFrontend>().executor();
     }
 
+    /// The application's CefBrowser, readable on CEF's UI thread while open() runs (see NativeWindow.hpp).
+    [[nodiscard]] static NativeWindow nativeWindow() {
+        return nativeWindowHostOf<CEFFrontend>().window();
+    }
+
     static void initialize() {
         try {
             cef::initialize();
@@ -245,6 +251,15 @@ struct NativeOrBrowserFrontendFor {
             else
                 return {};
         }
+    }
+
+    /// The window of the one in use; the system browser has none.
+    [[nodiscard]] static NativeWindow nativeWindow() {
+        if (usesNativeWindow()) {
+            if constexpr (requires { { Native::nativeWindow() } -> std::same_as<NativeWindow>; })
+                return Native::nativeWindow();
+        }
+        return {};
     }
 
     // Called once per process by BasicWF (std::call_once). It resets the decision, so a direct caller must not

@@ -245,6 +245,32 @@ then keeps running, as with the plain browser. On macOS it sets `NSApplication` 
 it is still Regular. A frontend author implements it with `UIExecutorHost`: `attach(wake)` on the interface thread, `drain()` when woken,
 `close()` when the loop ends (`uiExecutorHostOf<Frontend>()` gives the process-wide host).
 
+## Native window
+
+The native dialogs of ADR-020 need the window that parents them. `app.nativeWindow()` returns a `frontend::NativeWindow` handle and
+`ui.nativeWindow()` the window of one connection; both give a `std::expected<NativeWindowHandle, NativeWindowError>` from `get()`.
+The handle carries `kind` (`win32`: `HWND`, `cocoa`: `NSWindow*`, `gtk`: `GtkWindow*`, `cef`: `CefBrowser*`), the `pointer`, and `portalParent`.
+
+| Error | Meaning |
+| --- | --- |
+| `unsupported` | the frontend has no native window (system browser, test double) |
+| `notEmbedded` | `ui.nativeWindow()` only: the connection is not the view of the frontend's window (remote client, system browser, loopback peer) |
+| `notOpen` | the window is not created yet |
+| `closed` | the loop ended; the window is gone |
+| `wrongThread` | not called on the interface thread: toolkit objects belong to it |
+
+Call it inside an operation scheduled with `app.uiExecutor()` and do not keep the pointer. The window stays published until the loop ends,
+including after the user closed it, so check the object with the toolkit when that matters (`IsWindow`, `-[NSWindow isVisible]`).
+The connection's window is the frontend's single window, reached through the association of ADR-020 rule 3 (`ui.isEmbeddedView()`); the
+system browser never has one. `portalParent` is the `parent_window` of the desktop portals: under WebKitGTK `x11:<hex XID>` when the
+window is on X11, `wayland:<handle>` once `gdk_wayland_toplevel_export_handle` succeeds (retried for 5 s after the window is presented,
+empty until then); it is empty on Windows and macOS. A frontend author calls `nativeWindowHostOf<Frontend>().publish(...)` on the interface
+thread after the window exists and `retract()` before it is destroyed.
+
+Manual check of a parented dialog (to run on each platform with the first native backend): open a native dialog parented to
+`ui.nativeWindow()` from an `app.uiExecutor()` operation; it must open over the application's window, stay on top of it, block it as
+the platform does and return focus to it. Not run yet: no native dialog exists before the ADR-020 native backend.
+
 ## Native window with browser fallback
 
 Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine or CEF is
