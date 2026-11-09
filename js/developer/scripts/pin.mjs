@@ -6,21 +6,41 @@
 // The header must be exactly the one generated for its version, and the archive at its URL must have its integrity.
 import {baseUrl, bootstrapHeader, sriOf} from '../tools/distribution.mjs';
 
-/** The numeric core and the prerelease of a version: an earlier prerelease precedes its release. */
+/** The numeric core and the dot-separated prerelease identifiers of a version (the names of distribution.json). */
 function versionOrder(version) {
-    const match = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(version);
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version);
     if (!match) throw new Error(`Invalid version ${version}`);
-    return {core: match.slice(1, 4).map(Number), prerelease: match[4]};
+    return {core: match.slice(1, 4).map(Number), prerelease: match[4]?.split('.')};
+}
+
+const numeric = identifier => /^\d+$/.test(identifier);
+
+/** The precedence of two prerelease identifiers (SemVer 2.0.0, 11.4): numbers numerically, below text, text in ASCII order. */
+function compareIdentifiers(a, b) {
+    if (numeric(a) && numeric(b)) return Math.sign(Number(a) - Number(b));
+    if (numeric(a)) return -1;
+    if (numeric(b)) return 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The SemVer 2.0.0 precedence of two versions: negative when a precedes b, 0 when they are equal, positive otherwise. */
+export function compareVersions(a, b) {
+    const left = versionOrder(a);
+    const right = versionOrder(b);
+    for (let index = 0; index < 3; index++) if (left.core[index] !== right.core[index]) return Math.sign(left.core[index] - right.core[index]);
+    // A prerelease precedes its release.
+    if (!left.prerelease || !right.prerelease) return (left.prerelease ? -1 : 0) - (right.prerelease ? -1 : 0);
+    for (let index = 0; index < Math.min(left.prerelease.length, right.prerelease.length); index++) {
+        const order = compareIdentifiers(left.prerelease[index], right.prerelease[index]);
+        if (order !== 0) return order;
+    }
+    // With equal leading identifiers, the shorter list precedes the longer one.
+    return Math.sign(left.prerelease.length - right.prerelease.length);
 }
 
 /** Whether version a precedes version b. */
 export function precedes(a, b) {
-    const left = versionOrder(a);
-    const right = versionOrder(b);
-    for (let index = 0; index < 3; index++) if (left.core[index] !== right.core[index]) return left.core[index] < right.core[index];
-    if (left.prerelease === right.prerelease) return false;
-    if (left.prerelease === undefined) return false;
-    return right.prerelease === undefined || left.prerelease < right.prerelease;
+    return compareVersions(a, b) < 0;
 }
 
 /**
