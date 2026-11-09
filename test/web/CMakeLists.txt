@@ -589,8 +589,16 @@ if(_browser_tests_available)
         webfront_add_self_build_test(ReactAdapterPackage 0 "run|react-package" OUTPUT "React adapter:" REQUIRES SelfBuildInstalled
             PROVIDES ReactAdapterPackaged)
         add_test(NAME ReactAdapterPackageContents COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
-            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-package-check -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReactPackage.cmake)
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-package-check -DDIRECTORY=react -DLABEL=React "-DFILES=index.mjs;index.d.ts;README.md;LICENSE"
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckPackage.cmake)
         set_tests_properties(ReactAdapterPackageContents PROPERTIES FIXTURES_REQUIRED ReactAdapterPackaged LABELS "web-integration" TIMEOUT 30)
+        # @webfront/services (#461): the same chain, from its own sources to the exact archive that the registry serves.
+        webfront_add_self_build_test(ServicesPackage 0 "run|services-package" OUTPUT "Services package:" REQUIRES SelfBuildInstalled
+            PROVIDES ServicesPackaged)
+        add_test(NAME ServicesPackageContents COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/services-package-check -DDIRECTORY=services -DLABEL=Services "-DFILES=index.mjs;index.d.ts;README.md;LICENSE"
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckPackage.cmake)
+        set_tests_properties(ServicesPackageContents PROPERTIES FIXTURES_REQUIRED ServicesPackaged LABELS "web-integration" TIMEOUT 30)
         # Developer specs migrated by #344 remain in the browser under the repository's locked Jasmine.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)

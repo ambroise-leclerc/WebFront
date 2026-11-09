@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `@webfront/services` package (#461, ADR-010 1.8, ADR-020 step 4). The browser side of the optional system services is
+  delivered outside the core, like `@webfront/react`: `js/services/` (a skeleton: an empty frozen `services` object and
+  `selfTest()`, declarations, license), `wf run services-package` for its deterministic archive and SHA-512, the same
+  bytes in the test registry, and a Jasmine spec that imports the installed archive. The archive packager is shared with
+  `react-package` (`js/developer/scripts/package-archive.mjs`) and `CheckPackage.cmake` verifies both. No core resource
+  is added. Publication to npm remains a separate maintainer action.
 - Writable storage confined to declared roots (#460, ADR-002 3.0, ADR-020 step 4). `fs::Storage` is the contract of a
   writable storage: stable paginated listing (`list(dir, after, limit)`, at most 1000 entries a page), `status`,
   `openRead`, `beginWrite(path, createNew | replace)` whose `commit()` renames a temporary file atomically (an uncommitted

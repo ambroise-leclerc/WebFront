@@ -50,7 +50,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.10 — 2026-10-20 |
 | [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) | Restricting bridge origins without promising a sandbox | Accepted through 1.0; 1.1 and 1.2 proposed | 2026-10-18 | 1.2 — 2026-11-04 |
 | [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.5 — 2026-10-25 |
-| [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.7 — 2026-10-23 |
+| [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.8 — 2026-11-09 |
 | [ADR-011](ADR-011-diagnostics-optionnels.md) | Confining mddlog behind an optional diagnostics façade | Accepted | 2026-10-01 | 1.2 — 2026-10-02 |
 | [ADR-012](ADR-012-preuves-et-tests.md) | Demonstrating contracts through deterministic tests and browser integration | Accepted | 2020-04-19 | 1.6 — 2026-10-19 |
 | [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
@@ -60,7 +60,7 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.5 — 2026-10-30 |
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted | 2026-10-28 | 1.2 — 2026-10-29 |
-| [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.7 — 2026-11-05 |
+| [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.8 — 2026-11-09 |
 | [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
 
 Numbering follows the reading topics; milestones and individual file histories provide

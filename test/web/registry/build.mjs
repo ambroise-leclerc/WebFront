@@ -7,6 +7,7 @@
 // build-registry/, next to an integrities.json of every package.
 import {realPackage, syntheticPackages, registryFiles} from './fixture.mjs';
 import {reactPackage} from '../../../js/developer/scripts/react-package.mjs';
+import {servicesPackage} from '../../../js/developer/scripts/services-package.mjs';
 
 export default async function (context) {
     if (context.args.length) throw new Error('Usage: wf run test-registry');
@@ -15,8 +16,9 @@ export default async function (context) {
     if (!archives.length) throw new Error('registry-archives holds no archive');
     const packages = [];
     for (const name of archives) packages.push(await realPackage(await project.read(`registry-archives/${name}`)));
-    // Preserve exactly the same archive bytes that `wf run react-package` writes.
+    // Preserve exactly the same archive bytes that `wf run react-package` and `wf run services-package` write.
     packages.push(await reactPackage(project));
+    packages.push(await servicesPackage(project));
     const {files, integrities} = await registryFiles([...packages, ...syntheticPackages()]);
     for (const [name, bytes] of files) await project.write(`build-registry/${name}`, bytes);
     await project.write('build-registry/integrities.json', JSON.stringify(integrities, null, 2) + '\n');
