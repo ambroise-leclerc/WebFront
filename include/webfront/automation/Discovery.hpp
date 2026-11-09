@@ -110,16 +110,23 @@ inline long currentProcess() noexcept {
 #endif
 }
 
-/// Creates the directory when missing. On POSIX it must be ours and closed to other users; a shared or foreign
-/// directory is refused rather than trusted.
+/// Creates the directory when missing, private to the user on POSIX. An existing directory must already be ours and
+/// closed to other users: a shared or foreign one is refused, never trusted nor changed, so its permissions and the
+/// files it holds are left as they are.
 inline void preparePrivateDirectory(const std::filesystem::path& directory) {
-    std::filesystem::create_directories(directory);
+    const bool created = std::filesystem::create_directories(directory);
 #ifndef _WIN32
     struct stat info{};
     if (::lstat(directory.c_str(), &info) != 0 || !S_ISDIR(info.st_mode) || info.st_uid != ::geteuid())
         throw std::runtime_error("The automation discovery directory must be a directory owned by the current user");
-    if ((info.st_mode & 077) != 0 && ::chmod(directory.c_str(), 0700) != 0)
-        throw std::runtime_error("Cannot make the automation discovery directory private");
+    if ((info.st_mode & 077) != 0) {
+        if (!created)
+            throw std::runtime_error("The automation discovery directory exists and is not private to the current user");
+        if (::chmod(directory.c_str(), 0700) != 0)
+            throw std::runtime_error("Cannot make the automation discovery directory private");
+    }
+#else
+    (void)created;
 #endif
 }
 

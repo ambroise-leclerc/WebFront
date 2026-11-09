@@ -4,6 +4,9 @@
 #include <webfront/automation/Enable.hpp>
 
 #include <fstream>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include <atomic>
 #include <functional>
 #include <thread>
@@ -27,7 +30,7 @@ struct ConsumerApp {
         }
     };
     std::filesystem::path project;
-    std::vector<std::string> registered;
+    std::vector<std::string> registered{};
     template <typename Handler>
     void cppFunction(std::string_view name, Handler) {
         registered.emplace_back(name);
@@ -98,6 +101,40 @@ SCENARIO("A shared session is listed with its grants and never with its capabili
             REQUIRE_FALSE(std::filesystem::exists(root.path() / "absent"));
         }
     }
+#ifndef _WIN32
+    GIVEN("a new discovery directory") {
+        const auto directory = root.path() / "sessions";
+        discovery::Registration registration{directory, entry("alpha")};
+        THEN("it is created private to the user") {
+            struct stat info{};
+            REQUIRE(::stat(directory.c_str(), &info) == 0);
+            REQUIRE((info.st_mode & 0777) == 0700);
+        }
+    }
+    GIVEN("an existing directory that other users can read") {
+        const auto directory = root.path() / "shared";
+        std::filesystem::create_directory(directory);
+        REQUIRE(::chmod(directory.c_str(), 0755) == 0);
+        std::ofstream{directory / "previous.txt"} << "dropped earlier";
+        THEN("it is refused, with its permissions and files left as they were") {
+            REQUIRE_THROWS_AS(discovery::Registration(directory, entry("alpha")), std::runtime_error);
+            struct stat info{};
+            REQUIRE(::stat(directory.c_str(), &info) == 0);
+            REQUIRE((info.st_mode & 0777) == 0755);
+            REQUIRE(std::filesystem::exists(directory / "previous.txt"));
+            REQUIRE_FALSE(std::filesystem::exists(directory / "alpha.json"));
+        }
+    }
+    GIVEN("an existing directory that is already private") {
+        const auto directory = root.path() / "private";
+        std::filesystem::create_directory(directory);
+        REQUIRE(::chmod(directory.c_str(), 0700) == 0);
+        THEN("it is used") {
+            discovery::Registration registration{directory, entry("alpha")};
+            REQUIRE(discovery::list(directory).size() == 1);
+        }
+    }
+#endif
 }
 
 SCENARIO("A discovery directory only lists live, well-formed records") {
@@ -183,6 +220,17 @@ SCENARIO("A consumer enables automation explicitly, with fixed grants and a visi
                               std::invalid_argument);
             REQUIRE_FALSE(std::filesystem::exists(root.path() / "endpoint"));
             REQUIRE(discovery::list(sessions).empty());
+            // A refused activation leaves nothing behind in the application: no callback without an object to close them.
+            REQUIRE(app.registered.empty());
+        }
+        THEN("a discovery directory that is refused after the endpoint was accepted registers nothing either") {
+#ifndef _WIN32
+            const auto shared = root.path() / "shared";
+            std::filesystem::create_directory(shared);
+            REQUIRE(::chmod(shared.c_str(), 0755) == 0);
+            REQUIRE_THROWS(enableAutomation(app, {.grants = {"check"}, .listen = root.path() / "endpoint2", .discovery = shared, .announce = false}));
+            REQUIRE(app.registered.empty());
+#endif
         }
     }
     GIVEN("automation enabled with check and inspect") {

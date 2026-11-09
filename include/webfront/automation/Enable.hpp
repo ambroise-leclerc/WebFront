@@ -33,11 +33,11 @@ namespace webfront::automation {
 struct AutomationOptions {
     /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, and the setup grants). None
     /// leaves only session discovery.
-    std::vector<std::string> grants;
+    std::vector<std::string> grants{};
     /// A new private directory outside the project that receives the attachment endpoint.
-    std::filesystem::path listen;
+    std::filesystem::path listen{};
     /// Where the discovery record goes; the per-user default when empty. Tests use their own.
-    std::filesystem::path discovery;
+    std::filesystem::path discovery{};
     /// Per-operation native deadline.
     std::chrono::seconds timeout{120};
     /// After a deadline revokes the session, how long the window may take to close on its own. `window.close()` cannot run
@@ -45,7 +45,7 @@ struct AutomationOptions {
     std::chrono::milliseconds closeGrace{5000};
     /// What to do with a window that did not close. By default the process ends with status 72 (as `webfront-agent`
     /// does): `show()` cannot be interrupted from another thread. Set it to close the application another way.
-    std::function<void()> onUnresponsive;
+    std::function<void()> onUnresponsive{};
     /// Whether to tell the human, on stderr, that an agent can attach and with which grants.
     bool announce = true;
 };
@@ -56,13 +56,15 @@ public:
     /// @throws std::invalid_argument for an unknown grant, a missing `listen` directory, or one inside the project
     Automation(App& app, AutomationOptions options)
         : session(make(app, options)),
-          binding(app, session),
           channel(session, options.listen),
           registration(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery, record(*session, channel.directory())),
           grants(std::move(options.grants)),
           endpointDirectory(channel.directory()),
           grace(options.closeGrace),
-          unresponsive(std::move(options.onUnresponsive)) {
+          unresponsive(std::move(options.onUnresponsive)),
+          // Last of the fallible steps: the binding registers callbacks in the application and cannot take them back, so
+          // everything that can refuse the activation (grants, endpoint, record) has been validated before it.
+          binding(app, session) {
         // The native deadline of a stuck operation revokes the session and asks the window to close, as the launcher does.
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
@@ -158,7 +160,6 @@ private:
     }
 
     std::shared_ptr<Session>      session;
-    Binding<App>                  binding;
     ChannelServer                 channel;
     discovery::Registration       registration;
     std::vector<std::string>      grants;
@@ -167,6 +168,7 @@ private:
     std::function<void()>         unresponsive;
     std::mutex                    revocation;
     bool                          revoked = false;
+    Binding<App>                  binding;
     std::jthread                  supervisor;
 };
 

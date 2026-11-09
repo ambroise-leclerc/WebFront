@@ -33,7 +33,7 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
   listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. Typed MCP tools for
   application callbacks, a message inside the in-window terminal (it needs a new environment) and the publication of
-  environment 0.6.4 remain open (#501).
+  environment 0.6.6 remain open (#501).
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers
@@ -101,6 +101,12 @@ are retained for investigation; diagnostics alone do not establish a correction.
   Manifest permissions bound only the scripts' `context` API. Only browser packages install;
   installation scripts and native add-ons do not run. The [content policy](CONTENT_POLICY.md)
   restricts browser origins and navigation but provides neither TLS nor client authentication.
+- `fs::NativeStorage` confines writable storage to a declared root while resolving each path, but
+  on POSIX it cannot prevent the effective user or the superuser from moving a directory out of the
+  root during an operation: it detects such a move before a commit and after each operation, at
+  best. Windows prevents those moves while an operation holds its directories; links are always
+  refused there. A `shared` root lifts the POSIX ownership checks. No service uses the storage yet
+  (ADR-020). See [ADR-002](adr/ADR-002-systemes-de-fichiers-composables.md).
 - A synchronous infinite loop in a spec blocks the page hosting `wf test`; the native test
   driver's watchdog terminates stalled runs with failure. Windows file reads beyond 260
   characters remain unsupported (#349).

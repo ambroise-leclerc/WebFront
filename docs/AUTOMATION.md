@@ -204,7 +204,7 @@ distribution build is an application choice: gate the call (for example behind a
 A session with an endpoint (`--serve --listen`, or `enableAutomation`) publishes `<session>.json` in a private per-user
 directory: `%LOCALAPPDATA%\WebFront\sessions` on Windows, `~/Library/Application Support/WebFront/sessions` on macOS,
 `$XDG_STATE_HOME/webfront/sessions` or `~/.local/state/webfront/sessions` elsewhere (`--sessions-dir` overrides it for the
-launcher and for `--list`). On POSIX it must be owned by the user and closed to others, otherwise it is not read. The record has
+launcher and for `--list`). On POSIX it must be owned by the user and closed to others, otherwise it is not read. A missing directory is created private (0700); an existing one that others can read is refused and left untouched. The record has
 the project, grants, process identifier, API version and the endpoint directory, **never the capability**, which stays in the
 private endpoint: listing a session does not let anyone operate it. It is removed on closure and on catchable signals; one
 whose process is gone is dropped by the next `--list`. A recycled process identifier can keep a dead record for a while.
