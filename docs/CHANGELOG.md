@@ -12,7 +12,7 @@
   `--print-mcp-config --attach <dir> [--name n]` prints a `.mcp.json`; `--sessions-dir` overrides the directory.
   `webfront_add_agent([INSTALL] [DESTINATION dir])` checks and installs the launcher target for `add_subdirectory` and
   `FetchContent` consumers. `wf check` without a `tsconfig.json` now also roots the project's own `.d.ts`, `.d.mts` and `.d.cts` files, so an ambient
-  `declare module '*.css'` applies. The environment sources move to 0.6.6 (the pin stays on the published 0.6.5); publishing 0.6.6 and updating the pin remain a release action.
+  `declare module '*.css'` applies. Environment 0.6.6 carries these changes; it is published (`developer-v0.6.6`) and pinned by `DeveloperReleaseData.hpp`, so `bootstrap("developer")` runs `call` and the notices.
   The operation `call` (permission `call`, environment 0.6.6) invokes an application callback that the owner allow-listed by exact name
   (`AutomationOptions::callbacks`, shown in the session, in `--list` and in the notice), with at most one string argument and a scalar or
   short-list result; `webfront.*` names and anything outside the list are refused natively and audited (ADR-019 1.4). Once connected, the
