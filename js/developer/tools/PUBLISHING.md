@@ -54,7 +54,7 @@ under that address; it prints a warning, and is refused as soon as the header pi
   `developer-release-app`;
 - a tag rule on `developer-v*` forbidding updates and deletions;
 - the branch protection of `develop` and `master` must not cover `release/*`, and the application has no bypass;
-- the Pages source and the environment `developer-pages-publication` unchanged ("One-time Pages configuration" below).
+- the Pages source (`gh-pages`, root, branch build) unchanged ("One-time Pages configuration" below); the group `developer-pages-publication` is the only writer of `gh-pages`.
 
 The library's release preparation freezes the compatibility table with `cmake -DROOT=. -DMODE=freeze -DLIBRARY_VERSION=<x.y.z> -P
 cmake/DeveloperCompatibility.cmake`; `CheckReleaseVersion.cmake` fails a `v*` tag without its row.

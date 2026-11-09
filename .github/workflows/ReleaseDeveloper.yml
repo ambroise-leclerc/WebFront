@@ -183,7 +183,7 @@ jobs:
     needs: [prepare, tag]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
-    environment: developer-pages-publication
+    # No environment: developer-pages-publication is the concurrency group below, the only writer of gh-pages.
     permissions:
       contents: write
       pages: write
@@ -256,7 +256,8 @@ jobs:
         run: wf restore
       - name: Check the deployed bytes and the pinned URL
         run: |
-          for attempt in 1 2 3 4 5 6; do
+          # A Pages build takes minutes, and a 404 served before it ends may be cached for up to ten minutes.
+          for attempt in $(seq 1 30); do
             if wf run pin; then exit 0; fi
             echo "::notice::Attempt $attempt failed; Pages may still be building"
             sleep 30
