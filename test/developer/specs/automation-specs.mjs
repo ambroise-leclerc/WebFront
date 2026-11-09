@@ -57,8 +57,9 @@ describe('Developer automation', () => {
 
     it('calls an application callback and reports only plain answers', async () => {
         const calls=[], completed=[];
+        let slowStarted=false, finishSlow;
         const answers={'app.echo':async (...args) => {calls.push(args); return 'answer:'+args.join(',');}, 'app.list':async () => new Uint8Array([1,2,3]),
-            'app.object':async () => ({secret:true}), 'app.huge':async () => 'x'.repeat(60000), 'app.never':() => new Promise(() => {})};
+            'app.object':async () => ({secret:true}), 'app.huge':async () => 'x'.repeat(60000), 'app.slow':() => new Promise(resolve => {slowStarted=true; finishSlow=resolve;})};
         const bridge={cppFunction:name => answers[name] ?? (async () => { throw new Error('missing '+name); })};
         const runner=createAutomationRunner({context:{bridge},exclusive,inspector:{},run:async () => { throw new Error('call is not a wf command'); },
             complete:async (_id,result) => {completed.push(result);}});
@@ -79,11 +80,19 @@ describe('Developer automation', () => {
         expect(completed[5].output).toContain('cannot be reported');
         expect(completed[5].data).toBeUndefined();
         expect(fitCompletion({exitCode:0,output:'',report:null,data:{result:'x'.repeat(60000)}}).exitCode).toBe(1);
-        const work=runner.start({runId:'f',operation:'call',arguments:{callback:'app.never'}});
-        await Promise.resolve();
+        const work=runner.start({runId:'f',operation:'call',arguments:{callback:'app.slow'}});
+        while (!slowStarted) await Promise.resolve();
         runner.cancel('f');
+        await Promise.resolve();
+        // The callback goes on in C++: the run is not over, and neither the lock nor the native deadline is released.
+        expect(completed.length).toBe(6);
+        await rejects(execute(['help'],{}),/busy/);
+        finishSlow('late answer');
         await work;
         expect(completed[6].exitCode).toBe(130);
+        expect(completed[6].output).toContain('effect was not undone');
+        expect(completed[6].data).toBeUndefined();
+        expect(await execute(['help'],{})).toContain('wf test');
     });
 
     it('tells the person in the terminal and in wf help that automation is connected, without control characters', async () => {

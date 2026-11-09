@@ -153,9 +153,16 @@ export async function callApplication(bridge, {callback, value}, signal) {
     if (typeof callback !== 'string' || !callback || callback.startsWith('webfront.')) throw new Error('Not an application callback');
     if (typeof bridge?.cppFunction !== 'function') throw new Error('The application bridge is not available');
     const pending = bridge.cppFunction(callback)(...(value === undefined ? [] : [value]));
-    void Promise.resolve(pending).catch(() => {});
-    const interrupted = new Promise((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), {once:true}));
-    const answer = plainAnswer(await Promise.race([pending, interrupted]));
+    // A callback in progress cannot be interrupted from here: the run, the session's lock and the native deadline stay
+    // until it returns, so that no other operation overlaps it. A cancellation is reported once it has.
+    let answer;
+    try {
+        answer = plainAnswer(await pending);
+    } catch (error) {
+        if (signal?.aborted) throw new Error('Cancelled: the callback ran to its end and failed');
+        throw error;
+    }
+    if (signal?.aborted) throw new Error('Cancelled once the callback returned; its effect was not undone');
     // An answer that cannot be reported is a failure with its reason, never a success without its value.
     if (new TextEncoder().encode(serializeMessage(answer)).length > answerBytes) throw new Error(`The callback answered more than ${answerBytes} bytes, which cannot be reported`);
     return answer;

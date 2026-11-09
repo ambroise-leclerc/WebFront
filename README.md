@@ -305,6 +305,39 @@ Recompilation is explicit. The resulting application runs offline without the pr
 The examples' [LifeFrontend.hpp](examples/life/LifeFrontend.hpp) selects `NativeOrBrowserFrontend` for both stages: a native window when the engine is built and a session exists, the default browser otherwise.
 Your own application can select `webfront::NativeApp` or `webfront::NativeAppWithAssets` explicitly when it requires a native window.
 
+## Let an agent drive your application
+
+Your coding agent can type-check, build, preview, inspect and click the interface of **your own application**, in its own
+window and with its own C++ callbacks, while you keep the window and decide what the agent may do. Nothing is on by default.
+
+<img src="docs/images/automation-agent.svg" width="100%" alt="Animated transcript. On the left, an agent lists the shared session, checks, builds and previews the interface, clicks a button, calls the allow-listed C++ callback bf.render and is refused bf.secret. On the right, the application window shows the interface updating, and the C++ process logs only the callbacks that ran.">
+
+*Abridged transcript of the `AutomationConsumerWindow` regression test, which runs these steps against a real application.*
+
+One call in your C++ turns it on, and the grants are yours, fixed in native code:
+
+```cpp
+#include <webfront/automation/Enable.hpp>
+
+webfront::NativeApp app{project};
+app.bootstrap("developer");
+app.cppFunction("bf.render", render);                  // your callbacks stay yours
+auto automation = webfront::automation::enableAutomation(
+    app, {.grants    = {"check", "build", "preview", "inspect", "interact", "call"},
+          .callbacks = {"bf.render"},                  // the only callback an agent may call
+          .listen    = privateEndpointDirectory});
+app.show(automation->launchPage());
+automation->close();
+app.shutdown();
+```
+
+- **Visible to you.** The window's terminal prints the grants and how to attach, `wf help` says so, and the window title can carry a marker.
+- **Found without being told.** `webfront-agent --list` shows the sessions their owners shared (never the capability), and `webfront-agent --print-mcp-config --attach <dir>` writes the `.mcp.json` for Claude Code or any MCP client. `wf create` adds an `AGENTS.md` that tells the agent how to attach.
+- **Bounded.** Each operation is a separate grant; a callback is reachable only by an exact name you listed; a stuck renderer is stopped by native deadlines; project code still runs with your rights (this is not a sandbox).
+- **Optional.** It lives in a separate launcher and one header; applications that do not call `enableAutomation` register nothing. `webfront_add_agent()` builds and installs the launcher for `add_subdirectory` and `FetchContent` consumers.
+
+The [automation guide](docs/AUTOMATION.md#automating-your-own-application) covers grants, callbacks, discovery, deadlines and the MCP profile.
+
 ## What's new since 0.5.0
 
 The [changelog](docs/CHANGELOG.md) is exhaustive; the main additions are:

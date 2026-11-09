@@ -219,7 +219,7 @@ refused natively and audited, whatever the page or the agent asks; the list cann
 the agent. The names are visible in the session (`callbacks`), in `--list` and in the terminal notice. The callback runs in
 the application's own process with the application's authority: allow-list only callbacks that are safe to trigger. An
 environment older than 0.6.6 cannot run `call`, and the native owner refuses the grant rather than ignore it. `call` is an
-operation of `webfront.start`, not one MCP tool per callback, so the tool list stays at four.
+operation of `webfront.start`, not one MCP tool per callback, so the tool list stays at four. A callback in progress cannot be interrupted: cancelling a `call` keeps the run, the session's lock and the native deadline until the callback returns, then reports it cancelled (its effect is not undone); a callback that never returns ends with the native deadline, which revokes the session.
 
 ## Discovering shared sessions
 

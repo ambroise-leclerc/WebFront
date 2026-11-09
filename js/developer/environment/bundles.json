@@ -18,7 +18,7 @@
   "js/developer/environment/starter.mjs": "89ccab43be4455ed9598c54355b4bbe5adea1afd7a0ae5d755a14317e3ca39df",
   "js/developer/environment/paths.mjs": "3b6114df78eb193161c5c84499dda084cb7ff91c56a4496371c30295d00880e3",
   "js/developer/environment/runtime.mjs": "19ea1924209915bbdb517212d5c2bc25cbb1b39ea3fde898b86efeab8c6ba220",
-  "js/developer/environment/automation.mjs": "aa93cfb1c01fdd4335d915ce12d3ea5d9c39fec8e38a3e38a183f355e31ed643",
+  "js/developer/environment/automation.mjs": "79405c89ba7025c1774bc13c9b78d814a07592755dcde018c8659a8015c4b8ed",
   "js/developer/environment/development.mjs": "1125043016727111031a452fbebec358b9e78231f82fe91df7dea0fe8b22f015",
   "js/developer/environment/testing.mjs": "aeb584505fab5957b9c02e78536e12f7d7f3d12f8adb2e17f1a1a6e395e43f3c",
   "js/developer/environment/terminal.mjs": "7ffcf7ac6ef63c35cdf5ef70284b384525b13ba18422af069289e53b6c4f6be1",
