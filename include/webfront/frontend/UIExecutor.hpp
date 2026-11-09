@@ -81,14 +81,22 @@ public:
             Done done{*this};
             wake();
         } catch (...) {
-            {
-                std::lock_guard lock(mutex);
-                wakePending = false;
-            }
-            remove(job);
-            job->fail(std::current_exception());
+            failQueued(std::current_exception());
         }
         return true;
+    }
+
+    /// The wake that was to run the queue failed: every job queued behind it relied on that notification (they asked for
+    /// none of their own), so all fail with its error rather than wait for a pass that nobody requested.
+    void failQueued(std::exception_ptr error) noexcept {
+        std::deque<std::shared_ptr<UIJob>> failed;
+        {
+            std::lock_guard lock(mutex);
+            wakePending = false;
+            failed.swap(queue);
+        }
+        for (auto& job : failed)
+            job->fail(error);
     }
 
     void remove(const std::shared_ptr<UIJob>& job) {
@@ -136,13 +144,12 @@ public:
             wake        = wakeFunction;
             ++wakesInFlight;
         }
-        // A wake that throws leaves the rest for the next one: any later schedule() wakes the loop again.
+        // A wake that throws fails the jobs still queued (see failQueued).
         try {
             Done done{*this};
             wake();
         } catch (...) {
-            std::lock_guard lock(mutex);
-            wakePending = false;
+            failQueued(std::current_exception());
         }
     }
 

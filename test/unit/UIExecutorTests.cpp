@@ -311,6 +311,33 @@ SCENARIO("The loop cannot be attached twice and a failing wake fails the operati
     }
 }
 
+SCENARIO("A failing wake fails the operations queued behind it") {
+    GIVEN("a wake function that queues a second operation, then throws") {
+        UIExecutorHost          host;
+        Observed                first;
+        Observed                second;
+        ex::inplace_stop_source stop;
+        using Op = Connected<decltype(host.executor().schedule())>;
+        Op                 secondOp(host.executor().schedule(), Receiver{second, stop.get_token()});
+        host.attach([&] {
+            secondOp.start();  // queued while the notification of the first is pending: it asks for none
+            throw std::runtime_error("wake failed");
+        });
+        Op firstOp(host.executor().schedule(), Receiver{first, stop.get_token()});
+        firstOp.start();
+        THEN("both complete with the error, and nothing is left to run") {
+            CHECK(first.errored);
+            CHECK(second.errored);
+            CHECK(first.completions == 1);
+            CHECK(second.completions == 1);
+            host.drain();
+            CHECK(first.completions == 1);
+            CHECK(second.completions == 1);
+        }
+        host.close();
+    }
+}
+
 SCENARIO("Shutdown while operations are racing stops or runs each exactly once") {
     GIVEN("a loop that closes while operations are scheduled") {
         for (int round = 0; round < 20; ++round) {
