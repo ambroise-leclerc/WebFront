@@ -15,6 +15,7 @@
   },
   "files": [
     "types/react.tsx",
+    "types/services.ts",
     "pages/life-react.tsx"
   ]
 }

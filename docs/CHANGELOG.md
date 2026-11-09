@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `@webfront/services` package (#461, ADR-010 1.8, ADR-020 step 4). The browser side of the optional system services is
+  delivered outside the core, like `@webfront/react`: `js/services/` (a skeleton: an empty frozen `services` object and
+  `selfTest()`, declarations, license), `wf run services-package` for its deterministic archive and SHA-512, the same
+  bytes in the test registry, and a Jasmine spec that imports the installed archive. The archive packager is shared with
+  `react-package` (`js/developer/scripts/package-archive.mjs`) and `CheckPackage.cmake` verifies both. No core resource
+  is added. Publication to npm remains a separate maintainer action.
 - Automation of a consumer's own application and discoverability (#501). `webfront::automation::enableAutomation(app, options)`
   (`automation/Enable.hpp`) mounts the controller, the page binding and the private attachment endpoint on an application
   that called `bootstrap("developer")`, so `webfront-agent --attach` drives its own window, with its own `cppFunction`
