@@ -8,7 +8,9 @@
 #include <sys/stat.h>
 #endif
 #include <atomic>
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <thread>
 #include <sstream>
 
@@ -64,6 +66,30 @@ discovery::Entry entry(std::string session, long pid = discovery::currentProcess
 // A process identifier no live process has: far beyond the usual ranges of Windows and POSIX systems.
 constexpr long deadProcess = 2147483000L;
 }  // namespace
+
+SCENARIO("A record that a reader holds open is still withdrawn") {
+    webfront::test::TemporaryDirectory root;
+    GIVEN("a registration whose record is open in a reader, as `list` reads it") {
+        const auto directory = root.path() / "sessions";
+        discovery::Registration registration{directory, entry("alpha")};
+        const auto record = directory / "alpha.json";
+        auto reader = std::make_unique<std::ifstream>(record, std::ios::binary);
+        REQUIRE(reader->is_open());
+        // Windows refuses to delete a file that is open without shared deletion: the withdrawal waits for the reader.
+        std::thread release{[&reader] {
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            reader.reset();
+        }};
+        WHEN("the session is withdrawn while the reader still holds it") {
+            registration.remove();
+            release.join();
+            THEN("the record is gone and no session is listed") {
+                REQUIRE_FALSE(std::filesystem::exists(record));
+                REQUIRE(discovery::list(directory).empty());
+            }
+        }
+    }
+}
 
 SCENARIO("A shared session is listed with its grants and never with its capability") {
     webfront::test::TemporaryDirectory root;

@@ -11,11 +11,13 @@
 #include "Json.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <optional>
+#include <thread>
 #include <utility>
 #ifndef _WIN32
 #include <csignal>
@@ -144,6 +146,26 @@ inline void preparePrivateDirectory(const std::filesystem::path& directory) {
 #endif
 }
 
+/// Removes a file, retrying for a short while on Windows: a reader that has the record open (`list` reads it without
+/// sharing deletion) makes the removal fail with a sharing violation, and giving up would leave a withdrawn session
+/// listed for as long as its process lives. Other failures, and every failure on POSIX, are final.
+inline void removeWithRetry(const std::filesystem::path& file) noexcept {
+#ifdef _WIN32
+    constexpr int attempts = 200;
+#else
+    constexpr int attempts = 1;
+#endif
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        std::error_code error;
+        std::filesystem::remove(file, error);
+        if (!error)
+            return;
+#ifdef _WIN32
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+#endif
+    }
+}
+
 /// The record of one shared session, present as long as this object lives.
 class Registration {
 public:
@@ -167,9 +189,8 @@ public:
         const std::scoped_lock lock{mutex};
         if (file.empty())
             return;
-        std::error_code ignored;
-        std::filesystem::remove(file, ignored);
-        std::filesystem::remove(file.string() + ".new", ignored);
+        removeWithRetry(file);
+        removeWithRetry(file.string() + ".new");
         file.clear();
     }
 
