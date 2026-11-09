@@ -45,3 +45,7 @@ check("a publication without pages permission" refuse "Job publish" "      pages
 check("a job without permissions of its own" refuse "Job tag declares no permissions"
     "    timeout-minutes: 5\n    permissions:\n      contents: write\n    steps:\n      - name: Tag" "    timeout-minutes: 5\n    steps:\n      - name: Tag")
 check("an assistant attribution" refuse "attribution" "Pins the published" "Generated with a tool. Pins the published")
+check("a preparation that rereads develop" refuse "Only wf-package"
+    "needs.wf-package.outputs.source }}" "needs.wf-package.outputs.source }}\n          x: y\n      - uses: actions/checkout@v7\n        with:\n          ref: develop")
+check("a rehearsal without the browser suite" refuse "rehearsal does not"
+    "ctest --test-dir build-driver -L web-integration" "ctest --test-dir build-driver -R Nothing")

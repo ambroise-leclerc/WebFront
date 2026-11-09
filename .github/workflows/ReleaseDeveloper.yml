@@ -40,14 +40,20 @@ jobs:
   # Construction and rehearsal: contents: read, no destination but the artifact.
   wf-package:
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       contents: read
+    outputs:
+      # The commit that was built: the release commit is made on this one, not on whatever develop became in the meantime.
+      source: ${{ steps.source.outputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: develop
           persist-credentials: false
+      - name: Record the source commit
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Check the requested version
         run: |
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must be MAJOR.MINOR.PATCH"; exit 1; }
@@ -84,6 +90,13 @@ jobs:
         run: cmake -DROOT="$PWD" -P test/cmake/CheckDeveloperPin.cmake
       - name: Run the specs of the environment
         run: wf test --timeout 300
+      # The rehearsal: the browser suite on the candidate bytes. The fixtures of CTest serve, from a local origin, the
+      # environment and the starters built from these sources (the candidate, whose bootstrap was just refreshed), and the
+      # developer journey starts and runs them. A defect found here costs no version.
+      - name: Run the browser suite on the candidate bytes served locally
+        run: |
+          cmake --build build-driver --target webtest developer_integration webfront-wf --parallel 2
+          xvfb-run -a ctest --test-dir build-driver -L web-integration --output-on-failure --no-tests=error --parallel 2
       - name: Collect the release files
         run: |
           mkdir release-files
@@ -123,7 +136,8 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v7
         with:
-          ref: develop
+          # The commit wf-package built, never the current develop: the files applied below come from that build.
+          ref: ${{ needs.wf-package.outputs.source }}
           token: ${{ steps.app.outputs.token }}
       - uses: actions/download-artifact@v4
         with:

@@ -102,3 +102,17 @@ if(NOT app_token_jobs STREQUAL expected_app_jobs)
     message(FATAL_ERROR "The application's token is created by '${app_token_jobs}', not by '${expected_app_jobs}'")
 endif()
 message(STATUS "release-developer: permissions of ${found_jobs} match the table of ADR-021")
+
+# The release commit is made on the commit that was built, and only the build job reads develop by name.
+string(REGEX MATCHALL "ref: develop" develop_refs "${content}")
+list(LENGTH develop_refs develop_count)
+if(NOT develop_count EQUAL 1)
+    message(FATAL_ERROR "Only wf-package may check out develop by name (${develop_count} found): the preparation must use its source commit")
+endif()
+if(NOT content MATCHES "needs[.]wf-package[.]outputs[.]source")
+    message(FATAL_ERROR "The preparation does not check out the commit built by wf-package")
+endif()
+# The rehearsal runs the browser suite on the candidate bytes before anything is tagged.
+if(NOT content MATCHES "ctest --test-dir build-driver -L web-integration")
+    message(FATAL_ERROR "The rehearsal does not run the browser suite on the candidate bytes")
+endif()

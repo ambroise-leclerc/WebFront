@@ -6,6 +6,26 @@
 // The header must be exactly the one generated for its version, and the archive at its URL must have its integrity.
 import {baseUrl, bootstrapHeader, sriOf} from '../tools/distribution.mjs';
 
+/**
+ * Where a pinned URL stands relative to the distribution's base URL (ADR-021, decision 2). Returns `{waiver, warning}`:
+ * `waiver` is true when the pin is tolerated only by the declared migration waiver (`previousBase` of distribution.json).
+ * Throws when the pinned URL is off the origin of the base without a valid waiver, or when a waiver is stale (the pin
+ * is on the current base, so `previousBase` must be removed).
+ */
+export function pinOrigin(pinnedUrl, base, previousBase) {
+    const current = new URL(baseUrl(base));
+    const pinned = new URL(pinnedUrl);
+    const previous = previousBase === undefined ? undefined : new URL(baseUrl(previousBase));
+    if (previous && previous.origin === current.origin) throw new Error('previousBase must be on another origin than baseUrl');
+    if (pinned.origin === current.origin) {
+        if (previous) throw new Error(`Stale migration waiver: the header pins a version published under ${current.origin}; remove previousBase from distribution.json`);
+        return {waiver: false};
+    }
+    if (!previous) throw new Error(`The pinned ${pinned.href} is not on ${current.origin}, the origin of baseUrl, and distribution.json declares no previousBase`);
+    if (!pinned.href.startsWith(previous.href)) throw new Error(`The pinned ${pinned.href} is on neither ${current.origin} nor the declared previousBase ${previous.href}`);
+    return {waiver: true, warning: `migration waiver: the pinned ${pinned.href} is under the previous base ${previous.href}; it is not checked for redirection or CORS, and a browser cannot start from it if it redirects`};
+}
+
 export default async function (context) {
     const {project} = context;
     const header = await project.readText('include/webfront/system/DeveloperReleaseData.hpp');
