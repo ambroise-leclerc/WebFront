@@ -127,7 +127,14 @@ SCENARIO("React stores coalesce a thousand writes into one snapshot per server c
         unsigned errors{};
         store.onError([&](std::exception_ptr error) {
             ++errors;
-            REQUIRE_THROWS(std::rethrow_exception(error));
+            bool rethrown = false;
+            try {
+                std::rethrow_exception(error);
+            }
+            catch (...) {
+                rethrown = true;
+            }
+            REQUIRE(rethrown);
         });
         harness.fail = true;
         store.set(1000);
