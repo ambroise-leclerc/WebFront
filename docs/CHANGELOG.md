@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Typed access to the native window and its link to a connection (#463, ADR-020 step 5, last task). `frontend::NativeWindow`
+  (`NativeWindow.hpp`) gives the `HWND` (WebView2), `NSWindow*` (WKWebView), `GtkWindow*` (WebKitGTK) or `CefBrowser*` (CEF) through
+  `get()`, a `std::expected` that answers only on the interface thread (#462) while the window is published: `notOpen`, `closed`,
+  `wrongThread`, `unsupported` otherwise. `BasicWF::nativeWindow()` returns the frontend's handle and `UI::nativeWindow()` adds the
+  association of #453: a connection that is not the embedded view gets `notEmbedded`, so the system browser stays without a parent.
+  WebKitGTK also gives the portal `parent_window` (`x11:<XID>`, or `wayland:<handle>` exported once the window is ready). Catch2 tests
+  with a simulated host and the shared lifecycle case `native-window` (before open, from another thread, on the interface thread,
+  after closure). The manual check of a parented dialog is documented in `docs/FRONTENDS.md` and waits for the native backend.
 - Interface-thread executor for every frontend (#462, ADR-020 step 5, ADR-007 1.11). `frontend::UIExecutor` (`UIExecutor.hpp`)
   exposes `available()`, `onUIThread()` and `schedule()`, a sender that completes on the interface thread: `set_value()` there,
   `set_stopped()` when the stop token fires first or the loop closes with the operation pending (it never runs after closure),

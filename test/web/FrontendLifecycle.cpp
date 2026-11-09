@@ -173,6 +173,165 @@ int checkUIExecutor() {
     return 0;
 }
 
+// Reads the native window on the interface thread, from an operation of the executor.
+struct WindowReader {
+    using receiver_concept = webfront::networking::ex::receiver_tag;
+    std::promise<webfront::frontend::NativeWindowResult>* result;
+    webfront::frontend::NativeWindow                      window;
+    auto                                                  get_env() const noexcept {
+        return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
+    }
+    void set_value() && noexcept {
+        result->set_value(window.get());
+    }
+    void set_stopped() && noexcept {
+        result->set_value(std::unexpected(webfront::frontend::NativeWindowError::closed));
+    }
+    void set_error(std::exception_ptr) && noexcept {
+        result->set_value(std::unexpected(webfront::frontend::NativeWindowError::unsupported));
+    }
+};
+
+// The native window of the frontend: absent before open, refused to other threads, given on the interface thread while the
+// window lives, and gone once it closed.
+int checkNativeWindow() {
+    using webfront::frontend::NativeWindowError;
+    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    const auto window   = app.nativeWindow();
+    const auto executor = app.uiExecutor();
+    if (window.get().error_or(NativeWindowError::closed) != NativeWindowError::notOpen)
+        throw std::runtime_error("The window is given (or has a wrong error) before the window opens");
+    std::atomic<bool> error = false;
+    std::string       message;
+    std::jthread      client([&] {
+        try {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            // CEF can publish the window (OnAfterCreated) while it creates it, before open() attaches the executor: wait for both,
+            // or the read scheduled below could find no loop.
+            while (window.get().error_or(NativeWindowError::closed) == NativeWindowError::notOpen || !executor.available()) {
+                if (std::chrono::steady_clock::now() > deadline)
+                    throw std::runtime_error("The window was never published, or the executor never became available");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (window.get().error_or(NativeWindowError::notOpen) != NativeWindowError::wrongThread)
+                throw std::runtime_error("The window was given to a thread that is not the interface thread");
+            std::promise<webfront::frontend::NativeWindowResult> answer;
+            auto operation = webfront::networking::ex::connect(executor.schedule(), WindowReader{&answer, window});
+            auto future    = answer.get_future();
+            webfront::networking::ex::start(operation);
+            if (future.wait_for(std::chrono::seconds(30)) != std::future_status::ready)
+                throw std::runtime_error("The read on the interface thread never completed");
+            const auto read = future.get();
+            if (!read)
+                throw std::runtime_error("The window was not given on the interface thread");
+            if (!read->pointer)
+                throw std::runtime_error("The native window is a null pointer");
+        } catch (const std::exception& e) {
+            message = e.what();
+            error   = true;
+        }
+    });
+    app.show("no-bridge.html");
+    client.join();
+    if (error)
+        throw std::runtime_error(message);
+    if (window.get().error_or(NativeWindowError::notOpen) != NativeWindowError::closed)
+        throw std::runtime_error("The window is still given after the window closed");
+    return 0;
+}
+
+// What a second open() attempted from the interface thread, during the first, did and left behind.
+struct SecondOpenOutcome {
+    bool refused        = false;  // the second open() threw
+    bool sameWindow     = false;  // the published window is still the first one
+    bool executorStill  = false;  // the executor is still attached
+    bool windowReadable = false;
+};
+
+struct SecondOpener {
+    using receiver_concept = webfront::networking::ex::receiver_tag;
+    std::promise<SecondOpenOutcome>*  result;
+    webfront::frontend::NativeWindow  window;
+    webfront::frontend::UIExecutor    executor;
+    void*                             firstWindow;
+    auto                              get_env() const noexcept {
+        return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
+    }
+    void set_value() && noexcept {
+        SecondOpenOutcome outcome;
+        try {
+            webfront::testdriver::QuietFrontend<Frontend>::open("0", "no-bridge.html");
+        } catch (const std::exception&) {
+            outcome.refused = true;
+        } catch (...) {
+            outcome.refused = true;
+        }
+        const auto after       = window.get();
+        outcome.windowReadable = after.has_value();
+        outcome.sameWindow     = after && after->pointer == firstWindow;
+        outcome.executorStill  = executor.available() && executor.onUIThread();
+        result->set_value(outcome);
+    }
+    void set_stopped() && noexcept {
+        result->set_value({});
+    }
+    void set_error(std::exception_ptr) && noexcept {
+        result->set_value({});
+    }
+};
+
+// A second open() on the interface thread, while the first runs, is refused before it creates a view: the window published for
+// the first application, and its executor, stay the ones its connections and dialogs rely on.
+int checkSecondOpen() {
+    App        app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    const auto window   = app.nativeWindow();
+    const auto executor = app.uiExecutor();
+    std::atomic<bool> error = false;
+    std::string       message;
+    std::jthread      client([&] {
+        try {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (window.get().error_or(webfront::frontend::NativeWindowError::closed) == webfront::frontend::NativeWindowError::notOpen
+                   || !executor.available()) {
+                if (std::chrono::steady_clock::now() > deadline)
+                    throw std::runtime_error("The window was never published, or the executor never became available");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            // The first window's pointer, read on the interface thread like the second open() will read it again.
+            std::promise<webfront::frontend::NativeWindowResult> first;
+            auto firstOperation = webfront::networking::ex::connect(executor.schedule(), WindowReader{&first, window});
+            auto firstFuture    = first.get_future();
+            webfront::networking::ex::start(firstOperation);
+            if (firstFuture.wait_for(std::chrono::seconds(30)) != std::future_status::ready)
+                throw std::runtime_error("The first read on the interface thread never completed");
+            const auto initial = firstFuture.get();
+            if (!initial)
+                throw std::runtime_error("The first window was not given on the interface thread");
+            std::promise<SecondOpenOutcome> answer;
+            auto operation = webfront::networking::ex::connect(executor.schedule(), SecondOpener{&answer, window, executor, initial->pointer});
+            auto future    = answer.get_future();
+            webfront::networking::ex::start(operation);
+            if (future.wait_for(std::chrono::seconds(30)) != std::future_status::ready)
+                throw std::runtime_error("The second open() never completed");
+            const auto outcome = future.get();
+            if (!outcome.refused)
+                throw std::runtime_error("A second open() during the first was not refused");
+            if (!outcome.windowReadable || !outcome.sameWindow)
+                throw std::runtime_error("The second open() replaced or withdrew the window of the first");
+            if (!outcome.executorStill)
+                throw std::runtime_error("The second open() detached the executor of the first");
+        } catch (const std::exception& e) {
+            message = e.what();
+            error   = true;
+        }
+    });
+    app.show("no-bridge.html");
+    client.join();
+    if (error)
+        throw std::runtime_error(message);
+    return 0;
+}
+
 int expectNavigationFailure() {
     try {
         webfront::testdriver::QuietFrontend<Frontend>::open("0", "index.html");
@@ -339,6 +498,8 @@ int run(std::string_view mode) {
         });
     cases.emplace("navigation-failure", expectNavigationFailure);
     cases.emplace("ui-executor", checkUIExecutor);
+    cases.emplace("native-window", checkNativeWindow);
+    cases.emplace("second-open", checkSecondOpen);
     cases.emplace("view-association", checkViewAssociation);
     const auto selected = cases.find(mode);
     if (selected == cases.end())

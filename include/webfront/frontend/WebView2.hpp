@@ -7,6 +7,7 @@
 #include "DefaultBrowser.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
+#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -877,6 +878,9 @@ inline void open(std::string_view address,
                  const WebView2Options& options,
                  const std::function<void(Session&)>& prepare = {}) {
     auto contentPolicy = webfront::detail::BoundContentPolicy{frontend::detail::applicationUrl(address, port, ""), options.contentPolicy};
+    // One window per process: a second open() on the interface thread is refused before it creates anything.
+    if (uiExecutorHostOf<WebView2Frontend>().executor().available())
+        throw std::logic_error("WebView2Frontend: open() is already running; a process opens one window at a time");
     Apartment                                                apartment;
     LPWSTR                                                   rawVersion = nullptr;
     const auto                                               available  = GetAvailableCoreWebView2BrowserVersionString(nullptr, &rawVersion);
@@ -902,12 +906,17 @@ inline void open(std::string_view address,
         if (!PostMessageW(window, drainMessage, 0, 0))
             throw std::runtime_error("WebView2: cannot wake the interface thread (the message queue is full)");
     });
+    // Published on the interface thread (this one), withdrawn before the session destroys the window.
+    auto& windowHost = nativeWindowHostOf<WebView2Frontend>();
+    windowHost.publish({.kind = NativeWindowKind::win32, .pointer = session->window, .portalParent = {}});
     struct Closing {
-        UIExecutorHost& host;
+        UIExecutorHost&   host;
+        NativeWindowHost& windowHost;
         ~Closing() {
+            windowHost.retract();
             host.close();
         }
-    } closing{host};
+    } closing{host, windowHost};
     session->run();
 }
 
@@ -923,6 +932,11 @@ struct WebView2Frontend {
     /// The thread of the window's message pump while open() runs (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {
         return uiExecutorHostOf<WebView2Frontend>().executor();
+    }
+
+    /// The HWND of the window, readable on that thread while open() runs (see NativeWindow.hpp).
+    [[nodiscard]] static NativeWindow nativeWindow() {
+        return nativeWindowHostOf<WebView2Frontend>().window();
     }
 
     static void initialize() { }

@@ -163,6 +163,14 @@ public:
         return webFront->isEmbeddedView(webLinkId, generation);
     }
 
+    /// The native window this connection's view lives in, for a native dialog's parent (ADR-020). Only the view of an
+    /// embedded frontend has one: any other connection (the system browser, a remote client, a loopback peer) gets
+    /// `notEmbedded`, so a dialog never attaches to a window that is not the caller's. Otherwise the answers and the
+    /// thread rule of frontend::NativeWindow::get() apply: call it on the interface thread (BasicWF::uiExecutor()).
+    [[nodiscard]] frontend::NativeWindowResult nativeWindow() const {
+        return webFront->nativeWindowOf(webLinkId, generation);
+    }
+
     /// The only criterion of a "local client" for system services (ADR-020, rule 3): an embedded view, or a
     /// loopback peer when the application set WebFrontConfig::trustLoopbackClients. The address is otherwise never
     /// consulted. False once the connection is gone.
@@ -727,6 +735,16 @@ public:
             return {};
     }
 
+    /// The native window of the frontend (see frontend/NativeWindow.hpp), or a handle that answers `unsupported` for a
+    /// frontend without one. It names the window, not a connection: UI::nativeWindow() also checks that the caller's view
+    /// is that window.
+    [[nodiscard]] frontend::NativeWindow nativeWindow() const {
+        if constexpr (requires { { Frontend::nativeWindow() } -> std::same_as<frontend::NativeWindow>; })
+            return Frontend::nativeWindow();
+        else
+            return {};
+    }
+
     /// Adds a handler for each browser that connects from now on, called after the onUIStarted
     /// handler and the earlier subscribers. It stays registered while the returned subscription
     /// lives; components use this so they never replace the application's handler.
@@ -807,6 +825,12 @@ private:
         std::scoped_lock lock{linksMutex};
         const auto       found = webLinks.find(id);
         return found != webLinks.end() && found->second.generation == generation && !found->second.closed && found->second.viewAssociated;
+    }
+
+    [[nodiscard]] frontend::NativeWindowResult nativeWindowOf(WebLinkId id, WebLinkGeneration generation) const {
+        if (!isEmbeddedView(id, generation))
+            return std::unexpected(frontend::NativeWindowError::notEmbedded);
+        return nativeWindow().get();
     }
 
     [[nodiscard]] bool isLocalClient(WebLinkId id, WebLinkGeneration generation) const {

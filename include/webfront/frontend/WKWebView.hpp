@@ -6,6 +6,7 @@
 #include "Downloads.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
+#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -29,6 +30,11 @@ namespace detail::wkwebview {
 /// The interface thread of the window: attached for the duration of open(), on the main thread.
 inline UIExecutorHost& executorHost() {
     static UIExecutorHost host;
+    return host;
+}
+/// The NSWindow, published to consumers while open() runs (see NativeWindow.hpp).
+inline NativeWindowHost& windowHost() {
+    static NativeWindowHost host{executorHost().executor()};
     return host;
 }
 }  // namespace detail::wkwebview
@@ -1079,12 +1085,17 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
         dispatch_async_f(
             dispatch_get_main_queue(), &host, +[](void* context) { static_cast<UIExecutorHost*>(context)->drain(); });
     });
+    // Published once the loop is attached (this is the interface thread), withdrawn before the session releases the window.
+    auto& windowHost = detail::wkwebview::windowHost();
+    windowHost.publish({.kind = NativeWindowKind::cocoa, .pointer = window.window, .portalParent = {}});
     struct Closing {
         UIExecutorHost& host;
+        NativeWindowHost& windowHost;
         ~Closing() {
+            windowHost.retract();
             host.close();
         }
-    } closing{host};
+    } closing{host, windowHost};
     window.run();
 }
 
@@ -1108,6 +1119,11 @@ struct WKWebViewFrontend {
     /// The main thread while open() runs the AppKit loop (see UIExecutor.hpp).
     [[nodiscard]] static UIExecutor uiExecutor() {
         return detail::wkwebview::executorHost().executor();
+    }
+
+    /// The NSWindow, readable on the main thread while open() runs (see NativeWindow.hpp).
+    [[nodiscard]] static NativeWindow nativeWindow() {
+        return detail::wkwebview::windowHost().window();
     }
 
     static void open(std::string_view port, std::string_view file) {

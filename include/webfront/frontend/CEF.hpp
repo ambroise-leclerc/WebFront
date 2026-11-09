@@ -9,6 +9,7 @@
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "ScriptDialogs.hpp"
+#include "NativeWindow.hpp"
 #include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
@@ -780,8 +781,11 @@ public:
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {
             captureTarget->browser = browser;
-        captureTarget->pending.open();
-            captureRegistration    = CaptureRegistration{detail::captureProvider(captureTarget)};
+            // This callback runs on the UI thread. open() refused a second opening, so this browser is the only one.
+            frontend::nativeWindowHostOf<frontend::CEFFrontend>().publish(
+                {.kind = frontend::NativeWindowKind::cef, .pointer = browser.get(), .portalParent = {}});
+            captureTarget->pending.open();
+            captureRegistration = CaptureRegistration{detail::captureProvider(captureTarget)};
         }
     }
     virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
@@ -790,6 +794,7 @@ public:
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
         if (captureTarget->browser && captureTarget->browser->IsSame(browser)) {
+            frontend::nativeWindowHostOf<frontend::CEFFrontend>().retract();
             captureRegistration = {};
             detail::abandonCaptures(*captureTarget);
         }
@@ -910,6 +915,11 @@ private:
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
                        CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
                        WindowOptions windowSettings = {}, bool preserveSignalHandlers = false, const ViewLaunch& launch = {}) {
+    // One window per process. Refuse a second open() first, before CefInitialize (which succeeds again when the context
+    // exists) and before any view: its browser would reach OnAfterCreated and replace the published window of the running
+    // one, before host.attach() could refuse it, and the first connection's dialogs would be parented to the new window.
+    if (frontend::uiExecutorHostOf<frontend::CEFFrontend>().executor().available())
+        throw std::logic_error("CEFFrontend: open() is already running; a process opens one window at a time");
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -994,6 +1004,7 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
         struct Closing {
             frontend::UIExecutorHost& host;
             ~Closing() {
+                frontend::nativeWindowHostOf<frontend::CEFFrontend>().retract();  // also when the loop ends before OnBeforeClose
                 host.close();
             }
         } closing{host};
