@@ -133,7 +133,7 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
     const DWORD thread = GetCurrentThreadId();
     // A wake that fails (the window is gone) is dropped: closing abandons what is pending.
     host.attach([window] { PostMessageW(window, drainMessage, 0, 0); });
-    // WM_QUIT belongs to the thread, not to the window: at most one is posted per opening (several requests are one), and
+    // WM_QUIT belongs to the thread, not to the window: one is posted per opening once a post succeeded (several requests are one), and
     // one left unconsumed (the loop left by an exception) is removed so that it cannot end the next opening.
     auto posted = std::make_shared<std::atomic<bool>>(false);
     struct PurgeQuit {
@@ -146,8 +146,10 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
     } purge{posted};  // destroyed after the guard has disarmed: no request can post any more
     CloseGuard guard{host, stop};
     if (stop.arm([thread, posted] {
-            if (!posted->exchange(true))
-                PostThreadMessageW(thread, WM_QUIT, 0, 0);
+            // Only a successful post counts: a full queue (ERROR_NOT_ENOUGH_QUOTA) leaves the next request free to retry.
+            // Two requests racing may both post: the extra WM_QUIT is removed on exit, like any unconsumed one.
+            if (!posted->load() && PostThreadMessageW(thread, WM_QUIT, 0, 0))
+                posted->store(true);
         }))
         return;
     MSG message{};
