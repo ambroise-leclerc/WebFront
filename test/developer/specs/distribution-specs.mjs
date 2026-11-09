@@ -1,7 +1,7 @@
 // Specs of the developer distribution: the starters, the Pages staging and the pinned bootstrap header.
 import {tar} from '../../../js/developer/tools/archive.mjs';
 import {bootstrapHeader, versionPath, distributionFiles, customDomain} from '../../../js/developer/tools/distribution.mjs';
-import {pinOrigin} from '../../../js/developer/scripts/pin.mjs';
+import {pinOrigin, precedes} from '../../../js/developer/scripts/pin.mjs';
 import stageSite from '../../../js/developer/scripts/site.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
 import {createStarter} from '../../../js/developer/environment/starter.mjs';
@@ -185,32 +185,51 @@ describe('The developer distribution', () => {
         const base = 'https://dist.webfront.fr/';
         const previous = 'https://ambroise-leclerc.github.io/WebFront/';
         const onBase = 'https://dist.webfront.fr/developer/0.6.5/environment.tgz';
-        const onPrevious = 'https://ambroise-leclerc.github.io/WebFront/developer/0.6.4/environment.tgz';
+        const onPrevious = version => `https://ambroise-leclerc.github.io/WebFront/developer/${version}/environment.tgz`;
 
         it('accepts a pin on the origin of baseUrl without a waiver', () => {
-            expect(pinOrigin(onBase, base)).toEqual({waiver: false});
+            expect(pinOrigin(onBase, base, undefined, '0.6.5')).toEqual({waiver: false});
         });
 
         it('refuses a pin off the origin of baseUrl when no migration is declared', () => {
-            throws(() => pinOrigin(onPrevious, base), /declares no previousBase/);
+            throws(() => pinOrigin(onPrevious('0.6.4'), base, undefined, '0.6.4'), /declares no previousBase/);
         });
 
-        it('tolerates a pin under the declared previousBase with a warning that names the waiver', () => {
-            const result = pinOrigin(onPrevious, base, previous);
+        it('tolerates a pin before baseSince under the declared previousBase, with a warning that names the waiver', () => {
+            const result = pinOrigin(onPrevious('0.6.4'), base, previous, '0.6.4', '0.6.5');
             expect(result.waiver).toBe(true);
             expect(result.warning).toMatch(/migration waiver/);
         });
 
+        it('refuses the waiver for the first version published under the new base and for any later one', () => {
+            for (const version of ['0.6.5', '0.6.6', '0.7.0', '1.0.0'])
+                throws(() => pinOrigin(onPrevious(version), base, previous, version, '0.6.5'), /covers only versions before 0.6.5/);
+        });
+
+        it('orders versions numerically, not as text, and a prerelease before its release', () => {
+            expect(precedes('0.6.4', '0.6.10')).toBe(true);
+            expect(precedes('0.6.10', '0.6.4')).toBe(false);
+            expect(precedes('0.6.5-rc.1', '0.6.5')).toBe(true);
+            expect(precedes('0.6.5', '0.6.5')).toBe(false);
+            expect(precedes('0.6.5', '0.6.5-rc.1')).toBe(false);
+            throws(() => precedes('0.6', '0.6.5'), /Invalid version/);
+        });
+
+        it('requires baseSince with previousBase, and previousBase with baseSince', () => {
+            throws(() => pinOrigin(onPrevious('0.6.4'), base, previous, '0.6.4'), /requires baseSince/);
+            throws(() => pinOrigin(onBase, base, undefined, '0.6.5', '0.6.5'), /only meaningful with previousBase/);
+        });
+
         it('refuses a pin outside both the base and the declared previousBase', () => {
-            throws(() => pinOrigin('https://elsewhere.example/developer/0.6.4/environment.tgz', base, previous), /neither/);
+            throws(() => pinOrigin('https://elsewhere.example/developer/0.6.4/environment.tgz', base, previous, '0.6.4', '0.6.5'), /neither/);
         });
 
         it('refuses a stale waiver once the header pins a version published under the new base', () => {
-            throws(() => pinOrigin(onBase, base, previous), /Stale migration waiver/);
+            throws(() => pinOrigin(onBase, base, previous, '0.6.5', '0.6.5'), /Stale migration waiver/);
         });
 
         it('refuses a previousBase on the origin of baseUrl', () => {
-            throws(() => pinOrigin(onBase, base, base), /another origin/);
+            throws(() => pinOrigin(onBase, base, base, '0.6.5', '0.6.5'), /another origin/);
         });
     });
 });

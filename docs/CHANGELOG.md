@@ -16,7 +16,7 @@
   with a dedicated GitHub application's token, tags in the same run, publishes, verifies the deployed bytes and opens the
   pull request into `develop`; its permissions are declared job by job and checked by `ReleaseDeveloperWorkflow`.
   `wf run pin` now fails (instead of warning) when the pinned URL is off the origin of `baseUrl`, redirects or lacks CORS,
-  and reads `previousBase` for the bounded migration waiver. `DeveloperPinConsistency` checks the states (a) to (c) and the
+  and reads `previousBase` and `baseSince` for the migration waiver, which covers only versions before `baseSince`. `DeveloperPinConsistency` checks the states (a) to (c) and the
   inconsistencies of ADR-021 decision 2. The compatibility table of `docs/DEVELOPER_ENVIRONMENT.md` is maintained by
   `cmake/DeveloperCompatibility.cmake` and enforced on `v*` tags by `CheckReleaseVersion.cmake`. The application, the tag rule
   and the first real publication are repository operations that remain to be done by a maintainer.

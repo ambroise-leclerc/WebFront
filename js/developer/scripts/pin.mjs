@@ -6,23 +6,45 @@
 // The header must be exactly the one generated for its version, and the archive at its URL must have its integrity.
 import {baseUrl, bootstrapHeader, sriOf} from '../tools/distribution.mjs';
 
+/** The numeric core and the prerelease of a version: an earlier prerelease precedes its release. */
+function versionOrder(version) {
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(version);
+    if (!match) throw new Error(`Invalid version ${version}`);
+    return {core: match.slice(1, 4).map(Number), prerelease: match[4]};
+}
+
+/** Whether version a precedes version b. */
+export function precedes(a, b) {
+    const left = versionOrder(a);
+    const right = versionOrder(b);
+    for (let index = 0; index < 3; index++) if (left.core[index] !== right.core[index]) return left.core[index] < right.core[index];
+    if (left.prerelease === right.prerelease) return false;
+    if (left.prerelease === undefined) return false;
+    return right.prerelease === undefined || left.prerelease < right.prerelease;
+}
+
 /**
  * Where a pinned URL stands relative to the distribution's base URL (ADR-021, decision 2). Returns `{waiver, warning}`:
- * `waiver` is true when the pin is tolerated only by the declared migration waiver (`previousBase` of distribution.json).
- * Throws when the pinned URL is off the origin of the base without a valid waiver, or when a waiver is stale (the pin
- * is on the current base, so `previousBase` must be removed).
+ * `waiver` is true when the pin is tolerated only by the declared migration waiver. The waiver is `previousBase` of
+ * distribution.json with `baseSince`, the first version published under `baseUrl`; it is bounded: it covers only a pin
+ * under `previousBase` whose version precedes `baseSince`. Throws when the pinned URL is off the origin of the base without
+ * a valid waiver, when the waiver is incomplete, when the pin is not before `baseSince`, or when the waiver is stale
+ * (the pin is on the current base, so `previousBase` and `baseSince` must be removed).
  */
-export function pinOrigin(pinnedUrl, base, previousBase) {
+export function pinOrigin(pinnedUrl, base, previousBase, pinnedVersion, baseSince) {
     const current = new URL(baseUrl(base));
     const pinned = new URL(pinnedUrl);
     const previous = previousBase === undefined ? undefined : new URL(baseUrl(previousBase));
     if (previous && previous.origin === current.origin) throw new Error('previousBase must be on another origin than baseUrl');
+    if (previous && baseSince === undefined) throw new Error('previousBase requires baseSince, the first version published under baseUrl');
+    if (!previous && baseSince !== undefined) throw new Error('baseSince is only meaningful with previousBase');
     if (pinned.origin === current.origin) {
-        if (previous) throw new Error(`Stale migration waiver: the header pins a version published under ${current.origin}; remove previousBase from distribution.json`);
+        if (previous) throw new Error(`Stale migration waiver: the header pins a version published under ${current.origin}; remove previousBase and baseSince from distribution.json`);
         return {waiver: false};
     }
     if (!previous) throw new Error(`The pinned ${pinned.href} is not on ${current.origin}, the origin of baseUrl, and distribution.json declares no previousBase`);
     if (!pinned.href.startsWith(previous.href)) throw new Error(`The pinned ${pinned.href} is on neither ${current.origin} nor the declared previousBase ${previous.href}`);
+    if (!precedes(pinnedVersion, baseSince)) throw new Error(`The migration waiver covers only versions before ${baseSince}, the first published under ${current.origin}; ${pinnedVersion} must be pinned on ${current.origin}`);
     return {waiver: true, warning: `migration waiver: the pinned ${pinned.href} is under the previous base ${previous.href}; it is not checked for redirection or CORS, and a browser cannot start from it if it redirects`};
 }
 
@@ -40,7 +62,7 @@ export default async function (context) {
     // (ii) The pinned URL itself: on the origin of baseUrl, or under the declared migration waiver (ADR-021).
     const distribution = JSON.parse(await project.readText('js/developer/tools/distribution.json'));
     const current = baseUrl(distribution.baseUrl);
-    const {waiver, warning} = pinOrigin(url, current, distribution.previousBase);
+    const {waiver, warning} = pinOrigin(url, current, distribution.previousBase, version, distribution.baseSince);
     // (i) The bytes, fetched where the distribution is served now: the pinned integrity proves the file.
     const served = new URL(marker, current).href;
     const response = await context.fetch(served, {signal: context.signal});

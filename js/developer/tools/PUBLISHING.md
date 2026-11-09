@@ -44,8 +44,11 @@ run, which publishes the same bytes, and a defect found at that point requires t
 version. A failed `verify` opens no pull request and changes neither `develop` nor `master`.
 
 `pin.mjs` (`wf run pin`) fails when the pinned URL is not on the origin of `baseUrl`, redirects, or lacks CORS headers. The only
-exception is a migration, declared by `previousBase` in `distribution.json` while the header still pins a version published
-under that address; it prints a warning, and is refused as soon as the header pins a version published under the new address.
+exception is a migration, declared in `distribution.json` by `previousBase` (the former address) together with `baseSince` (the
+first version published under `baseUrl`). It is bounded: it covers only a header under `previousBase` whose version precedes
+`baseSince`, prints a warning, and is refused for any later version, for a `previousBase` without `baseSince`, and as soon as the
+header pins a version published under the new address (the two fields must then be removed). `baseSince` completes the ADR-021
+decision, which names `previousBase` only.
 
 **Repository settings the workflow needs** (made by a maintainer, not by the workflow):
 
