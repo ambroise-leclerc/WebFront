@@ -9,6 +9,7 @@
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "ScriptDialogs.hpp"
+#include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -35,6 +36,10 @@
     #include <crt_externs.h>
     #include <mach-o/dyld.h>
 #endif
+
+namespace webfront::frontend {
+struct CEFFrontend;  // names the executor's host (UIExecutor.hpp)
+}
 
 namespace webfront::cef {
 
@@ -884,6 +889,24 @@ private:
 
 namespace detail {
 
+/// Runs the interface-thread executor's queue on CEF's UI thread.
+class DrainTask : public CefTask {
+public:
+    void Execute() override {
+        frontend::uiExecutorHostOf<frontend::CEFFrontend>().drain();
+    }
+
+private:
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(DrainTask);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
                        CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
                        WindowOptions windowSettings = {}, bool preserveSignalHandlers = false, const ViewLaunch& launch = {}) {
@@ -963,8 +986,19 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     // Create a top-level window with no browser chrome
     CefRefPtr<CefWindow> window = CefWindow::CreateTopLevelWindow(window_delegate);
 
-    // Run the CEF message loop
-    CefRunMessageLoop();
+    // Run the CEF message loop; CefPostTask is thread-safe and the task runs on this (UI) thread. A failed post (the loop is
+    // ending) is dropped: closing the host completes what is pending stopped.
+    auto& host = frontend::uiExecutorHostOf<frontend::CEFFrontend>();
+    host.attach([] { CefPostTask(TID_UI, new DrainTask); });
+    {
+        struct Closing {
+            frontend::UIExecutorHost& host;
+            ~Closing() {
+                host.close();
+            }
+        } closing{host};
+        CefRunMessageLoop();
+    }
 
     // Shutdown CEF
     CefShutdown();

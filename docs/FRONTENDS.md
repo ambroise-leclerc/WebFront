@@ -222,6 +222,29 @@ their own CTest timeouts.
 WKWebView adds native main-thread, Quit/closure, repeated-opening, initial HTTP failure, stalled-loading
 deadline and data-store/inspector/menu tests. See [WKWebView verification](WKWEBVIEW.md#unattended-verification).
 
+## Interface-thread executor
+
+An embedded frontend runs a loop on the thread that called `show()`; services (the native dialogs of ADR-020) must run code
+there. `app.uiExecutor()` returns a `frontend::UIExecutor`, a cheap handle: `available()` is true while the loop runs, and
+`schedule()` is a sender completing on the interface thread (compose it with `ex::then`). Completions: `set_value()` on the
+interface thread; `set_stopped()` when the receiver's stop token fires before the operation started, or when the window closes with it
+pending (nothing runs after closure); `set_error(UIExecutorUnavailable)` when no loop is attached (before `show()`, after closure,
+frontends without a loop). An operation that started is never interrupted, and `schedule()` always queues, even from the interface thread.
+
+| Frontend | Wake-up |
+| --- | --- |
+| WKWebView | block on the main queue |
+| WebView2 | window message `WM_APP + 0x4C3` |
+| WebKitGTK | `g_idle_add_full` on the default context |
+| CEF | `CefPostTask(TID_UI, ...)` |
+| `BrowserWithUILoopFrontend` | message-only window (Windows), run loop source (macOS), GLib idle (Linux) |
+
+The plain `DefaultBrowserFrontend` runs no loop and has no executor. `BrowserWithUILoopFrontend` launches the page in the system
+browser and runs the minimal loop on the calling thread until `BrowserWithUILoopFrontend::requestStop()` (any thread); the server
+then keeps running, as with the plain browser. On macOS it sets `NSApplication` to the Accessory policy (no Dock icon) only when
+it is still Regular. A frontend author implements it with `UIExecutorHost`: `attach(wake)` on the interface thread, `drain()` when woken,
+`close()` when the loop ends (`uiExecutorHostOf<Frontend>()` gives the process-wide host).
+
 ## Native window with browser fallback
 
 Without a preprocessor test, `webfront::embeddedFrontendAvailable` (`inline constexpr bool`, true when a native engine or CEF is

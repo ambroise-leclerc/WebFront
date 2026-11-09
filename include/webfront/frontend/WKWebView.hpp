@@ -6,6 +6,7 @@
 #include "Downloads.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
+#include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -23,6 +24,14 @@
 #include <type_traits>
 
 namespace webfront::frontend {
+
+namespace detail::wkwebview {
+/// The interface thread of the window: attached for the duration of open(), on the main thread.
+inline UIExecutorHost& executorHost() {
+    static UIExecutorHost host;
+    return host;
+}
+}  // namespace detail::wkwebview
 
 /** @brief Per-opening options for the optional macOS frontend. */
 struct WKWebViewOptions {
@@ -1063,6 +1072,19 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     Session window(applicationUrl(address, port, file), options);
     window.create();
     window.start();
+    // The AppKit loop drains the main queue: a wake is a block on it. Closing completes pending operations stopped,
+    // also when run() throws or returns at once because the window already closed.
+    auto& host = executorHost();
+    host.attach([&host] {
+        dispatch_async_f(
+            dispatch_get_main_queue(), &host, +[](void* context) { static_cast<UIExecutorHost*>(context)->drain(); });
+    });
+    struct Closing {
+        UIExecutorHost& host;
+        ~Closing() {
+            host.close();
+        }
+    } closing{host};
     window.run();
 }
 
@@ -1081,6 +1103,11 @@ struct WKWebViewFrontend {
 #else
         throw std::runtime_error("WKWebViewFrontend is unavailable. Configure on macOS with -DWEBFRONT_EMBED_WKWEBVIEW=ON");
 #endif
+    }
+
+    /// The main thread while open() runs the AppKit loop (see UIExecutor.hpp).
+    [[nodiscard]] static UIExecutor uiExecutor() {
+        return detail::wkwebview::executorHost().executor();
     }
 
     static void open(std::string_view port, std::string_view file) {

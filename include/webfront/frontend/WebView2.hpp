@@ -7,6 +7,7 @@
 #include "DefaultBrowser.hpp"
 #include "../ViewAssociation.hpp"
 #include "ScriptDialogs.hpp"
+#include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
@@ -52,6 +53,10 @@ struct WebView2Options {
     #include <shlobj.h>
     #include <WebView2.h>
     #include <wrl.h>
+
+namespace webfront::frontend {
+struct WebView2Frontend;  // names the executor's host (UIExecutor.hpp)
+}
 
 namespace webfront::frontend::detail::webview2 {
 
@@ -148,6 +153,7 @@ inline std::filesystem::path userDataFolder() {
 
 /// Posted to the window to make its STA start the queued capture requests.
 inline constexpr UINT captureMessage = WM_APP + 0x4C1;
+inline constexpr UINT drainMessage   = WM_APP + 0x4C3;  // UIExecutor: run what the interface thread was asked
 
 struct CaptureJob {
     std::promise<CaptureResult> done;
@@ -640,6 +646,9 @@ private:
             case captureMessage:
                 startCaptures();
                 return true;
+            case drainMessage:
+                uiExecutorHostOf<WebView2Frontend>().drain();
+                return true;
             case WM_CLOSE:
                 close();
                 DestroyWindow(handle);
@@ -885,6 +894,17 @@ inline void open(std::string_view address,
     std::filesystem::create_directories(profile);
     session->createWindow(options.visible, options.window);
     session->start(profile);
+    // The wake posts to the window, which the pump of run() dispatches. A post that fails (the window is gone) is
+    // dropped: closing the host completes what is pending stopped. The guard is declared after the apartment and
+    // before run(), so the host closes on every exit, also by exception.
+    auto& host = uiExecutorHostOf<WebView2Frontend>();
+    host.attach([window = session->window] { PostMessageW(window, drainMessage, 0, 0); });
+    struct Closing {
+        UIExecutorHost& host;
+        ~Closing() {
+            host.close();
+        }
+    } closing{host};
     session->run();
 }
 
@@ -896,6 +916,11 @@ namespace webfront::frontend {
 /** @brief Optional Windows embedded frontend. open() owns an STA and blocks until the window closes. */
 struct WebView2Frontend {
     static constexpr Action action{Action::closeServerAfterOpen};
+
+    /// The thread of the window's message pump while open() runs (see UIExecutor.hpp).
+    [[nodiscard]] static UIExecutor uiExecutor() {
+        return uiExecutorHostOf<WebView2Frontend>().executor();
+    }
 
     static void initialize() { }
 

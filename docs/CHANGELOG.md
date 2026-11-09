@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Interface-thread executor for every frontend (#462, ADR-020 step 5, ADR-007 1.11). `frontend::UIExecutor` (`UIExecutor.hpp`)
+  exposes `available()`, `onUIThread()` and `schedule()`, a sender that completes on the interface thread: `set_value()` there,
+  `set_stopped()` when the stop token fires first or the loop closes with the operation pending (it never runs after closure),
+  `set_error(UIExecutorUnavailable)` when no loop is attached. `BasicWF::uiExecutor()` forwards the frontend's. WKWebView
+  (main queue), WebView2 (a window message), WebKitGTK (`g_idle_add_full`) and CEF (`CefPostTask(TID_UI)`) publish one while
+  `open()` runs their loop. New `BrowserWithUILoopFrontend` is the system browser with an optional minimal loop on the calling
+  thread (message-only window pump, AppKit run loop with `NSApplication` in the Accessory policy, GLib loop; all loaded at run
+  time, nothing to link) that ends with `requestStop()`; the plain browser frontend still has no executor. Catch2 tests with a
+  simulated loop and the shared lifecycle case `ui-executor` (execution on the interface thread, race with closure, call after closure).
 - `@webfront/services` package (#461, ADR-010 1.8, ADR-020 step 4). The browser side of the optional system services is
   delivered outside the core, like `@webfront/react`: `js/services/` (a skeleton: an empty frozen `services` object and
   `selfTest()`, declarations, license), `wf run services-package` for its deterministic archive and SHA-512, the same

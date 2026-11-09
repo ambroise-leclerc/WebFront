@@ -7,6 +7,8 @@
 #include "CEF.hpp"
 #include "DefaultBrowser.hpp"
 #include "NativeWebView.hpp"
+#include "UIExecutor.hpp"
+#include "UILoop.hpp"
 #include "WebView2.hpp"
 #include "WKWebView.hpp"
 #include "WebKitGTK.hpp"
@@ -42,6 +44,8 @@ namespace webfront::frontend {
  * diagnostic naming its enabling CMake option. ContentPolicy rules and adapter capabilities
  * are documented in docs/CONTENT_POLICY.md.
  * An optional open(address, port, file, policy, window) overload also receives the application's WindowOptions.
+ * An optional static UIExecutor uiExecutor() publishes the interface thread (UIExecutor.hpp): it is available while
+ * open() runs the frontend's loop, and BasicWF::uiExecutor() forwards it.
  * An optional static bool closeServerAfterOpen() overrides `action` at run time (NativeOrBrowserFrontend).
  * An optional open(address, port, file) overload receives the configured address; build URLs with
  * detail::applicationUrl() so all frontends preserve the same URI-reference semantics.
@@ -77,8 +81,62 @@ struct DefaultBrowserFrontend {
     }
 };
 
+/**
+ * @brief The system browser with an interface-thread loop on the calling thread (ADR-020, #462).
+ *
+ * Like DefaultBrowserFrontend it launches the page in the system browser, then runs the platform's minimal loop (Windows
+ * message pump, AppKit run loop in the Accessory policy, GLib main loop) on the thread that called show()/open(), usually
+ * the main thread. `uiExecutor()` is available while it runs, which the native dialogs need. Unlike the plain browser
+ * frontend it does not wait for Enter: it returns when `requestStop()` is called, from any thread (a callback, a signal
+ * handler's thread, a test). The server keeps running after it returns, until stop() or destruction. Without this frontend
+ * the system browser has no interface thread and no executor.
+ */
+struct BrowserWithUILoopFrontend {
+    static constexpr Action action{Action::keepServerRunning};
+
+    static void initialize() { }
+
+    /// Ends the loop of a running open(), or the next one at its start; callable from any thread.
+    static void requestStop() noexcept {
+        loopStop().request();
+    }
+    [[nodiscard]] static UIExecutor uiExecutor() {
+        return uiExecutorHostOf<BrowserWithUILoopFrontend>().executor();
+    }
+
+    static void open(std::string_view port, std::string_view file) {
+        open("127.0.0.1", port, file);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file) {
+        loop(address, port, file, browser::launch);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&) {
+        open(address, port, file);
+    }
+    static void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy&, const WindowOptions&) {
+        open(address, port, file);
+    }
+    /// The loop with another launcher: the unit tests start no browser.
+    static void loop(std::string_view address, std::string_view port, std::string_view file, browser::Launcher launcher) {
+        // A launcher that fails throws before the loop: no executor is left attached.
+        launcher(detail::applicationUrl(address, port, file));
+        detail::uiloop::run(uiExecutorHostOf<BrowserWithUILoopFrontend>(), loopStop());
+    }
+
+private:
+    static UILoopStop& loopStop() {
+        static UILoopStop stop;
+        return stop;
+    }
+};
+
 struct CEFFrontend {
     static constexpr Action action{Action::closeServerAfterOpen};
+
+    /// CEF's UI thread while open() runs its message loop (see UIExecutor.hpp).
+    [[nodiscard]] static UIExecutor uiExecutor() {
+        return uiExecutorHostOf<CEFFrontend>().executor();
+    }
 
     static void initialize() {
         try {
@@ -172,6 +230,21 @@ struct NativeOrBrowserFrontendFor {
             return usesNativeWindow();
         else
             return false;
+    }
+
+    /// The interface thread of the window in use; the browser path has one only with its loop mode.
+    [[nodiscard]] static UIExecutor uiExecutor() {
+        if (usesNativeWindow()) {
+            if constexpr (requires { { Native::uiExecutor() } -> std::same_as<UIExecutor>; })
+                return Native::uiExecutor();
+            else
+                return {};
+        } else {
+            if constexpr (requires { { Browser::uiExecutor() } -> std::same_as<UIExecutor>; })
+                return Browser::uiExecutor();
+            else
+                return {};
+        }
     }
 
     // Called once per process by BasicWF (std::call_once). It resets the decision, so a direct caller must not
