@@ -449,26 +449,29 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
     GIVEN("the browser frontend with its loop") {
         CHECK_FALSE(Browser::uiExecutor().available());
         launches = 0;
-        LoopOutcome outcome;
+        LoopOutcome       outcome;
+        std::atomic<bool> clientOk{false};
+        // No Catch2 assertion off the main thread: the client records its result and always asks the loop to stop,
+        // so that a timeout fails the test instead of hanging or terminating the process.
         std::jthread client([&] {
             const auto executor = Browser::uiExecutor();
-            REQUIRE(waitFor([&] { return executor.available(); }));
-            using Op = Connected<decltype(executor.schedule())>;
-            // A function-local receiver type keeps the helper simple: schedule one operation and wait for it.
-            struct Holder {
-                decltype(ex::connect(std::declval<decltype(executor.schedule())>(), std::declval<LoopReceiver>())) op;
-                Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
-            } holder(executor, outcome);
-            ex::start(holder.op);
-            REQUIRE(waitFor([&] { return outcome.completions == 1; }));
+            if (waitFor([&] { return executor.available(); })) {
+                // A function-local receiver type keeps the helper simple: schedule one operation and wait for it.
+                struct Holder {
+                    decltype(ex::connect(std::declval<decltype(executor.schedule())>(), std::declval<LoopReceiver>())) op;
+                    Holder(const UIExecutor& e, LoopOutcome& o) : op(ex::connect(e.schedule(), LoopReceiver{o})) { }
+                } holder(executor, outcome);
+                ex::start(holder.op);
+                clientOk = waitFor([&] { return outcome.completions == 1; });
+            }
             Browser::requestStop();
-            (void)sizeof(Op);
         });
         WHEN("open runs until the stop request") {
             const auto callingThread = std::this_thread::get_id();
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             THEN("the page was launched, the operation ran on the calling thread and the executor is gone") {
                 client.join();
+                CHECK(clientOk);
                 CHECK(launches == 1);
                 CHECK(outcome.valueThread == callingThread);
                 CHECK_FALSE(outcome.stopped);
@@ -486,17 +489,20 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
     GIVEN("several stop requests arriving while the loop exits") {
         launches = 0;
         std::atomic<bool> finished{false};
+        std::atomic<bool> clientOk{false};
         std::jthread     client([&] {
             const auto executor = Browser::uiExecutor();
-            REQUIRE(waitFor([&] { return executor.available(); }));
+            clientOk = waitFor([&] { return executor.available(); });
             // Each request may queue a source in the platform loop: none may outlive it or touch what it freed.
-            while (!finished)
+            do
                 Browser::requestStop();
+            while (!finished);
         });
         THEN("the loop ends") {
             Browser::loop("127.0.0.1", "9002", "index.html", fakeLaunch);
             finished = true;
             client.join();
+            CHECK(clientOk);
             CHECK_FALSE(Browser::uiExecutor().available());
         }
     }

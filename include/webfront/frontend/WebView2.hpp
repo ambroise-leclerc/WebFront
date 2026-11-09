@@ -894,11 +894,14 @@ inline void open(std::string_view address,
     std::filesystem::create_directories(profile);
     session->createWindow(options.visible, options.window);
     session->start(profile);
-    // The wake posts to the window, which the pump of run() dispatches. A post that fails (the window is gone) is
-    // dropped: closing the host completes what is pending stopped. The guard is declared after the apartment and
-    // before run(), so the host closes on every exit, also by exception.
+    // The wake posts to the window, which the pump of run() dispatches. A post that fails (a full message queue) throws:
+    // the host then fails the operations that relied on that notification instead of leaving them waiting. The guard is
+    // declared after the apartment and before run(), so the host closes on every exit, also by exception.
     auto& host = uiExecutorHostOf<WebView2Frontend>();
-    host.attach([window = session->window] { PostMessageW(window, drainMessage, 0, 0); });
+    host.attach([window = session->window] {
+        if (!PostMessageW(window, drainMessage, 0, 0))
+            throw std::runtime_error("WebView2: cannot wake the interface thread (the message queue is full)");
+    });
     struct Closing {
         UIExecutorHost& host;
         ~Closing() {

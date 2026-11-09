@@ -718,9 +718,6 @@ public:
         uiStartedHandler = std::move(handler);
     }
 
-    /// Adds a handler for each browser that connects from now on, called after the onUIStarted
-    /// handler and the earlier subscribers. It stays registered while the returned subscription
-    /// lives; components use this so they never replace the application's handler.
     /// The interface thread of the frontend: available while an embedded frontend's loop runs (or the system browser's
     /// optional loop mode), never for a frontend without one. See frontend/UIExecutor.hpp for the completion rules.
     [[nodiscard]] frontend::UIExecutor uiExecutor() const {
@@ -730,6 +727,9 @@ public:
             return {};
     }
 
+    /// Adds a handler for each browser that connects from now on, called after the onUIStarted
+    /// handler and the earlier subscribers. It stays registered while the returned subscription
+    /// lives; components use this so they never replace the application's handler.
     [[nodiscard]] UISubscription subscribeUIStarted(std::function<void(UI)> handler) {
         return uiSubscribers->subscribe(std::move(handler));
     }

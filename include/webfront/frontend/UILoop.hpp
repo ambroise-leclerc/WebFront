@@ -130,37 +130,40 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
             DestroyWindow(window);
         }
     } destroy{window};
-    const DWORD thread = GetCurrentThreadId();
-    // A wake that fails (the window is gone) is dropped: closing abandons what is pending.
-    host.attach([window] { PostMessageW(window, drainMessage, 0, 0); });
-    // WM_QUIT belongs to the thread, not to the window: one is posted per opening once a post succeeded (several requests are one), and
-    // one left unconsumed (the loop left by an exception) is removed so that it cannot end the next opening.
-    auto posted = std::make_shared<std::atomic<bool>>(false);
-    struct PurgeQuit {
-        std::shared_ptr<std::atomic<bool>> posted;
-        ~PurgeQuit() {
-            MSG left{};
-            if (posted->load())
-                while (PeekMessageW(&left, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) { }
+    // The stop request is an event, not a posted message: SetEvent cannot fail for lack of queue quota, and the loop
+    // reads it after every turn, so a single request is always honoured and nothing is left in the thread's queue.
+    struct Event {
+        HANDLE handle{CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+        ~Event() {
+            if (handle)
+                CloseHandle(handle);
         }
-    } purge{posted};  // destroyed after the guard has disarmed: no request can post any more
+    } stopEvent;  // closed after the guard has disarmed: no request can signal it any more
+    if (!stopEvent.handle)
+        throw std::runtime_error("UI loop: cannot create the stop event");
+    // A wake that cannot be posted (a full message queue) throws: the host fails the operations that relied on it.
+    host.attach([window] {
+        if (!PostMessageW(window, drainMessage, 0, 0))
+            throw std::runtime_error("UI loop: cannot wake the interface thread (the message queue is full)");
+    });
     CloseGuard guard{host, stop};
-    if (stop.arm([thread, posted] {
-            // Only a successful post counts: a full queue (ERROR_NOT_ENOUGH_QUOTA) leaves the next request free to retry.
-            // Two requests racing may both post: the extra WM_QUIT is removed on exit, like any unconsumed one.
-            if (!posted->load() && PostThreadMessageW(thread, WM_QUIT, 0, 0))
-                posted->store(true);
-        }))
+    if (stop.arm([event = stopEvent.handle] { SetEvent(event); }))
         return;
-    MSG message{};
     for (;;) {
-        const auto result = GetMessageW(&message, nullptr, 0, 0);
-        if (result == -1)
-            throw std::runtime_error("UI loop: message loop failed");
-        if (!result)
+        if (stop.requestedStop())
             return;
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        const auto waited = MsgWaitForMultipleObjectsEx(1, &stopEvent.handle, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if (waited == WAIT_OBJECT_0)
+            return;
+        if (waited == WAIT_FAILED)
+            throw std::runtime_error("UI loop: message loop failed");
+        MSG message{};
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            if (message.message == WM_QUIT)
+                return;
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
     }
 }
 

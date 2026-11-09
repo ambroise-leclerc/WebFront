@@ -14,6 +14,7 @@
 
 #include "../networking/Tasks.hpp"
 
+#include <algorithm>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
