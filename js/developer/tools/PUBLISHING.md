@@ -16,8 +16,8 @@ The **release-developer** workflow (`.github/workflows/ReleaseDeveloper.yml`, AD
 it on `develop` with the version (greater than the one of `distribution.json`):
 
 ```sh
-gh workflow run release-developer.yml --ref develop -f version=0.6.7 -f publish=false   # rehearsal
-gh workflow run release-developer.yml --ref develop -f version=0.6.7 -f publish=true    # release
+gh workflow run ReleaseDeveloper.yml --ref develop -f version=0.6.7 -f publish=false   # rehearsal
+gh workflow run ReleaseDeveloper.yml --ref develop -f version=0.6.7 -f publish=true    # release
 ```
 
 The jobs run in this order, and each declares only the permissions of the table of ADR-021 (`ReleaseDeveloperWorkflow` checks them):

@@ -266,7 +266,7 @@ jobs:
         run: |
           cmake -S . -B build-public -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON \
             -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
-          cmake --build build-public --target developer_integration --parallel 2
+          cmake --build build-public --target developer_integration webfront-wf --parallel 2
           ctest --test-dir build-public -R '^DeveloperFixtures$' --output-on-failure --no-tests=error
           xvfb-run -a ./build-public/test/web/developer_integration \
             "$PWD/build-public/test/web/developer-fixtures" "$PWD/build-public/test/web/public-generated" --public
