@@ -13,6 +13,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -131,8 +132,22 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
     const DWORD thread = GetCurrentThreadId();
     // A wake that fails (the window is gone) is dropped: closing abandons what is pending.
     host.attach([window] { PostMessageW(window, drainMessage, 0, 0); });
+    // WM_QUIT belongs to the thread, not to the window: at most one is posted per opening (several requests are one), and
+    // one left unconsumed (the loop left by an exception) is removed so that it cannot end the next opening.
+    auto posted = std::make_shared<std::atomic<bool>>(false);
+    struct PurgeQuit {
+        std::shared_ptr<std::atomic<bool>> posted;
+        ~PurgeQuit() {
+            MSG left{};
+            if (posted->load())
+                while (PeekMessageW(&left, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) { }
+        }
+    } purge{posted};  // destroyed after the guard has disarmed: no request can post any more
     CloseGuard guard{host, stop};
-    if (stop.arm([thread] { PostThreadMessageW(thread, WM_QUIT, 0, 0); }))
+    if (stop.arm([thread, posted] {
+            if (!posted->exchange(true))
+                PostThreadMessageW(thread, WM_QUIT, 0, 0);
+        }))
         return;
     MSG message{};
     for (;;) {
@@ -215,34 +230,81 @@ private:
 // NSApplication in the Accessory policy (no Dock icon, no menu bar) so that panels can be shown. An application that
 // already owns AppKit (another frontend, a host application) keeps its policy: only the default (Regular) one is changed.
 // The Objective-C runtime is reached through dlsym, as CoreFoundation is: a consumer links nothing for this loop.
-inline void prepareApplication() {
-    using Id         = void*;
-    using Selector   = void*;
-    using GetClass   = Id (*)(const char*);
-    using Register   = Selector (*)(const char*);
-    using Send       = Id (*)(Id, Selector);
-    using SendLong   = long (*)(Id, Selector);
-    using SetLong    = unsigned char (*)(Id, Selector, long);
-    using SendVoid   = void (*)(Id, Selector);
-    const auto getClass   = reinterpret_cast<GetClass>(dlsym(RTLD_DEFAULT, "objc_getClass"));
-    const auto selector   = reinterpret_cast<Register>(dlsym(RTLD_DEFAULT, "sel_registerName"));
-    const auto messageRaw = dlsym(RTLD_DEFAULT, "objc_msgSend");
-    if (!getClass || !selector || !messageRaw)
-        return;
-    const auto applicationClass = getClass("NSApplication");
-    if (!applicationClass)
-        return;
-    const auto application = reinterpret_cast<Send>(messageRaw)(applicationClass, selector("sharedApplication"));
-    if (!application)
-        return;
-    if (reinterpret_cast<SendLong>(messageRaw)(application, selector("activationPolicy")) == 0)
-        reinterpret_cast<SetLong>(messageRaw)(application, selector("setActivationPolicy:"), 1L);  // Accessory
-    reinterpret_cast<SendVoid>(messageRaw)(application, selector("finishLaunching"));
-}
+// The loop is an AppKit event pump (nextEvent / sendEvent), not a bare run loop: panels need their events dispatched.
+class AppKitPump {
+public:
+    using Id       = void*;
+    using Selector = void*;
+    struct Point {
+        double x, y;
+    };
+
+    bool ok{false};
+
+    AppKitPump() {
+        const auto getClass = reinterpret_cast<Id (*)(const char*)>(dlsym(RTLD_DEFAULT, "objc_getClass"));
+        selector            = reinterpret_cast<Selector (*)(const char*)>(dlsym(RTLD_DEFAULT, "sel_registerName"));
+        send                = dlsym(RTLD_DEFAULT, "objc_msgSend");
+        poolPush            = reinterpret_cast<Id (*)()>(dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPush"));
+        poolPop             = reinterpret_cast<void (*)(Id)>(dlsym(RTLD_DEFAULT, "objc_autoreleasePoolPop"));
+        const auto mode     = reinterpret_cast<Id*>(dlsym(RTLD_DEFAULT, "NSDefaultRunLoopMode"));
+        if (!getClass || !selector || !send || !poolPush || !poolPop || !mode)
+            return;
+        defaultMode      = *mode;
+        const auto appClass = getClass("NSApplication");
+        eventClass          = getClass("NSEvent");
+        dateClass           = getClass("NSDate");
+        if (!appClass || !eventClass || !dateClass)
+            return;
+        application = call<Id>(appClass, "sharedApplication");
+        if (!application)
+            return;
+        if (call<long>(application, "activationPolicy") == 0)
+            call<unsigned char>(application, "setActivationPolicy:", 1L);  // Accessory
+        call<void>(application, "finishLaunching");
+        ok = true;
+    }
+
+    /// Thread-safe: makes next() return, so that the loop reads its flags again.
+    void wake() const {
+        const auto pool  = poolPush();
+        const auto event = call<Id>(eventClass, "otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:",
+                                    15UL /* NSEventTypeApplicationDefined */, Point{0, 0}, 0UL, 0.0, 0L, Id{}, short{0}, 0L, 0L);
+        if (event)
+            call<void>(application, "postEvent:atStart:", event, static_cast<signed char>(1));
+        poolPop(pool);
+    }
+
+    /// One turn of the pump: waits for an event (the run loop's sources, such as the executor's, run meanwhile) and dispatches it.
+    void next() const {
+        const auto pool  = poolPush();
+        const auto until = call<Id>(dateClass, "distantFuture");
+        const auto event = call<Id>(application, "nextEventMatchingMask:untilDate:inMode:dequeue:", ~0UL, until, defaultMode,
+                                    static_cast<signed char>(1));
+        if (event)
+            call<void>(application, "sendEvent:", event);
+        poolPop(pool);
+    }
+
+private:
+    template <typename R, typename... Args>
+    R call(Id target, const char* name, Args... args) const {
+        return reinterpret_cast<R (*)(Id, Selector, Args...)>(send)(target, selector(name), args...);
+    }
+
+    Selector (*selector)(const char*) = nullptr;
+    void*  send{};
+    Id     (*poolPush)()   = nullptr;
+    void   (*poolPop)(Id)  = nullptr;
+    Id     application{};
+    Id     eventClass{};
+    Id     dateClass{};
+    Id     defaultMode{};
+};
 
 inline void run(UIExecutorHost& host, UILoopStop& stop) {
     const auto& cf = CoreFoundation::get();
-    prepareApplication();
+    const AppKitPump pump;
     CoreFoundation::SourceContext context{};
     context.info    = &host;
     context.perform = +[](void* info) { static_cast<UIExecutorHost*>(info)->drain(); };
@@ -260,19 +322,24 @@ inline void run(UIExecutorHost& host, UILoopStop& stop) {
             cf.release(source);
         }
     } remove{cf, loop, source};
-    host.attach([&cf, loop, source] {
+    const auto signalLoop = [&cf, &pump, loop, source] {
         cf.signal(source);
         cf.wakeUp(loop);
-    });
+        if (pump.ok)
+            pump.wake();  // nextEvent only returns for an event: the source ran, the loop must also look at its flags
+    };
+    host.attach(signalLoop);
     CloseGuard guard{host, stop};
-    // A stop request signals the source: the run returns after handling it (returnAfterSourceHandled) and the flag is read
-    // again, so a request made between the check and the run is not lost.
-    if (stop.arm([&cf, loop, source] {
-            cf.signal(source);
-            cf.wakeUp(loop);
-        }))
+    // A stop request signals the same way: the loop reads the flag again after each turn, so a request made between the
+    // check and the wait is not lost (it posted an event).
+    if (stop.arm(signalLoop))
         return;
-    while (!stop.requestedStop())
+    if (pump.ok) {
+        while (!stop.requestedStop())
+            pump.next();
+        return;
+    }
+    while (!stop.requestedStop())  // no Objective-C runtime: sources only
         cf.runInMode(cf.defaultMode, 1.0e9, 1);
 }
 
