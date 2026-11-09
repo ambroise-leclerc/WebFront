@@ -194,7 +194,7 @@ webfront-agent --list
 webfront-agent --attach /absolute/private-endpoint --operation check
 ```
 
-The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. A callback of the
+A window that never claims the session (`startupTimeout`, 120 s from the activation) is revoked the same way, since no operation exists for the deadline to expire. The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. A callback of the
 application is not an MCP tool: exposing an explicit allow-list of typed callbacks needs its own security decision
 ([ADR-019](adr/ADR-019-developpement-automatisable-et-agents.md)) and is not implemented. Enabling automation in a
 distribution build is an application choice: gate the call (for example behind a macro) so that shipped binaries have none.

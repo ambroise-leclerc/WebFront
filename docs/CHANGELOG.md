@@ -11,7 +11,7 @@
   removed on closure and dropped when its process is gone. `webfront-agent --list` prints these records and
   `--print-mcp-config --attach <dir> [--name n]` prints a `.mcp.json`; `--sessions-dir` overrides the directory.
   `webfront_add_agent([INSTALL] [DESTINATION dir])` checks and installs the launcher target for `add_subdirectory` and
-  `FetchContent` consumers. `wf check` without a `tsconfig.json` now also roots the project's own `.d.ts` files, so an ambient
+  `FetchContent` consumers. `wf check` without a `tsconfig.json` now also roots the project's own `.d.ts`, `.d.mts` and `.d.cts` files, so an ambient
   `declare module '*.css'` applies. The environment sources move to 0.6.6 (the pin stays on the published 0.6.5); publishing 0.6.6 and updating the pin remain a release action. A new discovery directory is created private to the user; an existing one that others can read is refused, never modified.
 - Writable storage confined to declared roots (#460, ADR-002 3.0, ADR-020 step 4). `fs::Storage` is the contract of a
   writable storage: stable paginated listing (`list(dir, after, limit)`, at most 1000 entries a page), `status`,

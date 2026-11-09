@@ -305,12 +305,13 @@ SCENARIO("A window that ignores the deadline's close request is declared unrespo
     ConsumerApp           app{.project = root.path() / "project"};
     const auto            sessions = root.path() / "sessions";
     std::atomic<int>      unresponsive{0};
-    const auto            enable = [&](std::chrono::milliseconds grace) {
+    const auto            enable = [&](std::chrono::milliseconds grace, std::chrono::seconds startup = std::chrono::seconds{120}) {
         return enableAutomation(app,
                                 {.grants         = {"check"},
                                  .listen         = root.path() / ("endpoint" + std::to_string(grace.count())),
                                  .discovery      = sessions,
                                  .timeout        = std::chrono::seconds{1},
+                                 .startupTimeout  = startup,
                                  .closeGrace     = grace,
                                  .onUnresponsive = [&] { ++unresponsive; },
                                  .announce       = false});
@@ -350,12 +351,33 @@ SCENARIO("A window that ignores the deadline's close request is declared unrespo
             REQUIRE(discovery::list(sessions).empty());
         }
     }
+    GIVEN("a renderer blocked before its first poll, so that no operation can expire") {
+        auto automation = enable(std::chrono::milliseconds{100}, std::chrono::seconds{1});
+        THEN("the startup deadline revokes the session and the unresponsive window is declared after the grace") {
+            REQUIRE(eventually([&] { return unresponsive.load() == 1; }));
+            REQUIRE(automation->controller()->isClosed());
+            REQUIRE(discovery::list(sessions).empty());
+            REQUIRE_FALSE(std::filesystem::exists(automation->endpoint() / "endpoint.json"));
+        }
+    }
+    GIVEN("a window that claims the session before the startup deadline") {
+        auto automation = enable(std::chrono::milliseconds{100}, std::chrono::seconds{1});
+        automation->controller()->poll();
+        THEN("an idle session is not revoked by the startup deadline") {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1500});
+            REQUIRE_FALSE(automation->controller()->isClosed());
+            REQUIRE(unresponsive.load() == 0);
+        }
+    }
     GIVEN("the window disconnecting by itself") {
         auto automation = enable(std::chrono::milliseconds{50});
         automation->controller()->close("Developer window disconnected");
         THEN("the application is not declared unresponsive, whatever the time it takes to close the automation") {
             std::this_thread::sleep_for(std::chrono::milliseconds{300});
             REQUIRE(unresponsive.load() == 0);
+            // The session is over: the record and the endpoint are withdrawn even though the object is still alive.
+            REQUIRE(eventually([&] { return discovery::list(sessions).empty(); }));
+            REQUIRE_FALSE(std::filesystem::exists(automation->endpoint() / "endpoint.json"));
         }
     }
 }

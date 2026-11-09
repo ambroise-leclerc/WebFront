@@ -40,6 +40,9 @@ struct AutomationOptions {
     std::filesystem::path discovery{};
     /// Per-operation native deadline.
     std::chrono::seconds timeout{120};
+    /// How long the window may take to claim the session, counted from the activation: a renderer blocked before its first
+    /// poll has no operation for `timeout` to expire. Past it the session is revoked like a deadline.
+    std::chrono::seconds startupTimeout{120};
     /// After a deadline revokes the session, how long the window may take to close on its own. `window.close()` cannot run
     /// in a renderer stuck in a loop, so past this grace the endpoint and record are removed and `onUnresponsive` is called.
     std::chrono::milliseconds closeGrace{5000};
@@ -62,6 +65,8 @@ public:
           endpointDirectory(channel.directory()),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
+          launched(std::chrono::steady_clock::now()),
+          startup(options.startupTimeout),
           // Last of the fallible steps: the binding registers callbacks in the application and cannot take them back, so
           // everything that can refuse the activation (grants, endpoint, record) has been validated before it.
           binding(app, session) {
@@ -69,15 +74,18 @@ public:
         // A renderer in a loop never runs that request: after the grace the window is declared unresponsive.
         supervisor = std::jthread([this](std::stop_token stop) {
             while (!stop.stop_requested()) {
-                if (session->expire())
+                const bool starting = !session->wasReady() && !session->isClosed();
+                if (session->expire() || (starting && std::chrono::steady_clock::now() - launched > startup))
                     session->close("Native automation deadline exceeded");
                 if (session->isClosed()) {
                     binding.closeBrowser();
                     // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure
                     // report), the window was only asked to close: a stuck renderer ignores it. Only a window that already
                     // disconnected has nothing left to watch.
-                    if (Object(session->describe()).string("failure") == "Developer window disconnected")
+                    if (Object(session->describe()).string("failure") == "Developer window disconnected") {
+                        revoke();  // nothing to watch, but the session is over: no endpoint nor running record may remain
                         return;
+                    }
                     const auto deadline = std::chrono::steady_clock::now() + grace;
                     while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
@@ -168,6 +176,8 @@ private:
     std::function<void()>         unresponsive;
     std::mutex                    revocation;
     bool                          revoked = false;
+    std::chrono::steady_clock::time_point launched;
+    std::chrono::seconds          startup;
     Binding<App>                  binding;
     std::jthread                  supervisor;
 };

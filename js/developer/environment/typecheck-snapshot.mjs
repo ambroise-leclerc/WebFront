@@ -314,7 +314,7 @@ export async function loadSnapshot(ts, {read, list, lock, typescript, entries = 
         await loadPackageScopes(wanted);
         // The project's own declaration files are roots too: an ambient `declare module '*.css'` applies only when its
         // file belongs to the program, and nothing imports it.
-        const declarations = listed.filter(path => path.endsWith('.d.ts') && !sources.includes(path)).sort();
+        const declarations = listed.filter(path => declaration.test(path) && !sources.includes(path)).sort();
         rootNames = [...sources, ...declarations].map(path => `${projectRoot}/${path}`);
     }
     snapshot.misses.clear();

@@ -548,6 +548,17 @@ try {
         const rootDeclared = await checked([], {bridge: withoutConfig});
         assert(rootDeclared.text && rootDeclared.output.includes('No type errors in 2 project files'),
             `A root .d.ts must be checked with an entry of a subdirectory: ${rootDeclared.error}\n${rootDeclared.output}`);
+        // The module-format variants of declaration files are roots as well (the root's globals.d.ts is still there: 4 files).
+        await writeFile('dts-mod/main.ts', "import text from './a.txt';\nimport table from './b.csv';\nexport const both: string = text + table;\n");
+        await writeFile('webfront.project.json', JSON.stringify({...manifest, entries: {declarations: 'dts-mod/main.ts'}}));
+        const modUndeclared = await checked([], {bridge: withoutConfig});
+        assert(modUndeclared.error?.exitCode === 1 && /dts-mod\/main\.ts\(1,\d+\): error TS2307/.test(modUndeclared.output),
+            `Imports without a declaration must fail: ${modUndeclared.error}\n${modUndeclared.output}`);
+        await writeFile('types.d.mts', "declare module '*.txt' { const text: string; export default text; }\n");
+        await writeFile('dts-mod/more.d.cts', "declare module '*.csv' { const table: string; export default table; }\n");
+        const modDeclared = await checked([], {bridge: withoutConfig});
+        assert(modDeclared.text && modDeclared.output.includes('No type errors in 4 project files'),
+            `.d.mts and .d.cts declarations must be checked with the entries: ${modDeclared.error}\n${modDeclared.output}`);
         await writeFile('webfront.project.json', manifestBeforeDeclarations);
         // A long check is synchronous in its Worker: Ctrl+C terminates it after the grace period, and nothing is written.
         const slow =['type Build<N extends number, T extends 0[] = []> = T["length"] extends N ? T : Build<N, [...T, 0]>;'];
