@@ -12,7 +12,7 @@
 | 1.5 | 2026-10-16 | Acceptée | Ambroise Leclerc | Interruption des commandes navigateur et transferts séquentiels par blocs de 256 KiB. | [c81f7f7](https://github.com/ambroise-leclerc/WebFront/commit/c81f7f74728ad24a53c16f907e016eb0fe1b8bce) |
 | 1.6 | 2026-10-22 | Acceptée | Ambroise Leclerc | Trajectoire de retrait de Terminal.hpp, ToolManager.hpp, ToolStore et PackageFS au profit de l'environnement bootstrap (ADR-016). | [404fed2](https://github.com/ambroise-leclerc/WebFront/commit/404fed2c2145d4faba8efee035e10522ff87a91f) |
 | 1.7 | 2026-10-23 | Acceptée | Ambroise Leclerc | Retrait effectué (#313) : le terminal de l'environnement et `webfront::Commands` remplacent le composant terminal et le gestionnaire d'outils. | [PR #331](https://github.com/ambroise-leclerc/WebFront/pull/331) |
-| 1.8 | 2026-11-09 | Acceptée | Ambroise Leclerc | Livraison du JavaScript des services hors du cœur (#461) : paquet `@webfront/services`, sur le modèle de `@webfront/react`. | À renseigner après intégration. |
+| 1.8 | 2026-11-09 | Acceptée | Ambroise Leclerc | Livraison du JavaScript des services hors du cœur (#461) : paquet `@webfront/services`, sur le modèle de `@webfront/react`. | [PR #503](https://github.com/ambroise-leclerc/WebFront/pull/503), [6eb8293](https://github.com/ambroise-leclerc/WebFront/commit/6eb82937896114ad98b72fd5ad0f38b4e18dbe73) |
 
 ## État et chronologie
 
