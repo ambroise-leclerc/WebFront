@@ -369,15 +369,24 @@ SCENARIO("A window that ignores the deadline's close request is declared unrespo
             REQUIRE(unresponsive.load() == 0);
         }
     }
-    GIVEN("the window disconnecting by itself") {
-        auto automation = enable(std::chrono::milliseconds{50});
+    GIVEN("the window closing: its connection is lost and show() returns within the grace") {
+        auto automation = enable(std::chrono::seconds{30});
         automation->controller()->close("Developer window disconnected");
-        THEN("the application is not declared unresponsive, whatever the time it takes to close the automation") {
-            std::this_thread::sleep_for(std::chrono::milliseconds{300});
-            REQUIRE(unresponsive.load() == 0);
-            // The session is over: the record and the endpoint are withdrawn even though the object is still alive.
+        THEN("the record and the endpoint are withdrawn at once, and closing the automation confirms the window is gone") {
             REQUIRE(eventually([&] { return discovery::list(sessions).empty(); }));
-            REQUIRE_FALSE(std::filesystem::exists(automation->endpoint() / "endpoint.json"));
+            REQUIRE(eventually([&] { return !std::filesystem::exists(automation->endpoint() / "endpoint.json"); }));
+            automation->close();
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            REQUIRE(unresponsive.load() == 0);
+        }
+    }
+    GIVEN("a lost connection that leaves the native window open") {
+        auto automation = enable(std::chrono::milliseconds{100});
+        // A navigation or a broken WebSocket: window.close() cannot reach the page, and show() does not return.
+        automation->controller()->close("Developer window disconnected");
+        THEN("the withdrawal is immediate and the window is still declared unresponsive after the grace") {
+            REQUIRE(eventually([&] { return discovery::list(sessions).empty(); }));
+            REQUIRE(eventually([&] { return unresponsive.load() == 1; }));
         }
     }
 }

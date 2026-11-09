@@ -80,12 +80,11 @@ public:
                 if (session->isClosed()) {
                     binding.closeBrowser();
                     // Whatever revoked the session (a deadline, a signal, an attached client's --shutdown, the page's own failure
-                    // report), the window was only asked to close: a stuck renderer ignores it. Only a window that already
-                    // disconnected has nothing left to watch.
-                    if (Object(session->describe()).string("failure") == "Developer window disconnected") {
-                        revoke();  // nothing to watch, but the session is over: no endpoint nor running record may remain
-                        return;
-                    }
+                    // report, a lost WebSocket), the window was only asked to close: a stuck renderer ignores it, and a lost
+                    // connection cannot even carry the request. Only the application ending show() (close()) confirms that the
+                    // native window is gone, so the grace always runs.
+                    if (Object(session->describe()).string("failure") == "Developer window disconnected")
+                        revoke();  // the connection is gone: no endpoint nor running record may remain meanwhile
                     const auto deadline = std::chrono::steady_clock::now() + grace;
                     while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
                         std::this_thread::sleep_for(std::chrono::milliseconds{20});
