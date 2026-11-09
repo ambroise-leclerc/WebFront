@@ -523,3 +523,69 @@ SCENARIO("Disarming a stop waits for the request in flight") {
         CHECK_FALSE(stop.requestedStop());
     }
 }
+
+namespace {
+// An operation that schedules its successor from the interface thread, `limit` times.
+struct Chain {
+    struct Link;
+    UIExecutor                         executor;
+    std::size_t                        limit{0};
+    std::size_t                        completed{0};
+    std::vector<std::unique_ptr<Link>> links;
+    void                               next();
+};
+struct ChainReceiver {
+    using receiver_concept = ex::receiver_tag;
+    Chain* chain;
+    auto   get_env() const noexcept {
+        return ex::prop{ex::get_stop_token, ex::never_stop_token{}};
+    }
+    void set_value() && noexcept {
+        ++chain->completed;
+        if (chain->completed < chain->limit)
+            chain->next();
+    }
+    void set_stopped() && noexcept { }
+    void set_error(std::exception_ptr) && noexcept { }
+};
+struct Chain::Link {
+    decltype(ex::connect(std::declval<decltype(std::declval<UIExecutor>().schedule())>(), std::declval<ChainReceiver>())) op;
+    Link(UIExecutor e, Chain* c) : op(ex::connect(e.schedule(), ChainReceiver{c})) { }
+};
+void Chain::next() {
+    links.push_back(std::make_unique<Link>(executor, this));
+    ex::start(links.back()->op);
+}
+}  // namespace
+
+SCENARIO("A pass of the interface thread runs a bounded batch") {
+    GIVEN("an operation that keeps rescheduling itself") {
+        UIExecutorHost host;
+        std::size_t    wakes{0};
+        host.attach([&] { ++wakes; });  // called on this thread only: the chain starts and runs here
+        Chain chain;
+        chain.executor = host.executor();
+        chain.limit    = 10'000;
+        chain.next();
+        REQUIRE(wakes == 1);
+        WHEN("the loop drains once") {
+            host.drain();
+            THEN("only the operations queued before the pass ran, and the loop is woken for the rest") {
+                CHECK(chain.completed == 1);
+                CHECK(wakes >= 2);
+            }
+        }
+        WHEN("the loop keeps draining after each wake") {
+            std::size_t passes{0};
+            while (chain.completed < chain.limit && passes < 20'000) {
+                host.drain();
+                ++passes;
+            }
+            THEN("every operation ran, one per pass, and the loop got the thread back in between") {
+                CHECK(chain.completed == chain.limit);
+                CHECK(passes == chain.limit);
+            }
+        }
+        host.close();
+    }
+}

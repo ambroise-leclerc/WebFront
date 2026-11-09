@@ -15,6 +15,7 @@
 #include "../networking/Tasks.hpp"
 
 #include <condition_variable>
+#include <cstddef>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -49,6 +50,16 @@ class UIExecutorShared {
 public:
     enum class Phase { idle, running, closed };
 
+    /// Ends one wake-up in flight, also when the wake function throws.
+    struct Done {
+        UIExecutorShared& self;
+        ~Done() {
+            std::lock_guard lock(self.mutex);
+            --self.wakesInFlight;
+            self.wakesDone.notify_all();
+        }
+    };
+
     /// Queues `job` and wakes the loop; false (job untouched) when no loop is running.
     bool enqueue(const std::shared_ptr<UIJob>& job) {
         std::function<void()> wake;
@@ -60,14 +71,6 @@ public:
             wake = wakeFunction;
             ++wakesInFlight;  // close() waits for it: the wake may use what the loop frees once it has closed
         }
-        struct Done {
-            UIExecutorShared& self;
-            ~Done() {
-                std::lock_guard lock(self.mutex);
-                --self.wakesInFlight;
-                self.wakesDone.notify_all();
-            }
-        };
         try {
             Done done{*this};
             wake();
@@ -92,8 +95,16 @@ public:
         phase        = Phase::running;
     }
 
+    /// Runs the operations queued when it starts, no more: one that reschedules itself, or a producer that keeps queueing,
+    /// runs in a later pass so that the native loop handles its events (closing, stop requests) in between. When work
+    /// remains, the loop is woken again.
     void drain() noexcept {
-        for (;;) {
+        std::size_t batch{};
+        {
+            std::lock_guard lock(mutex);
+            batch = queue.size();
+        }
+        for (; batch > 0; --batch) {
             std::shared_ptr<UIJob> job;
             {
                 std::lock_guard lock(mutex);
@@ -103,6 +114,20 @@ public:
                 queue.pop_front();
             }
             job->run();
+        }
+        std::function<void()> wake;
+        {
+            std::lock_guard lock(mutex);
+            if (queue.empty() || phase != Phase::running)
+                return;
+            wake = wakeFunction;
+            ++wakesInFlight;
+        }
+        // A wake that throws leaves the rest for the next one: any later schedule() wakes the loop again.
+        try {
+            Done done{*this};
+            wake();
+        } catch (...) {
         }
     }
 
@@ -304,7 +329,8 @@ public:
     void attach(std::function<void()> wake) {
         shared->attach(std::move(wake));
     }
-    /// Runs the queued operations; call it on the interface thread only.
+    /// Runs a bounded batch of the queued operations (those queued when it starts) and wakes the loop again if more
+    /// remain; call it on the interface thread only.
     void drain() noexcept {
         shared->drain();
     }
