@@ -3,6 +3,10 @@
 #include <webfront/WebFront.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <future>
+#include <list>
+#include <thread>
 #include <filesystem>
 #include <iostream>
 #include <cstdint>
@@ -65,6 +69,107 @@ int checkViewAssociation() {
         throw std::runtime_error("The page of the view is not associated with the view");
     if (embedded[1] || local[1])
         throw std::runtime_error("A connection without the secret was associated with the view");
+    return 0;
+}
+
+// What the interface thread's executor reports for one operation.
+enum class Outcome { ran, stopped, unavailable, failed };
+
+struct OutcomeReceiver {
+    using receiver_concept = webfront::networking::ex::receiver_tag;
+    std::promise<std::pair<Outcome, bool>>* result;  // the Outcome, and whether it completed on the interface thread
+    webfront::frontend::UIExecutor          executor;
+    auto                                    get_env() const noexcept {
+        return webfront::networking::ex::prop{webfront::networking::ex::get_stop_token, webfront::networking::ex::never_stop_token{}};
+    }
+    void set_value() && noexcept {
+        result->set_value({Outcome::ran, executor.onUIThread()});
+    }
+    void set_stopped() && noexcept {
+        result->set_value({Outcome::stopped, false});
+    }
+    void set_error(std::exception_ptr error) && noexcept {
+        try {
+            std::rethrow_exception(error);
+        } catch (const webfront::frontend::UIExecutorUnavailable&) {
+            result->set_value({Outcome::unavailable, false});
+        } catch (...) {
+            result->set_value({Outcome::failed, false});
+        }
+    }
+};
+
+struct ScheduledOperation {
+    std::promise<std::pair<Outcome, bool>> result;
+    decltype(webfront::networking::ex::connect(std::declval<decltype(std::declval<webfront::frontend::UIExecutor>().schedule())>(),
+                                              std::declval<OutcomeReceiver>()))
+        operation;
+    explicit ScheduledOperation(const webfront::frontend::UIExecutor& executor)
+        : operation(webfront::networking::ex::connect(executor.schedule(), OutcomeReceiver{&result, executor})) { }
+    std::future<std::pair<Outcome, bool>> start() {
+        auto future = result.get_future();
+        webfront::networking::ex::start(operation);
+        return future;
+    }
+};
+
+// The window's interface thread runs the operations, and closing the window completes the pending ones stopped: every
+// operation completes exactly once, none runs on another thread or after closure, and the executor is unavailable afterwards.
+int checkUIExecutor() {
+    App         app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    const auto  executor = app.uiExecutor();
+    const auto  mainThread = std::this_thread::get_id();
+    if (executor.available())
+        throw std::runtime_error("The executor is available before the window opens");
+    std::atomic<int>  ran = 0;
+    std::atomic<bool> error = false;
+    std::string       message;
+    std::jthread      client([&] {
+        try {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (!executor.available()) {
+                if (std::chrono::steady_clock::now() > deadline)
+                    throw std::runtime_error("The executor never became available");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            std::list<ScheduledOperation>                       operations;
+            std::vector<std::future<std::pair<Outcome, bool>>> results;
+            while (executor.available() && results.size() < 5000) {
+                operations.emplace_back(executor);
+                results.push_back(operations.back().start());
+                if (results.size() % 16 == 0)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            for (auto& future : results) {
+                if (future.wait_for(std::chrono::seconds(30)) != std::future_status::ready)
+                    throw std::runtime_error("An operation never completed");
+                const auto [outcome, onInterfaceThread] = future.get();
+                if (outcome == Outcome::ran) {
+                    ++ran;
+                    if (!onInterfaceThread)
+                        throw std::runtime_error("An operation ran away from the interface thread");
+                } else if (outcome == Outcome::failed) {
+                    throw std::runtime_error("An operation failed");
+                }
+            }
+        } catch (const std::exception& e) {
+            message = e.what();
+            error   = true;
+        }
+    });
+    app.show("no-bridge.html");
+    client.join();
+    if (error)
+        throw std::runtime_error(message);
+    if (ran == 0)
+        throw std::runtime_error("No operation ran on the interface thread");
+    if (executor.available() || executor.onUIThread())
+        throw std::runtime_error("The executor is still available after the window closed");
+    ScheduledOperation late(executor);
+    auto               future = late.start();
+    if (future.get().first != Outcome::unavailable)
+        throw std::runtime_error("An operation scheduled after closure was not refused");
+    (void)mainThread;
     return 0;
 }
 
@@ -233,6 +338,7 @@ int run(std::string_view mode) {
             return show("encoded path %23.html?x=1#example");
         });
     cases.emplace("navigation-failure", expectNavigationFailure);
+    cases.emplace("ui-executor", checkUIExecutor);
     cases.emplace("view-association", checkViewAssociation);
     const auto selected = cases.find(mode);
     if (selected == cases.end())

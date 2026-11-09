@@ -7,6 +7,7 @@
 #include "DefaultBrowser.hpp"
 #include "Downloads.hpp"
 #include "ScriptDialogs.hpp"
+#include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 #include "../ViewAssociation.hpp"
@@ -33,6 +34,10 @@
     #include <dlfcn.h>
     #include <sys/syscall.h>
     #include <unistd.h>
+
+namespace webfront::frontend {
+struct WebKitGTKFrontend;  // names the executor's host (UIExecutor.hpp)
+}
 
 namespace webfront::frontend::detail::webkitgtk {
 
@@ -714,6 +719,25 @@ inline void open(std::string_view address, std::string_view port, std::string_vi
     session.create();
     if (options.configure)
         options.configure(session);
+    // g_idle_add_full is thread-safe and wakes the main context the loop of run() iterates.
+    auto& host = uiExecutorHostOf<WebKitGTKFrontend>();
+    host.attach([&host] {
+        constexpr int defaultIdle = 200;  // G_PRIORITY_DEFAULT_IDLE
+        api().idleAddFull(
+            defaultIdle,
+            +[](void* data) -> int {
+                static_cast<UIExecutorHost*>(data)->drain();
+                return 0;  // G_SOURCE_REMOVE
+            },
+            &host,
+            nullptr);
+    });
+    struct Closing {
+        UIExecutorHost& host;
+        ~Closing() {
+            host.close();
+        }
+    } closing{host};
     session.run(applicationUrl(address, port, file));
 }
 
@@ -724,6 +748,11 @@ namespace webfront::frontend {
 
 /** @brief Optional Linux WebKitGTK 6.0 window. Construct and open on the process main thread. */
 struct WebKitGTKFrontend {
+    /// The main thread while open() runs the GLib loop (see UIExecutor.hpp).
+    [[nodiscard]] static UIExecutor uiExecutor() {
+        return uiExecutorHostOf<WebKitGTKFrontend>().executor();
+    }
+
     static constexpr Action action{Action::closeServerAfterOpen};
     static void             initialize() {
 #if defined(WEBFRONT_EMBED_WEBKITGTK) && defined(__linux__)

@@ -15,11 +15,12 @@
 | 1.8 | 2026-10-19 | Acceptée | Ambroise Leclerc | Interface WebKitGTK facultative sous Linux. | [e20203e](https://github.com/ambroise-leclerc/WebFront/commit/e20203ea88d79bd141a1b64d6fe0f987143d73ff) |
 | 1.9 | 2026-10-19 | Acceptée | Ambroise Leclerc | Alias NativeWebViewFrontend avec sélection explicite par plateforme. | [7be859f](https://github.com/ambroise-leclerc/WebFront/commit/7be859f18957e770cc0db8382e7d9641689ba403) |
 | 1.10 | 2026-10-20 | Acceptée | Ambroise Leclerc | WKWebView respecte les bundles agents LSUIElement ; les exécutables de test ne créent plus d’icônes Dock. | À renseigner après intégration. |
+| 1.11 | 2026-11-09 | Acceptée | Ambroise Leclerc | Contrat facultatif `static UIExecutor uiExecutor()` : le thread d'interface d'un frontend, disponible pendant que `open()` fait tourner sa boucle (ADR-020, #462). Frontend `BrowserWithUILoopFrontend` : navigateur système avec boucle facultative. | Branche `462-ui-thread-executor` |
 
 ## État et chronologie
 
 **Acceptée.** Décision initiale : **2026-05-31** (version 1.0).
-Dernière révision : **2026-10-20** (version 1.10).
+Dernière révision : **2026-11-09** (version 1.11).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
