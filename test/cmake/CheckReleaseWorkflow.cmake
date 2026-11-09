@@ -120,3 +120,8 @@ endif()
 if(NOT content MATCHES "cmake -S [.] -B build-driver\n")
     message(FATAL_ERROR "The rehearsal does not configure build-driver again after setting the version")
 endif()
+
+# The tag step can be rerun after a lost response: it accepts a tag that already points at the release commit.
+if(NOT content MATCHES "echo \"[$]tag already points at the release commit\"")
+    message(FATAL_ERROR "The tag step is not rerunnable: it must accept an existing tag at the release commit")
+endif()

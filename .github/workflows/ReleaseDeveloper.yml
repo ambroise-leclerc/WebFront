@@ -179,7 +179,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/developer-v$VERSION" -f "sha=$COMMIT" > /dev/null
+          # Rerunnable after a lost response: a tag that already points at the release commit is the expected result. A tag
+          # elsewhere is never moved (the tag rule forbids it) and stops the run.
+          tag="developer-v$VERSION"
+          errors=$(mktemp)
+          if existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2> "$errors"); then
+            if [ "$existing" != "$COMMIT" ]; then
+              echo "::error::$tag already points at $existing, not at the release commit $COMMIT"
+              exit 1
+            fi
+            echo "$tag already points at the release commit"
+          elif grep -q '(HTTP 404)' "$errors"; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$COMMIT" > /dev/null
+          else
+            cat "$errors" >&2
+            exit 1
+          fi
 
   publish:
     needs: [prepare, tag]

@@ -51,3 +51,5 @@ check("a rehearsal without the browser suite" refuse "rehearsal does not"
     "ctest --test-dir build-driver -L web-integration" "ctest --test-dir build-driver -R Nothing")
 check("a rehearsal on a stale configuration" refuse "configure build-driver again"
     "          cmake -S . -B build-driver\n" "")
+check("a tag step that fails on an existing tag" refuse "not rerunnable"
+    "already points at the release commit\"\n          elif" "exists\"\n          elif")
