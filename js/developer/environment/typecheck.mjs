@@ -12,7 +12,7 @@ const decoder = new TextDecoder();
 /** The locked typescript package wf check runs, as [id, node]; a missing or unsupported one is refused. */
 export function typescriptPackage(lock) {
     const locked = lockedPackage(lock, 'typescript');
-    if (!locked) throw new Error('wf check needs the typescript package: run wf install typescript@6');
+    if (!locked) throw new Error('wf check needs the typescript package: run wf install typescript@6 (an agent granted install runs the install operation)');
     const [id, node] = locked;
     if (!semver.satisfies(node.version, supportedTypeScript)) {
         const native = semver.major(node.version) >= 7 ? ', whose compiler is a native program without the JavaScript API' : '';

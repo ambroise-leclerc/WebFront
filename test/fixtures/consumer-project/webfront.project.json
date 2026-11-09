@@ -1,0 +1,7 @@
+{
+  "format":1,
+  "name":"consumer-fixture",
+  "version":"0.1.0",
+  "dependencies":{"typescript":"6.0.3"},
+  "entries":{"main":"main.ts"}
+}

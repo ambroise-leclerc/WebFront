@@ -7,6 +7,8 @@
 | 1.0 | 2026-10-28 | Proposée | Ambroise Leclerc | Comparaison des voies d'automatisation, orientation MCP locale et modèle de menace de l'épique #403 ; #402 comme premier cas consommateur. | À renseigner après intégration. |
 | 1.1 | 2026-10-28 | Proposée | Ambroise Leclerc | Contrat d'opérations décrit en JSON Schema et projeté vers plusieurs adaptateurs ; CLI et consignes d'agent comme voie de premier rang ; WebDriver BiDi et WebMCP au comparatif ; exigences propres aux modèles locaux ; précisions sur le premier incrément et la gravité conditionnelle de HTTP. | — |
 | 1.2 | 2026-10-29 | Acceptée | Ambroise Leclerc | Décision fondée sur les livraisons #405, #406 et #407 : contrat v1, CLI/MCP stdio, attachement authentifié, protections et réserves ; qualification de cinq modèles locaux, preuves CI et préparation de la distribution 0.6.3. | [#407](https://github.com/ambroise-leclerc/WebFront/pull/407), tête `4a1c92b`, intégration `22f6795` ; révision ADR `cf1bf15`. |
+| 1.3 | 2026-11-08 | Proposée | Ambroise Leclerc | Issue #501 : une application consommatrice active l'automatisation par un appel natif explicite (`enableAutomation`), avec les mêmes grants, le même canal privé et la même révocation ; découverte par enregistrement par utilisateur sans capacité (`--list`) ; configuration cliente générée sans grant ni secret. L'exposition de `cppFunction` comme outils MCP typés était écartée en 1.3 (arbitrée en 1.4) : elle exigeait une liste blanche native, des types bornés et ses propres grants, donc une décision distincte. | Issue #501. |
+| 1.4 | 2026-11-09 | Proposée | Ambroise Leclerc | Issue #501 : arbitrage de l'exposition des callbacks. Une opération `call`, sous la permission `call` du propriétaire, invoque un callback **nommé dans une liste blanche native** (`AutomationOptions::callbacks`, publiée dans la session et le registre de découverte) avec au plus un argument texte et ne rapporte qu'un scalaire ou une courte liste de scalaires. Ni motif, ni nom `webfront.*`, ni liste par le manifeste ou l'agent ; sans liste, tout appel est refusé. Ce n'est pas un outil MCP par callback : l'opération passe par `webfront.start`, dont le contrat reste à quatre outils. | Issue #501. |
 
 ## État et portée
 
@@ -78,7 +80,7 @@ longue rend un runId consultable ; le chemin `connectAutomation` borne les sorti
 les coupures par `truncated`, alors que `runNonInteractive` conserve par défaut sa sortie complète. L'annulation est coopérative,
 ne revient pas sur une publication commise et ne garantit pas d'arrêter le JavaScript déjà lancé.
 Un résultat perdu après une mutation est signalé comme incertain, jamais rejoué automatiquement.
-wf run/exec et callbacks C++ arbitraires ne sont pas des outils MCP. Amendement (#466) : `init`, `create`, `install`,
+wf run/exec et callbacks C++ arbitraires ne sont pas des outils MCP ; seuls les callbacks nommés par le propriétaire sont joignables, par l'opération `call` (amendement #501, version 1.4). Amendement (#466) : `init`, `create`, `install`,
 `restore` et `embed` sont des opérations du contrat, chacune sous sa propre permission explicite du propriétaire ;
 `install`/`restore` n'utilisent que le registre déjà configuré (jamais choisi par l'agent) et les arguments restent
 des noms simples ou des chemins relatifs au projet.
@@ -122,7 +124,7 @@ les runs conservent leurs résultats séparément, avec une rétention de 64 ent
 L'inspection livre un DOM réduit borné des éléments visibles à ID explicite, les erreurs observées
 et des cibles sémantiques. Click/fill exigent la révision de page ; une navigation invalide les
 anciennes cibles. Les mots de passe, fichiers, valeurs de formulaires et HTML intégral ne sont pas
-exportés par inspect. Il n'y a ni eval, shell, export automatique des callbacks, capture d'écran
+exportés par inspect. Il n'y a ni eval, shell, export automatique des callbacks (seule la liste blanche de `call` est joignable), capture d'écran
 ni garantie d'arbre d'accessibilité complet.
 
 ### Modèles locaux et premier consommateur
@@ -160,7 +162,7 @@ pas certification contre un code de projet hostile.
 | Menace et gravité | Mesures exigées | Risque résiduel |
 | --- | --- | --- |
 | Injection de prompt dans sources, page, diagnostics, descriptions d'outils ou outils déclarés par la page — élevée | Traiter les contenus comme données ; outils/schémas de confiance ; autorisations hors du projet, vérifiées côté contrôleur à chaque appel. Une annotation MCP n'accorde aucun droit. Les outils déclarés par une page ne sont jamais ajoutés au catalogue de confiance. | L'agent peut encore choisir une action autorisée nuisible ; séparer l'autorité de la qualité du raisonnement. Les tâches synthétiques mesurées ne qualifient pas la résistance aux injections de prompt. |
-| Exécution arbitraire par script, test, paquet ou callback — critique | Aucune exportation automatique du bridge ; capacités séparées pour exécution, écriture et réseau ; politique plafonnée par le lanceur, non extensible par le manifeste. | Le code exécuté garde l'autorité accessible au processus. Projet hostile : isolation OS/CI dédiée et secrets retirés ; aucun sandbox WebFront annoncé. |
+| Exécution arbitraire par script, test, paquet ou callback — critique | Aucune exportation automatique du bridge (seule la liste blanche native de `call`, noms exacts, un argument texte, résultat scalaire) ; capacités séparées pour exécution, écriture et réseau ; politique plafonnée par le lanceur, non extensible par le manifeste. | Le code exécuté garde l'autorité accessible au processus. Projet hostile : isolation OS/CI dédiée et secrets retirés ; aucun sandbox WebFront annoncé. |
 | Accès non autorisé ou détournement de session — critique | Stdio ou IPC protégé ; attachement explicite et révocable ; autorisation liée à projet/session ; identifiants non assimilés à une identité. | Un processus du même utilisateur peut dépasser les garanties du canal ; documenter cette limite. |
 | DNS rebinding, requêtes web et exposition réseau — sans objet tant que HTTP n'est pas retenu, critique s'il l'est | Loopback uniquement, validation Host et Origin, refus d'Origin invalide, authentification indépendante même sans Origin ; pas de CORS permissif. Aucun accès distant implicite. | Origin n'authentifie pas un client natif ; la politique du bridge ADR-008 ne sécurise pas à elle seule MCP. |
 | Chemins hostiles, liens symboliques et courses — élevée | Projet explicitement lié, résolution et contrôle au moment de l'accès, traitement des liens et opérations atomiques quand nécessaires ; cas de course testés. | NativeDebugFS et permissions de manifeste n'isolent pas du code exécuté avec les droits OS du processus. |

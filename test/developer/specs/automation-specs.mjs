@@ -1,4 +1,4 @@
-import {clipText,createAutomationRunner,createPreviewInspector,fitCompletion} from '../../../js/developer/environment/automation.mjs';
+import {announceAutomation,clipText,createAutomationRunner,createPreviewInspector,fitCompletion,onAutomationNotice} from '../../../js/developer/environment/automation.mjs';
 import {exclusive,execute,runNonInteractive} from '../../../js/developer/environment/runtime.mjs';
 import {rejects} from '../support.mjs';
 import {memoryBridge} from '../memory-bridge.mjs';
@@ -53,6 +53,63 @@ describe('Developer automation', () => {
         expect(argvs).toEqual([['create','life','ui'],['install','react@19.3.1'],['restore'],['embed','LifeUI'],
             ['embed','ui/main.tsx','--output','generated/LifeUI.hpp']]);
         expect(completed[5].exitCode).toBe(1);
+    });
+
+    it('calls an application callback and reports only plain answers', async () => {
+        const calls=[], completed=[];
+        let slowStarted=false, finishSlow;
+        const answers={'app.echo':async (...args) => {calls.push(args); return 'answer:'+args.join(',');}, 'app.list':async () => new Uint8Array([1,2,3]),
+            'app.object':async () => ({secret:true}), 'app.huge':async () => 'x'.repeat(60000), 'app.slow':() => new Promise(resolve => {slowStarted=true; finishSlow=resolve;})};
+        const bridge={cppFunction:name => answers[name] ?? (async () => { throw new Error('missing '+name); })};
+        const runner=createAutomationRunner({context:{bridge},exclusive,inspector:{},run:async () => { throw new Error('call is not a wf command'); },
+            complete:async (_id,result) => {completed.push(result);}});
+        await runner.start({runId:'a',operation:'call',arguments:{callback:'app.echo',value:'x'}});
+        await runner.start({runId:'b',operation:'call',arguments:{callback:'app.echo'}});
+        await runner.start({runId:'c',operation:'call',arguments:{callback:'app.list'}});
+        await runner.start({runId:'d',operation:'call',arguments:{callback:'app.object'}});
+        await runner.start({runId:'e',operation:'call',arguments:{callback:'webfront.developer.read'}});
+        expect(calls).toEqual([['x'],[]]);
+        expect(completed[0].data).toEqual({callback:'app.echo',result:'answer:x'});
+        expect(completed[1].data.result).toBe('answer:');
+        expect(completed[2].data.result).toEqual([1,2,3]);
+        expect(completed[3].exitCode).toBe(1);
+        expect(completed[4].exitCode).toBe(1);
+        await runner.start({runId:'g',operation:'call',arguments:{callback:'app.huge'}});
+        // A value that cannot be reported is a failure that says so, never a success without it.
+        expect(completed[5].exitCode).toBe(1);
+        expect(completed[5].output).toContain('cannot be reported');
+        expect(completed[5].data).toBeUndefined();
+        expect(fitCompletion({exitCode:0,output:'',report:null,data:{result:'x'.repeat(60000)}}).exitCode).toBe(1);
+        const work=runner.start({runId:'f',operation:'call',arguments:{callback:'app.slow'}});
+        while (!slowStarted) await Promise.resolve();
+        runner.cancel('f');
+        await Promise.resolve();
+        // The callback goes on in C++: the run is not over, and neither the lock nor the native deadline is released.
+        expect(completed.length).toBe(6);
+        await rejects(execute(['help'],{}),/busy/);
+        finishSlow('late answer');
+        await work;
+        expect(completed[6].exitCode).toBe(130);
+        expect(completed[6].output).toContain('effect was not undone');
+        expect(completed[6].data).toBeUndefined();
+        expect(await execute(['help'],{})).toContain('wf test');
+    });
+
+    it('tells the person in the terminal and in wf help that automation is connected, without control characters', async () => {
+        const shown=[];
+        delete globalThis.webfrontAutomationNotice;
+        expect(await execute(['help'],{})).not.toContain('Automation:');
+        const stop=onAutomationNotice(text => shown.push(text));
+        announceAutomation('WebFront automation enabled (grants: check). Attach with: webfront-agent --attach "/x" --mcp\u001b[2J\u0007');
+        stop();
+        expect(shown.length).toBe(1);
+        expect(shown[0]).toContain('grants: check');
+        expect(/[\u0000-\u001f\u007f-\u009f]/.test(shown[0])).toBeFalse();
+        expect(await execute(['help'],{})).toContain('\nAutomation: WebFront automation enabled (grants: check)');
+        const late=[];
+        onAutomationNotice(text => late.push(text))();
+        expect(late).toEqual(shown);
+        delete globalThis.webfrontAutomationNotice;
     });
 
     it('does not turn a script exit 130 into a cancellation', async () => {

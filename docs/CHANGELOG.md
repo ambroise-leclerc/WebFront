@@ -8,6 +8,23 @@
   bytes in the test registry, and a Jasmine spec that imports the installed archive. The archive packager is shared with
   `react-package` (`js/developer/scripts/package-archive.mjs`) and `CheckPackage.cmake` verifies both. No core resource
   is added. Publication to npm remains a separate maintainer action.
+- Automation of a consumer's own application and discoverability (#501). `webfront::automation::enableAutomation(app, options)`
+  (`automation/Enable.hpp`) mounts the controller, the page binding and the private attachment endpoint on an application
+  that called `bootstrap("developer")`, so `webfront-agent --attach` drives its own window, with its own `cppFunction`
+  callbacks, under native grants; it registers nothing unless called, announces itself on stderr and offers a window title
+  marker. A shared session publishes a record without capability in a private per-user directory
+  (`%LOCALAPPDATA%\WebFront\sessions`, `~/.local/state/webfront/sessions`, `~/Library/Application Support/WebFront/sessions`),
+  removed on closure and dropped when its process is gone. `webfront-agent --list` prints these records and
+  `--print-mcp-config --attach <dir> [--name n]` prints a `.mcp.json`; `--sessions-dir` overrides the directory.
+  `webfront_add_agent([INSTALL] [DESTINATION dir])` checks and installs the launcher target for `add_subdirectory` and
+  `FetchContent` consumers. `wf check` without a `tsconfig.json` now also roots the project's own `.d.ts`, `.d.mts` and `.d.cts` files, so an ambient
+  `declare module '*.css'` applies. Environment 0.6.6 carries these changes; it is published (`developer-v0.6.6`) and pinned by `DeveloperReleaseData.hpp`, so `bootstrap("developer")` runs `call` and the notices.
+  The operation `call` (permission `call`, environment 0.6.6) invokes an application callback that the owner allow-listed by exact name
+  (`AutomationOptions::callbacks`, shown in the session, in `--list` and in the notice), with at most one string argument and a scalar or
+  short-list result; `webfront.*` names and anything outside the list are refused natively and audited (ADR-019 1.4). Once connected, the
+  window's terminal prints the grants and the attach path, `wf help` ends with an `Automation:` line, `wf create` writes an `AGENTS.md`
+  beside the starter's sources, and the errors asking for typescript or jasmine-core name the `install` operation. A browser regression
+  attaches `webfront-agent` to a real consumer application (`automation_consumer`, `AutomationConsumerWindow`). A new discovery directory is created private to the user; an existing one that others can read is refused, never modified.
 - Writable storage confined to declared roots (#460, ADR-002 3.0, ADR-020 step 4). `fs::Storage` is the contract of a
   writable storage: stable paginated listing (`list(dir, after, limit)`, at most 1000 entries a page), `status`,
   `openRead`, `beginWrite(path, createNew | replace)` whose `commit()` renames a temporary file atomically (an uncommitted

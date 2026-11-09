@@ -145,6 +145,8 @@ if(WEBFRONT_BUILD_AUTOMATION OR (WEBFRONT_ENABLE_TESTING AND
     target_compile_definitions(webfront-agent PRIVATE WEBFRONT_AUTOMATION_FRONTEND_TYPE=${WEBFRONT_AUTOMATION_FRONTEND_TYPE})
     webfront_setup_frontends_for_target(webfront-agent)
 endif()
+# Public helper for a parent project: checks the launcher target and optionally installs it.
+include(WebFrontAgent)
 
 if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_ENABLE_FUZZING)
   include(TestHardening)

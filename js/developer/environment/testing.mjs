@@ -35,7 +35,7 @@ export function specFiles(manifest) {
 /** The locked jasmine-core, chosen by the project: its id, node and browser file, or an error that says how to install it. */
 export function jasmineCore(lock) {
     const locked = lockedPackage(lock, 'jasmine-core');
-    if (!locked) throw new Error('jasmine-core is not installed: run wf install jasmine-core');
+    if (!locked) throw new Error('jasmine-core is not installed: run wf install jasmine-core (an agent granted install runs the install operation)');
     const [id, node] = locked;
     if (!node.files.includes(jasminePath)) throw new Error(`${id} has no ${jasminePath}: wf test needs the browser build of jasmine-core`);
     return {id, node, path: jasminePath};
