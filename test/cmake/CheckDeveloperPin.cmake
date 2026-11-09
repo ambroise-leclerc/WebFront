@@ -7,6 +7,7 @@
 # with another URL or integrity. The bytes and the origin of the pinned URL are checked by `wf run pin`; a header equal to a
 # fresh build, by the comparison of the Developer packages workflow. ROOT is the repository (or a fixture of it).
 cmake_minimum_required(VERSION 3.31)
+include("${CMAKE_CURRENT_LIST_DIR}/SemVer.cmake")
 if(NOT ROOT)
     message(FATAL_ERROR "ROOT is required")
 endif()
@@ -30,7 +31,10 @@ foreach(field VERSION URL INTEGRITY)
     set(bootstrap_${field} "${CMAKE_MATCH_1}")
 endforeach()
 
-if(header_version VERSION_GREATER sources_version)
+# SemVer precedence: CMake's VERSION_* comparisons ignore the prerelease (0.7.0-rc.2 against 0.7.0-rc.1).
+webfront_semver_compare("${header_version}" "${sources_version}" header_to_sources)
+webfront_semver_compare("${bootstrap_VERSION}" "${header_version}" bootstrap_to_header)
+if(header_to_sources GREATER 0)
     message(FATAL_ERROR "DeveloperReleaseData.hpp pins ${header_version}, newer than distribution.json ${sources_version}")
 endif()
 # Literal dots: a version or a suffix with another character in their place is another path.
@@ -39,18 +43,18 @@ string(REPLACE "." "[.]" bootstrap_pattern "${bootstrap_VERSION}")
 if(NOT header_environment MATCHES "/developer/${header_pattern}/environment[.]tgz$")
     message(FATAL_ERROR "DeveloperReleaseData.hpp is not the header of its version ${header_version}: ${header_environment}")
 endif()
-if(bootstrap_VERSION VERSION_GREATER header_version)
+if(bootstrap_to_header GREATER 0)
     message(FATAL_ERROR "The bootstrap ${bootstrap_VERSION} is ahead of the header ${header_version}")
 endif()
 if(NOT bootstrap_URL MATCHES "/developer/${bootstrap_pattern}/environment[.]tgz$")
     message(FATAL_ERROR "The bootstrap URL is not the one of its version ${bootstrap_VERSION}: ${bootstrap_URL}")
 endif()
-if(bootstrap_VERSION VERSION_EQUAL header_version
+if(bootstrap_to_header EQUAL 0
         AND (NOT bootstrap_URL STREQUAL header_environment OR NOT bootstrap_INTEGRITY STREQUAL header_integrity))
     message(FATAL_ERROR "The bootstrap and the header both name ${header_version} with a different URL or integrity")
 endif()
 
-if(header_version VERSION_EQUAL sources_version)
+if(header_to_sources EQUAL 0)
     set(state "(b) sources equal to the header")
 else()
     set(state "(a) sources ${sources_version} ahead of the header")

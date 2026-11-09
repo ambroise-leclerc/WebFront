@@ -73,3 +73,11 @@ check("header whose version has other characters in place of its dots" refuse "n
 check("header whose file name has another character in place of its dot" refuse "not the header of its version" 0.6.6 0.6.5:0.6.5:a:environmentXtgz 0.6.4)
 check("bootstrap whose version has other characters in place of its dots" refuse "not the one of its version" 0.6.6 0.6.5 0.6.4:0x6x4)
 check("bootstrap whose file name has another character in place of its dot" refuse "not the one of its version" 0.6.6 0.6.5 0.6.4:0.6.4:a:environmentXtgz)
+# Prereleases follow SemVer, not the numeric core alone.
+check("a header newer than the sources by its prerelease" refuse "newer than distribution.json" 0.7.0-rc.1 0.7.0-rc.2 0.6.5)
+check("a header newer than the sources by a longer prerelease number" refuse "newer than distribution.json" 0.7.0-rc.2 0.7.0-rc.10 0.6.5)
+check("a bootstrap ahead of the header by its prerelease" refuse "ahead of the header" 0.7.0-rc.2 0.7.0-rc.1 0.7.0-rc.2)
+check("sources that are a prerelease ahead of the header" accept "Developer pin: [(]a[)]" 0.7.0-rc.2 0.7.0-rc.1 0.6.5)
+check("sources equal to a prerelease header" accept "Developer pin: [(]b[)]" 0.7.0-rc.2 0.7.0-rc.2 0.7.0-rc.1)
+check("a bootstrap that is an earlier prerelease of the header's release" accept "bootstrap 0.7.0-rc.1" 0.7.0 0.7.0 0.7.0-rc.1)
+check("a bootstrap that is the release of a header prerelease" refuse "ahead of the header" 0.7.0 0.7.0-rc.1 0.7.0)
