@@ -414,3 +414,95 @@ SCENARIO("The system browser can run an interface-thread loop on the calling thr
         }
     }
 }
+
+SCENARIO("Closing waits for the wake-ups in flight, which may use what the loop frees") {
+    GIVEN("a wake function blocked inside an enqueue on another thread") {
+        UIExecutorHost          host;
+        std::mutex              gate;
+        std::condition_variable changed;
+        bool                    inWake{false};
+        bool                    release{false};
+        host.attach([&] {
+            std::unique_lock lock(gate);
+            inWake = true;
+            changed.notify_all();
+            changed.wait(lock, [&] { return release; });
+        });
+        Observed                observed;
+        ex::inplace_stop_source stop;
+        using Op = Connected<decltype(host.executor().schedule())>;
+        auto op  = std::make_unique<Op>(host.executor().schedule(), Receiver{observed, stop.get_token()});
+        std::thread scheduler([&] { op->start(); });
+        {
+            std::unique_lock lock(gate);
+            REQUIRE(changed.wait_for(lock, 30s, [&] { return inWake; }));
+        }
+        std::atomic<bool> closed{false};
+        std::thread       closer([&] {
+            host.close();
+            closed = true;
+        });
+        WHEN("the loop closes meanwhile") {
+            std::this_thread::sleep_for(50ms);
+            THEN("close() does not return before the wake-up is over") {
+                CHECK_FALSE(closed);
+                {
+                    std::lock_guard lock(gate);
+                    release = true;
+                    changed.notify_all();
+                }
+                scheduler.join();
+                closer.join();
+                CHECK(closed);
+                CHECK(observed.completions == 1);
+                CHECK(observed.stopped);
+            }
+        }
+        if (scheduler.joinable()) {
+            {
+                std::lock_guard lock(gate);
+                release = true;
+                changed.notify_all();
+            }
+            scheduler.join();
+            closer.join();
+        }
+    }
+}
+
+SCENARIO("Disarming a stop waits for the request in flight") {
+    GIVEN("a quit function blocked inside request() on another thread") {
+        UILoopStop              stop;
+        std::mutex              gate;
+        std::condition_variable changed;
+        bool                    inQuit{false};
+        bool                    release{false};
+        stop.arm([&] {
+            std::unique_lock lock(gate);
+            inQuit = true;
+            changed.notify_all();
+            changed.wait(lock, [&] { return release; });
+        });
+        std::thread requester([&] { stop.request(); });
+        {
+            std::unique_lock lock(gate);
+            REQUIRE(changed.wait_for(lock, 30s, [&] { return inQuit; }));
+        }
+        std::atomic<bool> disarmed{false};
+        std::thread       loop([&] {
+            stop.disarm();
+            disarmed = true;
+        });
+        std::this_thread::sleep_for(50ms);
+        CHECK_FALSE(disarmed);
+        {
+            std::lock_guard lock(gate);
+            release = true;
+            changed.notify_all();
+        }
+        requester.join();
+        loop.join();
+        CHECK(disarmed);
+        CHECK_FALSE(stop.requestedStop());
+    }
+}

@@ -14,6 +14,7 @@
 
 #include "../networking/Tasks.hpp"
 
+#include <condition_variable>
 #include <deque>
 #include <exception>
 #include <functional>
@@ -57,8 +58,18 @@ public:
                 return false;
             queue.push_back(job);
             wake = wakeFunction;
+            ++wakesInFlight;  // close() waits for it: the wake may use what the loop frees once it has closed
         }
+        struct Done {
+            UIExecutorShared& self;
+            ~Done() {
+                std::lock_guard lock(self.mutex);
+                --self.wakesInFlight;
+                self.wakesDone.notify_all();
+            }
+        };
         try {
+            Done done{*this};
             wake();
         } catch (...) {
             remove(job);
@@ -98,10 +109,12 @@ public:
     void close() noexcept {
         std::deque<std::shared_ptr<UIJob>> pending;
         {
-            std::lock_guard lock(mutex);
+            std::unique_lock lock(mutex);
             phase = Phase::closed;
-            wakeFunction = nullptr;  // may hold the session that is ending
             pending.swap(queue);
+            // No new wake starts (phase is closed): wait for those in flight on other threads, which only signal the loop.
+            wakesDone.wait(lock, [&] { return wakesInFlight == 0; });
+            wakeFunction = nullptr;  // may hold the session that is ending
         }
         for (auto& job : pending)
             job->abandon();
@@ -118,6 +131,8 @@ public:
 
 private:
     mutable std::mutex                 mutex;
+    std::condition_variable            wakesDone;
+    unsigned                           wakesInFlight{0};
     Phase                              phase{Phase::idle};
     std::thread::id                    uiThread;
     std::function<void()>              wakeFunction;
@@ -293,7 +308,8 @@ public:
     void drain() noexcept {
         shared->drain();
     }
-    /// Ends the loop: pending operations complete stopped, later ones fail as unavailable. Idempotent.
+    /// Ends the loop: pending operations complete stopped, later ones fail as unavailable. Idempotent. Returns once the
+    /// wake-ups in flight on other threads are over, so the loop may then free what `wake` uses (never call it from `wake`).
     void close() noexcept {
         shared->close();
     }

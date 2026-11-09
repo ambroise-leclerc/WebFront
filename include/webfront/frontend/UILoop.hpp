@@ -11,6 +11,7 @@
 #include "UIExecutor.hpp"
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -37,9 +38,20 @@ public:
             std::lock_guard lock(mutex);
             requested = true;
             wake      = quit;
+            if (wake)
+                ++calls;  // disarm() waits for it: the quit function uses what the loop frees after disarming
         }
-        if (wake)
-            wake();
+        if (!wake)
+            return;
+        struct Done {
+            UILoopStop& self;
+            ~Done() {
+                std::lock_guard lock(self.mutex);
+                --self.calls;
+                self.callsDone.notify_all();
+            }
+        } done{*this};
+        wake();
     }
     /// True once request() was called and until the next run starts.
     [[nodiscard]] bool requestedStop() const {
@@ -53,14 +65,18 @@ public:
         quit = std::move(function);
         return requested;
     }
+    /// Waits for the request() calls in flight, then forgets the quit function and the request.
     void disarm() {
-        std::lock_guard lock(mutex);
-        quit      = nullptr;
+        std::unique_lock lock(mutex);
+        quit = nullptr;  // no later request() copies it
+        callsDone.wait(lock, [&] { return calls == 0; });
         requested = false;
     }
 
 private:
-    mutable std::mutex    mutex;
+    mutable std::mutex      mutex;
+    std::condition_variable callsDone;
+    unsigned                calls{0};
     bool                  requested{false};
     std::function<void()> quit;
 };
