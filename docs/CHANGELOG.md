@@ -11,6 +11,15 @@
   thread (message-only window pump, AppKit run loop with `NSApplication` in the Accessory policy, GLib loop; all loaded at run
   time, nothing to link) that ends with `requestStop()`; the plain browser frontend still has no executor. Catch2 tests with a
   simulated loop and the shared lifecycle case `ui-executor` (execution on the interface thread, race with closure, call after closure).
+- Release workflow of the developer environment (#482, ADR-021 phase 1; repository side). The `release-developer` workflow
+  (`.github/workflows/ReleaseDeveloper.yml`) builds twice, commits a closed list of paths on `release/developer-<version>`
+  with a dedicated GitHub application's token, tags in the same run, publishes, verifies the deployed bytes and opens the
+  pull request into `develop`; its permissions are declared job by job and checked by `ReleaseDeveloperWorkflow`.
+  `wf run pin` now fails (instead of warning) when the pinned URL is off the origin of `baseUrl`, redirects or lacks CORS,
+  and reads `previousBase` and `baseSince` for the migration waiver, which covers only versions before `baseSince`. `DeveloperPinConsistency` checks the states (a) to (c) and the
+  inconsistencies of ADR-021 decision 2. The compatibility table of `docs/DEVELOPER_ENVIRONMENT.md` is maintained by
+  `cmake/DeveloperCompatibility.cmake` and enforced on `v*` tags by `CheckReleaseVersion.cmake`. The application, the tag rule
+  and the first real publication are repository operations that remain to be done by a maintainer.
 - `@webfront/services` package (#461, ADR-010 1.8, ADR-020 step 4). The browser side of the optional system services is
   delivered outside the core, like `@webfront/react`: `js/services/` (a skeleton: an empty frozen `services` object and
   `selfTest()`, declarations, license), `wf run services-package` for its deterministic archive and SHA-512, the same

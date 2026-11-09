@@ -10,6 +10,62 @@ The environment builds itself: the pinned bootstrap environment (`cmake/WebFront
 lock). Building, reviewing and publishing need a C++23 compiler, CMake, the engine of the driver's frontend and `gh`
 and `jq` for the host operations.
 
+## Releasing with the workflow
+
+The **release-developer** workflow (`.github/workflows/ReleaseDeveloper.yml`, ADR-021) is the way to publish a version. Dispatch
+it on `develop` with the version (greater than the one of `distribution.json`):
+
+```sh
+gh workflow run ReleaseDeveloper.yml --ref develop -f version=0.6.7 -f publish=false   # rehearsal
+gh workflow run ReleaseDeveloper.yml --ref develop -f version=0.6.7 -f publish=true    # release
+```
+
+The jobs run in this order, and each declares only the permissions of the table of ADR-021 (`ReleaseDeveloperWorkflow` checks them):
+
+1. `wf-package` (`contents: read`): sets the version, builds twice with `--refresh-bootstrap`, compares the repeat build and the
+   header, renders the embedded headers and the **unreleased** row of the compatibility table, fails if the diff touches a path
+   outside `RELEASE_PATHS` (declared once in the workflow; `check-release-paths.sh`), checks the pin (`CheckDeveloperPin.cmake`)
+   and runs the specs. With `publish=false` the workflow ends here: nothing is pushed, tagged or published.
+2. `prepare`: with the token of the dedicated GitHub application, commits that closed list of paths on
+   `release/developer-<version>` (never `develop` or `master`); an existing branch stops the run.
+3. `tag`: sets `developer-v<version>` on that commit, in the same run.
+4. `publish`: stages the site on `gh-pages` (immutable versions, no force-push), requests the Pages build and archives the
+   prerelease.
+5. `verify`: `wf run pin` (bytes, pinned URL without redirection, CORS; retried while Pages builds) and the public smoke test.
+6. `pull-request`: with the application's token, opens the pull request of the release branch into `develop`. It is not merged by
+   the workflow: the review and the required checks of `develop` apply, and they run because the pull request is not created
+   with the `GITHUB_TOKEN`.
+
+**Resuming.** A failure of `wf-package` or `prepare` leaves nothing pushed or deployed (delete the release branch if `prepare`
+pushed it) and the same version can be dispatched again. Once `tag` has run, the tag rule `developer-tags` forbids moving or
+deleting `developer-v<version>`: a failure of `tag` or `publish` after it is resumed by re-running the failed jobs of the same
+run, which publishes the same bytes, and a defect found at that point requires the next version. A failure of `verify` after `publish` is a transient fault if
+`wf run pin` succeeds on a rerun (re-run the failed jobs: the bytes are the same) and a defect otherwise, which requires a new
+version. A failed `verify` opens no pull request and changes neither `develop` nor `master`.
+
+`pin.mjs` (`wf run pin`) fails when the pinned URL is not on the origin of `baseUrl`, redirects, or lacks CORS headers. The only
+exception is a migration, declared in `distribution.json` by `previousBase` (the former address) together with `baseSince` (the
+first version published under `baseUrl`). It is bounded: it covers only a header under `previousBase` whose version precedes
+`baseSince`, prints a warning, and is refused for any later version, for a `previousBase` without `baseSince`, and as soon as the
+header pins a version published under the new address (the two fields must then be removed). `baseSince` completes the ADR-021
+decision, which names `previousBase` only. The release workflow removes both fields from the release commit, since the header it
+generates is under `baseUrl`, and `CheckDeveloperPin.cmake` (run before anything is published) refuses a waiver that is stale,
+incomplete, or whose header is off `baseUrl` without one.
+
+**Repository settings the workflow needs** (made by a maintainer, not by the workflow):
+
+- a GitHub application with `pull-requests: write` and `contents: write` only, installed on this repository; its identifier is
+  the variable `RELEASE_APP_ID` and its private key the secret `RELEASE_APP_PRIVATE_KEY` of the protected environment
+  `developer-release-app`;
+- a tag rule on `developer-v*` forbidding updates and deletions;
+- the branch protection of `develop` and `master` must not cover `release/*`, and the application has no bypass;
+- the Pages source (`gh-pages`, root, branch build) unchanged ("One-time Pages configuration" below); the group `developer-pages-publication` is the only writer of `gh-pages`.
+
+The library's release preparation freezes the compatibility table with `cmake -DROOT=. -DMODE=freeze -DLIBRARY_VERSION=<x.y.z> -P
+cmake/DeveloperCompatibility.cmake`; `CheckReleaseVersion.cmake` fails a `v*` tag without its row.
+
+The sections below describe the building blocks and the manual procedure, which remains the fallback when the workflow cannot run.
+
 ## Build and review
 
 The driver `webfront-wf` runs one `wf` command without interaction on a project (here, the repository). Any frontend
@@ -50,7 +106,7 @@ The static branch preserves every version. Republishing identical bytes is allow
 published version with different bytes fails. Increment `distribution.json` before publishing any
 changed environment, starter, public URL or provisioning configuration.
 
-## Pinning a new version
+## Pinning a new version (manual fallback)
 
 `distribution.json` names the version under development; `DeveloperReleaseData.hpp` pins the last version that is
 published. Pull requests and branch pushes therefore require the header to match a fresh build only when both name

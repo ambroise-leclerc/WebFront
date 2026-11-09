@@ -1,6 +1,7 @@
 // Specs of the developer distribution: the starters, the Pages staging and the pinned bootstrap header.
 import {tar} from '../../../js/developer/tools/archive.mjs';
 import {bootstrapHeader, versionPath, distributionFiles, customDomain} from '../../../js/developer/tools/distribution.mjs';
+import {pinOrigin, precedes} from '../../../js/developer/scripts/pin.mjs';
 import stageSite from '../../../js/developer/scripts/site.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
 import {createStarter} from '../../../js/developer/environment/starter.mjs';
@@ -178,5 +179,73 @@ describe('The developer distribution', () => {
             else { await rejects(create(), /provider name/); expect(writes).toBe(0); }
         }
         throws(() => distributionFiles({starters: {life: {archive: '../life-starter.tgz'}}}));
+    });
+
+    describe('the origin of a pinned URL (ADR-021)', () => {
+        const base = 'https://dist.webfront.fr/';
+        const previous = 'https://ambroise-leclerc.github.io/WebFront/';
+        const onBase = 'https://dist.webfront.fr/developer/0.6.5/environment.tgz';
+        const onPrevious = version => `https://ambroise-leclerc.github.io/WebFront/developer/${version}/environment.tgz`;
+
+        it('accepts a pin on the origin of baseUrl without a waiver', () => {
+            expect(pinOrigin(onBase, base, undefined, '0.6.5')).toEqual({waiver: false});
+        });
+
+        it('refuses a pin off the origin of baseUrl when no migration is declared', () => {
+            throws(() => pinOrigin(onPrevious('0.6.4'), base, undefined, '0.6.4'), /declares no previousBase/);
+        });
+
+        it('tolerates a pin before baseSince under the declared previousBase, with a warning that names the waiver', () => {
+            const result = pinOrigin(onPrevious('0.6.4'), base, previous, '0.6.4', '0.6.5');
+            expect(result.waiver).toBe(true);
+            expect(result.warning).toMatch(/migration waiver/);
+        });
+
+        it('refuses the waiver for the first version published under the new base and for any later one', () => {
+            for (const version of ['0.6.5', '0.6.6', '0.7.0', '1.0.0'])
+                throws(() => pinOrigin(onPrevious(version), base, previous, version, '0.6.5'), /covers only versions before 0.6.5/);
+        });
+
+        it('orders versions numerically, not as text, and a prerelease before its release', () => {
+            expect(precedes('0.6.4', '0.6.10')).toBe(true);
+            expect(precedes('0.6.10', '0.6.4')).toBe(false);
+            expect(precedes('0.6.5-rc.1', '0.6.5')).toBe(true);
+            expect(precedes('0.6.5', '0.6.5')).toBe(false);
+            expect(precedes('0.6.5', '0.6.5-rc.1')).toBe(false);
+            throws(() => precedes('0.6', '0.6.5'), /Invalid version/);
+        });
+
+        it('orders prereleases by SemVer: numeric identifiers as numbers, below text, and a prefix before its extension', () => {
+            // The SemVer 2.0.0 example: 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0
+            const ordered = ['1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-alpha.beta', '1.0.0-beta', '1.0.0-beta.2', '1.0.0-beta.11', '1.0.0-rc.1', '1.0.0'];
+            for (let low = 0; low < ordered.length; low++)
+                for (let high = 0; high < ordered.length; high++)
+                    expect(precedes(ordered[low], ordered[high])).withContext(`${ordered[low]} before ${ordered[high]}`).toBe(low < high);
+            expect(precedes('0.7.0-rc.2', '0.7.0-rc.10')).toBe(true);
+            expect(precedes('0.7.0-rc.10', '0.7.0-rc.2')).toBe(false);
+        });
+
+        it('does not tolerate a pin past a prerelease baseSince through the order of its identifiers', () => {
+            const version = '0.7.0-rc.10';
+            throws(() => pinOrigin(onPrevious(version), base, previous, version, '0.7.0-rc.2'), /covers only versions before 0.7.0-rc.2/);
+            expect(pinOrigin(onPrevious('0.7.0-rc.2'), base, previous, '0.7.0-rc.2', '0.7.0-rc.10').waiver).toBe(true);
+        });
+
+        it('requires baseSince with previousBase, and previousBase with baseSince', () => {
+            throws(() => pinOrigin(onPrevious('0.6.4'), base, previous, '0.6.4'), /requires baseSince/);
+            throws(() => pinOrigin(onBase, base, undefined, '0.6.5', '0.6.5'), /only meaningful with previousBase/);
+        });
+
+        it('refuses a pin outside both the base and the declared previousBase', () => {
+            throws(() => pinOrigin('https://elsewhere.example/developer/0.6.4/environment.tgz', base, previous, '0.6.4', '0.6.5'), /neither/);
+        });
+
+        it('refuses a stale waiver once the header pins a version published under the new base', () => {
+            throws(() => pinOrigin(onBase, base, previous, '0.6.5', '0.6.5'), /Stale migration waiver/);
+        });
+
+        it('refuses a previousBase on the origin of baseUrl', () => {
+            throws(() => pinOrigin(onBase, base, base, '0.6.5', '0.6.5'), /another origin/);
+        });
     });
 });
