@@ -340,6 +340,7 @@ struct Session : FailureState {
     unsigned                             navigationTimer   = 0;
     unsigned                             portalTimer       = 0;  // retries the Wayland export until the toplevel can be exported
     int                                  portalAttempts    = 0;
+    std::uint64_t                        portalGeneration  = 0;  // the publication this session's identifier belongs to
     unsigned long                        windowHandler     = 0;
     std::vector<unsigned long>           viewHandlers;
     std::shared_ptr<CaptureTarget>       captureTarget = std::make_shared<CaptureTarget>();
@@ -720,10 +721,11 @@ struct Session : FailureState {
         std::snprintf(text, sizeof text, "x11:%lx", a.x11Xid(target));
         return text;
     }
-    static void onWaylandExported(Api::Object, const char* handle, void*) {
-        // The host ignores it once the window is withdrawn; nothing here points into a session.
+    // The export is asynchronous: its answer can arrive after the window closed and another one opened. `data` is the
+    // generation of the publication that asked, so the host drops an answer that is not about the current window.
+    static void onWaylandExported(Api::Object, const char* handle, void* data) {
         if (handle)
-            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::string("wayland:") + handle);
+            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::string("wayland:") + handle, reinterpret_cast<std::uintptr_t>(data));
     }
     // gdk_wayland_toplevel_export_handle fails until the toplevel has its xdg role: retry every 100 ms for 5 s, then give up
     // (the identifier stays empty and a dialog is simply not parented).
@@ -732,7 +734,7 @@ struct Session : FailureState {
         auto  target = self->surface();
         auto& a      = self->a;
         if (target && a.instanceIsA && a.waylandToplevelType && a.waylandExport && a.instanceIsA(target, a.waylandToplevelType())) {
-            if (a.waylandExport(target, onWaylandExported, nullptr, nullptr)) {
+            if (a.waylandExport(target, onWaylandExported, reinterpret_cast<void*>(static_cast<std::uintptr_t>(self->portalGeneration)), nullptr)) {
                 self->portalTimer = 0;
                 return 0;
             }
@@ -743,8 +745,10 @@ struct Session : FailureState {
         return 0;
     }
     void startPortalExport() {
+        // open() published this session's window just before run(): that is the generation current now.
+        portalGeneration = nativeWindowHostOf<WebKitGTKFrontend>().generation();
         if (auto x11 = x11PortalParent(); !x11.empty()) {
-            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::move(x11));
+            nativeWindowHostOf<WebKitGTKFrontend>().setPortalParent(std::move(x11), portalGeneration);
             return;
         }
         if (!a.waylandExport)

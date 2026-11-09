@@ -14,6 +14,7 @@
 
 #include "UIExecutor.hpp"
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <mutex>
@@ -57,16 +58,24 @@ class NativeWindowShared {
 public:
     enum class Phase { idle, open, closed };
 
-    void publish(NativeWindowHandle handle) {
+    /// Publishes a window and returns its generation: each publication has its own, so that an asynchronous update meant
+    /// for an earlier window is recognized and dropped.
+    std::uint64_t publish(NativeWindowHandle handle) {
         std::lock_guard lock(mutex);
         window = std::move(handle);
         phase  = Phase::open;
+        return ++current;
     }
-    /// Sets the portal identifier of the published window (Wayland: known after the window is mapped); no-op otherwise.
-    void setPortalParent(std::string portalParent) {
+    /// Sets the portal identifier of the window published as `generation` (Wayland: known after the window is mapped).
+    /// No-op unless that window is still the published one.
+    void setPortalParent(std::string portalParent, std::uint64_t generation) {
         std::lock_guard lock(mutex);
-        if (phase == Phase::open)
+        if (phase == Phase::open && generation == current)
             window.portalParent = std::move(portalParent);
+    }
+    [[nodiscard]] std::uint64_t generation() const {
+        std::lock_guard lock(mutex);
+        return current;
     }
     void retract() noexcept {
         std::lock_guard lock(mutex);
@@ -91,6 +100,7 @@ public:
 private:
     mutable std::mutex mutex;
     Phase              phase{Phase::idle};
+    std::uint64_t      current{0};
     NativeWindowHandle window;
 };
 
@@ -125,12 +135,19 @@ public:
     [[nodiscard]] NativeWindow window() const {
         return NativeWindow{shared, executor};
     }
-    /// Gives the window to consumers. Call it on the interface thread, once the window exists.
-    void publish(NativeWindowHandle handle) {
-        shared->publish(std::move(handle));
+    /// Gives the window to consumers. Call it on the interface thread, once the window exists. Returns the generation of this
+    /// publication, to pass to setPortalParent() for anything that completes later.
+    std::uint64_t publish(NativeWindowHandle handle) {
+        return shared->publish(std::move(handle));
     }
-    void setPortalParent(std::string portalParent) {
-        shared->setPortalParent(std::move(portalParent));
+    /// Sets the portal identifier of the window of `generation`; ignored when that window was withdrawn or replaced by a
+    /// later publication, so a late answer about window A never lands on window B.
+    void setPortalParent(std::string portalParent, std::uint64_t generation) {
+        shared->setPortalParent(std::move(portalParent), generation);
+    }
+    /// The generation of the latest publication (0 before the first).
+    [[nodiscard]] std::uint64_t generation() const {
+        return shared->generation();
     }
     /// Withdraws the window; call it before the toolkit destroys it. Idempotent. A later publish() opens a new session.
     void retract() noexcept {

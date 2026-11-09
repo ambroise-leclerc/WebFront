@@ -35,8 +35,8 @@ struct Session {
     Session() {
         executor.attach([] {});
     }
-    void publish(std::string portalParent = {}) {
-        window.publish({.kind = NativeWindowKind::gtk, .pointer = &windowObject, .portalParent = std::move(portalParent)});
+    std::uint64_t publish(std::string portalParent = {}) {
+        return window.publish({.kind = NativeWindowKind::gtk, .pointer = &windowObject, .portalParent = std::move(portalParent)});
     }
     ~Session() {
         window.retract();
@@ -120,7 +120,7 @@ SCENARIO("The native window is given on the interface thread while it is publish
     GIVEN("a published window") {
         Session<PlainTag> session;
         const auto        handle = nativeWindowHostOf<PlainTag>().window();
-        session.publish("x11:1a2b");
+        const auto generation = session.publish("x11:1a2b");
         WHEN("it is read on the interface thread") {
             const auto window = handle.get();
             THEN("it is the toolkit object, with its portal identifier") {
@@ -137,7 +137,7 @@ SCENARIO("The native window is given on the interface thread while it is publish
             }
         }
         WHEN("the portal identifier becomes known later") {
-            session.window.setPortalParent("wayland:handle");
+            session.window.setPortalParent("wayland:handle", generation);
             THEN("the window carries it") {
                 REQUIRE(handle.get()->portalParent == "wayland:handle");
             }
@@ -146,7 +146,7 @@ SCENARIO("The native window is given on the interface thread while it is publish
             session.window.retract();
             THEN("it answers closed, and a late portal identifier is dropped") {
                 REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
-                session.window.setPortalParent("wayland:late");
+                session.window.setPortalParent("wayland:late", generation);
                 REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
             }
         }
@@ -154,6 +154,36 @@ SCENARIO("The native window is given on the interface thread while it is publish
             session.executor.close();
             THEN("it is not given to a thread that is no longer the interface thread") {
                 REQUIRE(errorOf(handle.get()) == NativeWindowError::wrongThread);
+            }
+        }
+    }
+    GIVEN("an asynchronous portal export that answers after its window was replaced") {
+        const auto handle = nativeWindowHostOf<PlainTag>().window();
+        std::uint64_t first{};
+        {
+            Session<PlainTag> a;
+            first = a.publish();  // window A asks for its export, which has not answered yet
+        }
+        Session<PlainTag> b;
+        const auto        second = b.publish("x11:b");
+        REQUIRE(second != first);
+        WHEN("the answer about window A arrives") {
+            b.window.setPortalParent("wayland:stale-a", first);
+            THEN("window B keeps its own identifier") {
+                REQUIRE(handle.get()->portalParent == "x11:b");
+            }
+        }
+        WHEN("the answer about window B arrives") {
+            b.window.setPortalParent("wayland:b", second);
+            THEN("window B takes it") {
+                REQUIRE(handle.get()->portalParent == "wayland:b");
+            }
+        }
+        WHEN("window B is withdrawn and the answer about window A arrives") {
+            THEN("it is dropped as well") {
+                b.window.retract();
+                b.window.setPortalParent("wayland:stale-a", first);
+                REQUIRE(errorOf(handle.get()) == NativeWindowError::closed);
             }
         }
     }

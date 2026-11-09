@@ -265,7 +265,9 @@ The connection's window is the frontend's single window, reached through the ass
 system browser never has one. `portalParent` is the `parent_window` of the desktop portals: under WebKitGTK `x11:<hex XID>` when the
 window is on X11, `wayland:<handle>` once `gdk_wayland_toplevel_export_handle` succeeds (retried for 5 s after the window is presented,
 empty until then); it is empty on Windows and macOS. A frontend author calls `nativeWindowHostOf<Frontend>().publish(...)` on the interface
-thread after the window exists and `retract()` before it is destroyed.
+thread after the window exists and `retract()` before it is destroyed. `publish()` returns the generation of the publication, and an
+answer that completes later (the Wayland export) goes through `setPortalParent(text, generation)`, which drops it when its window was
+withdrawn or replaced by a newer one.
 
 Manual check of a parented dialog (to run on each platform with the first native backend): open a native dialog parented to
 `ui.nativeWindow()` from an `app.uiExecutor()` operation; it must open over the application's window, stay on top of it, block it as
