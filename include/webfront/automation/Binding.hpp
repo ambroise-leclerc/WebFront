@@ -67,7 +67,7 @@ void (async () => {
         const supported = Array.isArray(runtime.automationOperations) ? runtime.automationOperations : [];
         for (const [operation, since] of __VERSIONED__)
             if (!supported.includes(operation)) throw new Error('This environment cannot run granted operation '+operation+'; provision environment '+since+' or later');
-        runtime.connectAutomation({bridge:webFront,call,config,environment,preview:document.getElementById('preview')});
+        runtime.connectAutomation({bridge:webFront,call,config,environment,preview:document.getElementById('preview'),notice:__NOTICE__});
     } catch (error) {
         await call('failed',failureText(error?.message ?? error)).catch(() => {});
         window.close();
@@ -75,7 +75,7 @@ void (async () => {
 })();
 )JS";
 
-inline std::string connectionScript(std::string_view capability, const std::vector<std::pair<std::string, std::string>>& versioned = {}) {
+inline std::string connectionScript(std::string_view capability, const std::vector<std::pair<std::string, std::string>>& versioned = {}, std::string_view notice = {}) {
     std::string script{connectionScriptTemplate};
     std::string list = "[";
     for (const auto& [operation, since] : versioned)
@@ -83,6 +83,8 @@ inline std::string connectionScript(std::string_view capability, const std::vect
     list += "]";
     script.replace(script.find("__VERSIONED__"), std::string_view("__VERSIONED__").size(), list);
     script.replace(script.find("__CAPABILITY__"), std::string_view("__CAPABILITY__").size(), capability);
+    // Last: the notice is text of the native owner, and nothing after it is substituted.
+    script.replace(script.find("__NOTICE__"), std::string_view("__NOTICE__").size(), json::quote(notice));
     return script;
 }
 
@@ -95,6 +97,7 @@ class Binding {
         std::optional<AppUI>               browser;
         authentication::PageAuthentication pageAuthentication;
         std::string                        launchToken = channel::nonce();
+        std::string                        notice;  // what the human sees in the terminal: grants and how to attach
         bool                               closing     = false;
         void
         authorize(const AppUI& ui, std::string_view sequence, std::string_view mac, std::string_view method, std::initializer_list<std::string_view> args) {
@@ -122,7 +125,7 @@ public:
                 throw std::runtime_error("Automation window claim rejected");
             owned->browser = ui;
             owned->launchToken.clear();  // one successful claim; later connections cannot replace the selected browser
-            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret(), owned->session->versionedOperations()));
+            ui.addScript(owned->closing ? std::string{"window.close()"} : connectionScript(owned->pageAuthentication.secret(), owned->session->versionedOperations(), owned->notice));
             return std::string{"null"};
         });
         app.cppFunction("webfront.automation.poll", [owned](AppUI ui, std::string sequence, std::string mac, std::string output) {
@@ -168,6 +171,11 @@ public:
             if (owned->browser == ui)
                 owned->session->close("Developer window disconnected");
         });
+    }
+    /// The sentence the developer window's terminal shows once automation is connected (no secret): grants and how to attach.
+    void announce(std::string text) {
+        std::scoped_lock lock{state->mutex};
+        state->notice = std::move(text);
     }
     std::string launchPage() const {
         std::scoped_lock lock{state->mutex};

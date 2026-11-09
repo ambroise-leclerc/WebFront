@@ -12,7 +12,13 @@
   `--print-mcp-config --attach <dir> [--name n]` prints a `.mcp.json`; `--sessions-dir` overrides the directory.
   `webfront_add_agent([INSTALL] [DESTINATION dir])` checks and installs the launcher target for `add_subdirectory` and
   `FetchContent` consumers. `wf check` without a `tsconfig.json` now also roots the project's own `.d.ts`, `.d.mts` and `.d.cts` files, so an ambient
-  `declare module '*.css'` applies. The environment sources move to 0.6.6 (the pin stays on the published 0.6.5); publishing 0.6.6 and updating the pin remain a release action. A new discovery directory is created private to the user; an existing one that others can read is refused, never modified.
+  `declare module '*.css'` applies. The environment sources move to 0.6.6 (the pin stays on the published 0.6.5); publishing 0.6.6 and updating the pin remain a release action.
+  The operation `call` (permission `call`, environment 0.6.6) invokes an application callback that the owner allow-listed by exact name
+  (`AutomationOptions::callbacks`, shown in the session, in `--list` and in the notice), with at most one string argument and a scalar or
+  short-list result; `webfront.*` names and anything outside the list are refused natively and audited (ADR-019 1.4). Once connected, the
+  window's terminal prints the grants and the attach path, `wf help` ends with an `Automation:` line, `wf create` writes an `AGENTS.md`
+  beside the starter's sources, and the errors asking for typescript or jasmine-core name the `install` operation. A browser regression
+  attaches `webfront-agent` to a real consumer application (`automation_consumer`, `AutomationConsumerWindow`). A new discovery directory is created private to the user; an existing one that others can read is refused, never modified.
 - Writable storage confined to declared roots (#460, ADR-002 3.0, ADR-020 step 4). `fs::Storage` is the contract of a
   writable storage: stable paginated listing (`list(dir, after, limit)`, at most 1000 entries a page), `status`,
   `openRead`, `beginWrite(path, createNew | replace)` whose `commit()` renames a temporary file atomically (an uncommitted

@@ -34,6 +34,10 @@ struct AutomationOptions {
     /// Granted operations (`check`, `build`, `test`, `preview`, `inspect`, `interact`, and the setup grants). None
     /// leaves only session discovery.
     std::vector<std::string> grants{};
+    /// The application callbacks the `call` grant may invoke (`callbacks = {"bf.render"}`): an explicit list of names, never a
+    /// pattern. The agent sees the names, gives them one string at most and reads a scalar or list back; `webfront.*` names are
+    /// refused. Needs the `call` grant; without it nothing of the application can be called.
+    std::vector<std::string> callbacks{};
     /// A new private directory outside the project that receives the attachment endpoint.
     std::filesystem::path listen{};
     /// Where the discovery record goes; the per-user default when empty. Tests use their own.
@@ -62,6 +66,7 @@ public:
           channel(session, options.listen),
           registration(options.discovery.empty() ? discovery::defaultDirectory() : options.discovery, record(*session, channel.directory())),
           grants(std::move(options.grants)),
+          callbackNames(std::move(options.callbacks)),
           endpointDirectory(channel.directory()),
           grace(options.closeGrace),
           unresponsive(std::move(options.onUnresponsive)),
@@ -100,6 +105,7 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds{20});
             }
         });
+        binding.announce(banner());  // the terminal of the window says it too, once automation is connected
         if (options.announce)
             std::cerr << banner() << '\n';
     }
@@ -122,7 +128,10 @@ public:
         std::string list;
         for (const auto& grant : grants)
             list += (list.empty() ? "" : ", ") + grant;
-        return "WebFront automation enabled (grants: " + (list.empty() ? std::string{"none"} : list) + "). Attach with: webfront-agent --attach \""
+        std::string names;
+        for (const auto& callback : callbackNames)
+            names += (names.empty() ? "" : ", ") + callback;
+        return "WebFront automation enabled (grants: " + (list.empty() ? std::string{"none"} : list) + (names.empty() ? "" : "; callbacks: " + names) + "). Attach with: webfront-agent --attach \""
                + endpointDirectory.generic_string() + "\" --mcp";
     }
     /// `base` marked as shared with an agent, for a window title: automation must be visible to the person using it.
@@ -155,7 +164,7 @@ private:
     static std::shared_ptr<Session> make(App& app, const AutomationOptions& options) {
         if (options.listen.empty())
             throw std::invalid_argument("Automation needs a new private `listen` directory for its endpoint");
-        return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout});
+        return std::make_shared<Session>(SessionOptions{.project = app.projectDirectory(), .allow = options.grants, .timeout = options.timeout, .callbacks = options.callbacks});
     }
     static discovery::Entry record(const Session& session, const std::filesystem::path& endpoint) {
         const Object description{session.describe()};
@@ -163,13 +172,15 @@ private:
                 .project  = description.string("project"),
                 .endpoint = endpoint.generic_string(),
                 .allow    = description.raw("allow"),
-                .pid      = discovery::currentProcess()};
+                .pid      = discovery::currentProcess(),
+                .callbacks = description.raw("callbacks")};
     }
 
     std::shared_ptr<Session>      session;
     ChannelServer                 channel;
     discovery::Registration       registration;
     std::vector<std::string>      grants;
+    std::vector<std::string>      callbackNames;
     std::filesystem::path         endpointDirectory;
     std::chrono::milliseconds     grace;
     std::function<void()>         unresponsive;

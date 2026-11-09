@@ -71,6 +71,8 @@ inline bool validIdentifier(std::string_view id) {
 struct Entry {
     std::string session, project, endpoint, allow;
     long        pid = 0;
+    /// The JSON array of the application callbacks that `call` may invoke (empty unless the owner allow-listed some).
+    std::string callbacks = "[]";
     /// The JSON the CLI prints; the same members as the record, plus the observed state.
     std::string json() const {
         return objectJson({
@@ -79,6 +81,7 @@ struct Entry {
             {"pid",                              std::to_string(pid)},
             {"project",                   webfront::json::quote(project)},
             {"allow",                                         allow},
+            {"callbacks",                                 callbacks},
             {"endpoint",                 webfront::json::quote(endpoint)},
             {"state",                       webfront::json::quote("running")},
         });
@@ -187,12 +190,14 @@ inline std::optional<Entry> readRecord(const std::filesystem::path& path) {
         entry.project  = record.string("project");
         entry.endpoint = record.string("endpoint");
         entry.allow    = record.raw("allow", "[]");
+        entry.callbacks = record.raw("callbacks", "[]");
         const auto pid = record.raw("pid", "0");
         entry.pid      = std::stol(pid);
         if (record.raw("version") != "1" || !validIdentifier(entry.session) || path.stem().string() != entry.session || entry.project.empty()
-            || entry.endpoint.empty() || !entry.allow.starts_with('[') || entry.pid <= 0)
+            || entry.endpoint.empty() || !entry.allow.starts_with('[') || !entry.callbacks.starts_with('[') || entry.pid <= 0)
             return std::nullopt;
         Object{"{\"allow\":" + entry.allow + "}"};  // the grants must be well-formed JSON of the usual bounds
+        Object{"{\"callbacks\":" + entry.callbacks + "}"};
         return entry;
     } catch (const std::exception&) {
         return std::nullopt;

@@ -194,10 +194,32 @@ webfront-agent --list
 webfront-agent --attach /absolute/private-endpoint --operation check
 ```
 
-A lost WebSocket does not prove the native window is gone (a navigation or a broken connection can leave it open, with `show()` still blocked): the record and endpoint are withdrawn at once, but the grace still runs until the application calls `close()` after `show()` returns, so call it promptly. A window that never claims the session (`startupTimeout`, 120 s from the activation) is revoked the same way, since no operation exists for the deadline to expire. The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. A callback of the
-application is not an MCP tool: exposing an explicit allow-list of typed callbacks needs its own security decision
-([ADR-019](adr/ADR-019-developpement-automatisable-et-agents.md)) and is not implemented. Enabling automation in a
+A lost WebSocket does not prove the native window is gone (a navigation or a broken connection can leave it open, with `show()` still blocked): the record and endpoint are withdrawn at once, but the grace still runs until the application calls `close()` after `show()` returns, so call it promptly. A window that never claims the session (`startupTimeout`, 120 s from the activation) is revoked the same way, since no operation exists for the deadline to expire. The native deadline of an operation revokes the session and asks the window to close. A renderer stuck in a loop never runs that request, and `show()` cannot be interrupted from another thread: after `closeGrace` (five seconds) the endpoint and record are removed and `onUnresponsive` is called, which by default ends the process with status 72, as `webfront-agent` does. An application that prefers another way to stop sets `onUnresponsive`. Enabling automation in a
 distribution build is an application choice: gate the call (for example behind a macro) so that shipped binaries have none.
+
+### Calling the application's own callbacks
+
+Testing the behavior of the application, not only its interface, needs its C++ callbacks. They are never exported by
+default: the owner names the ones an agent may call and grants `call`.
+
+```cpp
+auto automation = webfront::automation::enableAutomation(
+    app, {.grants = {"check", "build", "preview", "inspect", "interact", "call"}, .callbacks = {"bf.render"},
+          .listen = privateEndpointDirectory});
+```
+
+```sh
+webfront-agent --attach /absolute/private-endpoint --operation call --callback bf.render --value "glider"
+```
+
+`call` takes the `callback` name and at most one string `value`; its result is `data: {callback, result}`, where `result` is a
+string, a number, a boolean, `null` or a list of at most 1000 of those (typed arrays included). Anything else, a
+`webfront.*` name, a name that is not in the list (matched exactly, never as a pattern) and a session without the grant are
+refused natively and audited, whatever the page or the agent asks; the list cannot come from the project manifest or from
+the agent. The names are visible in the session (`callbacks`), in `--list` and in the terminal notice. The callback runs in
+the application's own process with the application's authority: allow-list only callbacks that are safe to trigger. An
+environment older than 0.6.6 cannot run `call`, and the native owner refuses the grant rather than ignore it. `call` is an
+operation of `webfront.start`, not one MCP tool per callback, so the tool list stays at four.
 
 ## Discovering shared sessions
 
@@ -216,6 +238,13 @@ webfront-agent --print-mcp-config --attach /absolute/private-endpoint [--name ap
 
 The generated configuration is one stdio server `webfront-agent --attach <dir> --mcp`; it carries no grant (the owner's
 process fixes them) and no secret. It is never written into the project manifest.
+
+`--print-mcp-config` is the client configuration generator (there is no `wf agent init`: the file belongs to the agent's client, not to the
+project, and `wf` cannot know where that client keeps it). Automation is also visible to the person at the window: once connected, the
+terminal prints the grants, the callbacks and the attach path in yellow, `wf help` ends with an `Automation:` line while it lasts, and
+`automation->windowTitle(base)` marks the title. `wf create` writes an `AGENTS.md` beside the starter's sources that tells an agent
+these commands, and the errors that ask for a package (`wf check` without typescript, `wf test` without jasmine-core) name the `install`
+operation. These need environment 0.6.6; an older one shows none of them and still works.
 
 ## MCP profile and results
 

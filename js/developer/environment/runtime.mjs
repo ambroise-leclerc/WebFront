@@ -17,7 +17,7 @@ import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, repor
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
 import {pinnedStarters} from './bootstrap.mjs';
-import {connectAutomation as connectAgent, clipText} from './automation.mjs';
+import {connectAutomation as connectAgent, clipText, automationHelp, onAutomationNotice} from './automation.mjs';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -268,7 +268,7 @@ async function list(_args, {bridge}) {
     return syncNotice(project) + (names || 'No installed packages.');
 }
 
-const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.';
+const help = () => 'wf init [name]\nwf create <starter> [directory]\nwf install [--update] [<package>[@range] ...]\nwf restore [--offline]\nwf run [--timeout <seconds>] <script> [args...]\nwf exec [--timeout <seconds>] <package>[:<entry>] [args...]\nwf check [--timeout <seconds>]\nwf test [--timeout <seconds>] [pattern]\nwf list\nwf build [entry.tsx|name]\nwf dev [entry.tsx|name]\nwf preview [entry.tsx|name]\nwf embed <provider> | <entry.tsx> --output <Provider.hpp>\nCtrl+C interrupts a command. No system shell is exposed.' + automationHelp();
 const commands = {init, create, install: installCommand, restore: restoreCommand, run, exec, check, test, build, dev, preview, embed, list, help};
 
 let executionToken = null, executionCount = 0, automationActive = false, cppActive = 0;
@@ -315,7 +315,7 @@ export async function execute(args, context) {
 }
 
 /** Automation operations this environment runs beyond the 0.6.3 set; the native owner refuses a grant it does not list. */
-export const automationOperations = ['init', 'create', 'install', 'restore', 'embed'];
+export const automationOperations = ['call', 'init', 'create', 'install', 'restore', 'embed'];
 // The launcher's native configuration has no starters: they come from the environment's own manifest, as in the terminal.
 export const connectAutomation = ({environment, ...context}) => connectAgent({...context, run:runNonInteractive, exclusive,
     config:{...context.config, starters:pinnedStarters(environment, new URL(context.config.environment, location.href))}});
@@ -576,6 +576,11 @@ export async function mount({bridge, config, terminal: element, preview, onExit,
     terminal.onResize(() => editor.resized());
     if (fitToElement) new ResizeObserver(() => fit.fit()).observe(element);
     terminal.onData(data => editor.handle(data));
+    // Automation must be visible to the person using the terminal: say so once it is connected, grants and attach path included.
+    onAutomationNotice(text => {
+        write(`\r\x1b[K\x1b[33m${text}\x1b[0m\r\n`);
+        if (!editor.busy) editor.showPrompt();
+    });
     editor.showPrompt();
     for (const data of early) editor.handle(data);
     terminal.focus();

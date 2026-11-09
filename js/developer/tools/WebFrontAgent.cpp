@@ -803,8 +803,15 @@ int main(int argc, char** argv) {
                        .manifestDirectory = options.manifestDirectory});
         Binding                      binding{app, session};
         std::optional<ChannelServer> channel;
-        if (!options.listen.empty())
+        if (!options.listen.empty()) {
             channel.emplace(session, options.listen);
+            // The terminal of this window tells the human that an agent may attach, with which grants.
+            std::string grants;
+            for (const auto& grant : options.session.allow)
+                grants += (grants.empty() ? "" : ", ") + grant;
+            binding.announce("WebFront automation enabled (grants: " + (grants.empty() ? std::string{"none"} : grants) + "). Attach with: webfront-agent --attach \""
+                             + channel->directory().generic_string() + "\" --mcp");
+        }
         // A shared session is listed for `--list` until it closes; the record names the endpoint but holds no capability.
         std::optional<discovery::Registration> registration;
         if (channel) {
