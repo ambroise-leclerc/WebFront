@@ -48,7 +48,9 @@ exception is a migration, declared in `distribution.json` by `previousBase` (the
 first version published under `baseUrl`). It is bounded: it covers only a header under `previousBase` whose version precedes
 `baseSince`, prints a warning, and is refused for any later version, for a `previousBase` without `baseSince`, and as soon as the
 header pins a version published under the new address (the two fields must then be removed). `baseSince` completes the ADR-021
-decision, which names `previousBase` only.
+decision, which names `previousBase` only. The release workflow removes both fields from the release commit, since the header it
+generates is under `baseUrl`, and `CheckDeveloperPin.cmake` (run before anything is published) refuses a waiver that is stale,
+incomplete, or whose header is off `baseUrl` without one.
 
 **Repository settings the workflow needs** (made by a maintainer, not by the workflow):
 

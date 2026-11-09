@@ -55,3 +55,7 @@ check("a tag step that fails on an existing tag" refuse "not rerunnable"
     "already points at the release commit\"\n          elif" "exists\"\n          elif")
 check("a public smoke test without the sandbox opt-out" refuse "must each set"
     "        env:\n          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'\n        run: |\n          cmake -S . -B build-public" "        run: |\n          cmake -S . -B build-public")
+check("a release that keeps the migration fields" refuse "does not remove"
+    " | del(.previousBase, .baseSince)" "")
+check("a release that skips the offline pin check" refuse "does not run CheckDeveloperPin"
+    "test/cmake/CheckDeveloperPin.cmake" "test/cmake/Other.cmake")

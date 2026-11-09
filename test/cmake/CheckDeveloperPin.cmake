@@ -54,6 +54,38 @@ if(bootstrap_to_header EQUAL 0
     message(FATAL_ERROR "The bootstrap and the header both name ${header_version} with a different URL or integrity")
 endif()
 
+# The origin of the pinned URL (ADR-021, decision 2, criterion 7), offline: on baseUrl, or under the declared migration
+# waiver (previousBase with baseSince), which covers only a header whose version precedes baseSince. A waiver that the
+# header has outgrown is stale: the release workflow removes it with the pin it generates, and this check, which it runs
+# before anything is published, stops a release that would leave it.
+string(JSON base_url GET "${distribution}" baseUrl)
+if(NOT base_url MATCHES "/$")
+    string(APPEND base_url "/")
+endif()
+string(JSON previous_base ERROR_VARIABLE no_previous GET "${distribution}" previousBase)
+string(JSON base_since ERROR_VARIABLE no_since GET "${distribution}" baseSince)
+if(no_previous AND NOT no_since)
+    message(FATAL_ERROR "distribution.json has baseSince without previousBase")
+elseif(NOT no_previous AND no_since)
+    message(FATAL_ERROR "distribution.json has previousBase without baseSince, the first version published under baseUrl")
+elseif(NOT no_previous)
+    if(NOT previous_base MATCHES "/$")
+        string(APPEND previous_base "/")
+    endif()
+    webfront_semver_compare("${header_version}" "${base_since}" header_to_base_since)
+    string(FIND "${header_environment}" "${previous_base}" on_previous)
+    if(NOT on_previous EQUAL 0 OR NOT header_to_base_since LESS 0)
+        message(FATAL_ERROR "The migration waiver of distribution.json is stale: the header ${header_version} must be under "
+            "${previous_base} and precede ${base_since}; remove previousBase and baseSince")
+    endif()
+else()
+    string(FIND "${header_environment}" "${base_url}" on_base)
+    if(NOT on_base EQUAL 0)
+        message(FATAL_ERROR "The header pins ${header_environment}, which is not under baseUrl ${base_url}, and distribution.json "
+            "declares no migration")
+    endif()
+endif()
+
 if(header_to_sources EQUAL 0)
     set(state "(b) sources equal to the header")
 else()

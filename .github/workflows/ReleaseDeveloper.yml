@@ -64,9 +64,11 @@ jobs:
           fi
       - uses: ./.github/actions/remove-node
       - uses: ./.github/actions/wf-driver
-      - name: Set the version
+      - name: Set the version and close a migration
         run: |
-          jq --arg version "$VERSION" '.version = $version' js/developer/tools/distribution.json > "$RUNNER_TEMP/distribution.json"
+          # The header generated below pins this version under baseUrl: a migration waiver (previousBase and baseSince)
+          # would then be stale, and wf run pin refuses it after the publication. The release commit removes it.
+          jq --arg version "$VERSION" '.version = $version | del(.previousBase, .baseSince)' js/developer/tools/distribution.json > "$RUNNER_TEMP/distribution.json"
           cp "$RUNNER_TEMP/distribution.json" js/developer/tools/distribution.json
       - name: Restore the locked build dependencies
         run: wf restore

@@ -133,3 +133,12 @@ list(LENGTH sandbox_settings sandbox_count)
 if(NOT sandbox_count EQUAL 2)
     message(FATAL_ERROR "The rehearsal and the public smoke test must each set the WebKitGTK sandbox opt-out (${sandbox_count} found)")
 endif()
+
+# A migration is closed by the release commit: the pin it generates is under baseUrl, so the waiver would be stale.
+if(NOT content MATCHES "del[(][.]previousBase, [.]baseSince[)]")
+    message(FATAL_ERROR "The release does not remove the migration fields of distribution.json")
+endif()
+# The offline check of the pin, which refuses a stale waiver, runs before anything is published.
+if(NOT content MATCHES "test/cmake/CheckDeveloperPin[.]cmake")
+    message(FATAL_ERROR "The release does not run CheckDeveloperPin.cmake before publishing")
+endif()
