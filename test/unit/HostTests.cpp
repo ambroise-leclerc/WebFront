@@ -69,7 +69,7 @@ std::string waitFor(HostSession& host, double id) {
             return *summary;
         std::this_thread::sleep_for(10ms);
     }
-    FAIL("the run did not end");
+    FAIL_CHECK("the run did not end");
     return {};
 }
 
