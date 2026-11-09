@@ -206,9 +206,11 @@ int checkNativeWindow() {
     std::jthread      client([&] {
         try {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-            while (window.get().error_or(NativeWindowError::closed) == NativeWindowError::notOpen) {
+            // CEF can publish the window (OnAfterCreated) while it creates it, before open() attaches the executor: wait for both,
+            // or the read scheduled below could find no loop.
+            while (window.get().error_or(NativeWindowError::closed) == NativeWindowError::notOpen || !executor.available()) {
                 if (std::chrono::steady_clock::now() > deadline)
-                    throw std::runtime_error("The window was never published");
+                    throw std::runtime_error("The window was never published, or the executor never became available");
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             if (window.get().error_or(NativeWindowError::notOpen) != NativeWindowError::wrongThread)
