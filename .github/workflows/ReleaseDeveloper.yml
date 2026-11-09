@@ -94,6 +94,9 @@ jobs:
       # environment and the starters built from these sources (the candidate, whose bootstrap was just refreshed), and the
       # developer journey starts and runs them. A defect found here costs no version.
       - name: Run the browser suite on the candidate bytes served locally
+        env:
+          # The wf command of the wf-driver action sets it for itself only; CTest and its tests start the browser directly.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
         run: |
           # The driver was configured before the version was set: CTest read the former version of distribution.json then.
           cmake -S . -B build-driver
@@ -281,6 +284,8 @@ jobs:
           done
           exit 1
       - name: Run the public smoke test from the pinned header
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
         run: |
           cmake -S . -B build-public -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON \
             -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DCMAKE_CXX_SCAN_FOR_MODULES=OFF

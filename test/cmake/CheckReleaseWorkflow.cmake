@@ -125,3 +125,11 @@ endif()
 if(NOT content MATCHES "echo \"[$]tag already points at the release commit\"")
     message(FATAL_ERROR "The tag step is not rerunnable: it must accept an existing tag at the release commit")
 endif()
+
+# The steps that start the browser directly (CTest, developer_integration) carry the WebKitGTK sandbox opt-out of the
+# trusted fixtures, as BuildAndTest.yml does: the one of the wf command applies to that command only.
+string(REGEX MATCHALL "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'" sandbox_settings "${content}")
+list(LENGTH sandbox_settings sandbox_count)
+if(NOT sandbox_count EQUAL 2)
+    message(FATAL_ERROR "The rehearsal and the public smoke test must each set the WebKitGTK sandbox opt-out (${sandbox_count} found)")
+endif()

@@ -53,3 +53,5 @@ check("a rehearsal on a stale configuration" refuse "configure build-driver agai
     "          cmake -S . -B build-driver\n" "")
 check("a tag step that fails on an existing tag" refuse "not rerunnable"
     "already points at the release commit\"\n          elif" "exists\"\n          elif")
+check("a public smoke test without the sandbox opt-out" refuse "must each set"
+    "        env:\n          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'\n        run: |\n          cmake -S . -B build-public" "        run: |\n          cmake -S . -B build-public")
