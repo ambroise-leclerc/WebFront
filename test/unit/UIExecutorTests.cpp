@@ -338,6 +338,55 @@ SCENARIO("A failing wake fails the operations queued behind it") {
     }
 }
 
+namespace {
+// A wake function whose copy can be made to fail, as an allocation would.
+struct FragileWake {
+    static inline std::atomic<bool> failCopy{false};
+    std::size_t*                    wakes;
+    explicit FragileWake(std::size_t* count) : wakes(count) { }
+    FragileWake(const FragileWake& other) : wakes(other.wakes) {
+        if (failCopy)
+            throw std::bad_alloc();
+    }
+    FragileWake(FragileWake&&) noexcept = default;
+    void operator()() const {
+        ++*wakes;
+    }
+};
+}  // namespace
+
+SCENARIO("A failure while queuing completes the operation and leaves the queue usable") {
+    GIVEN("a wake function that cannot be copied") {
+        UIExecutorHost host;
+        std::size_t    wakes{0};
+        host.attach(FragileWake{&wakes});
+        Observed                failed;
+        Observed                later;
+        ex::inplace_stop_source stop;
+        using Op = Connected<decltype(host.executor().schedule())>;
+        FragileWake::failCopy = true;
+        Op failing(host.executor().schedule(), Receiver{failed, stop.get_token()});
+        failing.start();  // start() is noexcept: the failure must not end the process
+        FragileWake::failCopy = false;
+        THEN("the operation completes with the error and nothing is queued") {
+            CHECK(failed.errored);
+            CHECK(failed.completions == 1);
+            CHECK(wakes == 0);
+            host.drain();
+            CHECK(failed.completions == 1);
+        }
+        AND_THEN("a later operation queues, wakes the loop and runs") {
+            Op next(host.executor().schedule(), Receiver{later, stop.get_token()});
+            next.start();
+            CHECK(wakes == 1);
+            host.drain();
+            CHECK(later.completions == 1);
+            CHECK_FALSE(later.errored);
+        }
+        host.close();
+    }
+}
+
 SCENARIO("Shutdown while operations are racing stops or runs each exactly once") {
     GIVEN("a loop that closes while operations are scheduled") {
         for (int round = 0; round < 20; ++round) {

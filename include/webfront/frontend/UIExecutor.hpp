@@ -60,20 +60,26 @@ public:
         }
     };
 
-    /// Queues `job` and wakes the loop; false (job untouched) when no loop is running.
-    bool enqueue(const std::shared_ptr<UIJob>& job) {
+    /// Queues `job` and wakes the loop; false (job untouched) when no loop is running. Never throws: a failure to queue
+    /// or to copy the wake function completes the job with that error and leaves the queue as it was.
+    bool enqueue(const std::shared_ptr<UIJob>& job) noexcept {
         std::function<void()> wake;
-        {
+        try {
             std::lock_guard lock(mutex);
             if (phase != Phase::running)
                 return false;
+            // One notification per pass: while one is pending, the next drain() will see this job too. What can throw
+            // (copying the wake function, growing the queue) comes first; the state changes after it cannot fail.
+            if (!wakePending)
+                wake = wakeFunction;
             queue.push_back(job);
-            // One notification per pass: while one is pending, the next drain() will see this job too.
-            if (!wakePending) {
+            if (wake) {
                 wakePending = true;
-                wake        = wakeFunction;
                 ++wakesInFlight;  // close() waits for it: the wake may use what the loop frees once it has closed
             }
+        } catch (...) {
+            job->fail(std::current_exception());
+            return true;
         }
         if (!wake)
             return true;
@@ -136,19 +142,19 @@ public:
             job->run();
         }
         std::function<void()> wake;
-        {
-            std::lock_guard lock(mutex);
-            if (queue.empty() || phase != Phase::running || wakePending)
-                return;  // nothing left, or a job queued meanwhile already asked for the next pass
-            wakePending = true;
-            wake        = wakeFunction;
-            ++wakesInFlight;
-        }
-        // A wake that throws fails the jobs still queued (see failQueued).
         try {
+            {
+                std::lock_guard lock(mutex);
+                if (queue.empty() || phase != Phase::running || wakePending)
+                    return;  // nothing left, or a job queued meanwhile already asked for the next pass
+                wake        = wakeFunction;  // may throw: nothing has changed yet
+                wakePending = true;
+                ++wakesInFlight;
+            }
             Done done{*this};
             wake();
         } catch (...) {
+            // A wake that cannot be made or that throws fails the jobs still queued (see failQueued).
             failQueued(std::current_exception());
         }
     }
