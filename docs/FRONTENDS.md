@@ -247,8 +247,9 @@ it is still Regular. A frontend author implements it with `UIExecutorHost`: `att
 
 ## Native window
 
-The native dialogs of ADR-020 need the window that parents them. `app.nativeWindow()` returns a `frontend::NativeWindow` handle and
-`ui.nativeWindow()` the window of one connection; both give a `std::expected<NativeWindowHandle, NativeWindowError>` from `get()`.
+The native dialogs of ADR-020 need the window that parents them. `app.nativeWindow()` returns a `frontend::NativeWindow` handle, whose `get()` gives a
+`std::expected<NativeWindowHandle, NativeWindowError>`; `ui.nativeWindow()` is the window of one connection and returns that
+`std::expected` directly, with no `get()`: `app.nativeWindow().get()` and `ui.nativeWindow()` are the two forms.
 The handle carries `kind` (`win32`: `HWND`, `cocoa`: `NSWindow*`, `gtk`: `GtkWindow*`, `cef`: `CefBrowser*`), the `pointer`, and `portalParent`.
 
 | Error | Meaning |
