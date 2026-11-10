@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-10
+
 - Diagnose asynchronous media and file-services specs before Jasmine's generic timeout (#504). Each spec shares a 15 s
   budget across named operations with a 20 s Jasmine deadline; video failures include the media state and a bounded
   `mediaRanges` query. The video waits for initial data and checks the destination of each `seeked` event. Consumer
