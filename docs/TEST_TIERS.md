@@ -87,7 +87,9 @@ reports one complete result.
 The shared frontend lifecycle runner has a 45-second watchdog which reports the last observed stage and exits with a failure
 status when the interface thread cannot be unwound. Forced process exit does not itself terminate browser subprocesses; they
 can remain orphaned until the surrounding CI runner or operating system cleans them up. Do not kill the process group from
-the watchdog: a shared Xvfb display and other tests may belong to that group.
+the watchdog: a shared Xvfb display and other tests may belong to that group. The 45-second deadline can preempt the
+more specific errors of scenarios that make multiple successive 30-second waits. Forced exit also loses the process's
+unflushed gcov coverage data. Page stage reports are best effort and can be lost during navigation or disconnection.
 
 The `FrontendLifecycleWatchdog` probe bypasses frontend initialization to test the deadline without a display. The ordinary
 `CEFLifecycle-*` CTest cases exercise CEF subprocess dispatch and frontend initialization before the watchdog is started.

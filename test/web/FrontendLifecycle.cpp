@@ -145,6 +145,20 @@ int checkViewAssociation() {
     return 0;
 }
 
+// Exercise a page stage report through the real bridge without making the other scenarios depend on telemetry.
+int checkStageReport() {
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    registerLifecycleStage(app);
+    std::atomic<bool> observed = false;
+    app.cppFunction("stageProbeFinished", [&] {
+        observed = lifecycleStage == LifecycleStage::associationOrigins;
+    });
+    app.show("lifecycle-stage-probe.html");
+    if (!observed)
+        throw std::runtime_error("The page stage report did not reach the lifecycle runner");
+    return 0;
+}
+
 // What the interface thread's executor reports for one operation.
 enum class Outcome { ran, stopped, unavailable, failed };
 
@@ -584,6 +598,7 @@ int run(std::string_view mode) {
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("view-association", checkViewAssociation);
+    cases.emplace("stage-report", checkStageReport);
     const auto selected = cases.find(mode);
     if (selected == cases.end())
         throw std::runtime_error("Unknown lifecycle scenario");
