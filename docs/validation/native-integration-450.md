@@ -46,9 +46,11 @@ Windows 11 Pro 22631, MSVC 14.51 (Build Tools 18), CMake 4.3.4, Ninja, Release, 
   top-level `HWND` of the interface thread, `wrongThread` from a worker and `closed` after the loop; the dialog is owned by
   that window, which is disabled while the dialog is open, then enabled and active again. This is the manual check of a
   parented dialog of `docs/FRONTENDS.md` for Windows, with a dialog opened by the program instead of the native backend.
-- Not completed: the complete CTest run stopped at about 603 of 678 for lack of memory on the machine. Before that,
-  `TestOptionsConfiguration` (its nested configuration did not detect Ninja's version) and `JourneyRestoreSession`
-  (`rename: Access is denied` while restoring a package) failed; neither exercises this epic. The run must be repeated.
+- Complete CTest run (`--parallel 4`, on this branch): 677 of 678 pass. `TestOptionsConfiguration` fails, unrelated to this
+  epic: its "old build tree" fixture returns before `project()`, which the Ninja generator selected by the machine's
+  `CMAKE_GENERATOR=Ninja` refuses ("The detected version of Ninja () is less than the version of Ninja required").
+  A first run, stopped at about 603 of 678 for lack of memory, had also failed `JourneyRestoreSession`
+  (`rename: Access is denied` while restoring a package); it passed in the complete run.
 
 ## Linux — partly validated
 
