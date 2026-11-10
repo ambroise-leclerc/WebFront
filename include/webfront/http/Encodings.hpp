@@ -46,7 +46,8 @@ inline void appendPercentEncodedByte(std::string& encoded, unsigned char byte) {
     return encoded;
 }
 
-[[nodiscard]] inline std::string decode(std::string_view uri) {
+// @param plusAsSpace the form-encoding rule, which the file providers keep; a URL path leaves '+' literal.
+[[nodiscard]] inline std::string decode(std::string_view uri, bool plusAsSpace = true) {
     std::string decoded;
     decoded.reserve(uri.size());
     for (std::size_t index = 0; index < uri.size(); ++index) {
@@ -65,7 +66,7 @@ inline void appendPercentEncodedByte(std::string& encoded, unsigned char byte) {
             else
                 decoded += uri[index];
             break;
-        case '+': decoded += ' '; break;
+        case '+': decoded += plusAsSpace ? ' ' : '+'; break;
         default: decoded += uri[index];
         }
     }

@@ -6,3 +6,5 @@
 Both files are self-contained vectors with explicit forest-green, lime and white fills, and no external resources. Preserve all three colours when reusing them. For an icon-only button, give the button an accessible name such as “WebFront tools” and treat the image as decorative (`alt=""`).
 
 The artwork is available for reuse; adding the developer-tools button and its behaviour is separate application work.
+
+- `automation-agent.svg`: the animated transcript of the README's automation section (an agent attaching to an application's own window). It is a self-contained SVG with SMIL animation and no script or external resource; the commands and answers are abridged from the `AutomationConsumerWindow` regression test.

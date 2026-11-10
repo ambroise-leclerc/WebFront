@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <future>
 #include <span>
 #include <string>
@@ -34,6 +35,15 @@ void browserHandshake() {
     msg::Handshake message;
     InjectableSocket::receive(clientFrame(span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())));
 }
+
+/// Runs its cleanup once, on request or at scope exit: a failing REQUIRE must not leave a sink that points into the test.
+struct LogRestore {
+    std::function<void()> cleanup;
+    ~LogRestore() { run(); }
+    void run() {
+        if (auto once = std::move(cleanup); once) { cleanup = nullptr; once(); }
+    }
+};
 
 template <typename Result>
 string futureError(future<Result>& result) {
@@ -106,6 +116,83 @@ SCENARIO("WebLink settles correlated asynchronous results") {
             THEN("the future completes") {
                 REQUIRE_NOTHROW(result.get());
             }
+        }
+    }
+}
+
+namespace {
+/// The BridgeError a future rethrows, as its code and message.
+template <typename Result>
+pair<string, string> futureFailure(future<Result>& result) {
+    try {
+        static_cast<void>(result.get());
+    } catch (const BridgeError& error) {
+        return {error.code(), error.what()};
+    } catch (const exception& error) {
+        FAIL("The failure is not a BridgeError: " << error.what());
+    }
+    FAIL("The asynchronous result did not throw");
+    return {};
+}
+}  // namespace
+
+SCENARIO("A browser rejection reaches C++ with its code") {
+    InjectableSocket::reset();
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
+
+    GIVEN("a pending call the browser rejects with an application code") {
+        auto [callId, result] = link.expectResult<string>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const BridgeError error{"denied", "the user said no"};
+            message.encodeParameter(error, frame);
+            frame.freeze();
+        }));
+        THEN("the future throws a BridgeError with that code and message") {
+            REQUIRE(futureFailure(result) == pair<string, string>{"denied", "the user said no"});
+        }
+    }
+    GIVEN("a pending call the browser rejects with a plain error") {
+        auto [callId, result] = link.expectResult<string>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const runtime_error error{"plain failure"};
+            message.encodeParameter(error, frame);
+            frame.freeze();
+        }));
+        THEN("the code is the generic one") {
+            REQUIRE(futureFailure(result) == pair<string, string>{string(bridge_code::generic), "plain failure"});
+        }
+    }
+    GIVEN("a pending call the browser rejects with a code of the bridge") {
+        auto [callId, result] = link.expectResult<void>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const auto error = detail::makeBridgeError(bridge_code::notFound, "JavaScript function 'x' was not found");
+            message.encodeParameter(error, frame);
+            frame.freeze();
+        }));
+        THEN("the reserved code is kept, which tells it from an application's") {
+            const auto [code, text] = futureFailure(result);
+            REQUIRE(code == bridge_code::notFound);
+            REQUIRE(BridgeError::isReserved(code));
+        }
+    }
+    GIVEN("a pending call whose result is not of the expected type") {
+        auto [callId, result] = link.expectResult<double>();
+        InjectableSocket::receive(returnMessage(callId, [](auto& message, auto& frame) {
+            const string text{"text"};  // the frame borrows it until freeze()
+            message.encodeParameter(text, frame);
+            frame.freeze();
+        }));
+        THEN("the failure has the malformed code") {
+            REQUIRE(futureFailure(result).first == bridge_code::malformed);
+        }
+    }
+    GIVEN("a call pending when the connection closes") {
+        auto [callId, result] = link.expectResult<string>();
+        static_cast<void>(callId);
+        InjectableSocket::fail(make_error_code(errc::connection_reset));
+        THEN("the failure has the disconnected code") {
+            REQUIRE(futureFailure(result).first == bridge_code::disconnected);
         }
     }
 }
@@ -198,6 +285,19 @@ SCENARIO("WebLink dispatches browser messages and allocates distinct calls") {
 
         THEN("the encoded exception is written") {
             REQUIRE(InjectableSocket::hasWrittenData());
+        }
+    }
+
+    GIVEN("an application error with a code, and one that tries to pass for the bridge's") {
+        link.sendError(15, "no space", "quota:exceeded");
+        link.sendError(16, "forged", "webfront.notFound");
+        link.sendError(17, "ill formed", "bad code");
+
+        THEN("the application code is kept and the others are sent as the generic one") {
+            REQUIRE(InjectableSocket::wrote("quota:exceeded"));
+            REQUIRE_FALSE(InjectableSocket::wrote(std::string(bridge_code::notFound)));
+            REQUIRE_FALSE(InjectableSocket::wrote("bad code"));
+            REQUIRE(InjectableSocket::wrote(std::string(bridge_code::generic)));
         }
     }
 
@@ -429,4 +529,31 @@ SCENARIO("A writer resumes after a failed write reported the closure") {
         }
     }
     InjectableSocket::reset();
+}
+
+SCENARIO("WebLink never logs the payload of an incoming message") {
+    InjectableSocket::reset();
+    InlineTaskScope               scope;
+    WebLink<InjectableNetworking> link{InjectableSocket{}, 7, [](WebLinkEvent) { }, scope};
+    auto [callId, result] = link.expectResult<string>();
+
+    log::setLogLevel(log::Info);
+    string     logged;
+    std::mutex loggedMutex;
+    const auto sink = log::addSinks([&](string_view line) {
+        std::scoped_lock lock{loggedMutex};
+        logged += string(line) + "\n";
+    });
+    LogRestore restore_sink{[&] { log::removeSinks(sink); log::setLogLevel(log::Error); }};
+    auto response = returnMessage(callId, [](auto& message, auto& frame) {
+        const string value{"/webfront/services/files/0123456789abcdef.QQQQQQQQQQQQQQQQ/a.txt"};
+        message.encodeParameter(value, frame);
+        frame.freeze();
+    });
+    InjectableSocket::receive(response);
+    REQUIRE(result.get().starts_with("/webfront/services/files/"));
+    restore_sink.run();
+    std::scoped_lock lock{loggedMutex};
+    REQUIRE(logged.find("QQQQ") == string::npos);
+    REQUIRE(logged.find("51 51") == string::npos);
 }

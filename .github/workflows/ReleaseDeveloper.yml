@@ -1,0 +1,325 @@
+name: release-developer
+
+# One workflow publishes a version of the developer environment (ADR-021): it builds twice, commits the closed list of
+# paths on release/developer-<version>, tags, publishes, verifies the deployed bytes and opens the pull request that merges
+# the pin into develop. With publish=false it stops after the rehearsal: nothing is pushed, tagged or published.
+# The GITHUB_TOKEN has no permission by default; each job declares exactly its own (table of ADR-021, decision 1).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of the environment to release (MAJOR.MINOR.PATCH, greater than the one of distribution.json)
+        type: string
+        required: true
+      publish:
+        description: Publish (false runs the rehearsal on the candidate bytes only)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: release-developer
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ inputs.version }}
+  # The closed list of paths of the release commit: the step that commits fails when the diff touches another one.
+  RELEASE_PATHS: >-
+    js/developer/tools/distribution.json
+    include/webfront/system/DeveloperReleaseData.hpp
+    js/developer/environment/bundles.json
+    js/core/bootstrap/bootstrap.bundle.mjs
+    js/developer/environment/packages.bundle.mjs
+    include/webfront/system/DeveloperBootstrapData.hpp
+    include/webfront/system/DeveloperIndexHtmlData.hpp
+    docs/DEVELOPER_ENVIRONMENT.md
+
+jobs:
+  # Construction and rehearsal: contents: read, no destination but the artifact.
+  wf-package:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      # The commit that was built: the release commit is made on this one, not on whatever develop became in the meantime.
+      source: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+          persist-credentials: false
+      - name: Record the source commit
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Check the requested version
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must be MAJOR.MINOR.PATCH"; exit 1; }
+          current=$(jq -r .version js/developer/tools/distribution.json)
+          if [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ] || [ "$current" = "$VERSION" ]; then
+            echo "::error::Version $VERSION must be greater than the current $current"
+            exit 1
+          fi
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/wf-driver
+      - name: Set the version and close a migration
+        run: |
+          # The header generated below pins this version under baseUrl: a migration waiver (previousBase and baseSince)
+          # would then be stale, and wf run pin refuses it after the publication. The release commit removes it.
+          jq --arg version "$VERSION" '.version = $version | del(.previousBase, .baseSince)' js/developer/tools/distribution.json > "$RUNNER_TEMP/distribution.json"
+          cp "$RUNNER_TEMP/distribution.json" js/developer/tools/distribution.json
+      - name: Restore the locked build dependencies
+        run: wf restore
+      - name: Build twice, refreshing the checked-in bootstrap, and compare
+        run: |
+          wf run build build-distribution --refresh-bootstrap
+          wf run build build-distribution-repeat
+          for name in environment.tgz life-starter.tgz provision.json DeveloperReleaseData.hpp; do
+            cmp "build-distribution/$name" "build-distribution-repeat/$name"
+          done
+          cmp include/webfront/system/DeveloperReleaseData.hpp build-distribution/DeveloperReleaseData.hpp
+      - name: Render the embedded headers and the compatibility table
+        run: |
+          cmake --build build-driver --target webfront-embedded-assets
+          cmake -DROOT="$PWD" -DMODE=unreleased -P cmake/DeveloperCompatibility.cmake
+      # The guide names the pinned version and URL, and NewcomerDocsMatchExamples requires them to be the header's.
+      - name: Name the pin in the developer environment guide
+        run: |
+          sed -i -E "/ release pin selects$/{s#The [0-9][^ ]* release pin#The $VERSION release pin#;n;s#developer/[0-9][^/]*/environment[.]tgz#developer/$VERSION/environment.tgz#}" docs/DEVELOPER_ENVIRONMENT.md
+          grep -q "developer/$VERSION/environment[.]tgz" docs/DEVELOPER_ENVIRONMENT.md
+      - name: Check the closed list of paths
+        run: |
+          # shellcheck disable=SC2086
+          bash js/developer/tools/check-release-paths.sh $RELEASE_PATHS
+      - name: Check the consistency of the new pin
+        run: cmake -DROOT="$PWD" -P test/cmake/CheckDeveloperPin.cmake
+      - name: Run the specs of the environment
+        run: wf test --timeout 300
+      # The rehearsal: the browser suite on the candidate bytes. The fixtures of CTest serve, from a local origin, the
+      # environment and the starters built from these sources (the candidate, whose bootstrap was just refreshed), and the
+      # developer journey starts and runs them. A defect found here costs no version.
+      - name: Run the browser suite on the candidate bytes served locally
+        env:
+          # The wf command of the wf-driver action sets it for itself only; CTest and its tests start the browser directly.
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: |
+          # The driver was configured before the version was set: CTest read the former version of distribution.json then.
+          cmake -S . -B build-driver
+          cmake --build build-driver --target webtest developer_integration webfront-wf --parallel 2
+          xvfb-run -a ctest --test-dir build-driver -L web-integration --output-on-failure --no-tests=error --parallel 2
+      - name: Collect the release files
+        run: |
+          mkdir release-files
+          # shellcheck disable=SC2086
+          tar -cf release-files/paths.tar $RELEASE_PATHS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          if-no-files-found: error
+          path: release-files/paths.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: developer-distribution
+          if-no-files-found: error
+          path: |
+            build-distribution/environment.tgz
+            build-distribution/life-starter.tgz
+            build-distribution/provision.json
+            build-distribution/DeveloperReleaseData.hpp
+
+  # Preparation: the application's token pushes the release branch only (never develop or master); the GITHUB_TOKEN reads.
+  prepare:
+    if: inputs.publish
+    needs: wf-package
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment: developer-release-app
+    permissions:
+      contents: read
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          # The commit wf-package built, never the current develop: the files applied below come from that build.
+          ref: ${{ needs.wf-package.outputs.source }}
+          token: ${{ steps.app.outputs.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release-files
+      - name: Commit the closed list of paths on the release branch
+        id: commit
+        run: |
+          branch="release/developer-$VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "::error::$branch already exists"
+            exit 1
+          fi
+          git switch -c "$branch"
+          tar -xf release-files/paths.tar
+          rm -rf release-files
+          # shellcheck disable=SC2086
+          bash js/developer/tools/check-release-paths.sh $RELEASE_PATHS
+          git config user.name "webfront-release[bot]"
+          git config user.email "webfront-release[bot]@users.noreply.github.com"
+          # shellcheck disable=SC2086
+          git add -- $RELEASE_PATHS
+          git commit -m "Pin developer environment $VERSION"
+          git push origin "HEAD:refs/heads/$branch"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # The tag is set by this run, after the build succeeded: a tag pushed with the GITHUB_TOKEN would not start another run.
+  tag:
+    needs: prepare
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          # Rerunnable after a lost response: a tag that already points at the release commit is the expected result. A tag
+          # elsewhere is never moved (the tag rule forbids it) and stops the run.
+          tag="developer-v$VERSION"
+          errors=$(mktemp)
+          if existing=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2> "$errors"); then
+            if [ "$existing" != "$COMMIT" ]; then
+              echo "::error::$tag already points at $existing, not at the release commit $COMMIT"
+              exit 1
+            fi
+            echo "$tag already points at the release commit"
+          elif grep -q '(HTTP 404)' "$errors"; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$COMMIT" > /dev/null
+          else
+            cat "$errors" >&2
+            exit 1
+          fi
+
+  publish:
+    needs: [prepare, tag]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    # No environment: developer-pages-publication is the concurrency group below, the only writer of gh-pages.
+    permissions:
+      contents: write
+      pages: write
+    concurrency:
+      group: developer-pages-publication
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/wf-driver
+      - name: Restore the locked build dependencies
+        run: wf restore
+      - uses: actions/download-artifact@v4
+        with:
+          name: developer-distribution
+          path: build-distribution
+      - name: Check the configured Pages source before pushing
+        run: bash js/developer/tools/pages.sh --check
+      - name: Preserve existing versions and publish the static branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          site=build-site
+          git init --initial-branch=gh-pages "$site"
+          git -C "$site" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          result=0
+          git -C "$site" ls-remote --exit-code --heads origin gh-pages > "$RUNNER_TEMP/developer-pages-ref" || result=$?
+          if [ "$result" = 0 ]; then
+            git -C "$site" fetch --depth=1 origin gh-pages
+            git -C "$site" switch --detach FETCH_HEAD
+          elif [ "$result" != 2 ]; then
+            exit "$result"
+          fi
+          host=$(jq -r '.baseUrl | sub("^https://"; "") | sub("[/:].*$"; "")' js/developer/tools/distribution.json)
+          case "$host" in *.github.io) git -C "$site" rm -q --ignore-unmatch CNAME ;; esac
+          wf run site build-distribution "$site"
+          git -C "$site" config user.name "$GITHUB_ACTOR"
+          git -C "$site" config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git -C "$site" add .nojekyll index.html developer
+          if [ -e "$site/CNAME" ]; then git -C "$site" add CNAME; fi
+          if ! git -C "$site" diff --cached --quiet; then
+            git -C "$site" commit -m "Publish developer packages $VERSION [#288]"
+            git -C "$site" push origin HEAD:refs/heads/gh-pages
+          fi
+      - name: Request the configured Pages build
+        run: bash js/developer/tools/pages.sh
+      - name: Archive the packages in a dedicated prerelease
+        run: bash js/developer/tools/archive-release.sh "developer-v$VERSION" build-distribution
+
+  # The deployed bytes, the pinned URL and the access from a browser; a transient failure is retried with the same bytes.
+  verify:
+    needs: [prepare, publish]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/wf-driver
+      - name: Restore the locked build dependencies
+        run: wf restore
+      - name: Check the deployed bytes and the pinned URL
+        run: |
+          # A Pages build takes minutes, and a 404 served before it ends may be cached for up to ten minutes.
+          for attempt in $(seq 1 30); do
+            if wf run pin; then exit 0; fi
+            echo "::notice::Attempt $attempt failed; Pages may still be building"
+            sleep 30
+          done
+          exit 1
+      - name: Run the public smoke test from the pinned header
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+        run: |
+          cmake -S . -B build-public -G Ninja -DCMAKE_BUILD_TYPE=Release -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_ENABLE_TESTING=ON \
+            -DWEBFRONT_EMBED_WEBKITGTK=ON -DWEBFRONT_WEBTEST_FRONTEND=WebKitGTK -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+          cmake --build build-public --target developer_integration webfront-wf --parallel 2
+          ctest --test-dir build-public -R '^DeveloperFixtures$' --output-on-failure --no-tests=error
+          xvfb-run -a ./build-public/test/web/developer_integration \
+            "$PWD/build-public/test/web/developer-fixtures" "$PWD/build-public/test/web/public-generated" --public
+
+  # The pull request carries the application's identity so that BuildAndTest.yml and DeveloperDistribution.yml run on it.
+  # It is not merged here: the review that protects develop stays.
+  pull-request:
+    needs: [prepare, verify]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    environment: developer-release-app
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - name: Open the pull request into develop
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          gh pr create --repo "$GITHUB_REPOSITORY" --base develop --head "release/developer-$VERSION" \
+            --title "Pin developer environment $VERSION" \
+            --body "Pins the published developer environment $VERSION (tag developer-v$VERSION, deployed bytes verified by the release-developer workflow, run $GITHUB_RUN_ID)."

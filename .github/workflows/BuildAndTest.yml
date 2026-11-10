@@ -196,6 +196,14 @@ jobs:
           -DREPEAT=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && '3' || '1' }}
           -DLABEL_EXCLUDE=${{ (github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)) && 'none' || 'portability' }}
           -P test/cmake/RunTestSuite.cmake
+      - name: Repeat WebKitGTK pointer tests with suite display sharing enabled
+        if: runner.os == 'Linux'
+        env: ${{ matrix.test_env }}
+        # These tests must still get private displays when invoked from the shared-display suite runner.
+        run: >-
+          xvfb-run -a env WEBFRONT_TEST_SHARED_DISPLAY=1
+          ctest --test-dir build --output-on-failure --no-tests=error
+          -R '^WebKitGTKAdapter-(choose-file|cancel-choose|close-with-dialog)$' --repeat until-fail:5
       - name: Analyze CTest timings
         if: always()
         shell: bash
@@ -365,7 +373,7 @@ jobs:
       CXX: clang++-23
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:suppressions=${{ github.workspace }}/test/sanitizers/tsan.supp
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v4

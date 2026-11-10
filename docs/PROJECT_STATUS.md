@@ -30,6 +30,9 @@ WebFront is a header-only C++23 HTTP/WebSocket core plus a standalone developer 
   lifecycle, limits and the supported MCP profile. It requires a compatible environment
   (0.6.3 or later), supplied as a rebuilt archive or verified published distribution. Explicitly shared human windows support authenticated
   native attachment. This does not discover arbitrary processes or isolate untrusted project code.
+  An application opts in to being driven with `automation::enableAutomation` (its own window and callbacks), shared sessions are
+  listed by `webfront-agent --list`, and `--print-mcp-config` generates the client configuration. The owner may allow-list application callbacks that an agent reaches through the `call` operation, and the terminal, `wf help` and
+  the starter's `AGENTS.md` announce automation (environment 0.6.6). Environment 0.6.6 is published and pinned.
 - **Maintaining WebFront.** The repository is itself a `wf` project, selected with
   `--manifest-dir js/developer`. Build and publish its environment using
   [PUBLISHING](../js/developer/tools/PUBLISHING.md). Regenerate the core's versioned headers
@@ -82,8 +85,9 @@ are retained for investigation; diagnostics alone do not establish a correction.
 
 - Bridge calls from JavaScript always return Promises and reject on failure, including `void`
   callbacks. Untyped C++ calls are fire-and-forget; typed calls return futures. Result types
-  are scalar, string, tuple, numeric typed-array and packed bitset values. Strings have a
-  16-bit byte length. See [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md).
+  are scalar, string, tuple, numeric typed-array, packed bitset and list (strings, tuples, typed
+  arrays) values; strings and messages are bounded by the buffers policy's message size (64 MiB by
+  default). See [ADR-003](adr/ADR-003-protocole-binaire-et-bornes.md).
 - `webfront::Task`, `app.spawn` / `ui.spawn` and `TaskHandle` provide owned coroutine lifetime
   and individual cancellation. Typed senders support local cancellation; futures and JavaScript
   Promises do not expose it. Already-dispatched JavaScript continues running. Cancelled calls
@@ -96,6 +100,12 @@ are retained for investigation; diagnostics alone do not establish a correction.
   Manifest permissions bound only the scripts' `context` API. Only browser packages install;
   installation scripts and native add-ons do not run. The [content policy](CONTENT_POLICY.md)
   restricts browser origins and navigation but provides neither TLS nor client authentication.
+- `fs::NativeStorage` confines writable storage to a declared root while resolving each path, but
+  on POSIX it cannot prevent the effective user or the superuser from moving a directory out of the
+  root during an operation: it detects such a move before a commit and after each operation, at
+  best. Windows prevents those moves while an operation holds its directories; links are always
+  refused there. A `shared` root lifts the POSIX ownership checks. No service uses the storage yet
+  (ADR-020). See [ADR-002](adr/ADR-002-systemes-de-fichiers-composables.md).
 - A synchronous infinite loop in a spec blocks the page hosting `wf test`; the native test
   driver's watchdog terminates stalled runs with failure. Windows file reads beyond 260
   characters remain unsupported (#349).

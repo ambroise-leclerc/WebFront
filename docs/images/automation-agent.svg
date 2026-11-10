@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540" role="img" aria-labelledby="t d">
+<title id="t">An agent drives a C++ application's own window</title>
+<desc id="d">Abridged transcript: the agent lists the shared session, checks, builds and previews the interface, inspects and clicks it, calls an allow-listed C++ callback and is refused another one.</desc>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d1117"/><stop offset="1" stop-color="#161b2e"/></linearGradient>
+<filter id="sh" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity=".45"/></filter>
+</defs>
+<rect width="960" height="540" rx="16" fill="url(#bg)"/>
+<g filter="url(#sh)"><rect x="24" y="24" width="520" height="492" rx="12" fill="#0d1117" stroke="#30363d"/></g>
+<rect x="24" y="24" width="520" height="34" rx="12" fill="#161b22"/><rect x="24" y="46" width="520" height="12" fill="#161b22"/>
+<circle cx="46" cy="41" r="6" fill="#ff5f56"/><circle cx="66" cy="41" r="6" fill="#ffbd2e"/><circle cx="86" cy="41" r="6" fill="#27c93f"/>
+<text x="284" y="46" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" fill="#8b949e">your agent</text>
+<clipPath id="c1"><rect x="40" y="73" height="20" width="0"><animate attributeName="width" values="0;0;200;200;0" keyTimes="0;0.0312;0.0594;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="88" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c1)"><tspan fill="#7ee787">$</tspan> webfront-agent --list<tspan x="62" dy="18"></tspan></text>
+<text x="62" y="110" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#8b949e" opacity="0">bf-app  running  grants: check build preview inspect interact call<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.0688;0.0766;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<clipPath id="c2"><rect x="40" y="125" height="20" width="0"><animate attributeName="width" values="0;0;360;360;0" keyTimes="0;0.1062;0.1562;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="140" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c2)"><tspan fill="#7ee787">$</tspan> webfront-agent --attach ep --operation check<tspan x="62" dy="18"></tspan></text>
+<text x="62" y="162" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#7ee787" opacity="0">✓ No type errors in 1 project file (TypeScript 6.0.3)<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.1625;0.1703;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<clipPath id="c3"><rect x="40" y="177" height="20" width="0"><animate attributeName="width" values="0;0;360;360;0" keyTimes="0;0.2000;0.2500;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="192" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c3)"><tspan fill="#7ee787">$</tspan> webfront-agent --attach ep --operation build<tspan x="62" dy="18"></tspan></text>
+<text x="62" y="214" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#7ee787" opacity="0">✓ build succeeded: app.js<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.2562;0.2641;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<clipPath id="c4"><rect x="40" y="229" height="20" width="0"><animate attributeName="width" values="0;0;370;370;0" keyTimes="0;0.2812;0.3344;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="244" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c4)"><tspan fill="#7ee787">$</tspan> webfront-agent --attach ep --operation preview<tspan x="62" dy="18"></tspan></text>
+<text x="62" y="266" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#7ee787" opacity="0">✓ preview is running in bf-app<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.3375;0.3453;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<clipPath id="c5"><rect x="40" y="281" height="20" width="0"><animate attributeName="width" values="0;0;520;520;0" keyTimes="0;0.3625;0.4375;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="296" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c5)"><tspan fill="#7ee787">$</tspan> webfront-agent --attach ep --operation click --element-id render<tspan x="62" dy="18"></tspan></text>
+<text x="62" y="318" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#7ee787" opacity="0">✓ clicked #render<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.4437;0.4516;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<clipPath id="c6"><rect x="40" y="333" height="38" width="0"><animate attributeName="width" values="0;0;400;400;0" keyTimes="0;0.4688;0.5188;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="348" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c6)"><tspan fill="#7ee787">$</tspan> webfront-agent --attach ep --operation call \<tspan x="62" dy="18">--callback bf.render --value glider</tspan></text>
+<text x="62" y="388" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#79c0ff" opacity="0">{"callback":"bf.render","result":"rendered:glider"}<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5563;0.5641;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<clipPath id="c7"><rect x="40" y="405" height="38" width="0"><animate attributeName="width" values="0;0;400;400;0" keyTimes="0;0.5938;0.6438;0.9750;1" dur="32s" repeatCount="indefinite"/></rect></clipPath>
+<text x="44" y="420" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#e6edf3" clip-path="url(#c7)"><tspan fill="#7ee787">$</tspan> webfront-agent --attach ep --operation call \<tspan x="62" dy="18">--callback bf.secret</tspan></text>
+<text x="62" y="460" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#ff7b72" opacity="0">✗ not_authorized: this callback is not allow-listed<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6750;0.6828;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<text x="284" y="500" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="19" font-weight="600" fill="#f0f6fc" opacity="0">Your window. Your callbacks. Grants fixed by your C++.<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.7344;0.7422;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<g filter="url(#sh)"><rect x="568" y="24" width="368" height="300" rx="12" fill="#ffffff"/></g>
+<rect x="568" y="24" width="368" height="32" rx="12" fill="#e9ecef"/><rect x="568" y="44" width="368" height="12" fill="#e9ecef"/>
+<circle cx="588" cy="40" r="6" fill="#ff5f56"/><circle cx="608" cy="40" r="6" fill="#ffbd2e"/><circle cx="628" cy="40" r="6" fill="#27c93f"/>
+<text x="752" y="45" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" fill="#495057">bf-app [automation]</text>
+<rect x="568" y="56" width="368" height="74" fill="#141821"/>
+<g opacity="0">
+<text x="580" y="76" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="10.5" fill="#e3b341">WebFront automation enabled (grants: check, build,</text>
+<text x="580" y="91" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="10.5" fill="#e3b341">preview, inspect, interact, call; callbacks: bf.render).</text>
+<text x="580" y="106" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="10.5" fill="#e3b341">Attach with: webfront-agent --attach "ep" --mcp</text>
+<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.0094;0.0172;0.9750;1" dur="32s" repeatCount="indefinite"/>
+</g>
+<text x="580" y="122" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="11" fill="#7ee787">&gt;</text>
+<rect x="594" y="112" width="7" height="12" fill="#e6edf3"><animate attributeName="opacity" values="1;0;1" dur="1.1s" repeatCount="indefinite"/></rect>
+<g opacity="0">
+<text x="752" y="170" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="18" font-weight="700" fill="#212529">Pattern renderer</text>
+<rect x="702" y="190" width="100" height="34" rx="8" fill="#2f81f7"><animate attributeName="fill" values="#2f81f7;#2f81f7;#1f5fbf;#2f81f7;#2f81f7" keyTimes="0;0.4375;0.4531;0.4844;1" dur="32s" repeatCount="indefinite"/></rect>
+<text x="752" y="212" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="14" font-weight="600" fill="#fff">Render</text>
+<text x="752" y="262" text-anchor="middle" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="14" fill="#6c757d">idle<animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.4375;0.45;0.99;1" dur="32s" repeatCount="indefinite"/></text>
+<text x="752" y="262" text-anchor="middle" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="14" font-weight="700" fill="#1a7f37" opacity="0">rendered:hello<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.45;0.4531;0.5469;0.5625;1" dur="32s" repeatCount="indefinite"/></text>
+<text x="752" y="262" text-anchor="middle" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="14" font-weight="700" fill="#1a7f37" opacity="0">rendered:glider<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5469;0.5625;0.975;1" dur="32s" repeatCount="indefinite"/></text>
+<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.3312;0.3391;0.9750;1" dur="32s" repeatCount="indefinite"/>
+</g>
+<g filter="url(#sh)"><rect x="568" y="344" width="368" height="172" rx="12" fill="#0d1117" stroke="#30363d"/></g>
+<text x="584" y="368" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" fill="#8b949e">your C++ process: app.cppFunction("bf.render", …)</text>
+<text x="584" y="398" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#d2a8ff" opacity="0">bf.render("hello")<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.4500;0.4578;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<text x="584" y="422" font-family="SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace" font-size="13" fill="#d2a8ff" opacity="0">bf.render("glider")<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5500;0.5578;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+<text x="584" y="470" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" fill="#8b949e" opacity="0">bf.secret never ran: refused natively<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6813;0.6891;0.9750;1" dur="32s" repeatCount="indefinite"/></text>
+</svg>

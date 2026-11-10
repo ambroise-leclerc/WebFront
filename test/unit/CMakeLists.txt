@@ -24,13 +24,13 @@ if(WEBFRONT_TEST_DOXYGEN)
 endif()
 
 set(TESTS_LIST)
-list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
+list(APPEND TESTS_LIST WebKitGTKPolicyTests.cpp ContentPolicyTests.cpp HTTPServerTests.cpp HTTPEncodingTests.cpp GzipExecutorTests.cpp AcceptEncodingTests.cpp GzipTests.cpp ModuleHTTPServerTests.cpp HTTPRoutesTests.cpp HTTPRangeTests.cpp EncodingsTests.cpp WebSocketTests.cpp LoggerTests.cpp MimeTypeTests.cpp)
 list(APPEND TESTS_LIST FormsTests.cpp ReactStoreTests.cpp DomDocumentTests.cpp DomBatchTests.cpp JSFunctionTests.cpp TypeErasedFunctionTests.cpp MessagesTests.cpp IndexFSTests.cpp)
-list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp)
+list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp StorageTests.cpp NativeStorageTests.cpp)
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
-list(APPEND TESTS_LIST BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
-list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp)
-list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
+list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
+list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
+list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()
@@ -60,7 +60,7 @@ target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host
 # helpers share names.
 set(WEBFRONT_TEST_UNITY_BATCH 0 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
 if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
-  set(_heavy WebFrontTests BroadcastTests CommandsTests ApplicationTaskTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
+  set(_heavy WebFrontTests ReadBindingTests ViewAssociationTests BroadcastTests CommandsTests ApplicationTaskTests DeferredCallTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
       AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
   set_target_properties(tests PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE ${WEBFRONT_TEST_UNITY_BATCH})
   foreach(_source IN LISTS TESTS_LIST)
@@ -167,6 +167,25 @@ add_test(NAME ReleaseVersionRegression
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
         -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-version-regression
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseVersionTests.cmake)
+add_test(NAME DeveloperPinConsistency
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperPin.cmake)
+add_test(NAME DeveloperPinRegression
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-pin-regression
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperPinTests.cmake)
+add_test(NAME ReleaseDeveloperWorkflow
+    COMMAND ${CMAKE_COMMAND} -DWORKFLOW=${PROJECT_SOURCE_DIR}/.github/workflows/ReleaseDeveloper.yml
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseWorkflow.cmake)
+add_test(NAME ReleaseDeveloperWorkflowRegression
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-workflow-regression
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleaseWorkflowTests.cmake)
+add_test(NAME SemVerOrdering
+    COMMAND ${CMAKE_COMMAND} -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckSemVer.cmake)
+add_test(NAME DeveloperCompatibilityTable
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-compatibility
+        -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperCompatibility.cmake)
+set_tests_properties(DeveloperPinConsistency DeveloperPinRegression ReleaseDeveloperWorkflow ReleaseDeveloperWorkflowRegression
+    DeveloperCompatibilityTable SemVerOrdering
+    PROPERTIES TIMEOUT 60 LABELS fast)
 add_test(NAME BootstrapProvisioning
     COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/bootstrap-provisioning
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckBootstrapProvisioning.cmake)
@@ -176,6 +195,11 @@ if(UNIX)
     add_test(NAME RunWithDeadline COMMAND ${CMAKE_COMMAND} -DSCRIPT=${PROJECT_SOURCE_DIR}/cmake/RunWithDeadline.sh
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckRunWithDeadline.cmake)
     set_tests_properties(RunWithDeadline PROPERTIES TIMEOUT 60 LABELS fast)
+    # The closed list of paths of the developer release commit (ADR-021).
+    add_test(NAME ReleasePathsClosedList
+        COMMAND ${CMAKE_COMMAND} -DSCRIPT=${PROJECT_SOURCE_DIR}/js/developer/tools/check-release-paths.sh
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/release-paths -DBASH=bash -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReleasePaths.cmake)
+    set_tests_properties(ReleasePathsClosedList PROPERTIES TIMEOUT 60 LABELS fast)
     find_program(WEBFRONT_TEST_BASH_EXECUTABLE bash)
     find_package(Git QUIET)
     if(WEBFRONT_TEST_BASH_EXECUTABLE AND Git_FOUND)
@@ -296,6 +320,10 @@ add_test(NAME FrontendConsumerConfiguration
         -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-consumer
         -DCPM_MODULE=${CPM_DOWNLOAD_LOCATION}
         "-DDEPENDENCY_ARGS=${_consumer_dependency_args}"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+        "-DTEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
         -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckFrontendConsumer.cmake)
 set_tests_properties(FrontendConsumerConfiguration PROPERTIES TIMEOUT 120)
 # Read the actual target's launcher at generation time, including an explicitly

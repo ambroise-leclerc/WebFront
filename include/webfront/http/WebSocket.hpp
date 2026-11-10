@@ -178,8 +178,8 @@ struct Frame : public Header {
 
     /// @return size of added buffer
     size_t addBuffer(std::span<const std::byte> buffer) {
-        if (log::is(log::Debug))  // The dump is formatted before log::debug() tests the level.
-            log::debug("frame::addBuffer {}", utils::hexDump(buffer));
+        // Sizes only: a payload can carry a credential (a binding secret, a read URL), which no log may receive.
+        log::debug("frame::addBuffer {} bytes", buffer.size());
         setPayloadSize(payloadSize() + buffer.size());
         borrowedBuffers.emplace_back(buffer);
         return buffer.size();

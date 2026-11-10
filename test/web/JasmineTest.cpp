@@ -23,7 +23,9 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -38,6 +40,16 @@ namespace {
 
 constexpr string_view cppToJsToken{"cpp-to-js-token"};
 constexpr string_view jsToCppToken{"js-to-cpp-token"};
+
+/// A string wrapped in `Levels` one-field tuples: the deepest list element the bridge accepts has 32 of them.
+template <int Levels>
+struct Nested {
+    using type = tuple<typename Nested<Levels - 1>::type>;
+};
+template <>
+struct Nested<0> {
+    using type = string;
+};
 
 struct TestState {
     atomic<bool> browserReady{false};
@@ -93,6 +105,8 @@ public:
 
     ~BrowserIntegrationTest() {
         joinBitsetFutureChecks();
+        error_code ignored;
+        if (!mediaFile.empty()) filesystem::remove(mediaFile, ignored);
     }
 
     /// Registers the callbacks of the specs before the page opens; the rejecting WebSocket server starts after the CEF
@@ -103,7 +117,27 @@ public:
         rejectedWebSocket.emplace();
         registerCallbacks();
         registerBitsetCallbacks();
+        registerListCallbacks();
         lifeReactSubscription = demo::installLifeReact(app);
+        registerMediaRoute(app);
+        registerReadRoute(app);
+        streamRoute           = app.addRoute("/webfront/services/test-stream/", [](const http::RouteRequest& request) {
+            if (request.query.find("fail=1") != std::string_view::npos) throw std::runtime_error("route failure requested by the spec");
+            std::uint64_t size = 0;
+            if (const auto at = request.query.find("size="); at != std::string_view::npos)
+                size = std::stoull(std::string(request.query.substr(at + 5)));
+            http::RouteReply reply;
+            reply.headers.emplace_back("Content-Type", "application/octet-stream");
+            reply.headers.emplace_back("Cache-Control", "no-store");
+            reply.contentLength = size;
+            reply.body          = [size, produced = std::uint64_t{0}](std::span<char> out) mutable {
+                const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), size - produced));
+                for (std::size_t index = 0; index < count; ++index) out[index] = static_cast<char>((((produced + index) * 7) + 3) % 251);
+                produced += count;
+                return count;
+            };
+            return reply;
+        });
     }
 
     /// The status of `wf test` (the specs), unless the specs passed and C++ did not observe every call they make.
@@ -157,6 +191,11 @@ private:
     optional<TestWF::UI> connectedUI;
     UISubscription                   uiSubscription;
     UISubscription                   lifeReactSubscription;
+    http::RouteTable::Registration   streamRoute, mediaRoute;
+    ReadRoute                        readRoute;
+    filesystem::path                 mediaFile;
+    mutex                            mediaMutex;
+    vector<string>                   mediaRanges;
     std::map<WebLinkId, react::Store<TestWF::UI, std::tuple<std::uint32_t, std::string>>> reactStores;
     UISubscription                       closedDomSubscription;
     std::map<WebLinkId, bool>            closedDocumentRejected;
@@ -298,6 +337,108 @@ private:
         throw runtime_error("Cancelled browser sender resumed with a result");
     }
 
+    using Record = tuple<string, double, bool, vector<uint8_t>>;
+
+    static ResultTask<string> deferredEcho(TestWF* app, string value, int delayMs) {
+        co_await app->resumeAfter(chrono::milliseconds(delayMs));
+        co_return "deferred:" + value;
+    }
+    static ResultTask<string> deferredFailure(TestWF* app, string reason) {
+        co_await app->resumeAfter(chrono::milliseconds(20));
+        if (!reason.empty())  // always: a value-returning coroutine needs a co_return and no unreachable code (MSVC)
+            throw BridgeError("late:failure", reason);
+        co_return reason;
+    }
+
+    void registerListCallbacks() {
+        webFront->cppFunction("deepEcho", [](const vector<Nested<32>::type>& value) {
+            return value;
+        });
+        webFront->cppFunction("deferredEcho", [this](string value, int delayMs) { return deferredEcho(webFront, std::move(value), delayMs); });
+        webFront->cppFunction("deferredFailure", [this]() { return deferredFailure(webFront, "rejected after a delay"); });
+
+        webFront->cppFunction("listEcho", [](const vector<string>& value) {
+            return value;
+        });
+        webFront->cppFunction("recordsEcho", [](const vector<Record>& value) {
+            return value;
+        });
+        webFront->cppFunction("listFromCpp", [](size_t count) {
+            vector<string> entries;
+            entries.reserve(count);
+            for (size_t index = 0; index < count; ++index)
+                entries.push_back("entry-" + to_string(index));
+            return entries;
+        });
+        webFront->cppFunction("pageFromCpp", []() {
+            return tuple<vector<string>, string>{{"a", "b"}, "cursor"};
+        });
+        webFront->cppFunction("heterogeneousList", [](const vector<string>&) {});
+    }
+
+    /// C++ -> JavaScript: the code of a rejection of the browser reaches C++, and an application cannot forge a reserved one.
+    Task checkErrorCodes(TestWF::UI ui) {
+        bool passed = false;
+        try {
+            string application, reserved, missing, plain, longCode;
+            size_t longSize = 0;
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("quota:exceeded");
+            } catch (const BridgeError& error) {
+                application = error.code() + "|" + error.what();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectWithCode")("webfront.cancelled");
+            } catch (const BridgeError& error) {
+                reserved = error.code();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.noSuchFunction")();
+            } catch (const BridgeError& error) {
+                missing = error.code();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.rejectLong")();
+            } catch (const BridgeError& error) {
+                longCode = error.code();
+                longSize = string_view(error.what()).size();
+            }
+            try {
+                co_await ui.jsFunctionSender<string>("webfrontTests.senderThrows")();
+            } catch (const BridgeError& error) {
+                plain = error.code();
+            }
+            passed = application == "quota:exceeded|failure quota:exceeded" && reserved == bridge_code::generic && missing == bridge_code::notFound
+                     && plain == bridge_code::generic
+                     && longCode == "long" && longSize == 65534;  // the 80000-byte message is cut before the character that straddles 65535
+        } catch (const exception& error) {
+            log::error("Error code checks failed: {}", error.what());
+        }
+        ui.jsFunction("webfrontTests.errorChecksFinished")(passed);
+    }
+
+    /// C++ -> JavaScript: a list of strings and a list of records as arguments and as the result of the browser's callback.
+    Task checkLists(TestWF::UI ui) {
+        bool passed = false;
+        try {
+            const vector<string> names{"alpha", "", string(70000, 'z'), "\xe2\x82\xac"};
+            const auto echoed = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(names);
+            const vector<Record> records{{"a.txt", 12.5, true, {1, 2, 3}}, {"b", 0, false, {}}};
+            const auto echoedRecords = co_await ui.jsFunctionSender<vector<Record>>("webfrontTests.recordsEcho")(records);
+            const auto none = co_await ui.jsFunctionSender<vector<string>>("webfrontTests.listEcho")(vector<string>{});
+            bool heterogeneousRejected = false;
+            try {
+                co_await ui.jsFunctionSender<vector<string>>("webfrontTests.heterogeneousList")();
+            } catch (const runtime_error&) {
+                heterogeneousRejected = true;
+            }
+            passed = echoed == names && echoedRecords == records && none.empty() && heterogeneousRejected;
+        } catch (const exception& error) {
+            log::error("List checks failed: {}", error.what());
+        }
+        ui.jsFunction("webfrontTests.listChecksFinished")(passed);
+    }
+
     void registerBitsetCallbacks() {
         webFront->cppFunction("bitsetEcho", [](const bitset<9>& value) {
             return value;
@@ -361,6 +502,63 @@ private:
             notice.pending = false;
             throw;
         }
+    }
+
+    /// A 20 second PCM sound in a native file, served by ranges (#455): a <video> element plays it and seeks in it.
+    void registerMediaRoute(TestWF& app) {
+        constexpr uint32_t rate = 8000, seconds = 20, dataSize = rate * seconds;
+        string wav = "RIFF";
+        auto   little = [&wav](uint32_t value, int bytes) { for (int index = 0; index < bytes; ++index) wav.push_back(static_cast<char>((value >> (8 * index)) & 0xff)); };
+        little(36 + dataSize, 4);
+        wav += "WAVEfmt ";
+        little(16, 4); little(1, 2); little(1, 2); little(rate, 4); little(rate, 4); little(1, 2); little(8, 2);
+        wav += "data";
+        little(dataSize, 4);
+        for (uint32_t index = 0; index < dataSize; ++index) wav.push_back(static_cast<char>(128 + (index % 80 < 40 ? 20 : -20)));
+        mediaFile = filesystem::temp_directory_path() / ("webfront-range-" + to_string(random_device{}()) + ".wav");
+        ofstream(mediaFile, ios::binary) << wav;
+        mediaRoute = app.addRoute("/webfront/services/test-media/", [this](const http::RouteRequest& request) {
+            {
+                lock_guard lock(mediaMutex);
+                mediaRanges.push_back(request.request.getHeaderValue("Range").value_or("-"));
+            }
+            fs::File file{ifstream(mediaFile, ios::binary)};
+            file.setEntityTag("\"test-media-1\"");  // the content is written once, so its version never changes
+            auto reply = http::fileReply(request.request, std::move(file), "audio/wav");
+            reply.headers.emplace_back("Cache-Control", "no-store");
+            return reply;
+        });
+        webFront->cppFunction("mediaRanges", [this]() {
+            lock_guard lock(mediaMutex);
+            string joined;
+            for (const auto& range : mediaRanges) joined += range + "\n";
+            return joined;
+        });
+    }
+
+    /// Read grants bound to the browser client (#469): hostile active content is served by a bound route.
+    void registerReadRoute(TestWF& app) {
+        readRoute = app.addReadRoute("/webfront/services/test-read/", [](const http::RouteRequest&, const ReadGrant& grant) {
+            const string_view marker = "try { window.top.__readExecuted = true; parent.__readExecuted = true; } catch (e) {} fetch('/webfront/services/test-read/executed').catch(() => {});";
+            string type, body;
+            if (grant.rest == "hello.txt") { type = "text/plain"; body = "hello"; }
+            else if (grant.rest == "evil.html") { type = "text/html"; body = "<script>" + string(marker) + "</script>"; }
+            else if (grant.rest == "evil.svg") { type = "image/svg+xml"; body = "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><script>" + string(marker) + "</script><rect width='4' height='4' fill='red'/></svg>"; }
+            else if (grant.rest == "legacy.js") { type = "text/javascript1.5"; body = string(marker); }
+            else if (grant.rest == "legacy-ecma.js") { type = "application/x-ecmascript"; body = string(marker); }
+            else { http::RouteReply reply; reply.status = http::Response::notFound; reply.contentLength = 0; return reply; }
+            http::RouteReply reply;
+            reply.headers.emplace_back("Content-Type", type);
+            reply.contentLength = body.size();
+            reply.body = [body = std::move(body), position = size_t{0}](span<char> out) mutable {
+                const auto count = min(out.size(), body.size() - position);
+                copy_n(body.data() + position, count, out.data());
+                position += count;
+                return count;
+            };
+            return reply;
+        });
+        webFront->cppFunction("readUrl", [this](TestWF::UI ui, string name) { return ui.grantRead(readRoute, name); });
     }
 
     void registerCallbacks() {
@@ -553,7 +751,9 @@ private:
         });
         webFront->cppFunction<string, string>("returnFromCpp", [](const string& value) { return "cpp-result:" + value; });
         webFront->cppFunction<void>("throwFromCpp", [] { throw runtime_error("C++ callback failed"); });
-        webFront->cppFunction<string>("returnOverlongFromCpp", [] { return string(65536, 'x'); });
+        webFront->cppFunction<void>("throwCodedFromCpp", [] { throw BridgeError("denied", "the user said no"); });
+        webFront->cppFunction<string, size_t>("longStringFromCpp", [](size_t size) { return string(size, 'x'); });
+        webFront->cppFunction<string, string>("echoString", [](const string& value) { return value; });
         webFront->cppFunction("integerInCpp", [](int value) {
             return value;
         });
@@ -615,6 +815,8 @@ private:
         webFront->spawn(checkSenderResults(requireUI()));
         startBitsetFutureChecks(requireUI());
         webFront->spawn(checkBitsetResults(requireUI()));
+        webFront->spawn(checkLists(requireUI()));
+        webFront->spawn(checkErrorCodes(requireUI()));
         cancelledTask = requireUI().spawn(awaitCancelledSender(requireUI()));
         requireUI().jsFunction("webfrontTests.receiveFromCpp")(cppToJsToken);
         requireUI().jsFunction("webfrontTests.receiveArraysFromCpp")(

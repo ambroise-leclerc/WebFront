@@ -24,7 +24,7 @@ struct PolicyRequest {
 inline bool navigationSchemeAllowed(const char* uri) {
     if (!uri)
         return false;
-    if (webfront::detail::contentOrigin(uri))
+    if (webfront::detail::contentOrigin(uri) || webfront::detail::contentOrigin(webfront::detail::blobOriginUrl(uri)))
         return true;
     return std::string_view(uri) == "about:blank" || std::string_view(uri) == "about:srcdoc";
 }

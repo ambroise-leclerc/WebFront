@@ -34,9 +34,11 @@ installed or required (see [Type checking](#type-checking-wf-check)).
 
 The generated `DeveloperReleaseData.hpp` selects the default environment and its integrity. Published
 versions stay immutable. Environment **0.6.3** adds automation API v1 and the shared human/agent execution
-lease; version 0.6.2 predates that API. The sources advance to 0.6.4 (project setup operations in the automation
-runner), which is not published yet; the release pin stays on the published 0.6.3. Publication and pin changes follow
-[PUBLISHING](../js/developer/tools/PUBLISHING.md), with deployment verified before merging a new pin.
+lease; version 0.6.2 predates that API. Environment **0.6.4** adds the project setup operations of the automation
+runner (`init`, `create`, `install`, `restore`, `embed`). Environment **0.6.6** adds the `call` operation, the terminal and `wf help` notice of automation and the starter's `AGENTS.md`. The release pin selects 0.6.6, published under the dedicated
+`developer-v0.6.6` tag and verified after deployment. The test bootstrap (`cmake/WebFrontBootstrap.cmake`) stays on the
+published 0.6.3 and advances in a separate pull request. Publication and pin changes follow
+[PUBLISHING](../js/developer/tools/PUBLISHING.md).
 
 ## Minimal C++ application
 
@@ -58,15 +60,16 @@ int main() {
 }
 ```
 
-The [versioned distributions](https://ambroise-leclerc.github.io/WebFront/) are published on GitHub Pages.
+The [versioned distributions](https://dist.webfront.fr/) are published on GitHub Pages, under the domain `dist.webfront.fr`.
 Each published version is immutable: 0.3.0 introduced the packed-bitset Life starter (bridge support from #289), 0.3.1 made
 `wf install` keep the versions of the installed lock, 0.4.1 changed the include of the generated provider, 0.5.0 added the
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 0.6.3 release pin selects
-`https://ambroise-leclerc.github.io/WebFront/developer/0.6.3/environment.tgz`; the
-[publication gate](validation/developer-0.6.3-release.md) requires deployed verification before that pin is merged.
+an exact versioned environment URL and the trusted digest. The 0.9.0 release pin selects
+`https://dist.webfront.fr/developer/0.9.0/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
+smoke test were verified before the pin was merged. Earlier publication gates are recorded for
+[0.6.6](validation/developer-0.6.6-release.md), [0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
 0.6.1, 0.6.0, 0.5.0 and 0.4.1 stay immutable, while 0.4.0 and earlier target the former include layout.
 The configuration pins one version and its SHA-512 rather than resolving a mutable `latest` channel. An explicit
@@ -579,6 +582,27 @@ report file), a starter, an entry module renamed in `environment.json`, an unkno
 a missing archive and archives with an incompatible protocol or API. `BootstrapProvisioning` checks the
 configure-time provisioning (verified download, reuse, local directory, wrong digest, malformed value). The Linux CEF CI job
 blocks the public network after the configure step.
+
+## Compatibility table
+
+Which environment accompanies which library version (ADR-021). The two cycles are independent: the first row, **unreleased**,
+is the environment pinned by `develop` and is rewritten by the `release-developer` workflow at each pin; preparing a library
+release freezes it into a row carrying that library's version (`cmake -DROOT=. -DMODE=freeze -DLIBRARY_VERSION=<x.y.z> -P
+cmake/DeveloperCompatibility.cmake`, from the `DeveloperReleaseData.hpp` of the release commit). `CheckReleaseVersion.cmake`
+fails a `v*` tag whose version has no row, or whose row differs from that header. A release published without a new
+environment therefore reuses the previous one. "Minimum api" is `developer::apiVersion` (see the compatibility contract
+above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 predates the pin.
+
+<!-- compatibility-table:begin -->
+| Library | Environment | Minimum api |
+| --- | --- | --- |
+| unreleased | 0.9.0 | 1 |
+| 0.9.0 | 0.9.0 | 1 |
+| 0.8.0 | 0.6.3 | 1 |
+| 0.7.0 | 0.6.3 | 1 |
+| 0.6.0 | 0.6.3 | 1 |
+| 0.5.0 | 0.6.2 | 1 |
+<!-- compatibility-table:end -->
 
 ## Dependencies, storage and limitations
 

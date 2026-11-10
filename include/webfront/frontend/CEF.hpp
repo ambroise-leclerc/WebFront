@@ -2,19 +2,27 @@
 
 #include "../ContentPolicy.hpp"
 #include "../system/WindowsCompat.hpp"
+#include "../ViewAssociation.hpp"
 #include "../tooling/Logger.hpp"
 #include "CEFPaths.hpp"
 #include "Capture.hpp"
 #include "DefaultBrowser.hpp"
+#include "Downloads.hpp"
+#include "ScriptDialogs.hpp"
+#include "NativeWindow.hpp"
+#include "UIExecutor.hpp"
 #include "Url.hpp"
 #include "Window.hpp"
 
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <memory>
+#include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -29,6 +37,10 @@
     #include <crt_externs.h>
     #include <mach-o/dyld.h>
 #endif
+
+namespace webfront::frontend {
+struct CEFFrontend;  // names the executor's host (UIExecutor.hpp)
+}
 
 namespace webfront::cef {
 
@@ -247,6 +259,62 @@ inline CefMainArgs makeMainArgs(
 }
 
 // Initialize CEF and handle subprocesses
+/// The renderer's half of the view association (ADR-020): the browser process hands the launch secret to its own browser
+/// as extra information, never on a command line, and the renderer defines it on the window of the top-level documents of
+/// the application's origin, before any script of the page runs. WebFront.js reads then removes it.
+class ViewSecretRenderApp : public CefApp, public CefRenderProcessHandler {
+public:
+    static constexpr const char* secretKey = "webfrontViewSecret";
+    static constexpr const char* originKey = "webfrontViewOrigin";
+
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override {
+        return this;
+    }
+    void OnBrowserCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDictionaryValue> extraInfo) override {
+        if (!browser || !extraInfo || !extraInfo->HasKey(secretKey) || !extraInfo->HasKey(originKey))
+            return;
+        std::scoped_lock lock{mutex};
+        launches[browser->GetIdentifier()] = ViewLaunch{extraInfo->GetString(secretKey).ToString(), extraInfo->GetString(originKey).ToString()};
+    }
+    void OnBrowserDestroyed(CefRefPtr<CefBrowser> browser) override {
+        std::scoped_lock lock{mutex};
+        launches.erase(browser->GetIdentifier());
+    }
+    void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context) override {
+        if (!frame->IsMain())
+            return;
+        ViewLaunch launch;
+        {
+            std::scoped_lock lock{mutex};
+            const auto       found = launches.find(browser->GetIdentifier());
+            if (found == launches.end())
+                return;
+            launch = found->second;
+        }
+        // frame->GetURL() can still be the previous or a blank URL when the context is created: the page itself is asked
+        // for its origin, by the script every other adapter runs, which only defines the secret for a top-level document of
+        // the application's origin.
+        const auto script = webfront::detail::viewSecretScript(launch.secret, launch.origin);
+        if (script.empty())
+            return;
+        CefRefPtr<CefV8Value>     result;
+        CefRefPtr<CefV8Exception> exception;
+        context->Eval(script, CefString(), 0, result, exception);
+    }
+
+private:
+    std::mutex                  mutex;
+    std::map<int, ViewLaunch>   launches;
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(ViewSecretRenderApp);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+
 // Throws: CEFInitializationError on initialization failure
 // Throws: CEFSubprocessExit if this is a subprocess (caller should exit with the provided code)
 // Returns: void on successful main process initialization
@@ -274,7 +342,9 @@ inline void initialize() {
         argv_ptrs.data()
     #endif
     );
-    CefRefPtr<CefApp> app;
+    // The renderer processes are this executable started again: this is the app that installs their render process handler
+    // (a separate helper executable must pass a ViewSecretRenderApp to its own CefExecuteProcess to associate its views).
+    CefRefPtr<CefApp> app(new ViewSecretRenderApp);
     int               exit_code = CefExecuteProcess(main_args, app, nullptr);
     if (exit_code >= 0) {
         throw CEFSubprocessExit(exit_code);
@@ -493,7 +563,10 @@ class SimpleCEFClient : public CefClient,
                         public CefLoadHandler,
                         public CefRequestHandler,
                         public CefContextMenuHandler,
-                        public CefCommandHandler {
+                        public CefCommandHandler,
+                        public CefDownloadHandler,
+                        public CefDialogHandler,
+                        public CefJSDialogHandler {
 public:
     explicit SimpleCEFClient(webfront::detail::BoundContentPolicy policy = webfront::detail::BoundContentPolicy{}, browser::Launcher launch = browser::launch)
         : contentPolicy(std::move(policy)), popupLauncher(launch) { }
@@ -510,6 +583,109 @@ public:
     }
     CefRefPtr<CefCommandHandler> GetCommandHandler() override {
         return this;
+    }
+
+    /// The Chrome runtime already shows its own file dialog and saves downloads; these two hooks only exist for tests.
+    /// Test injection: answers <input type="file"> without a dialog (an empty list cancels). Unset keeps the engine's dialog.
+    std::function<std::vector<std::string>()> chooseFiles;
+    /// Test injection: a non-empty folder receives downloads without a "save as" dialog.
+    std::filesystem::path downloadDirectory;
+    frontend::detail::DownloadReservations                         downloadReservations;
+    std::mutex                                                     reservedMutex;
+    std::map<std::uint32_t, std::filesystem::path>                 reservedByDownload;  // CefDownloadItem id -> destination
+    /// Test injection: called with the full path of each completed download.
+    std::function<void(const std::string&)> downloadFinished;
+
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
+        return this;
+    }
+    CefRefPtr<CefDialogHandler> GetDialogHandler() override {
+        return this;
+    }
+    /// Test injection: answers alert, confirm, prompt and beforeunload without a dialog. Unset keeps the engine's own dialogs.
+    frontend::ScriptDialogHandler answerScriptDialog;
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override {
+        return this;
+    }
+    bool OnJSDialog(CefRefPtr<CefBrowser>,
+                    const CefString&,
+                    JSDialogType                   type,
+                    const CefString&               message,
+                    const CefString&               defaultText,
+                    CefRefPtr<CefJSDialogCallback> callback,
+                    bool&) override {  // suppress_message stays false: the injection is the answer.
+        if (!answerScriptDialog)
+            return false;
+        frontend::ScriptDialog dialog;
+        dialog.kind        = type == JSDIALOGTYPE_CONFIRM  ? frontend::ScriptDialog::Kind::confirm
+                             : type == JSDIALOGTYPE_PROMPT ? frontend::ScriptDialog::Kind::prompt
+                                                           : frontend::ScriptDialog::Kind::alert;
+        dialog.message     = message.ToString();
+        dialog.defaultText = defaultText.ToString();
+        return answer(dialog, callback);
+    }
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser>, const CefString& message, bool, CefRefPtr<CefJSDialogCallback> callback) override {
+        if (!answerScriptDialog)
+            return false;
+        return answer({frontend::ScriptDialog::Kind::beforeUnload, message.ToString(), {}}, callback);
+    }
+    bool OnFileDialog(CefRefPtr<CefBrowser>,
+                      FileDialogMode,
+                      const CefString&,
+                      const CefString&,
+                      const std::vector<CefString>&,
+                      const std::vector<CefString>&,
+                      const std::vector<CefString>&,
+                      CefRefPtr<CefFileDialogCallback> callback) override {
+        if (!chooseFiles)
+            return false;
+        std::vector<CefString> files;
+        try {
+            for (const auto& file : chooseFiles())
+                files.emplace_back(file);
+        } catch (...) {
+            files.clear();
+        }
+        if (files.empty())
+            callback->Cancel();
+        else
+            callback->Continue(files);
+        return true;
+    }
+    bool OnBeforeDownload(CefRefPtr<CefBrowser>,
+                          CefRefPtr<CefDownloadItem>           item,
+                          const CefString&                     suggested,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        if (downloadDirectory.empty())
+            return false;
+        try {
+            const auto result = downloadReservations.reserve(downloadDirectory, suggested.ToString());
+            {
+                std::scoped_lock lock{reservedMutex};
+                reservedByDownload[item->GetId()] = result;
+            }
+            callback->Continue(result.string(), false);
+        } catch (const std::filesystem::filesystem_error&) {
+            // Returning true without continuing cancels the download, including when all candidate names are occupied.
+        }
+        return true;
+    }
+    void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback>) override {
+        if (item->IsComplete() && downloadFinished)
+            downloadFinished(item->GetFullPath().ToString());
+        if (item->IsInProgress())
+            return;
+        // Complete, cancelled or interrupted: the name can be given to another download again.
+        std::filesystem::path reserved;
+        {
+            std::scoped_lock lock{reservedMutex};
+            if (const auto found = reservedByDownload.find(item->GetId()); found != reservedByDownload.end()) {
+                reserved = std::move(found->second);
+                reservedByDownload.erase(found);
+            }
+        }
+        if (!reserved.empty())
+            downloadReservations.release(reserved);
     }
 
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request, bool, bool) override {
@@ -605,8 +781,11 @@ public:
         // The application's window is the first browser; popups are cancelled and DevTools has its own client.
         if (!captureTarget->browser) {
             captureTarget->browser = browser;
-        captureTarget->pending.open();
-            captureRegistration    = CaptureRegistration{detail::captureProvider(captureTarget)};
+            // This callback runs on the UI thread. open() refused a second opening, so this browser is the only one.
+            frontend::nativeWindowHostOf<frontend::CEFFrontend>().publish(
+                {.kind = frontend::NativeWindowKind::cef, .pointer = browser.get(), .portalParent = {}});
+            captureTarget->pending.open();
+            captureRegistration = CaptureRegistration{detail::captureProvider(captureTarget)};
         }
     }
     virtual bool DoClose(CefRefPtr<CefBrowser> /*browser*/) override {
@@ -615,6 +794,7 @@ public:
 
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
         if (captureTarget->browser && captureTarget->browser->IsSame(browser)) {
+            frontend::nativeWindowHostOf<frontend::CEFFrontend>().retract();
             captureRegistration = {};
             detail::abandonCaptures(*captureTarget);
         }
@@ -623,6 +803,17 @@ public:
     }
 
 private:
+    bool answer(const frontend::ScriptDialog& dialog, CefRefPtr<CefJSDialogCallback> callback) {
+        frontend::ScriptDialogAnswer reply;
+        try {
+            reply = answerScriptDialog(dialog);
+        } catch (...) {
+            reply = {};  // A failing injection dismisses the dialog; the page must not wait for it.
+        }
+        callback->Continue(reply.accepted, reply.text);
+        return true;
+    }
+
     webfront::detail::BoundContentPolicy contentPolicy;
     browser::Launcher                    popupLauncher;
     bool loadingInitialPage = true;
@@ -703,9 +894,32 @@ private:
 
 namespace detail {
 
+/// Runs the interface-thread executor's queue on CEF's UI thread.
+class DrainTask : public CefTask {
+public:
+    void Execute() override {
+        frontend::uiExecutorHostOf<frontend::CEFFrontend>().drain();
+    }
+
+private:
+    #ifdef __clang__
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wextra-semi"
+    #endif
+    IMPLEMENT_REFCOUNTING(DrainTask);
+    #ifdef __clang__
+        #pragma clang diagnostic pop
+    #endif
+};
+
 inline void openWindow(std::string url, webfront::detail::BoundContentPolicy contentPolicy,
                        CefRefPtr<SimpleCEFClient> client = nullptr, const std::filesystem::path& profile = {},
-                       WindowOptions windowSettings = {}, bool preserveSignalHandlers = false) {
+                       WindowOptions windowSettings = {}, bool preserveSignalHandlers = false, const ViewLaunch& launch = {}) {
+    // One window per process. Refuse a second open() first, before CefInitialize (which succeeds again when the context
+    // exists) and before any view: its browser would reach OnAfterCreated and replace the published window of the running
+    // one, before host.attach() could refuse it, and the first connection's dialogs would be parented to the new window.
+    if (frontend::uiExecutorHostOf<frontend::CEFFrontend>().executor().available())
+        throw std::logic_error("CEFFrontend: open() is already running; a process opens one window at a time");
     setKeychainEnvironment();
     // Build platform-appropriate CefMainArgs
     auto [argc, argv_vec] = getCommandLineArgs();
@@ -767,7 +981,13 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     CefBrowserSettings browser_settings;
 
     // Create a browser view using the modern Views API - this creates a chromeless browser
-    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(client, url, browser_settings, nullptr, nullptr, nullptr);
+    CefRefPtr<CefDictionaryValue> extraInfo;
+    if (!launch.secret.empty()) {
+        extraInfo = CefDictionaryValue::Create();
+        extraInfo->SetString(ViewSecretRenderApp::secretKey, launch.secret);
+        extraInfo->SetString(ViewSecretRenderApp::originKey, launch.origin);
+    }
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(client, url, browser_settings, extraInfo, nullptr, nullptr);
 
     // Create a window delegate for controlling the window appearance
     CefRefPtr<SimpleCEFWindowDelegate> window_delegate(new SimpleCEFWindowDelegate(frontend::detail::resolveWindow(std::move(windowSettings))));
@@ -776,8 +996,20 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
     // Create a top-level window with no browser chrome
     CefRefPtr<CefWindow> window = CefWindow::CreateTopLevelWindow(window_delegate);
 
-    // Run the CEF message loop
-    CefRunMessageLoop();
+    // Run the CEF message loop; CefPostTask is thread-safe and the task runs on this (UI) thread. A failed post (the loop is
+    // ending) is dropped: closing the host completes what is pending stopped.
+    auto& host = frontend::uiExecutorHostOf<frontend::CEFFrontend>();
+    host.attach([] { CefPostTask(TID_UI, new DrainTask); });
+    {
+        struct Closing {
+            frontend::UIExecutorHost& host;
+            ~Closing() {
+                frontend::nativeWindowHostOf<frontend::CEFFrontend>().retract();  // also when the loop ends before OnBeforeClose
+                host.close();
+            }
+        } closing{host};
+        CefRunMessageLoop();
+    }
 
     // Shutdown CEF
     CefShutdown();
@@ -788,12 +1020,14 @@ inline void openWindow(std::string url, webfront::detail::BoundContentPolicy con
 }  // namespace detail
 
 inline void open(std::string_view address, std::string_view port, std::string_view file, const ContentPolicy& policy = {},
-                 const WindowOptions& window = {}) {
+                 const WindowOptions& window = {}, const ViewLaunch& launch = {}) {
     detail::openWindow(frontend::detail::applicationUrl(address, port, file),
                        webfront::detail::BoundContentPolicy{webfront::detail::applicationOrigin(address, port), policy},
                        nullptr,
                        {},
-                       window);
+                       window,
+                       false,
+                       launch);
 }
 
 }  // namespace webfront::cef
@@ -811,7 +1045,8 @@ inline void initialize() {
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }
 
-inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}, const WindowOptions& = {}) {
+inline void open(std::string_view /*address*/, std::string_view /*port*/, std::string_view /*file*/, const ContentPolicy& = {}, const WindowOptions& = {},
+                 const ViewLaunch& = {}) {
     throw std::runtime_error("webfront::frontend::CEFFrontend requires CEF support, but this build was configured with "
                              "WEBFRONT_EMBED_CEF=OFF. Reconfigure with -DWEBFRONT_EMBED_CEF=ON to use the embedded CEF frontend.");
 }

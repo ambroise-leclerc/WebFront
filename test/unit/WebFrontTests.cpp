@@ -1,6 +1,7 @@
 #include "InjectableNetworking.hpp"
 #include "Mocks.hpp"
 #include "Version.hpp"
+#include <functional>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -751,8 +752,9 @@ SCENARIO("C++ function responders encode values and failures") {
 namespace {
 
 // The single string parameter of the return message a responder sent.
+template <http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 std::string sentString(const ResultLinkMock& link) {
-    auto        result  = msg::FunctionReturn<http::DefaultBuffersPolicy>::castFromRawData(link.message);
+    auto        result  = msg::FunctionReturn<Policy>::castFromRawData(link.message);
     auto        payload = result->payload();
     std::string value;
     result->decodeParameter(value, payload);
@@ -761,29 +763,98 @@ std::string sentString(const ResultLinkMock& link) {
     return value;
 }
 
-template <typename R>
+template <typename R, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 std::string respondWith(R value) {
     ResultLinkMock link;
-    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, http::DefaultBuffersPolicy, R>([value](std::span<const std::byte>) {
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, Policy, R>([value](std::span<const std::byte>) {
         return value;
     });
     responder({}, link, 9);
-    return sentString(link);
+    return sentString<Policy>(link);
 }
 
 }  // namespace
 
-SCENARIO("C++ results too long for the wire reject the JavaScript Promise") {
-    const std::string overlong(65536, 'x');
+namespace {
+/// The code and the message of the exception a responder sent.
+template <http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
+std::pair<std::string, std::string> sentException(std::function<void()> thrower) {
+    ResultLinkMock link;
+    auto           responder = detail::makeCppFunctionResponder<networking::NetworkingMock, Policy, int>([thrower](std::span<const std::byte>) -> int {
+        thrower();
+        return 0;
+    });
+    responder({}, link, 9);
+    auto             result = msg::FunctionReturn<Policy>::castFromRawData(link.message);
+    auto             payload = result->payload();
+    std::string      code, message;
+    msg::FunctionReturn<Policy>::decodeException(code, message, payload);
+    return {code, message};
+}
+}  // namespace
 
-    GIVEN("a callback returning a string over 65535 bytes") {
+SCENARIO("A callback failure is sent with its code") {
+    GIVEN("a callback throwing a BridgeError") {
+        THEN("the rejection carries its code") {
+            REQUIRE(sentException([] { throw BridgeError("denied", "no"); }) == std::pair<std::string, std::string>{"denied", "no"});
+        }
+    }
+    GIVEN("a callback throwing an ordinary exception or something else") {
+        THEN("the code is the generic one") {
+            REQUIRE(sentException([] { throw std::runtime_error("plain"); }) == std::pair<std::string, std::string>{std::string(bridge_code::generic), "plain"});
+            REQUIRE(sentException([] { throw 42; }).first == bridge_code::generic);
+        }
+    }
+    GIVEN("a callback whose message exceeds what a small policy leaves") {
+        using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 64>;
+        THEN("the rejection is still sent, with the message cut to fit") {
+            const auto [code, message] = sentException<SmallPolicy>([] { throw BridgeError("quota", std::string(1000, 'x')); });
+            REQUIRE(code == "quota");
+            REQUIRE(message == std::string(64 - 8 - 2 - 5 - 2, 'x'));
+        }
+        THEN("a multi-byte character is never cut in two") {
+            std::string text;
+            for (int i = 0; i < 500; ++i)
+                text += "\xc3\xa9";
+            const auto message = sentException<SmallPolicy>([text] { throw BridgeError("quota", text); }).second;
+            REQUIRE(message.size() == 46);  // 47 bytes fit, the 24th character would need the 48th
+            REQUIRE(message == text.substr(0, 46));
+        }
+    }
+    GIVEN("a callback whose argument cannot be decoded") {
+        ResultLinkMock link;
+        auto           handler = detail::makeCppFunctionHandler<http::DefaultBuffersPolicy, void, std::string>([](std::string) {});
+        const std::array<std::byte, 1> boolean{std::byte{static_cast<std::uint8_t>(msg::CodedType::booleanTrue)}};
+        THEN("the failure has the malformed code") {
+            try {
+                handler(boolean);
+                FAIL("The call did not throw");
+            } catch (const BridgeError& error) {
+                REQUIRE(error.code() == bridge_code::malformed);
+            }
+        }
+    }
+}
+
+SCENARIO("C++ string results cross the bridge up to the message size of the policy") {
+    const std::string longText(100000, 'x');
+    using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024 * 1024>;
+    const std::string overlong(1024 * 1024, 'x');
+    const std::string tooLong = "WebFront message exceeds the maximum message size of the buffers policy";
+
+    GIVEN("a callback returning a string of more than 65535 bytes") {
+        THEN("it is sent whole as a longString") {
+            REQUIRE(respondWith(longText) == longText);
+        }
+    }
+    GIVEN("a callback returning a string that does not fit the message size of the policy") {
         THEN("a single well-formed exception is sent") {
-            REQUIRE(respondWith(overlong) == "WebFront strings cannot exceed 65535 bytes");
+            REQUIRE(respondWith<std::string, SmallPolicy>(overlong) == tooLong);
         }
     }
     GIVEN("a callback returning such a string inside a tuple") {
         THEN("the partly encoded result is replaced by a single well-formed exception") {
-            REQUIRE(respondWith(std::tuple<int, std::string>{1, overlong}) == "WebFront strings cannot exceed 65535 bytes");
+            REQUIRE(respondWith<std::tuple<int, std::string>, SmallPolicy>(std::tuple<int, std::string>{1, overlong}) == tooLong);
         }
     }
 }

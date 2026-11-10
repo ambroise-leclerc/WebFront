@@ -18,7 +18,7 @@ function(webfront_add_wkwebview_tests)
     add_executable(wkwebview_lifecycle "${webtest_source_dir}/WKWebViewLifecycle.cpp"
         "${webtest_source_dir}/WKWebViewHeaderConsumer.cpp")
     target_link_libraries(wkwebview_lifecycle PRIVATE WebFront WebFront_warnings WebFront_options)
-    foreach(mode repeated-show main-thread native-close quit navigation-diagnostic startup-timeout settings redirect-policy missing-response committed-navigation agent-application)
+    foreach(mode repeated-show main-thread native-close quit navigation-diagnostic startup-timeout settings redirect-policy missing-response committed-navigation agent-application download choose-file cancel-choose replaced-download choose-in-blank choose-in-srcdoc close-with-open-panel close-with-save-panel script-dialogs close-with-script-dialog sandboxed-script-dialog)
         add_test(NAME WKWebViewLifecycle-${mode} COMMAND wkwebview_lifecycle ${mode})
         webfront_set_browser_test_properties("WKWebViewLifecycle-${mode}" "${webtest_source_dir}" 90)
     endforeach()

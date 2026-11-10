@@ -198,16 +198,31 @@ void (async () => {
         finally { removeEventListener('error', capture); script.remove(); }
         if (failure) throw new Error('Jasmine file ' + index + ' failed to load: ' + String(failure?.message ?? failure));
     };
+    // Iterate Unicode characters when clipping, and normalize isolated surrogates before C++ parses the JSON.
+    const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {ignoreBOM:true});
+    const clip = (value, limit) => Array.from(String(value)).slice(0, limit).join('');
+    const stringify = value => JSON.stringify(value, (_key, item) =>
+        typeof item === 'string' ? decoder.decode(encoder.encode(item)) : item);
     let reporting = false;
     const report = async result => {
         if (reporting) return;
         reporting = true;
         try {
-            // The bridge string length is 16 bits of UTF-8 bytes: shed failure messages until the report fits.
-            let text = JSON.stringify(result);
-            while (new TextEncoder().encode(text).length > 60000 && result.failures?.length) {
-                result.failures.pop();
-                text = JSON.stringify(result);
+            // Keep every recorded failure and its full name. Shrink message prefixes first, measuring the actual
+            // UTF-8 JSON (including escaping). Only names that cannot fit even with empty messages are shortened.
+            const failures = result.failures;
+            let messageLimit = 2048, nameLimit = Infinity, text;
+            for (;;) {
+                if (failures) result.failures = failures.map(({name, message}) => {
+                    const title = clip(name, nameLimit), detail = clip(message, messageLimit);
+                    if (title.length < name.length || detail.length < message.length) result.truncated = true;
+                    return title + ': ' + detail;
+                });
+                text = stringify(result);
+                if (encoder.encode(text).length <= 60000) break;
+                result.truncated = true;
+                if (messageLimit) messageLimit = Math.floor(messageLimit / 2);
+                else nameLimit = nameLimit === Infinity ? 1024 : Math.floor(nameLimit / 2);
             }
             await call('result', text);
         }
@@ -231,7 +246,7 @@ void (async () => {
         const failures = [];
         const record = result => {
             for (const item of result.failedExpectations ?? [])
-                if (failures.length < 50) failures.push(String(item.message).slice(0, 512));
+                if (failures.length < 50) failures.push({name:String(result.fullName ?? 'Jasmine'), message:String(item.message)});
         };
         env.addReporter({
             specDone(result) { if (result.status === 'passed' || result.status === 'failed') ++total; if (result.status === 'failed') ++failed; record(result); },
@@ -239,13 +254,13 @@ void (async () => {
             jasmineDone(info) {
                 record(info);
                 return report({format:1, status: info.overallStatus === 'passed' && total > 0 && failed === 0 && !failures.length ? 'passed' : 'failed',
-                    total, failed, failures, incomplete:String(info.incompleteReason ?? '').slice(0,1024)});
+                    total, failed, failures, incomplete:clip(info.incompleteReason ?? '',1024)});
             }
         });
         for (let index = 1; index < count; ++index) await load(index);
         await env.execute();
     } catch (error) {
-        await report({format:1, status:'error', error:(String(error?.message ?? error) + '\n' + String(error?.stack ?? '')).slice(0,8192)});
+        await report({format:1, status:'error', error:clip(String(error?.message ?? error) + '\n' + String(error?.stack ?? ''),8192)});
     }
 })();
 )JS";

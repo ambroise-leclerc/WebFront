@@ -1,0 +1,65 @@
+# Maintains the compatibility table of docs/DEVELOPER_ENVIRONMENT.md (ADR-021, decision 4), in pure CMake:
+#
+#   cmake -DROOT=<repo> -DMODE=unreleased -P cmake/DeveloperCompatibility.cmake
+#       rewrites the "unreleased" row from DeveloperReleaseData.hpp and developer::apiVersion (the release workflow)
+#   cmake -DROOT=<repo> -DMODE=freeze -DLIBRARY_VERSION=<x.y.z> -P cmake/DeveloperCompatibility.cmake
+#       freezes the "unreleased" row into a row of that library version (the preparation of a library release)
+#
+# The table lies between the markers below; a row is "| library | environment | minimum api |".
+cmake_minimum_required(VERSION 3.31)
+if(NOT ROOT OR NOT MODE)
+    message(FATAL_ERROR "ROOT and MODE (unreleased or freeze) are required")
+endif()
+
+set(document "${ROOT}/docs/DEVELOPER_ENVIRONMENT.md")
+set(begin_marker "<!-- compatibility-table:begin -->")
+set(end_marker "<!-- compatibility-table:end -->")
+
+file(READ "${ROOT}/include/webfront/system/DeveloperReleaseData.hpp" header)
+if(NOT header MATCHES "version\{\"([^\"]*)\"\}")
+    message(FATAL_ERROR "DeveloperReleaseData.hpp has no version")
+endif()
+set(environment "${CMAKE_MATCH_1}")
+file(READ "${ROOT}/include/webfront/DeveloperApp.hpp" application)
+if(NOT application MATCHES "apiVersion *= *([0-9]+);")
+    message(FATAL_ERROR "DeveloperApp.hpp has no apiVersion")
+endif()
+set(api "${CMAKE_MATCH_1}")
+
+file(READ "${document}" content)
+string(FIND "${content}" "${begin_marker}" begin_at)
+string(FIND "${content}" "${end_marker}" end_at)
+if(begin_at EQUAL -1 OR end_at EQUAL -1 OR end_at LESS begin_at)
+    message(FATAL_ERROR "The compatibility table markers are missing from DEVELOPER_ENVIRONMENT.md")
+endif()
+string(LENGTH "${begin_marker}" begin_length)
+math(EXPR table_at "${begin_at} + ${begin_length}")
+math(EXPR table_length "${end_at} - ${table_at}")
+string(SUBSTRING "${content}" 0 ${table_at} before)
+string(SUBSTRING "${content}" ${table_at} ${table_length} table)
+string(SUBSTRING "${content}" ${end_at} -1 after)
+
+string(REGEX MATCH "[|] unreleased [|][^\n]*\n" unreleased_row "${table}")
+if(NOT unreleased_row)
+    message(FATAL_ERROR "The compatibility table has no unreleased row")
+endif()
+set(new_unreleased "| unreleased | ${environment} | ${api} |\n")
+
+if(MODE STREQUAL "unreleased")
+    string(REPLACE "${unreleased_row}" "${new_unreleased}" table "${table}")
+elseif(MODE STREQUAL "freeze")
+    if(NOT LIBRARY_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
+        message(FATAL_ERROR "LIBRARY_VERSION must be MAJOR.MINOR.PATCH")
+    endif()
+    # The first cell of a row: the version of the environment column may be the same number, and a dot is literal.
+    string(REPLACE "." "[.]" version_pattern "${LIBRARY_VERSION}")
+    if(table MATCHES "
+[|] ${version_pattern} [|]")
+        message(FATAL_ERROR "The compatibility table already has a row for ${LIBRARY_VERSION}")
+    endif()
+    string(REPLACE "${unreleased_row}" "${new_unreleased}| ${LIBRARY_VERSION} | ${environment} | ${api} |\n" table "${table}")
+else()
+    message(FATAL_ERROR "MODE must be unreleased or freeze")
+endif()
+file(WRITE "${document}" "${before}${table}${after}")
+message(STATUS "Compatibility table (${MODE}): environment ${environment}, api ${api}")

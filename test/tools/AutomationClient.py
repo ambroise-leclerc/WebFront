@@ -315,9 +315,12 @@ def watchdog(args):
                     if args.scenario == "mcp-watchdog":
                         connect = re.findall(rb"([A-Za-z_$][A-Za-z0-9_$]*) as connectAutomation(?=[,}])", data)
                         assert len(connect) == 1
-                        # A bridge RangeError consumes a JS sequence without reaching native code.
+                        # A bridge RangeError (a message past the bridge's maximum, lowered for this call) consumes a JS
+                        # sequence without reaching native code.
                         data += (b"\nconst beforeGap=" + connect[0] + b";" + connect[0] +
-                                 b"=context=>{void context.call('poll','x'.repeat(65536)).then(()=>window.close(),()=>beforeGap(context));};")
+                                 b"=context=>{const limit=context.bridge.maxMessageBytes;context.bridge.maxMessageBytes=70000;"
+                                 b"void context.call('poll','x'.repeat(70000)).then(()=>window.close(),"
+                                 b"()=>{context.bridge.maxMessageBytes=limit;beforeGap(context);});};")
                         # Only this startup test needs a delay longer than the operation's two-second deadline.
                         data = b"await new Promise(resolve => setTimeout(resolve,3000));\n" + data
                     member.size = len(data)
@@ -381,12 +384,114 @@ def watchdog(args):
     print(f"{args.scenario}: blocked renderer, native deadline, EOF and private endpoint cleanup passed")
 
 
+def consumer(args):
+    """An application that opted in with enableAutomation (#501), driven from another process.
+
+    The window and its `consumer.render` callback belong to automation_consumer; this process only attaches. The preview
+    runs in the application's own window, so its page reaches the application's C++ callback, which a window owned by
+    the agent never could."""
+    integrity = json.loads(pathlib.Path(args.provision).read_text())["integrity"]
+    pathlib.Path(args.work).mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=args.work, prefix="consumer-") as temporary:
+        root = pathlib.Path(temporary)
+        project = root / "project"
+        shutil.copytree(args.fixture, project)
+        base = ["--project", str(project), "--environment", args.environment, "--integrity", integrity,
+                "--registry-dir", args.registry]
+        installed = subprocess.run([args.driver, *base, "--", "install"], capture_output=True, text=True, timeout=120)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+        endpoint, sessions, called = root / "endpoint", root / "sessions", root / "called.txt"
+        with profile_directory() as profile_root, (root / "consumer.log").open("w") as log:
+            owner_environment = dict(os.environ, TMPDIR=profile_root, TEMP=profile_root, TMP=profile_root)
+            owner = subprocess.Popen([args.consumer, *base, "--listen", str(endpoint), "--sessions", str(sessions),
+                                      "--called", str(called)],
+                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, text=True, env=owner_environment)
+            try:
+                deadline = time.monotonic() + 60
+                while not (endpoint / "endpoint.json").exists():
+                    assert owner.poll() is None, (root / "consumer.log").read_text()
+                    assert time.monotonic() < deadline, "The application never published its endpoint"
+                    time.sleep(0.05)
+                # Discoverable by an agent that was told nothing, without the capability.
+                listed = subprocess.run([args.agent, "--list", "--sessions-dir", str(sessions)],
+                                        capture_output=True, text=True, timeout=10)
+                assert listed.returncode == 0, listed.stderr
+                token = json.loads((endpoint / "endpoint.json").read_text())["token"]
+                assert token not in listed.stdout + listed.stderr
+                entries = json.loads(listed.stdout)["sessions"]
+                assert len(entries) == 1 and entries[0]["state"] == "running", listed.stdout
+                assert sorted(entries[0]["allow"]) == sorted(["check", "build", "preview", "inspect", "interact", "call"]), entries
+                assert entries[0]["callbacks"] == ["consumer.render"], entries
+                assert pathlib.Path(entries[0]["endpoint"]).resolve() == endpoint.resolve(), entries
+                configuration = subprocess.run([args.agent, "--print-mcp-config", "--attach", str(endpoint)],
+                                               capture_output=True, text=True, timeout=10)
+                assert configuration.returncode == 0, configuration.stderr
+                server = json.loads(configuration.stdout)["mcpServers"]["webfront"]
+                assert server["args"][0] == "--attach" and server["args"][-1] == "--mcp"
+                assert token not in configuration.stdout
+                client = Client([args.agent, *server["args"]], log)
+                try:
+                    client.initialize()
+                    # The grants are the application's: the agent cannot widen them.
+                    for operation in ("test", "init", "install", "embed"):
+                        client.tool("start", {"session": client.session, "operation": operation}, error=True)
+                    # Only the allow-listed callback can be called, and the page can never reach webfront.* ones.
+                    for callback in ("consumer.secret", "webfront.developer.read", "consumer.render.extra"):
+                        client.tool("start", {"session": client.session, "operation": "call", "arguments": {"callback": callback}}, error=True)
+                    client.run("check")
+                    client.run("build")
+                    assert (project / ".webfront/developer/build/app.js").is_file()
+                    client.run("preview")
+                    for _ in range(100):
+                        run = client.wait(client.start("inspect"))
+                        if run["state"] == "succeeded" and any(item["id"] == "render" for item in run["result"]["data"]["elements"]):
+                            break
+                        time.sleep(0.1)
+                    snapshot = run["result"]["data"]
+                    assert any(item["id"] == "render" for item in snapshot["elements"]), run
+                    client.run("click", {"pageId": snapshot["pageId"], "elementId": "render"})
+                    for _ in range(100):
+                        updated = client.run("inspect")["data"]
+                        if any(item["id"] == "result" and item["text"] == "rendered:hello" for item in updated["elements"]):
+                            break
+                        time.sleep(0.1)
+                    else:
+                        raise AssertionError(updated)
+                    # The callback that answered is the application's own, in its own process.
+                    answered = client.run("call", {"callback": "consumer.render", "value": "from-agent"})
+                    assert answered["data"] == {"callback": "consumer.render", "result": "rendered:from-agent"}, answered
+                    assert called.read_text().split() == ["hello", "from-agent"], called.read_text()
+                finally:
+                    client.close()
+                assert owner.poll() is None, "Detaching an agent closed the application's window"
+                shutdown = subprocess.run([args.agent, "--attach", str(endpoint), "--shutdown"],
+                                          capture_output=True, text=True, timeout=10)
+                assert shutdown.returncode == 0, shutdown.stderr
+                status = owner.wait(timeout=30)
+                assert status == 0, f"exit {status}\n{(root / 'consumer.log').read_text()}"
+                assert not endpoint.exists() or not (endpoint / "endpoint.json").exists(), "The endpoint outlived the application"
+                assert json.loads(subprocess.run([args.agent, "--list", "--sessions-dir", str(sessions)],
+                                                 capture_output=True, text=True, timeout=10).stdout)["sessions"] == []
+            except BaseException:
+                print((root / "consumer.log").read_text(), flush=True)
+                raise
+            finally:
+                if owner.poll() is None:
+                    owner.kill()
+                    owner.wait()
+    print("consumer: attach to an application's own window, its own callback, grants, discovery, shutdown passed")
+
+
 def main():
     parser = argparse.ArgumentParser()
     for name in ("agent", "driver", "environment", "provision", "registry", "fixture", "work"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "cli-watchdog"), default="session")
+    parser.add_argument("--scenario", choices=("session", "mcp-watchdog", "cli-watchdog", "consumer"), default="session")
+    parser.add_argument("--consumer", help="the automation_consumer executable of the consumer scenario")
     args = parser.parse_args()
+    if args.scenario == "consumer":
+        consumer(args)
+        return
     if args.scenario != "session":
         watchdog(args)
         return
@@ -480,6 +585,7 @@ def main():
                 assert "Unknown pinned starter" in missing["output"], missing
                 client.run("create", {"starter": "life", "directory": "ui"})
                 assert (setup / "ui/main.tsx").is_file() and (setup / "ui/style.css").is_file()
+                assert "--print-mcp-config" in (setup / "ui/AGENTS.md").read_text(encoding="utf-8"), "The starter must explain how an agent attaches"
                 again = client.run("create", {"starter": "life", "directory": "ui"}, state="failed")
                 assert (setup / "ui/main.tsx").is_file(), again
                 client.run("init")

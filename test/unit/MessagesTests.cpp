@@ -25,6 +25,18 @@ SCENARIO("Handshake message") {
     REQUIRE(handshake->getEndian() == msg::JSEndian::little);
 }
 
+SCENARIO("Handshake message with the proof of an embedded view") {
+    // ADR-003: bytes after the two header bytes are the launch secret of ADR-020; the header itself is unchanged.
+    const std::string proof(64, 'a');
+    std::vector<std::byte> raw{std::byte{0x00}, std::byte{0x00}};
+    for (const char c : proof)
+        raw.push_back(static_cast<std::byte>(c));
+    auto handshake = msg::Handshake::castFromRawData(std::span(raw));
+    REQUIRE(handshake->getEndian() == msg::JSEndian::little);
+    REQUIRE(handshake->getPayloadSize() == 0);
+    REQUIRE(raw.size() - sizeof(*handshake) == proof.size());
+}
+
 SCENARIO("Ack message") {
     msg::Ack ack;
 
@@ -111,7 +123,7 @@ SCENARIO("FunctionReturn") {
 
             THEN("Encoded frame should be") {
                 auto encodedFrame = span(socket.debugBuffer.data(), socket.bufferIndex);
-                REQUIRE(encodedFrame.size() == 2 + message.header().size() + 3 + exceptionText.size());
+                REQUIRE(encodedFrame.size() == 2 + message.header().size() + 4 + bridge_code::generic.size() + exceptionText.size());
             }
 
             THEN("A Frame decoded should retrieve the encoded parameters") {
@@ -120,7 +132,7 @@ SCENARIO("FunctionReturn") {
 
                 auto funcRet = msg::FunctionReturn<>::castFromRawData(decoder.payload());
                 REQUIRE(funcRet->getParametersCount() == 1);
-                REQUIRE(funcRet->getPayloadSize() == 3 + exceptionText.size());
+                REQUIRE(funcRet->getPayloadSize() == 4 + bridge_code::generic.size() + exceptionText.size());
 
                 std::string text;
                 auto        undecodedData = funcRet->payload();
@@ -194,32 +206,415 @@ string roundTrip(const T& value) {
     return text;
 }
 
-SCENARIO("Strings beyond the 16-bit wire length are rejected instead of truncated") {
-    GIVEN("a string of exactly 65535 bytes") {
-        const string text(65535, 'x');
-        THEN("it crosses the wire whole") {
+namespace {
+/// The coded type byte that opens the first parameter of a return message holding 'value'.
+template <typename T>
+msg::CodedType firstCodeOf(const T& value) {
+    msg::FunctionReturn<>                        message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(value, frame);
+    return static_cast<msg::CodedType>(messageBytes(frame).at(8));
+}
+}  // namespace
+
+SCENARIO("Strings of 65536 bytes or more use a 32-bit length") {
+    GIVEN("strings on both sides of the 16-bit boundary") {
+        THEN("255 bytes is a smallString, 256 to 65535 a string and 65536 a longString") {
+            REQUIRE(firstCodeOf(string(255, 'x')) == msg::CodedType::smallString);
+            REQUIRE(firstCodeOf(string(256, 'x')) == msg::CodedType::string);
+            REQUIRE(firstCodeOf(string(65535, 'x')) == msg::CodedType::string);
+            REQUIRE(firstCodeOf(string(65536, 'x')) == msg::CodedType::longString);
+        }
+        THEN("each crosses the wire whole") {
+            for (const auto size : {255uz, 256uz, 65535uz, 65536uz, 65537uz, 1000000uz}) {
+                const string text(size, 'x');
+                REQUIRE(roundTrip(text) == text);
+            }
+        }
+    }
+    GIVEN("a UTF-8 character that straddles the 65535-byte boundary") {
+        const string text = string(65534, 'x') + "\xc3\xa9" + string(10, 'y');  // 'é' occupies bytes 65534 and 65535
+        THEN("it is not cut: the whole string is a longString") {
+            REQUIRE(text.size() == 65546);
+            REQUIRE(firstCodeOf(text) == msg::CodedType::longString);
             REQUIRE(roundTrip(text) == text);
         }
     }
-    GIVEN("a string of 65536 bytes and a function return message") {
-        const string                                 text(65536, 'x');
-        msg::FunctionReturn<> message;
-        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
-
-        THEN("encoding throws without counting the parameter") {
-            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
-            REQUIRE(message.getParametersCount() == 0);
+    GIVEN("a string whose multi-byte characters take it past 65535 bytes") {
+        string text;
+        for (int i = 0; i < 40000; ++i)
+            text += "\xe2\x82\xac";  // the euro sign, 3 bytes
+        THEN("the size counts bytes, not characters") {
+            REQUIRE(roundTrip(text) == text);
         }
-        THEN("the message and its frame are left untouched") {
-            REQUIRE_THROWS_AS(message.encodeParameter(text, frame), length_error);
+    }
+    GIVEN("a longString header whose payload is truncated or inconsistent") {
+        auto decode = [](span<const byte> bytes) {
+            string           target;
+            span<const byte> payload{bytes};
+            msg::FunctionCall<>::decodeParameter(target, payload);
+        };
+        const auto long5 = [](uint32_t size, size_t present) {
+            vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::longString)}};
+            for (int i = 0; i < 4; ++i)
+                bytes.push_back(byte{static_cast<uint8_t>(size >> (8 * i))});
+            bytes.insert(bytes.end(), present, byte{'a'});
+            return bytes;
+        };
+        THEN("a header shorter than five bytes is refused") {
+            const vector<byte> header{byte{static_cast<uint8_t>(msg::CodedType::longString)}, byte{1}, byte{0}};
+            REQUIRE_THROWS_AS(decode(header), runtime_error);
+        }
+        THEN("a length that exceeds the bytes present is refused") {
+            REQUIRE_THROWS_AS(decode(long5(70000, 69999)), runtime_error);
+            REQUIRE_THROWS_AS(decode(long5(0xffffffffu, 10)), runtime_error);
+        }
+        THEN("the exact length decodes and leaves the cursor after it") {
+            auto             bytes = long5(70000, 70000);
+            string           target;
+            span<const byte> payload{bytes};
+            msg::FunctionCall<>::decodeParameter(target, payload);
+            REQUIRE(target.size() == 70000);
+            REQUIRE(payload.empty());
+        }
+        THEN("a destination that is not a string is refused") {
+            auto bytes = long5(5, 5);
+            int  number{};
+            span<const byte> payload{bytes};
+            REQUIRE_THROWS_AS(msg::FunctionCall<>::decodeParameter(number, payload), runtime_error);
+        }
+    }
+    GIVEN("a policy whose messages cannot exceed 1 MiB") {
+        using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024 * 1024>;
+        msg::FunctionReturn<SmallPolicy>             message;
+        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+        THEN("a string that fits is encoded") {
+            message.encodeParameter(string(1024 * 1024 - 8 - 5, 'x'), frame);
+            REQUIRE(message.getPayloadSize() == 1024 * 1024 - 8);
+        }
+        THEN("a string one byte too large throws length_error and leaves the message untouched") {
+            REQUIRE_THROWS_AS(message.encodeParameter(string(1024 * 1024 - 8 - 4, 'x'), frame), length_error);
             REQUIRE(message.getPayloadSize() == 0);
+            REQUIRE(message.getParametersCount() == 0);
             REQUIRE(frame.size() == message.header().size());
+        }
+        THEN("the bound counts what the message already carries") {
+            message.encodeParameter(string(600 * 1024, 'x'), frame);
+            REQUIRE_THROWS_AS(message.encodeParameter(string(600 * 1024, 'y'), frame), length_error);
         }
     }
     GIVEN("an exception message longer than 65535 bytes, with a two-byte character across the limit") {
         const runtime_error error{string(65534, 'x') + "\xc3\xa9" + string(10, 'y')};
         THEN("the message is cut before the first character that does not fit whole") {
             REQUIRE(roundTrip(error) == string(65534, 'x'));
+        }
+    }
+}
+
+namespace {
+
+/// The bytes of 'value' alone as the parameter of a function return, without the message header.
+template <typename T>
+vector<byte> encodedParameter(const T& value) {
+    msg::FunctionReturn<>                        message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    message.encodeParameter(value, frame);
+    auto bytes = messageBytes(frame);
+    return vector<byte>(bytes.begin() + 8, bytes.end());
+}
+
+template <typename T>
+T decodedParameter(const vector<byte>& bytes) {
+    T                value{};
+    span<const byte> payload{bytes};
+    msg::FunctionCall<>::decodeParameter(value, payload);
+    if (!payload.empty())
+        throw runtime_error("Trailing data after the decoded list");
+    return value;
+}
+
+template <typename T>
+T listRoundTrip(const T& value) {
+    return decodedParameter<T>(encodedParameter(value));
+}
+
+vector<byte> listBytes(uint32_t count, initializer_list<vector<byte>> elements) {
+    vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::list)}};
+    for (int i = 0; i < 4; ++i)
+        bytes.push_back(byte{static_cast<uint8_t>(count >> (8 * i))});
+    for (const auto& element : elements)
+        bytes.insert(bytes.end(), element.begin(), element.end());
+    return bytes;
+}
+
+vector<byte> wireString(string_view text) {
+    vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::smallString)}, byte{static_cast<uint8_t>(text.size())}};
+    for (const char c : text)
+        bytes.push_back(byte{static_cast<uint8_t>(c)});
+    return bytes;
+}
+
+vector<byte> wireNumber(double value) {
+    vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::number)}};
+    const auto*  raw = reinterpret_cast<const byte*>(&value);
+    bytes.insert(bytes.end(), raw, raw + sizeof(value));
+    return bytes;
+}
+
+static_assert(msg::is_list_v<vector<string>>);
+static_assert(msg::is_list_v<vector<tuple<string, int, bool>>>);
+static_assert(msg::is_list_v<vector<vector<uint8_t>>>);
+static_assert(!msg::is_list_v<vector<int>>, "a vector of numbers is a typed array");
+static_assert(!msg::is_list_v<vector<vector<string>>>, "lists do not nest");
+static_assert(!msg::is_list_v<vector<bool>>);
+static_assert(msg::contains_list_v<tuple<int, vector<string>>>);
+
+}  // namespace
+
+SCENARIO("Lists of strings, tuples and arrays are encoded as one list value") {
+    GIVEN("an empty list of strings") {
+        const vector<string> empty;
+        THEN("it is the list code and a zero count") {
+            REQUIRE(encodedParameter(empty) == listBytes(0, {}));
+            REQUIRE(listRoundTrip(empty).empty());
+        }
+    }
+    GIVEN("a list with one element, then several of different lengths") {
+        const vector<string> one{"alpha"};
+        const vector<string> several{"", "beta", string(300, 'g'), string(70000, 'd')};
+        THEN("elements keep their order and their own string header") {
+            REQUIRE(encodedParameter(one) == listBytes(1, {wireString("alpha")}));
+            REQUIRE(listRoundTrip(one) == one);
+            REQUIRE(listRoundTrip(several) == several);
+        }
+        THEN("the list is one parameter, not one per element") {
+            msg::FunctionReturn<>                        message;
+            websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+            message.encodeParameter(several, frame);
+            REQUIRE(message.getParametersCount() == 1);
+        }
+    }
+    GIVEN("a list of records mixing strings, numbers, booleans and a Uint8Array") {
+        using Record = tuple<string, double, bool, vector<uint8_t>>;
+        const vector<Record> entries{{"a.txt", 12.5, true, {1, 2, 3}}, {"b", 0, false, {}}, {"c", -1, true, vector<uint8_t>(300, 7)}};
+        THEN("every field of every record crosses the wire") {
+            REQUIRE(listRoundTrip(entries) == entries);
+        }
+    }
+    GIVEN("a list of typed arrays and a list of bitsets") {
+        const vector<vector<uint8_t>> chunks{{1}, vector<uint8_t>(500, 9), {}};
+        const vector<bitset<9>>       bits{bitset<9>{0x181}, bitset<9>{}};
+        THEN("each is an element of its list") {
+            REQUIRE(listRoundTrip(chunks) == chunks);
+            REQUIRE(listRoundTrip(bits) == bits);
+        }
+    }
+    GIVEN("a tuple that holds a list, as a page of results with its cursor does") {
+        const tuple<vector<string>, string> page{{"x", "y"}, "next"};
+        THEN("the list is nested in the tuple, not in a list") {
+            REQUIRE(listRoundTrip(page) == page);
+        }
+    }
+    GIVEN("a list sent by JavaScript as a plain array, hence a tuple") {
+        vector<byte> tupleBytes{byte{static_cast<uint8_t>(msg::CodedType::tuple)}, byte{2}};
+        for (const auto& element : {wireString("one"), wireString("two")})
+            tupleBytes.insert(tupleBytes.end(), element.begin(), element.end());
+        THEN("it decodes into a vector of the same elements") {
+            REQUIRE(decodedParameter<vector<string>>(tupleBytes) == vector<string>{"one", "two"});
+        }
+        THEN("a tuple of other elements is still refused") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(vector<byte>{byte{static_cast<uint8_t>(msg::CodedType::tuple)}, byte{1}, wireNumber(1)[0], wireNumber(1)[1]}),
+                              runtime_error);
+        }
+    }
+    GIVEN("lists that are heterogeneous, truncated or inconsistent") {
+        THEN("an element of another type than the first is refused") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(listBytes(2, {wireString("a"), wireNumber(1)})), runtime_error);
+            REQUIRE_THROWS_AS((decodedParameter<vector<tuple<string, int>>>(listBytes(2, {encodedParameter(tuple<string, int>{"a", 1}), wireString("b")}))),
+                              runtime_error);
+        }
+        THEN("a tuple of another arity than the first is refused") {
+            REQUIRE_THROWS_AS((decodedParameter<vector<tuple<string, int>>>(
+                                   listBytes(2, {encodedParameter(tuple<string, int>{"a", 1}), encodedParameter(tuple<string>{"b"})}))),
+                              runtime_error);
+        }
+        THEN("a list or an exception inside a list is refused") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(listBytes(1, {listBytes(0, {})})), runtime_error);
+            const vector<byte> exception{byte{static_cast<uint8_t>(msg::CodedType::exception)}, byte{1}, byte{0}, byte{'x'}};
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(listBytes(1, {exception})), runtime_error);
+        }
+        THEN("a count larger than the bytes that follow is refused without allocating for it") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(listBytes(0xffffffffu, {wireString("a")})), runtime_error);
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(listBytes(3, {wireString("a"), wireString("b")})), runtime_error);
+        }
+        THEN("a header shorter than five bytes, or an element cut short, is refused") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(vector<byte>{byte{static_cast<uint8_t>(msg::CodedType::list)}, byte{1}}), runtime_error);
+            auto cut = listBytes(1, {wireString("abcdef")});
+            cut.pop_back();
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(cut), runtime_error);
+        }
+        THEN("a list decoded into another kind of destination is refused") {
+            REQUIRE_THROWS_AS(decodedParameter<string>(listBytes(0, {})), runtime_error);
+            REQUIRE_THROWS_AS(decodedParameter<vector<int>>(listBytes(0, {})), runtime_error);
+            REQUIRE_THROWS_AS(decodedParameter<vector<string>>(encodedParameter(vector<uint8_t>{1})), runtime_error);
+        }
+    }
+    GIVEN("elements whose values decode into the destination but whose wire shapes differ") {
+        const auto boolTuple   = encodedParameter(tuple<bool>{true});
+        const auto numberTuple = encodedParameter(tuple<double>{1});
+        THEN("a list of [true] and [1] is refused although a number decodes as a bool") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<tuple<bool>>>(listBytes(2, {boolTuple, numberTuple})), runtime_error);
+        }
+        THEN("the same holds for a plain JavaScript array, which arrives as a tuple") {
+            vector<byte> asTuple{byte{static_cast<uint8_t>(msg::CodedType::tuple)}, byte{2}};
+            for (const auto* element : {&boolTuple, &numberTuple})
+                asTuple.insert(asTuple.end(), element->begin(), element->end());
+            REQUIRE_THROWS_AS(decodedParameter<vector<tuple<bool>>>(asTuple), runtime_error);
+        }
+        THEN("true and false are one shape") {
+            REQUIRE(decodedParameter<vector<tuple<bool>>>(listBytes(2, {boolTuple, encodedParameter(tuple<bool>{false})})).size() == 2);
+        }
+        THEN("different fields at the same position are refused, equal shapes with different string headers are accepted") {
+            REQUIRE_THROWS_AS((decodedParameter<vector<tuple<string, double>>>(
+                                   listBytes(2, {encodedParameter(tuple<string, double>{"a", 1}), encodedParameter(tuple<double, string>{2, "b"})}))),
+                              runtime_error);
+            const vector<tuple<string, double>> mixed{{"a", 1}, {string(300, 'b'), 2}, {string(70000, 'c'), 3}};
+            REQUIRE(listRoundTrip(mixed) == mixed);
+        }
+        THEN("the short and the regular Uint8Array are one shape, other element types are not") {
+            const vector<vector<uint8_t>> bytes{vector<uint8_t>(3, 1), vector<uint8_t>(300, 2)};
+            REQUIRE(listRoundTrip(bytes) == bytes);
+            REQUIRE_THROWS_AS(decodedParameter<vector<vector<uint8_t>>>(listBytes(2, {encodedParameter(vector<uint8_t>{1}), encodedParameter(vector<int8_t>{1})})),
+                              runtime_error);
+        }
+    }
+    GIVEN("tuples nested far deeper than any application type") {
+        // A list whose first element is 100000 tuples of one field each: 2 bytes of header per level.
+        vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::list)}, byte{1}, byte{0}, byte{0}, byte{0}};
+        for (int level = 0; level < 100000; ++level) {
+            bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::tuple)});
+            bytes.push_back(byte{1});
+        }
+        bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::booleanTrue)});
+        THEN("the shape check refuses them before the stack is at risk") {
+            REQUIRE_THROWS_AS(decodedParameter<vector<tuple<bool>>>(bytes), runtime_error);
+        }
+    }
+    GIVEN("tuples nested exactly at and just past the shared limit of 32 levels") {
+        const auto nested = [](int levels) {
+            vector<byte> bytes{byte{static_cast<uint8_t>(msg::CodedType::list)}, byte{1}, byte{0}, byte{0}, byte{0}};
+            for (int level = 0; level < levels; ++level) {
+                bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::tuple)});
+                bytes.push_back(byte{1});
+            }
+            bytes.push_back(byte{static_cast<uint8_t>(msg::CodedType::booleanTrue)});
+            return bytes;
+        };
+        // The destination only has to be as deep as the wire value for decoding to reach the check: a 33-level destination
+        // type is refused at compile time by the encoder, so the wire is built by hand.
+        THEN("32 levels pass the shape check and 33 are refused") {
+            using Level32 = tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<tuple<bool>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>;
+            static_assert(msg::tuple_depth_v<Level32> == 32);
+            REQUIRE_NOTHROW(decodedParameter<vector<Level32>>(nested(32)));
+            REQUIRE_THROWS_AS(decodedParameter<vector<Level32>>(nested(33)), runtime_error);
+        }
+    }
+}
+
+// A scenario of its own: each message and frame holds its policy's buffers, and one function with all of them exceeds
+// the 64 KiB of stack that the MSVC analysis allows (C6262, #512).
+SCENARIO("Lists respect the bounds of the buffers policy") {
+    GIVEN("a policy whose messages cannot exceed 1 KiB") {
+        using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024>;
+        msg::FunctionReturn<SmallPolicy>             message;
+        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+        THEN("a list that does not fit throws length_error") {
+            REQUIRE_THROWS_AS(message.encodeParameter(vector<string>(200, string(10, 'x')), frame), length_error);
+        }
+    }
+    GIVEN("a policy whose header buffer is small") {
+        using TinyPolicy = http::CustomBuffersPolicy<8192, 8192, 64>;
+        msg::FunctionReturn<TinyPolicy>              message;
+        websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+        THEN("a list with more element headers than the buffer holds overflows explicitly") {
+            REQUIRE_THROWS_AS(message.encodeParameter(vector<string>(100, "x"), frame), http::BufferOverflowException);
+        }
+    }
+}
+
+SCENARIO("A typed array that exactly fills the message size is encoded") {
+    using ExactPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 32>;
+    msg::FunctionReturn<ExactPolicy>             message;
+    websocket::Frame<networking::NetworkingMock> frame{span(reinterpret_cast<const byte*>(message.header().data()), message.header().size())};
+    THEN("its header is counted once") {
+        const vector<uint8_t> bytes(22, 1);  // 8 header bytes + 2 + 22 = 32
+        REQUIRE_NOTHROW(message.encodeParameter(bytes, frame));
+        REQUIRE(message.getPayloadSize() == 24);
+    }
+    THEN("one more byte is refused") {
+        REQUIRE_THROWS_AS(message.encodeParameter(vector<uint8_t>(23, 1), frame), length_error);
+    }
+}
+
+SCENARIO("Exceptions carry a code and a message") {
+    auto decodeBoth = [](const vector<byte>& bytes) {
+        string           code, message;
+        span<const byte> payload{bytes};
+        msg::FunctionReturn<>::decodeException(code, message, payload);
+        REQUIRE(payload.empty());
+        return pair<string, string>{code, message};
+    };
+    GIVEN("an application error") {
+        const BridgeError error{"quota:exceeded", "no space left"};
+        THEN("the wire carries the code, then the message") {
+            const auto bytes = encodedParameter(error);
+            REQUIRE(bytes.size() == 2 + 14 + 2 + 13);
+            REQUIRE(bytes[0] == byte{static_cast<uint8_t>(msg::CodedType::exception)});
+            REQUIRE(bytes[1] == byte{14});
+            REQUIRE(decodeBoth(bytes) == pair<string, string>{"quota:exceeded", "no space left"});
+        }
+        THEN("decoded as a string, the exception is its message") {
+            REQUIRE(roundTrip(error) == "no space left");
+        }
+    }
+    GIVEN("an ordinary exception") {
+        THEN("it is sent with the generic code") {
+            REQUIRE(decodeBoth(encodedParameter(runtime_error{"boom"})) == pair<string, string>{string(bridge_code::generic), "boom"});
+            REQUIRE(decodeBoth(encodedParameter(out_of_range{"gone"})).first == bridge_code::generic);
+        }
+    }
+    GIVEN("an error of the bridge") {
+        THEN("its reserved code crosses the wire") {
+            REQUIRE(decodeBoth(encodedParameter(detail::makeBridgeError(bridge_code::cancelled, "stopped"))).first == bridge_code::cancelled);
+        }
+    }
+    GIVEN("an exception message longer than 65535 bytes") {
+        THEN("the code is kept and the message is cut before a character that does not fit") {
+            const BridgeError error{"big", string(65534, 'x') + "\xc3\xa9" + string(10, 'y')};
+            REQUIRE(decodeBoth(encodedParameter(error)) == pair<string, string>{"big", string(65534, 'x')});
+        }
+    }
+    GIVEN("a truncated exception") {
+        auto bytes = encodedParameter(BridgeError{"code", "message"});
+        THEN("every cut is refused") {
+            for (size_t keep = 0; keep < bytes.size(); ++keep) {
+                const vector<byte> cut(bytes.begin(), bytes.begin() + static_cast<ptrdiff_t>(keep));
+                string             code, message;
+                span<const byte>   payload{cut};
+                REQUIRE_THROWS_AS(msg::FunctionReturn<>::decodeException(code, message, payload), runtime_error);
+            }
+        }
+    }
+    GIVEN("a code that is ill-formed or reserved") {
+        THEN("an application cannot build the error") {
+            REQUIRE_THROWS_AS(BridgeError("", "m"), invalid_argument);
+            REQUIRE_THROWS_AS(BridgeError(string(65, 'a'), "m"), invalid_argument);
+            REQUIRE_THROWS_AS(BridgeError("with space", "m"), invalid_argument);
+            REQUIRE_THROWS_AS(BridgeError("webfront.cancelled", "m"), invalid_argument);
+            REQUIRE_NOTHROW(BridgeError(string(64, 'a'), "m"));
+        }
+        THEN("a peer's ill-formed code becomes the generic one") {
+            REQUIRE(detail::makeBridgeError("bad code", "m").code() == bridge_code::generic);
         }
     }
 }

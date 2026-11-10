@@ -14,6 +14,7 @@
 
 #include <array>
 #include <atomic>
+#include <future>
 #include <chrono>
 #include <span>
 #include <stdexcept>
@@ -87,6 +88,11 @@ std::string readHeaders(Stdnet::Socket& socket, std::chrono::milliseconds timeou
         received.append(buffer.data(), size);
     }
     return received;
+}
+
+webfront::Task cleanupReleasesHandler(http::Server<Stdnet, fs::DefaultFS>& server, std::shared_ptr<void> guard) {
+    static_cast<void>(guard);  // released when the cancelled task is destroyed, on the server context
+    co_await server.resumeAfter(1h);
 }
 
 const std::string upgradeRequest =
@@ -293,4 +299,40 @@ SCENARIO("A rejected WebSocket Origin never reaches the server upgrade callback"
     }
     serverThread.request_stop();
     serverThread.join();
+}
+
+SCENARIO("Draining pumps cancelled tasks while a route handler waits for their cleanup") {
+    const auto                          port = freePort();
+    http::Server<Stdnet, fs::DefaultFS> server("127.0.0.1", port);
+    std::promise<void>                  released, entered;
+    std::atomic<bool>                   done{false};
+    const auto                          release = [&] {
+        if (!done.exchange(true)) released.set_value();
+    };
+    auto route = server.addRoute("/webfront/services/wait/", [&, wait = released.get_future().share()](const http::RouteRequest&) {
+        entered.set_value();
+        wait.wait();
+        return http::RouteReply{};
+    });
+    {
+        std::shared_ptr<void> guard(nullptr, [&](void*) { release(); });
+        static_cast<void>(server.startTask(cleanupReleasesHandler(server, std::move(guard))));
+    }
+    std::thread       serverThread([&server] { server.run(); });
+    Stdnet::IoContext clientContext;
+    Stdnet::Socket    client(clientContext);
+    connect(client, port);
+    const std::string request = "GET /webfront/services/wait/x HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    client.send(std::as_bytes(std::span(request)));
+    const bool handlerEntered = entered.get_future().wait_for(5s) == std::future_status::ready;
+    server.stop();
+    serverThread.join();  // before any assertion: a joinable thread would terminate the process
+    REQUIRE(handlerEntered);
+    WHEN("the server is drained") {
+        auto drained = std::async(std::launch::async, [&server] { server.drain(); });
+        const bool finished = drained.wait_for(5s) == std::future_status::ready;
+        release();  // never leave the test hanging if the drain waited for the cleanup it was to run
+        drained.wait();
+        THEN("the drain ran the cleanup which released the handler") { REQUIRE(finished); }
+    }
 }

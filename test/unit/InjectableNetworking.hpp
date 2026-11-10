@@ -6,6 +6,7 @@
 #include <webfront/networking/NetworkingMock.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -14,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -100,13 +102,29 @@ public:
             error = writeError;
             return 0;
         }
+        if (discarding) {
+            discarded += input.size();
+            return input.size();
+        }
         const auto* first = static_cast<const std::byte*>(input.data());
         written.insert(written.end(), first, first + input.size());
         return input.size();
     }
 
     void close() {}
-    void shutdown(shutdown_type) {}
+    void shutdown(shutdown_type) { ++shutdowns; }
+
+    /// The peer address of the next accepted connection, as the server reads it for trustLoopbackClients.
+    static inline std::atomic<bool> peerIsLoopback{false};
+    struct PeerAddress {
+        bool loopback;
+        bool is_loopback() const { return loopback; }
+    };
+    struct PeerEndpoint {
+        bool        loopback;
+        PeerAddress address() const { return {loopback}; }
+    };
+    PeerEndpoint remote_endpoint(std::error_code&) const { return {peerIsLoopback.load()}; }
 
     /// The read the WebSocket is waiting for: the test completes it, or the task is stopped.
     static ManualSender read(networking::buffers::MutableBuffer buffer) {
@@ -139,7 +157,26 @@ public:
         deferring  = false;
         deferred.clear();
         readCalls  = 0;
+        shutdowns  = 0;
+        discarding = false;
+        discarded  = 0;
     }
+
+    /// How many times the server shut a socket down: the end of a connection it answered.
+    static int shutdownCount() { return shutdowns; }
+
+    /// Everything the server wrote.
+    static std::string writtenText() {
+        std::lock_guard lock(mutex);
+        return {reinterpret_cast<const char*>(written.data()), written.size()};
+    }
+
+    /// Counts the written bytes instead of keeping them, to send more than the test may hold.
+    static void discardWrites() {
+        std::lock_guard lock(mutex);
+        discarding = true;
+    }
+    static std::uint64_t discardedBytes() { return discarded; }
 
     static int readCallCount() { return readCalls; }
 
@@ -216,6 +253,9 @@ private:
     inline static bool                               deferring = false;
     inline static std::vector<std::function<void()>> deferred;
     inline static int                                readCalls  = 0;
+    inline static std::atomic<int>                   shutdowns{0};
+    inline static bool                               discarding = false;
+    inline static std::atomic<std::uint64_t>         discarded{0};
 };
 
 class InjectableNetworking : public networking::NetworkingMock {

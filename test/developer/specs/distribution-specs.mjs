@@ -1,6 +1,7 @@
 // Specs of the developer distribution: the starters, the Pages staging and the pinned bootstrap header.
 import {tar} from '../../../js/developer/tools/archive.mjs';
-import {bootstrapHeader, versionPath, distributionFiles} from '../../../js/developer/tools/distribution.mjs';
+import {bootstrapHeader, versionPath, distributionFiles, customDomain} from '../../../js/developer/tools/distribution.mjs';
+import {pinOrigin, precedes} from '../../../js/developer/scripts/pin.mjs';
 import stageSite from '../../../js/developer/scripts/site.mjs';
 import {compress} from '../../../js/developer/environment/embed.mjs';
 import {createStarter} from '../../../js/developer/environment/starter.mjs';
@@ -75,6 +76,7 @@ describe('The developer distribution', () => {
 
     it('Pages staging retains older versions and refuses different bytes under an existing version', async () => {
         const project = memoryProject();
+        await project.write('js/developer/tools/distribution.json', JSON.stringify({version: '0.1.0', baseUrl: 'https://owner.github.io/WebFront/'}));
         const environment = encode('environment');
         const starterBytes = encode('starter');
         const write = async version => {
@@ -93,6 +95,7 @@ describe('The developer distribution', () => {
         await write('0.2.0');
         await stage();
         expect(await project.readText('site/developer/0.1.0/environment.tgz')).toBe('environment');
+        expect(project.storage.has('site/CNAME')).toBe(false);
         expect(await project.readText('site/index.html')).toMatch(/developer\/0.2.0\/life-starter.tgz/);
         expect(await project.readText('site/developer/0.2.0/life-starter.tgz')).toBe('starter');
         await write('0.3.0');
@@ -109,6 +112,51 @@ describe('The developer distribution', () => {
         expect(await project.readText('site/developer/0.2.0/DeveloperReleaseData.hpp')).toMatch(/namespace webfront/);
         await project.write('distribution/environment.tgz', 'corrupt');
         await rejects(stage(), /checksum mismatch/);
+    });
+
+    it('Pages staging writes the CNAME file of a custom domain on every publication', async () => {
+        const project = memoryProject();
+        await project.write('js/developer/tools/distribution.json', JSON.stringify({version: '0.1.0', baseUrl: 'https://dist.example.test/'}));
+        const environment = encode('environment');
+        const starterBytes = encode('starter');
+        const manifest = {version: '0.1.0', integrity: await integrity(environment), starters: {life: {archive: 'life-starter.tgz', integrity: await integrity(starterBytes)}}};
+        await project.write('distribution/environment.tgz', environment);
+        await project.write('distribution/life-starter.tgz', starterBytes);
+        await project.write('distribution/provision.json', JSON.stringify(manifest));
+        await project.write('distribution/DeveloperReleaseData.hpp', bootstrapHeader('0.1.0', 'https://dist.example.test/', manifest.integrity));
+        const stage = () => stageSite({args: ['distribution', 'site'], project, console: {log() {}}});
+        await stage();
+        expect(await project.readText('site/CNAME')).toBe('dist.example.test\n');
+        // A publication from a checkout that lost the file restores it.
+        project.storage.delete('site/CNAME');
+        await stage();
+        expect(await project.readText('site/CNAME')).toBe('dist.example.test\n');
+    });
+
+    it('Pages staging refuses to keep the CNAME of a former custom domain when the base URL returns to github.io', async () => {
+        const project = memoryProject();
+        await project.write('js/developer/tools/distribution.json', JSON.stringify({version: '0.1.0', baseUrl: 'https://owner.github.io/WebFront/'}));
+        const environment = encode('environment');
+        const starterBytes = encode('starter');
+        const manifest = {version: '0.1.0', integrity: await integrity(environment), starters: {life: {archive: 'life-starter.tgz', integrity: await integrity(starterBytes)}}};
+        await project.write('distribution/environment.tgz', environment);
+        await project.write('distribution/life-starter.tgz', starterBytes);
+        await project.write('distribution/provision.json', JSON.stringify(manifest));
+        await project.write('distribution/DeveloperReleaseData.hpp', bootstrapHeader('0.1.0', 'https://owner.github.io/WebFront/', manifest.integrity));
+        await project.write('site/CNAME', 'dist.example.test\n');
+        const stage = () => stageSite({args: ['distribution', 'site'], project, console: {log() {}}});
+        await rejects(stage(), /still has a CNAME file/);
+        project.storage.delete('site/CNAME');
+        await stage();
+        expect(project.storage.has('site/CNAME')).toBe(false);
+    });
+
+    it('a custom domain is the root of the site and a github.io address has none', () => {
+        expect(customDomain('https://dist.example.test')).toBe('dist.example.test');
+        expect(customDomain('https://owner.github.io/WebFront/')).toBe('');
+        throws(() => customDomain('https://dist.example.test/developer/'));
+        throws(() => customDomain('https://dist.example.test:8443/'));
+        throws(() => customDomain('http://dist.example.test/'));
     });
 
     it('bootstrap configuration is pinned and rejects unsafe version/base inputs', async () => {
@@ -131,5 +179,73 @@ describe('The developer distribution', () => {
             else { await rejects(create(), /provider name/); expect(writes).toBe(0); }
         }
         throws(() => distributionFiles({starters: {life: {archive: '../life-starter.tgz'}}}));
+    });
+
+    describe('the origin of a pinned URL (ADR-021)', () => {
+        const base = 'https://dist.webfront.fr/';
+        const previous = 'https://ambroise-leclerc.github.io/WebFront/';
+        const onBase = 'https://dist.webfront.fr/developer/0.6.5/environment.tgz';
+        const onPrevious = version => `https://ambroise-leclerc.github.io/WebFront/developer/${version}/environment.tgz`;
+
+        it('accepts a pin on the origin of baseUrl without a waiver', () => {
+            expect(pinOrigin(onBase, base, undefined, '0.6.5')).toEqual({waiver: false});
+        });
+
+        it('refuses a pin off the origin of baseUrl when no migration is declared', () => {
+            throws(() => pinOrigin(onPrevious('0.6.4'), base, undefined, '0.6.4'), /declares no previousBase/);
+        });
+
+        it('tolerates a pin before baseSince under the declared previousBase, with a warning that names the waiver', () => {
+            const result = pinOrigin(onPrevious('0.6.4'), base, previous, '0.6.4', '0.6.5');
+            expect(result.waiver).toBe(true);
+            expect(result.warning).toMatch(/migration waiver/);
+        });
+
+        it('refuses the waiver for the first version published under the new base and for any later one', () => {
+            for (const version of ['0.6.5', '0.6.6', '0.7.0', '1.0.0'])
+                throws(() => pinOrigin(onPrevious(version), base, previous, version, '0.6.5'), /covers only versions before 0.6.5/);
+        });
+
+        it('orders versions numerically, not as text, and a prerelease before its release', () => {
+            expect(precedes('0.6.4', '0.6.10')).toBe(true);
+            expect(precedes('0.6.10', '0.6.4')).toBe(false);
+            expect(precedes('0.6.5-rc.1', '0.6.5')).toBe(true);
+            expect(precedes('0.6.5', '0.6.5')).toBe(false);
+            expect(precedes('0.6.5', '0.6.5-rc.1')).toBe(false);
+            throws(() => precedes('0.6', '0.6.5'), /Invalid version/);
+        });
+
+        it('orders prereleases by SemVer: numeric identifiers as numbers, below text, and a prefix before its extension', () => {
+            // The SemVer 2.0.0 example: 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta < 1.0.0-beta.2 < 1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0
+            const ordered = ['1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-alpha.beta', '1.0.0-beta', '1.0.0-beta.2', '1.0.0-beta.11', '1.0.0-rc.1', '1.0.0'];
+            for (let low = 0; low < ordered.length; low++)
+                for (let high = 0; high < ordered.length; high++)
+                    expect(precedes(ordered[low], ordered[high])).withContext(`${ordered[low]} before ${ordered[high]}`).toBe(low < high);
+            expect(precedes('0.7.0-rc.2', '0.7.0-rc.10')).toBe(true);
+            expect(precedes('0.7.0-rc.10', '0.7.0-rc.2')).toBe(false);
+        });
+
+        it('does not tolerate a pin past a prerelease baseSince through the order of its identifiers', () => {
+            const version = '0.7.0-rc.10';
+            throws(() => pinOrigin(onPrevious(version), base, previous, version, '0.7.0-rc.2'), /covers only versions before 0.7.0-rc.2/);
+            expect(pinOrigin(onPrevious('0.7.0-rc.2'), base, previous, '0.7.0-rc.2', '0.7.0-rc.10').waiver).toBe(true);
+        });
+
+        it('requires baseSince with previousBase, and previousBase with baseSince', () => {
+            throws(() => pinOrigin(onPrevious('0.6.4'), base, previous, '0.6.4'), /requires baseSince/);
+            throws(() => pinOrigin(onBase, base, undefined, '0.6.5', '0.6.5'), /only meaningful with previousBase/);
+        });
+
+        it('refuses a pin outside both the base and the declared previousBase', () => {
+            throws(() => pinOrigin('https://elsewhere.example/developer/0.6.4/environment.tgz', base, previous, '0.6.4', '0.6.5'), /neither/);
+        });
+
+        it('refuses a stale waiver once the header pins a version published under the new base', () => {
+            throws(() => pinOrigin(onBase, base, previous, '0.6.5', '0.6.5'), /Stale migration waiver/);
+        });
+
+        it('refuses a previousBase on the origin of baseUrl', () => {
+            throws(() => pinOrigin(onBase, base, base, '0.6.5', '0.6.5'), /another origin/);
+        });
     });
 });

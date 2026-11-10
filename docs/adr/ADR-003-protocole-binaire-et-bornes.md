@@ -18,13 +18,18 @@
 | 1.11 | 2026-10-27 | Acceptée | Ambroise Leclerc | Validation par delta, budget cumulé des noms, récupération et contrat des événements précisés (#380). | — |
 | 1.12 | 2026-10-27 | Acceptée | Ambroise Leclerc | Identifiant de lot non nul, plafond d’opérations, codec canonique et nettoyage limité aux sous-arbres concernés (#380). | — |
 | 1.13 | 2026-10-27 | Acceptée | Ambroise Leclerc | Rejet de PROPERTY value sur output pour préserver les identifiants de ses enfants (#380). | — |
-| 1.14 | 2026-10-27 | Proposée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [PR #394](https://github.com/ambroise-leclerc/WebFront/pull/394) |
+| 1.14 | 2026-10-27 | Acceptée | Ambroise Leclerc | Notifications de document et lectures groupées par les appels existants (#381). | [81db4af](https://github.com/ambroise-leclerc/WebFront/commit/81db4af6cb90a3c528496df10891b3ecf8664fd2) |
+| 1.15 | 2026-11-04 | Acceptée | Ambroise Leclerc | La poignée de main peut porter, après ses deux octets, le secret de lancement d'une vue intégrée (#453, ADR-020). | [29ba6db](https://github.com/ambroise-leclerc/WebFront/commit/29ba6dbab77356b3fbeee22d7e012ec929b819af) |
+| 1.16 | 2026-11-05 | Acceptée | Ambroise Leclerc | Chaînes de 65 536 octets et plus : code `longString` à longueur sur 32 bits ; seule borne, la taille de message de la politique (#456, ADR-020). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 1.17 | 2026-11-05 | Acceptée | Ambroise Leclerc | Listes homogènes de chaînes, de tuples, de tableaux typés et de bitsets : code `list` à nombre d'éléments sur 32 bits (#457, ADR-020). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 1.18 | 2026-11-05 | Acceptée | Ambroise Leclerc | Erreurs typées : le code `exception` porte un code d'erreur avant son message (#458, ADR-020, ADR-004). | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0) |
+| 1.19 | 2026-11-05 | Acceptée | Ambroise Leclerc | Les tuples d'un élément de liste s'imbriquent sur 32 niveaux au plus, dans les deux codecs, comptés à la descente ; une liste plus profonde, auparavant acceptée, est refusée (#457, ADR-020). | [c817501](https://github.com/ambroise-leclerc/WebFront/commit/c81750191ff0d1e1e1e8f4b42ee5ef49d0d69d64) |
 
 ## État et chronologie
 
-**Acceptée jusqu’à la version 1.13.** L’extension 1.14 est **proposée** dans la PR #394, en attente d’intégration.
+**Acceptée jusqu’à la version 1.19.**
 Décision initiale : **2022-02-06** (version 1.0).
-Dernière révision : **2026-10-27** (version 1.14).
+Dernière révision : **2026-11-05** (version 1.19).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -40,12 +45,53 @@ Que soit préservé le protocole binaire de `weblink/Messages.hpp` et de la sour
 
 Note de renommage (0.4) : la source JavaScript est désormais `js/core/WebFront.js` ; ce déplacement ne modifie pas le protocole décrit ici.
 Les messages d’appel et de retour portent des identifiants de corrélation sur 16 bits.
-Les types pris en charge sont les scalaires, chaînes, tuples, tableaux numériques typés et `std::bitset<N>` ;
-les objets JavaScript arbitraires et objets DOM ne traversent pas automatiquement le pont.
+Les types pris en charge sont les scalaires, chaînes, tuples, tableaux numériques typés, `std::bitset<N>` et listes
+(ci-dessous) ; les objets JavaScript arbitraires et objets DOM ne traversent pas automatiquement le pont.
 
-La longueur des chaînes est bornée à 65 535 octets : C++ lève `std::length_error` à l’encodage et
-JavaScript produit une `RangeError`. Un résultat de callback trop long rejette la Promise.
-Les tableaux utilisent leur encodage propre et ne sont pas soumis à la limite des chaînes.
+Une **liste** (code `list`, 20) est le code, un nombre d'éléments sur 32 bits, puis ces éléments encodés chacun avec
+son code habituel. C++ : `std::vector<E>` où `E` est une chaîne, un `std::tuple`, un tableau typé (`std::vector` ou
+`std::array` de nombres) ou un `std::bitset` ; un `std::vector` de nombres reste un tableau typé et `std::vector<bool>`
+n'est pas pris en charge. JavaScript : un tableau de chaînes, de tableaux typés ou de tuples de même forme, que `webFront.list(éléments)`
+marque pour l'envoi (une liste de nombres ou de booléens est refusée : les nombres vont en tableau typé) ; une liste reçue arrive comme un `Array`. Un tableau JavaScript ordinaire reste un tuple
+(éléments de types quelconques, 255 au plus) ; une destination `std::vector` accepte aussi un tuple, ce qui permet
+d'envoyer un court tableau sans le marquer. Les éléments d'une liste ont tous la **même forme** : même famille de
+chaîne (`smallString`, `string` et `longString` sont une forme), même type de tableau typé (le `Uint8Array` court et
+le régulier sont une forme), même arité et mêmes formes de champs pour les tuples. Le décodeur C++ le vérifie en
+décodant chaque élément dans le type de la destination ; le décodeur et l'encodeur JavaScript comparent les formes. Les
+**listes ne s'imbriquent pas**, ni directement ni dans un tuple élément : un `std::vector<std::vector<std::string>>`
+est refusé à la compilation, une telle liste reçue ou envoyée par JavaScript est rejetée ; une liste dans un tuple de
+premier niveau (une page de résultats et son curseur) est permise. Un élément ne peut pas être une exception. Les tuples s'imbriquent sur **32 niveaux au plus** dans un élément de liste, dans
+les deux codecs : le décodeur C++ et le codec JavaScript refusent le 33e niveau, l'encodeur C++ le refuse à la compilation
+(`maxListTupleDepth`) et l'encodeur JavaScript par une `TypeError` ; la borne protège la pile, que les décodeurs récursifs
+parcourent.
+Bornes : la taille de message ; un nombre d'éléments supérieur au nombre d'octets restants est rejeté avant toute
+allocation ; une liste tronquée ou hétérogène est rejetée. L'encodeur C++ place l'en-tête de chaque élément dans le
+tampon de la politique (`functionCallBufferSize`, 32 Kio par défaut, soit de 10 000 à 16 000 chaînes) : une liste plus
+longue lève `http::BufferOverflowException`, que les services pagineront ou dont ils agrandiront la politique.
+
+Une chaîne de 255 octets au plus est un `smallString` (longueur sur 8 bits), de 256 à 65 535 octets un `string`
+(16 bits), de 65 536 octets et plus un `longString` (code 19, longueur sur 32 bits) que l'encodeur choisit seul ;
+les deux premiers codes sont inchangés. La longueur compte des octets UTF-8, jamais des caractères, et un
+caractère multi-octets à cheval sur 65 535 n'est jamais coupé. Les messages d'exception (code `exception`) gardent
+leur longueur sur 16 bits : un message plus long est coupé avant le premier caractère qui ne tient pas entier.
+La seule borne des chaînes est la taille de message de la politique de tampons (`maxMessageSize`, 64 Mio par défaut,
+en-tête de 8 octets compris) : au-delà, C++ lève `std::length_error` à l'encodage sans rien mettre en file
+(le résultat d'un callback rejette alors la Promise), JavaScript lève une `RangeError` avant d'envoyer
+(`maxMessageBytes` du pont, 64 Mio par défaut, à aligner sur une politique qui change la borne), et le récepteur ferme
+la connexion pour un message plus grand que sa propre limite. Un `longString` tronqué ou dont la longueur dépasse les
+octets présents est rejeté au décodage des deux côtés. Les tableaux ont leur propre encodage (longueur sur 32 bits).
+
+Une **exception** (code `exception`, 6) est le code, un octet pour la taille du code d'erreur, ce code, deux octets
+pour la taille du message, puis le message (UTF-8, 65 535 octets au plus, coupé avant le premier caractère qui ne tient
+pas entier). Un code d'erreur compte 1 à 64 caractères parmi les lettres, chiffres et `. _ : -` ; il est choisi par
+l'émetteur : `webfront::BridgeError(code, message)` en C++, la propriété `code` d'un `Error` en JavaScript. Les codes qui
+commencent par `webfront.` sont **réservés** à WebFront (`webfront.error` générique, `webfront.notFound` fonction
+absente, `webfront.malformed` argument, résultat ou message mal formé, `webfront.disconnected` connexion fermée,
+`webfront.cancelled` travail arrêté) : le constructeur de `BridgeError` les refuse et le pont JavaScript n'envoie un code
+réservé que pour une erreur qu'il a lui-même produite ou reçue, sinon le code générique. Une exception sans code
+(`std::exception`, `Error` sans `code`, code mal formé) porte `webfront.error`. Un code mal formé reçu est remplacé par
+le code générique. Décodée comme une chaîne, une exception est son message. Un rejet reçu devient un `BridgeError`
+(`future::get()`, sender) ou un `Error` portant `code` (Promise). Une exception n'est jamais un élément de liste.
 
 Les bitsets réutilisent les en-têtes unsigned-byte courts ou réguliers : exactement
 `N / 8 + (N % 8 != 0)` octets, avec le bit C++ `i` dans le bit `i % 8` de l’octet
@@ -64,6 +110,17 @@ fragmentés, conserve les fragments incomplets et traite les trames réunies dan
 La politique borne chaque message à 64 MiB par défaut ; que tout dépassement annoncé soit
 refusé dès l’en-tête, fragments compris. Les trames de contrôle ont leur propre plafond de
 125 octets.
+
+## Poignée de main (`handshake`, code 0)
+
+Le message compte deux octets : le code 0 et l'indicateur d'endianness de la page. Il peut être suivi du **secret de
+lancement** d'une vue intégrée (ADR-020, règle 3) : 64 octets ASCII, les caractères hexadécimaux minuscules lus tels
+quels. Sans secret, le message est celui des versions antérieures ; le serveur l'accepte (le pont reste réglé par
+l'`Origin`, ADR-008) et la connexion n'est simplement pas associée à une vue. Le serveur compare le secret en temps
+constant à celui de son lancement ; toute autre longueur ou valeur est ignorée sans fermer la connexion. `WebFront.js` ne
+transmet que 64 caractères hexadécimaux ; il retire la propriété qui le porte de la fenêtre dès son chargement et le garde
+pour les poignées de main de la page. Le serveur n'accepte qu'une poignée de main par connexion (la suivante est ignorée
+et ne modifie pas l'association) et ne copie une preuve que si elle compte exactement 64 octets.
 
 ## Commande DOM (`domBatch`, code 5, version 1)
 
@@ -182,7 +239,7 @@ l'absence de module installé ou une exception DOM résiduelle pendant l'applica
 callback ordinaire `wfDom.rejected(uint32 batchId, string reason)` ; l'application doit l'enregistrer.
 Le motif est limité à 4 096 unités UTF-16 avant encodage. Si l'en-tête est tronqué, l'identifiant vaut zéro.
 Les événements utilisent `wfDom.event(uint32 nodeId, uint32 nameIndex, string value)` et leurs
-Promises sont traitées. Une valeur d’événement dépassant 65 535 octets UTF-8
+Promises sont traitées. Une valeur d’événement dépassant la taille de message
 n’est pas livrée à C++ et n’est pas tronquée ; le rejet d’encodage, de transport ou
 de callback est journalisé dans la console du navigateur. Il n’existe pas de
 notification C++ distincte pour cet échec. `nameIndex` désigne le nom interné à LISTEN. La valeur est celle du nœud

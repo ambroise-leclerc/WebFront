@@ -1,0 +1,27 @@
+# SemVer.cmake orders the versions as SemVer 2.0.0 does, in particular the prereleases that VERSION_LESS ignores.
+cmake_minimum_required(VERSION 3.31)
+include("${CMAKE_CURRENT_LIST_DIR}/SemVer.cmake")
+
+# The SemVer 2.0.0 example, then releases, in increasing order.
+set(ordered 0.6.4 0.6.10 0.7.0-alpha 0.7.0-alpha.1 0.7.0-alpha.beta 0.7.0-beta 0.7.0-beta.2 0.7.0-beta.11 0.7.0-rc.1 0.7.0-rc.2
+    0.7.0-rc.10 0.7.0 0.7.1 1.0.0)
+list(LENGTH ordered count)
+math(EXPR last "${count} - 1")
+foreach(low RANGE ${last})
+    foreach(high RANGE ${last})
+        list(GET ordered ${low} a)
+        list(GET ordered ${high} b)
+        webfront_semver_compare("${a}" "${b}" order)
+        if(low LESS high)
+            set(expected -1)
+        elseif(low GREATER high)
+            set(expected 1)
+        else()
+            set(expected 0)
+        endif()
+        if(NOT order EQUAL expected)
+            message(FATAL_ERROR "${a} against ${b}: got ${order}, expected ${expected}")
+        endif()
+    endforeach()
+endforeach()
+message(STATUS "${count} versions ordered as SemVer 2.0.0 does")

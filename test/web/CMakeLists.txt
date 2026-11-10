@@ -20,6 +20,23 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     target_compile_definitions(frontend_lifecycle PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
     webfront_setup_frontends_for_target(frontend_lifecycle)
     add_dependencies(webtest frontend_lifecycle)
+    add_test(NAME FrontendLifecycleWatchdog COMMAND "${CMAKE_COMMAND}"
+        "-DPROBE=$<TARGET_FILE:frontend_lifecycle>" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleWatchdog.cmake")
+    set_tests_properties(FrontendLifecycleWatchdog PROPERTIES TIMEOUT 10 LABELS fast)
+endif()
+
+# Keep the stage values in the HTML probes synchronized with the C++ enum, including in CEF-off builds.
+add_test(NAME FrontendLifecycleStageValues COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleStageValues.cmake")
+set_tests_properties(FrontendLifecycleStageValues PROPERTIES TIMEOUT 10 LABELS fast)
+
+# Manual validation of the interface-thread executor and the native window (#450) with a real browser, window and native
+# dialog: never built or run by CTest/CI. See docs/validation/native-integration-450.md.
+add_executable(native_integration_manual EXCLUDE_FROM_ALL NativeIntegrationManual.cpp)
+target_link_libraries(native_integration_manual PRIVATE WebFront WebFront_warnings WebFront_options)
+if(TARGET frontend_lifecycle)
+    target_compile_definitions(native_integration_manual PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(native_integration_manual)
 endif()
 
 # The runner passes arguments literally and kills the whole process tree at its deadline (POSIX shell wrapper).
@@ -97,6 +114,22 @@ if(_browser_tests_available AND TARGET webfront-agent)
                 set_tests_properties(${_case} PROPERTIES RESOURCE_LOCK webfront_automation_watchdog)
             endif()
         endforeach()
+        # A consumer application that opted in with enableAutomation (#501), driven by an agent attached from another process.
+        add_executable(automation_consumer AutomationConsumer.cpp)
+        add_dependencies(webtest automation_consumer)
+        target_link_libraries(automation_consumer PRIVATE WebFront WebFront_test_hardening WebFront_options WebFront_warnings)
+        target_compile_definitions(automation_consumer PRIVATE WEBFRONT_DRIVER_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+        webfront_setup_frontends_for_target(automation_consumer)
+        add_test(NAME AutomationConsumerWindow COMMAND ${_agent_prefix} "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/test/tools/AutomationClient.py"
+            --scenario consumer --consumer "$<TARGET_FILE:automation_consumer>"
+            --agent "${_agent_command}" --driver "$<TARGET_FILE:webfront-wf>"
+            --environment "${_fixtures}/environment.tgz" --provision "${_fixtures}/provision.json"
+            --registry "${_registry}" --fixture "${PROJECT_SOURCE_DIR}/test/fixtures/consumer-project"
+            --work "${CMAKE_CURRENT_BINARY_DIR}/automation-consumer")
+        set_tests_properties(AutomationConsumerWindow PROPERTIES FIXTURES_REQUIRED DeveloperFixtures
+            LABELS web-integration TIMEOUT 180)
+        webfront_use_own_profile(AutomationConsumerWindow automation-consumer)
         execute_process(COMMAND "${Python3_EXECUTABLE}" -c
             "import importlib.metadata; assert importlib.metadata.version('mcp') == '2.3.0'"
             RESULT_VARIABLE _sdk_available OUTPUT_QUIET ERROR_QUIET)
@@ -130,10 +163,12 @@ if(_browser_tests_available)
     set(_reason_fail "Jasmine did not pass \\(status: failed\\)")
     set(_reason_empty "${_reason_fail}")
     set(_reason_pending "${_reason_fail}")
+    set(_reason_unicode "${_reason_fail}")
+    set(_reason_report-bounds "${_reason_fail}")
     set(_reason_broken "Jasmine did not pass \\(status: error\\)")
     set(_reason_close "exited without reporting a result")
     set(_reason_hang "timed out after 5 seconds")
-    foreach(mode pass fail empty pending broken close hang)
+    foreach(mode pass fail empty pending broken close hang unicode report-bounds)
         set(limit 30)
         if(mode STREQUAL "hang")
             set(limit 5)
@@ -175,12 +210,23 @@ if(_browser_tests_available)
             set_tests_properties(ConsumerJasmine-${mode} PROPERTIES PASS_REGULAR_EXPRESSION "${_reason_${mode}}")
         endif()
     endforeach()
+    # Exercise the short timeout/error paths without a real stalled native operation (#504).
+    set(_async_diagnostics "${CMAKE_CURRENT_SOURCE_DIR}/suite/specs/async-diagnostics.js")
+    webfront_add_jasmine_test(NAME ConsumerJasmine-async-diagnostics TARGET jasmine_consumer
+        FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
+        SPECS "${_async_diagnostics}" "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/async-diagnostics.spec.js"
+        ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
     # Window capture (issue #468) is implemented by every embedded frontend.
     set(WEBFRONT_CAPTURE_FRONTENDS WebKitGTK WKWebView WebView2 CEF)
     if(WEBFRONT_WEBTEST_FRONTEND IN_LIST WEBFRONT_CAPTURE_FRONTENDS)
         webfront_add_jasmine_test(NAME ConsumerJasmine-capture TARGET jasmine_consumer
             FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
             SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/capture.spec.js"
+            ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
+        # File services of the engine (issue #451), shared by every embedded frontend.
+        webfront_add_jasmine_test(NAME ConsumerJasmine-file-services TARGET jasmine_consumer
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 60
+            SPECS "${_async_diagnostics}" "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/file-services.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
         add_test(NAME ConsumerJasmineCaptures COMMAND "${CMAKE_COMMAND}"
             "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/ConsumerJasmine-capture/captures"
@@ -232,6 +278,17 @@ if(WEBFRONT_EMBED_CEF AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(_policy_xvfb)
         add_test(NAME CEFContentPolicy COMMAND "${_policy_xvfb}" -a $<TARGET_FILE:cef_content_policy>)
         webfront_set_browser_test_properties(CEFContentPolicy "${CMAKE_CURRENT_SOURCE_DIR}" 45)
+    endif()
+    # File chooser and downloads (issue #451).
+    add_executable(cef_file_services CEFFileServices.cpp)
+    target_link_libraries(cef_file_services PRIVATE WebFront_test_hardening WebFront WebFront_warnings WebFront_options)
+    webfront_setup_frontends_for_target(cef_file_services)
+    add_dependencies(webtest cef_file_services)
+    if(_policy_xvfb)
+        foreach(mode download choose cancel dialogs hold)
+            add_test(NAME CEFFileServices-${mode} COMMAND "${_policy_xvfb}" -a $<TARGET_FILE:cef_file_services> ${mode})
+            webfront_set_browser_test_properties(CEFFileServices-${mode} "${CMAKE_CURRENT_SOURCE_DIR}" 60)
+        endforeach()
     endif()
 endif()
 
@@ -573,8 +630,16 @@ if(_browser_tests_available)
         webfront_add_self_build_test(ReactAdapterPackage 0 "run|react-package" OUTPUT "React adapter:" REQUIRES SelfBuildInstalled
             PROVIDES ReactAdapterPackaged)
         add_test(NAME ReactAdapterPackageContents COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
-            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-package-check -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckReactPackage.cmake)
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/react-package-check -DDIRECTORY=react -DLABEL=React "-DFILES=index.mjs;index.d.ts;README.md;LICENSE"
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckPackage.cmake)
         set_tests_properties(ReactAdapterPackageContents PROPERTIES FIXTURES_REQUIRED ReactAdapterPackaged LABELS "web-integration" TIMEOUT 30)
+        # @webfront/services (#461): the same chain, from its own sources to the exact archive that the registry serves.
+        webfront_add_self_build_test(ServicesPackage 0 "run|services-package" OUTPUT "Services package:" REQUIRES SelfBuildInstalled
+            PROVIDES ServicesPackaged)
+        add_test(NAME ServicesPackageContents COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -DPROJECT=${_self_project}
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/services-package-check -DDIRECTORY=services -DLABEL=Services "-DFILES=index.mjs;index.d.ts;README.md;LICENSE"
+            -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckPackage.cmake)
+        set_tests_properties(ServicesPackageContents PROPERTIES FIXTURES_REQUIRED ServicesPackaged LABELS "web-integration" TIMEOUT 30)
         # Developer specs migrated by #344 remain in the browser under the repository's locked Jasmine.
         webfront_add_self_build_test(DeveloperSpecs 0 "test|--timeout|240" OUTPUT "PASSED: [0-9]+ specs" TIMEOUT 300
             REQUIRES SelfBuildInstalled)

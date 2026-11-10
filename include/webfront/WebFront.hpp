@@ -4,7 +4,9 @@
 /// @brief WebFront UI main objet
 #pragma once
 
+#include "BridgeError.hpp"
 #include "Broadcast.hpp"
+#include "DeferredCalls.hpp"
 #include "dom/Document.hpp"
 #include "frontend/Frontend.hpp"
 #include "http/HTTPServer.hpp"
@@ -16,6 +18,8 @@
 #include "system/WindowsCompat.hpp"
 #include "Task.hpp"
 #include "UISubscribers.hpp"
+#include "ReadBinding.hpp"
+#include "ViewAssociation.hpp"
 #include "weblink/DomBatch.hpp"
 #include "weblink/Messages.hpp"
 #include "weblink/WebLink.hpp"
@@ -40,12 +44,15 @@
 
 namespace webfront {
 
-inline constexpr std::string_view version = "0.8.0";
+inline constexpr std::string_view version = "0.9.0";
 
 namespace testing {
 /// Test-only access to the connection identifiers of an application; not part of the API.
 template <typename Application>
 struct ConnectionIds;
+/// Test-only access to the launch secret of an application; not part of the API.
+template <typename Application>
+struct LaunchSecret;
 }  // namespace testing
 
 using NetProvider     = networking::TCPStdnet;
@@ -149,6 +156,40 @@ public:
         return webFront->resumeAfter(duration);
     }
 
+    /// True when this connection proved, with the secret of this launch, that it comes from the view of an embedded
+    /// frontend of this application (CEF, WebView2, WKWebView, WebKitGTK). The system browser never is: no secret is
+    /// given to it, whatever its address. False once the connection is gone.
+    [[nodiscard]] bool isEmbeddedView() const {
+        return webFront->isEmbeddedView(webLinkId, generation);
+    }
+
+    /// The native window this connection's view lives in, for a native dialog's parent (ADR-020). Only the view of an
+    /// embedded frontend has one: any other connection (the system browser, a remote client, a loopback peer) gets
+    /// `notEmbedded`, so a dialog never attaches to a window that is not the caller's. Otherwise the answers and the
+    /// thread rule of frontend::NativeWindow::get() apply: call it on the interface thread (BasicWF::uiExecutor()).
+    [[nodiscard]] frontend::NativeWindowResult nativeWindow() const {
+        return webFront->nativeWindowOf(webLinkId, generation);
+    }
+
+    /// The only criterion of a "local client" for system services (ADR-020, rule 3): an embedded view, or a
+    /// loopback peer when the application set WebFrontConfig::trustLoopbackClients. The address is otherwise never
+    /// consulted. False once the connection is gone.
+    [[nodiscard]] bool isLocalClient() const {
+        return webFront->isLocalClient(webLinkId, generation);
+    }
+
+    /// A read URL on `route` for this browser's connection: the page reads it with `<img>`, `<video>`, `fetch` or a
+    /// download; `path` is what the route's handler receives (ReadGrant::rest). Unless `options.transferable`, the URL
+    /// works only from the browser client of this connection and only while the connection is open; it stays valid for
+    /// repeated requests (byte ranges). Throws ReadRefused when the connection is gone, when it is not the view of an
+    /// embedded frontend and WebFrontConfig::remoteFileTransport was not declared, or when the options are unacceptable.
+    [[nodiscard]] std::string grantRead(const ReadRoute& route, std::string_view path, ReadOptions options = {}) const {
+        // A generation is only unique within its application: a route of another one would own the wrong connection.
+        if (route.binding().get() != webFront->readBinding.get())
+            throw ReadRefused("The read route belongs to another application");
+        return route.binding()->grant(generation, route.id(), route.prefix(), path, std::move(options));
+    }
+
     /// Lazy typed call; co_await propagates the receiver's stop token. Cancellation
     /// stops waiting locally; a JavaScript function already dispatched keeps running.
     template <typename R = void>
@@ -158,6 +199,21 @@ public:
 };
 
 namespace detail {
+
+/// True for the loopback address of either family, including an IPv4 loopback seen through a dual-stack socket (::ffff:127.0.0.1).
+template <typename Address>
+[[nodiscard]] bool isLoopbackAddress(const Address& address) {
+    if (address.is_loopback())
+        return true;
+    if constexpr (requires { address.is_v6(); address.to_v6().is_v4_mapped(); address.to_v6().to_bytes(); }) {
+        if (address.is_v6()) {
+            const auto v6 = address.to_v6();
+            return v6.is_v4_mapped() && v6.to_bytes()[12] == 127;
+        }
+    }
+    return false;
+}
+
 template <frontend::FrontendType Frontend>
 inline int ensureFrontendInitialized() {
     static std::once_flag initialized;
@@ -177,9 +233,14 @@ auto makeCppFunctionHandler(Function&& function) {
     return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) -> R {
         std::tuple<Args...> parameters;
         auto deserializeAndCall = [&]<std::size_t... Is>(std::tuple<Args...>& tuple, std::index_sequence<Is...>) -> R {
-            (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
-            if (!data.empty())
-                throw std::runtime_error("Function call contains trailing parameter data");
+            // Arguments that cannot be decoded as the callback declared them reject with the `webfront.malformed` code.
+            try {
+                (msg::FunctionCall<Policy>::decodeParameter(std::get<Is>(tuple), data), ...);
+                if (!data.empty())
+                    throw std::runtime_error("Function call contains trailing parameter data");
+            } catch (const std::exception& error) {
+                throw detail::makeBridgeError(bridge_code::malformed, error.what());
+            }
             if constexpr (std::is_void_v<R>) {
                 std::invoke(*callable, caller..., std::get<Is>(tuple)...);
                 return;
@@ -188,6 +249,34 @@ auto makeCppFunctionHandler(Function&& function) {
         };
 
         return deserializeAndCall(parameters, std::index_sequence_for<Args...>());
+    };
+}
+
+/// Like makeCppFunctionHandler for a callback that answers later: it returns the sender of the callback, which owns the decoded
+/// arguments and the calling UI (they live in its operation state). A callback that takes them by reference, a coroutine for instance, can thus
+/// use them until it completes, long after this handler returned.
+template <http::BuffersPolicyType Policy, typename... Args, typename Function>
+auto makeDeferredHandler(Function&& function) {
+    using StoredFunction = std::decay_t<Function>;
+    auto callable = std::make_shared<StoredFunction>(std::forward<Function>(function));
+
+    return [callable = std::move(callable)](std::span<const std::byte> data, auto&&... caller) {
+        // The caller (the calling UI) is kept with the arguments, as a copy: a callback taking it by reference lives as long as them.
+        using State = std::pair<std::tuple<std::decay_t<decltype(caller)>...>, std::tuple<Args...>>;
+        auto state  = std::make_shared<State>(std::tuple<std::decay_t<decltype(caller)>...>{caller...}, std::tuple<Args...>{});
+        try {
+            std::apply([&](auto&... decoded) { (msg::FunctionCall<Policy>::decodeParameter(decoded, data), ...); }, state->second);
+            if (!data.empty())
+                throw std::runtime_error("Function call contains trailing parameter data");
+        } catch (const std::exception& error) {
+            throw detail::makeBridgeError(bridge_code::malformed, error.what());
+        }
+        auto sender = std::apply(
+            [&](auto&... kept) {
+                return std::apply([&](auto&... decoded) { return std::invoke(*callable, kept..., decoded...); }, state->second);
+            },
+            state->first);
+        return networking::ex::let_value(networking::ex::just(std::move(state)), [sender = std::move(sender)](auto&) mutable { return std::move(sender); });
     };
 }
 
@@ -302,6 +391,40 @@ websocket::Frame<Net> makeFailureFrame(msg::CallId callId, const std::exception&
     return frame;
 }
 
+/// WebFront's own rejection of a call, with one of the codes of the bridge (bridge_code). Internal: the public ways to
+/// reject (BridgeError thrown by a callback, WebLink::sendError) can never carry a reserved code.
+template <typename Net, http::BuffersPolicyType Policy, typename Link>
+void rejectWithBridgeCode(Link& link, msg::CallId callId, std::string_view code, const std::string& message) {
+    if (callId != 0)
+        link.sendFrame(makeFailureFrame<Net, Policy>(callId, makeBridgeError(code, message)));
+}
+
+/// A self-contained return message carrying `value`, or the failure of its encoding (a string over the message size).
+template <typename Net, http::BuffersPolicyType Policy, typename Value>
+websocket::Frame<Net> makeValueFrame(msg::CallId callId, const Value& value) {
+    msg::FunctionReturn<Policy> result;
+    result.setCallId(callId);
+    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+    try {
+        if constexpr (!std::is_void_v<Value>)
+            result.encodeParameter(value, frame);
+        frame.freeze();
+        return frame;
+    } catch (const std::exception& error) {
+        return makeFailureFrame<Net, Policy>(callId, error);
+    }
+}
+
+/// A return message without value.
+template <typename Net, http::BuffersPolicyType Policy>
+websocket::Frame<Net> makeVoidFrame(msg::CallId callId) {
+    msg::FunctionReturn<Policy> result;
+    result.setCallId(callId);
+    websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
+    frame.freeze();
+    return frame;
+}
+
 template<typename Net, http::BuffersPolicyType Policy, typename R, typename Callable>
 auto makeCppFunctionResponder(Callable&& callable) {
     return [callable = std::forward<Callable>(callable)](std::span<const std::byte> data, auto& link, msg::CallId callId, auto&&... caller) mutable {
@@ -346,7 +469,113 @@ struct WebFrontConfig {
     ContentPolicy         contentPolicy{};
     /// Initial window of the embedded frontends; the title defaults to the executable's name.
     WindowOptions         window{};
+    /// Treats a connection whose peer address is the loopback as a local client (UI::isLocalClient) although it is
+    /// not the view of an embedded frontend. This reintroduces a decision by address: it is unsafe on a shared machine
+    /// and behind a local proxy or an SSH tunnel, which also arrive from the loopback. Off by default (ADR-020).
+    bool                  trustLoopbackClients = false;
+    /// How the application declares that a connection other than the view of an embedded frontend (the system browser
+    /// among them) reaches it, which decides whether such a connection may read files (ADR-020 rule 3). Never deduced
+    /// from an address or a `Forwarded` header. `loopbackAttested` is refused at construction unless `address` is a
+    /// loopback address; the other declarations are the integrator's word, which WebFront does not verify.
+    RemoteFileTransport   remoteFileTransport = RemoteFileTransport::refused;
 };
+
+namespace detail {
+/// True when `address` parses as the IPv6 address ::1 in any spelling (::1, 0:0:0:0:0:0:0:1, 0::0001...).
+[[nodiscard]] inline bool isIPv6Loopback(std::string_view address) {
+    if (address.find(':') == std::string_view::npos)
+        return false;
+    const auto compress = address.find("::");
+    if (compress != std::string_view::npos && address.find("::", compress + 1) != std::string_view::npos)
+        return false;
+    const auto groups = [](std::string_view text, std::vector<unsigned>& out) {
+        while (!text.empty()) {
+            const auto colon = text.find(':');
+            const auto group = text.substr(0, colon);
+            if (group.empty() || group.size() > 4)
+                return false;
+            unsigned value = 0;
+            for (const char c : group) {
+                const unsigned digit = c >= '0' && c <= '9' ? static_cast<unsigned>(c - '0')
+                                       : c >= 'a' && c <= 'f' ? static_cast<unsigned>(c - 'a' + 10)
+                                       : c >= 'A' && c <= 'F' ? static_cast<unsigned>(c - 'A' + 10) : 16u;
+                if (digit > 15)
+                    return false;
+                value = value * 16 + digit;
+            }
+            out.push_back(value);
+            if (colon == std::string_view::npos)
+                break;
+            text.remove_prefix(colon + 1);
+            if (text.empty())
+                return false;  // a trailing single colon
+        }
+        return true;
+    };
+    std::vector<unsigned> head, tail;
+    if (compress == std::string_view::npos) {
+        if (!groups(address, head) || head.size() != 8)
+            return false;
+    } else {
+        if (!groups(address.substr(0, compress), head) || !groups(address.substr(compress + 2), tail) || head.size() + tail.size() > 7)
+            return false;
+    }
+    std::vector<unsigned> all = head;
+    all.insert(all.end(), 8 - head.size() - tail.size(), 0u);
+    all.insert(all.end(), tail.begin(), tail.end());
+    return all.size() == 8 && std::all_of(all.begin(), all.end() - 1, [](unsigned g) { return g == 0; }) && all.back() == 1;
+}
+
+/// True for the literal loopback addresses a server can be configured with: 127.x.y.z and ::1 in any spelling, bracketed or not.
+[[nodiscard]] inline bool isLoopbackName(std::string_view address) {
+    if (address.size() > 2 && address.front() == '[' && address.back() == ']')
+        address = address.substr(1, address.size() - 2);
+    // "localhost" is a name, resolved later by the server to whatever the host says: only literal addresses are verifiable here.
+    if (isIPv6Loopback(address))
+        return true;
+    if (!address.starts_with("127."))
+        return false;
+    // Four decimal octets of 0 to 255 without leading zeros: the string must read the same to every resolver (127.256.0.1 or
+    // 127.0.0.010 are not literal addresses, and a resolver could take them for names).
+    int      octets = 0;
+    unsigned value  = 0;
+    int      digits = 0;
+    bool     leadingZero = false;
+    for (const char c : address) {
+        if (c == '.') {
+            if (digits == 0)
+                return false;
+            ++octets;
+            value = 0;
+            digits = 0;
+            leadingZero = false;
+        } else if (c >= '0' && c <= '9') {
+            if (digits == 1 && leadingZero)
+                return false;
+            leadingZero = digits == 0 && c == '0';
+            value       = value * 10 + static_cast<unsigned>(c - '0');
+            if (++digits > 3 || value > 255)
+                return false;
+        } else {
+            return false;
+        }
+    }
+    return octets == 3 && digits > 0;
+}
+
+/// Refuses the configurations whose declaration WebFront can disprove, before anything is bound.
+inline const std::string& checkedAddress(const WebFrontConfig& config) {
+    if (config.remoteFileTransport == RemoteFileTransport::loopbackAttested && !isLoopbackName(config.address))
+        throw std::invalid_argument("remoteFileTransport::loopbackAttested needs a server that listens on the loopback only, not '" + config.address + "'");
+    return config.address;
+}
+
+/// The read binding of a configuration, which is refused here, before anything is bound, if its declaration is false.
+inline std::shared_ptr<ReadBinding> makeReadBinding(const WebFrontConfig& config) {
+    checkedAddress(config);
+    return std::make_shared<ReadBinding>(config.remoteFileTransport);
+}
+}  // namespace detail
 
 template <typename NetProvider, typename Filesystem, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy,
           frontend::FrontendType Frontend = frontend::DefaultFrontend>
@@ -361,12 +590,14 @@ public:
     BasicWF() : BasicWF(WebFrontConfig{}) {}
 
     explicit BasicWF(WebFrontConfig config)
-        : httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
+        : readBinding(detail::makeReadBinding(config)),
+          httpServer((detail::ensureFrontendInitialized<Frontend>(), config.address), config.port, config.documentRoot, config.contentPolicy),
           httpAddress(config.address),
           httpPort(httpServer.port()),
           httpDocRoot(config.documentRoot),
           contentPolicy(std::move(config.contentPolicy)),
           windowOptions(std::move(config.window)),
+          trustLoopbackClients(config.trustLoopbackClients),
           idsCounter(0) {
         // Links are created on the server thread, outside the lock: identifiers are only assigned here.
         httpServer.onUpgrade([this](typename Net::Socket&& socket) {
@@ -379,15 +610,26 @@ public:
                 id         = idsCounter++;
                 generation = ++generationCounter;
             }
+            bool loopbackPeer = false;
+            if constexpr (requires(std::error_code& error) { socket.remote_endpoint(error).address().is_loopback(); }) {
+                if (trustLoopbackClients) {
+                    std::error_code error;
+                    const auto      peer = socket.remote_endpoint(error);
+                    loopbackPeer         = !error && detail::isLoopbackAddress(peer.address());
+                }
+            }
             auto link = std::make_shared<WebLink<Net, Policy>>(std::move(socket), id, [this](WebLinkEvent event) {
                 onEvent(event);
             }, httpServer.taskScope(), false);
             {
                 std::scoped_lock lock{linksMutex};
-                webLinks.emplace(id, Connection{.link = link, .generation = generation, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}});
+                webLinks.emplace(id, Connection{.link = link, .generation = generation, .thread = std::this_thread::get_id(), .closed = false, .stage = Connection::Stage::handshaking, .deferred = {}, .viewAssociated = false, .loopbackPeer = loopbackPeer});
             }
             link->start();  // registered first: every event it dispatches finds it
         });
+        // The exchange of the binding secret for the client cookie; the secret is part of the path, so it is never logged.
+        readBinding->useNamespace(httpPort);
+        bindRoute = httpServer.addRoute(std::string(ReadBinding::bindPath), readBinding->exchangeHandler(), true);
     }
 
     // Preserved for source compatibility; binds all interfaces like it always has, unlike the
@@ -428,6 +670,38 @@ public:
         return httpServer.startTask(std::move(task));
     }
 
+    /** @brief Answers the `GET` and `HEAD` requests under `prefix` (absolute, ending with '/') with a reply produced at
+     * run time and streamed in chunks of bounded size (see http::RouteReply). The handler runs on a worker thread, not on
+     * the server context. The route precedes the file providers, never masks the embedded `WebFront.js`, and lasts as long
+     * as the returned registration; an overlapping prefix throws std::invalid_argument. Thread-safe.
+     */
+    [[nodiscard]] http::RouteTable::Registration addRoute(std::string prefix, http::RouteHandler handler) {
+        return httpServer.addRoute(std::move(prefix), std::move(handler));
+    }
+
+    /** @brief Registers a route whose URLs are read grants (UI::grantRead): `handler` is called only for a request that
+     * presents a valid token and, unless the grant is transferable, the cookie of the client of the connection that owns
+     * the grant (ADR-020, rule 4). Every answer is neutralized: `no-store`, `no-referrer`, `nosniff`, a sandboxing
+     * Content-Security-Policy, and an attachment disposition outside the passive types; HTML, XML, JavaScript and
+     * WebAssembly are announced as application/octet-stream. `prefix` is under "/webfront/services/" (the cookie's
+     * path) and is not "/webfront/services/bind/", which belongs to the exchange. Same rules as addRoute otherwise.
+     */
+    [[nodiscard]] ReadRoute addReadRoute(std::string prefix, ReadHandler handler) {
+        if (!handler)
+            throw std::invalid_argument("A read route needs a handler");
+        if (!prefix.starts_with(ReadBinding::servicesPath) || prefix.size() == ReadBinding::servicesPath.size() || prefix.starts_with(ReadBinding::bindPath))
+            throw std::invalid_argument("A read route lives under " + std::string(ReadBinding::servicesPath) + ", not under " + std::string(ReadBinding::bindPath));
+        auto id = automation::channel::nonce();  // this registration's identity: its grants work nowhere else
+        auto registration = httpServer.addRoute(prefix, readBinding->readHandler(id, prefix, std::move(handler)), true,
+                                                  [](http::RouteReply& reply) { detail::hardenRead(reply, {}); });
+        return ReadRoute{std::move(id), prefix, readBinding, std::move(registration)};
+    }
+
+    /// Revokes the read grant of a URL returned by UI::grantRead (or of its token); an unknown one is ignored.
+    void revokeRead(std::string_view urlOrToken) {
+        readBinding->revoke(urlOrToken);
+    }
+
     /** @brief A sender completing on the server context once the duration has elapsed. co_await propagates the
      * task's stop token: a stop request (TaskHandle::requestStop, shutdown) completes it stopped at once.
      */
@@ -450,6 +724,25 @@ public:
     /// Sets the application's handler for each connected browser, replacing any previous one.
     void onUIStarted(std::function<void(UI)>&& handler) {
         uiStartedHandler = std::move(handler);
+    }
+
+    /// The interface thread of the frontend: available while an embedded frontend's loop runs (or the system browser's
+    /// optional loop mode), never for a frontend without one. See frontend/UIExecutor.hpp for the completion rules.
+    [[nodiscard]] frontend::UIExecutor uiExecutor() const {
+        if constexpr (requires { { Frontend::uiExecutor() } -> std::same_as<frontend::UIExecutor>; })
+            return Frontend::uiExecutor();
+        else
+            return {};
+    }
+
+    /// The native window of the frontend (see frontend/NativeWindow.hpp), or a handle that answers `unsupported` for a
+    /// frontend without one. It names the window, not a connection: UI::nativeWindow() also checks that the caller's view
+    /// is that window.
+    [[nodiscard]] frontend::NativeWindow nativeWindow() const {
+        if constexpr (requires { { Frontend::nativeWindow() } -> std::same_as<frontend::NativeWindow>; })
+            return Frontend::nativeWindow();
+        else
+            return {};
     }
 
     /// Adds a handler for each browser that connects from now on, called after the onUIStarted
@@ -481,6 +774,8 @@ private:
     friend class Broadcast;
     template <typename>
     friend struct testing::ConnectionIds;  // lets a test start the identifiers near their wrap
+    template <typename>
+    friend struct testing::LaunchSecret;  // lets a test present the secret an embedded view would
 
     /// Sends `call` to each browser not reported closed whose onUIStarted handlers have returned: at once, on the
     /// calling thread and outside every lock. For a browser whose handlers are running, `call` is kept, within its
@@ -524,6 +819,25 @@ private:
         if (found == webLinks.end())
             return {nullptr, WebLinkGeneration{0}};
         return {found->second.link, found->second.generation};
+    }
+
+    [[nodiscard]] bool isEmbeddedView(WebLinkId id, WebLinkGeneration generation) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        return found != webLinks.end() && found->second.generation == generation && !found->second.closed && found->second.viewAssociated;
+    }
+
+    [[nodiscard]] frontend::NativeWindowResult nativeWindowOf(WebLinkId id, WebLinkGeneration generation) const {
+        if (!isEmbeddedView(id, generation))
+            return std::unexpected(frontend::NativeWindowError::notEmbedded);
+        return nativeWindow().get();
+    }
+
+    [[nodiscard]] bool isLocalClient(WebLinkId id, WebLinkGeneration generation) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(id);
+        return found != webLinks.end() && found->second.generation == generation && !found->second.closed
+               && (found->second.viewAssociated || (trustLoopbackClients && found->second.loopbackPeer));
     }
 
     /// The UI of the connection that now owns `id` (generation 0, reaching nothing, when none does).
@@ -615,7 +929,9 @@ public:
      */
     template <typename R, typename... Args>
     bool cppFunction(std::string functionName, auto&& function) {
-        if constexpr (detail::takes_caller<UI, Args...>::value)
+        if constexpr (detail::deferred_result<R>)
+            return registerDeferred<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
+        else if constexpr (detail::takes_caller<UI, Args...>::value)
             return registerWithCaller<R, Args...>(std::move(functionName), std::forward<decltype(function)>(function));
         else {
             auto callable  = detail::makeCppFunctionHandler<Policy, R, Args...>(std::forward<decltype(function)>(function));
@@ -665,7 +981,9 @@ public:
     #pragma warning(disable : 4702)
 #endif
     WindowAction openWindow(std::string_view htmlFilename) {
-        if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
+        if constexpr (requires(const ViewLaunch& launch) { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, launch); })
+            Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions, ViewLaunch{viewSecret, detail::browserOrigin(httpAddress, httpPort)});
+        else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy, windowOptions);
         else if constexpr (requires { Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy); })
             Frontend::open(httpAddress, httpPort, htmlFilename, contentPolicy);
@@ -737,12 +1055,136 @@ private:
     }
 
     void releaseLinks() {
+        readBinding->shutdown();  // read URLs die with the application, and no grant is issued afterwards
         for (auto& [id, document] : domDocuments)
             document->close();
         domDocuments.clear();
         std::map<WebLinkId, Connection>                           released;
         std::scoped_lock                                          lock{linksMutex};
         released.swap(webLinks);
+    }
+
+    /// A callback that returns a sender (a ResultTask<R> among them) answers when it completes, not when it returns: the
+    /// call is owned by the connection (its closure stops the work and drops the late answer) and by the server scope
+    /// (shutdown stops and joins it). The answer is sent on the server context.
+    template <typename R, typename... Args>
+    bool registerDeferred(std::string functionName, auto&& function) {
+        // Naming the value type checks the contract at registration: one value at most, one kind of value completion.
+        using DeferredValue [[maybe_unused]] = detail::deferred_value_t<R>;
+        const auto start = [this](auto invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+            this->startDeferred(std::move(invoke), link, callId, caller);
+        };
+        if constexpr (detail::takes_caller<UI, Args...>::value) {
+            auto handler = registerDeferredHandler<Args...>(std::forward<decltype(function)>(function));
+            return cppFunctions
+                .try_emplace(std::move(functionName),
+                             [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                                 start([&] { return handler(data, caller); }, link, callId, caller);
+                             })
+                .second;
+        } else {
+            auto handler = detail::makeDeferredHandler<Policy, Args...>(std::forward<decltype(function)>(function));
+            return cppFunctions
+                .try_emplace(std::move(functionName),
+                             [start, handler](std::span<const std::byte> data, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) mutable {
+                                 start([&] { return handler(data); }, link, callId, caller);
+                             })
+                .second;
+        }
+    }
+
+    template <typename Caller, typename... Args>
+    auto registerDeferredHandler(auto&& function) {
+        return detail::makeDeferredHandler<Policy, Args...>(detail::adaptCaller<Caller>(std::forward<decltype(function)>(function)));
+    }
+
+    /// Claims the call identifier, then calls the callback and hands the sender it returned to a task that answers when it
+    /// completes. The claim comes first: a call refused as a duplicate, or on a closed connection, never runs the callback.
+    template <typename Invoke>
+    void startDeferred(Invoke invoke, WebLink<Net, Policy>& link, msg::CallId callId, UI caller) {
+        const auto [calls, generation] = deferredCallsOf(caller);
+        const auto key                  = calls ? calls->reserve(callId) : 0;
+        if (key == 0) {
+            // The connection closed (nobody is left to answer), or a call with this identifier is still running: the common
+            // reception drops such a call before it gets here, and this claim is the last guard.
+            return;
+        }
+        std::optional<std::remove_cvref_t<decltype(invoke())>> sender;
+        try {
+            sender.emplace(invoke());
+        } catch (const std::exception& error) {
+            calls->finish(callId, key);
+            if (callId != 0)
+                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, error));
+            return;
+        } catch (...) {
+            calls->finish(callId, key);
+            if (callId != 0)
+                link.sendFrame(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
+            return;
+        }
+        const auto handle = spawn(respondLater(caller, generation, calls, callId, key, std::move(*sender)));
+        if (handle.stopRequested()) {
+            // The server refused the task (it is shutting down): it never runs, so nothing would release the identifier.
+            calls->finish(callId, key);
+            return;
+        }
+        calls->attach(key, handle);
+    }
+
+    [[nodiscard]] bool callInFlight(WebLinkId id, WebLinkGeneration generation, msg::CallId callId) const {
+        std::shared_ptr<detail::DeferredCalls> calls;
+        {
+            std::scoped_lock lock{linksMutex};
+            const auto       found = webLinks.find(id);
+            if (found == webLinks.end() || found->second.generation != generation)
+                return false;
+            calls = found->second.deferredCalls;
+        }
+        return calls->inFlight(callId);
+    }
+
+    std::pair<std::shared_ptr<detail::DeferredCalls>, WebLinkGeneration> deferredCallsOf(const UI& caller) const {
+        std::scoped_lock lock{linksMutex};
+        const auto       found = webLinks.find(caller.id());
+        if (found == webLinks.end() || found->second.closed)
+            return {nullptr, WebLinkGeneration{0}};
+        return {found->second.deferredCalls, found->second.generation};
+    }
+
+    /// Awaits the sender of a deferred callback and sends its result, its failure, or `webfront.cancelled` when it
+    /// completed stopped by something other than this call's own stop request. When that request was made (the
+    /// connection closed, the application is stopping) nothing is sent: nobody is left to read it.
+    template <typename Sender>
+    Task respondLater(UI caller, WebLinkGeneration generation, std::shared_ptr<detail::DeferredCalls> calls, msg::CallId callId, std::uint64_t key, Sender sender) {
+        struct Finish {
+            detail::DeferredCalls& calls;
+            msg::CallId            callId;
+            std::uint64_t          key;
+            ~Finish() { calls.finish(callId, key); }
+        } finish{*calls, callId, key};
+        const auto token = co_await networking::ex::read_env(networking::ex::get_stop_token);
+        std::optional<websocket::Frame<Net>> answer;
+        try {
+            auto stoppable = networking::ex::stopped_as_error(
+                std::move(sender), std::make_exception_ptr(detail::makeBridgeError(bridge_code::cancelled, "The C++ callback was cancelled")));
+            // One answer frame whether the sender completes with a value or without: the message is built where it completes.
+            auto framed = networking::ex::then(std::move(stoppable), [callId](auto&&... values) -> websocket::Frame<Net> {
+                if constexpr (sizeof...(values) == 0)
+                    return detail::makeVoidFrame<Net, Policy>(callId);
+                else
+                    return detail::makeValueFrame<Net, Policy>(callId, values...);
+            });
+            answer.emplace(co_await std::move(framed));
+        } catch (const std::exception& error) {
+            answer.emplace(detail::makeFailureFrame<Net, Policy>(callId, error));
+        } catch (...) {
+            answer.emplace(detail::makeFailureFrame<Net, Policy>(callId, std::runtime_error{"Unknown C++ exception"}));
+        }
+        if (token.stop_requested() || callId == 0)
+            co_return;
+        if (const auto link = findLink(caller.id(), generation))
+            link->sendFrame(std::move(*answer));
     }
 
     template <typename R, typename Caller, typename... Args>
@@ -758,12 +1200,17 @@ private:
             .second;
     }
 
+    // Before the server: the routes' handlers use it, and the server drains them before it is destroyed.
+    std::shared_ptr<ReadBinding>                                             readBinding;
     http::Server<Net, Filesystem, Policy>                                    httpServer;
+    http::RouteTable::Registration                                           bindRoute;
     std::string                                                              httpAddress;
     std::string                                                              httpPort;
     std::filesystem::path                                                    httpDocRoot;
     ContentPolicy                                                            contentPolicy;
     WindowOptions                                                            windowOptions;
+    const std::string                                                        viewSecret = detail::newViewSecret();  // this launch's proof of an embedded view
+    const bool                                                               trustLoopbackClients;
     mutable std::mutex                                                       linksMutex;  // guards webLinks, read from any thread
     struct Connection {
         std::shared_ptr<WebLink<Net, Policy>> link;
@@ -773,6 +1220,9 @@ private:
         enum class Stage { handshaking, starting, started };
         Stage                                  stage = Stage::handshaking;  // starting while its onUIStarted handlers run
         std::vector<detail::BroadcastCall<Net>> deferred;                    // sendToStartedLinks() calls while starting
+        bool                                    viewAssociated = false;              // presented the launch secret of an embedded view
+        bool                                    loopbackPeer   = false;              // peer address was the loopback (read only with trustLoopbackClients)
+        std::shared_ptr<detail::DeferredCalls>  deferredCalls = std::make_shared<detail::DeferredCalls>();  // calls a callback answers later
     };
     std::map<WebLinkId, Connection>                                          webLinks;
     WebLinkId                                                              idsCounter{0};
@@ -883,10 +1333,17 @@ private:
     void onEvent(WebLinkEvent event) {
         switch (event.code) {
             case WebLinkEvent::Code::linked: {
+                std::optional<WebLinkGeneration> bindKey;
+                bool                             local = false;
                 {
                     std::scoped_lock lock{linksMutex};
-                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end())
-                        found->second.stage = Connection::Stage::starting;
+                    if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
+                        found->second.stage          = Connection::Stage::starting;
+                        // Raised once, never lowered: the secret is judged at the single handshake WebLink dispatches.
+                        found->second.viewAssociated = found->second.viewAssociated || detail::viewSecretMatches(viewSecret, event.text);
+                        bindKey                      = found->second.generation;
+                        local                        = found->second.viewAssociated;  // the only local transport (ADR-020, rule 3)
+                    }
                 }
                 // Even when a handler throws: the browser must not keep collecting deferred sends.
                 struct Started {
@@ -897,22 +1354,41 @@ private:
                     }
                 } started{this, event.webLinkId};
                 const auto ui = uiOf(event.webLinkId);
+                if (bindKey) {
+                    // The page swaps this one-time secret for the cookie that binds its reads to its browser client.
+                    try {
+                        ui.jsFunction("wfBind.exchange")(readBinding->open(*bindKey, local));
+                    } catch (const std::exception& error) {
+                        log::error("The read binding could not be offered to a browser: {}", error.what());
+                    }
+                }
                 if (uiStartedHandler)
                     uiStartedHandler(ui);
                 uiSubscribers->notify(ui);
                 break;
             }
-            case WebLinkEvent::Code::closed:
+            case WebLinkEvent::Code::closed: {
                 // Shutdown cancels the connections' writes, which then fail and report a closure: not a disconnection.
                 if (httpServer.taskScope().stopRequested())
                     break;
+                std::optional<WebLinkGeneration> closedGeneration;
+                std::shared_ptr<detail::DeferredCalls> stoppedCalls;
                 {
                     std::scoped_lock lock{linksMutex};
                     if (auto found = webLinks.find(event.webLinkId); found != webLinks.end()) {
                         found->second.closed = true;
                         found->second.deferred.clear();
+                        closedGeneration = found->second.generation;
+                        stoppedCalls     = found->second.deferredCalls;
                     }
                 }
+                // The calls a callback has not answered are stopped and their late answers dropped, outside the lock: a
+                // stop callback runs on this thread.
+                if (stoppedCalls)
+                    stoppedCalls->close();
+                // Outside linksMutex: dropping the grants destroys their contexts, whose destructors may use the application.
+                if (closedGeneration)
+                    readBinding->close(*closedGeneration);  // its read URLs stop working at once
                 if (auto found = domDocuments.find(event.webLinkId); found != domDocuments.end()) {
                     found->second->close();
                     domDocuments.erase(found);
@@ -922,11 +1398,19 @@ private:
                 // During shutdown the task is refused and the link goes with the application.
                 static_cast<void>(httpServer.startTask(releaseLink(event.webLinkId)));
                 break;
+            }
             case WebLinkEvent::Code::cppFunctionCalled: {
                 // Links are registered before they read, and released after their closure: the caller is registered.
                 const auto [link, generation] = linkAndGeneration(event.webLinkId);
                 if (!link)
                     break;
+                // A browser that reuses the identifier of a call a callback has not answered yet breaks the protocol (its own
+                // calls never do). Whatever the function, no second call and no answer with that identifier: an answer could
+                // settle the first call's Promise, and the first call's own answer a later call that reuses the identifier.
+                if (callInFlight(event.webLinkId, generation, event.callId)) {
+                    log::error("Ignoring a call to '{}' that reuses the identifier {} of a call still running", event.text, event.callId);
+                    break;
+                }
                 if constexpr (requires(typename Net::Acceptor& acceptor) { Net::ResumeAfter(acceptor, std::chrono::milliseconds(1)); }) {
                     if (domCall(event, *link))
                         break;
@@ -937,7 +1421,7 @@ private:
                 if (auto function = cppFunctions.find(event.text); function != cppFunctions.end())
                     function->second(event.data, *link, event.callId, UI{*this, event.webLinkId, generation});
                 else
-                    link->sendError(event.callId, "C++ function '" + event.text + "' was not found");
+                    detail::rejectWithBridgeCode<Net, Policy>(*link, event.callId, bridge_code::notFound, "C++ function '" + event.text + "' was not found");
                 break;
             }
         }

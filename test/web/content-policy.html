@@ -1,7 +1,13 @@
 <!doctype html>
 <script src="/WebFront.js"></script>
 <script type="module">
+// Values match LifecycleStage in FrontendLifecycle.cpp. Diagnostics must not change the test outcome.
+const stage = { policyPopup: 5, policyNavigation: 6 };
+const reportStage = value => {
+    try { webFront.cppFunction("lifecycleStage")(value).catch(() => {}); } catch { /* best effort */ }
+};
 await webFront.ready;
+reportStage(stage.policyPopup);
 const popup = window.open('/policy-escaped.html?popup', '_blank');
 if (popup !== null) {
     await webFront.cppFunction('policyEscaped')();
@@ -17,6 +23,7 @@ if (popup !== null) {
     const target = new URL('/policy-escaped.html?navigation', location.href);
     target.hostname = 'localhost';
     // Keep one history entry so WebView2 permits the destination's script closure.
+    reportStage(stage.policyNavigation);
     location.replace(target.href);
 }
 </script>

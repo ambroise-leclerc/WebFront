@@ -1,10 +1,10 @@
 # WebFront architecture decision records
 
 This directory describes WebFront’s architectural choices and the constraints to preserve
-when making changes or generating code. It contains **20 ADRs**, with unique numbers (17 accepted decisions and 3 proposals).
+when making changes or generating code. It contains **21 ADRs**, with unique numbers (18 accepted decisions and 3 proposals).
 The accepted baseline corresponds to commit `b031ab5` dated **2026-10-19**;
 the developer environment proposals are dated **2026-10-20**, the direct frontend access proposal **2026-10-24**,
-the DOM access proposal **2026-10-26**, the developer automation proposal **2026-10-28**, accepted **2026-10-29**, and the system services proposal **2026-10-31**. Each ADR is versioned
+the DOM access proposal **2026-10-26**, the developer automation proposal **2026-10-28**, accepted **2026-10-29**, the system services proposal **2026-10-31**, and the developer environment publication proposal **2026-11-02**. Each ADR is versioned
 according to the decision’s creation and its significant changes in the Git history.
 The ADRs themselves are written in French.
 
@@ -42,15 +42,15 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | ADR | Decision | Status | Initial creation | Current version |
 | --- | --- | --- | --- | --- |
 | [ADR-001](ADR-001-coeur-cpp23-header-only.md) | A header-only C++23 core embedded in the application | Accepted | 2020-04-19 | 1.5 — 2026-10-13 |
-| [ADR-002](ADR-002-systemes-de-fichiers-composables.md) | An abstract, composable filesystem as the foundation for portability | Accepted | 2023-03-16 | 2.4 — 2026-10-14 |
-| [ADR-003](ADR-003-protocole-binaire-et-bornes.md) | A shared, typed and bounded binary protocol | Accepted through 1.13; 1.14 proposed | 2022-02-06 | 1.14 — 2026-10-27 |
-| [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | Asynchronous calls with deliberately asymmetric contracts | Accepted | 2022-02-06 | 2.4 — 2026-10-18 |
+| [ADR-002](ADR-002-systemes-de-fichiers-composables.md) | An abstract, composable filesystem as the foundation for portability | Accepted | 2023-03-16 | 3.0 — 2026-11-05 |
+| [ADR-003](ADR-003-protocole-binaire-et-bornes.md) | A shared, typed and bounded binary protocol | Accepted | 2022-02-06 | 1.19 — 2026-11-05 |
+| [ADR-004](ADR-004-appels-asynchrones-et-erreurs.md) | Asynchronous calls with deliberately asymmetric contracts | Accepted | 2022-02-06 | 2.6 — 2026-11-05 |
 | [ADR-005](ADR-005-evolution-reseau-asio-stdnet.md) | From standalone ASIO to stdnet: anticipating standard networking without blocking progress | Accepted through 3.1; 3.2 proposed | 2022-01-21 | 3.2 — 2026-10-26 |
 | [ADR-006](ADR-006-taches-structurees-et-arret.md) | Owning, cancelling and joining every task | Accepted | 2026-10-13 | 2.1 — 2026-10-25 |
-| [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.10 — 2026-10-20 |
-| [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) | Restricting bridge origins without promising a sandbox | Accepted | 2026-10-18 | 1.0 — 2026-10-18 |
+| [ADR-007](ADR-007-frontends-explicites.md) | Explicit frontend selection and a shared lifecycle contract | Accepted | 2026-05-31 | 1.11 — 2026-11-09 |
+| [ADR-008](ADR-008-contenu-de-confiance-et-origines.md) | Restricting bridge origins without promising a sandbox | Accepted through 1.0; 1.1 and 1.2 proposed | 2026-10-18 | 1.2 — 2026-11-04 |
 | [ADR-009](ADR-009-modules-et-assets-reproductibles.md) | Serving modules locally and regenerating assets reproducibly | Accepted | 2023-03-16 | 2.5 — 2026-10-25 |
-| [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.7 — 2026-10-23 |
+| [ADR-010](ADR-010-composants-et-outils-optionnels.md) | Extending WebFront through optional components and development tools | Accepted | 2026-10-14 | 1.8 — 2026-11-09 |
 | [ADR-011](ADR-011-diagnostics-optionnels.md) | Confining mddlog behind an optional diagnostics façade | Accepted | 2026-10-01 | 1.2 — 2026-10-02 |
 | [ADR-012](ADR-012-preuves-et-tests.md) | Demonstrating contracts through deterministic tests and browser integration | Accepted | 2020-04-19 | 1.6 — 2026-10-19 |
 | [ADR-013](ADR-013-bootstrap-developpeur-a-la-demande.md) | Bootstrapping a downloaded developer environment | Accepted | 2026-10-20 | 1.0 — 2026-10-24 |
@@ -60,7 +60,8 @@ verification evidence remain in [PROJECT_STATUS](../PROJECT_STATUS.md).
 | [ADR-017](ADR-017-acces-direct-aux-frontends.md) | Direct access to embedded frontends, with HTML kept normative | Proposed | 2026-10-24 | 1.1 — 2026-10-25 |
 | [ADR-018](ADR-018-acces-au-dom.md) | DOM access from C++ through a bounded mutation stream, without contesting the DOM of UI libraries | Proposed, partially superseded, partially delivered | 2026-10-26 | 1.5 — 2026-10-30 |
 | [ADR-019](ADR-019-developpement-automatisable-et-agents.md) | Automating the developer environment through shared operations and an optional local MCP adapter | Accepted | 2026-10-28 | 1.2 — 2026-10-29 |
-| [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.0 — 2026-10-31 |
+| [ADR-020](ADR-020-services-systeme.md) | System services (files, clipboard, shell, notifications…) through optional C++ portals with per-connection backends, granting handles rather than paths | Proposed | 2026-10-31 | 1.8 — 2026-11-09 |
+| [ADR-021](ADR-021-publication-de-l-environnement-developpeur.md) | Simplifying the publication of the developer environment: automate the release, keep pinned hashes, no dedicated server | Accepted (domain delivered; phase 1 to implement) | 2026-11-02 | 1.0 — 2026-11-02 |
 
 Numbering follows the reading topics; milestones and individual file histories provide
 the chronology, which does not follow the numerical order.
@@ -106,7 +107,7 @@ Do not replace historical dates with the date of an editorial change to the docu
 Keep previous rows and update the current version in the index.
 
 - Use one `ADR-NNN-description.md` file per decision and one row in this index. The next number
-  is **ADR-021**. Retain historical numbers and files.
+  is **ADR-022**. Retain historical numbers and files.
 - For a new decision that has not been integrated, use **Proposée** (Proposed), its actual
   proposal date and validation criteria; do not assign an artificial historical commit date.
 - After integration, record the date and supporting commits, the accepted negative

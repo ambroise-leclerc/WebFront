@@ -5,11 +5,14 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-18 | Acceptée | Ambroise Leclerc | Décision initiale : politique commune des origines du pont, de la navigation et des fenêtres surgissantes. | [d59db71](https://github.com/ambroise-leclerc/WebFront/commit/d59db712f1d390abe1457a5046b904bd330b85cc) |
+| 1.1 | 2026-11-04 | Proposée | Ambroise Leclerc | Le contrôle d'origine reste seul juge de l'accès au pont ; un secret de lancement, présenté à la poignée de main, distingue la vue d'un frontend intégré sans l'autoriser davantage (#453, ADR-020). | [29ba6db](https://github.com/ambroise-leclerc/WebFront/commit/29ba6dbab77356b3fbeee22d7e012ec929b819af) |
+| 1.2 | 2026-11-04 | Proposée | Ambroise Leclerc | Le cookie de liaison des lectures HTTP (#469, ADR-020) ne remplace pas le contrôle d'origine du pont : il prouve la possession d'un cookie par un client, ne désigne aucune connexion, et une autre page de même origine du même profil lit les URL de lecture, car elle partage déjà l'autorité du pont. | [ecf17ba](https://github.com/ambroise-leclerc/WebFront/commit/ecf17ba124969037fcdaf4ce4175b9b5f53fe661) |
 
 ## État et chronologie
 
-**Acceptée.** Décision initiale : **2026-10-18** (version 1.0).
-Dernière révision : **2026-10-18** (version 1.0).
+**Acceptée.** Décision initiale : **2026-10-18** (version 1.0). Les révisions 1.1 et 1.2 (secret de lancement, cookie de liaison des
+lectures) sont proposées : elles précisent la décision sans changer le contrôle d'origine.
+Dernière révision : **2026-11-04** (version 1.2).
 Le présent texte expose la décision en vigueur ; le tableau retrace ses états antérieurs.
 
 ## Contexte
@@ -35,6 +38,16 @@ Que les dérogations de développement demeurent explicites. DevTools et menus r
 par défaut. Le navigateur système contrôle sa propre navigation ; le serveur y applique néanmoins
 le contrôle du bridge. Les capacités des moteurs diffèrent, notamment les popups WKWebView.
 WebFront cible du contenu de confiance, sans TLS ni authentification intégrés.
+
+Que le secret de lancement d'une vue intégrée (#453) ne s'ajoute pas au contrôle d'origine : il ne donne aucun accès
+au pont, que le contrôle d'`Origin` règle seul. Il ne sert qu'à savoir si la connexion vient de la vue de
+l'application (`UI::isEmbeddedView()`), critère de « client local » des services (ADR-020, règle 3). Il ne protège pas
+d'un script admis dans la vue, qui partage l'autorité du pont et pourrait le lire avant `WebFront.js`, ou le rejouer depuis une autre connexion tant que la page vit ; le navigateur
+système n'en reçoit aucun.
+
+Que le cookie de liaison des lectures HTTP (#469, ADR-020, règle 4) prouve seulement la possession d'un cookie par un client
+(un profil de navigateur) : il ne désigne pas une connexion et ne remplace pas le contrôle d'origine du pont. Une autre page
+de même origine et du même profil peut lire les URL de lecture, car elle partage déjà l'autorité du pont.
 
 ## Options écartées et motifs
 

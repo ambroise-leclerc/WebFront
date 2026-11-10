@@ -50,8 +50,10 @@ find_package(Threads REQUIRED)
 add_library(WebFront INTERFACE)
 add_library(WebFront::WebFront ALIAS WebFront)
 target_link_libraries(WebFront INTERFACE Threads::Threads)
+# dlopen/dlsym: the frontends' run-time loaded toolkits and the system browser's UI loop (needs -ldl before glibc 2.34)
+target_link_libraries(WebFront INTERFACE ${CMAKE_DL_LIBS})
 if(WIN32)
-    target_link_libraries(WebFront INTERFACE shell32)
+    target_link_libraries(WebFront INTERFACE shell32 bcrypt)
 endif()
 
 # Static linkage for CEF compatibility (a global setting: only the top-level project may choose it)
@@ -145,6 +147,8 @@ if(WEBFRONT_BUILD_AUTOMATION OR (WEBFRONT_ENABLE_TESTING AND
     target_compile_definitions(webfront-agent PRIVATE WEBFRONT_AUTOMATION_FRONTEND_TYPE=${WEBFRONT_AUTOMATION_FRONTEND_TYPE})
     webfront_setup_frontends_for_target(webfront-agent)
 endif()
+# Public helper for a parent project: checks the launcher target and optionally installs it.
+include(WebFrontAgent)
 
 if(WEBFRONT_ENABLE_TESTING OR WEBFRONT_ENABLE_FUZZING)
   include(TestHardening)

@@ -5,11 +5,21 @@
 | Version | Date | État | Auteur | Évolution | Révision Git |
 | --- | --- | --- | --- | --- | --- |
 | 1.0 | 2026-10-31 | Proposée | Ambroise Leclerc | Décision initiale : distinction hôte/client, préalables regroupés en épiques (#446 à #450), confinement des racines pendant la résolution et hypothèse de confiance face au déplacement d'un répertoire ouvert ou de la racine, autorisation attachée à l'emplacement déclaré, propriétaires admissibles des répertoires et des ancêtres, transport du navigateur système déclaré (`loopbackAttested`) plutôt que prouvé par un secret de lancement, jetons de lecture réutilisables liés à la connexion par un cookie, exposition des jetons et transport des lectures distantes, exception de confiance explicite, liaison HTTP par profil de navigateur avec cookies nommés par client, contenu actif neutralisé, transport déclaré et association de lancement du navigateur système, racines déclarées accessibles à tout script admis, services en composants facultatifs, sélection par l'utilisateur valant autorisation (poignées plutôt que chemins), backends natif, HTML et navigateur choisis par connexion, contenu des fichiers par HTTP à jeton ; état de l'art et inventaire des autres services. | À renseigner après intégration. |
+| 1.1 | 2026-11-02 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison partielle de l'étape 1 pour #451 (sélecteur de fichiers et téléchargements sous WebKitGTK, CEF, WKWebView et WebView2) ; #452 reste à faire. La section « État de l'étape 1 » distingue les preuves de validation par moteur et par révision ; `docs/FRONTENDS.md` précise les limites de couverture. | Branche `451-file-chooser-downloads` (PR #484), implémentation initiale `91049ab`, stockage privé WKWebView `52d8c68` |
+| 1.2 | 2026-11-03 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #452 (`alert`, `confirm`, `prompt` partout ; `beforeunload` sauf sous WKWebView, qui n'a pas de délégué public pour lui) : l'étape 1 n'est complète qu'avec cette limite. `docs/FRONTENDS.md` précise la couverture par moteur (WKWebView et WebView2 non exécutés localement ; `beforeunload` non exercé de bout en bout et jamais demandé à la fermeture de la fenêtre). | Branche `452-script-dialogs` |
+| 1.3 | 2026-11-03 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #454 (étape 2) : routes HTTP dynamiques (`addRoute`, désinscription par handle, priorité après `WebFront.js` et avant les fournisseurs, collision de préfixes refusée), envoi en flux par morceaux bornés d'une réponse produite à l'exécution et des fichiers non encodés de taille connue (`fs::File::knownSize`), gestionnaire et lectures sur un thread de travail du serveur. Les plages `Range` (#455) et la liaison à la connexion (#469) restent à faire ; elles s'appuient sur ces routes. | [95e2c71](https://github.com/ambroise-leclerc/WebFront/commit/95e2c71f4ab8a847f46d5914ba35f8db55aa9bd5) |
+| 1.4 | 2026-11-04 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #455 (étape 2) : requêtes partielles `Range` (206, 416, `Accept-Ranges`) pour les fichiers non encodés de taille connue et pour les routes dynamiques (`http::fileReply`, `http::range::select`), `If-Range` sur un `ETag` fort fourni par le fournisseur, plages multiples servies en entier. La liaison à la connexion (#469) reste à faire. | [61a9726](https://github.com/ambroise-leclerc/WebFront/commit/61a9726037edb24cc07601ddc68bcf24b3064d04) |
+| 1.5 | 2026-11-04 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #469 (étape 2) : `addReadRoute`, `UI::grantRead`, cookie de liaison `wf-client-<port>-<id>` échangé contre un secret à usage unique reçu par le pont, mode transférable borné à 15 minutes, en-têtes de neutralisation, jeton masqué des journaux, transport déclaré (`remoteFileTransport`, `loopbackAttested` vérifié à la configuration). Les tests navigateur passent sous WKWebView ; la qualification sous CEF, WebView2, WebKitGTK et les navigateurs système reste à exécuter. | [ecf17ba](https://github.com/ambroise-leclerc/WebFront/commit/ecf17ba124969037fcdaf4ce4175b9b5f53fe661) |
+| 1.6 | 2026-11-05 | Proposée, partiellement livrée | Ambroise Leclerc | Étape 3 (#448) : chaînes longues, listes, erreurs typées et réponses différées du pont ; les services eux-mêmes restent à livrer. | [a51449b](https://github.com/ambroise-leclerc/WebFront/commit/a51449b7bf7796c2e23bddacf11af5ce891335a0), [c817501](https://github.com/ambroise-leclerc/WebFront/commit/c81750191ff0d1e1e1e8f4b42ee5ef49d0d69d64) |
+| 1.7 | 2026-11-05 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #460 (étape 4) : stockage modifiable sous des racines déclarées (ADR-002 3.0), `fs::Storage`, `fs::NativeStorage` confiné pendant la résolution, contrôle des propriétaires POSIX, handles tenus sans partage de suppression sous Windows, `rootMoved` et `confinementViolated`, `fs::MemoryStorage` simulé. Écarts aux prescriptions : descente composant par composant sous Linux plutôt que `openat2`, points de réanalyse jamais suivis sous Windows (refusés à la traversée et à la lecture, signalés par `status`, supprimés eux-mêmes par `remove`), vérification d'appartenance par le chemin final du handle et renommage par `NtSetInformationFile` sous Windows. #461 reste à faire. | [509de1a](https://github.com/ambroise-leclerc/WebFront/commit/509de1a), branche `460-writable-storage` (PR #500) |
+| 1.8 | 2026-11-09 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #461 (étape 4) : paquet `@webfront/services` (squelette : module de services vide et fonction de test), archive déterministe, registre de test et suite ; l'étape 4 est achevée. | [PR #503](https://github.com/ambroise-leclerc/WebFront/pull/503), [6eb8293](https://github.com/ambroise-leclerc/WebFront/commit/6eb82937896114ad98b72fd5ad0f38b4e18dbe73) |
+| 1.9 | 2026-11-09 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #462 (étape 5) : exécuteur du thread d'interface (`frontend::UIExecutor`, sender `schedule()` : valeur sur le thread d'interface, arrêté si le jeton part ou si la boucle se ferme, erreur `UIExecutorUnavailable` sans boucle) publié par WKWebView, WebView2, WebKitGTK et CEF, et par `BrowserWithUILoopFrontend`, le navigateur système avec boucle minimale facultative (pompe de messages sur fenêtre de messages, run loop AppKit avec `NSApplication` en politique Accessory, boucle GLib), qui s'arrête par `requestStop()`. **Décision Linux** : le portail XDG passera par GDBus, c'est-à-dire `libgio-2.0` chargée à l'exécution comme GLib et WebKitGTK le sont déjà (aucune dépendance de construction, aucune bibliothèque D-Bus dédiée) ; sans GIO, le backend natif est indisponible. #463 est livré dans la version 1.10. | Branche `462-ui-thread-executor` |
+| 1.10 | 2026-11-09 | Proposée, partiellement livrée | Ambroise Leclerc | Livraison de #463 (étape 5, achevée) : accès typé à la fenêtre native (`frontend::NativeWindow`, `NativeWindowHost`) publié par WKWebView (`NSWindow*`), WebView2 (`HWND`), WebKitGTK (`GtkWindow*`) et CEF (`CefBrowser*`) ; `get()` ne répond que sur le thread d'interface (#462) et pendant la session (`notOpen`, `closed`, `wrongThread`, `unsupported`). `UI::nativeWindow()` ajoute la correspondance avec la connexion par l'association de #453 : toute connexion qui n'est pas la vue du frontend reçoit `notEmbedded`, donc le navigateur système reste sans parent. Identifiant de portail sous WebKitGTK : `x11:<XID>` lu à l'ouverture, `wayland:<handle>` exporté par `gdk_wayland_toplevel_export_handle` une fois la fenêtre prête (nouvelles tentatives pendant 5 s) ; vide tant qu'il est inconnu. Écart : la fenêtre reste publiée jusqu'à la fin de la boucle, y compris quand l'utilisateur vient de la fermer. La vérification manuelle d'un dialogue parenté sous chaque plateforme (`docs/FRONTENDS.md`) reste à exécuter avec le premier backend natif. | Branche `463-native-window-access` |
 
 ## État et chronologie
 
-**Proposée** le **2026-10-31**. Aucun code n'est livré avec cette version : elle fixe le cadre des services
-système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). Elle passera à « Acceptée » quand les
+**Proposée** le **2026-10-31**. La version 1.0 ne livrait aucun code : elle fixe le cadre des services
+système et leurs préalables (épiques #446 à #450) avant l'implémentation du premier d'entre eux (sélection de fichiers). La version 1.1 livre une partie de l'étape 1 (#451) ; la décision reste proposée. Elle passera à « Acceptée » quand les
 critères de la section dédiée seront démontrés.
 
 ## Contexte
@@ -41,12 +51,9 @@ différentes.
 
 - Le serveur HTTP ne traite que `GET` et `HEAD` ; les écritures passent par le pont, par morceaux séquentiels
   (modèle de l'installation `wf`, ADR-010).
-- Les chaînes du pont sont bornées à 65 535 octets par leur en-tête (longueur sur 16 bits, `maxStringBytes`) ; ce
-  n'est pas une limite de WebSocket. Les tableaux typés ont une longueur sur 32 bits et un message est borné à 64 Mio
-  par défaut (`BuffersPolicy`). Le pont ne transporte ni liste de chaînes ni liste d'enregistrements, et un rejet ne
-  porte qu'un message (ADR-003, ADR-004).
-- `cppFunction` encode immédiatement le résultat du callback et `webfront::Task` (`ex::task<void>`) n'est pas un
-  template : un callback ne peut pas différer sa réponse jusqu'à la fin d'une coroutine, d'un dialogue ou d'une lecture.
+- Le pont transporte les chaînes jusqu'à la taille de message de la politique (`longString`, 32 bits), des listes de
+  chaînes, de tuples et de tableaux typés, des erreurs à code (`BridgeError`) et des réponses différées
+  (`cppFunction` acceptant un `webfront::ResultTask<R>`), depuis l'épique #448 (ADR-003, ADR-004).
 - Un fournisseur (ADR-002) ne voit que `open(path)` et rend un `fs::File` ; il ne voit ni la requête (`Range`), ni la
   connexion, ni des jetons émis à l'exécution. Le serveur copie le fichier entier dans la réponse avant l'envoi
   (`readFile`) : la mémoire croît avec la taille du fichier, ce qui interdit les gros fichiers sur cible embarquée.
@@ -246,7 +253,7 @@ lève).
   une connexion qui présente déjà un cookie valide lors de l'échange rejoint ce client au lieu d'en créer un.
   **Échanges simultanés** : deux onglets d'un profil vierge peuvent échanger en même temps sans cookie et créer deux
   clients. Pour qu'aucun `Set-Cookie` n'écrase l'autre, chaque cookie porte un **nom propre à son client**
-  (`wf-client-<id>`, valeur secrète) : les deux coexistent dans le profil et le navigateur les joint tous deux aux
+  (`wf-client-<port>-<id>`, valeur secrète) : les deux coexistent dans le profil et le navigateur les joint tous deux aux
   requêtes. Un jeton est accepté si **l'un** des cookies présentés désigne le client de la connexion propriétaire, tant
   que celle-ci est ouverte. Les cookies dont le serveur a oublié le client (dernière connexion fermée) sont effacés
   (`Max-Age=0`) lors d'un échange ultérieur ; un échange qui présente déjà un cookie valide n'en crée pas, ce qui borne
@@ -289,7 +296,8 @@ lève).
   - `loopbackAttested` : WebFront vérifie que le serveur n'écoute que sur la boucle locale ; l'intégrateur atteste
     qu'aucun mandataire ni tunnel ne l'expose et que la machine n'est pas partagée avec des utilisateurs non fiables.
     C'est la déclaration attendue d'une application de bureau qui utilise le navigateur système ;
-  - `encryptedByDeployment` : le déploiement chiffre (mandataire inverse TLS, tunnel chiffré) ;
+  - `encryptedByDeployment` : le déploiement chiffre sous HTTP (VPN, tunnel) alors que le navigateur utilise `http://` : le cookie n'est pas `Secure`, qu'un navigateur refuserait ;
+  - `httpsByDeployment` : le navigateur atteint l'application en `https://` (mandataire inverse TLS) : le cookie est `Secure` ;
   - `plaintextAccepted` : réseau isolé de confiance.
 
   Hors la part vérifiée de `loopbackAttested`, ces déclarations sont des attestations de l'intégrateur, que WebFront ne
@@ -299,25 +307,21 @@ lève).
 
 ### 5. Appels depuis C++ et depuis JavaScript
 
-Esquisse ; les noms ne sont pas contractuels avant l'implémentation. `cppFunction` répond aujourd'hui dès le retour
-du callback : la forme ci-dessous suppose la **réponse différée** des préalables (un callback qui renvoie une tâche à
-résultat, `ex::task<R>`). La Promise JavaScript se résout quand la tâche se termine, avec la valeur encodée ; elle se
+Esquisse ; les noms de services ne sont pas contractuels avant l'implémentation. `cppFunction` accepte un callback qui
+renvoie une tâche à résultat (`webfront::ResultTask<R>`, alias de `ex::task<R>`) et répond à la fin de la tâche. La Promise JavaScript se résout quand la tâche se termine, avec la valeur encodée ; elle se
 rejette si la tâche lève (message et code d'erreur typé) ou se termine arrêtée (code d'annulation), et à la
 déconnexion, qui demande l'arrêt de la tâche et écarte sa réponse.
 
 ```cpp
 webfront::services::Files files{app, {.roots = {{"Données", dataDirectory}}, .backends = Backends::automatic}};
 
-app.cppFunction("importer", [&](App::UI ui) -> ex::task<int> {
+app.cppFunction("importer", [&](App::UI ui) -> webfront::ResultTask<int> {
     auto picked = co_await files.open(ui, {.title = "Importer", .filters = {{"Images", {"*.png", "*.jpg"}}}});
     for (auto& grant : picked) load(grant.path());   // C++ : autorisation complète
     co_return static_cast<int>(picked.size());       // résout la Promise de la page
 });
 ```
 
-Sans cette extension, une application peut seulement lancer le travail avec `ui.spawn(task)` et répondre aussitôt ;
-la Promise se résout alors avant la fin du dialogue, et le résultat comme les erreurs doivent revenir par un appel
-`ui.jsFunction` séparé. Cette forme dégradée ne sert pas de contrat aux services.
 
 ```ts
 import { files } from "@webfront/services/files";
@@ -351,6 +355,31 @@ Le code vérifié le 2026-10-31 ne permet pas encore d'implémenter ces règles.
 | 3 | [#448](https://github.com/ambroise-leclerc/WebFront/issues/448) Types et contrats du pont | [#456](https://github.com/ambroise-leclerc/WebFront/issues/456) chaînes longues (32 bits) ; [#457](https://github.com/ambroise-leclerc/WebFront/issues/457) listes de chaînes et de tuples ; [#458](https://github.com/ambroise-leclerc/WebFront/issues/458) erreurs typées ; [#459](https://github.com/ambroise-leclerc/WebFront/issues/459) réponse différée des callbacks C++ | listages (règle 4), appels (règle 5) |
 | 4 | [#449](https://github.com/ambroise-leclerc/WebFront/issues/449) Stockage modifiable et livraison des services | [#460](https://github.com/ambroise-leclerc/WebFront/issues/460) stockage sous racines déclarées, confiné pendant la résolution (révision de l'ADR-002) ; [#461](https://github.com/ambroise-leclerc/WebFront/issues/461) paquet `@webfront/services` | sélecteur HTML et écritures (règles 2 à 4) |
 | 5 | [#450](https://github.com/ambroise-leclerc/WebFront/issues/450) Intégration native des frontends | [#462](https://github.com/ambroise-leclerc/WebFront/issues/462) exécuteur du thread d'interface, y compris le navigateur système ; [#463](https://github.com/ambroise-leclerc/WebFront/issues/463) fenêtre native et correspondance avec les connexions | backend natif seulement |
+
+État de l'étape 1 (#451), preuves disponibles au 2026-11-03 : sélecteur et téléchargements implémentés dans les quatre
+moteurs, avec des validations de provenance et de révision distinctes. Les résultats suivants ne valent que pour les
+révisions indiquées ; ils ne qualifient pas automatiquement les changements ultérieurs.
+
+| Moteur | Source de validation | Révision et portée |
+| --- | --- | --- |
+| WebKitGTK | [CI Linux](https://github.com/ambroise-leclerc/WebFront/actions/runs/41628819255/job/125892906278) | `52d8c68` : suite CTest, dont sélection, annulation et téléchargements. |
+| WebView2 | [CI Windows](https://github.com/ambroise-leclerc/WebFront/actions/runs/41628819255/job/125892850205) | `52d8c68` : suite CTest ; sélection interceptée par DevTools et téléchargements redirigés, sans qualification des dialogues natifs. Les 538 tests MSVC Release locaux rapportés dans la [PR #484](https://github.com/ambroise-leclerc/WebFront/pull/484) constituent une preuve locale distincte. |
+| CEF | [CI étendue GCC et Clang](https://github.com/ambroise-leclerc/WebFront/actions/runs/41614144327) | `158ceb5`, antérieure au stockage privé WKWebView : scénarios CEF de fichiers et suite Jasmine. Les essais Linux locaux rapportés dans la PR sont distincts de cette exécution CI. |
+| WKWebView | [CI macOS](https://github.com/ambroise-leclerc/WebFront/actions/runs/41614129707/job/125843186922) | `158ceb5`, antérieure au stockage privé ajouté dans `52d8c68` : scénarios automatisés de sélection, téléchargement, remplacement et fermeture sous un panneau. |
+| WKWebView, panneaux réels | Essais manuels locaux rapportés dans la [PR #484](https://github.com/ambroise-leclerc/WebFront/pull/484) et `docs/FRONTENDS.md` | Réalisés avant `52d8c68` ; la révision exacte de chaque essai n'est pas consignée. Ces résultats ne qualifient pas le nouveau stockage privé. |
+
+À la révision `52d8c68`, le nouveau stockage privé WKWebView n'avait pas été exécuté sur macOS : la compilation CI avait
+échoué avant les tests. Le correctif et les validations ultérieures sont consignés dans la PR #484. La qualification
+des dialogues natifs reste partielle ; les injections de test ne la remplacent pas. `docs/FRONTENDS.md` détaille les
+limites par moteur. #452 est livré dans la version 1.2 (`beforeunload` n'est pas pris en charge sous WKWebView ; sous WebView2, la fermeture de la fenêtre elle-même ne le déclenche pas non plus, seules les navigations et les rechargements le font ; non vérifié sous WebKitGTK et CEF, voir `docs/FRONTENDS.md`) ; l'ADR reste proposée.
+
+#454 est livré dans la version 1.3 : `addRoute(préfixe, gestionnaire)` répond aux `GET` et `HEAD` sous un préfixe absolu terminé par `/`, par une réponse (`http::RouteReply`) dont le corps est lu morceau par morceau sur un thread de travail du serveur, sans mémoire proportionnelle à sa taille (mesure : 128 Mio envoyés sans croissance du pic mémoire). Les fichiers non encodés des fournisseurs dont la taille est connue sont envoyés de la même façon ; les fichiers encodés restent lus en entier pour la négociation de codage (ADR-009). Le gestionnaire ne reçoit ni jeton ni identité de connexion : ils viennent de #469.
+
+#455 est livré dans la version 1.4 : un fichier non encodé de taille connue est servi par plages (`Range: bytes=a-b`, `a-`, `-n` sur une seule plage : `206` avec `Content-Range`, `416` pour une plage qui commence après la fin, `Accept-Ranges: bytes`), en ne lisant que la plage demandée. Les plages multiples sont servies en entier (`200`) ; il n'y a pas de réponse `multipart/byteranges`. Les réponses encodées ou décodées par le repli annoncent `Accept-Ranges: none`. `If-Range` n'accepte qu'un `ETag` fort fourni par le fournisseur (`fs::File::setEntityTag`) ; WebFront n'en déduit aucun d'un chemin, d'une taille ou d'une date, qui peuvent désigner une autre version que le flux ouvert. Sans validateur (fichiers natifs, données embarquées), la plage conditionnée est servie en entier. Une route dynamique sert un fichier par plages avec `http::fileReply`. Le jeton de lecture reste donc réutilisable pour plusieurs requêtes `Range` ; leur liaison à la connexion propriétaire vient de #469.
+
+#469 est livré dans la version 1.5 : `app.addReadRoute(préfixe, gestionnaire)` (sous `/webfront/services/`, hors `bind/`) et `ui.grantRead(route, chemin, ReadOptions)` appliquent les règles ci-dessus. Le jeton est `<identifiant 64 bits>.<secret 256 bits>` placé après le préfixe ; la requête est acceptée si le jeton est connu, non expiré, si la connexion propriétaire est ouverte et si l'un des cookies présentés désigne son client (sauf mode transférable : durée obligatoire de 15 minutes au plus). Un jeton est refusé de la même façon dans tous les cas (`403`, mêmes en-têtes). `WebFront.js` échange le secret reçu par `wfBind.exchange` contre le cookie (`GET /webfront/services/bind/<secret>`, puis `check`) et `webFront.bound` rejette avec une erreur explicite si le navigateur refuse le cookie. Le cookie est `Secure` si l'application déclare `httpsByDeployment` (le navigateur utilise `https://`) ; un tunnel chiffré sous `http://` (`encryptedByDeployment`) n'en reçoit pas, car le navigateur refuserait un cookie `Secure` reçu en HTTP. Un transport non local sans déclaration est refusé à l'émission du jeton et à chaque requête.
+
+#460 est livré dans la version 1.7 (révision 3.0 de l'ADR-002, qui en donne le détail) : `fs::NativeStorage` applique les mesures de la section « Prescriptions » à toute opération (listage paginé, métadonnées, lecture, écriture par temporaire et renommage, création, suppression, renommage), avec les erreurs typées `storage.rootMoved`, `storage.confinementViolated`, `storage.unsafeDirectory`, `storage.linkRefused`… (`fs::StorageError`, une `BridgeError`). Quatre écarts aux prescriptions, sans affaiblir la garantie : sous Linux, la descente composant par composant est toujours employée plutôt qu'`openat2`, puisque chaque répertoire traversé doit être ouvert pour contrôler son propriétaire ; sous Windows, un point de réanalyse n'est jamais suivi (`LinkPolicy::followInside` ne vaut que sous POSIX) : une opération qui le traverserait ou le lirait échoue avec `linkRefused`, tandis que `status` le signale comme lien et que `remove` supprime le point lui-même, sans atteindre sa cible ; sous Windows, l'appartenance du répertoire à la racine se vérifie par le chemin final de son handle, les handles tenus empêchant déjà le déplacement ; sous Windows encore, le renommage passe par `NtSetInformationFile`, car `SetFileInformationByHandle` convertit un nom relatif en chemin absolu, que refuse un renommage relatif au handle d'un dossier (`STATUS_INVALID_PARAMETER`). Les tests Catch2 couvrent le stockage simulé, les sorties par liens (jonctions sous Windows), le remplacement concurrent d'un composant ou du fichier final par des points d'injection, une course répétée (POSIX), les déplacements d'un répertoire ou de la racine pendant la résolution, l'écriture du temporaire et avant la validation, et les propriétaires refusés ou admis (simulés, et `/tmp` réel). Les droits refusés par le système réel ne sont simulés que par `fs::MemoryStorage` : un test qui retire des droits sur disque échoue sous le superutilisateur. Le paquet `@webfront/services` (#461) est livré dans la version 1.8 : sources dans `js/services/` (`services`, objet gelé vide, et `selfTest()`), archive produite par `wf run services-package` avec le packager partagé de `@webfront/react`, servie par le registre de test, installée par la suite Jasmine qui l'importe ; `wf check` vérifie ses déclarations et `ServicesPackageContents` compare l'archive aux sources, à la licence et au SHA-512. Aucune ressource n'est ajoutée au cœur. L'étape 4 est achevée ; la façade du premier service s'ajoutera à ce paquet avec son épique.
 
 Après l'étape 4, le premier service (sélecteur HTML, poignées, import et export côté client) fera l'objet de sa propre
 épique ; les dialogues natifs suivront l'étape 5. `PUT`/`POST` ne sont pas des préalables : les écritures passent par
@@ -505,7 +534,8 @@ autorisations explicites, backend par connexion).
   ouvert, puis `renameat`, `unlinkat`, `mkdirat` relatifs à ce même descripteur. macOS : même descente avec
   `O_NOFOLLOW` (ou `O_NOFOLLOW_ANY`), `renameatx_np`. Windows : ouvertures relatives au handle du répertoire
   (`NtCreateFile` avec `RootDirectory`), points de réanalyse refusés par composant (`FILE_FLAG_OPEN_REPARSE_POINT`),
-  renommage par `SetFileInformationByHandle` sur le handle ouvert. Un lien interne à la racine est suivi seulement si la
+  renommage par `NtSetInformationFile` (`FileRenameInformation`) sur le handle ouvert, relatif au handle du dossier de
+  destination (`SetFileInformationByHandle` convertit le nom en chemin absolu et ce renommage échoue). Un lien interne à la racine est suivi seulement si la
   résolution le confine ; par défaut, les liens sont refusés. Les stockages sans liens (FatFs, LittleFS) se contentent du
   contrôle syntaxique.
 - **Déplacement d'un répertoire déjà ouvert.** La résolution par descripteur empêche la substitution d'un composant

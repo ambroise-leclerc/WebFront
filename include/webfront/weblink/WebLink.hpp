@@ -110,6 +110,9 @@ private:
     std::size_t inFlight = 0;
 };
 
+/// The only size of handshake proof that is kept: the 64 hexadecimal characters of a launch secret (ADR-020).
+inline constexpr std::size_t handshakeProofSize = 64;
+
 template<typename Net, http::BuffersPolicyType Policy = http::DefaultBuffersPolicy>
 class WebLink {
     std::shared_ptr<HandlerGuard> handlers{std::make_shared<HandlerGuard>()};
@@ -117,6 +120,7 @@ class WebLink {
     WebLinkId id;
     DecimalId idText{id};
     bool sameEndian;
+    bool handshaken{};  /// The handshake is accepted once
     std::mutex transportMutex;
     std::optional<log::TransportHandle> transport; /// Browser log transport, attached at handshake
     bool transportRetired{};                       /// No transport may attach after disconnection
@@ -143,10 +147,11 @@ public:
                 const log::ContextScope context(linkContext());
                 detachTransport(false);
                 auto message = event.reason.empty() ? std::string("Browser connection closed") : std::string("Browser connection closed: ") + event.reason;
-                rejectPending(std::make_exception_ptr(std::runtime_error(message)));
+                rejectPending(std::make_exception_ptr(detail::disconnectedError(message)));
                 // The WebSocket reports its closure once, and never when it is stopped by the server or the link.
+                const auto queue = writerQueue;  // the event may release this link
                 eventsHandler({WebLinkEvent::Code::closed, id});
-                wakeAllWriters();  // after the closure is known: nothing will be written any more
+                wakeAll(*queue);  // after the closure is known: nothing will be written any more
             });
         });
 
@@ -172,7 +177,7 @@ public:
         ws->stop();
         const log::ContextScope context(linkContext());
         log::debug("WebLink destructor");
-        rejectPending(std::make_exception_ptr(std::runtime_error("Browser connection closed")));
+        rejectPending(std::make_exception_ptr(detail::disconnectedError()));
         wakeAllWriters();
     }
 
@@ -185,21 +190,21 @@ public:
     /// the thread that writes the frame bringing them down, and returns its identifier for cancelWrites(). The waiters
     /// are also called when the connection closes or the link is destroyed: nothing is left to wait for.
     std::uint64_t whenWritesAtMost(std::size_t limit, std::function<void()> ready) {
-        std::lock_guard lock(writersMutex);
+        std::lock_guard lock(writerQueue->mutex);
         if (ws->pendingWrites() <= limit)
             return 0;
-        const auto waiter = ++lastWriter;
-        writers.emplace(waiter, Writer{limit, std::move(ready)});
+        const auto waiter = ++writerQueue->last;
+        writerQueue->writers.emplace(waiter, Writer{limit, std::move(ready)});
         return waiter;
     }
 
     /// Forgets a waiter of whenWritesAtMost() that was not called yet.
     void cancelWrites(std::uint64_t waiter) {
         std::function<void()> removed;  // destroyed outside the lock
-        std::lock_guard lock(writersMutex);
-        if (auto found = writers.find(waiter); found != writers.end()) {
+        std::lock_guard lock(writerQueue->mutex);
+        if (auto found = writerQueue->writers.find(waiter); found != writerQueue->writers.end()) {
             removed = std::move(found->second.ready);
-            writers.erase(found);
+            writerQueue->writers.erase(found);
         }
     }
 
@@ -252,7 +257,9 @@ public:
 private:
     void onBinaryMessage(std::span<const std::byte> data) {
         const log::ContextScope context(linkContext());
-        log::infoHex("onMessage(binary) :", data);
+        // Log records reach connected browsers, and a message can carry a credential (the launch secret of a handshake, a
+        // read URL returned by a callback): only the command byte and the size are logged, never the payload.
+        log::info("onMessage(binary) : {} bytes, command {}", data.size(), data.empty() ? -1 : static_cast<int>(data[0]));
         if (data.empty()) {
             log::error("Received an empty WebFront message");
             return;
@@ -267,6 +274,11 @@ private:
     }
 
     void handleHandshake(std::span<const std::byte> data) {
+        // One handshake per connection: a repeated one must not reset the stage or the association the first established.
+        if (std::exchange(handshaken, true)) {
+            log::error("Ignoring a repeated handshake");
+            return;
+        }
         auto command = msg::Handshake::castFromRawData(data);
         sendCommand(msg::Ack{});
         attachTransport();
@@ -277,7 +289,12 @@ private:
         const auto     jsEndian       = static_cast<msg::JSEndian>(command->getEndian());
         sameEndian = (nativeIsLittle && jsEndian == msg::JSEndian::little) || (nativeIsBig && jsEndian == msg::JSEndian::big);
 
-        eventsHandler({WebLinkEvent::Code::linked, id});
+        // Anything after the two header bytes is the secret of an embedded view (ADR-020); the application judges it.
+        // Only a proof of the exact size of a launch secret is copied: anything else cannot match and is not worth an allocation.
+        auto proof = data.size() > sizeof(msg::Handshake) ? data.subspan(sizeof(msg::Handshake)) : std::span<const std::byte>{};
+        if (proof.size() != handshakeProofSize)
+            proof = {};
+        eventsHandler({WebLinkEvent::Code::linked, id, std::string(reinterpret_cast<const char*>(proof.data()), proof.size())});
     }
 
     void handleCallFunction(std::span<const std::byte> data) {
@@ -309,12 +326,17 @@ private:
 
 
 public:
-    void sendError(msg::CallId callId, std::string_view message) {
+    /// Rejects the call `callId` with `message` and an application `code` (the generic one by default); nothing is sent
+    /// for call 0. A code that is ill-formed or reserved to the bridge (`webfront.*`) is sent as the generic one: this path
+    /// cannot forge an error that looks like the bridge's own. WebFront's own codes leave through the internal
+    /// detail::rejectWithBridgeCode, not through a method of the link.
+    void sendError(msg::CallId callId, std::string_view message, std::string_view code = bridge_code::generic) {
         if (callId == 0) return;
+        const bool usable = BridgeError::isValidCode(code) && !BridgeError::isReserved(code);
         msg::FunctionReturn<Policy> result;
         result.setCallId(callId);
         websocket::Frame<Net> frame{std::span(reinterpret_cast<const std::byte*>(result.header().data()), result.header().size())};
-        std::runtime_error error{std::string(message)};
+        const auto error = detail::makeBridgeError(usable ? code : bridge_code::generic, std::string(message));
         result.encodeParameter(error, frame);
         frame.freeze();
         sendFrame(std::move(frame));
@@ -325,36 +347,43 @@ private:
         std::size_t           limit;
         std::function<void()> ready;
     };
-    std::mutex                        writersMutex;
-    std::map<std::uint64_t, Writer>   writers;  // waiters of whenWritesAtMost(), by identifier
-    std::uint64_t                     lastWriter = 0;
+    /// The waiters of whenWritesAtMost(), by identifier. Shared, so that the closure handler can wake them after its event
+    /// released the link (an application whose scheduler runs the release at once destroys the link inside that handler).
+    struct WriterQueue {
+        std::mutex                      mutex;
+        std::map<std::uint64_t, Writer> writers;
+        std::uint64_t                   last = 0;
+    };
+    std::shared_ptr<WriterQueue> writerQueue = std::make_shared<WriterQueue>();
 
     // The queue shrank: the waiters it now satisfies are removed, then called outside the lock.
     void wakeWriters() {
         std::vector<std::function<void()>> ready;
         {
-            std::lock_guard lock(writersMutex);
-            if (writers.empty())
+            std::lock_guard lock(writerQueue->mutex);
+            if (writerQueue->writers.empty())
                 return;
             const auto queued = ws->pendingWrites();
-            for (auto writer = writers.begin(); writer != writers.end();) {
+            for (auto writer = writerQueue->writers.begin(); writer != writerQueue->writers.end();) {
                 if (queued > writer->second.limit) {
                     ++writer;
                     continue;
                 }
                 ready.push_back(std::move(writer->second.ready));
-                writer = writers.erase(writer);
+                writer = writerQueue->writers.erase(writer);
             }
         }
         for (auto& call : ready)
             call();
     }
 
-    void wakeAllWriters() {
+    void wakeAllWriters() { wakeAll(*writerQueue); }
+
+    static void wakeAll(WriterQueue& queue) {
         std::map<std::uint64_t, Writer> ready;
         {
-            std::lock_guard lock(writersMutex);
-            ready.swap(writers);
+            std::lock_guard lock(queue.mutex);
+            ready.swap(queue.writers);
         }
         for (auto& [waiter, writer] : ready)
             writer.ready();
