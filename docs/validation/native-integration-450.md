@@ -1,8 +1,8 @@
 # Native integration of the frontends (#450) — platform validation
 
 Epic #450 (ADR-020, step 5) was written on macOS: #462 (interface-thread executor) and #463 (native window). This page
-records what was then validated on Windows and Linux on 2026-11-10, at `develop` 3af5848, and what is left to do on a
-Linux desktop.
+records what was validated on Windows and Linux on 2026-11-10, at `develop` 3af5848 and on this branch (the Linux
+runs on a real desktop).
 
 ## The manual program
 
@@ -52,18 +52,34 @@ Windows 11 Pro 22631, MSVC 14.51 (Build Tools 18), CMake 4.3.4, Ninja, Release, 
   A first run, stopped at about 603 of 678 for lack of memory, had also failed `JourneyRestoreSession`
   (`rename: Access is denied` while restoring a package); it passed in the complete run.
 
-## Linux — partly validated
+## Linux — validated
 
 - CI at 3af5848: `desktop (linux-gcc-webkitgtk)` passes (Xvfb, X11), and the dispatch of `BuildAndTest.yml` on `develop`
   ([run 42776804599](https://github.com/ambroise-leclerc/WebFront/actions/runs/42776804599)) passes `web-integration`
   with GCC and Clang (CEF) and both sanitizer jobs. #463 had not been through the CEF jobs before.
-- WSL 2, Ubuntu 26.10, GCC 15.3, GLib 2.90, no GTK, no WebKitGTK, no portal, no browser:
-  `native_integration_manual browser` PASS with the real GLib loop. The page was opened by the Windows browser through an
-  `xdg-open` shim, so only the loop and the server are Linux there.
-- The WebKitGTK path of the program (`portalParent`, `GtkFileDialog`) only passed a GCC syntax check
-  (`-DWEBFRONT_EMBED_WEBKITGTK`, no GTK installed): **it has never run**.
+- WSL 2, Ubuntu 26.10, GCC 15.3, GLib 2.90, no GTK, no WebKitGTK: `native_integration_manual browser` PASS with the real
+  GLib loop and the page opened by the Windows browser through an `xdg-open` shim.
+- Linux desktop, 2026-11-10, this branch: Wayland session (GNOME, `xdg-desktop-portal` with the gnome and gtk backends),
+  GCC, GTK 4.22.4, WebKitGTK 2.52.6, Release, configured with the commands below.
+  - `WebKitGTKLifecycle-ui-executor`, `-native-window` and `-second-open` pass.
+  - `browser` with the real `xdg-open`: PASS.
+  - `embedded 15000` under XWayland (`GDK_BACKEND=x11`): PASS, `portalParent` is `x11:1a00004`.
+  - `embedded 15000` under native Wayland (`GDK_BACKEND=wayland`): PASS, `portalParent` is `wayland:<handle>`: the
+    `gdk_wayland_toplevel_export_handle` export works on a real desktop. The parented `GtkFileDialog` opened from an operation
+    of the executor, an operation ran while it was open, it completed on the interface thread and `gtk_window_is_active` was
+    true afterwards.
+  - No program fix was needed on the WebKitGTK path.
+  - Complete CTest run on this branch (`--parallel 4`, Xvfb, GCC 16.1, Linux 7.0): the 126 `web-integration` cases and the
+    other targets pass, including `WebKitGTKLifecycle-*`. The `tests` executable does not compile with the default
+    `-Werror`: GCC 16.1 reports `-Wnull-dereference` in `basic_string.h` for `StorageTests.cpp` and `NativeStorageTests.cpp`,
+    which this branch does not touch. Built with `-DWARNINGS_AS_ERRORS=OFF`, 5 of 537 `fast` scenarios fail, all in
+    `NativeStorageTests.cpp` and about symbolic links (`linkRefused` expected, another error code returned, for example
+    `8 == 7` in "A link followed inside the root never reaches a temporary file"). Both are outside this epic and are
+    to be tracked separately.
+  - The four `[look]` points (over the window, on top, blocking, focus returned) are visual and were not confirmed by a
+    person in these runs; the program's checks of the same behavior pass.
 
-### Left to do on a Linux desktop
+### Commands
 
 Needs `libwebkitgtk-6.0-dev`, GTK 4.10 or later, and `xdg-desktop-portal` with a backend for the portal dialog.
 
@@ -76,14 +92,7 @@ build-450/test/web/native_integration_manual browser
 build-450/test/web/native_integration_manual embedded 15000
 ```
 
-- [ ] `browser` with a Linux system browser (real `xdg-open`).
-- [ ] `embedded` in a Wayland session: `portalParent` is `wayland:<handle>` (the export of
-      `gdk_wayland_toplevel_export_handle` has not been tried on a real desktop), and the four `[look]` points of the dialog.
-- [ ] `embedded` in an X11 session (or `GDK_BACKEND=x11` under XWayland): `portalParent` is `x11:<hex XID>`, same `[look]` points.
-- [ ] Optional: WSLg (`docs/WEBKITGTK.md` asks for a manual check there).
-- [ ] Record the results here and update the manual-check paragraph of `docs/FRONTENDS.md`.
-
-If the program itself is wrong on that path (it could not be run), fix it in the same change.
+Not done: WSLg (`docs/WEBKITGTK.md` asks for a manual check there).
 
 ## Not covered
 
