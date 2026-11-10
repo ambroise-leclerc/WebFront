@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Diagnose asynchronous media and file-services specs before Jasmine's generic timeout (#504). Each spec shares a 15 s
+  budget across named operations with a 20 s Jasmine deadline; video failures include the media state and a bounded
+  `mediaRanges` query. The video waits for initial data and checks the destination of each `seeked` event. Consumer
+  Jasmine reports retain recorded failure names, normalize isolated Unicode surrogates and explicitly shorten diagnostics
+  to fit the JSON byte budget. See the [macOS investigation and validation](validation/wkwebview-specs-504.md).
 - Build the unit tests with GCC 16.1 and make the native storage tests independent of the umask (#517). `fs::detail::pageOf`
   moves its page into the result with a loop instead of `vector::assign` over move iterators, which GCC 16.1 reported with
   `-Wnull-dereference` in `basic_string` (an error under the default `-Werror`). The native storage tests created their
