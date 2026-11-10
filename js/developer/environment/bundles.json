@@ -39,12 +39,12 @@
   "js/developer/environment/embed.mjs": "3e6bc10200939fa30d5f60a96f01eb33ddf3da87661390ad433a18366bf52547",
   "examples/life/ui/main.tsx": "7b1ff285d2a6b8f897ef12df872886e61ef4b24e2358a9423b76b38ab75c85d3",
   "examples/life/ui/style.css": "9bb55eb0f0a3287e5b7dc78af9d69608b87ff42c4d9c8a653bc83a52fe293c44",
-  "js/developer/tools/distribution.json": "9909ea4607d91cc38f30d6f6d4bcfcedffcc178aad21873056fc60aad6d0fb18",
+  "js/developer/tools/distribution.json": "a9314cb421c6113c0bb901bc57247e2373bf2670f65d1708923241940f6133db",
   "js/developer/tools/archive.mjs": "da63bb9d796ddfd24ed945b15c53f66a0400eb177886fd4f1c8fd10cafb5a91b",
   "js/developer/tools/distribution.mjs": "43dfdccc912693db46fd095fd78ae79325abab672d99f89fd569914ef3499cad",
   "js/developer/scripts/build.mjs": "def3c0ccecbc776b76e20571d015f9a1f23a267c0bd6c0c7a07a81ce9293a663",
   "js/developer/webfront.project.json": "3c25620969d4cb3dcb7ed01ada2cd72f56f9e2660d67433ca2133e0be6211a9c",
   "js/core/bootstrap/bootstrap.bundle.mjs": "536831257f0fc92e31911841750e1e59247f7c64e756b0fcb878efd9860a741f",
   "js/developer/environment/packages.bundle.mjs": "2d62f3fcdece8e898f15814d7e80fc3a27ea062f45514cf8e5c3ae32fd9d26c5",
-  "include/webfront/system/DeveloperReleaseData.hpp": "dcd9dd92a795b0b951c0b4e9559061e02ed5d9bccb8d8bfb75178528a3334729"
+  "include/webfront/system/DeveloperReleaseData.hpp": "98094418f18a0ce30f6334c94fb8a1ab2df6d9026a2203223aa11796b622b4ee"
 }

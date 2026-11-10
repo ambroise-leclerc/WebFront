@@ -596,7 +596,7 @@ above). Rows before 0.9 were reconstructed from the header of each tag; 0.4.0 pr
 <!-- compatibility-table:begin -->
 | Library | Environment | Minimum api |
 | --- | --- | --- |
-| unreleased | 0.6.6 | 1 |
+| unreleased | 0.9.0 | 1 |
 | 0.8.0 | 0.6.3 | 1 |
 | 0.7.0 | 0.6.3 | 1 |
 | 0.6.0 | 0.6.3 | 1 |
