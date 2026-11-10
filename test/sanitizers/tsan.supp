@@ -1,0 +1,7 @@
+# ThreadSanitizer suppressions of the sanitizers job (BuildAndTest.yml).
+#
+# GLib is not instrumented, and GMutex and the reference counts of its sources are futexes and atomics that ThreadSanitizer
+# cannot see: a GSource that one thread allocates (g_idle_add_full, as the interface-thread executor and UILoopStop do) and
+# that the loop thread frees after dispatching it is reported as a race although GLib orders the two itself. A race is
+# suppressed only when one of its stacks goes through libglib; the code of WebFront around it stays checked.
+race:libglib-2.0.so
