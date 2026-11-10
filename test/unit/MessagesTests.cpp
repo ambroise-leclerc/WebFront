@@ -519,6 +519,11 @@ SCENARIO("Lists of strings, tuples and arrays are encoded as one list value") {
             REQUIRE_THROWS_AS(decodedParameter<vector<Level32>>(nested(33)), runtime_error);
         }
     }
+}
+
+// A scenario of its own: each message and frame holds its policy's buffers, and one function with all of them exceeds
+// the 64 KiB of stack that the MSVC analysis allows (C6262, #512).
+SCENARIO("Lists respect the bounds of the buffers policy") {
     GIVEN("a policy whose messages cannot exceed 1 KiB") {
         using SmallPolicy = http::CustomBuffersPolicy<8192, 8192, 32768, 1024>;
         msg::FunctionReturn<SmallPolicy>             message;
