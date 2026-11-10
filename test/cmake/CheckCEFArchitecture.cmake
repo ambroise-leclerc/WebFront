@@ -30,6 +30,9 @@ check_project_arch(arm64 arm64 arm64)
 # x86_64 stays on the SDK's detection.
 check_project_arch(x86_64 x86_64 unset)
 check_project_arch(AMD64 AMD64 unset)
+# Spellings of one architecture are not a cross-build.
+check_project_arch(x86_64 amd64 unset)
+check_project_arch(aarch64 arm64 arm64)
 
 # A value given by the user is never overwritten.
 set(UNIX ON)
@@ -45,7 +48,7 @@ endif()
 
 # The package downloads the archive of the host: both directions of a cross-build are refused,
 # instead of compiling the wrapper for one architecture and linking libcef.so of the other.
-foreach(pair "x86_64;aarch64" "aarch64;x86_64")
+foreach(pair "x86_64;aarch64" "aarch64;x86_64" "x86_64;i686" "i686;x86_64")
     list(GET pair 0 host)
     list(GET pair 1 target)
     execute_process(
