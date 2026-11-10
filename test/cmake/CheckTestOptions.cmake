@@ -42,6 +42,15 @@ endforeach()
 configure("old build tree" upgraded OPTIONS -DOLD_TREE=ON -DENABLE_TESTING=ON -DENABLE_COVERAGE=ON)
 configure("old cache is not migrated" upgraded OPTIONS -DOLD_TREE=OFF -DTOP_LEVEL=ON
     EXPECT "TESTING=OFF LEGACY=ON" "COVERAGE=OFF LEGACY=ON")
+# The same upgrade with Ninja, whatever the default generator of the machine (CMAKE_GENERATOR). Ninja refuses to
+# generate a tree that declares no project, which the old-tree fixture once was (#514): it must keep generating.
+find_program(ninja NAMES ninja-build ninja samu)
+if(ninja)
+    configure("old build tree with Ninja" upgraded-ninja OPTIONS -G Ninja -DOLD_TREE=ON -DENABLE_TESTING=ON -DENABLE_COVERAGE=ON
+        EXPECT "Old tree generated with Ninja")
+    configure("old cache is not migrated with Ninja" upgraded-ninja OPTIONS -DOLD_TREE=OFF -DTOP_LEVEL=ON
+        EXPECT "TESTING=OFF LEGACY=ON" "COVERAGE=OFF LEGACY=ON")
+endif()
 configure("generic toolchain option" toolchain
     OPTIONS -DTOP_LEVEL=ON "-DCMAKE_TOOLCHAIN_FILE=${ROOT}/test/cmake/test-options/Toolchain.cmake" -DTOOLCHAIN_LEGACY=ON
     EXPECT "TESTING=OFF LEGACY=<unset>")
