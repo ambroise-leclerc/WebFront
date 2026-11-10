@@ -84,6 +84,11 @@ jobs:
         run: |
           cmake --build build-driver --target webfront-embedded-assets
           cmake -DROOT="$PWD" -DMODE=unreleased -P cmake/DeveloperCompatibility.cmake
+      # The guide names the pinned version and URL, and NewcomerDocsMatchExamples requires them to be the header's.
+      - name: Name the pin in the developer environment guide
+        run: |
+          sed -i -E "/ release pin selects$/{s#The [0-9][^ ]* release pin#The $VERSION release pin#;n;s#developer/[0-9][^/]*/environment[.]tgz#developer/$VERSION/environment.tgz#}" docs/DEVELOPER_ENVIRONMENT.md
+          grep -q "developer/$VERSION/environment[.]tgz" docs/DEVELOPER_ENVIRONMENT.md
       - name: Check the closed list of paths
         run: |
           # shellcheck disable=SC2086
