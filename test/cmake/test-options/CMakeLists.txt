@@ -6,6 +6,8 @@ if(OLD_TREE)
     option(ENABLE_COVERAGE "Enable coverage reporting for gcc/clang" FALSE)
     option(ENABLE_SANITIZER_ADDRESS "Enable address sanitizer" OFF)
     message(STATUS "Former options of ${ROOT} declared")
+    # A generator such as Ninja refuses to generate a tree whose CMakeLists.txt never calls project() (#514).
+    project(TestOptions LANGUAGES NONE)
     return()
 endif()
 if(FIXTURE_VERSION)
