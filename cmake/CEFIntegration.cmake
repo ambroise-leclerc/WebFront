@@ -44,6 +44,9 @@ set(CEF_ENABLE_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
 set(ENABLE_CEF_TESTS OFF CACHE BOOL "Disable CEF tests" FORCE)
 set(WITH_TESTS OFF CACHE BOOL "Disable all tests" FORCE)
 
+# The SDK takes Linux aarch64 for x86_64 (-m64); see CEFArchitecture.cmake.
+include("${CMAKE_CURRENT_LIST_DIR}/CEFArchitecture.cmake")
+
 # Dependency options create a normal variable in CPM's add_subdirectory scope. This overrides
 # both normal and cache settings for CEF without modifying either binding in the caller.
 # URI preserves the original shorthand's SYSTEM and EXCLUDE_FROM_ALL defaults.

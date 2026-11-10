@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 (#523). `cmake/CEFArchitecture.cmake` selects `PROJECT_ARCH=arm64` from
+  the target processor before the SDK is included, so the wrapper no longer receives `-m64 -march=x86-64`; a `PROJECT_ARCH`
+  you set is kept, and x86_64, Windows and macOS are unchanged. The `CEFArchitecture` CTest case covers it.
+
 ## 0.9.0 - 2026-11-10
 
 - Diagnose asynchronous media and file-services specs before Jasmine's generic timeout (#504). Each spec shares a 15 s
