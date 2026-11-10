@@ -216,7 +216,9 @@ inline DirectoryPage pageOf(std::vector<EntryInfo> entries, std::string_view aft
     auto          first = after.empty() ? entries.begin() : std::ranges::upper_bound(entries, after, {}, &EntryInfo::name);
     DirectoryPage page;
     const auto    count = std::min<std::size_t>(limit, static_cast<std::size_t>(entries.end() - first));
-    page.entries.assign(std::make_move_iterator(first), std::make_move_iterator(first + static_cast<std::ptrdiff_t>(count)));
+    page.entries.reserve(count);
+    for (auto entry = first; entry != first + static_cast<std::ptrdiff_t>(count); ++entry)
+        page.entries.push_back(std::move(*entry));
     if (first + static_cast<std::ptrdiff_t>(count) != entries.end())
         page.next = page.entries.back().name;
     return page;
