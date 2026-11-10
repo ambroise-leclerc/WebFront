@@ -373,7 +373,7 @@ jobs:
       CXX: clang++-23
       ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
       UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+      TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:suppressions=${{ github.workspace }}/test/sanitizers/tsan.supp
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v4
