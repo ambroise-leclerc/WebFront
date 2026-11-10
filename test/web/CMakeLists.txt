@@ -155,10 +155,12 @@ if(_browser_tests_available)
     set(_reason_fail "Jasmine did not pass \\(status: failed\\)")
     set(_reason_empty "${_reason_fail}")
     set(_reason_pending "${_reason_fail}")
+    set(_reason_unicode "${_reason_fail}")
+    set(_reason_report-bounds "${_reason_fail}")
     set(_reason_broken "Jasmine did not pass \\(status: error\\)")
     set(_reason_close "exited without reporting a result")
     set(_reason_hang "timed out after 5 seconds")
-    foreach(mode pass fail empty pending broken close hang)
+    foreach(mode pass fail empty pending broken close hang unicode report-bounds)
         set(limit 30)
         if(mode STREQUAL "hang")
             set(limit 5)
@@ -200,6 +202,12 @@ if(_browser_tests_available)
             set_tests_properties(ConsumerJasmine-${mode} PROPERTIES PASS_REGULAR_EXPRESSION "${_reason_${mode}}")
         endif()
     endforeach()
+    # Exercise the short timeout/error paths without a real stalled native operation (#504).
+    set(_async_diagnostics "${CMAKE_CURRENT_SOURCE_DIR}/suite/specs/async-diagnostics.js")
+    webfront_add_jasmine_test(NAME ConsumerJasmine-async-diagnostics TARGET jasmine_consumer
+        FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
+        SPECS "${_async_diagnostics}" "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/async-diagnostics.spec.js"
+        ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
     # Window capture (issue #468) is implemented by every embedded frontend.
     set(WEBFRONT_CAPTURE_FRONTENDS WebKitGTK WKWebView WebView2 CEF)
     if(WEBFRONT_WEBTEST_FRONTEND IN_LIST WEBFRONT_CAPTURE_FRONTENDS)
@@ -209,8 +217,8 @@ if(_browser_tests_available)
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
         # File services of the engine (issue #451), shared by every embedded frontend.
         webfront_add_jasmine_test(NAME ConsumerJasmine-file-services TARGET jasmine_consumer
-            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 30
-            SPECS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/file-services.spec.js"
+            FRONTEND "${WEBFRONT_WEBTEST_FRONTEND}" TIMEOUT 60
+            SPECS "${_async_diagnostics}" "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer/file-services.spec.js"
             ARGS "${CMAKE_CURRENT_SOURCE_DIR}/jasmine-consumer")
         add_test(NAME ConsumerJasmineCaptures COMMAND "${CMAKE_COMMAND}"
             "-DDIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/webfront-jasmine/ConsumerJasmine-capture/captures"

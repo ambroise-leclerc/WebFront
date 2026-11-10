@@ -6,6 +6,7 @@ import './forms-specs.mjs';
 import './content-policy-specs.mjs';
 import './dom-specs.mjs';
 import { importedValue } from './module-fixture.mjs';
+import './async-diagnostics.js';
 
 // The page of the application is covered by the lifecycle cases (path-encoding): these specs run in the frame of wf test.
 describe('Frontend page URL', () => {
@@ -608,31 +609,36 @@ describe('HTTP byte ranges', () => {
 
     it('lets a <video> seek into the middle of the resource and resume', async () => {
         // Only the requests the video makes count: the explicit fetches above also asked for ranges.
-        const before = (await webFront.cppFunction('mediaRanges')()).split('\n').length;
         const video = document.createElement('video');
         video.preload = 'auto';
         video.muted = true;
-        const once = name => new Promise((resolve, reject) => {
-            video.addEventListener(name, resolve, {once: true});
-            video.addEventListener('error', () => reject(new Error(`video error ${video.error?.code}: ${video.error?.message}`)), {once: true});
-        });
+        const waits = webFrontTestAsync.steps(webFrontTestAsync.timeoutMs, () =>
+            `readyState=${video.readyState}, networkState=${video.networkState}, currentTime=${video.currentTime}, ` +
+            `duration=${video.duration}, paused=${video.paused}, seeking=${video.seeking}`);
+        let before;
         try {
-            const ready = once('loadedmetadata');
-            video.src = url;
-            await ready;
+            before = (await waits.step('mediaRanges baseline', () => webFront.cppFunction('mediaRanges')())).split('\n').length;
+            await waits.event(video, 'loadedmetadata', () => { video.src = url; });
             expect(video.duration).toBeGreaterThan(19);
-            const seeked = once('seeked');
-            video.currentTime = video.duration / 2;
-            await seeked;
+            // WebKit can still be finishing its initial positioning at loadedmetadata. Wait for actual data and
+            // accept only a seeked at the requested position, not a queued event belonging to that initial load.
+            if (video.readyState < 2) await waits.event(video, 'loadeddata', () => {});
+            const middle = video.duration / 2;
+            await waits.event(video, 'seeked', () => { video.currentTime = middle; }, 'seeked (middle)',
+                () => !video.seeking && Math.abs(video.currentTime - middle) < 1);
             expect(video.currentTime).toBeGreaterThan(9);
-            const playing = once('timeupdate');
-            await video.play();
-            await playing;
+            await waits.event(video, 'timeupdate', () => video.play());
             video.pause();
-            const seekedAgain = once('seeked');
-            video.currentTime = 2;
-            await seekedAgain;
+            await waits.event(video, 'seeked', () => { video.currentTime = 2; }, 'seeked (back to 2s)',
+                () => !video.seeking && Math.abs(video.currentTime - 2) < 1);
             expect(video.currentTime).toBeLessThan(5);
+        } catch (error) {
+            // The bridge can itself stall. A second, short bound keeps this diagnostic ahead of Jasmine's deadline.
+            let ranges;
+            try {
+                ranges = await webFrontTestAsync.steps(1000).step('mediaRanges diagnostic', () => webFront.cppFunction('mediaRanges')());
+            } catch (diagnostic) { ranges = diagnostic.message; }
+            throw new Error(`${error.message}; mediaRanges=${JSON.stringify(ranges)}`);
         } finally {
             video.removeAttribute('src');
             video.load();
@@ -641,9 +647,10 @@ describe('HTTP byte ranges', () => {
         // engine asks is its own business: WebKit probes with a range then buffers the whole resource, GStreamer
         // (WebKitGTK) may download it without any Range. The ranges themselves are checked by the specs above; here
         // the video must have loaded this resource from the route and positioned itself in it.
-        const requests = (await webFront.cppFunction('mediaRanges')()).split('\n').slice(before - 1).filter(range => range !== '');
+        const requests = (await waits.step('mediaRanges after playback', () => webFront.cppFunction('mediaRanges')()))
+            .split('\n').slice(before - 1).filter(range => range !== '');
         expect(requests.length).toBeGreaterThan(0);
-    });
+    }, webFrontTestAsync.specTimeoutMs);
 });
 
 // HTTP reads bound to the browser client of the connection (#469): token and cookie, neutralized active content.

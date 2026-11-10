@@ -77,6 +77,10 @@ and bounded JSON report. Names contain only letters, digits, underscore and hyph
 two independent CTest processes for the same named test/build simultaneously. Use separate build
 trees for those runs. A failed spec, suite/global error, focused suite, zero executed specs,
 missing report, application failure or timeout fails CTest. Old reports are removed before each run.
+Each of the first 50 recorded failure strings includes the spec or suite name before its diagnostic. Diagnostics start
+with at most 2048 Unicode characters and are shortened together to fit the 60000-byte UTF-8 JSON budget, preserving
+every recorded name. If the names alone exceed that budget, they are shortened too. `truncated: true` signals any
+shortening. Isolated UTF-16 surrogates are replaced by U+FFFD so the report remains valid for the C++ JSON reader.
 
 The test build trusts the configured runtime/specs and application page. This is code execution
 with application/bridge authority, not a sandbox. Native reads expose only the configured files
