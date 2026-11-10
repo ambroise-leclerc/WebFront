@@ -340,7 +340,7 @@ The [automation guide](docs/AUTOMATION.md#automating-your-own-application) cover
 
 ## What's new since 0.5.0
 
-The [changelog](docs/CHANGELOG.md) is exhaustive; the main additions are:
+The [changelog](docs/CHANGELOG.md) lists every version with its breaking changes (detailed entries are archived in [`docs/changelog/`](docs/changelog/)); the main additions are:
 
 - **0.6.0.** `ui.document()` for [DOM islands from C++](docs/DOM.md); [forms and inspectors](docs/FORMS.md) generated from type descriptions (with an optional C++26 reflection layer); the [`@webfront/react` adapter](docs/REACT.md) with coalesced C++ stores and `Island`; `app.broadcast(...)` and `app.forEachUI(...)` to reach every browser from any thread; connection generations that reject a stale `UI`; local [automation](docs/AUTOMATION.md) (`webfront-agent`, stdio MCP and JSON CLI).
 - **0.7.0.** **Breaking:** test, fuzzing, coverage and sanitizer CMake options require the `WEBFRONT_` prefix (`WEBFRONT_ENABLE_TESTING`, ...); several agent shutdown fixes; faster pull-request CI.
