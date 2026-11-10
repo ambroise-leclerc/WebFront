@@ -2,6 +2,7 @@
 <script src="/WebFront.js"></script>
 <script type="module">
 await webFront.ready;
+await webFront.cppFunction("lifecycleStage")(5);
 const popup = window.open('/policy-escaped.html?popup', '_blank');
 if (popup !== null) {
     await webFront.cppFunction('policyEscaped')();
@@ -17,6 +18,7 @@ if (popup !== null) {
     const target = new URL('/policy-escaped.html?navigation', location.href);
     target.hostname = 'localhost';
     // Keep one history entry so WebView2 permits the destination's script closure.
+    await webFront.cppFunction("lifecycleStage")(6);
     location.replace(target.href);
 }
 </script>

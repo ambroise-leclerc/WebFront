@@ -8,6 +8,7 @@
     (async () => {
         try {
             await webFront.ready;
+            await webFront.cppFunction("lifecycleStage")(2);
             if ("__webfrontView" in window) throw new Error("the launch secret is still readable by the page");
             // Run the C++-generated injection against origins serialized by the real engine. A synthetic window
             // keeps the fixed test secret separate from the real view's launch secret and needs no IPv6 listener.
@@ -24,6 +25,7 @@
                 if ("__webfrontView" in foreign) throw new Error("a foreign origin received the secret");
             }
             await webFront.cppFunction("originsChecked")();
+            await webFront.cppFunction("lifecycleStage")(3);
             await new Promise((resolve, reject) => {
                 const socket = new WebSocket(`ws://${location.host}`, "WebFront_0.1");
                 socket.binaryType = "arraybuffer";
@@ -32,10 +34,12 @@
                 socket.onerror = () => reject(new Error("the second connection failed"));
                 socket.onclose = () => reject(new Error("the second connection closed before answering"));
             });
+            await webFront.cppFunction("lifecycleStage")(4);
             for (let attempt = 0; attempt < 100; ++attempt) {
                 if (await webFront.cppFunction("startedConnections")() >= 2) break;
                 await new Promise(resolve => setTimeout(resolve, 50));
             }
+            await webFront.cppFunction("lifecycleStage")(8);
         } finally {
             window.close();
         }

@@ -3,6 +3,7 @@
 <script type="module">
 try {
     await webFront.ready;
+    await webFront.cppFunction("lifecycleStage")(7);
     await webFront.cppFunction(location.search === '?popup' ? 'policyEscaped' : 'policyNavigated')();
 } catch (error) {
     console.error('Policy destination could not report its result', error);

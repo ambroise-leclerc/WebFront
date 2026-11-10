@@ -4,6 +4,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdlib>
 #include <future>
 #include <list>
 #include <thread>
@@ -26,6 +28,52 @@ using TestFS   = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::Native
 using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::testdriver::QuietFrontend<Frontend>>;
 static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOpen);
 
+// A stuck UI loop or a page which never settles must fail before CTest's outer timeout. The watchdog
+// uses process termination because the frontend may be stuck on its owning thread and cannot be unwound safely.
+std::atomic<int> lifecycleStage = 0;
+constexpr const char* stageName(int stage) {
+    switch (stage) {
+        case 1: return "bridge connected";
+        case 2: return "association: checking origins";
+        case 3: return "association: waiting for second WebSocket";
+        case 4: return "association: waiting for second connection registration";
+        case 5: return "policy: bridge ready, opening popup";
+        case 6: return "policy: waiting for navigation or cancellation";
+        case 7: return "policy: destination bridge ready";
+        case 8: return "page reported completion, waiting for window close";
+        case 9: return "window closed, checking results or shutting down";
+        default: return "starting frontend or waiting for first bridge connection";
+    }
+}
+
+class LifecycleWatchdog {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool finished = false;
+    std::thread worker;
+public:
+    explicit LifecycleWatchdog(std::chrono::seconds timeout) : worker([this, timeout] {
+        std::unique_lock lock{mutex};
+        if (!changed.wait_for(lock, timeout, [this] { return finished; })) {
+            std::cerr << "Lifecycle timeout at stage: " << stageName(lifecycleStage.load()) << std::endl;
+            std::_Exit(EXIT_FAILURE);
+        }
+    }) { }
+    ~LifecycleWatchdog() {
+        {
+            std::lock_guard lock{mutex};
+            finished = true;
+        }
+        changed.notify_one();
+        worker.join();
+    }
+};
+
+template <class Application>
+void registerLifecycleStage(Application& app) {
+    app.cppFunction("lifecycleStage", [](std::int32_t stage) { lifecycleStage = stage; });
+}
+
 int show(std::string_view page) {
     App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     std::atomic<bool> connected = false;
@@ -46,8 +94,11 @@ int checkViewAssociation() {
     std::vector<bool>   embedded;
     std::vector<bool>   local;
     std::atomic<bool>   originsChecked = false;
+    registerLifecycleStage(app);
     app.onUIStarted([&](App::UI ui) {
         std::scoped_lock lock{mutex};
+        if (embedded.empty())
+            lifecycleStage = 1;
         embedded.push_back(ui.isEmbeddedView());
         local.push_back(ui.isLocalClient());
     });
@@ -60,6 +111,7 @@ int checkViewAssociation() {
     });
     app.cppFunction("originsChecked", [&] { originsChecked = true; });
     app.show("view-association.html");
+    lifecycleStage = 9;
     if (!originsChecked)
         throw std::runtime_error("The view association script did not match the browser's serialized IPv6 origins");
     std::scoped_lock lock{mutex};
@@ -442,19 +494,28 @@ int checkContentPolicy(bool allowNavigation) {
         policy.navigationAllowedOrigins = {"http://localhost:9002"};
     using PolicyApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, PolicyLifecycleFrontend>;
     PolicyApp         app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .contentPolicy = policy});
+    registerLifecycleStage(app);
+    app.onUIStarted([](PolicyApp::UI) {
+        int initial = 0;
+        lifecycleStage.compare_exchange_strong(initial, 1);
+    });
     std::atomic<bool> completed = false;
     std::atomic<bool> escaped   = false;
     std::atomic<bool> navigated = false;
     app.cppFunction("policyCompleted", [&] {
+        lifecycleStage = 8;
         completed = true;
     });
     app.cppFunction("policyEscaped", [&] {
+        lifecycleStage = 8;
         escaped = true;
     });
     app.cppFunction("policyNavigated", [&] {
+        lifecycleStage = 8;
         navigated = true;
     });
     app.show("content-policy.html");
+    lifecycleStage = 9;
     if (escaped)
         throw std::runtime_error("Frontend allowed an unmanaged popup");
     if (completed == allowNavigation)
@@ -511,8 +572,20 @@ int run(std::string_view mode) {
 
 int main(int argc, char** argv) {
     try {
-        // CEF subprocesses have their own argument list and must dispatch before mode parsing.
+        if (argc == 2 && std::string_view(argv[1]) == "watchdog-probe") {
+            LifecycleWatchdog watchdog(std::chrono::seconds(1));
+            lifecycleStage = 3;
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            return 0;
+        }
+#ifdef WEBFRONT_EMBED_CEF
+        // CEF subprocesses must dispatch before starting any test threads.
         webfront::detail::ensureFrontendInitialized<Frontend>();
+#endif
+        LifecycleWatchdog watchdog(std::chrono::seconds(45));
+#ifndef WEBFRONT_EMBED_CEF
+        webfront::detail::ensureFrontendInitialized<Frontend>();
+#endif
         return argc == 2 ? run(argv[1]) : 1;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

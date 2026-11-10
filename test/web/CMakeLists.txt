@@ -20,6 +20,9 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     target_compile_definitions(frontend_lifecycle PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
     webfront_setup_frontends_for_target(frontend_lifecycle)
     add_dependencies(webtest frontend_lifecycle)
+    add_test(NAME FrontendLifecycleWatchdog COMMAND "${CMAKE_COMMAND}"
+        "-DPROBE=$<TARGET_FILE:frontend_lifecycle>" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleWatchdog.cmake")
+    set_tests_properties(FrontendLifecycleWatchdog PROPERTIES TIMEOUT 10 LABELS fast)
 endif()
 
 # Manual validation of the interface-thread executor and the native window (#450) with a real browser, window and native
