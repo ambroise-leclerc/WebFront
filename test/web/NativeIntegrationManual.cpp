@@ -103,8 +103,19 @@ struct Receiver {
         return ex::prop{ex::get_stop_token, ex::never_stop_token{}};
     }
     void set_value() && noexcept {
-        function();
-        result->set_value(Outcome::ran);
+        // noexcept: an exception of the operation is an outcome of the scenario, not a std::terminate. The outcome is
+        // published once, outside the try block, so that a failing set_value() is not retried.
+        auto outcome = Outcome::ran;
+        try {
+            function();
+        } catch (...) {
+            outcome = Outcome::failed;
+        }
+        try {
+            result->set_value(outcome);
+        } catch (...) {
+            // The promise was already satisfied or its state is gone: nobody waits for this outcome any more.
+        }
     }
     void set_stopped() && noexcept {
         result->set_value(Outcome::stopped);
@@ -312,7 +323,7 @@ void gtkDialog(const UIExecutor& executor, void* parent, int visibleMs) {
     look("focus returned to the application's window");
 }
 
-// The portal identifier of #463: `x11:<XID>` or `wayland:<handle>`, tried every 100 ms for 5 s after the window is presented.
+// The portal identifier of #463: `x11:<XID>` or `wayland:<handle>`, tried every 100 ms, 70 times (about 7 s), after the window is presented.
 template <typename App>
 void portalParent(App& app, const UIExecutor& executor) {
     std::string identifier;
