@@ -4,6 +4,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdlib>
 #include <future>
 #include <list>
 #include <thread>
@@ -26,6 +28,72 @@ using TestFS   = webfront::fs::Multi<webfront::fs::IndexFS, webfront::fs::Native
 using App      = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, webfront::testdriver::QuietFrontend<Frontend>>;
 static_assert(Frontend::action == webfront::frontend::Action::closeServerAfterOpen);
 
+// Values reported by the lifecycle pages; keep their named constants in sync with this enum.
+enum class LifecycleStage : std::int32_t {
+    uninstrumented = 0,
+    bridgeConnected = 1,
+    associationOrigins = 2,
+    associationSecondSocket = 3,
+    associationRegistration = 4,
+    policyPopup = 5,
+    policyNavigation = 6,
+    policyDestination = 7,
+    pageCompleted = 8,
+    windowClosed = 9,
+    startingInstrumented = 10,
+};
+std::atomic<LifecycleStage> lifecycleStage = LifecycleStage::uninstrumented;
+constexpr const char* stageName(LifecycleStage stage) {
+    switch (stage) {
+        case LifecycleStage::uninstrumented: return "uninstrumented mode or frontend initialization";
+        case LifecycleStage::bridgeConnected: return "bridge connected";
+        case LifecycleStage::associationOrigins: return "association: checking origins";
+        case LifecycleStage::associationSecondSocket: return "association: waiting for second WebSocket";
+        case LifecycleStage::associationRegistration: return "association: waiting for second connection registration";
+        case LifecycleStage::policyPopup: return "policy: bridge ready, opening popup";
+        case LifecycleStage::policyNavigation: return "policy: waiting for navigation or cancellation";
+        case LifecycleStage::policyDestination: return "policy: destination bridge ready";
+        case LifecycleStage::pageCompleted: return "page reported completion, waiting for window close";
+        case LifecycleStage::windowClosed: return "window closed, checking results or shutting down";
+        case LifecycleStage::startingInstrumented: return "starting frontend or waiting for first bridge connection";
+    }
+    return "unknown stage";
+}
+
+// A stuck UI loop or a page which never settles must fail before CTest's outer timeout. The watchdog
+// terminates the process because the owning thread cannot safely be unwound; EXIT_FAILURE makes CTest fail.
+class LifecycleWatchdog {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool finished = false;
+    std::thread worker;
+public:
+    explicit LifecycleWatchdog(std::chrono::seconds timeout) : worker([this, timeout] {
+        std::unique_lock lock{mutex};
+        if (!changed.wait_for(lock, timeout, [this] { return finished; })) {
+            std::cerr << "Lifecycle timeout at stage: " << stageName(lifecycleStage.load()) << std::endl;
+            std::_Exit(EXIT_FAILURE);
+        }
+    }) { }
+    ~LifecycleWatchdog() {
+        {
+            std::lock_guard lock{mutex};
+            finished = true;
+        }
+        changed.notify_one();
+        worker.join();
+    }
+};
+
+template <class Application>
+void registerLifecycleStage(Application& app) {
+    app.cppFunction("lifecycleStage", [](std::int32_t stage) {
+        if (stage >= static_cast<std::int32_t>(LifecycleStage::associationOrigins)
+            && stage <= static_cast<std::int32_t>(LifecycleStage::pageCompleted))
+            lifecycleStage = static_cast<LifecycleStage>(stage);
+    });
+}
+
 int show(std::string_view page) {
     App               app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
     std::atomic<bool> connected = false;
@@ -46,8 +114,12 @@ int checkViewAssociation() {
     std::vector<bool>   embedded;
     std::vector<bool>   local;
     std::atomic<bool>   originsChecked = false;
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    registerLifecycleStage(app);
     app.onUIStarted([&](App::UI ui) {
         std::scoped_lock lock{mutex};
+        if (embedded.empty())
+            lifecycleStage = LifecycleStage::bridgeConnected;
         embedded.push_back(ui.isEmbeddedView());
         local.push_back(ui.isLocalClient());
     });
@@ -60,6 +132,7 @@ int checkViewAssociation() {
     });
     app.cppFunction("originsChecked", [&] { originsChecked = true; });
     app.show("view-association.html");
+    lifecycleStage = LifecycleStage::windowClosed;
     if (!originsChecked)
         throw std::runtime_error("The view association script did not match the browser's serialized IPv6 origins");
     std::scoped_lock lock{mutex};
@@ -69,6 +142,20 @@ int checkViewAssociation() {
         throw std::runtime_error("The page of the view is not associated with the view");
     if (embedded[1] || local[1])
         throw std::runtime_error("A connection without the secret was associated with the view");
+    return 0;
+}
+
+// Exercise a page stage report through the real bridge without making the other scenarios depend on telemetry.
+int checkStageReport() {
+    App app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path()});
+    registerLifecycleStage(app);
+    std::atomic<bool> observed = false;
+    app.cppFunction("stageProbeFinished", [&] {
+        observed = lifecycleStage == LifecycleStage::associationOrigins;
+    });
+    app.show("lifecycle-stage-probe.html");
+    if (!observed)
+        throw std::runtime_error("The page stage report did not reach the lifecycle runner");
     return 0;
 }
 
@@ -442,19 +529,29 @@ int checkContentPolicy(bool allowNavigation) {
         policy.navigationAllowedOrigins = {"http://localhost:9002"};
     using PolicyApp = webfront::BasicWFWithFrontend<webfront::NetProvider, TestFS, PolicyLifecycleFrontend>;
     PolicyApp         app(webfront::WebFrontConfig{.documentRoot = std::filesystem::current_path(), .contentPolicy = policy});
+    lifecycleStage = LifecycleStage::startingInstrumented;
+    registerLifecycleStage(app);
+    app.onUIStarted([](PolicyApp::UI) {
+        auto initial = LifecycleStage::startingInstrumented;
+        lifecycleStage.compare_exchange_strong(initial, LifecycleStage::bridgeConnected);
+    });
     std::atomic<bool> completed = false;
     std::atomic<bool> escaped   = false;
     std::atomic<bool> navigated = false;
     app.cppFunction("policyCompleted", [&] {
+        lifecycleStage = LifecycleStage::pageCompleted;
         completed = true;
     });
     app.cppFunction("policyEscaped", [&] {
+        lifecycleStage = LifecycleStage::pageCompleted;
         escaped = true;
     });
     app.cppFunction("policyNavigated", [&] {
+        lifecycleStage = LifecycleStage::pageCompleted;
         navigated = true;
     });
     app.show("content-policy.html");
+    lifecycleStage = LifecycleStage::windowClosed;
     if (escaped)
         throw std::runtime_error("Frontend allowed an unmanaged popup");
     if (completed == allowNavigation)
@@ -501,6 +598,7 @@ int run(std::string_view mode) {
     cases.emplace("native-window", checkNativeWindow);
     cases.emplace("second-open", checkSecondOpen);
     cases.emplace("view-association", checkViewAssociation);
+    cases.emplace("stage-report", checkStageReport);
     const auto selected = cases.find(mode);
     if (selected == cases.end())
         throw std::runtime_error("Unknown lifecycle scenario");
@@ -511,8 +609,21 @@ int run(std::string_view mode) {
 
 int main(int argc, char** argv) {
     try {
-        // CEF subprocesses have their own argument list and must dispatch before mode parsing.
+        if (argc == 2 && (std::string_view(argv[1]) == "watchdog-probe" || std::string_view(argv[1]) == "watchdog-uninstrumented-probe")) {
+            LifecycleWatchdog watchdog(std::chrono::seconds(1));
+            if (std::string_view(argv[1]) == "watchdog-probe")
+                lifecycleStage = LifecycleStage::associationSecondSocket;
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            return 0;
+        }
+#ifdef WEBFRONT_EMBED_CEF
+        // CEF subprocesses must dispatch before starting any test threads.
         webfront::detail::ensureFrontendInitialized<Frontend>();
+#endif
+        LifecycleWatchdog watchdog(std::chrono::seconds(45));
+#ifndef WEBFRONT_EMBED_CEF
+        webfront::detail::ensureFrontendInitialized<Frontend>();
+#endif
         return argc == 2 ? run(argv[1]) : 1;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

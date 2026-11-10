@@ -1,0 +1,14 @@
+<!doctype html>
+<script src="/WebFront.js"></script>
+<script type="module">
+// Values match LifecycleStage in FrontendLifecycle.cpp.
+const stage = { associationOrigins: 2 };
+try {
+    await webFront.ready;
+    // This dedicated probe waits for the report to exercise its delivery; ordinary scenarios do not.
+    await webFront.cppFunction('lifecycleStage')(stage.associationOrigins);
+    await webFront.cppFunction('stageProbeFinished')();
+} finally {
+    window.close();
+}
+</script>

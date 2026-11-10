@@ -20,7 +20,15 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     target_compile_definitions(frontend_lifecycle PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
     webfront_setup_frontends_for_target(frontend_lifecycle)
     add_dependencies(webtest frontend_lifecycle)
+    add_test(NAME FrontendLifecycleWatchdog COMMAND "${CMAKE_COMMAND}"
+        "-DPROBE=$<TARGET_FILE:frontend_lifecycle>" -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleWatchdog.cmake")
+    set_tests_properties(FrontendLifecycleWatchdog PROPERTIES TIMEOUT 10 LABELS fast)
 endif()
+
+# Keep the stage values in the HTML probes synchronized with the C++ enum, including in CEF-off builds.
+add_test(NAME FrontendLifecycleStageValues COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+    -P "${PROJECT_SOURCE_DIR}/test/cmake/CheckLifecycleStageValues.cmake")
+set_tests_properties(FrontendLifecycleStageValues PROPERTIES TIMEOUT 10 LABELS fast)
 
 # Manual validation of the interface-thread executor and the native window (#450) with a real browser, window and native
 # dialog: never built or run by CTest/CI. See docs/validation/native-integration-450.md.

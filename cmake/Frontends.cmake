@@ -435,7 +435,7 @@ function(webfront_add_browser_tests target frontend assets_directory lifecycle_t
         if(WEBFRONT_FRONTEND_${frontend}_XVFB_LINUX AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
             set(lifecycle_command "${XVFB_RUN_EXECUTABLE}" -a ${lifecycle_command})
         endif()
-        set(lifecycle_modes no-bridge early-close rejected-ready navigation-failure path-encoding content-policy navigation-allow-list view-association)
+        set(lifecycle_modes no-bridge early-close rejected-ready navigation-failure path-encoding content-policy navigation-allow-list view-association stage-report)
         list(APPEND lifecycle_modes ui-executor native-window second-open)
         foreach(mode ${lifecycle_modes})
             set(lifecycle_name "${frontend}Lifecycle-${mode}")
