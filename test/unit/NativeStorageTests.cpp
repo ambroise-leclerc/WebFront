@@ -113,6 +113,20 @@ void linkDirectory(const stdfs::path& target, const stdfs::path& link) {
 }
 
 // A root and, beside it, a directory outside the root that no operation may reach.
+// Creates `path` and the missing directories above it, none of them writable by group or others, whatever the umask: a
+// directory of the root that another user could move is refused by the POSIX checks, which these tests do not exercise
+// unless they say so.
+void makeDirectories(const stdfs::path& path) {
+    std::vector<stdfs::path> created;
+    for (auto missing = path; !stdfs::exists(missing); missing = missing.parent_path())
+        created.push_back(missing);
+    stdfs::create_directories(path);
+#ifndef _WIN32
+    for (const auto& directory : created)
+        stdfs::permissions(directory, stdfs::perms::group_write | stdfs::perms::others_write, stdfs::perm_options::remove);
+#endif
+}
+
 struct Sandbox {
     test::TemporaryDirectory base;
     stdfs::path              root    = base.path() / "root";
@@ -377,7 +391,7 @@ SCENARIO("Native listings are paginated and stable") {
 
 SCENARIO("Links never lead a native storage outside its root") {
     Sandbox sandbox;
-    stdfs::create_directory(sandbox.root / "inside");
+    makeDirectories(sandbox.root / "inside");
     writeDisk(sandbox.root / "inside" / "note.txt", "note");
     linkDirectory(sandbox.outside, sandbox.root / "escape");
 
@@ -494,7 +508,7 @@ SCENARIO("A component replaced by a link during the resolution does not lead out
     // the outside directory, as a concurrent local process could do between two resolution steps.
     auto prepare = [&] {
         stdfs::remove_all(sandbox.root / "a");
-        stdfs::create_directories(sandbox.root / "a" / "b");
+        makeDirectories(sandbox.root / "a" / "b");
         writeDisk(sandbox.root / "a" / "b" / "secret.txt", "inner");
     };
     auto              swapB = hooksAt([&](fs::StoragePoint point, string_view name) {
@@ -577,7 +591,7 @@ SCENARIO("A final file replaced by a link after the resolution does not lead out
 SCENARIO("Repeated races between a link swap and the operations never reach the outside") {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root);
-    stdfs::create_directory(sandbox.root / "a");
+    makeDirectories(sandbox.root / "a");
     atomic<bool> stop{false};
     // Swaps `a` between a real directory and a link to the outside, as fast as it can.
     thread swapper([&] {
@@ -629,7 +643,7 @@ SCENARIO("Repeated races between a link swap and the operations never reach the 
 
 SCENARIO("A directory moved out of the root by the same user is detected before the commit") {
     Sandbox sandbox;
-    stdfs::create_directories(sandbox.root / "a" / "b");
+    makeDirectories(sandbox.root / "a" / "b");
     const auto moved = sandbox.outside / "b";
 
     GIVEN("a directory moved out while the temporary file is written") {
@@ -706,7 +720,7 @@ SCENARIO("A root moved by the same user is no longer used") {
     GIVEN("another directory put at the location") {
         fs::NativeStorage storage(sandbox.root);
         stdfs::rename(sandbox.root, elsewhere);
-        stdfs::create_directory(sandbox.root);
+        makeDirectories(sandbox.root);
         THEN("it is not taken for the root") {
             REQUIRE(errorOf([&] {
                         writeFile(storage, "file.txt", "x");
@@ -820,8 +834,8 @@ SCENARIO("POSIX directories another user could move refuse the root or the opera
         }
     }
     GIVEN("directories inside the root another user could move") {
-        stdfs::create_directories(sandbox.root / "group" / "deep");
-        stdfs::create_directories(sandbox.root / "foreign" / "deep");
+        makeDirectories(sandbox.root / "group" / "deep");
+        makeDirectories(sandbox.root / "foreign" / "deep");
         stdfs::permissions(sandbox.root / "group", stdfs::perms::group_write, stdfs::perm_options::add);
         overrides[root / "foreign"] = facts(otherUser, 0755);
         fs::NativeStorage storage(sandbox.root, {}, hooks);
@@ -882,7 +896,7 @@ SCENARIO("macOS ACLs that let another user change a directory refuse the root or
     }
     GIVEN("a directory inside the root granted to everyone after the declaration") {
         fs::NativeStorage storage(sandbox.root);
-        stdfs::create_directories(sandbox.root / "shared" / "deep");
+        makeDirectories(sandbox.root / "shared" / "deep");
         grant(sandbox.root / "shared", "everyone");
         THEN("operations through it are refused before any effect") {
             REQUIRE(errorOf([&] {
@@ -1126,6 +1140,31 @@ SCENARIO("A replaced file keeps its group") {
     REQUIRE(readDisk(file) == "new");
 }
 
+#ifndef _WIN32
+SCENARIO("Directories made by the tests stay closed to group and others under a permissive umask") {
+    // Restores the umask on every exit, a failing REQUIRE or an exception included: it is process-wide.
+    struct UmaskScope {
+        mode_t previous;
+        UmaskScope() : previous(::umask(0)) {}
+        UmaskScope(const UmaskScope&)            = delete;
+        UmaskScope& operator=(const UmaskScope&) = delete;
+        ~UmaskScope() {
+            ::umask(previous);
+        }
+    } umaskScope;
+    Sandbox sandbox;
+    makeDirectories(sandbox.root / "a" / "b");
+    for (const auto& directory : {sandbox.root / "a", sandbox.root / "a" / "b"}) {
+        struct stat status{};
+        REQUIRE(::stat(directory.c_str(), &status) == 0);
+        REQUIRE((status.st_mode & (S_IWGRP | S_IWOTH)) == 0);
+    }
+    fs::NativeStorage storage(sandbox.root);
+    REQUIRE(storage.list("a").entries.size() == 1);
+    REQUIRE(storage.list("a/b").entries.empty());
+}
+#endif
+
 SCENARIO("A link followed inside the root never reaches a temporary file") {
     Sandbox           sandbox;
     fs::NativeStorage storage(sandbox.root, {.links = fs::LinkPolicy::followInside});
@@ -1133,7 +1172,7 @@ SCENARIO("A link followed inside the root never reaches a temporary file") {
     writer.write(span<const char>("partial", 7));
     const auto temporary = namesOn(sandbox.root).at(0);
     stdfs::create_symlink(temporary, sandbox.root / "alias");
-    stdfs::create_directory(sandbox.root / "dir");
+    makeDirectories(sandbox.root / "dir");
     stdfs::create_symlink("../" + temporary, sandbox.root / "dir" / "deep");
     REQUIRE(errorOf([&] {
                 storage.openRead("alias");
@@ -1221,7 +1260,7 @@ SCENARIO("Windows finds a directory below a root at the top of its volume") {
 
 SCENARIO("Windows holds the directories of an operation so that nobody moves them") {
     Sandbox sandbox;
-    stdfs::create_directories(sandbox.root / "a" / "b");
+    makeDirectories(sandbox.root / "a" / "b");
     std::error_code rootRename, directoryRename, ancestorRename, baseRename;
 
     GIVEN("moves attempted while the temporary file is written and before the commit") {

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Build the unit tests with GCC 16.1 and make the native storage tests independent of the umask (#517). `fs::detail::pageOf`
+  moves its page into the result with a loop instead of `vector::assign` over move iterators, which GCC 16.1 reported with
+  `-Wnull-dereference` in `basic_string` (an error under the default `-Werror`). The native storage tests created their
+  directories with the process umask: under the common `0002` each one was group-writable, refused by the POSIX checks as
+  `unsafeDirectory` instead of reaching the link, root-move and confinement checks they target (5 scenarios). They now use
+  `makeDirectories()`, and a scenario runs it under `umask(0)`.
 - Record the [platform validation of the native integration](validation/native-integration-450.md) (#450): the manual program
   `native_integration_manual` (`test/web/NativeIntegrationManual.cpp`, outside CTest/CI) drives the interface-thread executor and the
   native window with a real browser, window and native dialog. It passes on Windows (system browser's loop, and WebView2 with a
