@@ -8,6 +8,7 @@ if(OLD_TREE)
     message(STATUS "Former options of ${ROOT} declared")
     # A generator such as Ninja refuses to generate a tree whose CMakeLists.txt never calls project() (#514).
     project(TestOptions LANGUAGES NONE)
+    message(STATUS "Old tree generated with ${CMAKE_GENERATOR}")
     return()
 endif()
 if(FIXTURE_VERSION)
