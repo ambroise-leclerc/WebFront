@@ -119,12 +119,12 @@ request description and the Git history, and a changelog entry points there.
   states the migration in its line.
 - One entry is one line, two at most, in the imperative, saying the effect for the user rather than the mechanism, and ending
   with its references: `(#NNN)`, an ADR or a guide. Error codes, platform paths and internals go to the ADR or the guide.
-- A recent version stays within about 50 lines. The detailed text of a release, when the summary leaves information out, goes
-  to `docs/changelog/<version>.md`, created with the release; never delete it.
+- A recent version stays within about 50 lines. Detail the summary leaves out belongs to the ADR, the guide or the pull
+  request, and the GitHub release keeps the history.
 - Do not generate the changelog from commit messages.
 
 The `ChangelogFormat` CTest case (`test/cmake/CheckChangelogFormat.cmake`) checks the headings, categories and their order,
-the entry length, the references from 0.7.0 on, the comparison links and the archive of each version.
+the entry length, the references (from 0.7.0 on, and always in `Unreleased`) and the comparison links, for `Unreleased` too.
 
 ## Pull Requests
 

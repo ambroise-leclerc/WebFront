@@ -1,9 +1,9 @@
 # The structure of docs/CHANGELOG.md (#536), described in .github/CONTRIBUTING.md ("Changelog format"):
 #   cmake -DROOT=<checkout> -P test/cmake/CheckChangelogFormat.cmake
 # Every version has a dated heading, a summary before its first category, only the allowed categories in a fixed order
-# (Breaking first), bounded entries, a comparison link at the foot and a detailed archive in docs/changelog/. An entry may
+# (Breaking first), bounded entriesand a comparison link at the foot. `Unreleased` is checked like a version, without the summary. An entry may
 # wrap over continuation lines; the bound applies to the whole entry. From 0.7.0 on each entry ends with a reference
-# (#NNN or a document); the older versions are condensed from their archive and cite it through their summary.
+# (#NNN or a document), and always in `Unreleased`.
 cmake_minimum_required(VERSION 3.31)
 
 if(NOT ROOT)
@@ -33,7 +33,7 @@ function(check_entry)
     if(length GREATER max_entry_chars)
         message(FATAL_ERROR "CHANGELOG ${version}: entry of ${length} characters (limit ${max_entry_chars}); the detail belongs to its ADR or guide: ${entry}")
     endif()
-    if(NOT version VERSION_LESS first_referenced_version AND NOT entry MATCHES "#[0-9]+|\\.md")
+    if((version STREQUAL "Unreleased" OR NOT version VERSION_LESS first_referenced_version) AND NOT entry MATCHES "#[0-9]+|\\.md")
         message(FATAL_ERROR "CHANGELOG ${version}: entry without a reference (#NNN) or a document: ${entry}")
     endif()
 endfunction()
@@ -46,11 +46,9 @@ foreach(line IN LISTS lines)
         set(rank -1)
         set(summary OFF)
         if(line STREQUAL "## Unreleased")
-            set(version "")
-            set(in_unreleased ON)
+            set(version Unreleased)
             continue()
         endif()
-        set(in_unreleased OFF)
         if(NOT line MATCHES "^## \\[([0-9]+\\.[0-9]+\\.[0-9]+)\\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$")
             message(FATAL_ERROR "CHANGELOG: a version heading is '## [x.y.z] - YYYY-MM-DD': ${line}")
         endif()
@@ -112,9 +110,6 @@ foreach(v IN LISTS versions)
     list(FIND links "${v}" index)
     if(index EQUAL -1)
         message(FATAL_ERROR "CHANGELOG: missing comparison link '[${v}]: https://...' at the foot of the file")
-    endif()
-    if(NOT EXISTS "${ROOT}/docs/changelog/${v}.md")
-        message(FATAL_ERROR "CHANGELOG: missing archive docs/changelog/${v}.md")
     endif()
 endforeach()
 list(FIND links "Unreleased" index)

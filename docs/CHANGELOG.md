@@ -5,8 +5,8 @@ All notable changes to WebFront, newest first. The format follows [Keep a Change
 
 Each version opens with a short summary, then lists `Breaking`, `Added`, `Changed`, `Fixed` and `Security` entries
 (empty categories are omitted). An entry is one line that says what changes for you and ends with its references.
-Mechanisms, error codes and platform details live in the cited ADR, guide or pull request. The original, detailed entries
-of every version are kept in [`changelog/`](changelog/).
+Mechanisms, error codes and platform details live in the cited ADR, guide or pull request. The earlier, detailed text of
+these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
@@ -15,7 +15,7 @@ of every version are kept in [`changelog/`](changelog/).
 Last minor revision before 1.0, with the developer environment at the same number. It lays the groundwork for the
 system services of [ADR-020](adr/README.md): confined writable storage, native window access, an interface-thread executor,
 ranged and dynamic HTTP routes. **No breaking change** for applications. Developer environment 0.9.0 is the first one
-published by the `release-developer` workflow. [Detailed entries](changelog/0.9.0.md).
+published by the `release-developer` workflow.
 
 ### Added
 
@@ -53,7 +53,7 @@ published by the `release-developer` workflow. [Detailed entries](changelog/0.9.
 
 ## [0.8.0] - 2026-11-01
 
-Automation, consumer tests and embedded engines. **No breaking change.** [Detailed entries](changelog/0.8.0.md).
+Automation, consumer tests and embedded engines. **No breaking change.**
 
 ### Added
 
@@ -69,7 +69,7 @@ Automation, consumer tests and embedded engines. **No breaking change.** [Detail
 
 ## [0.7.0] - 2026-10-31
 
-Test and CI housekeeping, with one **breaking** change to CMake option names. [Detailed entries](changelog/0.7.0.md).
+Test and CI housekeeping, with one **breaking** change to CMake option names.
 
 ### Breaking
 
@@ -87,7 +87,7 @@ Test and CI housekeeping, with one **breaking** change to CMake option names. [D
 ## [0.6.0] - 2026-10-31
 
 Release of the DOM, forms, React and automation layers. **No breaking change.** The largest version of the pre-1.0
-series: its 49 entries are condensed here; the [detailed entries](changelog/0.6.0.md) keep the original text.
+series, condensed from 49 entries.
 
 ### Added
 
@@ -114,7 +114,7 @@ series: its 49 entries are condensed here; the [detailed entries](changelog/0.6.
 ## [0.5.0] - 2026-10-26
 
 The developer environment becomes a complete, standalone `wf` toolchain, and the library moves under `include/webfront/`.
-Three **breaking** changes. Condensed from 62 entries; [detailed entries](changelog/0.5.0.md).
+Three **breaking** changes. Condensed from 62 entries.
 
 ### Breaking
 
@@ -141,7 +141,7 @@ Three **breaking** changes. Condensed from 62 entries; [detailed entries](change
 
 ## [0.4.0] - 2026-10-21
 
-Repository and CI reorganisation. **No new library functionality, no breaking change.** [Detailed entries](changelog/0.4.0.md).
+Repository and CI reorganisation. **No new library functionality, no breaking change.**
 
 ### Changed
 
@@ -152,7 +152,6 @@ Repository and CI reorganisation. **No new library functionality, no breaking ch
 ## [0.3.0] - 2026-10-21
 
 Coroutines and the opt-in developer environment. One **breaking** change to the low-level API.
-[Detailed entries](changelog/0.3.0.md).
 
 ### Breaking
 

@@ -25,8 +25,6 @@ set(NODE_GUARD_EXCEPTIONS
     "test/developer/specs/scripts-specs.mjs|node-import|checks that Node built-in modules are recognized and refused"
     # The proof that no JavaScript runtime is needed: the action that deletes them names them.
     ".github/actions/remove-node/action.yml|tool-word|names the tools it removes from the runner"
-    # Migration note and history.
-    "docs/changelog/0.5.0.md|node-config|archived history of the release, which names the directory that existed"
     # Diagnostics and tests of the rejection of Node APIs.
     "js/developer/environment/typecheck-snapshot.mjs|node-config|the layout of /project/node_modules that the TypeScript module resolver reads: wf check cannot resolve a package without it"
     "test/cmake/CheckRepositoryLayout.cmake|node-config|names the directory whose tracked presence it rejects, as a vendored source"
