@@ -105,9 +105,30 @@ To ensure consistency, we use `.clang-format` and `clang-tidy` to enforce our co
 
 Please run these tools on your code before submitting a pull request.
 
+## Changelog format
+
+[`docs/CHANGELOG.md`](../docs/CHANGELOG.md) answers three questions quickly: what changes for me, is anything breaking, and
+what must I do to migrate. It is not an implementation journal: that belongs to the ADRs, the guides under `docs/`, the pull
+request description and the Git history, and a changelog entry points there.
+
+- Versions are listed newest first, as `## [x.y.z] - YYYY-MM-DD`, under `## Unreleased`. Each has a comparison link at the
+  foot of the file (`[0.9.0]: https://github.com/ambroise-leclerc/WebFront/compare/v0.8.0...v0.9.0`).
+- A version opens with a summary of three to five lines: what to remember, and whether there is a breaking change or a
+  migration (say "No breaking change" when there is none).
+- Categories, in this order and omitted when empty: `Breaking`, `Added`, `Changed`, `Fixed`, `Security`. A breaking change
+  states the migration in its line.
+- One entry is one line, two at most, in the imperative, saying the effect for the user rather than the mechanism, and ending
+  with its references: `(#NNN)`, an ADR or a guide. Error codes, platform paths and internals go to the ADR or the guide.
+- A recent version stays within about 50 lines. Detail the summary leaves out belongs to the ADR, the guide or the pull
+  request, and the GitHub release keeps the history.
+- Do not generate the changelog from commit messages.
+
+The `ChangelogFormat` CTest case (`test/cmake/CheckChangelogFormat.cmake`) checks the headings, categories and their order,
+the entry length, the references (from 0.7.0 on, and always in `Unreleased`) and the comparison links, for `Unreleased` too.
+
 ## Pull Requests
 
-- **One commit per pull request.**
+- **One commit per pull request on `develop`:** pull requests are merged with a squash merge. Before the merge, a branch carries as many commits as needed; add follow-up commits instead of amending or force-pushing.
 - The pull request (PR) title must reference the related issue or feature (e.g., `Add CameraManager class [#42]`).
 - Provide a clear description of the changes and the motivation.
 - Ensure your branch is up to date with `develop` before submitting.
