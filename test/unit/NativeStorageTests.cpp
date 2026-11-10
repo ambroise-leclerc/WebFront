@@ -1142,20 +1142,26 @@ SCENARIO("A replaced file keeps its group") {
 
 #ifndef _WIN32
 SCENARIO("Directories made by the tests stay closed to group and others under a permissive umask") {
-    const auto previous = ::umask(0);
-    {
-        Sandbox sandbox;
-        makeDirectories(sandbox.root / "a" / "b");
-        for (const auto& directory : {sandbox.root / "a", sandbox.root / "a" / "b"}) {
-            struct stat status{};
-            REQUIRE(::stat(directory.c_str(), &status) == 0);
-            REQUIRE((status.st_mode & (S_IWGRP | S_IWOTH)) == 0);
+    // Restores the umask on every exit, a failing REQUIRE or an exception included: it is process-wide.
+    struct UmaskScope {
+        mode_t previous;
+        UmaskScope() : previous(::umask(0)) {}
+        UmaskScope(const UmaskScope&)            = delete;
+        UmaskScope& operator=(const UmaskScope&) = delete;
+        ~UmaskScope() {
+            ::umask(previous);
         }
-        fs::NativeStorage storage(sandbox.root);
-        REQUIRE(storage.list("a").entries.size() == 1);
-        REQUIRE(storage.list("a/b").entries.empty());
+    } umaskScope;
+    Sandbox sandbox;
+    makeDirectories(sandbox.root / "a" / "b");
+    for (const auto& directory : {sandbox.root / "a", sandbox.root / "a" / "b"}) {
+        struct stat status{};
+        REQUIRE(::stat(directory.c_str(), &status) == 0);
+        REQUIRE((status.st_mode & (S_IWGRP | S_IWOTH)) == 0);
     }
-    ::umask(previous);
+    fs::NativeStorage storage(sandbox.root);
+    REQUIRE(storage.list("a").entries.size() == 1);
+    REQUIRE(storage.list("a/b").entries.empty());
 }
 #endif
 
