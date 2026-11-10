@@ -14,8 +14,13 @@ these entries stays in the GitHub releases and the Git history.
 
 Last minor revision before 1.0, with the developer environment at the same number. It lays the groundwork for the
 system services of [ADR-020](adr/README.md): confined writable storage, native window access, an interface-thread executor,
-ranged and dynamic HTTP routes. **No breaking change** for applications. Developer environment 0.9.0 is the first one
-published by the `release-developer` workflow.
+ranged and dynamic HTTP routes. **One migration:** libraries and developer environments older than 0.6.5 must be rebuilt,
+because they pin a distribution address that no longer bootstraps. Developer environment 0.9.0 is the first one published
+by the `release-developer` workflow.
+
+### Breaking
+
+- Rebuild libraries and developer environments older than 0.6.5 against current sources: they pin the former distribution address, which redirects to `https://dist.webfront.fr/` without the CORS headers a browser needs, so `bootstrap("developer")` no longer starts (#478, ADR-021).
 
 ### Added
 
@@ -34,7 +39,7 @@ published by the `release-developer` workflow.
 
 ### Changed
 
-- Serve the developer distribution from `https://dist.webfront.fr/` (#478, ADR-021). Rebuild libraries and environments older than 0.6.5, which pin the former address and no longer bootstrap.
+- Serve the developer distribution from `https://dist.webfront.fr/` (#478, ADR-021), as the breaking entry above explains.
 - Stream unencoded files of known size instead of loading them whole (#454).
 - Make `wf run pin` fail when the pinned URL leaves `baseUrl`'s origin, redirects or lacks CORS (#482).
 - Make `wf check` without a `tsconfig.json` root the project's own `.d.ts`, `.d.mts` and `.d.cts` files (#501).
@@ -86,8 +91,14 @@ Test and CI housekeeping, with one **breaking** change to CMake option names.
 
 ## [0.6.0] - 2026-10-31
 
-Release of the DOM, forms, React and automation layers. **No breaking change.** The largest version of the pre-1.0
-series, condensed from 49 entries.
+Release of the DOM, forms, React and automation layers, with **two breaking changes** to the C++ API: values of `UI`,
+`JsFunction` and `JsFunctionSender` can no longer be built by hand, and `BasicWF` is no longer copyable or movable.
+The largest version of the pre-1.0 series, condensed from 49 entries.
+
+### Breaking
+
+- Use the `UI` that `onUIStarted`, `subscribeUIStarted` or a callback hands over instead of constructing `UI`, `JsFunction` or `JsFunctionSender` yourself: their public constructors take the connection generation as an extra argument (#428).
+- Do not copy or move a `BasicWF`: it is now non-copyable and non-movable, which the pointer held by `UI` requires (#400).
 
 ### Added
 
@@ -103,12 +114,12 @@ series, condensed from 49 entries.
 
 ### Changed
 
-- Make `BasicUI` (`UI`) an assignable value type (#400).
+- Make `BasicUI` (`UI`) an assignable value type that holds a pointer to the application (#400).
 - Enable native-window detection by default for `add_subdirectory` and CPM consumers (#397).
 
 ### Fixed
 
-- Reject a stale `UI` after its connection identifier is reused (#428).
+- Reject a stale `UI` after its connection identifier is reused: calls are dropped and typed calls fail (#428).
 - Keep automation shutdown and cleanup reliable on Windows and under load (#416, #439).
 
 ## [0.5.0] - 2026-10-26
