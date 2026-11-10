@@ -44,8 +44,8 @@
   `wf run pin` now fails (instead of warning) when the pinned URL is off the origin of `baseUrl`, redirects or lacks CORS,
   and reads `previousBase` and `baseSince` for the migration waiver, which covers only versions before `baseSince`. `DeveloperPinConsistency` checks the states (a) to (c) and the
   inconsistencies of ADR-021 decision 2. The compatibility table of `docs/DEVELOPER_ENVIRONMENT.md` is maintained by
-  `cmake/DeveloperCompatibility.cmake` and enforced on `v*` tags by `CheckReleaseVersion.cmake`. The application, the tag rule
-  and the first real publication are repository operations that remain to be done by a maintainer.
+  `cmake/DeveloperCompatibility.cmake` and enforced on `v*` tags by `CheckReleaseVersion.cmake`. Environment 0.9.0 is the first
+  published by this workflow (tag `developer-v0.9.0`); the application and the tag rule are configured on the repository.
 - `@webfront/services` package (#461, ADR-010 1.8, ADR-020 step 4). The browser side of the optional system services is
   delivered outside the core, like `@webfront/react`: `js/services/` (a skeleton: an empty frozen `services` object and
   `selfTest()`, declarations, license), `wf run services-package` for its deterministic archive and SHA-512, the same
