@@ -1,9 +1,12 @@
 <!doctype html>
 <script src="/WebFront.js"></script>
 <script type="module">
+// Values match LifecycleStage in FrontendLifecycle.cpp. Diagnostics must not change the test outcome.
+const stage = { policyDestination: 7 };
+const reportStage = value => webFront.cppFunction("lifecycleStage")(value).catch(() => {});
 try {
     await webFront.ready;
-    await webFront.cppFunction("lifecycleStage")(7);
+    await reportStage(stage.policyDestination);
     await webFront.cppFunction(location.search === '?popup' ? 'policyEscaped' : 'policyNavigated')();
 } catch (error) {
     console.error('Policy destination could not report its result', error);

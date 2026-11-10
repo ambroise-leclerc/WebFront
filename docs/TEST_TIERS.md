@@ -83,3 +83,11 @@ protection rules of `master`; the workflow cannot set that itself.
 
 The fast tier does not replace the others: the unit tests are also part of the standard run, so a pull request still
 reports one complete result.
+
+The shared frontend lifecycle runner has a 45-second watchdog which reports the last observed stage and exits with a failure
+status when the interface thread cannot be unwound. Forced process exit does not itself terminate browser subprocesses; they
+can remain orphaned until the surrounding CI runner or operating system cleans them up. Do not kill the process group from
+the watchdog: a shared Xvfb display and other tests may belong to that group.
+
+The `FrontendLifecycleWatchdog` probe bypasses frontend initialization to test the deadline without a display. The ordinary
+`CEFLifecycle-*` CTest cases exercise CEF subprocess dispatch and frontend initialization before the watchdog is started.
