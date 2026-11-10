@@ -272,7 +272,10 @@ withdrawn or replaced by a newer one.
 
 Manual check of a parented dialog (to run on each platform with the first native backend): open a native dialog parented to
 `ui.nativeWindow()` from an `app.uiExecutor()` operation; it must open over the application's window, stay on top of it, block it as
-the platform does and return focus to it. Not run yet: no native dialog exists before the ADR-020 native backend.
+the platform does and return focus to it. No native dialog exists before the ADR-020 native backend; until then the manual program
+`native_integration_manual` (`test/web/NativeIntegrationManual.cpp`) opens one itself. Run on Windows with WebView2 and with the
+system browser's loop; the WebKitGTK window, its portal identifier and its dialog remain to be checked on a Linux desktop. See the
+[platform validation of #450](validation/native-integration-450.md).
 
 ## Native window with browser fallback
 
