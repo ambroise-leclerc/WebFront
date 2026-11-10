@@ -76,8 +76,8 @@ Windows 11 Pro 22631, MSVC 14.51 (Build Tools 18), CMake 4.3.4, Ninja, Release, 
     `NativeStorageTests.cpp` and about symbolic links (`linkRefused` expected, another error code returned, for example
     `8 == 7` in "A link followed inside the root never reaches a temporary file"). Both are outside this epic and are
     to be tracked separately.
-  - The four `[look]` points (over the window, on top, blocking, focus returned) are visual and were not confirmed by a
-    person in these runs; the program's checks of the same behavior pass.
+  - The `[look]` points (over the window, on top, blocking, focus returned) were confirmed visually by a person under native
+    Wayland (`embedded 20000`); they were not looked at under XWayland.
 
 ### Commands
 
