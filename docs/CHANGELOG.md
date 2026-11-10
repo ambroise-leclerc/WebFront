@@ -4,7 +4,8 @@
 
 - Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 (#523). `cmake/CEFArchitecture.cmake` selects `PROJECT_ARCH=arm64` from
   the target processor before the SDK is included, so the wrapper no longer receives `-m64 -march=x86-64`; a `PROJECT_ARCH`
-  you set is kept, and x86_64, Windows and macOS are unchanged. The `CEFArchitecture` CTest case covers it.
+  you set is kept, and x86_64, Windows and macOS are unchanged. A Linux build that targets another architecture than its host is refused at configure time, because the CEF
+  package downloads the archive of the host. The `CEFArchitecture` CTest case covers both.
 
 ## 0.9.0 - 2026-11-10
 
