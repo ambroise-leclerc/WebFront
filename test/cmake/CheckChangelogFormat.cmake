@@ -3,7 +3,7 @@
 # Every version has a dated heading, a summary before its first category, only the allowed categories in a fixed order
 # (Breaking first), bounded entriesand a comparison link at the foot. `Unreleased` is checked like a version, without the summary. An entry may
 # wrap over continuation lines; the bound applies to the whole entry. From 0.7.0 on each entry ends with a reference
-# (#NNN or a document), and always in `Unreleased`.
+# (#NNN, an ADR or a document), and always in `Unreleased`.
 cmake_minimum_required(VERSION 3.31)
 
 if(NOT ROOT)
@@ -33,7 +33,7 @@ function(check_entry)
     if(length GREATER max_entry_chars)
         message(FATAL_ERROR "CHANGELOG ${version}: entry of ${length} characters (limit ${max_entry_chars}); the detail belongs to its ADR or guide: ${entry}")
     endif()
-    if((version STREQUAL "Unreleased" OR NOT version VERSION_LESS first_referenced_version) AND NOT entry MATCHES "#[0-9]+|\\.md")
+    if((version STREQUAL "Unreleased" OR NOT version VERSION_LESS first_referenced_version) AND NOT entry MATCHES "#[0-9]+|ADR-[0-9]+|\\.md")
         message(FATAL_ERROR "CHANGELOG ${version}: entry without a reference (#NNN) or a document: ${entry}")
     endif()
 endfunction()

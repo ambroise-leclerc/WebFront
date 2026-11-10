@@ -24,6 +24,7 @@ by the `release-developer` workflow.
 
 ### Added
 
+- Send long strings, homogeneous lists of strings, tuples, typed arrays and bitsets through the bridge, raise typed errors with application codes, and let a `cppFunction` callback return a `webfront::ResultTask<R>` or another sender (#456–#459, ADR-003, `docs/ASYNC_EXECUTION.md`).
 - Add `fs::Storage`, `fs::NativeStorage` and `fs::MemoryStorage`: writable storage confined to declared roots, with atomic commits (#460, ADR-002).
 - Add `frontend::NativeWindow` and `UI::nativeWindow()`: typed access to the native window of an embedded view (#463, ADR-020).
 - Add `frontend::UIExecutor` and `BasicWF::uiExecutor()`: a sender that completes on the interface thread, for every frontend (#462, ADR-007).
