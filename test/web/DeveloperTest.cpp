@@ -222,7 +222,8 @@ Mode parseMode(std::string_view argument) {
         mode.part               = "app";
     } else if (argument.starts_with("--part=")) {
         mode.part = std::string(argument.substr(7));
-        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal")
+        if (mode.part != "app" && mode.part != "scripts" && mode.part != "typescript" && mode.part != "jasmine" && mode.part != "terminal" &&
+            mode.part != "workspace")
             throw std::invalid_argument("Unknown part of the developer test: " + mode.part);
     } else {
         throw std::invalid_argument("Unknown smoke-test mode");

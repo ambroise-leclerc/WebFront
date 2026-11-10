@@ -806,6 +806,269 @@ try {
         assert(exits[3] === 1, 'A result that cannot be sent must not end the session with 0');
         if (part === 'jasmine') throw new Done('wf test passed');
     }
+    if (wants('workspace')) {
+        await progress('page layout');
+        // The layout of the page (#539): the terminal alone, then the interface over the whole window, with the terminal
+        // in a floating window behind an icon.
+        const until = async (predicate, message) => {
+            for (let attempt = 0; !(await predicate()); ++attempt) {
+                if (attempt === 400) throw new Error(message);
+                await delay(25);
+            }
+        };
+        const layout = page => {
+            const view = page.defaultView, root = page.documentElement;
+            const box = selector => page.querySelector(selector).getBoundingClientRect();
+            const style = selector => view.getComputedStyle(page.querySelector(selector));
+            return {
+                state: () => root.getAttribute('data-webfront-workspace'),
+                button: () => page.querySelector('.webfront-terminal-toggle'),
+                panel: () => page.querySelector('.webfront-terminal-window'),
+                bar: () => page.querySelector('.webfront-terminal-bar'),
+                box, style,
+                viewport: () => ({width: root.clientWidth, height: root.clientHeight}),
+                inside: selector => {
+                    const rect = box(selector);
+                    return rect.left >= 0 && rect.top >= 0 && rect.right <= root.clientWidth + 0.5 && rect.bottom <= root.clientHeight + 0.5;
+                },
+                fills: selector => {
+                    const rect = box(selector);
+                    return rect.left === 0 && rect.top === 0 && Math.abs(rect.width - root.clientWidth) < 1 && Math.abs(rect.height - root.clientHeight) < 1;
+                },
+            };
+        };
+        const here = layout(document);
+        if (part === 'workspace') {
+            // First launch, in a project without an interface: the terminal alone, no icon, no empty preview.
+            assert(here.state() === 'terminal', `A project without an interface must open on the terminal: ${here.state()}`);
+            assert(here.style('.webfront-terminal-toggle').display === 'none', 'The icon must not be shown without an interface');
+            assert(context.preview.hidden && here.style('.webfront-terminal-bar').display === 'none', 'Neither an empty preview nor a window bar must be shown');
+            assert(Math.abs(here.box('.webfront-terminal-window').width - here.viewport().width) < 1 && here.style('header').display !== 'none',
+                'The terminal must take the width of the window, under the status');
+        }
+        await writeFile('layout/main.ts', "import {value} from './value'; document.getElementById('root').textContent = value;\n");
+        await writeFile('layout/value.ts', "export const value: string = 'layout-one';\n");
+        // wf create and wf build do not make an interface to show at the next launch; wf preview does.
+        await execute(['build', 'layout/main.ts'], context);
+        const listed = async directory => JSON.parse(new TextDecoder().decode(await call('list', directory)));
+        if (part === 'workspace') {
+            assert(here.state() === 'terminal' && !(await listed('.webfront/developer')).includes('preview/'), 'wf build must not publish a preview');
+        }
+        // wf preview reads the lock, which the other parts get from wf install.
+        if (part === 'workspace') await writeFile('webfront-packages.lock.json', JSON.stringify({format: 1, roots: {}, packages: {}}));
+        await execute(['preview', 'layout/main.ts'], context);
+        await until(() => context.preview.contentDocument?.getElementById('root')?.textContent === 'layout-one', 'The preview did not mount');
+        // The interface appears while the terminal is in use: it fills the window and the terminal stays open over it.
+        if (part === 'workspace') await until(() => here.state() === 'floating', `The first preview must leave the terminal open: ${here.state()}`);
+        assert(here.state() !== 'terminal' && here.fills('#preview') && here.style('.webfront-terminal-toggle').display !== 'none',
+            'A displayed interface must fill the window, with the icon');
+
+        // Launching again: the bootstrap page of the same project, in a window of its own size.
+        const relaunched = document.createElement('iframe');
+        relaunched.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:600px;border:0;z-index:2147483647;background:#141821';
+        relaunched.src = location.pathname;
+        document.body.append(relaunched);
+        await until(() => {
+            const text = relaunched.contentDocument?.getElementById('status')?.textContent ?? '';
+            if (text.startsWith('Bootstrap failed:')) throw new Error(text);
+            return text.startsWith('Developer environment ready.');
+        }, 'The relaunched page did not start');
+        const again = layout(relaunched.contentDocument);
+        const page = relaunched.contentDocument, pagePreview = page.getElementById('preview');
+        assert(again.state() === 'interface', `A project with an interface must open on it: ${again.state()}`);
+        await until(() => pagePreview.contentDocument?.getElementById('root')?.textContent === 'layout-one', 'The existing interface was not loaded');
+        assert(again.fills('#preview') && again.style('header').display === 'none', 'The interface must fill the whole window');
+        assert(again.style('.webfront-terminal-window').visibility === 'hidden', 'The terminal must not be visible');
+        const button = again.button(), icon = again.box('.webfront-terminal-toggle');
+        assert(button.tagName === 'BUTTON' && button.getAttribute('aria-expanded') === 'false' && /terminal/i.test(button.getAttribute('aria-label'))
+            && button.getAttribute('aria-controls') === again.panel().id, 'The icon must be a named button that controls the terminal window');
+        assert(button.querySelector('svg') && icon.width >= 44 && icon.height >= 44 && icon.top <= 16 && again.viewport().width - icon.right <= 16,
+            `The icon must be a large enough target at the top right: ${JSON.stringify(icon)}`);
+        assert(page.elementFromPoint(icon.left + icon.width / 2, icon.top + icon.height / 2)?.closest('button') === button, 'The icon must stay over the interface');
+        assert(page.activeElement === pagePreview, 'The keys must go to the interface while the terminal is collapsed');
+        const session = page.querySelector('#terminal .xterm');
+        assert(session, 'The terminal must be mounted while it is collapsed');
+        const sessionText = () => page.querySelector('#terminal .xterm-rows')?.textContent ?? '';
+        await until(() => sessionText().includes('>'), 'The collapsed terminal must have its prompt');
+        const before = sessionText();
+
+        button.click();
+        assert(again.state() === 'floating' && button.getAttribute('aria-expanded') === 'true', 'A click on the icon must open the terminal');
+        const dialog = again.panel();
+        assert(dialog.getAttribute('role') === 'dialog' && dialog.getAttribute('aria-modal') === 'false' && dialog.getAttribute('aria-label'),
+            'The terminal window must be a named, non-modal dialog');
+        assert(again.style('.webfront-terminal-window').visibility === 'visible' && again.inside('.webfront-terminal-window') && again.fills('#preview'),
+            'The terminal window must float inside the window, over the full-size interface');
+        assert(dialog.contains(page.activeElement), 'The opened terminal must take the keys');
+        assert(page.querySelector('#terminal .xterm') === session && sessionText() === before, 'Opening must show the same session');
+        // The interface stays in its frame, the terminal window in the page: the frame remains the only boundary.
+        assert(dialog.ownerDocument === page && !dialog.contains(pagePreview) && pagePreview.contentDocument.querySelector('.webfront-terminal-window, .webfront-terminal-toggle') === null,
+            'The terminal window must not enter the application frame');
+
+        // Moving with the keyboard and the pointer stays inside the window.
+        const bar = again.bar();
+        const key = (target, init) => target.dispatchEvent(new (target.ownerDocument ?? target.document).defaultView.KeyboardEvent('keydown', {bubbles: true, cancelable: true, ...init}));
+        const left = () => again.box('.webfront-terminal-window').left, top = () => again.box('.webfront-terminal-window').top;
+        const startLeft = left();
+        bar.focus();
+        key(bar, {key: 'ArrowLeft'});
+        assert(left() === startLeft - 16, `An arrow key must move the terminal window: ${startLeft} -> ${left()}`);
+        for (let count = 0; count < 100; ++count) { key(bar, {key: 'ArrowLeft'}); key(bar, {key: 'ArrowUp'}); }
+        assert(left() === 0 && top() === 0 && again.inside('.webfront-terminal-window'), 'Keyboard moves must stop at the edges of the window');
+        const startWidth = again.box('.webfront-terminal-window').width;
+        key(bar, {key: 'ArrowLeft', shiftKey: true});
+        assert(again.box('.webfront-terminal-window').width === startWidth - 16, 'Shift with an arrow key must resize the terminal window');
+        const pointer = (type, x, y) => bar.dispatchEvent(new page.defaultView.PointerEvent(type, {bubbles: true, cancelable: true, button: 0, pointerId: 1, clientX: x, clientY: y}));
+        pointer('pointerdown', 20, 10);
+        pointer('pointermove', 120, 110);
+        assert(left() === 100 && top() === 100, `Dragging the bar must move the terminal window: ${left()},${top()}`);
+        pointer('pointermove', 5000, 5000);
+        pointer('pointerup', 5000, 5000);
+        assert(again.inside('.webfront-terminal-window') && again.box('.webfront-terminal-window').right > again.viewport().width - 1, 'A drag must stay inside the window');
+        pointer('pointermove', 0, 0);
+        assert(left() > 0, 'A released bar must not follow the pointer');
+        // The place is remembered in the project.
+        const placePath = '.webfront/developer/terminal-window.json';
+        const place = async () => { try { return JSON.parse(new TextDecoder().decode(await readFile(placePath))); } catch { return null; } };
+        await until(async () => (await place())?.x === left(), 'The place of the terminal window must be remembered in the project');
+        const remembered = await place();
+        assert(remembered.format === 1 && remembered.width === again.box('.webfront-terminal-window').width, `The size must be remembered too: ${JSON.stringify(remembered)}`);
+
+        // A smaller window keeps the icon and the terminal window; the remembered place comes back with the room.
+        const columns = () => Math.round(page.querySelector('#terminal .xterm-screen')?.getBoundingClientRect().width ?? 0);
+        const wideScreen = columns();
+        // This window gets no rendering frames under the test (no requestAnimationFrame callback, hence no resize event
+        // and no ResizeObserver notification): the test sends the event the browser sends.
+        const resize = (width, height) => {
+            relaunched.style.width = `${width}px`;
+            relaunched.style.height = `${height}px`;
+            page.defaultView.dispatchEvent(new page.defaultView.Event('resize'));
+        };
+        resize(280, 140);
+        assert(again.viewport().width === 280 && again.box('.webfront-terminal-window').right <= 280.5, `The terminal window must follow a smaller window: ${again.panel().style.cssText}`);
+        assert(again.inside('.webfront-terminal-window') && again.inside('.webfront-terminal-toggle'), 'A small window must keep the icon and the terminal window');
+        await until(() => columns() < wideScreen, 'xterm.js must be fitted to a smaller terminal window');
+        resize(900, 600);
+        await until(() => left() === remembered.x && top() === remembered.y, 'A window enlarged again must give the terminal window its place back');
+        await until(() => columns() === wideScreen, 'xterm.js must be fitted to the terminal window again');
+
+        // The close button and the shortcut collapse and open it, wherever the focus is.
+        page.querySelector('.webfront-terminal-close').click();
+        assert(again.state() === 'interface' && page.activeElement === pagePreview, 'Collapsing must give the keys back to the interface');
+        assert(columns() === wideScreen, 'A collapsed terminal must keep its size');
+        key(pagePreview.contentDocument.body, {key: 'F9'});
+        assert(again.state() === 'floating', 'F9 in the interface must open the terminal');
+        key(page.querySelector('#terminal .xterm-helper-textarea'), {key: 'F9'});
+        assert(again.state() === 'interface', 'F9 in the terminal must collapse it');
+        key(pagePreview.contentDocument.body, {key: 'F9', ctrlKey: true});
+        assert(again.state() === 'interface', 'Another key combination must be left to the interface');
+
+        // wf dev with the terminal collapsed: the full-window interface reloads and shows the build diagnostics.
+        const devStop = new AbortController();
+        let devOutput = '';
+        await withTimers([750], async clock => {
+            const poll = async () => {
+                await until(() => clock.pending() > 0, 'Dev polling deadline was not armed');
+                clock.fire(750);
+            };
+            const shows = text => () => pagePreview.contentDocument?.getElementById('root')?.textContent === text;
+            const devResult = execute(['dev', 'layout/main.ts'], {...context, preview: pagePreview, signal: devStop.signal,
+                write: text => { devOutput += text; }}).then(() => null, error => error);
+            try {
+                await until(() => /Preview ready/.test(devOutput) && shows('layout-one')(), 'wf dev did not start');
+                await writeFile('layout/value.ts', "export const value: string = 'layout-two';\n");
+                await poll();
+                await until(shows('layout-two'), 'wf dev must reload the full-window interface');
+                assert(again.state() === 'interface' && again.fills('#preview'), 'A reload must leave the terminal collapsed');
+                // The interface of a new document still gets the shortcut.
+                key(pagePreview.contentDocument.body, {key: 'F9'});
+                assert(again.state() === 'floating', 'F9 must work in a reloaded interface');
+                key(pagePreview.contentDocument.body, {key: 'F9'});
+                await writeFile('layout/value.ts', 'export const value = ;\n');
+                await poll();
+                await until(() => pagePreview.contentDocument?.getElementById('webfront-build-diagnostics'), 'A failed build must show its diagnostic in the interface');
+                assert(again.state() === 'interface' && shows('layout-two')() && /layout\/value.ts:1:/.test(pagePreview.contentDocument.getElementById('webfront-build-diagnostics').textContent),
+                    'The diagnostic must cover the last interface built, with the terminal collapsed');
+                const overlay = pagePreview.contentDocument.getElementById('webfront-build-diagnostics').getBoundingClientRect();
+                assert(page.elementFromPoint(icon.left + icon.width / 2, icon.top + icon.height / 2)?.closest('button') === button && overlay.width > 0,
+                    'The icon must stay over the diagnostic');
+            } finally { devStop.abort(); }
+            assert((await devResult)?.exitCode === 130, 'Ctrl+C must stop dev with exit code 130');
+        });
+        // A failed build keeps the last interface published: the next launch still opens on it.
+        assert((await listed('.webfront/developer/preview')).includes('index.html'), 'A failed build must keep the published interface');
+        relaunched.remove();
+
+        // The session behind the icon, with a terminal this test can type in: a page that mounts it with a preview frame.
+        const sessionFrame = document.createElement('iframe');
+        sessionFrame.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:600px;border:0;z-index:2147483647;background:#141821';
+        sessionFrame.src = '/fixtures/session.html';
+        document.body.append(sessionFrame);
+        await until(() => sessionFrame.contentWindow?.session, 'The session page did not load');
+        const other = await sessionFrame.contentWindow.session;
+        const otherPage = sessionFrame.contentDocument, otherPreview = otherPage.createElement('iframe');
+        otherPreview.id = 'preview';
+        otherPreview.hidden = true;
+        otherPage.body.append(otherPreview);
+        const mounted = await other.runtime.mount({bridge: other.bridge, config, terminal: otherPage.getElementById('terminal'), preview: otherPreview, onExit: () => {}});
+        const {terminal, editor, workspace} = mounted;
+        const there = layout(otherPage);
+        assert(workspace && there.state() === 'interface' && workspace.state === 'interface', `The mounted page must open on the interface: ${there.state()}`);
+        // The place remembered by the other page is the one of the project.
+        assert(Math.round(there.box('.webfront-terminal-window').left) === remembered.x, 'The remembered place must be the project\'s');
+        // A second terminal in the page leaves its layout alone.
+        const second = otherPage.createElement('div');
+        second.style.cssText = 'width:320px;height:120px';
+        otherPage.body.append(second);
+        const plain = await other.runtime.mount({bridge: other.bridge, config, terminal: second, preview: otherPreview, onExit: () => {}});
+        assert(!plain.workspace && otherPage.querySelectorAll('.webfront-terminal-toggle').length === 1, 'A page must have one layout');
+        plain.terminal.dispose();
+        second.remove();
+        const rendered = () => new Promise(resolve => terminal.write('', resolve));
+        const screen = () => {
+            const lines = [];
+            for (let index = 0; index < terminal.buffer.active.length; ++index) lines.push(terminal.buffer.active.getLine(index).translateToString(true));
+            return lines.join('\n');
+        };
+        workspace.open();
+        assert(there.state() === 'floating', 'The terminal must open');
+        await until(() => terminal.cols > 20, 'The terminal must be fitted to its window');
+        terminal.input('echo layout kept\r');
+        await editor.whenIdle();
+        terminal.input('echo par');
+        await rendered();
+        const size = [terminal.cols, terminal.rows];
+        workspace.toggle();
+        await delay(100);
+        assert(there.state() === 'interface' && terminal.cols === size[0] && terminal.rows === size[1], `Collapsing must not resize the terminal: ${terminal.cols}x${terminal.rows}`);
+        assert(editor.line === 'echo par', 'Collapsing must keep the line being typed');
+        workspace.toggle();
+        assert(otherPage.activeElement === terminal.textarea, 'Opening must give the keys to the terminal');
+        terminal.input('tial\r');
+        await editor.whenIdle();
+        await rendered();
+        assert(/^layout kept$/m.test(screen()) && /^partial$/m.test(screen()), `The session must keep its output: ${screen()}`);
+        assert(editor.history.slice(-2).join('|') === 'echo layout kept|echo partial', `The session must keep its history: ${editor.history.slice(-2)}`);
+        // A command keeps running while the terminal is collapsed and opened again.
+        const commandState = tag => webFront.cppFunction('test.command')(tag);
+        terminal.input('wait layout\r');
+        await until(async () => (await commandState('layout')) === 'running', 'The command did not start');
+        workspace.close();
+        await delay(150);
+        assert(there.state() === 'interface' && (await commandState('layout')) === 'running' && editor.busy, 'Collapsing must not interrupt a running command');
+        workspace.open();
+        assert((await commandState('layout')) === 'running', 'Opening must not interrupt a running command');
+        terminal.input('\x03');
+        await editor.whenIdle();
+        await rendered();
+        await until(async () => (await commandState('layout')) === 'cancelled', 'Ctrl+C must still reach the command');
+        assert(/waiting layout/.test(screen()) && /^layout kept$/m.test(screen()),
+            'Ctrl+C must still reach the command, in the same session');
+        await mounted.workspace.placeSaved();
+        terminal.dispose();
+        sessionFrame.remove();
+        if (part === 'workspace') throw new Done('Page layout: terminal alone, full-window interface, floating terminal passed');
+    }
     if (wants('terminal')) {
         // The completions below name a script and a file that the `scripts` part creates in a single-session run.
         if (part === 'terminal') {

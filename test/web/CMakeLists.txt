@@ -308,7 +308,7 @@ if(_browser_tests_available)
     # One long script (developer-specs.mjs) would run for two minutes on its own: it is cut into parts that start from their
     # own project and run in parallel (#435). `app` also generates the header that LifeEmbeddedBuild compiles. Each part
     # listens on a port the system picks, so none of them holds webfront_port_9002.
-    foreach(_part app scripts typescript jasmine terminal)
+    foreach(_part app scripts typescript jasmine terminal workspace)
         set(_name DeveloperBrowserIntegration)
         if(NOT _part STREQUAL "app")
             set(_name DeveloperBrowserIntegration-${_part})
