@@ -10,6 +10,10 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Changed
+
+- Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind an icon at the top right (F9), and keeps its session when collapsed. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
+
 ## [0.9.0] - 2026-11-10
 
 Last minor revision before 1.0, with the developer environment at the same number. It lays the groundwork for the
