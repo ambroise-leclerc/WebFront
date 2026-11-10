@@ -66,8 +66,8 @@ Each published version is immutable: 0.3.0 introduced the packed-bitset Life sta
 manifest, `wf restore`, `wf run`, `wf exec`, `wf check` and the complete terminal, and 0.6.0 `wf build`, `wf dev` and `wf test`.
 
 The default configuration is generated in `include/webfront/system/DeveloperReleaseData.hpp`; it contains
-an exact versioned environment URL and the trusted digest. The 0.6.6 release pin selects
-`https://dist.webfront.fr/developer/0.6.6/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
+an exact versioned environment URL and the trusted digest. The 0.9.0 release pin selects
+`https://dist.webfront.fr/developer/0.9.0/environment.tgz` (ADR-021). The deployed archive, CORS headers and public
 smoke test were verified before the pin was merged. Earlier publication gates are recorded for
 [0.6.6](validation/developer-0.6.6-release.md), [0.6.4](validation/developer-0.6.4-release.md) and [0.6.3](validation/developer-0.6.3-release.md).
 Published 0.6.2 introduced installation of the archives of `@types` packages and the manifest directory;
