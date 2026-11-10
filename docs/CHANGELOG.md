@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Record the [platform validation of the native integration](validation/native-integration-450.md) (#450): the manual program
+  `native_integration_manual` (`test/web/NativeIntegrationManual.cpp`, outside CTest/CI) drives the interface-thread executor and the
+  native window with a real browser, window and native dialog. It passes on Windows (system browser's loop, and WebView2 with a
+  dialog owned by the window) and on a Linux desktop (system browser's loop; WebKitGTK under X11 and Wayland, with the
+  portal identifier exported and the parented `GtkFileDialog` completing on the interface thread).
 - Typed access to the native window and its link to a connection (#463, ADR-020 step 5, last task). `frontend::NativeWindow`
   (`NativeWindow.hpp`) gives the `HWND` (WebView2), `NSWindow*` (WKWebView), `GtkWindow*` (WebKitGTK) or `CefBrowser*` (CEF) through
   `get()`, a `std::expected` that answers only on the interface thread (#462) while the window is published: `notOpen`, `closed`,

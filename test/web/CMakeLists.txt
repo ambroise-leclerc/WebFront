@@ -22,6 +22,15 @@ if(${WEBFRONT_FRONTEND_${WEBFRONT_WEBTEST_FRONTEND}_OPTION}
     add_dependencies(webtest frontend_lifecycle)
 endif()
 
+# Manual validation of the interface-thread executor and the native window (#450) with a real browser, window and native
+# dialog: never built or run by CTest/CI. See docs/validation/native-integration-450.md.
+add_executable(native_integration_manual EXCLUDE_FROM_ALL NativeIntegrationManual.cpp)
+target_link_libraries(native_integration_manual PRIVATE WebFront WebFront_warnings WebFront_options)
+if(TARGET frontend_lifecycle)
+    target_compile_definitions(native_integration_manual PRIVATE WEBFRONT_TEST_FRONTEND=${WEBFRONT_WEBTEST_FRONTEND_TYPE})
+    webfront_setup_frontends_for_target(native_integration_manual)
+endif()
+
 # The runner passes arguments literally and kills the whole process tree at its deadline (POSIX shell wrapper).
 if(UNIX)
     add_test(NAME JasmineRunnerArgumentsAndDeadline COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
