@@ -51,7 +51,10 @@ elseif(MODE STREQUAL "freeze")
     if(NOT LIBRARY_VERSION MATCHES "^[0-9]+[.][0-9]+[.][0-9]+$")
         message(FATAL_ERROR "LIBRARY_VERSION must be MAJOR.MINOR.PATCH")
     endif()
-    if(table MATCHES "[|] ${LIBRARY_VERSION} [|]")
+    # The first cell of a row: the version of the environment column may be the same number, and a dot is literal.
+    string(REPLACE "." "[.]" version_pattern "${LIBRARY_VERSION}")
+    if(table MATCHES "
+[|] ${version_pattern} [|]")
         message(FATAL_ERROR "The compatibility table already has a row for ${LIBRARY_VERSION}")
     endif()
     string(REPLACE "${unreleased_row}" "${new_unreleased}| ${LIBRARY_VERSION} | ${environment} | ${api} |\n" table "${table}")

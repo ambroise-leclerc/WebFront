@@ -46,4 +46,12 @@ run(status -DMODE=freeze -DLIBRARY_VERSION=1.2.3)
 if(status EQUAL 0)
     message(FATAL_ERROR "A repeated freeze was accepted")
 endif()
+# The library version may equal the environment's (one number for both): only the first cell of a row is a library.
+run(status -DMODE=freeze -DLIBRARY_VERSION=0.6.9)
+document(content)
+if(NOT status EQUAL 0 OR NOT content MATCHES "
+[|] 0[.]6[.]9 [|] 0[.]6[.]9 [|] 2 [|]
+")
+    message(FATAL_ERROR "A library version equal to the environment's was refused: ${last_output}")
+endif()
 file(REMOVE_RECURSE "${WORK}")
