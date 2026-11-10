@@ -138,6 +138,10 @@ endif()
 if(NOT content MATCHES "del[(][.]previousBase, [.]baseSince[)]")
     message(FATAL_ERROR "The release does not remove the migration fields of distribution.json")
 endif()
+# The guide names the pin, which a CTest case compares with the header: the release rewrites it.
+if(NOT content MATCHES "Name the pin in the developer environment guide")
+    message(FATAL_ERROR "The release does not name the pin in the developer environment guide")
+endif()
 # The offline check of the pin, which refuses a stale waiver, runs before anything is published.
 if(NOT content MATCHES "test/cmake/CheckDeveloperPin[.]cmake")
     message(FATAL_ERROR "The release does not run CheckDeveloperPin.cmake before publishing")
