@@ -128,7 +128,7 @@ the entry length, the references (from 0.7.0 on, and always in `Unreleased`) and
 
 ## Pull Requests
 
-- **One commit per pull request.**
+- **One commit per pull request on `develop`:** pull requests are merged with a squash merge. Before the merge, a branch carries as many commits as needed; add follow-up commits instead of amending or force-pushing.
 - The pull request (PR) title must reference the related issue or feature (e.g., `Add CameraManager class [#42]`).
 - Provide a clear description of the changes and the motivation.
 - Ensure your branch is up to date with `develop` before submitting.
