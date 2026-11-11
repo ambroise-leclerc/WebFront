@@ -10,6 +10,10 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Fixed
+
+- Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 instead of failing on `-m64`, and cross-compile CEF: WebFront pins CEF 156.0.28, whose package selects the archive and `PROJECT_ARCH` from the target (#523).
+
 ## [0.9.0] - 2026-11-10
 
 Last minor revision before 1.0, with the developer environment at the same number. It lays the groundwork for the

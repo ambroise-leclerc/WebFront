@@ -411,4 +411,4 @@ the native helper never selects CEF.
 | `WEBFRONT_EMBED_WEBVIEW2` | OFF | Download the pinned WebView2 SDK and link its static loader (Windows only) |
 | `WEBFRONT_EMBED_WKWEBVIEW` | OFF | Link the system Cocoa and WebKit frameworks for WKWebViewFrontend (macOS 13.3+ only) |
 | `WEBFRONT_EMBED_WEBKITGTK` | OFF | Enable the system WebKitGTK 6.0 embedded frontend (Linux only) |
-| `WEBFRONT_EMBED_CEF` | OFF | Download and link CEF so CEFFrontend is available (Windows, Linux and macOS only). Other platforms fail at configure time |
+| `WEBFRONT_EMBED_CEF` | OFF | Download and link CEF so CEFFrontend is available (Windows, Linux x86_64 and aarch64, and macOS only). Other platforms fail at configure time |
