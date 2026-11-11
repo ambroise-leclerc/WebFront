@@ -54,7 +54,7 @@ A literal `+` in the path is automatically encoded as `%2B`: `show("a+b.html")` 
 
 The shared `path-encoding` lifecycle case opens `encoded path %23.html` under every frontend and checks the query and fragment (reaching the page proves the decoded filename); the Jasmine suite, which runs in a frame of the developer environment, serves `a+b.html` through the C++ URL builder. Catch2 also checks this path at the system-browser launcher boundary and verifies shell quoting. On Windows the system browser is opened directly with `ShellExecute`, without a command shell; POSIX launches quote the URL as one argument.
 
-## Quiet automated sessions
+## Window visibility
 
 The per-opening options include `visible` (default `true`). Setting it to `false` creates the real native window and
 engine without presenting or focusing the window. This retains the native event loop and startup/navigation deadlines;

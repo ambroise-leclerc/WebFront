@@ -91,8 +91,9 @@ Browser tests keep their windows visible by default on Windows and macOS. Their 
 Linux's real windows remain on the suite's Xvfb display. Explicit tests of hidden-window behavior still use that option.
 
 `DeveloperBrowserSession` opens **one visible native window for all six developer integration parts**, instead of six.
-It displays each part in a fresh, full-size iframe, with its own native application, temporary project, assigned loopback
-port and origin. The previous frame is removed before the next part loads; its Workers, listeners and bridge go away.
+It displays up to four parts concurrently in visible iframe panes, each with its own native application, temporary
+project, assigned loopback port and origin. A completed frame is removed and its slot reused; its Workers, listeners
+and bridge go away. Workspace then gets the entire window for its layout/rendering checks. No active pane is hidden.
 All assertions run in their original single-part mode, including workspace's first-launch/failed-first-build checks.
 The familiar `DeveloperBrowserIntegration*` CTest names validate separate native reports. Closing the window early,
 a missing result or an expired per-part native deadline fails the session. A small fault-injection session verifies
@@ -102,9 +103,14 @@ check still come from their respective parts.
 The driver groups above each use one visible window. This change reduces the three WebSuite/React commands from three
 openings to one, publication's four commands from four to one, and manifest-directory init/install from two to one.
 With sessions disabled, the original individual commands and the six separate developer windows remain available.
-Developer parts now run sequentially within their window; this saves native startup/teardown and concurrent engine
-memory, but can take longer than six parallel windows. Compare full-suite wall time as well as openings before claiming
-a speedup. The session prints `nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
+The session reserves four CTest processors to account for its bounded internal parallelism. Each part retains its own
+native 180-second deadline, even while other parts finish. Compare full-suite wall time as well as openings before
+claiming a speedup. The session prints `nativeWindows=1 parts=6 durationMs=...` for timing comparisons.
+
+A local Windows/MSVC Release/WebView2 comparison used the same executable and fixtures, with four workers and no
+concurrent compiler: six separate visible windows took 28.83 s; the shared visible window took 27.85 s (27.38 s inside
+the native session). All six parts passed in both runs. This single pair demonstrates comparable elapsed time and five
+fewer native openings; it does not establish a whole-suite speedup.
 
 Failed navigation, native close, startup failures, watchdogs and cancellation remain real process tests. The two macOS
 executable/dylib registration orders remain separate images and processes. `ConsumerJasmine` modes and `Automation*`

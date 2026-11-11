@@ -190,7 +190,7 @@ Timed measurements are excluded from CTest and CI. [ADR-017](adr/ADR-017-acces-d
 their measurements and the consequences of Apple's public APIs for a future direct transport, including the
 Foundation type boundary, handler lifetime, origins and custom resource schemes. iOS remains unverified.
 
-## Quiet automated sessions
+## Window visibility
 
 The per-opening options include `visible` (default `true`). Setting it to `false` creates the real native window and
 engine without presenting or focusing the window. This retains the native event loop and startup/navigation deadlines;

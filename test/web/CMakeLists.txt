@@ -311,7 +311,7 @@ if(_browser_tests_available)
     if(WEBFRONT_TEST_SESSIONS)
         add_test(NAME DeveloperBrowserSession COMMAND ${_developer_command}
             "${_fixtures}" "${CMAKE_CURRENT_BINARY_DIR}/developer-generated" --session)
-        set_tests_properties(DeveloperBrowserSession PROPERTIES LABELS "web-integration" TIMEOUT 1110
+        set_tests_properties(DeveloperBrowserSession PROPERTIES LABELS "web-integration" TIMEOUT 570 PROCESSORS 4
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" FIXTURES_REQUIRED DeveloperFixtures
             FIXTURES_SETUP DeveloperBrowserSession)
         webfront_use_own_profile(DeveloperBrowserSession developer-session)
@@ -323,7 +323,7 @@ if(_browser_tests_available)
             -DPROGRAM=$<TARGET_FILE:developer_integration> "-DPREFIX=${_developer_session_prefix}"
             -DWORK=${CMAKE_CURRENT_BINARY_DIR}/developer-session-failure
             -P ${PROJECT_SOURCE_DIR}/test/cmake/CheckDeveloperSessionFailure.cmake)
-        set_tests_properties(DeveloperBrowserSessionFailure PROPERTIES LABELS "web-integration" TIMEOUT 60)
+        set_tests_properties(DeveloperBrowserSessionFailure PROPERTIES LABELS "web-integration" TIMEOUT 60 PROCESSORS 4)
         webfront_use_own_profile(DeveloperBrowserSessionFailure developer-session-failure)
         if(WEBFRONT_WEBTEST_FRONTEND STREQUAL "CEF")
             set_tests_properties(DeveloperBrowserSession PROPERTIES RESOURCE_LOCK webfront_port_9002)

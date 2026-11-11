@@ -30,8 +30,8 @@ share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide sta
 
 ## Following a browser test live
 
-`DeveloperBrowserIntegration` and its siblings `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine` and `-terminal`
-(the parts of `test/web/developer-specs.mjs`, which run in parallel on a port the system picks), the `Automation*` cases and the `WfDriver*` cases run `wf` commands (`create`, `install`,
+`DeveloperBrowserIntegration` and its siblings `DeveloperBrowserIntegration-scripts`, `-typescript`, `-jasmine`, `-terminal`
+and `-workspace` (the parts of `test/web/developer-specs.mjs`), the `Automation*` cases and the `WfDriver*` cases run `wf` commands (`create`, `install`,
 `build`, `dev`, `preview`, `embed`, ...) that can take several seconds each. CTest hides the output of a passing test, so
 to watch one:
 

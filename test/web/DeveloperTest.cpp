@@ -266,6 +266,7 @@ public:
                 throw std::runtime_error("A developer part reported twice");
             if (deadline)
                 deadline->beginCase(180s);
+            caseDeadline.endCase();
         });
         registerCommands(commands, states);
         app.cppFunction("test.command", [owned = states](std::string tag) {
@@ -281,13 +282,16 @@ public:
             return static_cast<double>(app.connectedBrowsers());
         });
         bootstrapApp(app, mode, readIntegrity(project.path() / "fixtures/provision.json"));
-        subscription = app.subscribeUIStarted([injected = false](App::UI ui) mutable {
-            if (!std::exchange(injected, true))
+        subscription = app.subscribeUIStarted([this, injected = false](App::UI ui) mutable {
+            if (!std::exchange(injected, true)) {
+                caseDeadline.beginCase(180s);
                 ui.addScript(runScript);
+            }
         });
     }
 
     ~Part() {
+        watchdog.request_stop();
         states->releaseAll();
         app.stop();
         if (server.joinable())
@@ -301,7 +305,14 @@ public:
     }
 
     void start() {
-        server = std::jthread([this] {
+        watchdog = std::jthread([this](std::stop_token stop) {
+            if (caseDeadline.expired(stop)) {
+                std::cerr << "Developer part exceeded its native deadline: " << mode.part << '\n';
+                std::cerr.flush();
+                std::_Exit(1);
+            }
+        });
+        server   = std::jthread([this] {
             app.run();
         });
     }
@@ -319,6 +330,7 @@ public:
     }
 
     bool finish(const std::filesystem::path& output) {
+        watchdog.request_stop();
         states->releaseAll();
         app.stop();
         if (server.joinable())
@@ -335,14 +347,16 @@ public:
     }
 
 private:
-    webfront::test::TemporaryDirectory project;
-    App                                app;
-    Mode                               mode;
-    std::atomic<bool>                  passed{false}, reported{false};
-    std::shared_ptr<CommandStates>     states;
-    webfront::Commands<App>            commands;
-    webfront::UISubscription           subscription;
-    std::jthread                       server;
+    webfront::test::TemporaryDirectory   project;
+    App                                  app;
+    Mode                                 mode;
+    std::atomic<bool>                    passed{false}, reported{false};
+    std::shared_ptr<CommandStates>       states;
+    webfront::Commands<App>              commands;
+    webfront::UISubscription             subscription;
+    webfront::testdriver::DriverDeadline caseDeadline{540s};
+    std::jthread                         watchdog;
+    std::jthread                         server;
 };
 
 int runSession(const std::filesystem::path& fixtures, const std::filesystem::path& output) {
@@ -352,7 +366,7 @@ int runSession(const std::filesystem::path& fixtures, const std::filesystem::pat
     // Remove only this invocation's own reports, so a crash cannot leave a previous success behind.
     for (const auto name : names)
         std::filesystem::remove(output / "results" / (std::string(name) + ".json"));
-    webfront::testdriver::DriverDeadline deadlines(1080s);
+    webfront::testdriver::DriverDeadline deadlines(540s);
     deadlines.beginCase(180s);
     std::vector<std::unique_ptr<Part>> parts;
     webfront::ContentPolicy            policy;
@@ -368,24 +382,38 @@ int runSession(const std::filesystem::path& fixtures, const std::filesystem::pat
     std::ofstream html(page, std::ios::binary);
     html << R"HTML(<!doctype html><meta charset="utf-8"><title>Developer integration</title>
 <style>html,body{margin:0;width:100%;height:100%;background:#141821;color:#eee;font:14px sans-serif}
-header{height:28px;line-height:28px;padding:0 10px}iframe{display:block;border:0;width:100%;height:calc(100% - 28px)}</style>
-<header id="status"></header><script>
+body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:2px}
+section{min-width:0;min-height:0}header{height:28px;line-height:28px;padding:0 10px}
+iframe{display:block;border:0;width:100%;height:calc(100% - 28px)}</style><body><script>
 const urls = )HTML"
          << urls << R"HTML(;
 const names = ['application', 'scripts', 'TypeScript', 'Jasmine', 'terminal', 'workspace'];
-let index = 0, frame;
-function next() {
-    frame?.remove();
-    if (index === urls.length) { window.close(); return; }
-    document.getElementById('status').textContent = `Developer integration ${index + 1}/${urls.length}: ${names[index]}`;
-    frame = document.createElement('iframe');
-    frame.src = urls[index]; document.body.append(frame);
+let cursor = 0, completed = 0;
+const frames = new Map();
+function launch(index) {
+    const pane = document.createElement('section'), title = document.createElement('header'), frame = document.createElement('iframe');
+    title.textContent = `Developer integration: ${names[index]}`;
+    // Give the embedded page the focus a standalone native page had, before its asynchronous bootstrap mounts the preview.
+    frame.addEventListener('load', () => frame.focus());
+    frame.src = urls[index]; pane.append(title, frame); document.body.append(pane);
+    frames.set(index, {pane, frame});
+}
+function advance() {
+    // All running pages remain displayed. Workspace's layout/rendering checks get the entire window afterwards.
+    while (cursor < 5 && frames.size < 4) launch(cursor++);
+    if (completed === 5 && !frames.size) {
+        document.body.style.gridTemplateColumns = '1fr';
+        launch(cursor++);
+    }
+    if (completed === urls.length) window.close();
 }
 addEventListener('message', event => {
-    if (event.source !== frame?.contentWindow || event.origin !== new URL(urls[index]).origin || event.data !== 'webfront-developer-finished') return;
-    ++index; next();
+    for (const [index, {pane, frame}] of frames) {
+        if (event.source !== frame.contentWindow || event.origin !== new URL(urls[index]).origin || event.data !== 'webfront-developer-finished') continue;
+        pane.remove(); frames.delete(index); ++completed; advance(); break;
+    }
 });
-next();
+advance();
 </script>)HTML";
     html.close();
     if (!html)
