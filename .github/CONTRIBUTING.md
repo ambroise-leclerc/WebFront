@@ -49,6 +49,11 @@ build needs neither tool. Current build/test commands are in [AGENTS.md](../AGEN
 and developer-environment publication is described in
 [PUBLISHING.md](../js/developer/tools/PUBLISHING.md).
 
+With GCC 13, building WebFront's tests in Release mode can produce false positive
+`-Wnull-dereference` warnings in libstdc++. Configure with
+`-DWARNINGS_AS_ERRORS=OFF` to build the tests; GCC 13 is not currently covered
+by a dedicated test job.
+
 - **File-level documentation:** Use `@brief` only, no `@file` or `@author` tags.
 - **Class documentation:** Include `@brief` with detailed description and usage examples.
 - **Method documentation:**
