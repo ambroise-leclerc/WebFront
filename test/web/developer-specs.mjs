@@ -846,7 +846,10 @@ try {
             assert(Math.abs(here.box('.webfront-terminal-window').width - here.viewport().width) < 1 && here.style('header').display !== 'none',
                 'The terminal must take the width of the window, under the status');
         }
-        await writeFile('layout/main.ts', "import {value} from './value'; document.getElementById('root').textContent = value;\n");
+        // The application listens to the keys the way one that uses F9 would: first on its window, while its module runs.
+        await writeFile('layout/main.ts', "import {value} from './value'; const seen: string[] = []; Object.assign(window, {seen});"
+            + " window.addEventListener('keydown', event => { seen.push((event.ctrlKey ? 'Ctrl+' : '') + event.key); }, true);"
+            + " document.getElementById('root').textContent = value;\n");
         if (part === 'workspace') {
             // A first build that fails shows its diagnostic in the terminal: no interface was published, so the page keeps
             // the terminal alone, without the icon or an empty frame, also once wf dev is stopped.
@@ -979,9 +982,13 @@ try {
         assert(columns() === wideScreen, 'A collapsed terminal must keep its size');
         key(pagePreview.contentDocument.body, {key: 'F9'});
         assert(again.state() === 'floating', 'F9 in the interface must open the terminal');
+        // The application's capture listener on its window, installed by its own script, does not get the shortcut.
+        assert(Array.isArray(pagePreview.contentWindow.seen) && pagePreview.contentWindow.seen.length === 0,
+            `The shortcut must not reach the application: ${pagePreview.contentWindow.seen}`);
         key(page.querySelector('#terminal .xterm-helper-textarea'), {key: 'F9'});
         assert(again.state() === 'interface', 'F9 in the terminal must collapse it');
         key(pagePreview.contentDocument.body, {key: 'F9', ctrlKey: true});
+        assert(pagePreview.contentWindow.seen.join() === 'Ctrl+F9', `Another key combination must reach the application: ${pagePreview.contentWindow.seen}`);
         assert(again.state() === 'interface', 'Another key combination must be left to the interface');
         // The focus may be in a frame that the interface embeds, at any depth, added after its load: keys do not leave
         // the document that has it.
@@ -1033,6 +1040,7 @@ try {
                 // The interface of a new document still gets the shortcut.
                 key(pagePreview.contentDocument.body, {key: 'F9'});
                 assert(again.state() === 'floating', 'F9 must work in a reloaded interface');
+                assert(pagePreview.contentWindow.seen.length === 0, `The shortcut must not reach a reloaded application: ${pagePreview.contentWindow.seen}`);
                 key(pagePreview.contentDocument.body, {key: 'F9'});
                 await writeFile('layout/value.ts', 'export const value = ;\n');
                 await poll();
@@ -1080,6 +1088,7 @@ try {
         assert(untouched && received.join() === 'F9' && there.state() === 'interface', `F9 must reach an application whose project names another shortcut: ${received}, ${there.state()}`);
         const taken = key(otherPreview.contentDocument.body, {key: 'F9', ctrlKey: true, shiftKey: true});
         assert(!taken && received.join() === 'F9' && there.state() === 'floating', `The project's shortcut must open the terminal: ${there.state()}`);
+        assert(otherPreview.contentWindow.seen.join() === 'F9', `The application must get F9 and not the project's shortcut: ${otherPreview.contentWindow.seen}`);
         key(otherPage.querySelector('#terminal .xterm-helper-textarea'), {key: 'F9', ctrlKey: true, shiftKey: true});
         assert(there.state() === 'interface', 'The project\'s shortcut must collapse the terminal');
         const toggleButton = otherPage.querySelector('.webfront-terminal-toggle');

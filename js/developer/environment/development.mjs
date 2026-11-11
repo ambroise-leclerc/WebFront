@@ -108,6 +108,16 @@ export function previewDiagnostics(frame, text) {
     document.body.append(overlay);
 }
 
+/**
+ * The one addition to the page of a preview, absent from a build and from an embedded application: before any script of
+ * the application runs, the page tells the frame that shows it that it has a new window, so that the developer page
+ * takes the terminal's shortcut before the application's listeners (workspace.mjs). It does nothing outside that frame.
+ */
+export const previewHook = "<script>try{frameElement?.dispatchEvent(new CustomEvent('webfront-preview-window'))}catch{}</script>";
+
+/** The page of a published preview. */
+export const previewPage = files => applicationPage(files, previewHook);
+
 let revision = 0;
 export function showPreview(frame, directory = 'preview') {
     if (!frame) throw new Error('No preview frame is available');
@@ -214,7 +224,7 @@ export async function dev(args, {bridge, signal, preview: frame, write = () => {
                     const entry = resolveEntry(project.manifest, args[0], 'wf dev <entry.tsx>');
                     if (!session || session.closed) session = compilerSession(bridge, active);
                     const files = await session.rebuild({entry, lock: project.lock ?? {format: 1, roots: {}, packages: {}}});
-                    files.set('index.html', applicationPage(files));
+                    files.set('index.html', previewPage(files));
                     await publish(bridge, '.webfront/developer/preview', files, {signal: active});
                     // Once commit succeeds, display its publication even if Ctrl+C arrived while awaiting it.
                     diagnostic = '';

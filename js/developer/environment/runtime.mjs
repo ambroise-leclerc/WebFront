@@ -12,7 +12,7 @@ import {install, initProject} from './installer.mjs';
 import {restore, describeRegistry} from './restore.mjs';
 import {loadProject, syncNotice, resolveEntry, embedTarget, lockPath, packageRoot, noManifest} from './project.mjs';
 import {parseRunOptions, scriptCommand, execTarget, scriptHost, runWorker, runResult, runDeadline, secondsLeft} from './scripts.mjs';
-import {build, dev, showPreview} from './development.mjs';
+import {build, dev, showPreview, previewPage} from './development.mjs';
 import {parseTestOptions, specFiles, jasmineCore, runnerFiles, runInFrame, reportResult, fitResult, stoppedRun, abortable, testDirectory} from './testing.mjs';
 import {generateProvider, applicationPage} from './embed.mjs';
 import {typescriptPackage, parseCheckOptions, checkHost} from './typecheck.mjs';
@@ -126,6 +126,7 @@ async function preview(args, {bridge, signal, preview: frame}) {
     const project = await loadProject(bridge);
     const entry = resolveEntry(project.manifest, args[0], 'wf preview <entry.tsx>');
     const result = await compile(bridge, entry, signal);
+    result.files.set('index.html', previewPage(result.files));
     await publish(bridge, '.webfront/developer/preview', result.files, {signal});
     showPreview(frame);
     return syncNotice(project) + 'Preview ready.';

@@ -305,10 +305,11 @@ export async function createWorkspace({bridge, element, frame}) {
     new view.MutationObserver(() => { if (frame.hidden) apply('hidden'); }).observe(frame, {attributes: true, attributeFilter: ['hidden']});
 
     // The shortcut works wherever the focus is: in this page and in the interface, whose window changes at each load.
+    // The listener is the first of its window (below), so the application's ones never see the shortcut.
     const onKey = event => {
         if (!isToggleKey(event, shortcut) || state === State.terminal) return;
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         apply('toggle');
     };
     view.addEventListener('keydown', onKey, true);
@@ -341,6 +342,9 @@ export async function createWorkspace({bridge, element, frame}) {
         }).observe(content, {childList: true, subtree: true});
     }
     watchFrame(frame);
+    // A published preview announces its new window before its scripts run (development.mjs, previewHook): the listener
+    // is installed ahead of the application's. A frame that the application embeds gets it once it is seen here.
+    frame.addEventListener('webfront-preview-window', () => watchWindow(frame.contentWindow));
 
     // Moving: the pointer is captured, so that the interface under the window does not take the moves.
     let grip = null;

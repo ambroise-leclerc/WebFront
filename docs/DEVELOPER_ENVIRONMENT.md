@@ -393,7 +393,12 @@ environment's `mount`, not to the embedded bootstrap page):
 - **The tab shows the session's state**, so that a collapsed terminal still tells what it does: three bars when nothing
   runs, a ring while a command runs or `wf dev` builds, a full dot when `wf dev` has built the interface and watches its
   inputs, an amber diamond when the last build failed. The tab's name and tooltip say it in words.
-- **The shortcut** is F9 by default. The developer page takes it before the interface does, so an application that uses
+- **The shortcut** is F9 by default. The developer page takes it before the interface does: the page of a preview
+  announces its window before its scripts run (one inline script, absent from `wf build` and from an embedded
+  application), so the page's listener is the first of that window and no listener of the application sees the shortcut.
+  A frame that the application embeds is covered once the page has seen it, after any listener its own document installs
+  while loading; so is a preview published by an environment before 0.9.1, until `wf dev` or `wf preview` rebuilds it.
+  An application that uses
   F9 itself names another one in its manifest, and receives F9 as it does in its embedded form:
   `"developer": {"terminalShortcut": "Ctrl+Shift+F9"}`. A shortcut is a function key, F1 to F12, optionally after `Ctrl`,
   `Alt`, `Shift` or `Meta`, joined by `+`; anything else is a manifest error. The page reads it when it opens: relaunch
@@ -402,7 +407,7 @@ environment's `mount`, not to the embedded bootstrap page):
   diagnostic over it.
 
 The tab is a button (`aria-expanded`, 44 px target) and the window a non-modal dialog. The interface stays in the preview
-frame, as before: the layout adds nothing to the application's documents except the shortcut's listener, installed in the interface
+frame, as before: the layout adds nothing to the application's documents except the shortcut's listener and the preview page's announcement, installed in the interface
 and in the same-origin frames it embeds (not in a frame of another origin, nor one inside a shadow tree: click the interface
 or the tab first). This is a layout, not a
 sandbox (see [limitations](#dependencies-storage-and-limitations)). A page that mounts the terminal itself (`runtime.mount`) with a preview frame gets
