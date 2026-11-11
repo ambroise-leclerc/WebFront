@@ -372,7 +372,8 @@ The page of `bootstrap("developer")` shows one thing at a time by default (envir
 environment's `mount`, not to the embedded bootstrap page):
 
 - **No interface yet** (first launch, or a project that never ran `wf dev` or `wf preview`): the terminal alone, under the
-  status line. No icon and no empty preview are shown.
+  status line. No icon and no empty preview are shown, also when the first build of `wf dev` fails: its diagnostic is in
+  the terminal.
 - **An interface exists**: the page opens on it, over the whole window, with the terminal collapsed. "Exists" means a
   published preview, `.webfront/developer/preview/index.html`. `wf dev` and `wf preview` publish it; `wf create` and
   `wf build` (which publishes under `build/`) do not. A publication replaces the directory in one step, so an interrupted

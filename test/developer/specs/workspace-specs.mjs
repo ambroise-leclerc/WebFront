@@ -134,6 +134,19 @@ describe('The developer page layout', () => {
             expect(await readPlace(bridge)).toBeNull();
         });
 
+        it('keeps the last place chosen when it equals the one written before the write in progress', async () => {
+            const {bridge} = memoryBridge();
+            const store = placeStore(bridge, 60000);
+            const first = {x: 1, y: 2, width: 400, height: 300}, second = {x: 50, y: 60, width: 400, height: 300};
+            store.remember(first);
+            await store.saved();
+            store.remember(second);
+            const writing = store.saved();  // not awaited: the first place is chosen again while this one is written
+            store.remember(first);
+            await Promise.all([writing, store.saved()]);
+            expect(await readPlace(bridge)).toEqual(first);
+        });
+
         it('stays usable when the place cannot be written', async () => {
             const store = placeStore({cppFunction: () => async () => { throw new Error('read-only project'); }}, 60000);
             store.remember({x: 1, y: 2, width: 400, height: 300});

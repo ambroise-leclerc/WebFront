@@ -34,8 +34,8 @@ const transitions = {
 };
 
 /**
- * The state after an event: `shown` and `hidden` (the preview frame appears or disappears), `toggle` (the icon or the
- * shortcut), `open` and `close`. An event that does not apply leaves the state unchanged.
+ * The state after an event: `shown` (a published preview is loaded in the frame), `hidden` (the frame is hidden), `toggle`
+ * (the icon or the shortcut), `open` and `close`. An event that does not apply leaves the state unchanged.
  */
 export const nextState = (state, event) => transitions[state]?.[event] ?? state;
 
@@ -104,9 +104,13 @@ export function placeStore(bridge, delay = 300) {
         if (!pending) return writes;
         const text = formatPlace(pending);
         pending = null;
-        if (text !== written) writes = writes
-            .then(() => publish(bridge, placePath, new Map([['output', encoder.encode(text)]]), {directory: false}))
-            .then(() => { written = text; }, () => {});
+        // Compared once the writes before this one are done: a place chosen again while another one is being written
+        // must still replace it.
+        writes = writes.then(async () => {
+            if (text === written) return;
+            await publish(bridge, placePath, new Map([['output', encoder.encode(text)]]), {directory: false});
+            written = text;
+        }).catch(() => {});
         return writes;
     };
     return {
@@ -144,7 +148,7 @@ ${floating} .webfront-terminal-bar{display:flex}
 .webfront-terminal-close{margin:0;padding:0;width:32px;height:32px;border:0;background:none;color:inherit;font:20px/1 system-ui;cursor:pointer}
 .webfront-terminal-toggle{position:fixed;top:8px;right:8px;z-index:2147483647;margin:0;padding:0;width:44px;height:44px;display:grid;place-items:center;border:1px solid #46536a;border-radius:50%;background:#f6f7f2;box-shadow:0 2px 8px #0006;cursor:pointer;opacity:.9}
 .webfront-terminal-toggle:hover,.webfront-terminal-toggle[aria-expanded=true]{opacity:1}
-:root[${attribute}=terminal] .webfront-terminal-toggle{display:none}
+:root[${attribute}=terminal] .webfront-terminal-toggle,:root[${attribute}=terminal] .webfront-interface{display:none}
 `;
 
 const managed = new WeakSet();
@@ -195,6 +199,7 @@ export async function createWorkspace({bridge, element, frame}) {
     panel.append(bar, element);
     Object.assign(element.style, {flex: '1 1 auto', height: 'auto', minHeight: '0', boxSizing: 'border-box'});
     Object.assign(frame.style, {position: 'fixed', inset: '0', width: '100%', height: '100%'});
+    frame.classList.add('webfront-interface');
 
     const button = page.createElement('button');
     button.type = 'button';
@@ -233,8 +238,11 @@ export async function createWorkspace({bridge, element, frame}) {
 
     button.addEventListener('click', () => apply('toggle'));
     closeButton.addEventListener('click', () => apply('close'));
-    // The preview commands show the frame (and nothing else hides it): the layout follows it.
-    new view.MutationObserver(() => apply(frame.hidden ? 'hidden' : 'shown')).observe(frame, {attributes: true, attributeFilter: ['hidden']});
+    // Only a published preview loaded in the frame is an interface. wf dev also unhides the frame to show the diagnostic
+    // of a failed build: before any preview, the frame stays out of the page and the terminal, which prints the
+    // diagnostic too, keeps the window.
+    frame.addEventListener('webfront-preview-navigating', () => apply('shown'));
+    new view.MutationObserver(() => { if (frame.hidden) apply('hidden'); }).observe(frame, {attributes: true, attributeFilter: ['hidden']});
 
     // The shortcut works wherever the focus is: in this page and in the interface, whose window changes at each load.
     const onKey = event => {

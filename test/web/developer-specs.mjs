@@ -847,6 +847,24 @@ try {
                 'The terminal must take the width of the window, under the status');
         }
         await writeFile('layout/main.ts', "import {value} from './value'; document.getElementById('root').textContent = value;\n");
+        if (part === 'workspace') {
+            // A first build that fails shows its diagnostic in the terminal: no interface was published, so the page keeps
+            // the terminal alone, without the icon or an empty frame, also once wf dev is stopped.
+            await writeFile('layout/value.ts', 'export const value = ;\n');
+            const failedStop = new AbortController();
+            let failedOutput = '';
+            const failedDev = execute(['dev', 'layout/main.ts'], {...context, signal: failedStop.signal,
+                write: text => { failedOutput += text; }}).then(() => null, error => error);
+            const alone = () => here.state() === 'terminal' && here.style('.webfront-terminal-toggle').display === 'none'
+                && here.style('#preview').display === 'none' && here.style('header').display !== 'none';
+            try {
+                await until(() => /layout\/value.ts:1:/.test(failedOutput), 'The failed first build must be reported in the terminal');
+                assert(alone(), `A failed first build must not show an empty interface: ${here.state()}`);
+            } finally { failedStop.abort(); }
+            assert((await failedDev)?.exitCode === 130 && alone(), 'Stopping wf dev after a failed first build must leave the terminal alone');
+            assert(!(await call('list', '.webfront/developer').then(bytes => JSON.parse(new TextDecoder().decode(bytes)))).includes('preview/'),
+                'A failed first build must not publish a preview');
+        }
         await writeFile('layout/value.ts', "export const value: string = 'layout-one';\n");
         // wf create and wf build do not make an interface to show at the next launch; wf preview does.
         await execute(['build', 'layout/main.ts'], context);
