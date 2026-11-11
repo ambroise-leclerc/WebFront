@@ -77,7 +77,7 @@ def main():
         for attempt in attempts_to_read(run):
             where = f"{run['headBranch']}, run {run['databaseId']}" + (f", attempt {attempt} of {last}" if last > 1 else "")
             for job in failed_jobs(run, attempt):
-                found = failed_cases(gh("run", "view", "--job", str(job["id"]), "--log"))
+                found = failed_cases(gh("run", "view", "--job", str(job["id"]), "--attempt", str(attempt), "--log"))
                 if not found:
                     steps = ", ".join(step["name"] for step in job.get("steps", []) if step["conclusion"] == "failure")
                     other[f"{job['name']}: {steps}"] += 1
