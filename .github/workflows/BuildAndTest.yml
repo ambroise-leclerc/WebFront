@@ -360,6 +360,48 @@ jobs:
         shell: bash
         run: ctest --test-dir build -C Release -L portability --output-on-failure --no-tests=error
 
+  # GCC 13 on Linux aarch64 (#548): the default compiler of Ubuntu 24.04, JetPack 7.2 and Yocto Scarthgap, on the architecture of
+  # the Jetson boards. It builds the library, the examples and every test with the hosted ubuntu-24.04-arm image, then runs the fast
+  # tier. Warnings are not errors here: libstdc++ 13 reports false -Wnull-dereference positives (#526), so -Werror stays with the
+  # reference compiler (#525). A browser frontend needs a display and CEF has no aarch64 job yet, so both are off.
+  gcc13-arm64:
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'master') || (github.event_name == 'workflow_dispatch' && inputs.repeat_desktop_tests)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/remove-node
+      - uses: ./.github/actions/setup-cmake
+        with:
+          version: '4.4.4'
+      - uses: actions/cache@v4
+        with:
+          path: .cache/CPM
+          key: cpm-extended-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: cpm-extended-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install GCC 13
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 ninja-build
+      # An image change must not move the compiler silently: fail unless this really is GCC 13 on aarch64.
+      - name: Verify the compiler
+        run: |
+          g++-13 --version
+          test "$(uname -m)" = aarch64
+          case "$(g++-13 -dumpfullversion)" in 13.*) ;; *) echo "::error::Expected GCC 13, got $(g++-13 -dumpfullversion)"; exit 1 ;; esac
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DWEBFRONT_EMBED_CEF=OFF -DWEBFRONT_EMBED_WEBKITGTK=OFF -DWEBFRONT_ENABLE_TESTING=ON
+          -DWARNINGS_AS_ERRORS=OFF -DENABLE_CACHE=OFF -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+      - name: Build
+        run: cmake --build build --parallel 4
+      - name: Fast tests
+        run: ctest --test-dir build -L fast --output-on-failure --no-tests=error --parallel 4
+
   sanitizers:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'master')
     runs-on: ubuntu-24.04

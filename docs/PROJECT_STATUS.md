@@ -61,7 +61,7 @@ asset freshness checks and, with an enabled engine, real-browser Jasmine and lif
 `Journey*` builds a UI with the rebuilt environment and local registry, then compiles and runs
 its generated provider from an empty directory. Configured tests need no public network.
 
-[Tiers](TEST_TIERS.md) defines the desktop and extended CI scope.
+[Tiers](TEST_TIERS.md) defines the desktop and extended CI scope, including the GCC 13 Linux aarch64 job (#548).
 [Test execution and profiling](TEST_PERFORMANCE.md) documents session isolation, fixture locks,
 resource limits and complete-suite repetition. Sessions retain individual CTest assertions;
 independent driver processes use OS-assigned loopback ports. Manual transport measurements
