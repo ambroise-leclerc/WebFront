@@ -225,6 +225,40 @@ describe('wf test', () => {
         } finally { globalThis.setTimeout = originalSet; }
     });
 
+    it('empties the test directory again when the first publications are refused', async () => {
+        // Windows refuses to replace a directory while the server still sends one of its files to a removed frame.
+        const originalSet = globalThis.setTimeout, originalClear = globalThis.clearTimeout;
+        const timers = new Set();
+        globalThis.setTimeout = (callback, milliseconds, ...args) => {
+            // Only the waits between two attempts are shortened: the two-second bound of the cleanup stays.
+            const id = originalSet(() => { timers.delete(id); callback(...args); }, milliseconds <= 320 ? 1 : milliseconds);
+            timers.add(id);
+            return id;
+        };
+        globalThis.clearTimeout = id => { timers.delete(id); originalClear(id); };
+        try {
+            for (const refusals of [2, 100]) {
+                const calls = [];
+                const bridge = {cppFunction: name => async () => {
+                    const call = name.split('.').at(-1);
+                    calls.push(call);
+                    if (call === 'read') throw new Error('read failed');
+                    if (call === 'commit' && calls.filter(made => made === 'commit').length <= refusals) throw new Error('Access is denied');
+                    return 'transaction';
+                }};
+                await rejects(execute(['test'], {bridge}), /read failed/);
+                const count = call => calls.filter(made => made === call).length;
+                // A refused publication is abandoned before the next one; the attempts are bounded.
+                expect([count('commit'), count('abort')]).withContext(`${refusals} refusals`).toEqual(refusals === 2 ? [3, 2] : [6, 6]);
+                expect(timers.size).withContext(`${refusals} refusals: timers released`).toBe(0);
+            }
+        } finally {
+            globalThis.setTimeout = originalSet;
+            globalThis.clearTimeout = originalClear;
+            timers.forEach(originalClear);
+        }
+    });
+
     it('a report is bounded: what the specs post is cut, not trusted', () => {
         const many = Array.from({length: 300}, (_, index) => spec(`s${index}`, 'failed', {failures: Array.from({length: 20}, () => failure('m'.repeat(50000)))}));
         const report = buildReport({type: 'done', overall: 'failed', specs: many, global: [], durationMs: Infinity, version: 'v'.repeat(100)});

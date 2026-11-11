@@ -10,12 +10,22 @@ these entries stays in the GitHub releases and the Git history.
 
 ## Unreleased
 
+### Added
+
+- Build and test with GCC 13 on a hosted Linux aarch64 runner in the weekly and `master` checks (`gcc13-arm64`), and let `setup-cmake` install CMake on aarch64 (#548, `docs/TEST_TIERS.md`).
+
 ### Changed
+
+- Declare GCC 13 as the best-effort S2 minimum for the library and examples, document the GCC 14 exit clause and qualified Clang scope, and add GCC 13 ASan/UBSan fast tests (#525, ADR-022).
 
 - Open the developer page on the interface, over the whole window, once the project has a preview; the terminal moves to a floating, movable window behind a tab on the right edge that shows the session's state, and keeps its session when collapsed. Its shortcut is F9, or the manifest's new optional `developer.terminalShortcut`. Environment sources 0.9.1, not published yet (#539, `docs/DEVELOPER_ENVIRONMENT.md`).
 - Make the default test build the quick one: the heavy unit tests compile four to a file, the MSVC code analysis and the reproducibility proofs are off unless `-DWEBFRONT_MSVC_ANALYZE=ON` or `-DWEBFRONT_TEST_REPRODUCIBILITY=ON` asks for them. The CI passes every option explicitly and checks what it checked before (#546).
+- Run the unit tests as a few processes instead of one per scenario with `-DWEBFRONT_TEST_UNIT_SHARDS=<n>`: each of the `n` CTest cases is a Catch2 shard that reports every scenario in `unit-results-<shard>.xml`. The default still registers one CTest case per scenario; the desktop CI jobs pass 4 and no longer run the fast tier twice on a pull request (#543).
 
 ### Fixed
+
+- On Windows, `wf install`, `wf build` and `wf test` no longer fail with `rename: Access is denied` while another process, such as an antivirus scan, still reads the files just written: the developer store tries the rename again for up to 635 ms; `wf test` also empties the directory of an interrupted run (#542).
+- Run the commit attribution regression checks with older Git versions by dropping the unsupported `git log --no-graph` option (#525).
 
 - Build with `-DWEBFRONT_EMBED_CEF=ON` on Linux aarch64 instead of failing on `-m64`, and cross-compile CEF: WebFront pins CEF 156.0.28, whose package selects the archive and `PROJECT_ARCH` from the target (#523).
 

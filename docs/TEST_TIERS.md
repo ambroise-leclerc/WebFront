@@ -16,8 +16,17 @@ ctest --test-dir build -L portability                      # the portability tie
 cmake -DBUILD_DIR=build -DLABEL_EXCLUDE=portability -P test/cmake/RunTestSuite.cmake
 ```
 
-`RunTestSuite.cmake` runs every test unless `LABEL_EXCLUDE` names a label; the CI standard tier passes
-`portability`. A local run before a change is declared complete (see `AGENTS.md`) runs everything.
+`RunTestSuite.cmake` runs every test unless `LABEL_EXCLUDE` gives a regular expression of labels to leave out. The CI
+standard tier passes `^(portability|fast)$`, because its fast step has just run the fast tier. A local run before a
+change is declared complete (see `AGENTS.md`) runs everything.
+
+By default every Catch2 scenario is a CTest case of its own, which `ctest -R` selects by name, and a process of its
+own: more than 500 of them. `-DWEBFRONT_TEST_UNIT_SHARDS=4`, which the desktop CI jobs pass, registers four cases
+`UnitTests-0` to `UnitTests-3` instead, each a Catch2 shard that runs a quarter of the scenarios in one process and
+writes the result of each to `unit-results-<shard>.xml` in the build directory. The shards run the scenarios in their
+declaration order, which is what makes four processes started separately split them without overlap. Scenarios then
+share a process: `test/unit/ScenarioIsolation.cpp` restores the process-wide state a scenario may change. Run directly,
+`tests` draws a random order and prints its seed, which `tests --rng-seed <seed>` replays.
 
 ## Following a browser test live
 
@@ -79,7 +88,17 @@ dispatch with `repeat_desktop_tests`:
 - the `portability` job: the consumer project configured with Ninja (GCC on Linux, MSVC on Windows, Apple clang on macOS),
   with Unix Makefiles (Clang 23) and, reported but never blocking until it has run on a hosted runner, the Visual Studio
   2026 generator. There is no compiler cache: a new user compiles everything;
+- the `gcc13-arm64` job (#548): GCC 13 on a hosted Linux aarch64 runner (`ubuntu-24.04-arm`), compiling the library, the examples and
+  the tests with warnings that are not errors (libstdc++ 13 reports false `-Wnull-dereference` positives, #526), then running
+  the fast tier, then rebuilding the tests under GCC 13 ASan/UBSan and repeating the fast tier (#525, S2 support). It has no browser frontend. A compile error or a failing fast test under GCC 13 on aarch64 turns it red;
 - the address/undefined and thread sanitizers, the five fuzzers, and the GCC and Clang CEF browser integration.
+
+Manual dispatch with `gcc13_arm64=true` adds the GCC 13 ARM64 job and its sanitizer pass
+to the extended checks without enabling the repeated desktop matrix. For example:
+
+```bash
+gh workflow run BuildAndTest.yml --ref <branch> -f gcc13_arm64=true
+```
 
 The portability matrix does not vary the CMake version: `setup-cmake` pins the SHA-256 of each archive it installs, so
 another version needs its checksum added first.
@@ -87,11 +106,11 @@ another version needs its checksum added first.
 ## Required checks for `master`
 
 A pull request into `master` must pass all of: the desktop jobs, `portability` (except the experimental Visual Studio
-leg), `sanitizers` and `web-integration`. GitHub only enforces this once the checks are marked required in the branch
+leg), `gcc13-arm64`, `sanitizers` and `web-integration`. GitHub only enforces this once the checks are marked required in the branch
 protection rules of `master`; the workflow cannot set that itself.
 
-The fast tier does not replace the others: the unit tests are also part of the standard run, so a pull request still
-reports one complete result.
+The fast tier runs once on a pull request: the step that follows it runs everything else, and a failed fast step
+fails the job before the browser suite starts. The three passes of the complete tier run the fast tier again each time.
 
 The shared frontend lifecycle runner has a 45-second watchdog which reports the last observed stage and exits with a failure
 status when the interface thread cannot be unwound. Forced process exit does not itself terminate browser subprocesses; they

@@ -106,12 +106,15 @@ class Client:
     def close(self):
         if self.child.poll() is None:
             self.child.stdin.close()
+            # The agent ends on its own within about 9 s when a browser does not close: 5 s of grace, then up to 2 s to
+            # end its processes and 2 s to remove its profile. Wait longer than that, so a loaded machine is not a failure.
             try:
-                self.child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
+                self.child.wait(timeout=30)
+            except subprocess.TimeoutExpired as error:
                 self.child.kill()
                 self.child.wait()
-                raise
+                details = self.log_path.read_text()[-2000:] if self.log_path and self.log_path.exists() else ""
+                raise TimeoutError(f"The agent did not exit after its input closed; native stderr: {details}") from error
         self.reader.join(timeout=2)
 
 

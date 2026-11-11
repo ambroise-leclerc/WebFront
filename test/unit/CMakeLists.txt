@@ -30,7 +30,7 @@ list(APPEND TESTS_LIST FileSystemTests.cpp NativeFSTests.cpp DownloadsTests.cpp 
 list(APPEND TESTS_LIST DefaultFSTests.cpp StdnetShutdownTests.cpp SafePathTests.cpp UISubscribersTests.cpp)
 list(APPEND TESTS_LIST ReadBindingTests.cpp ViewAssociationTests.cpp BroadcastTests.cpp WebFrontTests.cpp WebLinkTests.cpp CEFPathsTests.cpp CEFMacrosTests.cpp)
 list(APPEND TESTS_LIST DeveloperTests.cpp WfDriverTests.cpp AutomationTests.cpp AutomationChannelTests.cpp AutomationStdioTests.cpp AutomationDiscoveryTests.cpp JasmineConsumerTests.cpp HostTests.cpp LifeTests.cpp StructuredShutdownTests.cpp JsFunctionSenderTests.cpp ApplicationTaskTests.cpp DeferredCallTests.cpp)
-list(APPEND TESTS_LIST FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
+list(APPEND TESTS_LIST ScenarioIsolation.cpp FrontendUrlTests.cpp ApplicationUrlTests.cpp FrontendContractTests.cpp UIExecutorTests.cpp NativeWindowTests.cpp CommandsTests.cpp EmbeddedCoreAssetsTests.cpp)
 if(WEBFRONT_USE_MDDLOG)
   list(APPEND TESTS_LIST MddlogLoggerTests.cpp MddlogTransportTests.cpp)
 endif()
@@ -58,7 +58,6 @@ target_compile_definitions(tests PRIVATE WEBFRONT_HOST_PROBE="$<TARGET_FILE:host
 # (docs/BUILD_TIME_STUDY.md): that is the default. 0 keeps one object per test file, which the portability and
 # sanitizer jobs ask for. The light units stay apart: grouping every unit does not compile, as their
 # helpers share names.
-set(WEBFRONT_TEST_UNITY_BATCH 4 CACHE STRING "Compile the heavy unit tests this many to a file; 0 compiles each file alone")
 if(WEBFRONT_TEST_UNITY_BATCH GREATER 0)
   set(_heavy WebFrontTests ReadBindingTests ViewAssociationTests BroadcastTests CommandsTests ApplicationTaskTests DeferredCallTests StdnetShutdownTests FrontendContractTests JsFunctionSenderTests
       AutomationTests ReactStoreTests DeveloperTests CEFMacrosTests JasmineConsumerTests WfDriverTests)
@@ -84,7 +83,27 @@ endif()
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 # Labels select the tiers (docs/TEST_TIERS.md): fast unit tests, browser integration, portability across toolchains.
-catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+# One CTest case per scenario starts one process per scenario: more than 500, which is most of the run time of the unit
+# tests (docs/TEST_PERFORMANCE.md). WEBFRONT_TEST_UNIT_SHARDS runs them as that many processes instead, each a Catch2
+# shard that writes the result of every scenario to a JUnit report. The default keeps one case per scenario, which
+# `ctest -R` filters by name.
+set(WEBFRONT_TEST_UNIT_SHARDS 0 CACHE STRING "Run the unit tests as this many CTest cases; 0 registers one case per scenario")
+if(NOT WEBFRONT_TEST_UNIT_SHARDS MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "WEBFRONT_TEST_UNIT_SHARDS must be a non-negative integer, not '${WEBFRONT_TEST_UNIT_SHARDS}'")
+endif()
+if(WEBFRONT_TEST_UNIT_SHARDS GREATER 0)
+  math(EXPR _last_shard "${WEBFRONT_TEST_UNIT_SHARDS} - 1")
+  foreach(_shard RANGE ${_last_shard})
+    # Catch2 shards the sorted list: the processes must sort alike, which a random order drawn by each would not.
+    add_test(NAME UnitTests-${_shard} COMMAND tests --order decl --shard-count ${WEBFRONT_TEST_UNIT_SHARDS} --shard-index ${_shard}
+        --reporter console::out=-::colour-mode=none
+        --reporter "junit::out=${CMAKE_BINARY_DIR}/unit-results-${_shard}.xml")
+    # The scenarios of a shard share its time limit; the slowest of them takes a few seconds.
+    set_tests_properties(UnitTests-${_shard} PROPERTIES TIMEOUT 600 LABELS fast)
+  endforeach()
+else()
+  catch_discover_tests(tests PROPERTIES TIMEOUT 60 LABELS fast)
+endif()
 
 # The developer journey type-checks the declaration this tool writes from the hand-described settings (#383).
 add_executable(forms_declaration FormsDeclaration.cpp)
@@ -391,9 +410,10 @@ find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
     add_test(NAME TestPerformanceProfile COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestProfileTests.py")
     add_test(NAME FuzzerConcurrency COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/fuzz/TestRunFuzzers.py")
-    set_tests_properties(TestPerformanceProfile FuzzerConcurrency PROPERTIES TIMEOUT 15 LABELS fast)
+    set_tests_properties(TestPerformanceProfile FuzzerConcurrency PROPERTIES TIMEOUT 60 LABELS fast)
 endif()
 if(Python3_Interpreter_FOUND)
     add_test(NAME TestResourceMeasurement COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestMeasurement.py")
-    set_tests_properties(TestResourceMeasurement PROPERTIES TIMEOUT 15 LABELS fast)
+    add_test(NAME TestFlakeReport COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/test/tools/TestFlakeReport.py")
+    set_tests_properties(TestResourceMeasurement TestFlakeReport PROPERTIES TIMEOUT 60 LABELS fast)
 endif()

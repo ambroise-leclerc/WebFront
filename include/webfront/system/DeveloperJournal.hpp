@@ -2,6 +2,7 @@
 #pragma once
 
 #include "WindowsCompat.hpp"
+#include "DeveloperFiles.hpp"
 #include "DeveloperPaths.hpp"
 
 #include <algorithm>
@@ -224,7 +225,7 @@ inline void rollForward(const std::filesystem::path& root, const std::filesystem
         const auto destination = projectPath(root, target);
         if (std::filesystem::is_regular_file(staged)) {
             createDirectoriesDurably(root, destination.parent_path());
-            std::filesystem::rename(staged, destination);
+            renameSettled(staged, destination);
         }
         directories.insert(destination.parent_path());
         if (hook)
