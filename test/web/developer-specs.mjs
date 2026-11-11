@@ -1063,7 +1063,9 @@ try {
         const {terminal, editor, workspace} = mounted;
         const there = layout(otherPage);
         assert(workspace && there.state() === 'interface' && workspace.state === 'interface', `The mounted page must open on the interface: ${there.state()}`);
-        await until(() => otherPreview.contentDocument?.getElementById('root'), 'The mounted page must load the interface');
+        // The page installs the shortcut in the interface once its document is loaded.
+        await until(() => otherPreview.contentDocument?.getElementById('root') && otherPreview.contentDocument.readyState === 'complete',
+            'The mounted page must load the interface');
         const received = [];
         otherPreview.contentDocument.addEventListener('keydown', event => received.push(event.key));
         const untouched = key(otherPreview.contentDocument.body, {key: 'F9'});
