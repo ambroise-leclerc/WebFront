@@ -13,7 +13,9 @@ and `jq` for the host operations.
 ## Releasing with the workflow
 
 The **release-developer** workflow (`.github/workflows/ReleaseDeveloper.yml`, ADR-021) is the way to publish a version. Dispatch
-it on `develop` with the version (greater than the one of `distribution.json`):
+it on `develop` with the version: greater than the published one (the pin of `DeveloperReleaseData.hpp`) and not lower than
+the one of `distribution.json`, so the version that a merged pull request already gave the sources can be released as it is
+(`check-release-version.sh`):
 
 ```sh
 gh workflow run ReleaseDeveloper.yml --ref develop -f version=0.6.7 -f publish=false   # rehearsal

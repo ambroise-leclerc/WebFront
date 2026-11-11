@@ -65,3 +65,31 @@ check("a release that leaves the guide on the former pin" refuse "does not name 
     "Name the pin in the developer environment guide" "Other step")
 check("a release that skips the offline pin check" refuse "does not run CheckDeveloperPin"
     "test/cmake/CheckDeveloperPin.cmake" "test/cmake/Other.cmake")
+check("a release that does not compare its version with the published pin" refuse "does not check the requested version"
+    "check-release-version.sh \"$VERSION\" \"$sources\" \"$pinned\"" "check-release-version.sh \"$VERSION\" \"$sources\" \"$sources\"")
+
+# The version rule itself: <requested> <sources> <pinned>. It needs bash, as the workflow that runs it does.
+find_program(BASH_PROGRAM bash)
+if(NOT BASH_PROGRAM)
+    message(STATUS "bash not found: the version rule of the release is not exercised")
+    return()
+endif()
+function(check_version description expected message requested sources pinned)
+    execute_process(COMMAND "${BASH_PROGRAM}" "${ROOT}/js/developer/tools/check-release-version.sh" "${requested}" "${sources}" "${pinned}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if(expected STREQUAL "accept" AND NOT result EQUAL 0)
+        message(FATAL_ERROR "${description}: refused: ${output}${error}")
+    elseif(expected STREQUAL "refuse" AND result EQUAL 0)
+        message(FATAL_ERROR "${description}: accepted")
+    endif()
+    if(NOT "${output}${error}" MATCHES "${message}")
+        message(FATAL_ERROR "${description}: missing diagnostic '${message}': ${output}${error}")
+    endif()
+endfunction()
+check_version("the version the sources already name, ahead of the pin" accept "" 0.9.1 0.9.1 0.9.0)
+check_version("a version above the sources and the pin" accept "" 0.10.0 0.9.1 0.9.0)
+check_version("a version above sources that still name the pin" accept "" 0.9.1 0.9.0 0.9.0)
+check_version("the published version again" refuse "greater than the published 0.9.0" 0.9.0 0.9.0 0.9.0)
+check_version("a version below the sources" refuse "not be lower than the 0.9.1" 0.9.0 0.9.1 0.8.0)
+check_version("a version below the pin" refuse "greater than the published 0.10.0" 0.9.9 0.9.1 0.10.0)
+check_version("a version that is not MAJOR.MINOR.PATCH" refuse "MAJOR.MINOR.PATCH" 0.9 0.9.1 0.9.0)
