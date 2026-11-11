@@ -203,7 +203,7 @@ webfront_register_frontend(WebKitGTK
     TEST_SETUP webfront_add_webkitgtk_tests)
 webfront_register_frontend(CEF
     OPTION WEBFRONT_EMBED_CEF POLICY lenient
-    DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux and macOS only). Other platforms fail at configure time"
+    DESCRIPTION "Download and link CEF so CEFFrontend is available (Windows, Linux x86_64 and aarch64, and macOS only). Other platforms fail at configure time"
     PLATFORMS Windows Linux Darwin SUPPORT CEFIntegration SETUP setup_cef_for_target
     TEST_PLATFORMS Linux TEST_NAME WebFrontBrowserIntegration TEST_TIMEOUT 60 XVFB_LINUX)
 
